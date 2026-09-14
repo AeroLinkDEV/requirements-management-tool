@@ -48,6 +48,14 @@ public sealed class ReviewCommentPersistenceTests
                 // Searching the raw bytes rather than a parsed document: a leak through any path — body,
                 // metadata, an embedded part — is still a leak, and parsing would only look where expected.
                 Assert.DoesNotContain(Encoding.UTF8.GetBytes(Secret), output!.Content);
+                if (format == "docx")
+                {
+                    using var archive = new System.IO.Compression.ZipArchive(new MemoryStream(output.Content));
+                    using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open());
+                    var xml = await reader.ReadToEndAsync();
+                    Assert.Contains("Release 1.0", xml);
+                    Assert.DoesNotContain("SW-01.00", xml);
+                }
             }
         }
         finally { File.Delete(path); }

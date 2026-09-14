@@ -24,6 +24,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         var ladderPolicy = policyResolver is null ? fallbackPolicy : await policyResolver.ResolveAsync(project.Id, ct);
         var allowedLevels = ladderPolicy.OrderedLevels.ToArray();
         var program=await db.Programs.AsNoTracking().SingleAsync(x=>x.Id==project.ProgramId,ct);var release=await db.Releases.AsNoTracking().SingleAsync(x=>x.Id==baseline.ReleaseId,ct);
+        var releaseLabel = await PublicationProgramContext.ResolveReleaseLabelAsync(db, project, program, release, ct);
         var requirements=await(from member in db.BaselineRequirements.AsNoTracking().Where(x=>x.BaselineId==baselineId) join artifact in db.Requirements.AsNoTracking().Where(x=>allowedLevels.Contains(x.Level)) on member.ArtifactId equals artifact.Id join revision in db.RequirementRevisions.AsNoTracking() on member.RevisionId equals revision.Id orderby artifact.Level,artifact.BaseNumber select new{revision.Id,display=artifact.BaseNumber+"."+revision.Revision.ToString("D2"),level=artifact.Level,revision.Statement,revision.ParentKind,revision.DerivedRationale}).ToListAsync(ct);
         var ids=requirements.Select(x=>x.Id).ToList();var links=await db.RequirementTraces.AsNoTracking().Where(x=>ids.Contains(x.SourceRevisionId)&&ids.Contains(x.TargetRevisionId)&&(x.ExactLinkSuspectLifecycleId==null||db.ExactLinkSuspectLifecycles.Any(lifecycle=>lifecycle.Id==x.ExactLinkSuspectLifecycleId&&lifecycle.LinkKind==ExactLinkKind.RequirementTrace&&lifecycle.State==ExactLinkLifecycleState.Closed))).ToListAsync(ct);var byId=requirements.ToDictionary(x=>x.Id);
         if (ladderPolicy is not ILegacyLadderCompatibilityPolicy)
@@ -60,14 +61,15 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         }).ToList();
         var generatedAt=DateTimeOffset.UtcNow;var approvals=await ApprovalBasis(baselineId,release.Id,generatedAt,ct);var hash=baseline.RequirementsHash??baseline.ContentHash??new string('0',64);var status=release.IsReleased?"Approved and Released":"Controlled Draft";
         var createdBy=(await db.BaselineEvents.AsNoTracking().Where(x=>x.BaselineId==baseline.Id&&x.EventType=="CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x=>x.OccurredAt).Select(x=>x.ActorId).FirstOrDefault()??"system";
-        var publication=new ProfessionalPublication(project.SoftwareProduct,await PublicationProgramContext.ResolveAsync(db, project, program, ct),project.Name,"Lifecycle Traceability Report",$"{project.SoftwareProduct} Full Traceability Evidence",$"Readable upward, downward, change-authority, and verification linkage for baseline {baseline.DisplayNumber}","TRACE-"+release.Version.Replace(".",""),"00",status,release.Version,baseline.DisplayNumber,createdBy,generatedAt,hash,new[]{("Requirements",records.Count.ToString("N0")),("Trace links",links.Count.ToString("N0")),("Verification links",coverage.Count.ToString("N0")),("Requirement manifest hash",hash)},approvals,new[]{("00",status,generatedAt.UtcDateTime.ToString("yyyy-MM-dd"),createdBy)},new[]{new PublicationSection("Complete Requirement Linkage","Each row identifies one exact baseline requirement revision and its upward, downward, and applicable verification relationships.",records)});
-        return ProfessionalPublicationRenderer.Render(publication,format,$"TRACEABILITY_{release.Version}_{baseline.DisplayNumber}");
+        var publication=new ProfessionalPublication(project.SoftwareProduct,await PublicationProgramContext.ResolveAsync(db, project, program, ct),project.Name,"Lifecycle Traceability Report",$"{project.SoftwareProduct} Full Traceability Evidence",$"Readable upward, downward, change-authority, and verification linkage for baseline {baseline.DisplayNumber}","TRACE-"+release.Version.Replace(".",""),"00",status,releaseLabel,baseline.DisplayNumber,createdBy,generatedAt,hash,new[]{("Requirements",records.Count.ToString("N0")),("Trace links",links.Count.ToString("N0")),("Verification links",coverage.Count.ToString("N0")),("Requirement manifest hash",hash)},approvals,new[]{("00",status,generatedAt.UtcDateTime.ToString("yyyy-MM-dd"),createdBy)},new[]{new PublicationSection("Complete Requirement Linkage","Each row identifies one exact baseline requirement revision and its upward, downward, and applicable verification relationships.",records)});
+        return ProfessionalPublicationRenderer.Render(publication,format,$"TRACEABILITY_{releaseLabel}_{baseline.DisplayNumber}");
     }
 
     public async Task<GeneratedOutput?> GenerateAsync(Guid documentId, string format, CancellationToken ct)
     {
         var document = await db.ControlledDocuments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == documentId, ct); if (document is null) return null;
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == document.ProjectId, ct); var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct); var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == document.ReleaseId, ct); var baseline = await db.CandidateBaselines.AsNoTracking().SingleAsync(x => x.Id == document.BaselineId, ct);
+        var releaseLabel = await PublicationProgramContext.ResolveReleaseLabelAsync(db, project, program, release, ct);
         var ladderPolicy = policyResolver is null
             ? fallbackPolicy
             : await policyResolver.ResolveAsync(document.ProjectId, ct);
@@ -143,7 +145,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
             var values = new Dictionary<string, string>
             {
                 ["product"] = project.SoftwareProduct, ["project"] = project.Name,
-                ["program"] = program.Name, ["release"] = release.Version,
+                ["program"] = program.Name, ["release"] = releaseLabel,
                 ["baseline"] = baseline.DisplayNumber, ["documentType"] = type,
                 ["documentTitle"] = document.Title, ["documentNumber"] = document.DocumentNumber,
                 ["recordCount"] = records.Count.ToString("N0"),
@@ -177,7 +179,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
         }
 
         var publication = new ProfessionalPublication(project.SoftwareProduct, await PublicationProgramContext.ResolveAsync(db, project, program, ct), project.Name, type, title,
-            subtitle, document.DocumentNumber, document.Revision.ToString("D2"), status, release.Version, baseline.DisplayNumber, createdBy, document.GeneratedAt, document.ContentHash,
+            subtitle, document.DocumentNumber, document.Revision.ToString("D2"), status, releaseLabel, baseline.DisplayNumber, createdBy, document.GeneratedAt, document.ContentHash,
             [("Controlled records", records.Count.ToString("N0")), ("Baseline content hash", baseline.ContentHash ?? "Not frozen"), ("Requirement manifest hash", baseline.RequirementsHash ?? "Not materialized"),
              ($"Test {verificationNoun} manifest hash", testProcedureManifestHashAtGeneration),
              ($"Test {verificationNoun} configuration basis", procedureSnapshot is null
@@ -191,7 +193,7 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
                  ? $"Named approvers and snapshot references from the exact approved test change requests that authorized the included verification {verificationNoun}s; upstream requirement-change authority is labelled separately; completed release approvals remain separate release authority"
                  : "Named approvers from exact approved change requests and completed release approvals recorded by generation time")], approvals,
             new[] { (document.Revision.ToString("D2"), status, document.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd"), createdBy) }, sections);
-        return ProfessionalPublicationRenderer.Render(publication, format, $"{document.DocumentNumber}.{document.Revision:D2}_{release.Version}");
+        return ProfessionalPublicationRenderer.Render(publication, format, $"{document.DocumentNumber}.{document.Revision:D2}_{releaseLabel}");
     }
 
     private static RequirementLevel? RequirementLevelFor(ControlledDocumentType type, ILadderPolicy ladderPolicy) =>

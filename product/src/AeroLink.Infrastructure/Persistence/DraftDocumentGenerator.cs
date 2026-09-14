@@ -41,13 +41,14 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             ? (policy ?? LegacyLadderPolicy.Instance)
             : await policyResolver.ResolveAsync(project.Id, ct);
         var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct);
+        var releaseLabel = await PublicationProgramContext.ResolveReleaseLabelAsync(db, project, program, release, ct);
 
         var artifactKey = ladderPolicy.Definitions.Where(level => level.VerificationProfile is not null)
             .SelectMany(level => level.VerificationProfile!.Definitions)
             .SingleOrDefault(artifact => artifact.DocumentType == type)?.Key;
         if (artifactKey is not null)
             return await GenerateProcedureDraftAsync(release, project, program, type, artifactKey.Value,
-                format, preparedBy, ladderPolicy, ct);
+                releaseLabel, format, preparedBy, ladderPolicy, ct);
 
         var level = RequirementLevelFor(type, ladderPolicy);
         if (level is null) return null;
@@ -75,8 +76,8 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         var publication = new ProfessionalPublication(
             project.SoftwareProduct, await PublicationProgramContext.ResolveAsync(db, project, program, ct), project.Name, DocumentTypeName(type),
             $"{project.SoftwareProduct} {DocumentTypeName(type)}",
-            $"Draft for release {release.Version}. Released content plus every approved change not yet baselined.",
-            documentNumber, revision.ToString("D2"), "DRAFT - NOT APPROVED", release.Version,
+            $"Draft for release {releaseLabel}. Released content plus every approved change not yet baselined.",
+            documentNumber, revision.ToString("D2"), "DRAFT - NOT APPROVED", releaseLabel,
             predecessor?.DisplayNumber ?? "No released predecessor", preparedBy, generatedAt,
             // No manifest hash: a hash asserts that this content is fixed and reproducible, and this content is
             // neither. Printing one would be the most misleading thing on the page.
@@ -93,14 +94,14 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             new[]
             {
                 new PublicationSection("Effective Requirements",
-                    $"The released baseline for this product with every approved change to release {release.Version} applied. Rows marked as changed are not yet part of any frozen baseline.",
+                    $"The released baseline for this product with every approved change to release {releaseLabel} applied. Rows marked as changed are not yet part of any frozen baseline.",
                     records),
             })
         {
             Watermark = "DRAFT",
         };
 
-        return ProfessionalPublicationRenderer.Render(publication, format, $"DRAFT_{documentNumber}.{revision:D2}_{release.Version}");
+        return ProfessionalPublicationRenderer.Render(publication, format, $"DRAFT_{documentNumber}.{revision:D2}_{releaseLabel}");
 
         string Supplementary(EffectiveRequirement item)
         {
@@ -116,7 +117,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
 
     private async Task<GeneratedOutput> GenerateProcedureDraftAsync(SoftwareRelease release, ProjectRecord project,
         ProgramRecord program, ControlledDocumentType type, VerificationArtifactKey artifactKey, string format,
-        string preparedBy, ILadderPolicy ladderPolicy, CancellationToken ct)
+        string releaseLabel, string preparedBy, ILadderPolicy ladderPolicy, CancellationToken ct)
     {
         var level = VerificationArtifactVocabulary.Definition(artifactKey).ProcedureLevel;
         var isCaseDocument = artifactKey.Kind == VerificationArtifactKind.Case;
@@ -161,7 +162,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             project.SoftwareProduct, await PublicationProgramContext.ResolveAsync(db, project, program, ct), project.Name, DocumentTypeName(type),
             $"{project.SoftwareProduct} {DocumentTypeName(type)}",
             $"Living draft for software build {SoftwareBuildIdentifier.FromVersion(release.Version)}.",
-            documentNumber, revisionNumber.ToString("D2"), "DRAFT - NOT APPROVED", release.Version,
+            documentNumber, revisionNumber.ToString("D2"), "DRAFT - NOT APPROVED", releaseLabel,
             SoftwareBuildIdentifier.FromVersion(release.Version), preparedBy, generatedAt,
             "not applicable to a draft",
             new[]
@@ -189,7 +190,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             Watermark = "DRAFT"
         };
         return ProfessionalPublicationRenderer.Render(publication, format,
-            $"DRAFT_{documentNumber}.{revisionNumber:D2}_{release.Version}");
+            $"DRAFT_{documentNumber}.{revisionNumber:D2}_{releaseLabel}");
     }
 
     /// <summary>The materialized baseline of the released predecessor, or null for a first release.</summary>

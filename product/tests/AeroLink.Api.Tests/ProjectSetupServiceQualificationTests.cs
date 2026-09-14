@@ -59,10 +59,14 @@ public sealed class ProjectSetupServiceQualificationTests
             using var document = await admin.GetAsync($"/api/releases/{releaseId}/draft-document?type=Sysrd&format={format}");
             var bytes = await document.Content.ReadAsByteArrayAsync();
             Assert.True(document.IsSuccessStatusCode, Encoding.UTF8.GetString(bytes));
+            Assert.Contains("SW-01.30", document.Content.Headers.ContentDisposition?.FileName ?? "");
             if (format == "pdf")
             {
                 var pdf = Encoding.Latin1.GetString(bytes);
                 Assert.StartsWith("%PDF", pdf);
+                Assert.Contains("Release SW-01.30", pdf); // cover
+                Assert.Contains("(SW-01.30) Tj", pdf); // document control value
+                Assert.DoesNotContain("Release 1.3", pdf);
                 Assert.DoesNotContain("backing scope", pdf);
                 Assert.Contains("Independent services", pdf);
             }
@@ -72,6 +76,10 @@ public sealed class ProjectSetupServiceQualificationTests
                 using var reader = new StreamReader(zip.GetEntry("word/document.xml")!.Open());
                 var xml = await reader.ReadToEndAsync();
                 Assert.Contains("DRAFT", xml);
+                Assert.Contains("Release SW-01.30", xml); // cover
+                Assert.Contains("xml:space=\"preserve\">Release</w:t>", xml); // document control label
+                Assert.Contains("release SW-01.30 applied", xml); // body
+                Assert.DoesNotContain("Release 1.3", xml);
                 Assert.DoesNotContain("FMS shall", xml);
                 Assert.DoesNotContain("backing scope", xml);
                 Assert.Contains("Independent services", xml);

@@ -32,6 +32,7 @@ public sealed class TestChangeRequestOutputGenerator(AeroLinkDbContext db)
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.Id == package.ProjectId, ct);
         var program = await db.Programs.AsNoTracking().SingleAsync(x => x.Id == project.ProgramId, ct);
         var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == package.ReleaseId, ct);
+        var releaseLabel = await PublicationProgramContext.ResolveReleaseLabelAsync(db, project, program, release, ct);
 
         var actorIds = new[] { package.AuthorId, package.AssignedEngineerId ?? "", package.ApprovedBy ?? "" }
             .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
@@ -110,14 +111,14 @@ public sealed class TestChangeRequestOutputGenerator(AeroLinkDbContext db)
             package.Title,
             $"Controlled change case, {artifactNoun} impact, review decisions, and what the package was raised from",
             package.BaseNumber, package.Revision.ToString("D2"), Humanize(package.State.ToString()),
-            release.Version, "Not yet baseline-effective", Person(package.AuthorId), package.UpdatedAt, manifest,
+            releaseLabel, "Not yet baseline-effective", Person(package.AuthorId), package.UpdatedAt, manifest,
             new[]
             {
                 ("Author", Person(package.AuthorId)),
                 ("Discipline", package.Discipline.ToString()),
                 ("Raised from", raisedFrom),
                 ("Assigned engineer", string.IsNullOrWhiteSpace(package.AssignedEngineerId) ? "Unassigned" : Person(package.AssignedEngineerId)),
-                ("Target build", release.Version),
+                ("Target build", releaseLabel),
                 ("Created", package.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'")),
                 ("Last updated", package.UpdatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'")),
                 ("Review cycle", latest is null ? "Not submitted" : latest.Sequence + " - " + latest.State),
