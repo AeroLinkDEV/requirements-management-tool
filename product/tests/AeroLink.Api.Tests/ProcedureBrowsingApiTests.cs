@@ -186,7 +186,7 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
             highCaseId = hlr.Id;
             var llr = new TestProcedure(projectId, "LLRTC-000001", "Verify LLR", "test.author", now, TestProcedureLevel.LowLevel);
             var system = new TestProcedure(projectId, "SYSTP-00000001", "Verify System", "test.author", now, TestProcedureLevel.System);
-            db.AddRange(new SoftwareRelease(projectId, $"722-{Guid.NewGuid():N}", true), hlr, llr, system,
+            db.AddRange(new SoftwareRelease(projectId, "7.22", true), hlr, llr, system,
                 new TestProcedureRevision(hlr.Id, 0, "HLR", "Ready", "Run", "Pass", TestProcedureState.Draft, "test.author", now),
                 new TestProcedureRevision(llr.Id, 0, "LLR", "Ready", "Run", "Pass", TestProcedureState.Draft, "test.author", now),
                 new TestProcedureRevision(system.Id, 0, "System", "Ready", "Run", "Pass", TestProcedureState.Draft, "test.author", now));

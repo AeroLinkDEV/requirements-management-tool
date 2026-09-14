@@ -147,7 +147,7 @@ public sealed class ProjectSetupApiTests : IClassFixture<SharedApiHost>
             {
                 steps = new[]
                 {
-                    new { catalogueEntry = "Customer", position = 1, capabilities = "None", enabledArtifactKinds = Array.Empty<string>() },
+                    new { catalogueEntry = "Customer", position = 1, capabilities = 0, enabledArtifactKinds = Array.Empty<string>() },
                 },
                 relationships = Array.Empty<object>(),
             },
@@ -159,6 +159,8 @@ public sealed class ProjectSetupApiTests : IClassFixture<SharedApiHost>
         Assert.True(customerSaved.IsSuccessStatusCode, await customerSaved.Content.ReadAsStringAsync());
         using var customerSavedBody = JsonDocument.Parse(await customerSaved.Content.ReadAsStringAsync());
         Assert.Empty(customerSavedBody.RootElement.GetProperty("reviewRules").GetProperty("definition")
+            .GetProperty("rules").EnumerateArray());
+        Assert.Empty(customerSavedBody.RootElement.GetProperty("reviewRules").GetProperty("suggestedDefinition")
             .GetProperty("rules").EnumerateArray());
         using var staleCustomerFinalize = await client.PostAsJsonAsync($"/api/project-setups/{customerDraftId}/finalize", new
         {

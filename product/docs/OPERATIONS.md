@@ -798,9 +798,11 @@ point design-time EF at `aerolink` itself. Ordinary AeroLink startup applies run
 The Full changed-area planner and hosted PostgreSQL lane also execute
 `product/scripts/Test-ProjectSetupPostgres.ps1` against their owned disposable server. The runner requires
 an explicit `AEROLINK_MIGRATIONS_CONNECTION`, requires PostgreSQL qualification, and checks that its TRX
-contains passing project-setup tests with no skipped results. A normal infrastructure run without a
+contains passing project-setup tests with no skipped results in both Infrastructure and API suites. The API
+probe forces normal release creation and legacy import acceptance to overlap at the database write boundary,
+qualifying one canonical identity across entry points. A normal test run without a
 disposable connection may skip these tests; that run is not provider evidence. The standalone runner builds
-the selected test project by default; `-NoBuild` is only for callers that already built the exact candidate.
+both selected test projects by default; `-NoBuild` is only for callers that already built the exact candidate.
 Its test boundary refuses persistent port 54329 and non-loopback servers.
 
 ## Attended production restore

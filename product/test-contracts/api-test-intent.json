@@ -1,17 +1,17 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 896,
-    "cases": 1004,
-    "classes": 138,
-    "hostedTests": 849,
-    "hostedCases": 935,
+    "tests": 897,
+    "cases": 1005,
+    "classes": 139,
+    "hostedTests": 850,
+    "hostedCases": 936,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 13,
     "unknownHostCases": 21,
-    "hostedCandidateTests": 16,
-    "hostedCandidateCases": 16,
+    "hostedCandidateTests": 17,
+    "hostedCandidateCases": 17,
     "unknownCandidateTests": 7,
     "unknownCandidateCases": 15,
     "unknownCaseTests": 0,
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 39,
-      "cases": 39,
+      "tests": 40,
+      "cases": 40,
       "unknownCases": 0,
-      "classes": 15
+      "classes": 16
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -10212,7 +10212,7 @@
       ],
       "sourceLines": {
         "start": 21,
-        "end": 180
+        "end": 182
       }
     },
     {
@@ -10247,6 +10247,22 @@
       "sourceLines": {
         "start": 16,
         "end": 59
+      }
+    },
+    {
+      "cls": "ProjectSetupServiceQualificationTests",
+      "test": "Fresh_project_supports_deliberate_staffing_ordinary_review_documents_and_durable_roster",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 16,
+        "end": 21
       }
     },
     {
