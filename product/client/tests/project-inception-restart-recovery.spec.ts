@@ -307,7 +307,15 @@ test("prepare five disposable drafts for a separate API-process recovery invocat
     relations: { sourceKey: string; include: boolean; exclusionReason?: string }[];
   };
   const nativeModules = Array.isArray(nativeView.modules) ? nativeView.modules as Record<string, unknown>[] : [];
-  const offPageModule = nativeModules[0];
+  // Use a leaf module for this proof. Excluding a parent would correctly make its still-included
+  // descendants fail reconciliation, which tests dependency enforcement rather than resumable UI state.
+  const offPageModule = nativeModules.find((module) => {
+    const objects = Array.isArray(module.objects) ? module.objects as Record<string, unknown>[] : [];
+    return String(module.name ?? "") === "LowLevel" && objects.length > 20;
+  }) ?? nativeModules.find((module) => {
+    const objects = Array.isArray(module.objects) ? module.objects as Record<string, unknown>[] : [];
+    return objects.length > 20;
+  });
   const offPageObjects = Array.isArray(offPageModule?.objects)
     ? offPageModule.objects as Record<string, unknown>[]
     : [];
@@ -316,15 +324,15 @@ test("prepare five disposable drafts for a separate API-process recovery invocat
   const nativeRelations = Array.isArray(nativeView.relations)
     ? nativeView.relations as Record<string, unknown>[]
     : [];
-  const relatedObjectKeys = new Set(nativeRelations.flatMap((relation) => [
-    String(relation.sourceKey ?? ""),
-    String(relation.targetKey ?? ""),
-  ]));
+  // Native DerivedFrom relations carry the child in sourceKey and its parent in targetKey. Pick
+  // an object that is never a relation target, so the explicit exclusion does not sever an included
+  // child-to-parent requirement. Relation rows touching the chosen leaf are still excluded below.
+  const relationTargetKeys = new Set(nativeRelations.map((relation) => String(relation.targetKey ?? "")));
   const pageTwoCandidates = offPageObjects.slice(20, 40).filter((object) => {
     const mapping = nativeMapping.objects.find((item) => item.sourceKey === String(object.key ?? ""));
     return mapping?.attributes.some((attribute) => attribute.destination === "Statement");
   });
-  const offPageObject = pageTwoCandidates.find((object) => !relatedObjectKeys.has(String(object.key ?? "")))
+  const offPageObject = pageTwoCandidates.find((object) => !relationTargetKeys.has(String(object.key ?? "")))
     ?? pageTwoCandidates[0];
   expect(offPageObject, "native page-two source object with a statement mapping").toBeTruthy();
   const offPageSourceKey = String(offPageObject?.key ?? "");
@@ -420,16 +428,14 @@ test("resume all five drafts after the API process has been restarted", async ({
       await page.getByRole("button", { name: /2\. Starting point/ }).click();
       await expect(page.getByRole("heading", { name: "Choose a starting point", level: 2 })).toBeVisible();
       await expect(page.getByText("Exact source", { exact: true })).toHaveCount(0);
-      const freshAfterSource = await getDraft(page.request, record.draftId);
-      const freshFinalization = await responseJson<{ state: string; projectId: string; releaseId: string }>(
-        await page.request.post(`${apiBase}/api/project-setups/${record.draftId}/finalize`, {
-          headers: { "Idempotency-Key": `restart-recovery-${record.draftId}` },
-          data: {
-            expectedVersion: freshAfterSource.version,
-            idempotencyKey: `restart-recovery-${record.draftId}`,
-          },
-        }),
+      await page.getByRole("button", { name: /7\. Review and finish/ }).click();
+      await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+      const freshFinalizationResponse = page.waitForResponse((response) =>
+        response.url().includes(`/api/project-setups/${record.draftId}/finalize`)
+        && response.request().method() === "POST",
       );
+      await page.getByRole("button", { name: "Create Project", exact: true }).click();
+      const freshFinalization = await responseJson<{ state: string; projectId: string; releaseId: string }>(await freshFinalizationResponse);
       expect(freshFinalization.state).toBe("Completed");
       expect(freshFinalization.projectId).toMatch(/^[0-9a-f-]{36}$/i);
       expect(freshFinalization.releaseId).toMatch(/^[0-9a-f-]{36}$/i);
@@ -488,24 +494,25 @@ test("resume all five drafts after the API process has been restarted", async ({
     // Native baselines can contain hundreds of exact source objects. Capture the visible
     // selection/reconciliation state without asking Chromium to rasterize the entire long panel.
     await page.screenshot({ path: testInfo.outputPath(`restart-recovery-${record.kind}-${record.draftId}.png`) });
-    const afterSource = await getDraft(page.request, record.draftId);
-    const finalization = await responseJson<{ state: string; projectId: string; releaseId: string }>(
-      await page.request.post(`${apiBase}/api/project-setups/${record.draftId}/finalize`, {
-        headers: { "Idempotency-Key": `restart-recovery-${record.draftId}` },
-        data: {
-          expectedVersion: afterSource.version,
-          idempotencyKey: `restart-recovery-${record.draftId}`,
-          ...(record.kind === "Fresh" ? {} : {
-            sourceAssertionHash: record.assertionHash,
-            sourceAssertionAccepted: true,
-            password: "AeroLink!2026",
-          }),
-        },
-      }),
+    await page.getByRole("button", { name: /7\. Review and finish/ }).click();
+    await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+    const sourceAcceptance = page.getByRole("checkbox", { name: /I accept this exact source assertion/ });
+    await expect(sourceAcceptance).toBeVisible();
+    await sourceAcceptance.check();
+    await page.getByLabel("Password to finalize source acceptance").fill("AeroLink!2026");
+    const finalizationResponse = page.waitForResponse((response) =>
+      response.url().includes(`/api/project-setups/${record.draftId}/finalize`)
+      && response.request().method() === "POST",
     );
+    await page.getByRole("button", { name: "Create Project", exact: true }).click();
+    const finalization = await responseJson<{ state: string; projectId: string; releaseId: string }>(await finalizationResponse);
     expect(finalization.state).toBe("Completed");
     expect(finalization.projectId).toMatch(/^[0-9a-f-]{36}$/i);
     expect(finalization.releaseId).toMatch(/^[0-9a-f-]{36}$/i);
+    await page.waitForURL(`**/projects/${finalization.projectId}/builds`);
+    await expect(page.getByRole("heading", { name: "Software Builds", level: 1 })).toBeVisible();
+    await expect(page.locator("[data-build-card]")).toHaveCount(1);
+    await expect(page.locator("[data-build-card]").getByText("In Work", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Sign out" }).click();
     await login(page, "admin", { openProject: false });
   }

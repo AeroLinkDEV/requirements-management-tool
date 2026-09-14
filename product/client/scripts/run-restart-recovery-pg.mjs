@@ -62,6 +62,14 @@ if (
   );
 }
 
+const initialRepositoryStatus = execFileSync("git", ["status", "--porcelain"], {
+  cwd: process.cwd(),
+  encoding: "utf8",
+}).trim();
+if (initialRepositoryStatus) {
+  throw new Error("The restart recovery runner requires a clean repository before creating run artifacts or building.");
+}
+
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 const runDirectory = resolve(
   process.env.AEROLINK_RESTART_RECOVERY_RUN_DIR
