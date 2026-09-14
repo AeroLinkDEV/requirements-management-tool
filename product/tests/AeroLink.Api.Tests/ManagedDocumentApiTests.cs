@@ -16,7 +16,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
 
-public sealed class ManagedDocumentApiTests
+public sealed partial class ManagedDocumentApiTests
 {
     [Fact]
     public async Task Relationships_are_canonical_authorized_project_scoped_review_bound_and_hashed()

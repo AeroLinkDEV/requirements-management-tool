@@ -820,7 +820,9 @@ public static class ManagedDocumentEndpoints
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         var size = ManagedDocumentPaging.PageSize(pageSize); if (size.Error is not null) return size.Error;
         var term = search?.Trim().ToLowerInvariant() ?? ""; string type; try { type = ManagedDocumentRelationshipPolicy.CanonicalType(artifactType); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        var filterKey = ManagedDocumentPaging.FilterKey(projectId, type, term); var decoded = ManagedDocumentPaging.Decode(cursor, "link-options", filterKey); if (decoded.Error is not null) return decoded.Error;
+        var filterKey = type == "Release" ? ManagedDocumentPaging.FilterKey(projectId, type, term, "canonical-release-order-v1")
+            : ManagedDocumentPaging.FilterKey(projectId, type, term);
+        var decoded = ManagedDocumentPaging.Decode(cursor, "link-options", filterKey); if (decoded.Error is not null) return decoded.Error;
         var after = decoded.Cursor?.Value; var snapshotAt = decoded.Cursor?.SnapshotAt ?? DateTimeOffset.UtcNow;
         var afterRevision = 0;
         if (after is not null && !int.TryParse(decoded.Cursor!.TieBreaker, out afterRevision)) return ManagedDocumentPaging.InvalidCursor();
@@ -856,9 +858,10 @@ public static class ManagedDocumentEndpoints
         {
             var query = db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId);
             if (term.Length > 0) query = query.Where(x => x.Version.ToLower().Contains(term));
-            if (after is not null) query = query.Where(x => string.Compare(x.Version, after) > 0);
-            var found = await query.OrderBy(x => x.Version).Take(size.Value + 1).ToListAsync(ct);
-            return LinkOptionPage(found.Select(x => new LinkOptionRow(x.Id, $"BUILD-{x.Version}", $"Build {x.Version}", x.IsReleased ? "Released" : "In work", x.Version, 0)).ToList(), type, size.Value, filterKey, snapshotAt);
+            var ordered = SoftwareReleaseOrderingQuery.WithSortKey(query, db.Database.IsNpgsql() ? "C" : "BINARY");
+            if (after is not null) ordered = ordered.Where(x => string.Compare(x.SortKey, after) > 0);
+            var found = await ordered.OrderBy(x => x.SortKey).Take(size.Value + 1).ToListAsync(ct);
+            return LinkOptionPage(found.Select(x => new LinkOptionRow(x.Release.Id, $"BUILD-{x.Release.Version}", $"Build {x.Release.Version}", x.Release.IsReleased ? "Released" : "In work", x.SortKey, 0)).ToList(), type, size.Value, filterKey, snapshotAt);
         }
         return Results.BadRequest(new { error = "Choose a supported lifecycle artifact type." });
     }
@@ -1245,7 +1248,10 @@ public static class ManagedDocumentEndpoints
         {
             var row = await db.ProblemReports.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (row is null || row.ProjectId != projectId) throw new DomainException("The linked artifact is not in this Project.");
-            var release = row.TargetReleaseId is null ? await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).OrderBy(x => x.IsReleased).ThenByDescending(x => x.Version).FirstOrDefaultAsync(ct) : await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.TargetReleaseId, ct);
+            var release = row.TargetReleaseId is null ? null : await db.Releases.AsNoTracking()
+                .SingleOrDefaultAsync(x => x.Id == row.TargetReleaseId && x.ProjectId == projectId, ct);
+            if (row.TargetReleaseId is not null && release is null)
+                throw new DomainException("The Problem Report's exact target build is unavailable in this Project.");
             var releaseId = release?.Id; var deepLink = releaseId is null ? $"/projects/{projectId}/problem-reports/{row.Id}" : $"/programs/{programId}/projects/{projectId}/releases/{releaseId}/problem-reports/{row.Id}";
             return new(type, row.Id, row.DisplayNumber, row.Title, row.State.ToString(), row.ProjectId, row.TargetReleaseId, row.TargetReleaseId is null ? "" : release?.Version ?? "", deepLink);
         }

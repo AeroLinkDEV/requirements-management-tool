@@ -95,6 +95,13 @@ operator refreshes from page one; they cannot shift records between pages in an 
 cross-filter, or oversized cursors fail closed with `400`. The browser shows the total register size and loads
 additional records on request, while a direct document URL loads the current record independently of its page.
 
+Release relationship targets are an existing exception to the first-page snapshot guarantee: releases have
+no immutable creation timestamp. Their bounded database pages use canonical numeric build identity, retained
+historical text and a stable ID tie-breaker; a concurrently created build may appear after the current cursor,
+and a build inserted before it requires refreshing page one. [Issue #1040](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1040)
+tracks a genuine snapshot boundary. A Problem Report without a target build retains its Project link; an
+explicit target resolves only that exact authorized Project/build and never falls back to a different build.
+
 Production PostgreSQL indexes cover the Project/type/steward/register orders, document/state/revision heads,
 review assignee/state, check-in time, attachment revision/logical version, relationship revision/time, and event
 document/time paths. Qualification targets a maximum response page of 100 and verifies multi-page uniqueness,

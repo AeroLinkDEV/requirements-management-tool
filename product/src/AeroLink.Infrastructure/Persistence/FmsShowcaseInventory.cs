@@ -1,5 +1,6 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
@@ -70,7 +71,7 @@ public sealed partial class FmsShowcaseSeeder
                     .Select(x => new ShowcaseInventoryExample(x.Id, x.Id.ToString(), "Register", null))));
         var result = new List<ShowcaseBuildInventory>();
         var traces = new List<object>();
-        foreach (var release in releases.OrderBy(x => x.Version))
+        foreach (var release in SoftwareReleaseOrdering.Ascending(releases))
         {
             var buildBaselines = baselines.Where(x => x.ReleaseId == release.Id).ToList();
             var materializedIds = buildBaselines.Where(x => x.RequirementsMaterializedAt is not null).Select(x => x.Id).ToHashSet();
