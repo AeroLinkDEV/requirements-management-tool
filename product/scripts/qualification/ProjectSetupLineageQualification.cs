@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -20,7 +21,9 @@ root.MarkReleased(DateTimeOffset.UtcNow.AddDays(-2));
 var releasedChild = new SoftwareRelease(project.Id, "10.5", false, root.Id);
 releasedChild.MarkReleased(DateTimeOffset.UtcNow.AddDays(-1));
 var workingChild = new SoftwareRelease(project.Id, "11.0", false, root.Id);
-db.AddRange(program, project, root, releasedChild, workingChild);
+// This is a historical navigation fixture, including its persisted supported legacy ladder.
+db.AddRange(program, project, root, releasedChild, workingChild,
+    LegacyDefaultProjectLadderFactory.Create(project.Id, DateTimeOffset.UtcNow));
 await db.SaveChangesAsync();
 await File.WriteAllTextAsync(args[1], JsonSerializer.Serialize(new
 {
