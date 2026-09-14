@@ -760,6 +760,7 @@ test.describe("suspect meaning survives the density tiers", () => {
    * else on the card.
    */
   test("the suspect word survives the compact tier the reader zooms out to", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
     await open(page, "hlr")
     await page.locator(".dtCanvas").focus()
     for (let index = 0; index < 3; index += 1) await page.keyboard.press("-")

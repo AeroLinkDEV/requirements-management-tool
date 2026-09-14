@@ -314,7 +314,7 @@ export interface RevealPlan {
 }
 
 /**
- * Lane-local reveal: bring eligible linked cards into the usable window, or directly below it, without
+ * Lane-local reveal: bring eligible linked cards into the usable window, or directly below it,
  * using foreground-only obstacles and without placing a revealed card above the window (that would need a
  * positive lane offset, which the reader's scroll cannot supply).
  */

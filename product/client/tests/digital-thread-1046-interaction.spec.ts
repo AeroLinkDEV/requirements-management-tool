@@ -82,11 +82,11 @@ test('stationary hover survives settled motion beyond dwell and deliberate motio
   await evidence(page, info)
 })
 
-test('selection uses selection intent; manual pan and passive resize keep reader ownership; clear keeps camera', async ({ page }, info) => {
+test('selection stays readable; manual pan and passive resize keep reader ownership; clear keeps camera', async ({ page }, info) => {
   await open(page)
   await body(page, 'sys-33', true)
   await waitForCanvasSettled(page)
-  expect((await paint(page)).display.zoom).toBeGreaterThanOrEqual(0.72)
+  expect((await paint(page)).display.zoom).toBeGreaterThanOrEqual(0.81)
   const beforePan = (await paint(page)).display
   const c = (await page.locator('.dtCanvas').boundingBox())!
   await page.mouse.move(c.x + 6, c.y + c.height - 50)
@@ -158,14 +158,14 @@ test('native keyboard activation and touch preserve exact selection under reduce
 })
 
 
-test('external arrival and browser back forward retain landing intent after internal selection', async ({ page }, info) => {
+test('external arrival and browser back forward preserve readable exact selection', async ({ page }, info) => {
   await open(page, '/tests/fixtures/digital-thread-1046.html?page=1&focal=sys-33')
   await selectedFits(page)
   expect((await paint(page)).display.zoom).toBeGreaterThanOrEqual(0.86)
   await body(page, 'proc-4', true)
   await waitForCanvasSettled(page)
   expect((await paint(page)).selectedId).toBe('proc-4')
-  expect((await paint(page)).display.zoom).toBeGreaterThanOrEqual(0.72)
+  expect((await paint(page)).display.zoom).toBeGreaterThanOrEqual(0.81)
   await page.goBack()
   await waitForCanvasSettled(page)
   expect((await paint(page)).selectedId).toBe('sys-33')
