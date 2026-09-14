@@ -160,6 +160,9 @@ public sealed class ProjectSetupAuthorizationApiTests
         Assert.Equal(HttpStatusCode.OK, configured.StatusCode);
         var configuredBody = await configured.Content.ReadFromJsonAsync<JsonElement>();
         var configuredVersion = configuredBody.GetProperty("draftVersion").GetInt64();
+        using var configuredSourceResponse = await originalAdministrator.GetAsync($"/api/project-setups/{draftId}/source");
+        var configuredSource = await configuredSourceResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var sourceAssertionHash = configuredSource.GetProperty("assertion").GetProperty("hash").GetString();
 
         // This is the current identity model's administrator boundary: administrator authority is derived from
         // the persisted reserved username. Rename the actual draft creator, preserve its source membership, and
@@ -196,7 +199,10 @@ public sealed class ProjectSetupAuthorizationApiTests
         var creatorSaved = await creatorSave.Content.ReadFromJsonAsync<JsonElement>();
         var resumedVersion = creatorSaved.GetProperty("version").GetInt64();
         using var creatorFinalize = await creator.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize", new
-        { expectedVersion = resumedVersion, idempotencyKey = "demoted-native-creator-must-not-accept" });
+        {
+            expectedVersion = resumedVersion, idempotencyKey = "demoted-native-creator-must-not-accept",
+            password = administratorPassword, sourceAssertionHash, sourceAssertionAccepted = true,
+        });
         Assert.Equal(HttpStatusCode.Forbidden, creatorFinalize.StatusCode);
 
         using var currentAdministrator = factory.CreateClient();
