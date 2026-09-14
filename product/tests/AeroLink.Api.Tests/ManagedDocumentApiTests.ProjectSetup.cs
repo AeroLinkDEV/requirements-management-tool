@@ -12,7 +12,13 @@ namespace AeroLink.Api.Tests;
 public sealed partial class ManagedDocumentApiTests
 {
     [Fact]
-    public async Task Fresh_setup_project_supports_local_connector_check_in_review_and_exact_controlled_release()
+    public Task Fresh_setup_project_supports_local_connector_check_in_review_and_exact_controlled_release() =>
+        QualifyFreshProjectManagedDocumentAsync();
+
+    // The Windows qualification harness supplies actual desktop Word operations while reusing the same
+    // Fresh setup, authorized protocol, lifecycle and immutable-evidence assertions as the normal API test.
+    internal static async Task QualifyFreshProjectManagedDocumentAsync(Func<byte[], byte[]>? authorInWord = null,
+        Func<byte[], (byte[] Docx, byte[] Pdf)>? renderInWord = null)
     {
         using var factory = new AeroLinkApiFactory();
         var project = await ProjectSetupServiceQualificationTests.QualifyAsync(factory);
@@ -62,6 +68,11 @@ public sealed partial class ManagedDocumentApiTests
         await RequireSuccess(download);
         var workingBytes = await download.Content.ReadAsByteArrayAsync();
         ManagedDocumentFileService.ValidateDocx(workingBytes, true);
+        var sourceXml = WordDocumentStructure.ReadWordParts(workingBytes)["word/document.xml"];
+        Assert.DoesNotContain("backing scope", sourceXml);
+        Assert.DoesNotContain("Approval pending", sourceXml);
+        Assert.Contains("Consult AeroLink for approval evidence bound to this exact revision and file hash.", sourceXml);
+        if (authorInWord is not null) workingBytes = authorInWord(workingBytes);
         using var checkIn = await SendCheckInAsync(owner, grantId, token, grant.GetProperty("sessionVersion").GetInt64(),
             "Checked the initial plan through the local connector protocol.", workingBytes);
         await RequireSuccess(checkIn);
@@ -91,11 +102,13 @@ public sealed partial class ManagedDocumentApiTests
             ManagedDocumentFileService.Sha256(workingBytes), [("Formal revision scope", "Initial isolated plan.")], [], [],
             [new("Purpose", "Scope", [new("1", "Plan", "Purpose", "Isolated protocol qualification.", [])])]);
         var pdf = ProfessionalPublicationRenderer.Render(publication, "pdf", "SDP-000001.00");
+        var pdfBytes = pdf.Content;
+        if (renderInWord is not null) (docxBytes, pdfBytes) = renderInWord(workingBytes);
         using var form = new MultipartFormDataContent();
         form.Add(new StringContent(releaseGrant.GetProperty("sessionVersion").GetInt64().ToString()), "expectedVersion");
         var docx = new ByteArrayContent(docxBytes); docx.Headers.ContentType = new(ManagedDocumentFileService.DocxContentType);
         form.Add(docx, "docx", "SDP-000001.00.docx");
-        var pdfContent = new ByteArrayContent(pdf.Content); pdfContent.Headers.ContentType = new(pdf.ContentType);
+        var pdfContent = new ByteArrayContent(pdfBytes); pdfContent.Headers.ContentType = new(pdf.ContentType);
         form.Add(pdfContent, "pdf", pdf.FileName);
         using var candidateRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/document-connector/{releaseGrantId}/release-candidate") { Content = form };
         candidateRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", releaseToken);
@@ -113,7 +126,7 @@ public sealed partial class ManagedDocumentApiTests
         Assert.Equal(2, pair.Count);
         Assert.All(pair, x => Assert.Equal(project.ProjectId, x.ProjectId));
         Assert.Contains(pair, x => x.Sha256 == ManagedDocumentFileService.Sha256(docxBytes));
-        Assert.Contains(pair, x => x.Sha256 == ManagedDocumentFileService.Sha256(pdf.Content));
+        Assert.Contains(pair, x => x.Sha256 == ManagedDocumentFileService.Sha256(pdfBytes));
         var signatures = await verifyDb.ElectronicSignatures.Where(x => x.ArtifactId == documentId || x.ArtifactId == revisionId).ToListAsync();
         Assert.Contains(signatures, x => x.UserName == "fresh.reviewer");
         Assert.Contains(signatures, x => x.UserName == "fresh.backup");

@@ -4,16 +4,16 @@
     "tests": 899,
     "cases": 1007,
     "classes": 141,
-    "hostedTests": 852,
-    "hostedCases": 938,
+    "hostedTests": 851,
+    "hostedCases": 937,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
-    "unknownHostTests": 13,
-    "unknownHostCases": 21,
+    "unknownHostTests": 14,
+    "unknownHostCases": 22,
     "hostedCandidateTests": 17,
     "hostedCandidateCases": 17,
-    "unknownCandidateTests": 7,
-    "unknownCandidateCases": 15,
+    "unknownCandidateTests": 8,
+    "unknownCandidateCases": 16,
     "unknownCaseTests": 0,
     "criterion7": "unresolved"
   },
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 562,
-      "cases": 630,
+      "tests": 561,
+      "cases": 629,
       "unknownCases": 0,
-      "classes": 111
+      "classes": 110
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 40,
-      "cases": 40,
+      "tests": 41,
+      "cases": 41,
       "unknownCases": 0,
-      "classes": 16
+      "classes": 17
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -5808,18 +5808,14 @@
       "cls": "ManagedDocumentApiTests.ProjectSetup",
       "test": "Fresh_setup_project_supports_local_connector_check_in_review_and_exact_controlled_release",
       "kind": "Fact",
-      "intent": "http-boundary",
+      "intent": "in-process-logic",
       "cases": 1,
       "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction",
-        "factory-client",
-        "factory-services"
-      ],
+      "hosted": "unknown",
+      "hostEvidence": [],
       "sourceLines": {
         "start": 14,
-        "end": 130
+        "end": 16
       }
     },
     {

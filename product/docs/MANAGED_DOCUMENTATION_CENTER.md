@@ -144,6 +144,20 @@ Install once per Windows user with `INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat`. Th
 administrator rights and registers the `aerolink://` protocol for that user. Word must be installed only for
 editing and final PDF production.
 
+The explicit Windows qualification entry point is
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File product/scripts/Test-ProjectSetupWord.ps1`.
+Close existing Word sessions first. It creates a disposable Fresh project through the API test host, assigns
+its own fixture people through the personnel APIs, checks out a plan, edits/saves with installed Word, checks
+in, signs the technical review, invokes the production connector's Word release renderer, and accepts/signs
+the exact DOCX/PDF pair. Source/run records are retained under `product/artifacts/project-setup-word`; owned
+document hashes and Word version are retained in the temporary directory named in the log. A changed checkout
+or failed operation invalidates the run. No persistent AeroLink database or evidence store is used.
+
+This qualifies installed Word authoring/rendering with the new-project API lifecycle. Signed installation,
+protocol-handler enrollment, desktop connector UI/recovery and the supported Windows/Office matrix require
+their separate production-path qualification. Word's equivalent fixed-point watermark opacity is accepted
+without relaxing the required controlled shape, text, color or placement.
+
 Connector trust controls are deliberately small: HTTPS is required for remote servers; loopback HTTP is allowed
 for the local demonstration; launch tokens are one-use and short-lived; session access is scoped to one revision;
 tokens stay in memory; stale-source check-ins fail without overwriting; macro-enabled files and non-DOCX sources

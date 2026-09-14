@@ -447,7 +447,9 @@ public static class WordDocumentStructure
             && style.Contains("mso-position-horizontal:center", StringComparison.OrdinalIgnoreCase)
             && style.Contains("mso-position-vertical:center", StringComparison.OrdinalIgnoreCase)
             && fill.Equals("#c8d0d8", StringComparison.OrdinalIgnoreCase)
-            && (opacity == ".45" || opacity == "0.45");
+            // Word saves the same 45% opacity as the nearest 16.16 fixed-point VML value.
+            // Accept only that exact equivalent; all named-shape, text, color and placement guards remain.
+            && (opacity is ".45" or "0.45" or "29491f");
     }
 
     private static IReadOnlyDictionary<string, (string Target, bool External)> ParseRelationships(string xml)
