@@ -545,26 +545,8 @@ public sealed class ProjectSetupService(
         }
     }
 
-    private static HashSet<ReviewSubject> ApplicableSubjects(ProjectLadderConfiguration ladder)
-    {
-        var subjects = new HashSet<ReviewSubject>();
-        var levels = ladder.Steps.Select(x => Enum.Parse<RequirementLevel>(x.CatalogueEntry, false)).ToHashSet();
-        if (levels.Contains(RequirementLevel.System)) subjects.Add(ReviewSubject.System);
-        if (levels.Contains(RequirementLevel.HighLevel) || levels.Contains(RequirementLevel.LowLevel)) subjects.Add(ReviewSubject.Software);
-        if (levels.Contains(RequirementLevel.Interface)) subjects.Add(ReviewSubject.Interface);
-        if (levels.Contains(RequirementLevel.System) && HasArtifact(ladder, RequirementLevel.System, VerificationArtifactKind.Procedure)) subjects.Add(ReviewSubject.SystemTest);
-        if (levels.Contains(RequirementLevel.HighLevel))
-        {
-            if (HasArtifact(ladder, RequirementLevel.HighLevel, VerificationArtifactKind.Case)) subjects.Add(ReviewSubject.HighLevelSoftwareCase);
-            if (HasArtifact(ladder, RequirementLevel.HighLevel, VerificationArtifactKind.Procedure)) subjects.Add(ReviewSubject.HighLevelSoftwareProcedure);
-        }
-        if (levels.Contains(RequirementLevel.LowLevel))
-        {
-            if (HasArtifact(ladder, RequirementLevel.LowLevel, VerificationArtifactKind.Case)) subjects.Add(ReviewSubject.LowLevelSoftwareCase);
-            if (HasArtifact(ladder, RequirementLevel.LowLevel, VerificationArtifactKind.Procedure)) subjects.Add(ReviewSubject.LowLevelSoftwareProcedure);
-        }
-        return subjects;
-    }
+    private static HashSet<ReviewSubject> ApplicableSubjects(ProjectLadderConfiguration ladder) =>
+        ProjectSetupReviewRules.ApplicableSubjects(ladder);
 
     private static ProjectRepositoryConfiguration CreateRepositoryConfiguration(Guid projectId,
         ProjectSetupDraft draft, string actor, DateTimeOffset now)
@@ -578,11 +560,6 @@ public sealed class ProjectSetupService(
         return new ProjectRepositoryConfiguration(projectId, mode, repository.Provider,
             repository.Endpoint, actor, now);
     }
-
-    private static bool HasArtifact(ProjectLadderConfiguration ladder, RequirementLevel level,
-        VerificationArtifactKind kind) => ladder.Steps.Any(step =>
-            Enum.Parse<RequirementLevel>(step.CatalogueEntry, false) == level
-            && step.EnabledArtifactKinds.Contains(kind));
 
     private static ProjectSetupFinalizationResult CompletedResult(ProjectSetupDraft draft)
     {

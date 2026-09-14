@@ -68,6 +68,10 @@ engineering content. Canonical `SW-NN.NN` identity validation governs new build 
 historical records. Empty-project ladder corrections preserve configuration history and synchronize containers;
 authored or inherited engineering content locks structural changes.
 
+Supported capability subsets remain valid. Setup offers review subjects only for the configured change-control
+and verification capabilities; artifact threads and traceability publications distinguish unavailable verification
+from missing coverage using the effective ladder.
+
 Project entry uses stable identity and opens the actual visual build-lineage selector, including for a single
 build. Explicit build links retain their exact authorized target. Repository setup can remain Pending and be
 configured later; a server-observed GitLab connection is separate from controlled implementation evidence.

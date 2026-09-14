@@ -1,4 +1,5 @@
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Domain.Hierarchy;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Api;
@@ -22,7 +23,8 @@ public static class ArtifactThreadEndpoints
         // procedure revision run in two builds would return both histories merged, with nothing in the request
         // able to choose between them.
         app.MapGet("/api/artifact-thread", async (Guid projectId, Guid baselineId, Guid? buildId,
-            string focalKind, Guid focalId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+            string focalKind, Guid focalId, HttpContext http, AeroLinkDbContext db,
+            IProjectLadderPolicyResolver policies, CancellationToken ct) =>
         {
             if (!Enum.TryParse<ArtifactThreadFocalKind>(focalKind, ignoreCase: true, out var kind))
                 return Results.BadRequest(new { error = "focalKind must be Requirement, Case, Procedure, Execution or Build." });
@@ -31,7 +33,7 @@ public static class ArtifactThreadEndpoints
             // runs, so a 404 from here never doubles as a probe for what exists in another Project.
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
 
-            var thread = await ArtifactThreadProjection.BuildAsync(db, projectId, baselineId, buildId, kind, focalId, ct);
+            var thread = await ArtifactThreadProjection.BuildAsync(db, projectId, baselineId, buildId, kind, focalId, ct, policies);
             return thread is null ? Results.NotFound() : Results.Ok(thread);
         });
     }

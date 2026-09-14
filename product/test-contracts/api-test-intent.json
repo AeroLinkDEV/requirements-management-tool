@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 904,
-    "cases": 1014,
-    "classes": 142,
-    "hostedTests": 856,
-    "hostedCases": 944,
+    "tests": 905,
+    "cases": 1016,
+    "classes": 143,
+    "hostedTests": 857,
+    "hostedCases": 946,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 14,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 565,
-      "cases": 635,
+      "tests": 566,
+      "cases": 637,
       "unknownCases": 0,
-      "classes": 110
+      "classes": 111
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -10364,6 +10364,24 @@
       "sourceLines": {
         "start": 26,
         "end": 92
+      }
+    },
+    {
+      "cls": "ProjectSetupLadderCapabilityApiTests",
+      "test": "Fresh_capability_subset_has_no_inapplicable_review_workflow",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 2,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 11,
+        "end": 43
       }
     },
     {

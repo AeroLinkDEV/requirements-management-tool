@@ -245,7 +245,8 @@ public static class ArtifactThreadProjection
 
     public static async Task<ArtifactThreadResult?> BuildAsync(
         AeroLinkDbContext db, Guid projectId, Guid baselineId, Guid? buildId,
-        ArtifactThreadFocalKind focalKind, Guid focalId, CancellationToken ct)
+        ArtifactThreadFocalKind focalKind, Guid focalId, CancellationToken ct,
+        IProjectLadderPolicyResolver? policies = null)
     {
         var baselineOwned = await db.CandidateBaselines.AsNoTracking()
             .AnyAsync(x => x.Id == baselineId && x.ProjectId == projectId, ct);
@@ -303,7 +304,8 @@ public static class ArtifactThreadProjection
 
         await AddChangeAndProblemAsync(db, projectId, requirementWalk.All, acc, ct);
         var verification = await AddVerificationAsync(db, projectId, requirementWalk.All,
-            requirementWalk.VerificationSources, anchors, focalKind, focalId, buildIds, builds, acc, ct);
+            requirementWalk.VerificationSources, anchors, focalKind, focalId, buildIds, builds, acc,
+            policies ?? new EffectiveProjectLadderPolicyResolver(db), ct);
 
         return new ArtifactThreadResult(projectId, baselineId, buildId, focalKind.ToString(), focalId,
             [.. acc.Nodes.Values], acc.Edges, verification);
@@ -697,7 +699,7 @@ public static class ArtifactThreadProjection
         IReadOnlyCollection<Guid> verificationRequirementIds, Anchors anchors,
         ArtifactThreadFocalKind focalKind, Guid focalId, IReadOnlyCollection<Guid> buildIds,
         IReadOnlyDictionary<Guid, (string Number, string Description, SoftwareBuildState State)> builds,
-        Accumulator acc, CancellationToken ct)
+        Accumulator acc, IProjectLadderPolicyResolver policies, CancellationToken ct)
     {
         if (requirementIds.Count > 0)
         {
@@ -707,9 +709,11 @@ public static class ArtifactThreadProjection
                                 where requirementIds.Contains(revision.Id)
                                 select artifact.Level).Distinct().ToListAsync(ct);
 
-            // A level either has a verification discipline or it does not; the domain is the authority and is
-            // not widened here. Customer and Interface have none, so their chain truthfully stops.
-            var without = levels.Where(level => !HasVerificationDiscipline(level)).ToList();
+            // Applicability follows the effective project configuration, including supported capability
+            // subsets. Historical verification anchors still retain their exact recorded relationships.
+            var policy = await policies.ResolveAsync(projectId, ct);
+            var without = levels.Where(level => policy.Definitions.SingleOrDefault(x => x.Level == level)
+                ?.VerificationProfile?.HasVerification != true).ToList();
             if (levels.Count > 0 && without.Count == levels.Count && anchors.Revisions.Count == 0)
             {
                 var named = string.Join(" and ", without.Select(x => x.ToString()).OrderBy(x => x));
@@ -929,17 +933,4 @@ public static class ArtifactThreadProjection
                 "authored", false));
     }
 
-    /// <summary>
-    /// Whether this requirement level has a verification discipline.
-    ///
-    /// <para>
-    /// Mirrors <c>ProjectLadderConfiguration</c>, which throws for any other level. Asking the question without
-    /// raising is what lets the thread state the absence instead of failing.
-    /// </para>
-    /// </summary>
-    private static bool HasVerificationDiscipline(RequirementLevel level) => level switch
-    {
-        RequirementLevel.System or RequirementLevel.HighLevel or RequirementLevel.LowLevel => true,
-        _ => false,
-    };
 }

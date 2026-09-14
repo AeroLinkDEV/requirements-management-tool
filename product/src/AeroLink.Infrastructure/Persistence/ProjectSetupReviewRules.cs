@@ -59,13 +59,17 @@ public static class ProjectSetupReviewRules
     private static IReadOnlyList<Rule> ApplicableRules(ProjectLadderConfiguration ladder)
     {
         var steps = ladder.Steps.Select(x => new Step(
-            Enum.Parse<RequirementLevel>(x.CatalogueEntry, false), x.EnabledArtifactKinds.ToHashSet())).ToArray();
+            Enum.Parse<RequirementLevel>(x.CatalogueEntry, false), x.Capabilities, x.EnabledArtifactKinds.ToHashSet())).ToArray();
         return ApplicableRules(steps);
     }
 
+    public static HashSet<ReviewSubject> ApplicableSubjects(ProjectLadderConfiguration ladder) =>
+        ApplicableRules(ladder).Select(x => x.Subject).ToHashSet();
+
     private static IReadOnlyList<Rule> ApplicableRules(IReadOnlyList<Step> steps)
     {
-        var levels = steps.Select(x => x.Level).ToHashSet();
+        var levels = steps.Where(x => x.Capabilities.HasFlag(LevelCapabilities.HasChangeControl))
+            .Select(x => x.Level).ToHashSet();
         var rules = new List<Rule>();
 
         if (levels.Contains(RequirementLevel.System))
@@ -77,7 +81,8 @@ public static class ProjectSetupReviewRules
         if (levels.Contains(RequirementLevel.Interface))
             rules.Add(new(ReviewSubject.Interface, "Interface requirements", ProgramRole.ConfigurationManager,
                 ReviewStageAuthorityKind.BaseRole));
-        if (steps.Any(x => x.Level == RequirementLevel.System && x.Artifacts.Contains(VerificationArtifactKind.Procedure)))
+        if (steps.Any(x => x.Level == RequirementLevel.System && x.Capabilities.HasFlag(LevelCapabilities.HasVerification)
+            && x.Artifacts.Contains(VerificationArtifactKind.Procedure)))
             rules.Add(new(ReviewSubject.SystemTest, "System test procedures", ProgramRole.SystemTestEngineer,
                 ReviewStageAuthorityKind.BaseRole));
 
@@ -92,7 +97,7 @@ public static class ProjectSetupReviewRules
         RequirementLevel level, ReviewSubject caseSubject, ReviewSubject procedureSubject, string label)
     {
         var step = steps.FirstOrDefault(x => x.Level == level);
-        if (step is null) return;
+        if (step is null || !step.Capabilities.HasFlag(LevelCapabilities.HasVerification)) return;
         if (step.Artifacts.Contains(VerificationArtifactKind.Case))
             rules.Add(new(caseSubject, $"{label} test cases", ProgramRole.SoftwareTestEngineer,
                 ReviewStageAuthorityKind.BaseRole));
@@ -126,10 +131,14 @@ public static class ProjectSetupReviewRules
                     && Enum.IsDefined(kind))
                     artifacts.Add(kind);
         }
-        return new(level, artifacts);
+        var capabilities = element.TryGetProperty("capabilities", out var capabilityValue)
+            ? JsonSerializer.Deserialize<LevelCapabilities>(capabilityValue.GetRawText(), WireJson)
+            : LevelCapabilities.None;
+        return new(level, capabilities, artifacts);
     }
 
-    private sealed record Step(RequirementLevel Level, IReadOnlySet<VerificationArtifactKind> Artifacts);
+    private sealed record Step(RequirementLevel Level, LevelCapabilities Capabilities,
+        IReadOnlySet<VerificationArtifactKind> Artifacts);
     private sealed record Rule(ReviewSubject Subject, string Name, ProgramRole Role,
         ReviewStageAuthorityKind AuthorityKind);
     private sealed record ReviewRulesDocument(IReadOnlyList<RuleWire> Rules);

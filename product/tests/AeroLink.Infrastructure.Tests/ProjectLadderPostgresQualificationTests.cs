@@ -150,7 +150,21 @@ public sealed class ProjectLadderPostgresQualificationTests
                 VALUES ({systemProcedureId}, {projectId}, {"SYSTP-72901"}, {"Legacy system procedure"}, {"migration.test"}, {"System"}, {now}, {now}, {1L}),
                        ({highLevelProcedureId}, {projectId}, {"HLRTP-72901"}, {"Legacy high-level case"}, {"migration.test"}, {"HighLevel"}, {now}, {now}, {1L});
             """);
-        await db.Database.GetService<IMigrator>().MigrateAsync();
+        // Qualify the reversible neutral-identity migrations before installing later forward-only
+        // controlled-identifier migrations. Latest -> 20260822 is not a supported downgrade path.
+        var migrator = db.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20260822153030_AddNeutralVerificationIdentity");
+        async Task<string[]> NeutralSnapshotAsync() => await db.Database.SqlQueryRaw<string>("""
+            SELECT row_to_json(s)::text AS "Value" FROM project_ladder_steps s
+            UNION ALL SELECT row_to_json(p)::text AS "Value" FROM test_procedures p
+            UNION ALL SELECT row_to_json(h)::text AS "Value" FROM project_ladder_configuration_history h
+            ORDER BY "Value"
+            """).ToArrayAsync();
+        var neutralBefore = await NeutralSnapshotAsync();
+        await migrator.MigrateAsync("20260822045540_ExactLinkSuspectLifecycle");
+        await migrator.MigrateAsync("20260822153030_AddNeutralVerificationIdentity");
+        Assert.Equal(neutralBefore, await NeutralSnapshotAsync());
+        await migrator.MigrateAsync();
         var step = await db.ProjectLadderSteps.AsNoTracking().SingleAsync(x => x.Id == stepId);
         Assert.Equal(string.Empty, step.EnabledArtifactKindsValue);
         var migratedArtifacts = await db.TestProcedures.AsNoTracking().OrderBy(x => x.Level).ToListAsync();
@@ -167,8 +181,8 @@ public sealed class ProjectLadderPostgresQualificationTests
         Assert.Equal(string.Empty, after.EnabledArtifactKindsValue);
         Assert.Equal(before.VerificationProfileSchemaVersion, (await db.ProjectLadderConfigurations.AsNoTracking().SingleAsync(x => x.Id == configurationId)).VerificationProfileSchemaVersion);
 
-        // Exercise the neutral migration's Down and reapply path as well as an idempotent latest-Migrate call.
-        await db.Database.GetService<IMigrator>().MigrateAsync("20260822045540_ExactLinkSuspectLifecycle");
+        // The neutral Down/reapply path was exercised before forward-only migrations above.
+        // Re-running the latest migration remains idempotent for the resulting controlled records.
         await db.Database.GetService<IMigrator>().MigrateAsync();
         var reapplied = await db.ProjectLadderSteps.AsNoTracking().SingleAsync(x => x.Id == stepId);
         Assert.Equal(string.Empty, reapplied.EnabledArtifactKindsValue);

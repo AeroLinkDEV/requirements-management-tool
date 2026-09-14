@@ -7,6 +7,20 @@ namespace AeroLink.Infrastructure.Tests;
 
 public sealed class ProjectSetupReviewRulesTests
 {
+    [Theory]
+    [InlineData("System")]
+    [InlineData("HighLevel")]
+    [InlineData("LowLevel")]
+    [InlineData("Interface")]
+    public void Disabled_capabilities_do_not_offer_unusable_review_workflows(string level)
+    {
+        var ladder = JsonSerializer.Serialize(new { steps = new[] { new {
+            catalogueEntry = level, position = 1, capabilities = 0, enabledArtifactKinds = Array.Empty<string>()
+        } }, relationships = Array.Empty<object>() });
+        using var document = JsonDocument.Parse(ProjectSetupReviewRules.SuggestedJson(ladder, Guid.NewGuid()));
+        Assert.Empty(document.RootElement.GetProperty("rules").EnumerateArray());
+    }
+
     [Fact]
     public void Maintained_standard_is_a_concrete_typed_definition_for_the_default_ladder()
     {
@@ -30,7 +44,7 @@ public sealed class ProjectSetupReviewRulesTests
         const string ladder = """
             {
               "steps": [
-                { "catalogueEntry": "Interface", "position": 1, "capabilities": "None", "enabledArtifactKinds": [] }
+                { "catalogueEntry": "Interface", "position": 1, "capabilities": "HasChangeControl", "enabledArtifactKinds": [] }
               ],
               "relationships": []
             }

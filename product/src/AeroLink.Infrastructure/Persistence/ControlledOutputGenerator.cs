@@ -32,13 +32,35 @@ public sealed class ControlledOutputGenerator(AeroLinkDbContext db, RichContentP
                 && IsConfiguredTrace(ladderPolicy, source.level, target.level, link.Type)).ToList();
         var procedureEffectivity = await TestProcedureEffectivity.ForBaselineAsync(db, baselineId, ct);
         var effectiveProcedureRevisionIds = procedureEffectivity?.RevisionIds ?? [];
-        var allowedProcedureLevels = ladderPolicy.Definitions.Where(x => x.Verification is not null).Select(x => x.Verification!.ProcedureLevel).ToArray();
-        var coverage=await(from link in db.TestCoverage.AsNoTracking().Where(x=>ids.Contains(x.RequirementRevisionId)&&effectiveProcedureRevisionIds.Contains(x.ProcedureRevisionId)&&!x.IsSuspect) join revision in db.TestProcedureRevisions.AsNoTracking() on link.ProcedureRevisionId equals revision.Id join procedure in db.TestProcedures.AsNoTracking().Where(x=>allowedProcedureLevels.Contains(x.Level)&&(x.Level==TestProcedureLevel.System||x.ArtifactKind==VerificationArtifactKind.Case)) on revision.ProcedureId equals procedure.Id select new{link.RequirementRevisionId,ProcedureRevisionId=revision.Id,display=procedure.BaseNumber+"."+revision.Revision.ToString("D2")}).ToListAsync(ct);
+        var coverageKeys = ladderPolicy.Definitions.Where(x => x.VerificationProfile?.HasVerification == true).Select(x => x.VerificationProfile!.Definitions[0].Key).ToHashSet();
+        var allowedProcedureLevels = ladderPolicy.Definitions.Where(x => x.VerificationProfile?.HasVerification == true).Select(x => x.VerificationProfile!.Definitions[0].ProcedureLevel).ToArray();
+        var coverage=await(from link in db.TestCoverage.AsNoTracking().Where(x=>ids.Contains(x.RequirementRevisionId)&&effectiveProcedureRevisionIds.Contains(x.ProcedureRevisionId)&&!x.IsSuspect) join revision in db.TestProcedureRevisions.AsNoTracking() on link.ProcedureRevisionId equals revision.Id join procedure in db.TestProcedures.AsNoTracking().Where(x=>allowedProcedureLevels.Contains(x.Level)) on revision.ProcedureId equals procedure.Id select new{link.RequirementRevisionId,ProcedureRevisionId=revision.Id,display=procedure.BaseNumber+"."+revision.Revision.ToString("D2"),procedure.ArtifactDiscipline,procedure.ArtifactKind}).ToListAsync(ct);
+        coverage = coverage.Where(x => coverageKeys.Contains(new VerificationArtifactKey(x.ArtifactDiscipline, x.ArtifactKind))).ToList();
         var procedureTitles=await TestProcedureRevisionTitleProjection.ForRevisionsAsync(db,coverage.Select(x=>x.ProcedureRevisionId).Distinct().ToList(),ct);
-        var records=requirements.Select(req=>{var parents=links.Where(x=>x.SourceRevisionId==req.Id&&byId.ContainsKey(x.TargetRevisionId)).Select(x=>byId[x.TargetRevisionId].display).ToList();var children=links.Where(x=>x.TargetRevisionId==req.Id&&byId.ContainsKey(x.SourceRevisionId)).Select(x=>byId[x.SourceRevisionId].display).ToList();var tests=coverage.Where(x=>x.RequirementRevisionId==req.Id).Select(x=>$"{x.display} - {procedureTitles[x.ProcedureRevisionId].Title}").ToList();var artifactNoun=req.level==RequirementLevel.System?"procedure":"case";return new PublicationRecord(req.display,req.level.ToString(),"Full lifecycle linkage",req.Statement,new[]{("Parent classification",req.ParentKind.ToString()),("Derived rationale",req.DerivedRationale),("Parent requirement revisions",parents.Count==0?"Top-level / none":string.Join("; ",parents)),("Child requirement revisions",children.Count==0?"Leaf-level / none":string.Join("; ",children)),($"Verification {artifactNoun} revisions",tests.Count==0?"Coverage gap - none recorded":string.Join("; ",tests))});}).ToList();
+        var records = requirements.Select(req =>
+        {
+            var parents = links.Where(x => x.SourceRevisionId == req.Id && byId.ContainsKey(x.TargetRevisionId))
+                .Select(x => byId[x.TargetRevisionId].display).ToList();
+            var children = links.Where(x => x.TargetRevisionId == req.Id && byId.ContainsKey(x.SourceRevisionId))
+                .Select(x => byId[x.SourceRevisionId].display).ToList();
+            var tests = coverage.Where(x => x.RequirementRevisionId == req.Id)
+                .Select(x => $"{x.display} - {procedureTitles[x.ProcedureRevisionId].Title}").ToList();
+            var profile = ladderPolicy.Definition(req.level).VerificationProfile;
+            var applicable = profile?.HasVerification == true;
+            var verificationLabel = applicable
+                ? $"Verification {profile!.Definitions[0].Kind.ToString().ToLowerInvariant()} revisions"
+                : "Verification applicability";
+            var verificationValue = !applicable ? "Not applicable - this level has no configured verification discipline."
+                : tests.Count == 0 ? "Coverage gap - none recorded" : string.Join("; ", tests);
+            return new PublicationRecord(req.display, req.level.ToString(), "Full lifecycle linkage", req.Statement,
+                new[] { ("Parent classification", req.ParentKind.ToString()), ("Derived rationale", req.DerivedRationale),
+                    ("Parent requirement revisions", parents.Count == 0 ? "Top-level / none" : string.Join("; ", parents)),
+                    ("Child requirement revisions", children.Count == 0 ? "Leaf-level / none" : string.Join("; ", children)),
+                    (verificationLabel, verificationValue) });
+        }).ToList();
         var generatedAt=DateTimeOffset.UtcNow;var approvals=await ApprovalBasis(baselineId,release.Id,generatedAt,ct);var hash=baseline.RequirementsHash??baseline.ContentHash??new string('0',64);var status=release.IsReleased?"Approved and Released":"Controlled Draft";
         var createdBy=(await db.BaselineEvents.AsNoTracking().Where(x=>x.BaselineId==baseline.Id&&x.EventType=="CandidateBaselineCreated").ToListAsync(ct)).OrderBy(x=>x.OccurredAt).Select(x=>x.ActorId).FirstOrDefault()??"system";
-        var publication=new ProfessionalPublication(project.SoftwareProduct,await PublicationProgramContext.ResolveAsync(db, project, program, ct),project.Name,"Lifecycle Traceability Report",$"{project.SoftwareProduct} Full Traceability Evidence",$"Readable upward, downward, change-authority, and verification linkage for baseline {baseline.DisplayNumber}","TRACE-"+release.Version.Replace(".",""),"00",status,release.Version,baseline.DisplayNumber,createdBy,generatedAt,hash,new[]{("Requirements",records.Count.ToString("N0")),("Trace links",links.Count.ToString("N0")),("Verification links",coverage.Count.ToString("N0")),("Requirement manifest hash",hash)},approvals,new[]{("00",status,generatedAt.UtcDateTime.ToString("yyyy-MM-dd"),createdBy)},new[]{new PublicationSection("Complete Requirement Linkage","Each row identifies one exact baseline requirement revision and all of its upward, downward, and verification relationships.",records)});
+        var publication=new ProfessionalPublication(project.SoftwareProduct,await PublicationProgramContext.ResolveAsync(db, project, program, ct),project.Name,"Lifecycle Traceability Report",$"{project.SoftwareProduct} Full Traceability Evidence",$"Readable upward, downward, change-authority, and verification linkage for baseline {baseline.DisplayNumber}","TRACE-"+release.Version.Replace(".",""),"00",status,release.Version,baseline.DisplayNumber,createdBy,generatedAt,hash,new[]{("Requirements",records.Count.ToString("N0")),("Trace links",links.Count.ToString("N0")),("Verification links",coverage.Count.ToString("N0")),("Requirement manifest hash",hash)},approvals,new[]{("00",status,generatedAt.UtcDateTime.ToString("yyyy-MM-dd"),createdBy)},new[]{new PublicationSection("Complete Requirement Linkage","Each row identifies one exact baseline requirement revision and its upward, downward, and applicable verification relationships.",records)});
         return ProfessionalPublicationRenderer.Render(publication,format,$"TRACEABILITY_{release.Version}_{baseline.DisplayNumber}");
     }
 

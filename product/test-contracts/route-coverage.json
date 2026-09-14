@@ -1776,6 +1776,7 @@
         "ProjectSetupBoundaryRegressionApiTests",
         "ProjectSetupDiscoveryApiTests",
         "ProjectSetupInceptionApiTests",
+        "ProjectSetupLadderCapabilityApiTests",
         "ProjectSetupServiceQualificationTests"
       ]
     },
@@ -1786,6 +1787,7 @@
       "coveredBy": [
         "ProjectSetupApiTests",
         "ProjectSetupInceptionApiTests",
+        "ProjectSetupLadderCapabilityApiTests",
         "ProjectSetupServiceQualificationTests"
       ]
     },
@@ -2559,6 +2561,7 @@
         "ProjectSetupBoundaryRegressionApiTests",
         "ProjectSetupDiscoveryApiTests",
         "ProjectSetupInceptionApiTests",
+        "ProjectSetupLadderCapabilityApiTests",
         "ProjectSetupServiceQualificationTests"
       ]
     },
