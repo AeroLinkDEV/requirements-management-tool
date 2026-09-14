@@ -1,13 +1,13 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 892,
-    "cases": 1000,
-    "classes": 136,
+    "tests": 894,
+    "cases": 1002,
+    "classes": 137,
     "hostedTests": 847,
     "hostedCases": 933,
-    "nonHostedTests": 32,
-    "nonHostedCases": 46,
+    "nonHostedTests": 34,
+    "nonHostedCases": 48,
     "unknownHostTests": 13,
     "unknownHostCases": 21,
     "hostedCandidateTests": 16,
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 37,
-      "cases": 37,
+      "tests": 39,
+      "cases": 39,
       "unknownCases": 0,
-      "classes": 14
+      "classes": 15
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -14116,7 +14116,7 @@
       ],
       "sourceLines": {
         "start": 159,
-        "end": 214
+        "end": 218
       }
     },
     {
@@ -14151,8 +14151,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 220,
-        "end": 250
+        "start": 224,
+        "end": 254
       }
     },
     {
@@ -15577,6 +15577,34 @@
       "sourceLines": {
         "start": 228,
         "end": 266
+      }
+    },
+    {
+      "cls": "WorkspaceReleaseOrderingTests",
+      "test": "Historical_rows_without_canonical_identity_still_use_their_valid_raw_identity",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 26,
+        "end": 43
+      }
+    },
+    {
+      "cls": "WorkspaceReleaseOrderingTests",
+      "test": "Release_projections_sort_by_canonical_numeric_identity_and_preserve_raw_values",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 9,
+        "end": 24
       }
     }
   ]

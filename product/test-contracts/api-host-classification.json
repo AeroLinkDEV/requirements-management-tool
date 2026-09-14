@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 136,
-    "tests": 892,
-    "knownCases": 1000,
+    "classes": 137,
+    "tests": 894,
+    "knownCases": 1002,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -20,9 +20,9 @@
       "unknownCaseTests": 0
     },
     "migration-candidate": {
-      "classes": 3,
-      "tests": 8,
-      "knownCases": 13,
+      "classes": 4,
+      "tests": 10,
+      "knownCases": 15,
       "unknownCaseTests": 0
     },
     "reusable-host": {
@@ -1050,6 +1050,17 @@
       "cls": "RuntimeIdentityTests",
       "tests": 6,
       "knownCases": 6,
+      "unknownCaseTests": 0,
+      "classification": "migration-candidate",
+      "reason": "Every test is in-process logic or a rule matrix; it needs a database or nothing, not a host.",
+      "intents": [
+        "in-process-logic"
+      ]
+    },
+    {
+      "cls": "WorkspaceReleaseOrderingTests",
+      "tests": 2,
+      "knownCases": 2,
       "unknownCaseTests": 0,
       "classification": "migration-candidate",
       "reason": "Every test is in-process logic or a rule matrix; it needs a database or nothing, not a host.",
