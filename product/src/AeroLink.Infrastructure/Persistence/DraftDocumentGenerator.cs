@@ -73,7 +73,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         var pending = effective.Count(x => x.Origin.Length > 0);
 
         var publication = new ProfessionalPublication(
-            project.SoftwareProduct, $"{program.Name} ({program.Code})", project.Name, DocumentTypeName(type),
+            project.SoftwareProduct, await PublicationProgramContext.ResolveAsync(db, project, program, ct), project.Name, DocumentTypeName(type),
             $"{project.SoftwareProduct} {DocumentTypeName(type)}",
             $"Draft for release {release.Version}. Released content plus every approved change not yet baselined.",
             documentNumber, revision.ToString("D2"), "DRAFT - NOT APPROVED", release.Version,
@@ -158,7 +158,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         var documentNumber = DocumentNumber(type, release.Version, ladderPolicy);
         var revisionNumber = await NextRevisionAsync(project.Id, type, ct);
         var publication = new ProfessionalPublication(
-            project.SoftwareProduct, $"{program.Name} ({program.Code})", project.Name, DocumentTypeName(type),
+            project.SoftwareProduct, await PublicationProgramContext.ResolveAsync(db, project, program, ct), project.Name, DocumentTypeName(type),
             $"{project.SoftwareProduct} {DocumentTypeName(type)}",
             $"Living draft for software build {SoftwareBuildIdentifier.FromVersion(release.Version)}.",
             documentNumber, revisionNumber.ToString("D2"), "DRAFT - NOT APPROVED", release.Version,

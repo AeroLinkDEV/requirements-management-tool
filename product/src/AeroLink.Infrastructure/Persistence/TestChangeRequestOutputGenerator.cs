@@ -100,7 +100,7 @@ public sealed class TestChangeRequestOutputGenerator(AeroLinkDbContext db)
             : $"Problem Report {package.SourceProblemReportNumber}";
 
         var publication = new ProfessionalPublication(
-            project.SoftwareProduct, program.Name + " (" + program.Code + ")", project.Name,
+            project.SoftwareProduct, await PublicationProgramContext.ResolveAsync(db, project, program, ct), project.Name,
             package.Discipline switch
             {
                 TestChangeReviewDiscipline.System => "System Test Change Request",

@@ -89,7 +89,7 @@ public sealed class ProblemReportOutputGenerator(AeroLinkDbContext db, RichConte
             metadata.Insert(1, ("Legacy type", legacyType));
         var publication = new ProfessionalPublication(
             project.SoftwareProduct,
-            program.Name + " (" + program.Code + ")",
+            await PublicationProgramContext.ResolveAsync(db, project, program, ct),
             project.Name,
             "Problem Report",
             snapshot.Title,

@@ -59,7 +59,13 @@ public sealed class ProjectSetupServiceQualificationTests
             using var document = await admin.GetAsync($"/api/releases/{releaseId}/draft-document?type=Sysrd&format={format}");
             var bytes = await document.Content.ReadAsByteArrayAsync();
             Assert.True(document.IsSuccessStatusCode, Encoding.UTF8.GetString(bytes));
-            if (format == "pdf") Assert.StartsWith("%PDF", Encoding.Latin1.GetString(bytes));
+            if (format == "pdf")
+            {
+                var pdf = Encoding.Latin1.GetString(bytes);
+                Assert.StartsWith("%PDF", pdf);
+                Assert.DoesNotContain("backing scope", pdf);
+                Assert.Contains("Independent services", pdf);
+            }
             else
             {
                 using var zip = new ZipArchive(new MemoryStream(bytes));
@@ -67,6 +73,8 @@ public sealed class ProjectSetupServiceQualificationTests
                 var xml = await reader.ReadToEndAsync();
                 Assert.Contains("DRAFT", xml);
                 Assert.DoesNotContain("FMS shall", xml);
+                Assert.DoesNotContain("backing scope", xml);
+                Assert.Contains("Independent services", xml);
             }
         }
 

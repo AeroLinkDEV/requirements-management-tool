@@ -102,7 +102,8 @@ public static class ProfessionalPublicationRenderer
         return output.ToArray();
     }
 
-    private static string ProjectLabel(ProfessionalPublication p) => p.ControlledStatusControls ? p.Project : p.Program + "  |  " + p.Project;
+    private static string ProjectLabel(ProfessionalPublication p) => p.ControlledStatusControls || string.IsNullOrWhiteSpace(p.Program)
+        ? p.Project : p.Program + "  |  " + p.Project;
     private static string ApprovalEvidenceNotice(ProfessionalPublication p) => p.ControlledStatusControls
         ? "Consult AeroLink for approval evidence bound to this exact revision and file hash."
         : "Approval pending - no completed approval decision is recorded.";

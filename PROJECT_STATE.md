@@ -291,6 +291,9 @@ AeroLink supports controlled generated publications over structured artifacts an
 
 Generated outputs are derived from controlled data/templates/effectivity and carry provenance rather than becoming independent masters. Managed Word documents retain their controlled DOCX/PDF candidates/revisions while Word remains the authoring application.
 
+Publications for projects created through setup identify the user-facing Project; their isolated internal backing
+scope is not a cover or document-control label. Existing project labels and retained source manifests remain unchanged.
+
 See [Controlled Document Publication Standard](docs/product-definition/CONTROLLED_DOCUMENT_PUBLICATION_STANDARD.md) and [product/docs/MANAGED_DOCUMENTATION_CENTER.md](product/docs/MANAGED_DOCUMENTATION_CENTER.md).
 
 ## Identity, security, and audit
