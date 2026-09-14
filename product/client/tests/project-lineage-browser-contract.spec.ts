@@ -70,6 +70,11 @@ async function mockLineageShell(page: Page) {
 }
 
 test("the visual lineage shows released branches from stored predecessors and explicit build selection", async ({ page }, testInfo) => {
+  const dashboardRequests: URL[] = [];
+  page.on("request", request => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/dashboard") dashboardRequests.push(url);
+  });
   await mockLineageShell(page);
   await page.goto("/projects/lineage-project/builds");
   await expect(page.getByRole("heading", { name: "Software Builds", level: 1 })).toBeVisible();
@@ -88,10 +93,14 @@ test("the visual lineage shows released branches from stored predecessors and ex
   await expect(cards.nth(1)).toContainText("SW-01.00");
   await expect(cards.nth(2)).toContainText("Released");
   await page.screenshot({ path: testInfo.outputPath("branched-lineage.png"), fullPage: true });
+  expect(dashboardRequests, "project overview must not request a summary for an absent or inferred build").toEqual([]);
 
   await cards.nth(1).getByRole("button", { name: /Open build 1\.50/ }).click();
   await expect(page).toHaveURL(routePath({ programId: "lineage-program", projectId: "lineage-project", releaseId: "release-150" }, "dashboard"));
   await expect(page.getByRole("heading", { name: "Command Center", level: 1 })).toBeVisible();
+  await expect.poll(() => dashboardRequests.length).toBeGreaterThan(0);
+  expect(dashboardRequests.every(url => url.searchParams.get("projectId") === "lineage-project"
+    && url.searchParams.get("releaseId") === "release-150")).toBe(true);
 });
 
 test("exact build links refuse missing targets and duplicate legacy slugs never select a project", async ({ page }) => {

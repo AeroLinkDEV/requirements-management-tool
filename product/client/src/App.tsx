@@ -425,13 +425,18 @@ function App() {
   useEffect(()=>{document.documentElement.dataset.motion=motion;localStorage.setItem('aerolink-motion',motion)},[motion]);
   useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(''),2600);return()=>clearTimeout(timer)},[toast]);
   const loadData = useCallback(async () => {
-    if (!project) return;
+    // Project-level pages have no selected build. Load a build summary only after explicit selection.
+    if (!project || !release) {
+      setDashboardError("");
+      setDashboardLoading(false);
+      return;
+    }
     const current = beginDashboard();
     setDashboardError("");
     setDashboardLoading(true);
     try {
       const response = await fetch(
-        `${API}/api/dashboard?projectId=${project.project.id}&releaseId=${release?.id ?? ""}`,
+        `${API}/api/dashboard?projectId=${project.project.id}&releaseId=${release.id}`,
       );
       if (!response.ok) throw new Error("Dashboard unavailable.");
       const next = await response.json();
