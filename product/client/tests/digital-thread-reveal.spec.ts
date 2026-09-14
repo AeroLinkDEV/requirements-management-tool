@@ -42,14 +42,16 @@ test.describe("lane-local reveal", () => {
       { id: "resident-0", lane: 1, row: 0 },
       { id: "resident-2", lane: 1, row: 2 },
       { id: "linked", lane: 1, row: 8 },
+      { id: "neighbor", lane: 1, row: 9 },
     ]
     const input = {
       nodes, geometry: GEOMETRY, laneOffsets: [0, 0],
-      storyIds: new Set(["subject", "linked"]), subjectId: "subject",
+      storyIds: new Set(["subject", "linked", "neighbor"]), subjectId: "subject",
       windowByLane: new Map([[1, { top: 0, bottom: 400 }]]), bandHeight: 400,
     }
     const first = planReveal({ ...input, frozenLanes: new Set<number>() })
-    expect(first.deltas.get("linked")).toBe(-992)
+    expect(first.deltas.has("linked")).toBe(true)
+    expect(first.deltas.has("neighbor")).toBe(true)
     if (promoted) input.subjectId = "linked"
     const measuredHeights = new Map([["linked", 200]])
     const grown = planReveal({ ...input, measuredHeights, existing: first.deltas, frozenLanes: new Set([1]) })
@@ -57,9 +59,10 @@ test.describe("lane-local reveal", () => {
     const top = positions.get("linked")!
     for (const id of ["resident-0", "resident-2"]) {
       expect(grown.deltas.has(id)).toBe(false)
-      const resident = positions.get(id)!
-      expect(top + 200 <= resident || top >= resident + 108, `grown linked card overlaps ${id}`).toBe(true)
+      expect(positions.get(id)).toBe(contentPositionsForNodes(nodes, GEOMETRY, measuredHeights).get(id))
     }
+    const neighbor = positions.get("neighbor")!
+    expect(top + 200 + 4 <= neighbor || neighbor + GEOMETRY.cardHeight + 4 <= top).toBe(true)
     expect([...planReveal({ ...input, measuredHeights, existing: grown.deltas, frozenLanes: new Set([1]) }).deltas])
       .toEqual([...grown.deltas])
   })
@@ -89,7 +92,7 @@ test.describe("lane-local reveal", () => {
     for (const id of ["n2", "n3", "n4", "n5", "n6", "n8"]) expect(plan.deltas.has(id)).toBe(false)
   })
 
-  test("a partially visible linked card is never displaced during hover", () => {
+  test("a clipped linked card is revealed into the usable window during hover", () => {
     const nodes = lane(8)
     // n3 spans 426-534; this window starts at 466, so n3 is genuinely clipped by the window edge.
     const top = contentTop(nodes, "n3") + 40
@@ -100,12 +103,14 @@ test.describe("lane-local reveal", () => {
       nodes, geometry: GEOMETRY, laneOffsets: [0], storyIds: new Set(["n3", "n7"]),
       subjectId: "n0", windowByLane: new Map([[0, window]]), frozenLanes: new Set(), bandHeight: BAND,
     })
-    // It intersects the usable window, so it is on screen and must not be displaced; n7, wholly below, moves.
-    expect(plan.deltas.has("n3")).toBe(false)
+    const revealed = contentPositionsForNodes(nodes, GEOMETRY, undefined, plan.deltas).get("n3")!
+    expect(revealed).toBeGreaterThanOrEqual(window.top)
+    expect(revealed + GEOMETRY.cardHeight).toBeLessThanOrEqual(window.bottom)
+    expect(plan.deltas.has("n3")).toBe(true)
     expect(plan.deltas.has("n7")).toBe(true)
   })
 
-  test("a placed card never overlaps a resident and is reachable through the derived scroll range", () => {
+  test("foreground cards clear each other, cover background and remain reachable through derived scrolling", () => {
     const nodes = lane(12)
     const window: RevealWindow = { top: 100, bottom: 500 }
     const plan = planReveal({
@@ -116,12 +121,11 @@ test.describe("lane-local reveal", () => {
     expect(placed.length).toBeGreaterThan(0)
     const residents = nodes.filter(node => !plan.deltas.has(node.id))
       .map(node => ({ id: node.id, top: contentTop(nodes, node.id), bottom: contentTop(nodes, node.id) + GEOMETRY.cardHeight }))
-    for (const card of placed) {
-      for (const resident of residents) {
-        const overlaps = card.top < resident.bottom + 3 && resident.top < card.top + GEOMETRY.cardHeight + 3
-        expect(overlaps, `${card.id} overlaps resident ${resident.id}`).toBe(false)
-      }
-    }
+    expect(placed).toHaveLength(2)
+    expect(Math.abs(placed[0].top - placed[1].top)).toBeGreaterThanOrEqual(GEOMETRY.cardHeight + 4)
+    expect(residents.length).toBeGreaterThan(0)
+    expect(placed.some(card => residents.some(resident =>
+      card.top < resident.bottom && resident.top < card.top + GEOMETRY.cardHeight))).toBe(true)
     // The producer's own extent feeds the bound, and the consumer's predicate agrees with it.
     const contentEnd = Math.max(...nodes.map(node => {
       const delta = plan.deltas.get(node.id) ?? 0

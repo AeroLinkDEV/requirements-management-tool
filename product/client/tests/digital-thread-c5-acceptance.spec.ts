@@ -110,18 +110,22 @@ test("artifact full story retains both verification branches and excludes the si
   for (const identity of ["LLRTP-925.01", "LLRTP-925.02", "FMS-925.0"]) await expect(panel).toContainText(identity)
   await expect(panel).not.toContainText("HLR-926.01")
   const cardOverlaps = () => page.locator(".dtCanvasNode:not(.is-offscreen)").evaluateAll(nodes => {
+    nodes = nodes.filter(node => Number((node as HTMLElement).style.zIndex) > 1)
     const collisions: string[] = []
+    let sameLanePairs = 0
     nodes.forEach((node, i) => nodes.slice(i + 1).forEach(other => {
       const a = node.getBoundingClientRect()
       const b = other.getBoundingClientRect()
+      if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1) sameLanePairs++
       if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
           Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1) {
         collisions.push(`${node.textContent?.slice(0, 45)} overlaps ${other.textContent?.slice(0, 45)}`)
       }
     }))
-    return collisions
+    return { collisions, sameLanePairs }
   })
-  await expect.poll(cardOverlaps).toEqual([])
+  await expect.poll(async () => (await cardOverlaps()).collisions).toEqual([])
+  expect((await cardOverlaps()).sameLanePairs).toBeGreaterThan(0)
   // At a wide viewport the arrival may already fit the entire story. Move the camera first so a broken Fit
   // handler cannot pass simply because its starting transform happens to be the desired one.
   await page.getByRole("button", { name: "Zoom in", exact: true }).click()
@@ -215,9 +219,7 @@ for (const view of ["network", "artifact", "inside"]) {
     if (view === "inside") {
       // The card's center is below the usable frame on this dense arrival. Reveal it through the real control
       // before requiring ordinary pointer activation; partial paint is not proof that its center is actionable.
-      const reveal = page.getByRole("button", { name: "Show SYSR-00076.02", exact: true })
-      await expect(reveal).toBeVisible()
-      await reveal.click()
+      await page.locator(".dtCanvasNode").filter({ hasText: "SYSR-00076.02" }).focus()
       await page.locator(".dtCanvasNode").filter({ hasText: "SYSR-00076.02" }).click()
       await expect(page.locator(".dticPanel")).toContainText("SYSR-00076.02")
     }
@@ -266,8 +268,7 @@ test("Inside identifier search preserves the opened record and truthful no-match
 test("Inside preserves explicit missing-base and target states alongside known before and after text", async ({ page }) => {
   await open(page, "inside", 1920)
   const newCard = page.locator(".dtCanvasNode").filter({ hasText: "SYSR-00151.00" })
-  const revealNew = page.getByRole("button", { name: "Show SYSR-00151.00", exact: true })
-  if (await revealNew.isVisible()) await revealNew.click()
+  await newCard.focus() // Deliberately inspect another proposal in the dense arrival lane.
   await newCard.click()
   await expect(page.locator(".dticPanel")).toContainText("Target not yet created")
   await expect(newCard.locator(".dticOp")).toHaveText("NEW")

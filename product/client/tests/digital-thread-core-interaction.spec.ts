@@ -5,14 +5,17 @@ import { waitForCanvasSettled } from "./digital-thread-rendered-helpers"
  * Core #1022 interaction, in the real shared canvas.
  *
  * Hover is stationary emphasis; selection is persistent and owns the thread; the floating preview target is
- * gone; only out-of-view linked cards are displaced, in their own lane. These run in the retained fast lane
- * beside the geometry spec, and the deeper view-by-view journeys stay in their own files.
+ * gone; eligible clipped/offscreen linked cards are revealed over background in their own lane. The deeper
+ * view-by-view journeys stay in their own files.
  */
 
 const open = async (page: import("@playwright/test").Page, scenario: string) => {
   await page.goto(`/tests/fixtures/change-network.html?case=${scenario}`)
   await waitForCanvasSettled(page)
 }
+
+const transformOf = async (scene: import("@playwright/test").Locator) =>
+  /transform:[^;]*/.exec((await scene.getAttribute("style")) ?? "")?.[0] ?? ""
 
 /**
  * Comparable evidence capture.
@@ -83,44 +86,33 @@ test("continuation affordances stay beside the inspector in every dock", async (
     await page.locator(".dtaPanelTools").getByRole("button", { name: mode, exact: true }).click()
     await expect(page.locator(".dtCanvasScene")).not.toHaveClass(/is-easing/)
     const panel = (await page.locator(".dtaPanel").boundingBox())!
-    for (const affordance of await page.locator(".dtCanvasPlacementNotice:visible, .dtCanvasOffscreen:visible").all()) {
+    for (const affordance of await page.locator(".dtCanvasPlacementNotice:visible, .dtCanvasContinuation:visible").all()) {
       const r = (await affordance.boundingBox())!
       expect(r.x >= panel.x + panel.width || r.x + r.width <= panel.x ||
         r.y >= panel.y + panel.height || r.y + r.height <= panel.y, `${mode} inspector content remains unobscured`).toBe(true)
     }
-    const strip = (await page.locator(".dtCanvasOffscreen").boundingBox())!
-    expect(strip.width).toBeLessThanOrEqual(320)
-    expect(strip.height).toBeLessThanOrEqual(42)
+    await expect(page.locator(".dtCanvasOffscreen")).toHaveCount(0)
     await shoot(page, `affordances-${mode.toLowerCase()}`)
   }
 })
 
-test("overflowing Show controls own wheel input and remain keyboard reachable", async ({ page }) => {
-  const consoleErrors: string[] = []
-  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()) })
+test("genuine dense overflow remains keyboard reachable without replacing selection", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await open(page, "dense")
-  await page.locator('[data-node-id="pr-5"]').click()
+  const root = page.locator('[data-node-id="pr-5"]')
+  await root.click()
   await waitForCanvasSettled(page)
-  const strip = page.getByRole('navigation', { name: 'Connected records outside view' })
-  expect(await strip.evaluate(e => e.scrollWidth > e.clientWidth)).toBe(true)
-  const camera = await page.locator('.dtCanvasScene').evaluate(e => getComputedStyle(e).transform)
-  const rect = (await strip.boundingBox())!
-  await page.mouse.move(rect.x + 60, rect.y + 12)
-  await page.mouse.wheel(0, 250)
-  await expect.poll(() => strip.evaluate(e => e.scrollLeft)).toBe(250)
-  await page.mouse.wheel(150, 0)
-  await expect.poll(() => strip.evaluate(e => e.scrollLeft)).toBe(400)
-  await expect(page.locator('.dtCanvasScene')).toHaveCSS('transform', camera)
-  const tail = strip.locator('button:visible').last()
+  await expect(page.locator('.dtCanvasContinuation[data-dir="down"]:visible')).not.toHaveCount(0)
+  const tail = page.locator('[data-node-id="case-34"]')
+  // Nineteen emphasized Case cards cannot share this lane window. Wrapper focus is deliberate navigation.
   await tail.focus()
+  await waitForCanvasSettled(page)
   await expect(tail).toBeFocused()
-  const tailRect = (await tail.boundingBox())!
-  expect(tailRect.x).toBeGreaterThanOrEqual(rect.x - 1)
-  expect(tailRect.x + tailRect.width).toBeLessThanOrEqual(rect.x + rect.width + 1)
-  await expect(page.locator('.dtCanvasScene')).toHaveCSS('transform', camera)
-  await shoot(page, 'overflow-strip-keyboard-tail')
-  expect(consoleErrors).toEqual([])
+  await expect(tail).not.toHaveClass(/is-offscreen/)
+  const r = (await tail.boundingBox())!, frame = await usableFrame(page)
+  expect(r.y).toBeGreaterThanOrEqual(frame.top - 1)
+  expect(r.y + r.height).toBeLessThanOrEqual(frame.bottom + 1)
+  await expect(root).toHaveAttribute('aria-pressed', 'true')
 })
 
 test("Bottom long-text identity and Right dense relationships scroll to their actual ends", async ({ page }) => {
@@ -156,30 +148,30 @@ test("Bottom long-text identity and Right dense relationships scroll to their ac
   await shoot(page, 'right-dense-relationships-scrolled-end')
 })
 
-test("a touch swipe starting between Show buttons scrolls the strip without moving the camera", async ({ page }) => {
+test("touch lane exploration reaches dense overflow without replacing selection or moving the camera", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await open(page, 'dense')
   await page.locator('[data-node-id="pr-5"]').click()
   await waitForCanvasSettled(page)
-  const strip = page.locator('.dtCanvasOffscreen')
-  const gap = await strip.evaluate(element => {
-    const box = element.getBoundingClientRect()
-    for (let x = box.left + 80; x < box.right - 4; x++) {
-      const y = box.top + 12
-      if (document.elementFromPoint(x, y) === element) return { x, y }
-    }
-    return null
-  })
-  expect(gap, 'a real gap must belong to the scroll strip').not.toBeNull()
+  const tail = page.locator('[data-node-id="case-34"]')
+  await tail.focus() // Enter the crowded lane through its supported keyboard route.
+  await waitForCanvasSettled(page)
+  const before = (await tail.boundingBox())!
+  const band = await page.locator('.dtCanvasBand').evaluateAll((bands, x) => {
+    const rect = bands.map(band => band.getBoundingClientRect()).find(r => r.left <= x && r.right >= x)!
+    return { x: rect.x, width: rect.width }
+  }, before.x + before.width / 2)
+  const frame = await usableFrame(page)
+  const point = { x: band.x + 4, y: frame.top + 25 }
   const camera = await page.locator('.dtCanvasScene').evaluate(e => getComputedStyle(e).transform)
   const session = await page.context().newCDPSession(page)
   await session.send('Emulation.setTouchEmulationEnabled', { enabled: true })
-  await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [gap!] })
+  await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] })
   for (let step = 1; step <= 8; step++) {
-    await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: gap!.x - step * 9, y: gap!.y }] })
+    await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: point.x, y: point.y + step * 15 }] })
   }
   await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-  await expect.poll(() => strip.evaluate(e => e.scrollLeft)).toBeGreaterThan(20)
+  await expect.poll(async () => (await tail.boundingBox())!.y).toBeGreaterThan(before.y + 20)
   await expect(page.locator('.dtCanvasScene')).toHaveCSS('transform', camera)
   await expect(page.locator('[data-node-id="pr-5"]')).toHaveAttribute('aria-pressed', 'true')
   await session.detach()
@@ -254,8 +246,7 @@ const usableFrame = async (page: import("@playwright/test").Page) => {
   const top = Math.max(canvasBox.y + 40, (controls?.y ?? canvasBox.y) + (controls?.height ?? 38) + headingOffset + 8)
   const panelLocator = page.locator(".dtnPanel-bottom, .dticPanel-bottom, .dtaPanel-bottom")
   const panel = await panelLocator.count() ? await panelLocator.boundingBox() : null
-  const selected = await page.locator(".dtCanvasNode.is-selected").count() > 0
-  const bottom = (panel ? panel.y - 12 : canvasBox.y + canvasBox.height) - (selected ? 64 : 0)
+  const bottom = panel ? panel.y - 12 : canvasBox.y + canvasBox.height
   return { canvasBox, top, bottom }
 }
 
@@ -339,7 +330,7 @@ test("the real card is the click target and selection is persistent", async ({ p
   await expect(page.locator(".dtCanvasNode.is-selected")).toHaveAttribute("data-node-id", "pr-5")
 })
 
-test("a dense thread keeps every record reachable through its explicit reveal action", async ({ page }) => {
+test("a dense thread keeps its last emphasized record reachable through wrapper focus", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.emulateMedia({ reducedMotion: "reduce" })
   await open(page, "dense")
@@ -347,13 +338,11 @@ test("a dense thread keeps every record reachable through its explicit reveal ac
   await root.focus()
   await root.press("Enter")
   await expect(root).toHaveAttribute("aria-pressed", "true")
-  const reveal = page.getByRole("navigation", { name: "Connected records outside view" })
-    .locator("button:not([hidden])").last()
-  await expect(reveal).toBeVisible()
-  const identifier = (await reveal.textContent())!.replace(/^Show /, "")
-  await reveal.click()
-  await expect(page.locator(".dtCanvasNode").filter({ has: page.locator(".dtnId", { hasText: identifier }) }))
-    .not.toHaveClass(/is-offscreen/)
+  const tail = page.locator('[data-node-id="case-34"]')
+  await tail.focus()
+  await waitForCanvasSettled(page)
+  await expect(tail).not.toHaveClass(/is-offscreen/)
+  await tail.click({ trial: true })
   await expect(root).toHaveAttribute("aria-pressed", "true")
 })
 
@@ -366,322 +355,56 @@ test("a dense thread keeps every record reachable through its explicit reveal ac
  */
 test("a revealed lane can be scrolled into its temporary range and clear does not snap it back", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
-  await open(page, "dense")
-  const root = page.locator('[data-node-id="pr-5"]')
-  await root.click()
-  await expect(root).toHaveAttribute("aria-pressed", "true")
-  await page.waitForTimeout(900)
-
-  /**
-   * Choose the shallowest rollable lane that holds a displaced linked witness.
-   *
-   * The proof needs a lane whose ordinary scroll bound a single real gesture can cross, so the lane is selected
-   * by its measured geometry rather than by document order. (A separate, recorded defect currently prevents a
-   * second gesture in the same session from delivering more than one move, so one gesture must suffice here.)
-   */
-  const laneChoice = await page.evaluate(() => {
-    const scene = document.querySelector<HTMLElement>(".dtCanvasScene")
-    const bandHeight = Number(/([\d.]+)px/.exec(scene?.style.height ?? "")?.[1] ?? NaN)
-    const nodes = [...document.querySelectorAll<HTMLElement>(".dtCanvasNode")]
-    const byLane = new Map<number, HTMLElement[]>()
-    nodes.forEach(node => {
-      const x = Number(/translate\((-?[\d.]+)px/.exec(node.style.transform)?.[1] ?? NaN)
-      if (!Number.isFinite(x)) return
-      byLane.set(x, [...(byLane.get(x) ?? []), node])
-    })
-    let best: { laneX: number; minimum: number; bandIndex: number; witnessId: string | null } | null = null
-    const bands = [...document.querySelectorAll<HTMLElement>(".dtCanvasBand")]
-    bands.forEach((band, bandIndex) => {
-      bandIndexes: {
-        const rect = band.getBoundingClientRect()
-        const laneCards = [...byLane.entries()].find(([, cards]) => {
-          const first = cards[0]?.getBoundingClientRect()
-          return first && first.left >= rect.left - 2 && first.right <= rect.right + 2
-        })
-        if (!laneCards) break bandIndexes
-        const [laneX, cards] = laneCards
-        const heights = cards.map(card => card.offsetHeight).filter(height => height > 0)
-        const rows = cards.map(card => Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/.exec(card.style.transform)?.[1] ?? NaN))
-          .filter(Number.isFinite).sort((a, b) => a - b)
-        const cardHeight = heights.length ? Math.min(...heights) : 0
-        const pitch = rows.length > 1 ? Math.min(...rows.slice(1).map((y, i) => y - rows[i]).filter(delta => delta > 40)) : 0
-        if (!cardHeight || !pitch) break bandIndexes
-        const contentHeight = (rows.length - 1) * pitch + cardHeight + 24
-        const minimum = Math.min(0, bandHeight - contentHeight)
-        if (minimum >= -1) break bandIndexes
-        const witness = cards.find(card => card.classList.contains("is-offscreen") &&
-          card.querySelector(".dtnCard:not(.is-untraced)") !== null)
-        if (!best || minimum > best.minimum) {
-          best = { laneX, minimum, bandIndex, witnessId: witness?.dataset.nodeId ?? null }
-        }
-      }
-    })
-    return best
-  })
-  expect(laneChoice, "no rollable lane was found").toBeTruthy()
-  const band = page.locator(".dtCanvasBand").nth(laneChoice!.bandIndex)
-  await expect(band).toBeVisible()
-  // Pin the band by its position in the document: after the tray closes the set of rollable lanes can change,
-  // and `.first()` would then resolve to a different lane and silently measure the wrong one.
-  const bandIndex = await band.evaluate(element =>
-    [...(element.parentElement?.children ?? [])].indexOf(element))
-  const bandBox = (await band.boundingBox())!
-  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
-  const grabX = bandBox.x + 4
-  const top = Math.max(bandBox.y, canvasBox.y) + 12
-  const bottom = Math.min(bandBox.y + bandBox.height, canvasBox.y + canvasBox.height) - 12
-  expect(bottom - top).toBeGreaterThan(80)
-
-  /**
-   * A probe that provably belongs to the dragged band: its rectangle sits inside that band on screen, so
-   * dragging the band is the only thing that can move it. An average over arbitrary cards mixed lane
-   * displacement with legitimate per-card return motion and was not an isolated measurement of the lane.
-   */
-  const probeId = await page.evaluate(bandRect => {
-    // An untraced card belongs to the lane's ordinary geometry only: it has no temporary reveal displacement,
-    // so its movement is the lane's movement and nothing else.
-    const nodes = [...document.querySelectorAll<HTMLElement>(".dtCanvasNode")]
-      .filter(node => node.querySelector(".dtnCard.is-untraced"))
-    // Exclude the selected subject's own lane: when the selection clears, that card's expanded body collapses
-    // and legitimately re-spaces the rows after it. That is layout, not lane movement, and mixing the two is
-    // what produced the earlier "33-unit clamp" reading.
-    const subjectX = Number(/translate\((-?[\d.]+)px/.exec(
-      document.querySelector<HTMLElement>(".dtCanvasNode.is-selected")?.style.transform ?? "")?.[1] ?? NaN)
-    const inside = nodes.find(node => {
-      const x = Number(/translate\((-?[\d.]+)px/.exec(node.style.transform)?.[1] ?? NaN)
-      if (Number.isFinite(subjectX) && Math.abs(x - subjectX) <= 1) return false
-      const rect = node.getBoundingClientRect()
-      return rect.left >= bandRect.x - 2 && rect.right <= bandRect.x + bandRect.width + 2 &&
-        rect.top > bandRect.y + 4 && rect.bottom < bandRect.y + bandRect.height - 4
-    })
-    return inside?.dataset.nodeId ?? null
-  }, { x: bandBox.x, y: bandBox.y, width: bandBox.width, height: bandBox.height })
-  expect(probeId, "no card belongs to the band being dragged").toBeTruthy()
-  const probe = page.locator(`[data-node-id="${probeId}"]`)
-  const yOf = async () => Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/
-    .exec((await probe.getAttribute("style")) ?? "")?.[1] ?? NaN)
-
-  /**
-   * The lane's ORDINARY scroll bound, derived from the real geometry.
-   *
-   * ordinary minimum = min(0, bandHeight - ordinary content height), where the content height comes from the
-   * lane's own cards and the band height is what the scene is actually drawing. Without this number "the lane
-   * scrolled" proves nothing about the *temporary* range: ordinary scrolling is supposed to reach off-screen
-   * cards. The gesture below must take the lane deeper than this bound for the extended range to be involved.
-   */
-  const geometry = await page.evaluate(probeNodeId => {
-    const scene = document.querySelector<HTMLElement>(".dtCanvasScene")
-    const bandHeight = Number(/([\d.]+)px/.exec(scene?.style.height ?? "")?.[1] ?? NaN)
-    const probe = document.querySelector<HTMLElement>(`[data-node-id="${probeNodeId}"]`)
-    const laneX = Number(/translate\((-?[\d.]+)px/.exec(probe?.style.transform ?? "")?.[1] ?? NaN)
-    const lane = [...document.querySelectorAll<HTMLElement>(".dtCanvasNode")].filter(node => {
-      const x = Number(/translate\((-?[\d.]+)px/.exec(node.style.transform)?.[1] ?? NaN)
-      return Number.isFinite(x) && Math.abs(x - laneX) <= 1
-    })
-    const heights = lane.map(node => node.offsetHeight).filter(height => height > 0)
-    const rows = lane.map(node => Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/.exec(node.style.transform)?.[1] ?? NaN))
-      .filter(Number.isFinite).sort((a, b) => a - b)
-    const cardHeight = heights.length ? Math.min(...heights) : 0
-    const pitch = rows.length > 1 ? Math.min(...rows.slice(1).map((y, i) => y - rows[i]).filter(delta => delta > 40)) : 0
-    const pad = 12
-    const contentHeight = rows.length && cardHeight && pitch
-      ? (rows.length - 1) * pitch + cardHeight + pad * 2
-      : 0
-    return { bandHeight, count: rows.length, cardHeight, pitch, contentHeight }
-  }, probeId)
-  expect(geometry.bandHeight, "the band height could not be measured").toBeGreaterThan(0)
-  expect(geometry.contentHeight, "the lane's ordinary content could not be derived").toBeGreaterThan(0)
-  const ordinaryMinimum = Math.min(0, geometry.bandHeight - geometry.contentHeight)
-  expect(ordinaryMinimum, "this fixture's lane has no ordinary scroll room to cross").toBeLessThan(-1)
-
-  /**
-   * A linked-card witness: a traced record in this same band that is currently outside the visible region.
-   * Its ordinary position is out of view by definition (the reveal only displaces such cards), so it can only
-   * become readable by using the extended range — which is the precondition this proof was missing. It also
-   * gives cleanup something real to retire, unlike the stationary untraced probe.
-   */
-  const witnessId = await page.evaluate(bandRect => {
-    const nodes = [...document.querySelectorAll<HTMLElement>(".dtCanvasNode")]
-      .filter(node => node.querySelector(".dtnCard:not(.is-untraced)") && node.classList.contains("is-offscreen"))
-    const inside = nodes.find(node => {
-      const rect = node.getBoundingClientRect()
-      return rect.left >= bandRect.x - 2 && rect.right <= bandRect.x + bandRect.width + 2
-    })
-    return inside?.dataset.nodeId ?? null
-  }, { x: bandBox.x, y: bandBox.y, width: bandBox.width, height: bandBox.height })
-  expect(witnessId, "no displaced linked card was available as a witness in the dragged lane").toBeTruthy()
-  const witness = page.locator(`[data-node-id="${witnessId}"]`)
-  await expect(witness).toHaveClass(/is-offscreen/)
-
-  const before = await yOf()
-  // The camera is the transform. The scene's width/height legitimately change with the tray's reserved
-  // space, so comparing the whole style attribute would confuse layout space with camera movement.
-  const transformOf = async () =>
-    /transform:[^;]*/.exec((await page.locator(".dtCanvasScene").getAttribute("style")) ?? "")?.[0] ?? ""
-  const cameraBefore = await transformOf()
-  /**
-   * Scroll until the lane stops.
-   *
-   * The lane's ordinary bound here is about −1920 scene units, far more than one in-viewport gesture can
-   * travel, so the reader's gesture is repeated: each drag continues from where the last one left the lane.
-   * The loop stops when the lane stops moving, which is the floor it actually has — ordinary or extended.
-   */
-  let previous = await yOf()
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    await page.mouse.move(grabX, (top + bottom) / 2)
+  await page.goto('/tests/fixtures/digital-thread-contract.html?case=range')
+  await waitForCanvasSettled(page)
+  const link = page.locator('[data-node-id="link"]')
+  const probe = page.locator('[data-node-id="background"]')
+  const canvas = page.locator('.dtCanvas')
+  const scale = await page.locator('.dtCanvasScene').evaluate(e => new DOMMatrix(getComputedStyle(e).transform).a)
+  const canonical = (await link.boundingBox())!
+  const band = (await page.locator('[data-band="1"]').boundingBox())!
+  const ordinaryMinimum = Math.min(0, (band.y + band.height - canonical.y - canonical.height) / scale)
+  await page.locator('[data-node-id="subj"]').click()
+  await waitForCanvasSettled(page)
+  const displaced = (await link.boundingBox())!
+  expect(displaced.y).toBeGreaterThan(canonical.y + 20)
+  const probeBefore = (await probe.boundingBox())!.y
+  const camera = await transformOf(page.locator('.dtCanvasScene'))
+  const frame = await usableFrame(page)
+  for (let i = 0; i < 8; i++) {
+    await page.mouse.move(band.x + 4, frame.bottom - 15)
     await page.mouse.down()
-    await page.mouse.move(grabX, (top + bottom) / 2 - 600, { steps: 10 })
+    await page.mouse.move(band.x + 4, frame.top + 15, { steps: 12 })
     await page.mouse.up()
-    await page.waitForTimeout(250)
-    const now = await yOf()
-    if (Math.abs(now - previous) <= 2) break
-    previous = now
   }
-  const scrolled = await yOf()
-  await shoot(page, "network-lane-scrolled-into-temporary-range")
-  expect(Math.abs(scrolled - before), "the lane did not scroll").toBeGreaterThan(60)
-  // The gesture went deeper than ordinary scrolling alone can reach: the extended, temporary range was used.
-  const achievedOffset = (scrolled - before) / (await page.locator(".dtCanvasScene").evaluate(
-    element => Number(/scale\(([\d.]+)\)/.exec(element.style.transform)?.[1] ?? 1)))
-  // Repeated full gestures must reach beyond the canonical floor, through the temporary reveal allowance.
-  expect(
-    achievedOffset,
-    `the lane did not move deeper at all (reached ${achievedOffset.toFixed(1)})`,
-  ).toBeLessThan(ordinaryMinimum)
-  /**
-   * The witness's guarantee is reachability, not forced placement.
-   *
-   * A traced card whose ordinary row sits above the current window cannot be reached by scrolling down to it,
-   * and the reveal deliberately never places a card above the window (that would need a scroll the lane cannot
-   * supply). For those cards the accepted answer is the labelled reveal action, exercised here — drawn when
-   * the lane has room, otherwise one working click away, with the selection intact.
-   */
-  if ((await witness.getAttribute("class"))?.includes("is-offscreen")) {
-    const witnessIdentity = await witness.evaluate(node => node.querySelector(".dtnId")?.textContent ?? "")
-    const reveal = page.getByRole("button", { name: `Show ${witnessIdentity}`, exact: true })
-    await expect(reveal, `${witnessIdentity} must never be silently unreachable`).toBeVisible()
-    await reveal.click()
-    await expect(page.locator(`[data-node-id="${witnessId}"]`)).not.toHaveClass(/is-offscreen/)
-    await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveAttribute("data-node-id", "pr-5")
-  }
-  // Scrolling a lane is not a camera move.
-  expect(await transformOf()).toBe(cameraBefore)
-
-  /**
-   * Baseline immediately before clearing. The witness branch may have used the explicit Show action, which
-   * rolls the lane on purpose — that is the reader's navigation and must be preserved, so it belongs in the
-   * baseline rather than being mistaken for a snap. The roll is *eased*, so the baseline waits for the lane to
-   * come to rest first: sampling mid-animation measured the tail of the reader's own gesture, which is how the
-   * earlier "33–40 unit cleanup movement" reading arose.
-   */
-  const probeAtRest = async () => {
-    const first = await yOf()
-    await page.waitForTimeout(250)
-    const second = await yOf()
-    return Math.abs(second - first) <= 1
-  }
-  await expect.poll(probeAtRest, { timeout: 15_000 }).toBe(true)
-  const beforeClear = await yOf()
-
-  // Clearing is explicit, and the selection really is gone.
-  await page.keyboard.press("Escape")
+  await waitForCanvasSettled(page)
+  const probeScrolled = (await probe.boundingBox())!.y
+  expect((probeScrolled - probeBefore) / scale).toBeLessThan(ordinaryMinimum - 5)
+  const tail = link.getByRole('button', { name: 'Native tail action' })
+  await expect(tail).not.toHaveAttribute('tabindex', '-1')
+  await tail.click()
+  await expect(link.getByRole('button', { name: 'Action activated' })).toBeVisible()
+  await expect(page.locator('[data-node-id="subj"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(canvas).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(1000)
+  expect(await transformOf(page.locator('.dtCanvasScene'))).toBe(camera)
+  expect((await probe.boundingBox())!.y).toBeCloseTo(probeScrolled, 0)
   await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveCount(0)
-
-  // Cleanup completes: the lane comes to rest rather than drifting or snapping.
-  const settled = async () => {
-    const first = await yOf()
-    await page.waitForTimeout(250)
-    const second = await yOf()
-    return Math.abs(second - first) <= 1
-  }
-  await expect.poll(settled, { timeout: 15_000 }).toBe(true)
-  const cleared = await yOf()
-  /**
-   * Cleanup must not move the witness either.
-   *
-   * It became visible through the explicit reveal, which rolls the lane: that navigation is the reader's and
-   * clearing preserves it. What cleanup must not do is shift the card — so this asserts stability rather than
-   * an expectation that it returns off-screen, which would confuse retiring temporary geometry with undoing
-   * deliberate navigation.
-   */
-  const witnessSettled = Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/
-    .exec((await witness.getAttribute("style")) ?? "")?.[1] ?? NaN)
-  expect(Number.isFinite(witnessSettled)).toBe(true)
-  await page.waitForTimeout(300)
-  const witnessAfter = Number(/translate\([^,]+,\s*(-?[\d.]+)px\)/
-    .exec((await witness.getAttribute("style")) ?? "")?.[1] ?? NaN)
-  expect(Math.abs(witnessAfter - witnessSettled), "cleanup moved the revealed linked card")
-    .toBeLessThanOrEqual(2)
-  expect(await transformOf()).toBe(cameraBefore)
-  /**
-   * With the lane at rest before the clear, cleanup must leave it where it was. The earlier larger readings
-   * were measurements taken during the reader's own eased roll, not cleanup movement; this assertion is the
-   * one that actually tests the no-snap property.
-   */
-  expect(
-    Math.abs(cleared - beforeClear),
-    `the lane moved after clear by ${(cleared - beforeClear).toFixed(1)} units`,
-  ).toBeLessThanOrEqual(4)
-
-  /**
-   * The next small input follows the reader, not the ordinary limit. Had clearing clamped the lane back to
-   * its ordinary bound, this drag would do nothing or jump instead of moving the card by the dragged distance.
-   */
-  // The band was re-laid out when the tray closed, so its screen box is re-resolved rather than reused.
-  const clearedBand = page.locator(".dtCanvasBand").nth(bandIndex)
-  const clearedBandBox = (await clearedBand.boundingBox())!
-  const clearedCanvasBox = (await page.locator(".dtCanvas").boundingBox())!
-  const clearedGrabX = clearedBandBox.x + 4
-  const clearedTop = Math.max(clearedBandBox.y, clearedCanvasBox.y) + 12
-  const clearedBottom =
-    Math.min(clearedBandBox.y + clearedBandBox.height, clearedCanvasBox.y + clearedCanvasBox.height) - 12
-  expect(clearedBottom - clearedTop).toBeGreaterThan(80)
-  await page.mouse.move(clearedGrabX, (clearedTop + clearedBottom) / 2)
+  await page.mouse.move(band.x + 4, frame.top + 20)
   await page.mouse.down()
-  /**
-   * One move here, deliberately.
-   *
-   * The four-step stimulus was investigated with a bounded pointer trace (down/move/up with client
-   * coordinates, plus per-frame lane samples). In a controlled state all four move events were delivered and
-   * the lane moved 38.095 units — exactly 40/1.05 as a signed displacement — so the handler accumulates from
-   * pointer-down correctly for multi-step drags and the earlier one-quarter reading was not an event-delivery
-   * defect. That reading was specific to this second, post-clear gesture and remains recorded, not explained,
-   * as an adverse observation; this case asserts the properties that are established and uses the stimulus
-   * whose expectation is unambiguous.
-   */
-  await page.mouse.move(clearedGrabX, (clearedTop + clearedBottom) / 2 + 40)
+  await page.mouse.move(band.x + 4, frame.top + 60, { steps: 4 })
   await page.mouse.up()
-  await page.waitForTimeout(300)
-  const afterSmallDrag = await yOf()
-  // If the gutter grab landed on a card instead of the band, the "drag" selected a record and the lane did
-  // not move at all — which is a test-gesture fault, not a product one, and this tells the two apart.
-  await expect(page.locator('.dtCanvasNode[aria-pressed="true"]'), "the follow-up gesture selected a card")
-    .toHaveCount(0)
-  /**
-   * The retained range must accept the next input, in the drag's own direction. The expected displacement is
-   * derived from the measured zoom rather than a hard-coded product zoom, so a density change cannot make the
-   * assertion accidentally pass. Had clearing clamped the lane back to its ordinary bound, this drag would do
-   * nothing or jump instead.
-   */
-  const zoomText = /scale\(([\d.]+)\)/.exec(
-    (await page.locator(".dtCanvasScene").getAttribute("style")) ?? "",
-  )?.[1]
-  const measuredZoom = Number(zoomText)
-  // A failed measurement must fail the precondition: substituting a plausible zoom would invent the result.
-  expect(Number.isFinite(measuredZoom) && measuredZoom > 0, `could not measure the zoom (read "${zoomText}")`)
-    .toBe(true)
-  // The drag is downward by 40 px, so the lane must follow by exactly +40/zoom in its own coordinates.
-  const expected = 40 / measuredZoom
-  const actual = afterSmallDrag - cleared
-  expect(
-    Math.abs(actual - expected),
-    `the retained range did not follow the drag: expected +${expected.toFixed(1)}, measured ${actual.toFixed(1)}`,
-  ).toBeLessThanOrEqual(6)
-  expect(await transformOf()).toBe(cameraBefore)
+  expect(Math.abs((await probe.boundingBox())!.y - probeScrolled - 40)).toBeLessThanOrEqual(6)
+  // Continued reader scrolling can return to canonical content; the retained allowance is no scroll trap.
+  for (let i = 0; i < 8; i++) {
+    await page.mouse.move(band.x + 4, frame.top + 15)
+    await page.mouse.down()
+    await page.mouse.move(band.x + 4, frame.bottom - 15, { steps: 12 })
+    await page.mouse.up()
+  }
+  await expect.poll(async () => (await probe.boundingBox())!.y).toBeGreaterThan(probeScrolled + 50)
 })
-
-const transformOf = async (scene: import("@playwright/test").Locator) =>
-  /transform:[^;]*/.exec((await scene.getAttribute("style")) ?? "")?.[0] ?? ""
 
 test("Inside a change: selected hover is inert and a selected record owns its thread", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
@@ -779,23 +502,20 @@ for (const promoted of [false, true]) test(`same-tier rendered ${promoted ? "pro
   const tier = await page.locator(".dtCanvasScene").getAttribute("data-tier")
   const camera = await transformOf(page.locator(".dtCanvasScene"))
   const height = (await linked.boundingBox())!.height
-  const beforeGrowth = (await linked.boundingBox())!
   expect(await page.evaluate(() => window.scrollY)).toBe(0)
   await page.getByRole("button", { name: "Change text size" }).click()
   await expect.poll(async () => (await linked.boundingBox())!.height).toBeGreaterThan(height + 50)
   await page.waitForTimeout(700)
   const grown = (await linked.boundingBox())!
   expect(await page.evaluate(() => window.scrollY)).toBe(0)
+  const neighbor = (await page.locator('[data-node-id="neighbor"]').boundingBox())!
+  // A populated foreground pair replaces the obsolete background obstacle assertions.
+  expect(grown.y + grown.height <= neighbor.y || grown.y >= neighbor.y + neighbor.height).toBe(true)
   const residentBoxes = await residents.evaluateAll(nodes => nodes.map(node => {
-    const rect = node.getBoundingClientRect()
-    return { top: rect.top, bottom: rect.bottom }
+    const r = node.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }
   }))
-  expect(residentBoxes.some(box => beforeGrowth.y < box.bottom && beforeGrowth.y + grown.height > box.top),
-    "growth must create a collision at the retained position, otherwise this does not exercise reconciliation").toBe(true)
-  for (const resident of await residents.all()) {
-    const box = (await resident.boundingBox())!
-    expect(grown.y + grown.height <= box.y || grown.y >= box.y + box.height).toBe(true)
-  }
+  expect(residentBoxes.some(box => grown.y < box.bottom && grown.y + grown.height > box.top),
+    'foreground/background overlap is allowed and actually exercised').toBe(true)
   expect(await residents.evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().y))).toEqual(residentBefore)
   expect(await page.locator(".dtCanvasScene").getAttribute("data-tier")).toBe(tier)
   expect(await transformOf(page.locator(".dtCanvasScene"))).toBe(camera)
@@ -804,55 +524,30 @@ for (const promoted of [false, true]) test(`same-tier rendered ${promoted ? "pro
   await shoot(page, `same-tier-${promoted ? "promoted" : "linked"}-growth-reconciled`)
 })
 
-test("a hidden lane's linked endpoint arrives at a useful height when the reader pans to it", async ({ page }) => {
-  // Narrow enough that the right-hand lanes genuinely start outside the viewport.
+test("a small network story fits before exploration and survives horizontal away and back", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 900 })
   await open(page, "hover")
   const root = page.locator('[data-node-id="pr-5"]')
   await root.click()
-  await expect(root).toHaveAttribute("aria-pressed", "true")
-  await page.waitForTimeout(900)
-
-  const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
+  await waitForCanvasSettled(page)
   const endpoint = page.locator('[data-node-id="case-34"]')
-  const startBox = await endpoint.boundingBox()
-  const startsOutside = !startBox ||
-    startBox.x >= canvasBox.x + canvasBox.width - 1 ||
-    startBox.y >= canvasBox.y + canvasBox.height - 1 ||
-    (await endpoint.getAttribute("class"))?.includes("is-offscreen") === true
-  expect(startsOutside, "the fixture did not start with the endpoint outside the view").toBe(true)
-
-  // Pan the camera left until the right-hand lanes arrive. This is the reader's own navigation: the reveal
-  // must not need a second vertical hunt afterwards. The pan is asserted to have actually moved the camera,
-  // or the "arrival" assertions below would be measuring a board that never went anywhere.
-  const scene = page.locator(".dtCanvasScene")
-  const cameraBeforePan = await transformOf(scene)
-  await panBackground(page, -1000)
-  expect(await transformOf(scene), "the pan did not move the camera").not.toBe(cameraBeforePan)
-
-  /**
-   * The accepted contract for a hidden lane, stated precisely.
-   *
-   * This lane holds twenty cards, so its window is genuinely full: the reveal has no free span to place the
-   * endpoint into and the truthful answer is the labelled reveal action, not a fabricated fit. What the
-   * promise requires is that the endpoint is *reachable* once the reader has panned to its lane — drawn if
-   * there is room, otherwise reachable through its own labelled action — with the selection intact.
-   */
-  const drawn = !(await endpoint.getAttribute("class"))?.includes("is-offscreen")
-  if (drawn) {
-    const arrived = (await endpoint.boundingBox())!
-    expect(arrived.x).toBeGreaterThanOrEqual(canvasBox.x - 1)
-    expect(arrived.x + arrived.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1)
-    expect(arrived.y).toBeGreaterThanOrEqual(canvasBox.y - 1)
-    expect(arrived.y + arrived.height).toBeLessThanOrEqual(canvasBox.y + canvasBox.height + 1)
-  } else {
-    const reveal = page.getByRole("button", { name: "Show HLRTCCR-000034", exact: true })
-    await expect(reveal, "the endpoint is neither drawn nor reachable").toBeVisible()
-    await reveal.click()
-    await expect(endpoint, "the explicit reveal did not reach the endpoint").not.toHaveClass(/is-offscreen/)
+  const assertUsable = async () => {
+    const { canvasBox, top, bottom } = await usableFrame(page)
+    const r = (await endpoint.boundingBox())!
+    expect(r.x).toBeGreaterThanOrEqual(canvasBox.x - 1)
+    expect(r.x + r.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width + 1)
+    expect(r.y).toBeGreaterThanOrEqual(top - 1)
+    expect(r.y + r.height).toBeLessThanOrEqual(bottom + 1)
   }
-  // Selection survives the exploration.
-  await expect(root).toHaveAttribute("aria-pressed", "true")
+  await assertUsable() // Automatic fitting is proved before any recovery or exploration.
+  const scene = page.locator('.dtCanvasScene')
+  const before = await transformOf(scene)
+  await panBackground(page, -700)
+  expect(await transformOf(scene)).not.toBe(before)
+  await panBackground(page, 700)
+  expect(await transformOf(scene)).toBe(before)
+  await assertUsable()
+  await expect(root).toHaveAttribute('aria-pressed', 'true')
 })
 
 test("manual vertical exploration survives horizontal away and back", async ({ page }) => {
@@ -1417,7 +1112,7 @@ test("Arrow Down moves focus within the same lane and keeps it visible", async (
  * retained temporary arrangement could leave cards on top of each other. The check is the rendered one: no two
  * drawn cards in the same lane may overlap, and the selection survives.
  */
-test("a density change after manual exploration leaves no overlapping cards", async ({ page }) => {
+test("a density change after manual exploration protects every foreground pair", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await open(page, "dense")
   const root = page.locator('[data-node-id="pr-5"]')
@@ -1444,7 +1139,7 @@ test("a density change after manual exploration leaves no overlapping cards", as
   const tierAfter = await page.locator(".dtCanvasScene").getAttribute("data-tier")
   expect(tierAfter, "the density tier did not change, so nothing was reconciled").not.toBe(tierBefore)
 
-  const collisions = await page.locator(".dtCanvasNode:not(.is-offscreen)").evaluateAll(nodes => {
+  const collisionProof = await page.locator(".dtCanvasNode:has(.dtnCard:not(.is-untraced))").evaluateAll(nodes => {
     const byLane = new Map<number, { id: string; top: number; bottom: number }[]>()
     nodes.forEach(node => {
       const element = node as HTMLElement
@@ -1453,17 +1148,20 @@ test("a density change after manual exploration leaves no overlapping cards", as
       byLane.set(lane, [...(byLane.get(lane) ?? []), { id: element.dataset.nodeId ?? "", top: rect.top, bottom: rect.bottom }])
     })
     const overlaps: string[] = []
+    let pairs = 0
     for (const cards of byLane.values()) {
       const sorted = [...cards].sort((a, b) => a.top - b.top)
       for (let index = 1; index < sorted.length; index += 1) {
+        pairs++
         if (sorted[index].top < sorted[index - 1].bottom - 1) {
           overlaps.push(`${sorted[index - 1].id}/${sorted[index].id}`)
         }
       }
     }
-    return overlaps
+    return { overlaps, pairs }
   })
-  expect(collisions, `cards overlap after the density change: ${collisions.join(", ")}`).toEqual([])
+  expect(collisionProof.pairs).toBeGreaterThan(0)
+  expect(collisionProof.overlaps).toEqual([])
   await expect(root).toHaveAttribute("aria-pressed", "true")
 })
 
@@ -1550,8 +1248,7 @@ test("a hidden lane's endpoint arrives at a useful height on first exposure", as
   const canvasBox = (await page.locator(".dtCanvas").boundingBox())!
   const linked = page.locator('[data-node-id="link"]')
   const subject = page.locator('[data-node-id="subj"]')
-  const usableTop = canvasBox.y + 40
-  const usableBottom = canvasBox.y + canvasBox.height - 40
+  const { top: usableTop, bottom: usableBottom } = await usableFrame(page)
 
   const startBox = await linked.boundingBox()
   const startsOutside = !startBox || startBox.y + startBox.height <= usableTop || startBox.y >= usableBottom ||
@@ -1618,6 +1315,11 @@ test("four-direction continuation follows the usable boundary during selected ex
   await panBackground(page, 0, 500)
   await assertCue("down")
   await panBackground(page, 0, -850)
+  const remaining = (await page.locator('[data-node-id="link"]').boundingBox())!
+  const { top: boundary } = await usableFrame(page)
+  if (remaining.y + remaining.height >= boundary) {
+    await panBackground(page, 0, boundary - remaining.y - remaining.height - 40)
+  }
   await assertCue("up")
 })
 

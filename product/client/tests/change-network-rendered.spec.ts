@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
+import { waitForCanvasSettled } from "./digital-thread-rendered-helpers"
 
 /**
  * #1022 supersedes the floating preview target. Hover is now a stationary emphasis: it must not move the
@@ -26,33 +27,33 @@ test("touch pins the same complete story without relying on hover", async ({ bro
     const root = page.locator('[data-node-id="pr-5"]')
     await root.tap()
     await expect(root).toHaveAttribute('aria-pressed', 'true')
-    // #1022 accepts clearly indicated off-screen links. The endpoint is either drawn, or it keeps its
-    // truthfully labelled reveal action, and using that action must not disturb the selection.
+    // This small story fits without a recovery gesture, including touch selection.
+    await waitForCanvasSettled(page)
     const endpoint = page.locator('[data-node-id="case-34"]')
-    if ((await endpoint.getAttribute('class'))?.includes('is-offscreen')) {
-      const reveal = page.getByRole('button', { name: 'Show HLRTCCR-000034', exact: true })
-      await expect(reveal).toBeVisible()
-      await reveal.click()
-      await expect(endpoint).not.toHaveClass(/is-offscreen/)
-      await expect(root).toHaveAttribute('aria-pressed', 'true')
-    }
+    await expect(endpoint).not.toHaveClass(/is-offscreen/)
+    await endpoint.tap({ trial: true })
+    await expect(root).toHaveAttribute('aria-pressed', 'true')
     await expect(page.locator('.dtCanvasHoverTarget')).toHaveCount(0)
   } finally { await context.close() }
 })
 
-test("a dense story keeps individual records and offers a working offscreen reveal", async ({ page }) => {
+test("a dense story keeps individual records and offers working keyboard overflow navigation", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/tests/fixtures/change-network.html?case=dense')
   const root = page.locator('[data-node-id="pr-5"]')
   await root.focus()
   await root.press('Enter')
-  const reveal = page.getByRole('navigation', { name: 'Connected records outside view' }).locator('button:not([hidden])').filter({ hasText: /^Show HLRTCCR/ }).last()
-  await expect(reveal).toBeVisible()
-  const identifier = (await reveal.textContent())!.replace(/^Show /, '')
-  await reveal.click()
-  await expect(page.locator('.dtCanvasNode').filter({ has: page.locator('.dtnId', { hasText: identifier }) })).not.toHaveClass(/is-offscreen/)
-  await expect(page.getByRole('button', { name: `Show ${identifier}`, exact: true })).toBeHidden()
+  await waitForCanvasSettled(page)
+  await expect(page.locator('.dtCanvasContinuation[data-dir="down"]:visible')).not.toHaveCount(0)
+  // Nineteen emphasized Case cards exceed one lane window; keyboard focus deliberately reaches the tail.
+  const tail = page.locator('[data-node-id="case-34"]')
+  await tail.focus()
+  await waitForCanvasSettled(page)
+  await expect(tail).toBeFocused()
+  await expect(tail).not.toHaveClass(/is-offscreen/)
+  await tail.click({ trial: true })
+  await expect(page.locator('.dtCanvasOffscreen')).toHaveCount(0)
   await expect(page.locator('.dtCanvasNode')).toHaveCount(40)
   await expect(root).toHaveAttribute('aria-pressed', 'true')
 })
@@ -82,11 +83,8 @@ test("hover reveals a two-hop endpoint without moving the camera, and selection 
   await root.click()
   await page.mouse.move(2, 2)
   await expect(root).toHaveAttribute('aria-pressed', 'true')
-  // The selected story may genuinely reach a lane the camera is not showing; that is the accepted contract, so
-  // the endpoint is either drawn or carries its honest reveal action — never silently missing.
-  if ((await endpoint.getAttribute('class'))?.includes('is-offscreen')) {
-    await page.getByRole('button', { name: 'Show HLRTCCR-000034', exact: true }).click()
-  }
+  // This small selected story must become usable before any explicit recovery.
+  await waitForCanvasSettled(page)
   // Both legitimate starting arrangements must end with an accessible endpoint and the same subject.
   await expect(endpoint).not.toHaveClass(/is-offscreen/)
   await endpoint.click({ trial: true })

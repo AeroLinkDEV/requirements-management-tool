@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { apiBase, apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed, surfacePainted } from "./auth"
+import { waitForCanvasSettled } from "./digital-thread-rendered-helpers"
 
 /**
  * The Digital Thread page after #880 §4 replaced it.
@@ -1240,6 +1241,65 @@ test.describe("landing legibility", () => {
 })
 
 test.describe("route state is real state", () => {
+  test("network exact selection stays usable through real router feedback, Back, Forward and refresh", async ({ page, request }, info) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1920, height: 1000 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+    await openThread(page)
+    const { projectId, releaseId } = ids(page)
+    const projection = await (await request.get(`${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
+    const subject = projection.nodes.find((node: { kind: string }) => node.kind === "ChangeRequest")
+    expect(subject).toBeTruthy()
+    const address = `${threadRoot(page)}/traceability/change-requests/${subject.id}?view=network`
+    await page.goto(address)
+    const assertSelected = async (id: string, label: string) => {
+      await expect(page.locator('.dtCanvasNode[aria-pressed="true"]')).toHaveAttribute('data-node-id', id)
+      await waitForCanvasSettled(page)
+      const rects = await page.evaluate(id => {
+        const card = document.querySelector(`[data-node-id="${id}"]`)!.getBoundingClientRect()
+        const canvas = document.querySelector('.dtCanvas')!.getBoundingClientRect()
+        const toolbar = document.querySelector('.dtCanvasControls')!.getBoundingClientRect()
+        const panel = document.querySelector('.dtnPanel')!.getBoundingClientRect()
+        return { card: card.toJSON(), canvas: canvas.toJSON(), toolbar: toolbar.toJSON(), panel: panel.toJSON() }
+      }, id)
+      const { card, canvas, toolbar, panel } = rects
+      expect(card.top).toBeGreaterThanOrEqual(toolbar.bottom)
+      expect(card.bottom).toBeLessThanOrEqual(canvas.bottom)
+      expect(card.left).toBeGreaterThanOrEqual(canvas.left)
+      expect(card.right).toBeLessThanOrEqual(canvas.right)
+      expect(card.right <= panel.left || card.left >= panel.right || card.bottom <= panel.top || card.top >= panel.bottom).toBe(true)
+      await info.attach(label, { body: await page.screenshot(), contentType: 'image/png' })
+      await info.attach(`${label}-bounds`, { body: JSON.stringify(rects), contentType: 'application/json' })
+    }
+    await assertSelected(subject.id, 'deep-link')
+    // Choose an exposed real card by its painted body hit target; no focus/Fit/Show setup.
+    const target = await page.evaluate(() => {
+      for (const node of document.querySelectorAll<HTMLElement>('.dtCanvasNode:not([aria-pressed="true"])')) {
+        const r = node.getBoundingClientRect(), x = r.left + r.width / 2
+        for (const y of [r.top + 48, r.top + r.height / 2, r.bottom - 20]) {
+          const hit = document.elementFromPoint(x, y)
+          if (hit?.closest('.dtCanvasNode') === node && !hit.closest('a,button,input,summary')) return { id: node.dataset.nodeId!, x, y }
+        }
+      }
+      return null
+    })
+    expect(target, 'the real board must expose another selectable card').not.toBeNull()
+    await page.mouse.click(target!.x, target!.y)
+    await assertSelected(target!.id, 'internal-selection')
+    const selectedAddress = page.url()
+    expect(selectedAddress).toContain(target!.id)
+    await page.goBack()
+    await assertSelected(subject.id, 'back')
+    await page.goForward()
+    await assertSelected(target!.id, 'forward')
+    await page.reload()
+    await assertSelected(target!.id, 'refresh')
+    expect(page.url()).toBe(selectedAddress)
+  })
+
   test("a focal artifact and view survive refresh", async ({ page, request }) => {
     test.setTimeout(180_000)
     await page.setViewportSize({ width: 1440, height: 900 })
