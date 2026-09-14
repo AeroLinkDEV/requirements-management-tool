@@ -1,6 +1,38 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { routePath } from "../src/routing";
+import { apiBase, login } from "./auth";
+
+test("actual authorized build identities, states and predecessors drive visual selection", async ({ page }, testInfo) => {
+  await login(page, "admin", { openProject: false });
+  const response = await page.request.get(`${apiBase}/api/workspaces`);
+  expect(response.ok()).toBeTruthy();
+  const workspaces = await response.json() as Array<{
+    program: { id: string };
+    projects: Array<{ project: { id: string }; releases: Array<{
+      id: string; version: string; isReleased: boolean; predecessorReleaseId?: string | null;
+    }> }>;
+  }>;
+  const choices = workspaces.flatMap(workspace => workspace.projects.map(project => ({ workspace, project })));
+  const choice = choices.find(({ project }) => project.releases.some(release => release.isReleased)
+    && project.releases.some(release => !release.isReleased && release.predecessorReleaseId));
+  expect(choice, "the isolated seeded installation contains actual historical and working builds").toBeTruthy();
+  const { workspace, project } = choice!;
+  await page.goto(`/projects/${project.project.id}/builds`);
+  await expect(page.getByRole("heading", { name: "Software Builds", level: 1 })).toBeVisible();
+  await expect(page.locator("[data-build-card]")).toHaveCount(project.releases.length);
+  for (const release of project.releases) {
+    const card = page.locator(`[data-build-id="${release.id}"]`);
+    await expect(card).toHaveAttribute("data-build-version", release.version);
+    await expect(card.locator("..")).toHaveAttribute("data-predecessor-release-id", release.predecessorReleaseId ?? "");
+    await expect(card.getByText(release.isReleased ? "Released" : "In Work", { exact: true })).toBeVisible();
+  }
+  await page.screenshot({ path: testInfo.outputPath("actual-stored-lineage.png"), fullPage: true });
+  const selected = project.releases.find(release => release.isReleased)!;
+  await page.locator(`[data-build-id="${selected.id}"]`).getByRole("button", { name: /Open build/ }).click();
+  await expect(page).toHaveURL(routePath({ programId: workspace.program.id,
+    projectId: project.project.id, releaseId: selected.id }, "dashboard"));
+});
 
 const branchWorkspace = {
   program: { id: "lineage-program", name: "Lineage Program", code: "LIN" },
