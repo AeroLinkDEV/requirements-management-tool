@@ -313,6 +313,7 @@ function Invoke-ScriptContractSuite {
         'AeroLinkUpgrade.Tests.ps1',
         'AeroLinkSmtp4dev.Tests.ps1',
         'Get-AeroLinkTestPlan.Tests.ps1',
+        'Test-ProjectSetupPostgres.Tests.ps1',
         'Test-RepositoryLayout.ps1',
         'Test-RepositoryLayout.Tests.ps1',
         'AeroLinkTestDiagnostics.Tests.ps1'

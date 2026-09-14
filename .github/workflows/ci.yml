@@ -949,6 +949,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/Get-AeroLinkTestPlan.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Windows test planner contract failed.' }
+      - name: Validate required project-setup provider evidence contracts
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/Test-ProjectSetupPostgres.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Project-setup PostgreSQL evidence contract failed.' }
       - name: Validate the durable test-diagnostics contract
         shell: powershell
         run: |
