@@ -48,14 +48,27 @@ test('the Projects portal keeps loading state separate from an empty authorized 
 
   let releaseWorkspaces!: () => void
   const workspacesHeld = new Promise<void>(resolve => { releaseWorkspaces = resolve })
+  let releaseDrafts!: () => void
+  const draftsHeld = new Promise<void>(resolve => { releaseDrafts = resolve })
   await page.route('**/api/workspaces', async route => {
     await workspacesHeld
     await route.continue()
   })
+  await page.route('**/api/project-setups', async route => {
+    if (route.request().method() !== 'GET') {
+      await route.continue()
+      return
+    }
+    await draftsHeld
+    await route.continue()
+  })
   await page.reload()
-  await expect(page.getByRole('status')).toContainText('Loading authorized projects…')
+  const projectsLoading = page.getByRole('region', { name: 'Authorized projects loading' })
+  await expect(projectsLoading.locator(':scope > .projectsEmptyState[role="status"]')).toContainText('Loading authorized projects…')
+  await expect(page.getByRole('status').filter({ hasText: 'Loading saved setup drafts…' })).toHaveCount(1)
   await expect(page.getByRole('heading', { name: 'No authorized projects' })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Setup drafts', level: 2 })).toBeVisible()
+  releaseDrafts()
   await expect(page.locator('[data-setup-draft-id]').filter({ hasText: projectName })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Create New Project', exact: true })).toBeVisible()
 
@@ -63,6 +76,7 @@ test('the Projects portal keeps loading state separate from an empty authorized 
   await expect(page.locator('[data-project-card]').first()).toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole('heading', { name: 'No authorized projects' })).toHaveCount(0)
   await page.unroute('**/api/workspaces')
+  await page.unroute('**/api/project-setups')
 })
 
 test('workspace discovery errors keep saved setup drafts available to administrators', async ({ page }, testInfo) => {
