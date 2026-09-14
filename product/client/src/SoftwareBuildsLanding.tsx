@@ -100,7 +100,7 @@ export default function SoftwareBuildsLanding({
         <section className="buildLineage" aria-labelledby="build-lineage-heading">
           <header>
             <h2 id="build-lineage-heading">Build lineage</h2>
-            <p>Builds are ordered by their canonical version identity. Each edge below comes from the stored predecessor relationship.</p>
+            <p>Builds are ordered by version. Predecessors show which build each one follows.</p>
           </header>
           {ordered.length ? (
             <ol>
