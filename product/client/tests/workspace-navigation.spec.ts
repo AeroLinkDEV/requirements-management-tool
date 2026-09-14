@@ -3,6 +3,8 @@ import type { Page } from "@playwright/test";
 import { resolveWorkspaceContext } from "../src/workspaceContext";
 import { parseRoute, projectAreaPath, projectSlugOf, routePath } from "../src/routing";
 
+type RetryTestWindow = Window & { __aerolinkWorkspaceRetryClicked?: boolean };
+
 const fms = { program: { id: "fms-program", name: "FMS Program", code: "FMS" }, projects: [{
   project: { id: "fms-project", name: "FMS Product Development", softwareProduct: "FMS" },
   releases: [{ id: "fms-old", version: "1.5", isReleased: true }, { id: "fms-current", version: "1.6", isReleased: false }],
@@ -112,12 +114,42 @@ test("a legacy Project slug remains readable when it identifies one authorized P
 
 test("workspace failures have a truthful retry state", async ({ page }) => {
   await mockShell(page);
-  await page.route("**/api/workspaces", route => route.fulfill({ status: 403, json: { error: "Denied" } }));
+  await page.addInitScript(() => {
+    const retryWindow = window as RetryTestWindow;
+    retryWindow.__aerolinkWorkspaceRetryClicked = false;
+    document.addEventListener("click", event => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const retryButton = target.closest("button");
+      if (retryButton?.textContent?.trim() === "Retry") {
+        retryWindow.__aerolinkWorkspaceRetryClicked = true;
+      }
+    }, true);
+  });
+  const workspaceRequestRetryStates: boolean[] = [];
+  await page.route("**/api/workspaces", async route => {
+    const retryClicked = await page.evaluate(() =>
+      Boolean((window as RetryTestWindow).__aerolinkWorkspaceRetryClicked));
+    workspaceRequestRetryStates.push(retryClicked);
+    if (retryClicked) {
+      await route.fulfill({ json: workspaces });
+    } else {
+      await route.fulfill({ status: 403, json: { error: "Denied" } });
+    }
+  });
   await page.goto(fmsPath);
   await expect(page.getByRole("heading", { name: "Workspace access unavailable" })).toBeVisible();
-  await page.unroute("**/api/workspaces");
+  const retryResponse = page.waitForResponse(response =>
+    response.url().includes("/api/workspaces") && response.status() === 200);
   await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await retryResponse;
   await expect(page.getByRole("button", { name: /Open Build 1.6/i })).toBeEnabled();
+  const firstSuccessfulRequest = workspaceRequestRetryStates.findIndex(Boolean);
+  expect(firstSuccessfulRequest, "a workspace request must be released by Retry").toBeGreaterThan(0);
+  expect(workspaceRequestRetryStates.slice(0, firstSuccessfulRequest).every(state => !state),
+    "workspace requests before the Retry click must remain failed").toBe(true);
+  expect(workspaceRequestRetryStates.slice(firstSuccessfulRequest).every(Boolean),
+    "workspace requests after the Retry click must use the successful response").toBe(true);
 });
 
 test("malformed build data cannot display or request a fabricated workspace and retry retains intent", async ({ page }) => {
