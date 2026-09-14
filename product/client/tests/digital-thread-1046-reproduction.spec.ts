@@ -1,6 +1,9 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { observeCanvas } from './digital-thread-rendered-helpers'
 
+// Preserve the original reproduction frame under both the evidence and Full CI runners.
+test.use({ viewport: { width: 1920, height: 1000 } })
+
 async function snapshot(page: Page, info: TestInfo, label: string) {
   await info.attach(label, { body: await page.screenshot(), contentType: 'image/png' })
   const geometry = await page.evaluate(() => {

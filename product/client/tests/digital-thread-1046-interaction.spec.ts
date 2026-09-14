@@ -1,6 +1,10 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test'
 import { waitForCanvasSettled, readCanvasState, observeCanvas } from './digital-thread-rendered-helpers'
 
+// This dense owner-shaped fixture includes the application rail and six lanes. Its gesture
+// coordinates require the reviewed desktop frame, independently of the runner's defaults.
+test.use({ viewport: { width: 1920, height: 1000 } })
+
 async function open(page: Page, path = '/tests/fixtures/digital-thread-1046.html?page=1') {
   await observeCanvas(page)
   await page.goto(path)

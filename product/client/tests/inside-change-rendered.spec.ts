@@ -397,7 +397,10 @@ test.describe("the detail panel never rests on a directly linked record", () => 
               .filter(node => Number(node.style.zIndex) > 1 && Math.abs(node.getBoundingClientRect().left - x) < 1)
             const toolbar = document.querySelector('.dtCanvasControls')!.getBoundingClientRect()
             const heading = document.querySelector('.dtCanvasLaneHead')!
-            const top = toolbar.bottom + Math.max(0, -parseFloat(getComputedStyle(heading).top)) + 8
+            const scene = document.querySelector('.dtCanvasScene')!.getBoundingClientRect()
+            // Linked cards are clipped to their existing lane band as well as the free frame.
+            // Space above a camera-translated band cannot be counted as a legal reveal slot.
+            const top = Math.max(scene.top, toolbar.bottom + Math.max(0, -parseFloat(getComputedStyle(heading).top)) + 8)
             const bottom = document.querySelector('.dticPanel')!.getBoundingClientRect().top - 12
             return { height: foreground.reduce((sum, node) => sum + node.getBoundingClientRect().height, 0), room: bottom - top }
           })
