@@ -196,6 +196,23 @@ public sealed class ProjectSetupInceptionApiTests
             sourceAssertionAccepted = true,
         });
         Assert.Equal(HttpStatusCode.OK, finalized.StatusCode);
+        var outcome = await finalized.Content.ReadFromJsonAsync<JsonElement>();
+        var destinationId = outcome.GetProperty("projectId").GetGuid();
+        using var provenanceResponse = await administrator.GetAsync($"/api/projects/{destinationId}/inception-source");
+        Assert.Equal(HttpStatusCode.OK, provenanceResponse.StatusCode);
+        var provenance = await provenanceResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("admin", provenance.GetProperty("acceptance").GetProperty("userName").GetString());
+        using var completedScope = factory.Services.CreateScope();
+        var completedDb = completedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var destinationProgramId = outcome.GetProperty("programId").GetGuid();
+        var management = await completedDb.ProgramMemberships.SingleAsync(x => x.ProgramId == destinationProgramId);
+        Assert.Equal(memberId, management.UserId);
+        Assert.Equal("admin", management.GrantedBy);
+        var completionAudit = await completedDb.SecurityAuditEvents.SingleAsync(x => x.EventType == "ProjectSetupCompleted"
+            && x.Target == draftId.ToString("D"));
+        Assert.Equal("admin", completionAudit.ActorId);
+        Assert.Contains("AeroLinkBaseline", completionAudit.Detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("no engineering content was inherited", completionAudit.Detail, StringComparison.Ordinal);
     }
 
     [Fact]
