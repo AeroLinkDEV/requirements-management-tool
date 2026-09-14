@@ -864,6 +864,20 @@ opens an existing database and retains the fixture, screenshot, logs and before/
 temporary directory. `-ApiPort` and `-ClientPort` select free qualification ports; no persistent installation is
 started or upgraded. This supplements the PostgreSQL persistence qualification above.
 
+For browser recovery across an API-process restart, run `node scripts/run-restart-recovery-pg.mjs` from
+`product/client` in a clean checkout with the normal client/Playwright dependencies installed. Set
+`AEROLINK_E2E_CONNECTION_STRING` explicitly to an owned disposable PostgreSQL database using the strict
+`Host=...;Port=...;Database=...;Username=...;Password=...` form. The host must be loopback, the port must be
+explicit and different from 54329, and the database name must start with `aerolink_1037_`. The runner builds
+the complete solution and client, prepares Fresh/native/ReqIF/CSV/XLSX drafts, then starts a separate API
+process to resume them. The supported showcase seed supplies the representative FMS source only inside that
+disposable database. These are qualification fixtures, never owner-created projects or persistent demo state.
+The runner retains a source/run manifest, separate phase logs, API logs and browser artifacts under a new
+temporary directory. It refuses existing artifact paths and source changes during qualification; retain a
+failed run when diagnosing recovery or mapping failures. `AEROLINK_E2E_API_PORT` and
+`AEROLINK_E2E_CLIENT_PORT` select free qualification ports. The runner does not upgrade the persistent
+installation or qualify live email/GitLab delivery.
+
 ## Attended production restore
 
 1. Confirm the selected archive, its date, and its `.sha256` sidecar; copy both to `product/.local/backups` if necessary.
