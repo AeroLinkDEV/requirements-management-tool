@@ -34,6 +34,25 @@ test('a notification link resolves its own context and opens the exact record', 
   await expect(page).toHaveURL(new RegExp(`/programs/[^/]+/projects/[^/]+/releases/[^/]+/(systems|software)/change-requests/${scr.id}$`))
 })
 
+test('the Projects portal keeps loading state separate from an empty authorized result', async ({ page }) => {
+  test.setTimeout(120_000)
+  let releaseWorkspaces!: () => void
+  const workspacesHeld = new Promise<void>(resolve => { releaseWorkspaces = resolve })
+  await page.route('**/api/workspaces', async route => {
+    await workspacesHeld
+    await route.continue()
+  })
+
+  await login(page, 'admin', { openProject: false })
+  await expect(page.getByRole('status')).toContainText('Loading authorized projects…')
+  await expect(page.getByRole('heading', { name: 'No authorized projects' })).toHaveCount(0)
+
+  releaseWorkspaces()
+  await expect(page.locator('[data-project-card]').first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('heading', { name: 'No authorized projects' })).toHaveCount(0)
+  await page.unroute('**/api/workspaces')
+})
+
 test('an unknown record and an unauthenticated reader are answered identically', async ({ page, baseURL }) => {
   test.setTimeout(120_000)
 
@@ -48,7 +67,10 @@ test('an unknown record and an unauthenticated reader are answered identically',
   // Read the address only once the app has settled. The resolver decides where to send an unresolvable link
   // after the session is known, so sampling the path on `load` alone catches it mid-decision and returns
   // whichever answer won that run — this assertion failed in both directions before the wait was added.
-  await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible({ timeout: 30_000 })
+  // The empty portal state also contains the heading "No authorized projects". Use the page title's
+  // exact accessible name so the readiness wait cannot become ambiguous when the signed-in user has no
+  // authorized project rows.
+  await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible({ timeout: 30_000 })
   const signedInUnknown = new URL(page.url()).pathname
 
   // Each reader is returned to their own starting point and told nothing about the record: signed out that is

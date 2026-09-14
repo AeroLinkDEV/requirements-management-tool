@@ -138,6 +138,8 @@ body:has(.projectsPage) { min-width: 0; }
 .projectsEmptyIcon svg { width: 54px; height: 54px; }
 .projectsEmptyState h2 { margin: 13px 0 6px; font: 650 18px/1.25 var(--font-display); }
 .projectsEmptyState p { margin: 0; color: var(--ink-500); font-size: 13px; line-height: 1.5; }
+.projectsEmptyState button { margin-top: 16px; border: 1px solid #236b9f; border-radius: 7px; background: #236b9f; color: white; padding: 8px 11px; font: 700 12px var(--font-body); cursor: pointer; }
+.projectsEmptyState button:hover { background: #174f79; }
 
 .setupDraftsSection { border-top: 1px solid #dce3ea; padding-top: 22px; }
 .setupDraftsHeading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 12px; }

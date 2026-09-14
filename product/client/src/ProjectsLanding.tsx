@@ -46,8 +46,10 @@ function ProjectCard({ project, onOpen }: { project: AuthorizedProject; onOpen: 
 export default function ProjectsLanding({
   user,
   projects,
+  workspaceStatus = "ready",
   drafts,
   draftStatus,
+  onRetryProjects,
   onRetryDrafts,
   onCreateProject,
   onResumeSetup,
@@ -56,8 +58,10 @@ export default function ProjectsLanding({
 }: {
   user: AuthUser;
   projects: AuthorizedProject[];
+  workspaceStatus?: "loading" | "ready" | "error";
   drafts: ProjectSetupDraftSummary[];
   draftStatus: "loading" | "ready" | "error";
+  onRetryProjects: () => void;
   onRetryDrafts: () => void;
   onCreateProject: () => void;
   onResumeSetup: (draft: ProjectSetupDraftSummary) => void;
@@ -72,10 +76,31 @@ export default function ProjectsLanding({
           <div>
             <p className="eyebrow">AUTHORIZED PROJECTS</p>
             <h1>Projects</h1>
-            <p>{projects.length ? "Select a project to continue." : "You do not have access to any projects yet."}</p>
+            <p>{workspaceStatus === "loading"
+              ? "Loading authorized projects…"
+              : workspaceStatus === "error"
+                ? "Project access could not be loaded."
+                : projects.length
+                  ? "Select a project to continue."
+                  : "You do not have access to any projects yet."}</p>
           </div>
         </header>
-        {projects.length ? (
+        {workspaceStatus === "loading" ? (
+          <section className="projectsSections" aria-label="Authorized projects loading">
+            <div className="projectsEmptyState" role="status">
+              <p>Loading authorized projects…</p>
+            </div>
+          </section>
+        ) : workspaceStatus === "error" ? (
+          <section className="projectsSections" aria-label="Authorized projects unavailable">
+            <div className="projectsEmptyState" role="alert">
+              <span className="projectsEmptyIcon"><ProjectIcon name="project" /></span>
+              <h2>Projects unavailable</h2>
+              <p>Authorized projects could not be loaded. Retry when workspace access is available.</p>
+              <button type="button" onClick={onRetryProjects}>Retry project discovery</button>
+            </div>
+          </section>
+        ) : projects.length ? (
           <section className="projectsSections" aria-label="Authorized projects">
             <div className="projectsGrid" data-project-list>
               {projects.map(project => <ProjectCard key={project.id} project={project} onOpen={() => onOpenProject(project)} />)}

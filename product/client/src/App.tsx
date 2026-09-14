@@ -474,8 +474,6 @@ function App() {
   };
   if (view === "projectSetup")
     return <ProjectSetupWalkthrough user={user} api={API} draftId={route.projectSetupDraftId} onDraftCreated={handleDraftCreated} onExit={() => { void loadSetupDrafts(); updateRoute("view", "projects"); writeHistory("pushState", "/projects"); }} onSignOut={signOut} onCompleted={result => { void completeProjectSetup(result); }} />;
-  if (workspaceStatus === "ready" && !workspaces.length)
-    return <ProjectsLanding user={user} projects={[]} drafts={setupDrafts} draftStatus={setupDraftStatus} onRetryDrafts={() => void loadSetupDrafts()} onCreateProject={() => openProjectSetup()} onResumeSetup={draft => openProjectSetup(draft.draftId)} onOpenProject={() => undefined} onSignOut={signOut}/>;
   // These two render nothing without an artifact to render, so a navigation that omits one used to change the
   // address bar and then fall through to whichever view matched next — Command Center. The reader saw a
   // populated dashboard, the URL still claimed to be on the artifact, and nothing was reported. A link built
@@ -679,8 +677,10 @@ function App() {
   if(view!=="projects" && (workspaceStatus!=="ready" || unavailable))return <main className="artifactState"><div><h1>{workspaceStatus==="loading"?"Opening workspace":workspaceStatus==="error"?"Workspace access unavailable":"Workspace unavailable"}</h1><p>{workspaceStatus==="loading"?"Loading the selected project and build…":"The selected project or build could not be opened. No other workspace has been substituted."}</p>{workspaceStatus==="error"&&<button onClick={()=>void loadWorkspaces()}>Retry</button>}<button onClick={showProjects}>Back to Projects</button></div></main>;
   if(view==="projects")return <ProjectsLanding user={user}
     projects={authorizedProjects(workspaces)}
+    workspaceStatus={workspaceStatus}
     drafts={setupDrafts}
     draftStatus={setupDraftStatus}
+    onRetryProjects={() => void loadWorkspaces()}
     onRetryDrafts={() => void loadSetupDrafts()}
     onCreateProject={() => openProjectSetup()}
     onResumeSetup={draft => openProjectSetup(draft.draftId)}
