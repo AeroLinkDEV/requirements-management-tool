@@ -597,32 +597,31 @@ export function decodeSourceView(value: unknown): SourceView | null {
 
 export function decodeNativeSourceOptions(value: unknown): NativeSourceOptionsPage {
   const row = asRecord(value);
-  const items = Array.isArray(row.items)
-    ? row.items.flatMap((entry) => {
-        const item = asRecord(entry);
-        const baselineId = text(item.baselineId).trim();
-        if (!baselineId) return [];
-        return [
-          {
-            baselineId,
-            projectId: text(item.projectId).trim(),
-            projectName: text(item.projectName).trim() || "Project",
-            name: text(item.name).trim() || "Baseline",
-            displayNumber: text(item.displayNumber).trim(),
-            state: text(item.state).trim() || "Unknown",
-            requirementsCount: nonNegative(item.requirementsCount),
-            casesCount: nonNegative(item.casesCount),
-            proceduresCount: nonNegative(item.proceduresCount),
-            evidenceCount: nonNegative(item.evidenceCount),
-          },
-        ];
-      })
-    : [];
+  const rawItems = Array.isArray(value) ? value : Array.isArray(row.items) ? row.items : [];
+  const items = rawItems.flatMap((entry) => {
+    const item = asRecord(entry);
+    const baselineId = text(item.baselineId).trim();
+    if (!baselineId) return [];
+    return [
+      {
+        baselineId,
+        projectId: text(item.projectId).trim(),
+        projectName: text(item.projectName).trim() || "Project",
+        name: text(item.name).trim() || "Baseline",
+        displayNumber: text(item.displayNumber).trim(),
+        state: text(item.state).trim() || "Unknown",
+        requirementsCount: nonNegative(item.requirementsCount),
+        casesCount: nonNegative(item.casesCount),
+        proceduresCount: nonNegative(item.proceduresCount),
+        evidenceCount: nonNegative(item.evidenceCount),
+      },
+    ];
+  });
   const offset = nonNegative(row.offset);
   const limit = nonNegative(row.limit) || 50;
   return {
     items,
-    total: nonNegative(row.total),
+    total: nonNegative(row.total) || items.length,
     offset,
     limit,
   };

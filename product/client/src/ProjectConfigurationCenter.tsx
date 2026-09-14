@@ -4,6 +4,7 @@ import PortalHeader from "./PortalHeader";
 import ApprovalConfigurationCenter from "./ApprovalConfigurationCenter";
 import AssurancePolicyPanel from "./AssurancePolicyPanel";
 import RepositoryConfigurationPanel from "./RepositoryConfigurationPanel";
+import InceptionSourceProvenancePanel from "./InceptionSourceProvenancePanel";
 import { apiRequest, operationError } from "./apiClient";
 import { capabilityMask } from "./projectLadder";
 import { useVerificationVocabulary } from "./verificationMethods";
@@ -82,14 +83,14 @@ function normalizeConfiguration(value: ConfigurationResponse): Configuration {
 
 export default function ProjectConfigurationCenter({ user, api, projectId, projectName, initialSection = "ladder", onBackToBuilds, onOpenApprovalConfiguration, onActivated, onSignOut }: {
   user: AuthUser; api: string; projectId: string; projectName: string; onBackToBuilds: () => void;
-  initialSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals" | "verification" | "repository";
+  initialSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals" | "verification" | "repository" | "inceptionSource";
   onOpenApprovalConfiguration: () => void; onActivated: (configuration: Configuration) => void; onSignOut: () => void;
 }) {
   const [configuration, setConfiguration] = useState<Configuration>();
   const [steps, setSteps] = useState<Step[]>([]);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [reason, setReason] = useState("");
-  const [section, setSection] = useState<"ladder" | "assurance" | "history" | "readiness" | "approvals" | "verification" | "repository">(initialSection);
+  const [section, setSection] = useState<"ladder" | "assurance" | "history" | "readiness" | "approvals" | "verification" | "repository" | "inceptionSource">(initialSection);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
@@ -231,10 +232,12 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
           <button className={section === "approvals" ? "selected" : ""} onClick={() => { setSection("approvals"); onOpenApprovalConfiguration(); }}>Approval configuration<small>Nested project policy</small></button>
           <button className={section === "verification" ? "selected" : ""} onClick={() => setSection("verification")}>Verification methods<small>{vocabularyLoading ? "Loading" : vocabulary ? `${vocabulary.methods.length} permitted${vocabulary.nonConforming.length > 0 ? ` · ${vocabulary.nonConforming.length} off-vocabulary` : ""}` : "Unavailable"}</small></button>
           <button className={section === "repository" ? "selected" : ""} onClick={() => setSection("repository")}>Repository setup<small>Connection and verification</small></button>
+          <button className={section === "inceptionSource" ? "selected" : ""} onClick={() => setSection("inceptionSource")}>Source provenance<small>Inherited source facts</small></button>
         </nav>
         <section className="projectConfigurationPanel">
           {section === "approvals" && <ApprovalConfigurationCenter embedded user={user} api={api} projectId={projectId} projectName={projectName} onBackToBuilds={onBackToBuilds} onSignOut={onSignOut} />}
           {section === "repository" && <RepositoryConfigurationPanel api={api} projectId={projectId} projectName={projectName} />}
+          {section === "inceptionSource" && <InceptionSourceProvenancePanel api={api} projectId={projectId} projectName={projectName} />}
           {section === "assurance" && <AssurancePolicyPanel api={api} projectId={projectId} />}
           {section === "verification" && <>
             <div className="projectConfigurationPanelHeader"><div><h2>Verification methods</h2><p>The controlled vocabulary requirement authoring offers and review enforces. A change request declaring anything else is refused at submission, naming these values.</p></div><span className="projectConfigurationPill">{vocabularyDirty ? "Unsaved changes" : "Saved"}</span></div>

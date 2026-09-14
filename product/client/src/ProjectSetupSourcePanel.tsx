@@ -929,7 +929,7 @@ export default function ProjectSetupSourcePanel({
                   <strong>Suggested maintained levels</strong>
                   {source.ladderSuggestion.levels.length ? (
                     <ul>
-                      {source.ladderSuggestion.levels.map((level) => <li key={level}>{level}</li>)}
+                      {source.ladderSuggestion.levels.map((level, levelIndex) => <li key={`${level}-${levelIndex}`}>{level}</li>)}
                     </ul>
                   ) : (
                     <p className="setupSourcePending">No supported levels were found.</p>
@@ -939,8 +939,8 @@ export default function ProjectSetupSourcePanel({
                   <strong>Typed source relationships</strong>
                   {source.ladderSuggestion.relationships.length ? (
                     <ul>
-                      {source.ladderSuggestion.relationships.map((relationship) => (
-                        <li key={relationship.key}>
+                      {source.ladderSuggestion.relationships.map((relationship, relationshipIndex) => (
+                        <li key={`${relationship.key}-${relationshipIndex}`}>
                           {relationship.type}: {relationship.sourceLevel} → {relationship.targetLevel}
                         </li>
                       ))}
@@ -954,7 +954,7 @@ export default function ProjectSetupSourcePanel({
                 <div className="setupSourceSuggestionFindings">
                   <strong>Review findings before applying</strong>
                   <ul>
-                    {source.ladderSuggestion.findings.map((finding) => <li key={finding}>{finding}</li>)}
+                    {source.ladderSuggestion.findings.map((finding, findingIndex) => <li key={`${finding}-${findingIndex}`}>{finding}</li>)}
                   </ul>
                 </div>
               )}
@@ -1210,7 +1210,10 @@ export default function ProjectSetupSourcePanel({
               </div>
             </header>
             {source.relations.map((relation, relationIndex) => (
-              <div className="setupSourceRelation" key={relation.sourceType}>
+              <div
+                className="setupSourceRelation"
+                key={`${relation.key ?? relation.sourceType}-${relation.sourceKey ?? ""}-${relation.targetKey ?? ""}-${relationIndex}`}
+              >
                 <label>
                   <input
                     type="checkbox"
@@ -1379,8 +1382,8 @@ export default function ProjectSetupSourcePanel({
               </span>
               {source.reconciliation.errors.length > 0 && (
                 <ul>
-                  {source.reconciliation.errors.map((item) => (
-                    <li key={item}>{item}</li>
+                  {source.reconciliation.errors.map((item, errorIndex) => (
+                    <li key={`${item}-${errorIndex}`}>{item}</li>
                   ))}
                 </ul>
               )}

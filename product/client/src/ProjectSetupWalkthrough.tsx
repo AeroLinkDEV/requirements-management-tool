@@ -410,13 +410,17 @@ export default function ProjectSetupWalkthrough({
   const [notice, setNotice] = useState("");
   const [sourceState, setSourceState] = useState<SourceDraftState>(emptySourceState);
   const finalizationKey = useRef<string | undefined>(undefined);
+  const draftLoadGeneration = useRef(0);
 
   const loadDraft = useCallback(
     async (id: string) => {
+      const generation = ++draftLoadGeneration.current;
+      const isCurrentLoad = () => draftLoadGeneration.current === generation;
       setLoading(true);
       setError("");
       try {
         const loaded = await apiRequest<SetupDraft>(`${api}/api/project-setups/${id}`);
+        if (!isCurrentLoad()) return;
         setDraft(loaded);
         setValues(valuesFromDraft(loaded));
         setSourceState(emptySourceState());
@@ -424,6 +428,7 @@ export default function ProjectSetupWalkthrough({
         if (loaded.start?.kind === "AeroLinkBaseline" || loaded.start?.kind === "ExternalBaseline") {
           try {
             const sourceEnvelope = await apiRequest<unknown>(`${api}/api/project-setups/${id}/source`);
+            if (!isCurrentLoad()) return;
             const sourceRecord = asObject(sourceEnvelope);
             const source = decodeSourceView(sourceRecord.source ?? sourceEnvelope);
             const sourceVersion = typeof sourceRecord.draftVersion === "number" ? sourceRecord.draftVersion : loaded.version;
@@ -432,6 +437,7 @@ export default function ProjectSetupWalkthrough({
               if (sourceVersion >= loaded.version) setDraft((current) => current ? { ...current, version: sourceVersion } : current);
             }
           } catch (failure) {
+            if (!isCurrentLoad()) return;
             // A missing source is a truthful pending state on a resumable draft. Other failures are
             // surfaced while leaving the already loaded project answers available for retry.
             if (!(failure instanceof ApiError && failure.status === 404)) {
@@ -440,6 +446,7 @@ export default function ProjectSetupWalkthrough({
           }
         }
       } catch (failure) {
+        if (!isCurrentLoad()) return;
         setError(
           operationError(
             failure,
@@ -447,7 +454,7 @@ export default function ProjectSetupWalkthrough({
           ),
         );
       } finally {
-        setLoading(false);
+        if (isCurrentLoad()) setLoading(false);
       }
     },
     [api],
