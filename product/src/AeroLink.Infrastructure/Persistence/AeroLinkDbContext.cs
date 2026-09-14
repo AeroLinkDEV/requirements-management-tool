@@ -332,6 +332,12 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         // proposed requirement/revision in a bulk import or fresh showcase seed.
         var localRequests = SystemChangeRequests.Local.ToDictionary(x => x.Id);
         var localRequirements = Requirements.Local.ToDictionary(x => x.Id);
+        // An unassigned target verification artifact is valid only when the same unit of work proves that it is
+        // being materialized from a staged inception source. Ordinary authoring with a blank owner must still
+        // fail closed, even when another valid candidate in this batch has already sealed the ladder.
+        var inceptionVerificationTargets = ProjectInceptionSourceRecords.Local
+            .Where(x => x.TargetKind is "TestCase" or "TestProcedure")
+            .Select(x => x.TargetId).ToHashSet();
 
         foreach (var entry in ChangeTracker.Entries<RequirementChange>().Where(x => x.State == EntityState.Added))
         {
@@ -371,10 +377,11 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             candidates.Add((entry.Entity.ProjectId,
                 entry.Entity.ArtifactKind == VerificationArtifactKind.Case ? "test-case" : "test-procedure",
                 entry.Entity.BaseNumber,
-                // Inherited inception verification starts unassigned by policy. The finalization boundary
-                // supplies the accepting actor as the attributable seal actor; ordinary authoring still carries
-                // its explicit owner identity here.
-                string.IsNullOrWhiteSpace(entry.Entity.OwnerId) ? LadderSealActor ?? "system.persistence" : entry.Entity.OwnerId));
+                // Inherited inception verification starts unassigned by policy. Only a tracked source record
+                // proves that this is such a materialization; ordinary authoring still needs an explicit owner.
+                string.IsNullOrWhiteSpace(entry.Entity.OwnerId)
+                    ? inceptionVerificationTargets.Contains(entry.Entity.Id) ? LadderSealActor ?? "" : ""
+                    : entry.Entity.OwnerId));
         foreach (var entry in ChangeTracker.Entries<TestChangeReview>().Where(x => x.State == EntityState.Added))
             candidates.Add((entry.Entity.ProjectId, "test-change-review",
                 string.IsNullOrWhiteSpace(entry.Entity.DisplayNumber) ? entry.Entity.Id.ToString("D") : entry.Entity.DisplayNumber,

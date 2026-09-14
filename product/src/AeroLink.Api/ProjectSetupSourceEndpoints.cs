@@ -30,6 +30,17 @@ public static class ProjectSetupSourceEndpoints
             catch (ProjectSetupInvalidException ex) { return Results.BadRequest(new { code = "invalid_source", error = ex.Message }); }
         });
 
+        app.MapGet("/api/projects/{projectId:guid}/inception-source", async (Guid projectId, HttpContext http,
+            ProjectSetupInceptionService service, CancellationToken ct) =>
+        {
+            try
+            {
+                var projection = await service.ReadMaterializedSourceAsync(projectId, http.UserAccount(), ct);
+                return projection is null ? Results.NotFound() : Results.Ok(projection);
+            }
+            catch (ProjectSetupAccessException) { return Results.Forbid(); }
+        });
+
         app.MapPost("/api/project-setups/{draftId:guid}/source/native", async (Guid draftId,
             CaptureNativeSourceRequest request, HttpContext http, ProjectSetupInceptionService service, CancellationToken ct) =>
         {

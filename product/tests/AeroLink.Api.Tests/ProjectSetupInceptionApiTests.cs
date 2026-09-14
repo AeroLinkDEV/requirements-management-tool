@@ -6,6 +6,7 @@ using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Identity;
 using AeroLink.Domain.Imports;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
@@ -23,6 +24,180 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class ProjectSetupInceptionApiTests
 {
+    [Fact]
+    public async Task Source_assertion_binds_official_build_and_start_kind_after_build_edit()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        using var created = await client.PostAsJsonAsync("/api/project-setups", new { projectName = "Assertion build binding" });
+        using var createdBody = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+        var draftId = createdBody.RootElement.GetProperty("draftId").GetGuid();
+        using var details = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        {
+            expectedVersion = 1, currentStep = "StartingPoint",
+            project = new { name = "Assertion build binding", softwareProduct = "Binding product" },
+            build = new { version = "1.3" }, selectedCategories = Array.Empty<string>(), ladder = new { },
+            reviewRules = new { }, reviewRulesAccepted = true, repository = new { mode = "ConfigureLater" }, mapping = new { },
+        });
+        Assert.Equal(HttpStatusCode.OK, details.StatusCode);
+        using var upload = new HttpRequestMessage(HttpMethod.Post,
+            $"/api/project-setups/{draftId}/source/upload?expectedVersion=2&fileName=source.csv")
+        { Content = new ByteArrayContent(CreateSource("source.csv")) };
+        upload.Content.Headers.ContentType = new("application/octet-stream");
+        using var uploaded = await client.SendAsync(upload);
+        Assert.Equal(HttpStatusCode.OK, uploaded.StatusCode);
+        using var uploadedBody = JsonDocument.Parse(await uploaded.Content.ReadAsStringAsync());
+        var sourceVersion = uploadedBody.RootElement.GetProperty("draftVersion").GetInt64();
+        using var observed = JsonDocument.Parse(await (await client.GetAsync($"/api/project-setups/{draftId}/source"))
+            .Content.ReadAsStringAsync());
+        using var configured = await client.PutAsJsonAsync($"/api/project-setups/{draftId}/source/configuration", new
+        {
+            expectedVersion = sourceVersion, selectedCategories = new[] { "Requirements" },
+            mapping = BuildMapping(observed.RootElement, "source.csv"), metadata = new { },
+        });
+        Assert.Equal(HttpStatusCode.OK, configured.StatusCode);
+        using var ready = JsonDocument.Parse(await (await client.GetAsync($"/api/project-setups/{draftId}/source"))
+            .Content.ReadAsStringAsync());
+        var oldAssertion = ready.RootElement.GetProperty("assertion");
+        var oldHash = oldAssertion.GetProperty("hash").GetString();
+        Assert.Contains("official build SW-01.30", oldAssertion.GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Contains("start kind ExternalBaseline", oldAssertion.GetProperty("text").GetString(), StringComparison.Ordinal);
+
+        using var changed = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        {
+            expectedVersion = 4, currentStep = "Review", build = new { version = "2.0" },
+        });
+        Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+        using var changedBody = JsonDocument.Parse(await changed.Content.ReadAsStringAsync());
+        var changedVersion = changedBody.RootElement.GetProperty("version").GetInt64();
+        Assert.Equal(5, changedVersion);
+
+        using var changedSource = JsonDocument.Parse(await (await client.GetAsync($"/api/project-setups/{draftId}/source"))
+            .Content.ReadAsStringAsync());
+        var newAssertion = changedSource.RootElement.GetProperty("assertion");
+        Assert.NotEqual(oldHash, newAssertion.GetProperty("hash").GetString());
+        Assert.Contains("official build SW-02.00", newAssertion.GetProperty("text").GetString(), StringComparison.Ordinal);
+        using var staleFinalize = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize", new
+        {
+            expectedVersion = changedVersion, idempotencyKey = "build-binding-stale",
+            password = AeroLinkApiFactory.AdministratorPassword, sourceAssertionHash = oldHash,
+            sourceAssertionAccepted = true,
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, staleFinalize.StatusCode);
+    }
+
+    [Fact]
+    public async Task Native_source_rechecks_current_membership_after_capture_and_allows_admin_resume()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var administrator = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(administrator);
+        var now = DateTimeOffset.UtcNow.AddMinutes(-2);
+        Guid sourceBaselineId;
+        Guid sourceProgramId;
+        Guid memberId;
+        Guid draftId;
+        using (var seed = factory.Services.CreateScope())
+        {
+            var db = seed.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var member = new UserAccount("native.revoked.member", "Native Revoked Member", "native.revoked@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+            var program = new ProgramRecord("Revocation source program", "RSP");
+            var project = new ProjectRecord(program.Id, "Revocation source project", "Revocation product");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            var baseline = new CandidateBaseline("SW-91.01", 0, project.Id, release.Id, null,
+                "Revocation source baseline", "source.manager", now);
+            var sourceChange = new SystemChangeRequest("SRCR-910011", 0, project.Id, release.Id,
+                "Source requirement", "Problem", "Analysis", "Solution", "source.author", now);
+            var requirement = new RequirementArtifact(project.Id, "SYSR-910011", RequirementLevel.System, now);
+            var revision = new RequirementRevision(requirement.Id, 0, "The source requirement shall remain attributable.",
+                "Source rationale", "", RequirementRevisionState.Active, sourceChange.Id, baseline.Id, now);
+            baseline.FreezeForInception("source.manager", now);
+            baseline.MarkRequirementsMaterialized("source.manager", new string('a', 64), 1, now);
+            var draft = new ProjectSetupDraft(member.Id, member.UserName, "Native revocation destination");
+            db.AddRange(member, program, project, release, baseline, sourceChange, requirement, revision,
+                new BaselineRequirementSelection(baseline.Id, requirement.Id, revision.Id),
+                new ProgramMembership(member.Id, program.Id, ProgramRole.Engineer, "admin", now), draft);
+            await db.SaveChangesAsync();
+            sourceBaselineId = baseline.Id;
+            sourceProgramId = program.Id;
+            memberId = member.Id;
+            draftId = draft.Id;
+        }
+
+        using var memberClient = factory.CreateClient();
+        using var login = await memberClient.PostAsJsonAsync("/api/auth/login", new
+        { userName = "native.revoked.member", password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(memberClient);
+        using var details = await memberClient.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        {
+            expectedVersion = 1, currentStep = "StartingPoint",
+            project = new { name = "Native revocation destination", softwareProduct = "Native revocation product" },
+            build = new { version = "1.3" }, selectedCategories = Array.Empty<string>(), ladder = new { },
+            reviewRules = new { }, reviewRulesAccepted = true, repository = new { mode = "ConfigureLater" }, mapping = new { },
+        });
+        Assert.Equal(HttpStatusCode.OK, details.StatusCode);
+        using var capture = await memberClient.PostAsJsonAsync($"/api/project-setups/{draftId}/source/native", new
+        { expectedVersion = 2, baselineId = sourceBaselineId });
+        Assert.Equal(HttpStatusCode.OK, capture.StatusCode);
+        using var captureBody = JsonDocument.Parse(await capture.Content.ReadAsStringAsync());
+        var capturedVersion = captureBody.RootElement.GetProperty("draftVersion").GetInt64();
+
+        // This token was issued while the member still held the source-program role. The persisted role is
+        // ended after capture, so every source boundary must reject the stale in-memory Programs snapshot.
+        using (var revoke = factory.Services.CreateScope())
+        {
+            var db = revoke.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var membership = await db.ProgramMemberships.SingleAsync(x => x.UserId == memberId
+                && x.ProgramId == sourceProgramId && x.EndedAt == null);
+            membership.End("admin", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+
+        using var revokedRead = await memberClient.GetAsync($"/api/project-setups/{draftId}/source");
+        Assert.Equal(HttpStatusCode.Forbidden, revokedRead.StatusCode);
+        using var revokedConfig = await memberClient.PutAsJsonAsync($"/api/project-setups/{draftId}/source/configuration", new
+        {
+            expectedVersion = capturedVersion, selectedCategories = new[] { "Requirements" },
+            mapping = new { }, metadata = new { },
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, revokedConfig.StatusCode);
+        using var revokedReconcile = await memberClient.PostAsJsonAsync($"/api/project-setups/{draftId}/source/reconcile", new
+        { expectedVersion = capturedVersion });
+        Assert.Equal(HttpStatusCode.Forbidden, revokedReconcile.StatusCode);
+        using var revokedFinalize = await memberClient.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize", new
+        {
+            expectedVersion = capturedVersion, idempotencyKey = "revoked-source-member",
+            password = AeroLinkApiFactory.MemberPassword,
+        });
+        Assert.Equal(HttpStatusCode.Forbidden, revokedFinalize.StatusCode);
+
+        using var adminRead = await administrator.GetAsync($"/api/project-setups/{draftId}/source");
+        Assert.Equal(HttpStatusCode.OK, adminRead.StatusCode);
+        using var source = JsonDocument.Parse(await adminRead.Content.ReadAsStringAsync());
+        using var configured = await administrator.PutAsJsonAsync($"/api/project-setups/{draftId}/source/configuration", new
+        {
+            expectedVersion = capturedVersion, selectedCategories = new[] { "Requirements" },
+            mapping = BuildNativeMapping(source.RootElement), metadata = new { },
+        });
+        Assert.Equal(HttpStatusCode.OK, configured.StatusCode);
+        using var configuredBody = JsonDocument.Parse(await configured.Content.ReadAsStringAsync());
+        var configuredVersion = configuredBody.RootElement.GetProperty("draftVersion").GetInt64();
+        using var ready = JsonDocument.Parse(await (await administrator.GetAsync($"/api/project-setups/{draftId}/source"))
+            .Content.ReadAsStringAsync());
+        var assertionHash = ready.RootElement.GetProperty("assertion").GetProperty("hash").GetString();
+        using var finalized = await administrator.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize", new
+        {
+            expectedVersion = configuredVersion, idempotencyKey = "revoked-source-admin-resume",
+            password = AeroLinkApiFactory.AdministratorPassword, sourceAssertionHash = assertionHash,
+            sourceAssertionAccepted = true,
+        });
+        Assert.Equal(HttpStatusCode.OK, finalized.StatusCode);
+    }
+
     [Fact]
     public async Task Source_upload_retries_are_idempotent_and_stale_assertions_cannot_finalize()
     {
@@ -364,6 +539,18 @@ public sealed class ProjectSetupInceptionApiTests
         var projectId = finalizedBody.RootElement.GetProperty("projectId").GetGuid();
         Assert.Equal("Completed", finalizedBody.RootElement.GetProperty("state").GetString());
         Assert.Equal("SW-01.30", finalizedBody.RootElement.GetProperty("officialBuildName").GetString());
+
+        using var provenanceResponse = await client.GetAsync($"/api/projects/{projectId}/inception-source");
+        Assert.Equal(HttpStatusCode.OK, provenanceResponse.StatusCode);
+        using var provenance = JsonDocument.Parse(await provenanceResponse.Content.ReadAsStringAsync());
+        var provenanceRoot = provenance.RootElement;
+        Assert.Equal(projectId, provenanceRoot.GetProperty("projectId").GetGuid());
+        Assert.Equal(sourceBytes.Length, provenanceRoot.GetProperty("package").GetProperty("sizeBytes").GetInt64());
+        Assert.Equal(assertionHash, provenanceRoot.GetProperty("package").GetProperty("assertionHash").GetString());
+        Assert.Equal("admin", provenanceRoot.GetProperty("acceptance").GetProperty("userName").GetString());
+        Assert.Contains("Accepted source", provenanceRoot.GetProperty("acceptance").GetProperty("meaning").GetString(), StringComparison.Ordinal);
+        var provenanceRecord = Assert.Single(provenanceRoot.GetProperty("records").EnumerateArray());
+        Assert.DoesNotContain("StorageKey", provenanceRecord.GetProperty("sourceSnapshot").GetRawText(), StringComparison.OrdinalIgnoreCase);
 
         // Replay with the last client-known token proves the committed finalization is recoverable after a lost
         // response. No second project or source import may be created.

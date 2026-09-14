@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Buffers;
 using AeroLink.Domain.Baselines;
@@ -51,8 +52,7 @@ public sealed class ProjectSetupInceptionService(
             throw new ProjectSetupInvalidException("Only a Frozen or Released baseline with a materialized requirement manifest can start a new project.");
         var sourceProject = await db.Projects.AsNoTracking().SingleOrDefaultAsync(x => x.Id == baseline.ProjectId, ct)
             ?? throw new ProjectSetupInvalidException("The selected baseline has no source project.");
-        if (!actor.IsAdministrator && !actor.Programs.Any(x => x.ProgramId == sourceProject.ProgramId))
-            throw new ProjectSetupAccessException();
+        await RequireCurrentSourceProgramAccessAsync(sourceProject.ProgramId, actor, ct);
         // A client can lose the response after the source package and draft answer commit. Replaying the same
         // immutable native selection is safe and returns the existing package, even though its draft token has
         // advanced. A different selection still goes through the optimistic version check below.
@@ -378,12 +378,60 @@ public sealed class ProjectSetupInceptionService(
         return ToView(package, ReadAnalysis(package), draft);
     }
 
+    /// <summary>
+    /// Returns the durable source facts recorded beside a materialized project. The exact source snapshot stays
+    /// server-owned; this projection removes storage keys while retaining source identities, revisions, states,
+    /// target links, and the captured fact payload needed to inspect provenance.
+    /// </summary>
+    public async Task<ProjectInceptionSourceProjection?> ReadMaterializedSourceAsync(Guid projectId,
+        AuthenticatedUser actor, CancellationToken ct)
+    {
+        RequireAuthenticated(actor);
+        var project = await db.Projects.AsNoTracking().SingleOrDefaultAsync(x => x.Id == projectId, ct);
+        if (project is null) return null;
+        if (!actor.IsAdministrator && !await db.ProgramMemberships.AsNoTracking()
+                .AnyAsync(x => x.UserId == actor.Id && x.ProgramId == project.ProgramId && x.EndedAt == null, ct))
+            throw new ProjectSetupAccessException();
+        var records = (await db.ProjectInceptionSourceRecords.AsNoTracking()
+                .Where(x => x.ProjectId == projectId).ToListAsync(ct))
+            .OrderBy(x => x.CreatedAt).ThenBy(x => x.Id)
+            .Select(x => new ProjectInceptionSourceRecordView(x.Id, x.PackageId, x.BaselineId, x.TargetKind,
+                x.TargetId, x.TargetRevisionId, x.SourceKey, x.SourceModule, x.SourceIdentifier,
+                x.SourceRevision, x.SourceState, RedactStorageKeys(x.SourceSnapshotJson), x.CreatedAt))
+            .ToArray();
+        if (records.Length == 0) return null;
+        var packageIds = records.Select(x => x.PackageId).Distinct().ToArray();
+        var package = (await db.ProjectSetupSourcePackages.AsNoTracking()
+                .Where(x => packageIds.Contains(x.Id)).ToListAsync(ct))
+            .OrderByDescending(x => x.UpdatedAt).ThenBy(x => x.Id).FirstOrDefault();
+        var assertionBaselineId = records[0].BaselineId;
+        // SQLite cannot translate DateTimeOffset ordering. This is one exact, authorized signature lookup, so
+        // materialize its bounded result and apply the deterministic ordering in the application.
+        var acceptance = (await db.ElectronicSignatures.AsNoTracking()
+            .Where(x => x.ProgramId == project.ProgramId
+                && x.ArtifactType == "ProjectInceptionSourceAssertion"
+                && x.ArtifactId == assertionBaselineId)
+            .Select(x => new ProjectInceptionSourceAcceptance(x.UserId, x.UserName, x.DisplayName,
+                x.SignedAt, x.Action, x.Meaning, x.ContentHash, x.Authority, x.Rationale))
+            .ToListAsync(ct)).OrderByDescending(x => x.SignedAt).FirstOrDefault();
+        var packageView = package is null ? null : new ProjectInceptionSourcePackageView(package.Id,
+            package.Kind.ToString(), package.FileName, package.Format, package.Sha256, package.SizeBytes,
+            package.SourceTool, package.SourceBaselineId, package.SourceProjectId, package.SourceState,
+            ParseAndRedact(package.SelectedCategoriesJson), ParseAndRedact(package.MappingJson),
+            package.ReconciliationJson.Length == 0 ? null : ParseAndRedact(package.ReconciliationJson),
+            package.ManifestHash, package.AssertionHash, package.CapturedBy, package.CapturedAt,
+            package.MaterializedBaselineId, package.UpdatedAt);
+        return new ProjectInceptionSourceProjection(projectId, packageView, acceptance, records);
+    }
+
     public async Task<IReadOnlyList<ProjectSetupSourceOption>> ListNativeOptionsAsync(AuthenticatedUser actor,
         int offset, int limit, CancellationToken ct)
     {
         RequireAuthenticated(actor);
         if (offset < 0 || limit is < 1 or > 200) throw new ProjectSetupInvalidException("Source option paging is invalid.");
-        var accessiblePrograms = actor.IsAdministrator ? null : actor.Programs.Select(x => x.ProgramId).ToHashSet();
+        var accessiblePrograms = actor.IsAdministrator ? null : (await db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.UserId == actor.Id && x.EndedAt == null)
+            .Select(x => x.ProgramId).ToListAsync(ct)).ToHashSet();
         var query = from baseline in db.CandidateBaselines.AsNoTracking()
                     join project in db.Projects.AsNoTracking() on baseline.ProjectId equals project.Id
                     where baseline.State != CandidateBaselineState.Draft && baseline.RequirementsMaterializedAt != null
@@ -678,8 +726,21 @@ public sealed class ProjectSetupInceptionService(
             throw new ProjectSetupInvalidException("The selected AeroLink baseline is no longer a materialized Frozen or Released source.");
         var sourceProject = await db.Projects.AsNoTracking().SingleOrDefaultAsync(x => x.Id == sourceProjectId, ct)
             ?? throw new ProjectSetupInvalidException("The selected native source project is no longer available.");
-        if (!actor.IsAdministrator && !actor.Programs.Any(x => x.ProgramId == sourceProject.ProgramId))
-            throw new ProjectSetupAccessException();
+        await RequireCurrentSourceProgramAccessAsync(sourceProject.ProgramId, actor, ct);
+    }
+
+    /// <summary>
+    /// The authenticated request contains a deliberately small directory snapshot. Native-source authority is
+    /// time-sensitive, so it must be resolved against the current persisted membership at every source boundary.
+    /// An ended membership never grants access, even when an older token still carries the former program list.
+    /// </summary>
+    private async Task RequireCurrentSourceProgramAccessAsync(Guid programId, AuthenticatedUser actor,
+        CancellationToken ct)
+    {
+        if (actor.IsAdministrator) return;
+        var hasCurrentMembership = await db.ProgramMemberships.AsNoTracking()
+            .AnyAsync(x => x.UserId == actor.Id && x.ProgramId == programId && x.EndedAt == null, ct);
+        if (!hasCurrentMembership) throw new ProjectSetupAccessException();
     }
 
     private static async Task<byte[]> ReadUploadBoundedAsync(Stream content, CancellationToken ct)
@@ -1035,7 +1096,8 @@ public sealed class ProjectSetupInceptionService(
     {
         var selected = ParseCategories(package.SelectedCategoriesJson);
         var assertion = package.ManifestHash is null ? null : new ProjectSetupSourceAssertion(
-            $"Accept the exact {package.Kind} source snapshot {package.Sha256} and reconciled manifest {package.ManifestHash} for the reserved first working build.",
+            BuildAssertionDescription(package, draft, draft.ProjectId, draft.InceptionBaselineId, draft.InitialReleaseId,
+                package.ManifestHash),
             BuildAssertionHash(package, draft, draft.ProjectId, draft.InceptionBaselineId, draft.InitialReleaseId, package.ManifestHash));
         var ladderSuggestion = SuggestLadder(analysis);
         return new(package.Id, package.Kind.ToString(), package.FileName, package.Format, package.Sha256,
@@ -1077,6 +1139,42 @@ public sealed class ProjectSetupInceptionService(
         .Where(x => !string.Equals(x.Key, "StorageKey", StringComparison.OrdinalIgnoreCase))
         .ToDictionary(x => x.Key, x => x.Value, StringComparer.Ordinal);
 
+    private static JsonElement RedactStorageKeys(string json)
+    {
+        try
+        {
+            var node = JsonNode.Parse(json);
+            RedactStorageKeys(node);
+            using var document = JsonDocument.Parse(node?.ToJsonString() ?? "{}");
+            return document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return JsonDocument.Parse("{}").RootElement.Clone();
+        }
+    }
+
+    private static JsonElement ParseAndRedact(string json) => RedactStorageKeys(json);
+
+    private static void RedactStorageKeys(JsonNode? node)
+    {
+        switch (node)
+        {
+            case JsonObject objectNode:
+                foreach (var property in objectNode.ToArray())
+                {
+                    if (string.Equals(property.Key, "StorageKey", StringComparison.OrdinalIgnoreCase))
+                        objectNode.Remove(property.Key);
+                    else
+                        RedactStorageKeys(property.Value);
+                }
+                break;
+            case JsonArray arrayNode:
+                foreach (var item in arrayNode) RedactStorageKeys(item);
+                break;
+        }
+    }
+
     private static JsonElement Parse(string json)
     {
         using var doc = JsonDocument.Parse(json); return doc.RootElement.Clone();
@@ -1107,8 +1205,15 @@ public sealed class ProjectSetupInceptionService(
         CandidateBaseline baseline, ILadderPolicy ladder, InceptionReconciliation reconciliation)
     {
         var hash = BuildAssertionHash(package, draft, project.Id, baseline.Id, baseline.ReleaseId, reconciliation.ManifestHash!);
-        return new SourceAssertion(hash, $"Accepted source {package.Sha256} with reconciliation {reconciliation.ManifestHash} for target project {project.Id:D}, baseline {baseline.Id:D}.");
+        return new SourceAssertion(hash, BuildAssertionDescription(package, draft, project.Id, baseline.Id,
+            baseline.ReleaseId, reconciliation.ManifestHash!));
     }
+
+    private static string BuildAssertionDescription(ProjectSetupSourcePackage package, ProjectSetupDraft draft,
+        Guid projectId, Guid baselineId, Guid releaseId, string manifestHash) =>
+        $"Accepted source {package.Sha256} with reconciliation {manifestHash} for target project {projectId:D}, " +
+        $"baseline {baselineId:D}, official build {draft.InitialReleaseCanonicalIdentity}, start kind {draft.StartKind?.ToString() ?? "Unknown"}, " +
+        $"release {releaseId:D}.";
 
     private static string BuildAssertionHash(ProjectSetupSourcePackage package, ProjectSetupDraft draft,
         Guid projectId, Guid baselineId, Guid releaseId, string manifestHash)
@@ -1117,7 +1222,9 @@ public sealed class ProjectSetupInceptionService(
             package.SourceBaselineId, packageManifestHash = package.ManifestHash, selectedCategories = package.SelectedCategoriesJson, mapping = package.MappingJson,
             ladderHash = ProjectLadderSnapshot.HashV2(ProjectSetupLadderFactory.Steps(draft.LadderJson),
                 ProjectSetupLadderFactory.Relationships(draft.LadderJson), LegacyLadderPolicy.Instance),
-            reconciliationManifestHash = manifestHash, projectId, baselineId, releaseId }, JsonOptions);
+            reconciliationManifestHash = manifestHash, projectId, baselineId, releaseId,
+            officialBuildIdentity = draft.InitialReleaseCanonicalIdentity,
+            startKind = draft.StartKind?.ToString() }, JsonOptions);
         return Sha256(Encoding.UTF8.GetBytes(payload));
     }
 
@@ -1153,6 +1260,18 @@ public sealed record ProjectSetupSourceView(Guid Id, string Kind, string FileNam
     ProjectSetupSourceAssertion? Assertion, JsonElement? Mapping = null, JsonElement? Metadata = null,
     ProjectSetupSourceLadderSuggestion? LadderSuggestion = null);
 public sealed record ProjectSetupSourceAssertion(string Text, string Hash);
+public sealed record ProjectInceptionSourceProjection(Guid ProjectId, ProjectInceptionSourcePackageView? Package,
+    ProjectInceptionSourceAcceptance? Acceptance, IReadOnlyList<ProjectInceptionSourceRecordView> Records);
+public sealed record ProjectInceptionSourcePackageView(Guid Id, string Kind, string FileName, string Format,
+    string Sha256, long SizeBytes, string SourceTool, Guid? SourceBaselineId, Guid? SourceProjectId, string? SourceState,
+    JsonElement SelectedCategories, JsonElement Mapping, JsonElement? Reconciliation, string? ManifestHash,
+    string? AssertionHash, string CapturedBy, DateTimeOffset CapturedAt, Guid? MaterializedBaselineId,
+    DateTimeOffset UpdatedAt);
+public sealed record ProjectInceptionSourceAcceptance(Guid UserId, string UserName, string DisplayName,
+    DateTimeOffset SignedAt, string Action, string Meaning, string ContentHash, string Authority, string Rationale);
+public sealed record ProjectInceptionSourceRecordView(Guid Id, Guid PackageId, Guid BaselineId, string TargetKind,
+    Guid TargetId, Guid? TargetRevisionId, string SourceKey, string SourceModule, string SourceIdentifier,
+    string SourceRevision, string SourceState, JsonElement SourceSnapshot, DateTimeOffset CreatedAt);
 public sealed record ProjectSetupSourceLadderSuggestion(IReadOnlyList<string> Levels,
     IReadOnlyList<ProjectSetupSourceSuggestedRelationship> Relationships, IReadOnlyList<string> Findings);
 public sealed record ProjectSetupSourceSuggestedRelationship(string Key, string Type, string SourceLevel,
