@@ -130,7 +130,7 @@ export async function selectProgram(page:Page,label:string, target?: { projectId
     // current session remains the caller's session. A direct route would prove identity resolution but
     // would skip the visual project/build selection contract.
     await page.goto('/')
-    await expect(page.getByRole('heading',{name:'Projects'})).toBeVisible()
+    await expect(page.getByRole('heading',{name:'Projects', exact:true})).toBeVisible()
     const project = page.locator(`[data-project-card][data-project-id="${seed.projectId}"]`)
     await expect(project, `Project card ${seed.projectId} must be present exactly once`).toHaveCount(1)
     await project.click()
