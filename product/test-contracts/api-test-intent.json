@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 910,
-    "cases": 1021,
-    "classes": 145,
-    "hostedTests": 862,
-    "hostedCases": 951,
+    "tests": 911,
+    "cases": 1022,
+    "classes": 146,
+    "hostedTests": 863,
+    "hostedCases": 952,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 14,
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 100,
-      "cases": 106,
+      "tests": 101,
+      "cases": 107,
       "unknownCases": 0,
-      "classes": 60
+      "classes": 61
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -10227,6 +10227,24 @@
       "sourceLines": {
         "start": 21,
         "end": 182
+      }
+    },
+    {
+      "cls": "ProjectSetupAuthorizationApiTests",
+      "test": "Former_creator_can_resume_and_save_but_current_administrator_must_finalize",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 15,
+        "end": 89
       }
     },
     {

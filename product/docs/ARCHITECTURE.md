@@ -106,7 +106,8 @@ Fresh installations contain no assumed program. The onboarding transaction creat
 ### Recoverable project creation and source inception
 
 New-project creation is a durable, typed setup draft rather than a browser-only wizard. An AeroLink administrator
-creates the draft; its creator and administrators may read, save, resume, upload, and finalize it. The draft
+creates the draft; its creator and administrators may read, save, resume, and upload it, while only a current
+AeroLink administrator may finalize it. The draft
 allocates its internal backing Program, Project, initial release, and inception-baseline identities once, without
 asking the user for a Program name or code. A numeric draft version is the optimistic concurrency token. The setup
 state, current step, selected start kind, source choice, configuration, acceptance hashes, and finalization
@@ -139,8 +140,8 @@ There are three inception boundaries:
   unmapped, or excluded content is reported rather than fabricated. The source package retains foreign identifiers,
   exact bytes/hash, parser observations, mapping, reconciliation manifest, and materialized source records.
 
-Source acceptance is a separate immutable electronic signature. The authorized creator or an AeroLink administrator
-must confirm the password; the signature binds the source hash, categories, mapping, reconciliation, accepted ladder,
+Source acceptance is a separate immutable electronic signature. A current AeroLink administrator must confirm the
+password; the signature binds the source hash, categories, mapping, reconciliation, accepted ladder,
 manifest, target IDs, and canonical first-build identity. It records who accepted source provenance and the meaning
 of that assertion. It does not assert that source approvals are new-project approvals, source executions occurred in
 the target project, or source evidence is newly produced. The materialized Project exposes a provenance projection

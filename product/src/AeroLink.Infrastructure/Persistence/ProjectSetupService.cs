@@ -151,7 +151,11 @@ public sealed class ProjectSetupService(
         long expectedVersion, string operationKey, CancellationToken ct, string? password = null,
         string? sourceAssertionHash = null, bool sourceAssertionAccepted = false)
     {
-        RequireAuthenticated(actor);
+        // Draft management is intentionally broader than project creation: the creator can save, read, and
+        // resume somebody's draft, while only a currently authenticated AeroLink administrator may create the
+        // project and, for source starts, accept/materialize its source. Do this before any draft details are
+        // exposed through finalization errors.
+        RequireAdministrator(actor);
         if (string.IsNullOrWhiteSpace(operationKey))
             throw new ProjectSetupInvalidException("Finalization requires an idempotency key.");
 

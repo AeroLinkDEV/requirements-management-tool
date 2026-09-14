@@ -14,7 +14,9 @@ using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace AeroLink.Infrastructure.Persistence;
 
@@ -71,7 +73,7 @@ public sealed class ProjectSetupInceptionService(
                 existingPackage.SelectedCategoriesJson, null, null, null, null, existingPackage.MappingJson,
                 DateTimeOffset.UtcNow);
             await RevalidateRestoredConfigurationAsync(draft, existingPackage, ct);
-            await db.SaveChangesAsync(ct);
+            await SaveSourceMutationAsync(ct);
             return new(existingPackage, draft.Version);
         }
 
@@ -297,7 +299,7 @@ public sealed class ProjectSetupInceptionService(
             ProjectSetupStartKind.AeroLinkBaseline, baseline.Id, null, null, package.SelectedCategoriesJson,
             null, null, null, null, package.MappingJson,
             DateTimeOffset.UtcNow);
-        await db.SaveChangesAsync(ct);
+        await SaveSourceMutationAsync(ct);
         return new(package, draft.Version);
     }
 
@@ -335,7 +337,7 @@ public sealed class ProjectSetupInceptionService(
             null, null, null, null, package.MappingJson,
             DateTimeOffset.UtcNow);
         await RevalidateRestoredConfigurationAsync(draft, package, ct);
-        await db.SaveChangesAsync(ct);
+        await SaveSourceMutationAsync(ct);
         return new(package, draft.Version);
     }
 
@@ -376,7 +378,7 @@ public sealed class ProjectSetupInceptionService(
         draft.UpdateAnswers(command.ExpectedVersion, ProjectSetupStep.Review, null, null, null, null, null,
             null, JsonSerializer.Serialize(categories, JsonOptions), null, null, null, null,
             JsonSerializer.Serialize(mapping, JsonOptions), DateTimeOffset.UtcNow);
-        await db.SaveChangesAsync(ct);
+        await SaveSourceMutationAsync(ct);
         return new(package, draft.Version);
     }
 
@@ -398,7 +400,7 @@ public sealed class ProjectSetupInceptionService(
         // replacement, or finalization cannot silently accept an older result.
         draft.UpdateAnswers(expectedVersion, ProjectSetupStep.Review, null, null, null, null, null, null, null,
             null, null, null, null, null, DateTimeOffset.UtcNow);
-        await db.SaveChangesAsync(ct);
+        await SaveSourceMutationAsync(ct);
         return new(result, draft.Version);
     }
 
@@ -517,6 +519,7 @@ public sealed class ProjectSetupInceptionService(
         ILadderPolicy ladder, CancellationToken ct)
     {
         if (draft.StartKind == ProjectSetupStartKind.Fresh) return;
+        RequireAdministrator(actor);
         var package = await LoadPackageAsync(draft, ct);
         await ValidateNativePackageAsync(package, actor, ct);
         if (package.Stage != ProjectSetupSourceStage.Reconciled || package.ManifestHash is null)
@@ -1245,6 +1248,70 @@ public sealed class ProjectSetupInceptionService(
     private static string? Get(JsonElement root, string name) => root.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
     private static void EnsureVersion(ProjectSetupDraft draft, long expected) { if (draft.Version != expected) throw new ProjectSetupConcurrencyException("This setup changed; refresh and retry."); }
     private static void RequireAuthenticated(AuthenticatedUser actor) { if (actor.Id == Guid.Empty) throw new ProjectSetupAccessException(); }
+    private static void RequireAdministrator(AuthenticatedUser actor)
+    {
+        RequireAuthenticated(actor);
+        if (!actor.IsAdministrator) throw new ProjectSetupAccessException();
+    }
+
+    /// <summary>
+    /// Source mutations share the draft and staged-package optimistic tokens. A concurrent request can therefore
+    /// lose either on an EF concurrency update or, for two identical first uploads/captures, on the package hash
+    /// uniqueness constraint. Translate only those source-owned races after clearing the failed tracker; malformed
+    /// data, foreign-key failures, and every other provider error still propagate to their normal diagnostics.
+    /// </summary>
+    private async Task SaveSourceMutationAsync(CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException ex) when (HasSourceMutationEntry(ex))
+        {
+            db.ChangeTracker.Clear();
+            throw new ProjectSetupConcurrencyException(
+                "Another source operation changed this setup. Refresh its saved version and retry.");
+        }
+        catch (DbUpdateException ex) when (IsSourceUniqueRace(ex))
+        {
+            db.ChangeTracker.Clear();
+            throw new ProjectSetupConcurrencyException(
+                "Another source operation staged the same source first. Refresh the setup to recover it.");
+        }
+        catch (Exception ex) when (IsSourceProviderRace(ex))
+        {
+            db.ChangeTracker.Clear();
+            throw new ProjectSetupConcurrencyException(
+                "Another source operation changed this setup. Refresh its saved version and retry.");
+        }
+    }
+
+    private static bool HasSourceMutationEntry(DbUpdateException exception) =>
+        exception.Entries.Any(x => x.Entity is ProjectSetupDraft or ProjectSetupSourcePackage);
+
+    private static bool IsSourceUniqueRace(DbUpdateException exception)
+    {
+        if (!exception.Entries.Any(x => x.Entity is ProjectSetupSourcePackage)) return false;
+        var root = exception.GetBaseException();
+        if (root is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation } postgres)
+            return postgres.ConstraintName?.Contains("project_setup_source_packages", StringComparison.OrdinalIgnoreCase) == true
+                || postgres.ConstraintName?.Contains("DraftId_Sha256", StringComparison.OrdinalIgnoreCase) == true;
+        if (root is SqliteException { SqliteErrorCode: 19 } sqlite)
+            return sqlite.Message.Contains("project_setup_source_packages", StringComparison.OrdinalIgnoreCase)
+                && sqlite.Message.Contains("DraftId", StringComparison.OrdinalIgnoreCase)
+                && sqlite.Message.Contains("Sha256", StringComparison.OrdinalIgnoreCase);
+        return false;
+    }
+
+    private static bool IsSourceProviderRace(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is PostgresException { SqlState: "40001" or "40P01" }) return true;
+            if (current is SqliteException { SqliteErrorCode: 5 or 6 }) return true;
+        }
+        return false;
+    }
     private static string Sha256(ReadOnlySpan<byte> bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     private static T Deserialize<T>(string json, string field)
     {

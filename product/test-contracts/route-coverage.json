@@ -359,6 +359,7 @@
         "ProjectLeadershipApiTests",
         "ProjectPersonnelApiTests",
         "ProjectRepositoryApiTests",
+        "ProjectSetupAuthorizationApiTests",
         "ProjectSetupCodeEvidenceApiTests",
         "ProjectSetupDiscoveryApiTests",
         "ProjectSetupInceptionApiTests",
@@ -1790,6 +1791,7 @@
       "file": "ProjectSetupEndpoints.cs",
       "coveredBy": [
         "ProjectSetupApiTests",
+        "ProjectSetupAuthorizationApiTests",
         "ProjectSetupInceptionApiTests",
         "ProjectSetupLadderCapabilityApiTests",
         "ProjectSetupServiceQualificationTests"
@@ -2563,6 +2565,7 @@
       "file": "ProjectSetupEndpoints.cs",
       "coveredBy": [
         "ProjectSetupApiTests",
+        "ProjectSetupAuthorizationApiTests",
         "ProjectSetupBoundaryRegressionApiTests",
         "ProjectSetupDiscoveryApiTests",
         "ProjectSetupInceptionApiTests",

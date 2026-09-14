@@ -656,8 +656,8 @@ retrying it. Do not repeat a completed finalization with a new key merely becaus
 access for a native baseline is checked again on resume and at each
 source boundary, so a revoked source membership blocks further use while preserving the staged record for audit.
 
-Source acceptance during finalization requires the authorized creator's or AeroLink administrator's password. The
-resulting electronic signature is bound to the exact source hash, selected categories, mapping, reconciliation
+Source acceptance during finalization requires the current AeroLink administrator's password. The resulting
+electronic signature is bound to the exact source hash, selected categories, mapping, reconciliation
 manifest, accepted ladder, target IDs, and canonical first-build identity. It records source provenance acceptance,
 not a new approval, test execution, staffing assignment, or target evidence. A different administrator may resume
 and accept an authorized draft; source
