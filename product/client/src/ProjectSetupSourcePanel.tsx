@@ -103,6 +103,46 @@ function sourceRelationLabel(value: string) {
   return labels[value] ?? value.replace(/([a-z])([A-Z])/g, "$1 $2");
 }
 
+type LadderSuggestionRelationshipSummary = {
+  type: string;
+  sourceLevel: string;
+  targetLevel: string;
+  count: number;
+};
+
+/**
+ * A ladder suggestion describes source relationship patterns, while the source editor below
+ * retains every exact relationship row. Group only identical typed level transitions here so a
+ * large source cannot mount thousands of repeated suggestion rows or lose the fact that several
+ * source relationships support the same transition.
+ */
+function summarizeLadderSuggestionRelationships(
+  relationships: SourceLadderSuggestion["relationships"],
+): LadderSuggestionRelationshipSummary[] {
+  const summaries = new Map<string, LadderSuggestionRelationshipSummary>();
+  for (const relationship of relationships) {
+    // Deliberately preserve server spelling and first-seen order. These are controlled source
+    // facts; case-folding or locale normalization could merge distinct maintained types/levels.
+    const key = JSON.stringify([
+      relationship.type,
+      relationship.sourceLevel,
+      relationship.targetLevel,
+    ]);
+    const existing = summaries.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      summaries.set(key, {
+        type: relationship.type,
+        sourceLevel: relationship.sourceLevel,
+        targetLevel: relationship.targetLevel,
+        count: 1,
+      });
+    }
+  }
+  return Array.from(summaries.values());
+}
+
 function selectedCategoryKeys(source: SourceView, selected: string[]) {
   const known = new Set<string>(source.categories.map((category) => category.key));
   const sourceSelection = source.selectedCategories.filter((category) => known.has(category));
@@ -810,6 +850,9 @@ export default function ProjectSetupSourcePanel({
       .toLocaleLowerCase()
       .includes(search.trim().toLocaleLowerCase()),
   );
+  const suggestionRelationships = source?.ladderSuggestion
+    ? summarizeLadderSuggestionRelationships(source.ladderSuggestion.relationships)
+    : [];
 
   return (
     <section className="setupSourcePanel" aria-label="Baseline source configuration">
@@ -1027,11 +1070,18 @@ export default function ProjectSetupSourcePanel({
                 </div>
                 <div>
                   <strong>Typed source relationships</strong>
-                  {source.ladderSuggestion.relationships.length ? (
+                  {suggestionRelationships.length ? (
                     <ul>
-                  {source.ladderSuggestion.relationships.map((relationship, relationshipIndex) => (
-                        <li key={`${relationship.key}-${relationshipIndex}`}>
+                      {suggestionRelationships.map((relationship) => (
+                        <li
+                          key={JSON.stringify([
+                            relationship.type,
+                            relationship.sourceLevel,
+                            relationship.targetLevel,
+                          ])}
+                        >
                           {sourceRelationLabel(relationship.type)}: {relationship.sourceLevel} → {relationship.targetLevel}
+                          {` (${formatCount(relationship.count)} observed source ${relationship.count === 1 ? "relationship" : "relationships"})`}
                         </li>
                       ))}
                     </ul>

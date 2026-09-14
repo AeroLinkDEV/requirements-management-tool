@@ -383,6 +383,30 @@ test("large source modules page object editors without losing exact mapping deci
       objects,
     }],
     relations,
+    ladderSuggestion: {
+      levels: ["System", "HighLevel", "LowLevel"],
+      relationships: [
+        ...Array.from({ length: 25 }, (_, index) => ({
+          key: `suggested-allocated-${index + 1}`,
+          type: "AllocatedFrom",
+          sourceLevel: "HighLevel",
+          targetLevel: "System",
+        })),
+        ...Array.from({ length: 10 }, (_, index) => ({
+          key: `suggested-derived-${index + 1}`,
+          type: "DerivedFrom",
+          sourceLevel: "HighLevel",
+          targetLevel: "System",
+        })),
+        ...Array.from({ length: 10 }, (_, index) => ({
+          key: `suggested-low-${index + 1}`,
+          type: "AllocatedFrom",
+          sourceLevel: "LowLevel",
+          targetLevel: "HighLevel",
+        })),
+      ],
+      findings: [],
+    },
     findings: [],
     findingResolutions: {},
     reconciliation: null,
@@ -453,6 +477,15 @@ test("large source modules page object editors without losing exact mapping deci
   });
   await page.getByRole("button", { name: "Upload and analyze source" }).click();
   await expect(page.getByText("Paged source module", { exact: true })).toBeVisible();
+  const suggestion = page.locator("section.setupSourceLadderSuggestion");
+  const suggestionRelationships = suggestion
+    .locator(".setupSourceSuggestionColumns > div")
+    .nth(1)
+    .locator("li");
+  await expect(suggestionRelationships).toHaveCount(3);
+  await expect(suggestionRelationships.nth(0)).toContainText("Allocated from: HighLevel → System (25 observed source relationships)");
+  await expect(suggestionRelationships.nth(1)).toContainText("Derived from: HighLevel → System (10 observed source relationships)");
+  await expect(suggestionRelationships.nth(2)).toContainText("Allocated from: LowLevel → HighLevel (10 observed source relationships)");
 
   const module = page.locator("article.setupSourceModule").filter({ hasText: "Requirements" }).first();
   await expect(module.getByText("1–20 of 45 source objects", { exact: true })).toBeVisible();
@@ -559,6 +592,133 @@ test("large source modules page object editors without losing exact mapping deci
   expect(relation22?.include).toBe(false);
   expect(relation22?.exclusionReason).toBe("Initially excluded pending review.");
   await page.screenshot({ path: testInfo.outputPath("paged-source-object-mappings.png"), fullPage: false });
+});
+
+test("relation-only source views page the complete relation collection", async ({ page }, testInfo) => {
+  const sourceId = "00000000-0000-4000-8000-000000000206";
+  const relations = Array.from({ length: 45 }, (_, index) => ({
+    key: `relation-only-${index + 1}`,
+    sourceKey: `source-${index + 1}`,
+    targetKey: `source-${Math.max(1, index)}`,
+    sourceType: "AllocatedFrom",
+    type: "AllocatedFrom",
+    count: 1,
+    include: false,
+    exclusionReason: "Initially excluded pending review.",
+  }));
+  let sourceReady = false;
+  let configurationBody: Record<string, unknown> | undefined;
+  let source: Record<string, unknown> = {
+    id: sourceId,
+    kind: "ExternalBaseline",
+    displayName: "Relation-only source",
+    fileName: "relations.csv",
+    format: "CSV",
+    sha256: "source-sha-206",
+    metadata: { sourceSystem: "Relation-only source tool" },
+    selectedCategories: [],
+    categories: [{ key: "Requirements", count: 0, requires: [], supported: true }],
+    modules: [],
+    relations,
+    findings: [],
+    findingResolutions: {},
+    reconciliation: null,
+    assertion: null,
+  };
+
+  await page.route(/\/api\/project-setups\/[^/]+\/source$/, async (route) => {
+    await route.fulfill({ json: sourceReady ? source : { draftVersion: 2, source: null } });
+  });
+  await page.route(/\/api\/project-setups\/[^/]+\/source\/upload\?/, async (route) => {
+    sourceReady = true;
+    await route.fulfill({ json: { id: sourceId, stage: "Analysed", sha256: "source-sha-206", draftVersion: 2 } });
+  });
+  await page.route(/\/api\/project-setups\/[^/]+\/source\/configuration$/, async (route) => {
+    configurationBody = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    source = {
+      ...source,
+      selectedCategories: ["Requirements"],
+      reconciliation: {
+        ready: true,
+        observedObjects: 0,
+        includedObjects: 0,
+        excludedObjects: 0,
+        observedRelations: relations.length,
+        includedRelations: 1,
+        excludedRelations: relations.length - 1,
+        errors: [],
+        manifestHash: "manifest-206",
+      },
+      assertion: { text: "Relation-only source source-sha-206 was reconciled.", hash: "assertion-206" },
+    };
+    await route.fulfill({ json: { id: sourceId, stage: "Reconciled", manifestHash: "manifest-206", draftVersion: 3 } });
+  });
+  await page.route(/\/api\/project-setups\/[^/]+(?:\/save-and-exit)?$/, async (route) => {
+    if (!["PUT", "POST"].includes(route.request().method())) {
+      await route.continue();
+      return;
+    }
+    const body = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+    await route.fulfill({
+      json: {
+        draftId: route.request().url().split("/").at(-1),
+        state: "Draft",
+        currentStep: typeof body.currentStep === "string" ? body.currentStep : "StartingPoint",
+        version: Number(body.expectedVersion ?? 1) + 1,
+        project: body.project ?? { name: "Relation-only source", softwareProduct: "Relation-only software" },
+        start: body.start ?? { kind: "ExternalBaseline", sourceImportId: sourceId },
+        build: body.build ?? { version: "1.02", officialName: "SW-01.02" },
+        selectedCategories: Array.isArray(body.selectedCategories) ? body.selectedCategories : [],
+        ladder: body.ladder ?? {},
+        reviewRules: { accepted: body.reviewRulesAccepted === true, definition: body.reviewRules ?? {} },
+        repository: body.repository ?? { mode: "ConfigureLater", provider: "GitLab", endpoint: null },
+        mapping: body.mapping ?? {},
+      },
+    });
+  });
+
+  await login(page, "admin", { openProject: false });
+  await page.goto("/projects/new");
+  await page.getByLabel("Project name").fill(`Relation-only source ${Date.now()}`);
+  await page.getByLabel("Software product").fill("Relation-only software");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel("External baseline from another tool").check();
+  await page.getByLabel("Baseline file (ReqIF, CSV, or XLSX)").setInputFiles({
+    name: "relations.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("foreign-id,statement\nREL-1,Relation-only source\n"),
+  });
+  await page.getByRole("button", { name: "Upload and analyze source" }).click();
+
+  const relationsSection = page.locator("section.setupSourceRelations");
+  await expect(relationsSection.getByText("1–20 of 45 source relationships", { exact: true })).toBeVisible();
+  await expect(relationsSection.locator(".setupSourceRelation")).toHaveCount(20);
+  await relationsSection.getByRole("button", { name: "Next relationships page" }).click();
+  await expect(relationsSection.getByText("21–40 of 45 source relationships", { exact: true })).toBeVisible();
+  const relationPageTwo = relationsSection.locator('[data-source-relation-key="relation-only-21"]');
+  await expect(relationPageTwo).toHaveCount(1);
+  await relationPageTwo.getByRole("checkbox").check();
+  await relationPageTwo.getByLabel("Trace type for AllocatedFrom").selectOption("AllocatedFrom");
+  await relationPageTwo.getByLabel("Relation direction for AllocatedFrom").selectOption("parent");
+  await relationsSection.getByRole("button", { name: "Previous relationships page" }).click();
+  await expect(relationsSection.getByText("1–20 of 45 source relationships", { exact: true })).toBeVisible();
+  await relationsSection.getByRole("button", { name: "Next relationships page" }).click();
+  await expect(relationPageTwo.getByRole("checkbox")).toBeChecked();
+  await expect(relationPageTwo.getByLabel("Relation direction for AllocatedFrom")).toHaveValue("parent");
+  await page.getByRole("checkbox", { name: /^Requirements / }).check();
+  await relationsSection.getByRole("button", { name: "Previous relationships page" }).click();
+  await page.getByRole("button", { name: "Save choices and reconcile" }).click();
+  await expect(page.getByText("Reconciliation ready", { exact: true })).toBeVisible();
+  const mappedRelations = ((configurationBody?.mapping as {
+    relations?: Array<{ sourceKey: string; include: boolean; type: string | null; sourceIsParent?: boolean }>;
+  } | undefined)?.relations ?? []);
+  expect(mappedRelations).toHaveLength(relations.length);
+  expect(mappedRelations.find((item) => item.sourceKey === "relation-only-21")).toMatchObject({
+    include: true,
+    type: "AllocatedFrom",
+    sourceIsParent: true,
+  });
+  await page.screenshot({ path: testInfo.outputPath("relation-only-paging.png"), fullPage: false });
 });
 
 test("native source picker follows an authoritative page total past the first 50 baselines", async ({ page }, testInfo) => {

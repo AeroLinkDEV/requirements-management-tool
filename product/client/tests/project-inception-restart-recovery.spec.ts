@@ -488,6 +488,20 @@ test("resume all five drafts after the API process has been restarted", async ({
     await expect(page.getByText("Exact source", { exact: true })).toBeVisible();
     await expect(page.getByText("Reconciliation ready", { exact: true })).toBeVisible();
     await expect(page.getByRole("checkbox", { name: /^Requirements/ })).toBeChecked();
+    if (record.kind === "AeroLinkBaseline") {
+      const suggestion = page.locator("section.setupSourceLadderSuggestion");
+      const suggestionRelationships = suggestion
+        .locator(".setupSourceSuggestionColumns > div")
+        .nth(1)
+        .locator("li");
+      await expect(suggestion).toBeVisible();
+      expect(await suggestionRelationships.count(), "bounded ladder suggestion DOM for the FMS baseline")
+        .toBeLessThanOrEqual(20);
+      const sourceRelations = page.locator("section.setupSourceRelations .setupSourceRelation");
+      await expect(sourceRelations).toHaveCount(20);
+      await expect(page.getByText(/1–20 of [\d,]+ source relationships/, { exact: false })).toBeVisible();
+      await suggestion.screenshot({ path: testInfo.outputPath(`restart-recovery-${record.kind}-ladder-suggestion.png`) });
+    }
     if (record.expectedSourceKey) {
       const sourceObject = page.locator("section.setupSourceObjectMapping").filter({ hasText: record.expectedSourceKey });
       await expect(sourceObject).toHaveCount(1);
