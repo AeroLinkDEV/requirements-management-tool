@@ -4,7 +4,9 @@ import { parseRoute, projectAreaPath, projectSetupPath } from "../src/routing";
 import {
   authorizedProjects,
   decodeWorkspaces,
+  isInternalProjectWorkspace,
   resolveWorkspaceContext,
+  workspaceDisplayName,
 } from "../src/workspaceContext";
 import { decodeProjectSetupDraftSummaries } from "../src/projectSetupDrafts";
 import {
@@ -34,6 +36,26 @@ const wireWorkspaces = [
     ],
   },
 ];
+
+test("new project backing scopes stay hidden while authored legacy Programs retain their label", () => {
+  const project = {
+    project: { id: "project-new", name: "Navigation Inception", softwareProduct: "Navigation" },
+    releases: [],
+  };
+  const internal = {
+    program: {
+      id: "program-new",
+      name: "Navigation Inception backing scope 0123456789abcdef0123456789abcdef",
+      code: "P-0123456789ABCDEF0123456789",
+    },
+    projects: [project],
+  };
+  const legacy = { ...internal, program: { id: "program-legacy", name: "Flight Program", code: "FMS" } };
+  expect(isInternalProjectWorkspace(internal, project)).toBe(true);
+  expect(workspaceDisplayName(internal, project)).toBe("Navigation Inception");
+  expect(isInternalProjectWorkspace(legacy, project)).toBe(false);
+  expect(workspaceDisplayName(legacy, project)).toBe("Flight Program");
+});
 
 test("the project selector is derived only from the authorized workspace projection", () => {
   const workspaces = decodeWorkspaces(wireWorkspaces);
@@ -195,16 +217,17 @@ test("source envelopes retain exact identity and configuration payload omits ser
   expect(source?.modules[0].objectCount).toBe(2);
   const payload = sourceConfigurationPayload(source!, 7, ["Requirements"]);
   expect(payload).toMatchObject({ expectedVersion: 7, selectedCategories: ["Requirements"] });
-  expect(payload.modules).toEqual([{
-    key: "requirements",
-    level: null,
-    include: true,
-    attributes: [{
-      sourceAttribute: "priority",
-      destination: "Statement",
-      valueMappings: [{ sourceValue: "high", destinationValue: "High" }],
-    }],
-  }]);
+  expect(payload).toEqual({
+    expectedVersion: 7,
+    selectedCategories: ["Requirements"],
+    metadata: {},
+    mapping: {
+      sourceSha256: "abc123",
+      objects: [],
+      relations: [{ sourceKey: "satisfies", include: true, type: null, sourceIsParent: true }],
+      findingResolutions: {},
+    },
+  });
   expect(JSON.stringify(payload)).not.toContain("objectCount");
   expect(JSON.stringify(payload)).not.toContain("password");
   expect(sourceUploadAccept).toContain(".reqif");

@@ -13,6 +13,7 @@ import {
   type SourceMappingDestination,
   type SourceModule,
   type SourceRelation,
+  type SourceLadderSuggestion,
   type SourceView,
 } from "./projectSetupSource";
 import "./ProjectSetupSourcePanel.css";
@@ -32,6 +33,10 @@ export type ProjectSetupSourcePanelProps = {
   onSourceVersion: (version: number) => void;
   onSourceIdentity: (id: string) => void;
   onSourceStateChange: (state: SourceDraftState) => void;
+  /** Changes to the accepted ladder invalidate a source reconciliation. */
+  ladderRevision?: string;
+  /** Lets the walkthrough review a server-derived, typed ladder suggestion. */
+  onApplyLadderSuggestion?: (suggestion: SourceLadderSuggestion) => void;
 };
 
 type SourceEnvelope = { draftVersion?: number; source?: unknown };
@@ -42,6 +47,11 @@ const mappingDestinations: { value: SourceMappingDestination; label: string }[] 
   { value: "Rationale", label: "Requirement rationale" },
   { value: "VerificationMethod", label: "Verification method" },
   { value: "SourceIdentifier", label: "Source identifier" },
+  { value: "Title", label: "Verification title" },
+  { value: "Objective", label: "Verification objective" },
+  { value: "Preconditions", label: "Verification preconditions" },
+  { value: "Steps", label: "Verification steps" },
+  { value: "ExpectedResult", label: "Verification expected result" },
   { value: "Exclude", label: "Exclude with a reason" },
 ];
 
@@ -176,6 +186,8 @@ export default function ProjectSetupSourcePanel({
   onSourceVersion,
   onSourceIdentity,
   onSourceStateChange,
+  ladderRevision,
+  onApplyLadderSuggestion,
 }: ProjectSetupSourcePanelProps) {
   const [source, setSource] = useState<SourceView | null>(
     initialState.source?.kind === kind ? initialState.source : null,
@@ -187,9 +199,6 @@ export default function ProjectSetupSourcePanel({
   const [sourceOffset, setSourceOffset] = useState(0);
   const [search, setSearch] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [metadata, setMetadata] = useState<SourceView["metadata"]>(
-    initialState.source?.kind === kind ? initialState.source.metadata : {},
-  );
   const [selected, setSelected] = useState<string[]>(
     initialState.source?.kind === kind
       ? selectedCategoryKeys(initialState.source, selectedCategories)
@@ -200,6 +209,7 @@ export default function ProjectSetupSourcePanel({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const requestNumber = useRef(0);
+  const previousLadderRevision = useRef(ladderRevision);
 
   useEffect(() => {
     onSourceStateChange({ source, assertionAccepted: accepted, password });
@@ -214,10 +224,26 @@ export default function ProjectSetupSourcePanel({
     });
   }, [source]);
 
+  useEffect(() => {
+    if (previousLadderRevision.current === ladderRevision) return;
+    previousLadderRevision.current = ladderRevision;
+    setSource((current) =>
+      current
+        ? {
+            ...current,
+            reconciliation: null,
+            assertion: null,
+          }
+        : current,
+    );
+    setAccepted(false);
+    setPassword("");
+    setNotice("The ladder changed. Reconcile the exact source again before finalization.");
+  }, [ladderRevision]);
+
   const applySource = (next: SourceView | null, version: number) => {
     if (!next) return;
     setSource(next);
-    setMetadata(next.metadata);
     const nextSelected = selectedCategoryKeys(next, selectedCategories);
     setSelected(nextSelected);
     onSelectedCategoriesChange(nextSelected);
@@ -249,6 +275,33 @@ export default function ProjectSetupSourcePanel({
     } finally {
       if (request === requestNumber.current) setOptionsBusy(false);
     }
+  };
+
+  const sourceAfterMutation = async (
+    mutation: unknown,
+    expectedVersion: number,
+    request: number,
+  ) => {
+    const mutationResult = sourceFromEnvelope(mutation);
+    if (mutationResult.source) {
+      return {
+        source: mutationResult.source,
+        version: responseVersion(mutationResult, expectedVersion),
+      };
+    }
+    // The source mutation routes return a compact durable receipt. Read the canonical SourceView
+    // afterwards so parser facts, typed mappings, findings, and the server's ladder suggestion are
+    // never reconstructed from a browser payload or a partial response.
+    const current = await apiRequest<unknown>(`${api}/api/project-setups/${draftId}/source`);
+    if (request !== requestNumber.current) return null;
+    const currentResult = sourceFromEnvelope(current);
+    if (!currentResult.source) {
+      throw new Error("The source service did not return the saved source view.");
+    }
+    return {
+      source: currentResult.source,
+      version: responseVersion(currentResult, responseVersion(mutationResult, expectedVersion)),
+    };
   };
 
   const loadSource = async () => {
@@ -317,11 +370,11 @@ export default function ProjectSetupSourcePanel({
         },
       );
       if (request !== requestNumber.current) return;
-      const decoded = sourceFromEnvelope(envelope);
-      if (!decoded.source || decoded.source.kind !== "AeroLinkBaseline") {
+      const committed = await sourceAfterMutation(envelope, expectedVersion, request);
+      if (!committed || committed.source.kind !== "AeroLinkBaseline") {
         throw new Error("The source service did not return the selected native baseline.");
       }
-      applySource(decoded.source, responseVersion(decoded, expectedVersion));
+      applySource(committed.source, committed.version);
     } catch (failure) {
       if (request === requestNumber.current) {
         setError(
@@ -362,11 +415,11 @@ export default function ProjectSetupSourcePanel({
         },
       );
       if (request !== requestNumber.current) return;
-      const decoded = sourceFromEnvelope(envelope);
-      if (!decoded.source || decoded.source.kind !== "ExternalBaseline") {
+      const committed = await sourceAfterMutation(envelope, expectedVersion, request);
+      if (!committed || committed.source.kind !== "ExternalBaseline") {
         throw new Error("The source service did not return the uploaded baseline.");
       }
-      applySource(decoded.source, responseVersion(decoded, expectedVersion));
+      applySource(committed.source, committed.version);
       setSelectedFile(null);
     } catch (failure) {
       if (request === requestNumber.current) {
@@ -383,8 +436,11 @@ export default function ProjectSetupSourcePanel({
   };
 
   const updateSourceAndNotice = (next: SourceView) => {
-    setSource({ ...next });
+    // A source assertion and reconciliation are proofs of the exact source, mapping, categories,
+    // and ladder. Any local edit invalidates both until the server recomputes them.
+    setSource({ ...next, reconciliation: null, assertion: null });
     setAccepted(false);
+    setPassword("");
     setNotice("Unsaved source choices. Save and reconcile before finalization.");
   };
 
@@ -424,6 +480,43 @@ export default function ProjectSetupSourcePanel({
 
   const saveConfiguration = async () => {
     if (!source) return;
+    const isNativeRelation = (relation: SourceRelation) =>
+      ["CaseProcedure", "VerificationCoverage", "EvidenceExecution"].includes(
+        relation.type ?? "",
+      );
+    const isTraceRelation = (relation: SourceRelation) =>
+      !isNativeRelation(relation) &&
+      ["RequirementTrace", "AllocatedFrom", "DerivedFrom"].includes(
+        relation.type ?? relation.sourceType,
+      );
+    const incompleteTrace = source.relations.find(
+      (relation) => relation.include && isTraceRelation(relation) && !relation.mappingType,
+    );
+    if (incompleteTrace) {
+      setError(
+        `Choose AllocatedFrom or DerivedFrom for ${incompleteTrace.sourceType} before reconciling.`,
+      );
+      return;
+    }
+    const incompleteRelation = source.relations.find(
+      (relation) =>
+        relation.include && !isNativeRelation(relation) && typeof relation.sourceIsParent !== "boolean",
+    );
+    if (incompleteRelation) {
+      setError(
+        `Choose the direction for ${incompleteRelation.sourceType}, or exclude it with a reason, before reconciling.`,
+      );
+      return;
+    }
+    const unexplainedExclusion = source.relations.find(
+      (relation) => !relation.include && !relation.exclusionReason?.trim(),
+    );
+    if (unexplainedExclusion) {
+      setError(
+        `Explain why ${unexplainedExclusion.sourceType} is excluded before reconciling.`,
+      );
+      return;
+    }
     const request = ++requestNumber.current;
     setBusy(true);
     setError("");
@@ -440,12 +533,11 @@ export default function ProjectSetupSourcePanel({
         },
       );
       if (request !== requestNumber.current) return;
-      const decoded = sourceFromEnvelope(envelope);
-      if (!decoded.source)
-        throw new Error("The source service did not return reconciliation results.");
-      applySource(decoded.source, responseVersion(decoded, expectedVersion));
+      const committed = await sourceAfterMutation(envelope, expectedVersion, request);
+      if (!committed) return;
+      applySource(committed.source, committed.version);
       setNotice(
-        decoded.source.reconciliation?.ready
+        committed.source.reconciliation?.ready
           ? "Reconciliation passed for the exact source and current ladder. Review the source assertion before finalization."
           : "Source choices were saved. Resolve the reported findings before finalization.",
       );
@@ -481,12 +573,11 @@ export default function ProjectSetupSourcePanel({
         },
       );
       if (request !== requestNumber.current) return;
-      const decoded = sourceFromEnvelope(envelope);
-      if (!decoded.source)
-        throw new Error("The source service did not return reconciliation results.");
-      applySource(decoded.source, responseVersion(decoded, expectedVersion));
+      const committed = await sourceAfterMutation(envelope, expectedVersion, request);
+      if (!committed) return;
+      applySource(committed.source, committed.version);
       setNotice(
-        decoded.source.reconciliation?.ready
+        committed.source.reconciliation?.ready
           ? "The source was revalidated against the current ladder."
           : "The source was revalidated. Resolve the findings shown below before finalization.",
       );
@@ -502,13 +593,6 @@ export default function ProjectSetupSourcePanel({
     } finally {
       if (request === requestNumber.current) setBusy(false);
     }
-  };
-
-  const updateMetadata = (key: keyof SourceView["metadata"], value: string) => {
-    if (!source) return;
-    const next = { ...source, metadata: { ...metadata, [key]: value } };
-    setMetadata(next.metadata);
-    updateSourceAndNotice(next);
   };
 
   const filteredOptions = options.filter((option) =>
@@ -700,12 +784,69 @@ export default function ProjectSetupSourcePanel({
             )}
           </div>
 
+          {source.ladderSuggestion && (
+            <section className="setupSourceLadderSuggestion" aria-label="Source-informed ladder suggestion">
+              <header>
+                <div>
+                  <h4>Source-informed ladder suggestion</h4>
+                  <p>
+                    The server derived these maintained levels and typed relationships from source
+                    structure. Review them before applying; this does not invent project ancestry.
+                  </p>
+                </div>
+                {onApplyLadderSuggestion && (
+                  <button
+                    type="button"
+                    onClick={() => onApplyLadderSuggestion(source.ladderSuggestion!)}
+                    disabled={busy}
+                  >
+                    Review and use compatible levels
+                  </button>
+                )}
+              </header>
+              <div className="setupSourceSuggestionColumns">
+                <div>
+                  <strong>Suggested maintained levels</strong>
+                  {source.ladderSuggestion.levels.length ? (
+                    <ul>
+                      {source.ladderSuggestion.levels.map((level) => <li key={level}>{level}</li>)}
+                    </ul>
+                  ) : (
+                    <p className="setupSourcePending">No supported levels were found.</p>
+                  )}
+                </div>
+                <div>
+                  <strong>Typed source relationships</strong>
+                  {source.ladderSuggestion.relationships.length ? (
+                    <ul>
+                      {source.ladderSuggestion.relationships.map((relationship) => (
+                        <li key={relationship.key}>
+                          {relationship.type}: {relationship.sourceLevel} → {relationship.targetLevel}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="setupSourcePending">No cross-level source relationships were found.</p>
+                  )}
+                </div>
+              </div>
+              {source.ladderSuggestion.findings.length > 0 && (
+                <div className="setupSourceSuggestionFindings">
+                  <strong>Review findings before applying</strong>
+                  <ul>
+                    {source.ladderSuggestion.findings.map((finding) => <li key={finding}>{finding}</li>)}
+                  </ul>
+                </div>
+              )}
+            </section>
+          )}
+
           {source.kind === "ExternalBaseline" && (
             <fieldset className="setupSourceMetadata">
               <legend>Source metadata</legend>
               <p className="setupSourceHint">
-                Leave unavailable source facts blank. The server retains unknown version/date rather
-                than guessing them.
+                Metadata is read from the uploaded source. Missing source facts remain unknown; the
+                creator cannot replace them with browser-entered values.
               </p>
               <div className="setupSourceMetadataGrid">
                 {(
@@ -714,23 +855,39 @@ export default function ProjectSetupSourcePanel({
                     "sourceSystemVersion",
                     "sourceBaselineName",
                     "sourceBaselineDate",
+                    "extractedBy",
+                    "extractedAt",
                   ] as const
                 ).map((field) => (
                   <label key={field}>
                     {field === "sourceSystem"
                       ? "Source system"
                       : field === "sourceSystemVersion"
-                        ? "Source system version"
-                        : field === "sourceBaselineName"
-                          ? "Source baseline name"
-                          : "Source baseline date"}
-                    <input
-                      value={metadata[field] ?? ""}
-                      onChange={(event) => updateMetadata(field, event.target.value)}
-                      placeholder={
-                        field === "sourceBaselineDate" ? "Unknown if absent" : "Unknown if absent"
+                          ? "Source system version"
+                          : field === "sourceBaselineName"
+                            ? "Source baseline name"
+                            : field === "sourceBaselineDate"
+                              ? "Source baseline date"
+                              : field === "extractedBy"
+                                ? "Extracted by"
+                                : "Extracted at"}
+                    <output
+                      aria-label={
+                        field === "sourceSystem"
+                          ? "Source system"
+                          : field === "sourceSystemVersion"
+                            ? "Source system version"
+                            : field === "sourceBaselineName"
+                              ? "Source baseline name"
+                              : field === "sourceBaselineDate"
+                                ? "Source baseline date"
+                                : field === "extractedBy"
+                                  ? "Extracted by"
+                                  : "Extracted at"
                       }
-                    />
+                    >
+                      {source.metadata[field]?.trim() || "Unknown (not reported by source)"}
+                    </output>
                   </label>
                 ))}
               </div>
@@ -969,31 +1126,72 @@ export default function ProjectSetupSourcePanel({
                   />{" "}
                   Include {relation.sourceType} ({formatCount(relation.count)} observed)
                 </label>
+                <small className="setupSourceRelationType">
+                  Source relationship type: {relation.type || relation.sourceType}
+                  {relation.sourceKey && relation.targetKey
+                    ? ` · ${relation.sourceKey} → ${relation.targetKey}`
+                    : ""}
+                  {relation.attributes && Object.keys(relation.attributes).length > 0
+                    ? ` · ${Object.keys(relation.attributes).length} source attributes require explicit handling`
+                    : ""}
+                </small>
                 {relation.include && (
-                  <label>
-                    Direction
-                    <select
-                      aria-label={`Relation direction for ${relation.sourceType}`}
-                      value={
-                        relation.sourceIsParent === undefined
-                          ? ""
-                          : relation.sourceIsParent
-                            ? "parent"
-                            : "child"
-                      }
-                      onChange={(event) =>
-                        updateSourceAndNotice(
-                          updateRelation(source, relationIndex, {
-                            sourceIsParent: event.target.value === "parent",
-                          }),
-                        )
-                      }
-                    >
-                      <option value="">Choose direction</option>
-                      <option value="parent">Source is parent</option>
-                      <option value="child">Source is child</option>
-                    </select>
-                  </label>
+                  <>
+                    {["RequirementTrace", "AllocatedFrom", "DerivedFrom"].includes(
+                      relation.type ?? relation.sourceType,
+                    ) && (
+                      <label>
+                        Trace type
+                        <select
+                          aria-label={`Trace type for ${relation.sourceType}`}
+                          value={relation.mappingType ?? ""}
+                          onChange={(event) =>
+                            updateSourceAndNotice(
+                              updateRelation(source, relationIndex, {
+                                mappingType:
+                                  event.target.value === ""
+                                    ? undefined
+                                    : (event.target.value as "AllocatedFrom" | "DerivedFrom"),
+                              }),
+                            )
+                          }
+                        >
+                          <option value="">Choose supported trace type</option>
+                          <option value="AllocatedFrom">AllocatedFrom</option>
+                          <option value="DerivedFrom">DerivedFrom</option>
+                        </select>
+                      </label>
+                    )}
+                    {!['CaseProcedure', 'VerificationCoverage', 'EvidenceExecution'].includes(relation.type ?? "") && (
+                      <label>
+                        Direction
+                        <select
+                          aria-label={`Relation direction for ${relation.sourceType}`}
+                          value={
+                            relation.sourceIsParent === undefined
+                              ? ""
+                              : relation.sourceIsParent
+                                ? "parent"
+                                : "child"
+                          }
+                          onChange={(event) =>
+                            updateSourceAndNotice(
+                              updateRelation(source, relationIndex, {
+                                sourceIsParent:
+                                  event.target.value === ""
+                                    ? undefined
+                                    : event.target.value === "parent",
+                              }),
+                            )
+                          }
+                        >
+                          <option value="">Choose direction</option>
+                          <option value="parent">Source is parent</option>
+                          <option value="child">Source is child</option>
+                        </select>
+                      </label>
+                    )}
+                  </>
                 )}
                 <label>
                   Exclusion reason

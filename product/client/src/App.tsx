@@ -1,7 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import type { ComponentType } from "react";
 import { useWorkspaceRoute } from "./useWorkspaceRoute";
-import { authorizedProjects, decodeWorkspaces, resolveWorkspaceContext } from "./workspaceContext";
+import {
+  authorizedProjects,
+  decodeWorkspaces,
+  isInternalProjectWorkspace,
+  resolveWorkspaceContext,
+  workspaceDisplayName,
+} from "./workspaceContext";
 import type { Workspace } from "./workspaceContext";
 import { useLatestRequest } from "./useLatestRequest";
 import CommandPalette from "./CommandPalette";
@@ -174,6 +180,8 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
 }) {
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
+  const internalProjectScope = Boolean(active && project && isInternalProjectWorkspace(active, project));
+  const displayedProgramName = active && project ? workspaceDisplayName(active, project) : active?.program.name;
   const release = project?.releases.find(x => x.id === selectedReleaseId) ?? project?.releases.at(-1);
   const officialBuild = release ? officialBuildName(release.version) ?? "Identity unavailable" : "";
   const hasSystem = ladderAllows(ladder, "System");
@@ -230,9 +238,9 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
       <div className="brand"><span aria-hidden="true" className="brandMark"><Icon name="brandMark"/></span><b>AeroLink</b><InstanceBadge/></div>
       <button className="quickSearch" onClick={onSearch}><span aria-hidden="true" className="quickSearchIcon"><Icon name="search"/></span> Search &amp; navigate <kbd>Ctrl K</kbd></button>
       <div className="program">
-        <small>ACTIVE CONTEXT</small>
-        <strong className="activeProgram" title={active?.program.name}>{active?.program.name}</strong>
-        <span title={project?.project.name}>{project?.project.name}</span>
+        <small>{internalProjectScope ? "PROJECT CONTEXT" : "ACTIVE CONTEXT"}</small>
+        <strong className="activeProgram" title={displayedProgramName}>{displayedProgramName}</strong>
+        {!internalProjectScope && <span title={project?.project.name}>{project?.project.name}</span>}
         {/* "Active build <version>" stays contiguous so the informal version a person reads elsewhere —
             the breadcrumb says "Build 1.6" — is how this can be found by name too. */}
         {/* Named the way the breadcrumb names it. The card led with the configuration identifier, SW-01.60,
@@ -444,6 +452,9 @@ function App() {
     void loadData();
     return invalidateDashboard;
   }, [loadData, invalidateDashboard]);
+  const handleDraftCreated = useCallback((id: string) => {
+    writeHistory("replaceState", projectSetupPath(id));
+  }, [writeHistory]);
   if (user === undefined)
     return <div className="appBoot"><div className="bootMark">▲</div><div><p>AEROLINK CONTROLLED WORKSPACE</p><h1>Establishing your secure session</h1><span>Confirming identity, authority, and active program context…</span><i><b/></i></div></div>;
   if (user === null) return <LoginPage api={API} onLogin={setUser} />;
@@ -457,7 +468,7 @@ function App() {
     writeHistory("pushState", projectAreaPath(result.projectId, "builds"));
   };
   if (view === "projectSetup")
-    return <ProjectSetupWalkthrough user={user} api={API} draftId={route.projectSetupDraftId} onExit={() => { void loadSetupDrafts(); updateRoute("view", "projects"); writeHistory("pushState", "/projects"); }} onSignOut={signOut} onCompleted={result => { void completeProjectSetup(result); }} />;
+    return <ProjectSetupWalkthrough user={user} api={API} draftId={route.projectSetupDraftId} onDraftCreated={handleDraftCreated} onExit={() => { void loadSetupDrafts(); updateRoute("view", "projects"); writeHistory("pushState", "/projects"); }} onSignOut={signOut} onCompleted={result => { void completeProjectSetup(result); }} />;
   if (workspaceStatus === "ready" && !workspaces.length)
     return <ProjectsLanding user={user} projects={[]} drafts={setupDrafts} draftStatus={setupDraftStatus} onRetryDrafts={() => void loadSetupDrafts()} onCreateProject={() => openProjectSetup()} onResumeSetup={draft => openProjectSetup(draft.draftId)} onOpenProject={() => undefined} onSignOut={signOut}/>;
   // These two render nothing without an artifact to render, so a navigation that omits one used to change the
@@ -700,7 +711,9 @@ function App() {
   const coverageLabel = discipline === "systemTest" ? "System Coverage" : selectedArtifactKind === "LowLevel" ? "Software LLR Coverage" : selectedArtifactKind === "HighLevel" ? "Software HLR Coverage" : "Software Coverage";
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:view==="procedureExplorer"?coverageReport?coverageLabel:`${discipline==="softwareTest"?"Software Test Case/Procedure":"System Test Procedure"} Explorer`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
-  const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb"><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b><span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b>{view!=="managedDocuments"&&<><span>Build {release?.version}</span><b aria-hidden="true">›</b></>}<strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{view==="teamwork"?"Project scope · every build":view==="managedDocuments"?"Project-wide":release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
+  const internalProjectScope = Boolean(active && project && isInternalProjectWorkspace(active, project));
+  const displayedProgramName = active && project ? workspaceDisplayName(active, project) : active?.program.name;
+  const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb">{!internalProjectScope&&<><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b></>}<span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b>{view!=="managedDocuments"&&<><span>Build {release?.version}</span><b aria-hidden="true">›</b></>}<strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{view==="teamwork"?"Project scope · every build":view==="managedDocuments"?"Project-wide":release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
    const palette=context?<CommandPalette api={API} context={context} ladder={ladder} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onNavigate={navigate}/>:null;
   const experience=<ExperienceControls open={displayOpen} density={density} motion={motion} onDensityChange={next=>{setDensity(next);setToast(`${next==='compact'?'Compact':'Comfortable'} density applied`)}} onMotionChange={next=>{setMotion(next);setToast(`${next==='reduced'?'Reduced':'Purposeful'} motion applied`)}} onClose={()=>setDisplayOpen(false)}/>;
   const feedback=toast?<div className="experienceToast" role="status" aria-live="polite"><span>✓</span><b>{toast}</b></div>:null;
@@ -1282,8 +1295,8 @@ function App() {
         <header>
           <div>
             <p className="eyebrow">
-              {active?.program.code} / {project?.project.name} /{" "}
-              {release?.version}
+              {internalProjectScope ? displayedProgramName : active?.program.code}
+              {!internalProjectScope && <> / {project?.project.name}</>} / {release?.version}
             </p>
             <h1>Command Center</h1>
           </div>

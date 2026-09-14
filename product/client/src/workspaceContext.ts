@@ -17,6 +17,29 @@ export type AuthorizedProject = Workspace["projects"][number]["project"] & {
   releases: WorkspaceRelease[];
 };
 
+const internalProjectProgramName = /\sbacking scope [0-9a-f]{32}$/i;
+
+/**
+ * New Project inception reserves an internal Program identity for server-side ownership. That
+ * backing name is an implementation detail; legacy workspaces still present their authored
+ * Program name in the established context surfaces.
+ */
+export function isInternalProjectWorkspace(
+  workspace: Workspace,
+  project?: Workspace["projects"][number],
+) {
+  return Boolean(project && internalProjectProgramName.test(workspace.program.name.trim()));
+}
+
+export function workspaceDisplayName(
+  workspace: Workspace,
+  project?: Workspace["projects"][number],
+) {
+  return isInternalProjectWorkspace(workspace, project)
+    ? project?.project.name || "Project"
+    : workspace.program.name;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

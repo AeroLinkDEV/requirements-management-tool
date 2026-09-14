@@ -133,6 +133,7 @@
 .setupNativeSourcePicker input,
 .setupExternalUploader input,
 .setupSourceMetadata input,
+.setupSourceMetadata output,
 .setupSourceModule input,
 .setupSourceModule select,
 .setupSourceRelation input,
@@ -248,6 +249,66 @@
   border: 1px solid #dce6eb;
   border-radius: 8px;
   padding: 14px;
+}
+.setupSourceLadderSuggestion {
+  display: grid;
+  gap: 11px;
+  max-width: 1040px;
+  border: 1px solid #d9cfae;
+  border-radius: 8px;
+  background: #fffaf0;
+  padding: 14px;
+}
+.setupSourceLadderSuggestion > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.setupSourceLadderSuggestion h4 {
+  margin: 0 0 5px;
+  color: var(--ink-800);
+  font: 700 14px/1.25 var(--font-display);
+}
+.setupSourceLadderSuggestion header p,
+.setupSourceLadderSuggestion strong,
+.setupSourceLadderSuggestion li,
+.setupSourceLadderSuggestion .setupSourcePending {
+  color: var(--ink-600);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.setupSourceLadderSuggestion header p {
+  max-width: 740px;
+  margin: 0;
+}
+.setupSourceLadderSuggestion button {
+  border: 1px solid #b9a96f;
+  border-radius: 6px;
+  background: #fff;
+  color: #6b5714;
+  padding: 8px 10px;
+  font: 700 11px var(--font-body);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.setupSourceLadderSuggestion button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+.setupSourceSuggestionColumns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.setupSourceSuggestionColumns ul,
+.setupSourceSuggestionFindings ul {
+  margin: 6px 0 0;
+  padding-left: 19px;
+}
+.setupSourceSuggestionFindings {
+  border-top: 1px solid #e8dfc3;
+  padding-top: 10px;
 }
 .setupSourceMetadata legend,
 .setupSourceCategories legend {

@@ -15,7 +15,7 @@ import ProjectSetupSourcePanel, {
   SourceAcceptanceFields,
 } from "./ProjectSetupSourcePanel";
 import { decodeSourceView, sourceFinalizationPayload } from "./projectSetupSource";
-import type { SourceDraftState, SourceKind } from "./projectSetupSource";
+import type { SourceDraftState, SourceKind, SourceLadderSuggestion } from "./projectSetupSource";
 import "./ProjectSetupWalkthrough.css";
 
 type StartKind = "Fresh" | "AeroLinkBaseline" | "ExternalBaseline";
@@ -389,6 +389,7 @@ export default function ProjectSetupWalkthrough({
   onExit,
   onSignOut,
   onCompleted,
+  onDraftCreated,
 }: {
   user: AuthUser;
   api: string;
@@ -396,6 +397,8 @@ export default function ProjectSetupWalkthrough({
   onExit: () => void;
   onSignOut: () => void;
   onCompleted: (result: FinalizationResult) => void;
+  /** Replace the temporary creation route once the server has allocated its durable draft identity. */
+  onDraftCreated?: (draftId: string) => void;
 }) {
   const [draft, setDraft] = useState<SetupDraft>();
   const [values, setValues] = useState<SetupValues>();
@@ -468,6 +471,7 @@ export default function ProjectSetupWalkthrough({
       .then((created) => {
         if (!active) return;
         const createdDraft = draftFromCreate(created);
+        onDraftCreated?.(createdDraft.draftId);
         setDraft(createdDraft);
         setValues(valuesFromDraft(createdDraft));
         setSourceState(emptySourceState());
@@ -482,7 +486,7 @@ export default function ProjectSetupWalkthrough({
     return () => {
       active = false;
     };
-  }, [api, draftId, loadDraft]);
+  }, [api, draftId, loadDraft, onDraftCreated]);
 
   const update = <K extends keyof SetupValues>(key: K, value: SetupValues[K]) => {
     setValues((current) => {
@@ -493,6 +497,18 @@ export default function ProjectSetupWalkthrough({
       if (key === "ladder" || key === "reviewRulesDefinition") next.reviewRulesAccepted = false;
       return next;
     });
+    if (key === "ladder") {
+      setSourceState((current) =>
+        current.source
+          ? {
+              ...current,
+              source: { ...current.source, reconciliation: null, assertion: null },
+              assertionAccepted: false,
+              password: "",
+            }
+          : current,
+      );
+    }
     setNotice("");
   };
   const useSuggestedReviewRules = () => {
@@ -763,6 +779,63 @@ export default function ProjectSetupWalkthrough({
       steps: next.steps.map((step, index) => ({ ...step, position: index + 1 })),
     });
 
+  const applySourceLadderSuggestion = (suggestion: SourceLadderSuggestion) => {
+    if (!values) return;
+    const catalogueFor = (value: string) => {
+      const normalized = value.trim().toLocaleLowerCase();
+      return levelCatalogue.find(
+        (level) =>
+          level.id.toLocaleLowerCase() === normalized ||
+          level.label.toLocaleLowerCase() === normalized,
+      );
+    };
+    const supportedLevels = suggestion.levels.flatMap((level) => {
+      const catalogue = catalogueFor(level);
+      return catalogue ? [catalogue] : [];
+    });
+    const unsupportedLevels = suggestion.levels.filter((level) => !catalogueFor(level));
+    const existing = new Map(values.ladder.steps.map((step) => [step.catalogueEntry, step]));
+    const steps = [...values.ladder.steps];
+    for (const catalogue of supportedLevels) {
+      if (existing.has(catalogue.id)) continue;
+      steps.push({
+        catalogueEntry: catalogue.id,
+        position: steps.length + 1,
+        capabilities: catalogue.capabilities,
+        enabledArtifactKinds: [...catalogue.verification],
+      });
+      existing.set(catalogue.id, steps[steps.length - 1]);
+    }
+    const compatibleLevels = new Set(steps.map((step) => step.catalogueEntry));
+    const relationships = [...values.ladder.relationships];
+    let addedRelationships = 0;
+    for (const relationship of suggestion.relationships) {
+      // Source trace rows carry the child at sourceLevel and the parent at targetLevel. This
+      // preserves the typed source direction while keeping unrelated native relationships out of
+      // the ladder; no ancestry is invented from numeric order or a relationship label.
+      if (!["AllocatedFrom", "DerivedFrom"].includes(relationship.type)) continue;
+      const parent = catalogueFor(relationship.targetLevel)?.id;
+      const child = catalogueFor(relationship.sourceLevel)?.id;
+      if (!parent || !child || parent === child || !compatibleLevels.has(parent) || !compatibleLevels.has(child)) continue;
+      if (relationships.some((edge) => edge.parent === parent && edge.child === child)) continue;
+      relationships.push({ parent, child });
+      addedRelationships += 1;
+    }
+    if (!supportedLevels.length) {
+      setNotice(
+        unsupportedLevels.length
+          ? `The source suggestion has no maintained levels that can be applied. Review: ${unsupportedLevels.join(", ")}.`
+          : "The source did not suggest any maintained levels to apply.",
+      );
+      return;
+    }
+    updateLadder({ steps, relationships });
+    setNotice(
+      `Applied ${supportedLevels.length} source-informed maintained level${supportedLevels.length === 1 ? "" : "s"} and ${addedRelationships} compatible relationship${addedRelationships === 1 ? "" : "s"}. Review the ladder and review rules again; source reconciliation is now stale.` +
+        (unsupportedLevels.length ? ` Unmapped source levels remain for explicit review: ${unsupportedLevels.join(", ")}.` : ""),
+    );
+  };
+
   if (loading)
     return (
       <div className="projectSetupPage">
@@ -892,12 +965,14 @@ export default function ProjectSetupWalkthrough({
               kind={values.startKind as SourceKind}
               selectedCategories={values.selectedCategories}
               levelOptions={levelCatalogue.map((level) => ({ id: level.id, label: level.label }))}
+              ladderRevision={JSON.stringify(values.ladder)}
               initialState={sourceState}
               onSelectedCategoriesChange={updateSourceCategories}
               beforeSourceCall={ensureSourceSaved}
               onSourceVersion={updateSourceVersion}
               onSourceIdentity={updateSourceIdentity}
               onSourceStateChange={updateSourceState}
+              onApplyLadderSuggestion={applySourceLadderSuggestion}
             />
           )}
         </section>
