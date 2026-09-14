@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 912,
-    "cases": 1023,
+    "tests": 913,
+    "cases": 1024,
     "classes": 146,
-    "hostedTests": 864,
-    "hostedCases": 953,
+    "hostedTests": 865,
+    "hostedCases": 954,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 14,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 567,
-      "cases": 636,
+      "tests": 568,
+      "cases": 637,
       "unknownCases": 0,
       "classes": 112
     },
@@ -9617,8 +9617,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 381,
-        "end": 413
+        "start": 481,
+        "end": 513
       }
     },
     {
@@ -9635,8 +9635,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 415,
-        "end": 427
+        "start": 515,
+        "end": 527
       }
     },
     {
@@ -9653,8 +9653,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 346,
-        "end": 379
+        "start": 446,
+        "end": 479
       }
     },
     {
@@ -9671,8 +9671,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 116,
-        "end": 269
+        "start": 216,
+        "end": 369
       }
     },
     {
@@ -9690,7 +9690,7 @@
       ],
       "sourceLines": {
         "start": 58,
-        "end": 114
+        "end": 115
       }
     },
     {
@@ -9707,8 +9707,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 501,
-        "end": 572
+        "start": 601,
+        "end": 672
       }
     },
     {
@@ -9725,8 +9725,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 441,
-        "end": 499
+        "start": 541,
+        "end": 599
+      }
+    },
+    {
+      "cls": "ProjectConfigurationApiTests",
+      "test": "Empty_active_ladder_can_be_corrected_until_first_content_then_projection_and_write_lock_agree",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "shared-host-fixture",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 117,
+        "end": 214
       }
     },
     {
@@ -9743,8 +9761,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 271,
-        "end": 344
+        "start": 371,
+        "end": 444
       }
     },
     {
@@ -9761,8 +9779,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 429,
-        "end": 439
+        "start": 529,
+        "end": 539
       }
     },
     {
