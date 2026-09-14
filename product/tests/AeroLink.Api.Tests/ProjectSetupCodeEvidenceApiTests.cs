@@ -19,6 +19,12 @@ public sealed class ProjectSetupCodeEvidenceApiTests
     public async Task Fresh_project_defers_repository_then_requires_observed_matching_identity_for_GitLab_evidence()
     {
         using var factory = new AeroLinkApiFactory();
+        await QualifyAsync(factory);
+    }
+
+    internal static async Task QualifyAsync(AeroLinkApiFactory factory,
+        Func<HttpClient, Guid, long, Func<Task<HttpResponseMessage>>, Task>? acceptMerge = null)
+    {
         var project = await ProjectSetupServiceQualificationTests.QualifyAsync(factory);
         // Only the remote transport is replaced. The endpoint, probe, observation and persistence run normally.
         using var remote = new HttpClient(new ObservedGitLabProject());
@@ -93,11 +99,24 @@ public sealed class ProjectSetupCodeEvidenceApiTests
         Assert.Equal(72, observed.GetProperty("repository").GetProperty("remoteProjectId").GetInt32());
         await Refusal("repository_identity_mismatch", "other/project", "https://code.example.test/company/software/-/merge_requests/12");
         await Refusal("repository_identity_mismatch", "company/software", "https://gitlab.foreign.test/company/software/-/merge_requests/12");
-        using (var accepted = await PostMerge("company/software", "https://code.example.test/company/software/-/merge_requests/12"))
+        if (acceptMerge is null)
+        {
+            using var accepted = await PostMerge("company/software", "https://code.example.test/company/software/-/merge_requests/12");
             await Success(accepted);
+        }
+        else await acceptMerge(client, project.ProjectId, observed.GetProperty("repository").GetProperty("version").GetInt64(),
+            () => PostMerge("company/software", "https://code.example.test/company/software/-/merge_requests/12"));
         var completed = await client.GetFromJsonAsync<JsonElement>($"/api/code-traceability?projectId={project.ProjectId}&releaseId={project.ReleaseId}");
         Assert.Equal(2, completed.GetProperty("summary").GetProperty("mapped").GetInt32());
         Assert.True(completed.GetProperty("summary").GetProperty("gateComplete").GetBoolean());
+        var snapshot = completed.GetProperty("requirements").EnumerateArray().Select(x => x.GetProperty("mapping"))
+            .Single(x => x.GetProperty("disposition").GetString() == "GitLabMerge");
+        Assert.Equal(72, snapshot.GetProperty("verifiedRemoteProjectId").GetInt64());
+        Assert.Equal("https://code.example.test/company/software", snapshot.GetProperty("verifiedRepositoryEndpoint").GetString());
+        Assert.Equal("company/software", snapshot.GetProperty("verifiedRepositoryPath").GetString());
+        Assert.Equal("admin", snapshot.GetProperty("repositoryVerifiedBy").GetString());
+        Assert.Equal(observed.GetProperty("repository").GetProperty("version").GetInt64(), snapshot.GetProperty("repositoryConfigurationVersion").GetInt64());
+        Assert.Equal(observed.GetProperty("repository").GetProperty("lastVerifiedAt").GetDateTimeOffset(), snapshot.GetProperty("repositoryVerifiedAt").GetDateTimeOffset());
         using var verification = configured.Services.CreateScope();
         var verifyDb = verification.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         Assert.All(await verifyDb.CodeTraceabilityRecords.ToListAsync(), x =>

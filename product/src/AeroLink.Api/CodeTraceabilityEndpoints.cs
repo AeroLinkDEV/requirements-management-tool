@@ -65,10 +65,18 @@ public static class CodeTraceabilityEndpoints
         if (release is null) return Results.BadRequest(new { error = "The selected build does not belong to this Project." });
         var ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
         if (release.IsReleased) return Results.Conflict(new { error = $"Build {release.Version} is released and read-only." });
+        // Hold the observed repository row through evidence commit. A concurrent configuration edit or
+        // failed verification must wait for this bounded write; no external call occurs under the lock.
+        await using var repositoryTransaction = request.Disposition == CodeTraceDisposition.GitLabMerge
+            ? await db.Database.BeginTransactionAsync(ct) : null;
         ProjectRepositoryConfiguration? repositoryConfiguration = null;
         if (request.Disposition == CodeTraceDisposition.GitLabMerge)
         {
-            repositoryConfiguration = await db.ProjectRepositoryConfigurations.AsNoTracking()
+            var repositoryQuery = db.Database.IsNpgsql()
+                ? db.ProjectRepositoryConfigurations.FromSqlInterpolated(
+                    $"SELECT * FROM project_repository_configurations WHERE \"ProjectId\" = {request.ProjectId} FOR UPDATE")
+                : db.ProjectRepositoryConfigurations.AsQueryable();
+            repositoryConfiguration = await repositoryQuery.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.ProjectId == request.ProjectId, ct);
             var refusal = ProjectRepositoryEvidencePolicy.ValidateMerge(repositoryConfiguration, request.RepositoryPath,
                 request.MergeRequestUrl, request.MergeRequestReference);
@@ -103,6 +111,7 @@ public static class CodeTraceabilityEndpoints
                 $"Mapped exact LLR revision {request.RequirementRevisionId} as {request.Disposition} for build {request.ReleaseId}.",
                 http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
             await db.SaveChangesAsync(ct);
+            if (repositoryTransaction is not null) await repositoryTransaction.CommitAsync(ct);
             return Results.Created($"/api/code-traceability/{record.Id}", new { record.Id, disposition = record.Disposition.ToString() });
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -154,6 +163,8 @@ public static class CodeTraceabilityEndpoints
                 {
                     id = record.Id, disposition = record.Disposition.ToString(), record.RepositoryPath, record.MergeRequestReference,
                     record.MergeRequestTitle, record.MergeRequestUrl, record.MergeCommitSha, record.MergedAt, record.NoCodeChangeRationale,
+                    record.VerifiedRemoteProjectId, record.VerifiedRepositoryEndpoint, record.VerifiedRepositoryPath,
+                    record.RepositoryConfigurationVersion, record.RepositoryVerifiedAt, record.RepositoryVerifiedBy,
                     record.IsDemonstration, record.RecordedBy, record.RecordedAt
                 } : null
             })

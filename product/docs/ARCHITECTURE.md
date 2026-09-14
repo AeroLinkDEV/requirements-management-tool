@@ -76,6 +76,10 @@ exposes this prerequisite; no-code decisions remain available subject to their n
 An observed repository connection does not assert that a manually supplied merge or commit exists. Existing
 projects without a setup record retain their prior capture contract, and historical evidence is never rewritten
 or hidden when connection configuration changes.
+Acceptance locks the observed configuration row for the short local evidence transaction, so a concurrent
+edit or failed verification cannot clear the prerequisite before that record commits. Each new GitLab mapping
+retains the observed remote project ID, endpoint/path, configuration version, verification actor and time.
+Later connection changes cannot rewrite that immutable snapshot; legacy and no-code records retain null values.
 
 Implementation evidence capture remains manual, with a small, conspicuously labelled FMS demonstration set.
 Webhook synchronization, CI state, many-to-many MR/LLR mapping, and automated

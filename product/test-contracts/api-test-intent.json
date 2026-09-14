@@ -10,8 +10,8 @@
     "nonHostedCases": 48,
     "unknownHostTests": 13,
     "unknownHostCases": 21,
-    "hostedCandidateTests": 17,
-    "hostedCandidateCases": 17,
+    "hostedCandidateTests": 18,
+    "hostedCandidateCases": 18,
     "unknownCandidateTests": 7,
     "unknownCandidateCases": 15,
     "unknownCaseTests": 0,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 562,
-      "cases": 630,
+      "tests": 561,
+      "cases": 629,
       "unknownCases": 0,
-      "classes": 111
+      "classes": 110
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 40,
-      "cases": 40,
+      "tests": 41,
+      "cases": 41,
       "unknownCases": 0,
-      "classes": 16
+      "classes": 17
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -10254,18 +10254,16 @@
       "cls": "ProjectSetupCodeEvidenceApiTests",
       "test": "Fresh_project_defers_repository_then_requires_observed_matching_identity_for_GitLab_evidence",
       "kind": "Fact",
-      "intent": "http-boundary",
+      "intent": "in-process-logic",
       "cases": 1,
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
-        "factory-client",
-        "host-customization"
+        "factory-construction"
       ],
       "sourceLines": {
         "start": 18,
-        "end": 121
+        "end": 23
       }
     },
     {

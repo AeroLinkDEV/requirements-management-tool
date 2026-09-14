@@ -1043,7 +1043,7 @@
       "classification": "fresh-host",
       "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
       "intents": [
-        "http-boundary"
+        "in-process-logic"
       ]
     },
     {

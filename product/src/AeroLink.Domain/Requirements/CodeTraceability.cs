@@ -43,6 +43,12 @@ public sealed class CodeTraceabilityRecord
             var refusal = ProjectRepositoryEvidencePolicy.ValidateMerge(repositoryConfiguration, RepositoryPath,
                 MergeRequestUrl, MergeRequestReference);
             if (refusal is not null) throw new DomainException(refusal.Error);
+            VerifiedRemoteProjectId = repositoryConfiguration.RemoteProjectId;
+            VerifiedRepositoryEndpoint = repositoryConfiguration.Endpoint;
+            VerifiedRepositoryPath = repositoryConfiguration.RemotePathWithNamespace;
+            RepositoryConfigurationVersion = repositoryConfiguration.Version;
+            RepositoryVerifiedAt = repositoryConfiguration.LastVerifiedAt;
+            RepositoryVerifiedBy = repositoryConfiguration.LastVerifiedBy;
         }
         // Preserve the legacy capture grammar for projects without setup configuration. A verified GitLab
         // installation may use any authorized host name; its exact project identity is checked above.
@@ -70,6 +76,14 @@ public sealed class CodeTraceabilityRecord
     public bool IsDemonstration { get; private set; }
     public string RecordedBy { get; private set; } = "";
     public DateTimeOffset RecordedAt { get; private set; }
+    // Observed identity at acceptance, independent of later repository edits, failures, path reuse or renames.
+    // Null means legacy capture or a no-code decision; it is never retroactive verification evidence.
+    public long? VerifiedRemoteProjectId { get; private set; }
+    public string? VerifiedRepositoryEndpoint { get; private set; }
+    public string? VerifiedRepositoryPath { get; private set; }
+    public long? RepositoryConfigurationVersion { get; private set; }
+    public DateTimeOffset? RepositoryVerifiedAt { get; private set; }
+    public string? RepositoryVerifiedBy { get; private set; }
 
     private static string Required(string? value, string error) => string.IsNullOrWhiteSpace(value) ? throw new DomainException(error) : value.Trim();
 }

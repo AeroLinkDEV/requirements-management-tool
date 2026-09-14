@@ -11,7 +11,7 @@ using Npgsql;
 
 namespace AeroLink.Api.Tests;
 
-public sealed class ProjectSetupPostgresQualificationTests
+public sealed partial class ProjectSetupPostgresQualificationTests
 {
     [RequiredSetupPostgresFact]
     public async Task Fresh_project_services_and_deliberate_staffing_survive_host_restart_and_migration_reapplication()

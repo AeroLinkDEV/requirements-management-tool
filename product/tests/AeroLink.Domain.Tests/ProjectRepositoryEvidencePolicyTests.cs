@@ -26,9 +26,20 @@ public sealed class ProjectRepositoryEvidencePolicyTests
             "https://code.example.test/hosting/company/software/-/merge_requests/12", new string('a', 40),
             DateTimeOffset.UtcNow, "", false, "engineer", DateTimeOffset.UtcNow, configuration);
         Assert.Equal("company/software", record.RepositoryPath);
+        var verifiedAt = configuration.LastVerifiedAt;
+        var version = configuration.Version;
         configuration.RecordVerificationFailure("admin", DateTimeOffset.UtcNow);
         Assert.Equal("repository_unverified", ProjectRepositoryEvidencePolicy.ValidateMerge(configuration, record.RepositoryPath,
             record.MergeRequestUrl, record.MergeRequestReference)?.Code);
+        configuration.Configure(configuration.Version, ProjectRepositorySetupMode.ConnectNow, "GitLab",
+            "https://code.example.test/hosting/company/replacement", "admin", DateTimeOffset.UtcNow);
+        configuration.RecordVerification("other.admin", DateTimeOffset.UtcNow, 91, "company/replacement");
+        Assert.Equal(72, record.VerifiedRemoteProjectId);
+        Assert.Equal("https://code.example.test/hosting/company/software.git", record.VerifiedRepositoryEndpoint);
+        Assert.Equal("company/software", record.VerifiedRepositoryPath);
+        Assert.Equal(version, record.RepositoryConfigurationVersion);
+        Assert.Equal(verifiedAt, record.RepositoryVerifiedAt);
+        Assert.Equal("admin", record.RepositoryVerifiedBy);
     }
 
     [Fact]

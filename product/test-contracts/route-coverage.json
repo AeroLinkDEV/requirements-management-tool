@@ -2578,7 +2578,8 @@
       "file": "ProjectRepositoryEndpoints.cs",
       "coveredBy": [
         "ProjectRepositoryApiTests",
-        "ProjectSetupCodeEvidenceApiTests"
+        "ProjectSetupCodeEvidenceApiTests",
+        "ProjectSetupPostgresQualificationTests.Repository"
       ]
     },
     {
