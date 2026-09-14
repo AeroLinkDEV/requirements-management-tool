@@ -119,8 +119,10 @@ public sealed class ProjectSetupService(
             {
                 SelectedCategoriesJson = command.StartKind == ProjectSetupStartKind.Fresh ? "[]" : command.SelectedCategoriesJson,
                 MappingJson = command.StartKind == ProjectSetupStartKind.Fresh ? "{}" : command.MappingJson,
+                LadderJson = command.LadderJson is not null && !JsonEquivalent(command.LadderJson, draft.LadderJson)
+                    ? command.LadderJson : null,
                 ReviewRulesJson = command.ReviewRulesJson is not null || command.ReviewRulesAccepted == true
-                    ? reviewRulesJson : null,
+                    ? (JsonEquivalent(reviewRulesJson, draft.ReviewRulesJson) ? null : reviewRulesJson) : null,
             };
             if (selectedSourcePackage is not null && effectiveCommand.LadderJson is not null)
             {

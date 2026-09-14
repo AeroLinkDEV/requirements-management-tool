@@ -86,6 +86,24 @@ public sealed class ProjectSetupInceptionApiTests
             sourceAssertionAccepted = true,
         });
         Assert.Equal(HttpStatusCode.BadRequest, staleFinalize.StatusCode);
+
+        using var changedLadder = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        {
+            expectedVersion = changedVersion, currentStep = "Review",
+            ladder = new
+            {
+                steps = new[] { new { catalogueEntry = "Customer", position = 1, capabilities = 0,
+                    enabledArtifactKinds = Array.Empty<string>() } },
+                relationships = Array.Empty<object>(),
+            },
+        });
+        Assert.Equal(HttpStatusCode.OK, changedLadder.StatusCode);
+        using var invalidatedSource = await client.GetAsync($"/api/project-setups/{draftId}/source");
+        Assert.Equal("Analysed", (await invalidatedSource.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("stage").GetString());
+        using var invalidatedDraft = await client.GetAsync($"/api/project-setups/{draftId}");
+        Assert.False((await invalidatedDraft.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("reviewRules").GetProperty("accepted").GetBoolean());
     }
 
     [Fact]
@@ -575,6 +593,15 @@ public sealed class ProjectSetupInceptionApiTests
         Assert.Equal("Reconciled", configuredBody.RootElement.GetProperty("stage").GetString());
         var configuredVersion = configuredBody.RootElement.GetProperty("draftVersion").GetInt64();
         Assert.NotEqual(JsonValueKind.Null, configuredBody.RootElement.GetProperty("manifestHash").ValueKind);
+
+        using var savedUnchangedLadder = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        { expectedVersion = configuredVersion, currentStep = "Review", ladder = new { } });
+        Assert.Equal(HttpStatusCode.OK, savedUnchangedLadder.StatusCode);
+        configuredVersion = (await savedUnchangedLadder.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("version").GetInt64();
+        using var sourceAfterSave = await client.GetAsync($"/api/project-setups/{draftId}/source");
+        Assert.Equal("Reconciled", (await sourceAfterSave.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("stage").GetString());
 
         // Backtracking without resending source fields clears inherited answers, while returning to the
         // exact upload restores the server-owned configuration for every supported external format.
