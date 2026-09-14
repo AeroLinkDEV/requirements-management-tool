@@ -299,6 +299,11 @@ test("unmapped heterogeneous source objects can be configured independently", as
   await expect(high).toHaveCount(1);
   await expect(system.getByLabel("Mapping for Requirements SYS-1 Statement")).toBeVisible();
   await expect(high.getByLabel("Mapping for Requirements HLR-1 Rationale")).toBeVisible();
+  // Header controls remain useful bulk actions. They must update every exact object before an
+  // individual override, otherwise the UI would show one decision while the payload retained old
+  // per-object defaults.
+  const module = page.locator("article.setupSourceModule").filter({ hasText: "Requirements" }).first();
+  await module.getByLabel("Ladder level for Requirements").selectOption("LowLevel");
   await system.getByRole("combobox").first().selectOption("System");
   await high.getByLabel("Include this source object").uncheck();
   await high.getByLabel("Exclusion reason", { exact: true }).fill("Not included in this project start.");
@@ -321,6 +326,7 @@ test("unmapped heterogeneous source objects can be configured independently", as
   expect(systemMapping?.level).toBe("System");
   expect(systemMapping?.attributes.find((attribute) => attribute.sourceAttribute === "Owner")?.destination).toBe("SourceOnly");
   expect(highMapping?.include).toBe(false);
+  expect(highMapping?.level).toBe("LowLevel");
   expect(highMapping?.exclusionReason).toBe("Not included in this project start.");
   await page.screenshot({ path: testInfo.outputPath("heterogeneous-object-mappings.png"), fullPage: true });
 });

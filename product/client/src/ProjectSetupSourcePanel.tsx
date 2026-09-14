@@ -28,6 +28,7 @@ export type ProjectSetupSourcePanelProps = {
   draftId: string;
   draftVersion: number;
   kind: SourceKind;
+  canAcceptSource?: boolean;
   selectedCategories: string[];
   levelOptions: SetupLevelOption[];
   initialState: SourceDraftState;
@@ -116,9 +117,37 @@ function formatCount(value: number) {
 function updateModule(source: SourceView, index: number, patch: Partial<SourceModule>): SourceView {
   return {
     ...source,
-    modules: source.modules.map((module, currentIndex) =>
-      currentIndex === index ? { ...module, ...patch } : module,
-    ),
+    modules: source.modules.map((module, currentIndex) => {
+      if (currentIndex !== index) return module;
+      const nextModule = { ...module, ...patch };
+      // The module heading is a useful bulk-edit affordance, but a module is only a
+      // presentation grouping. Keep its exact object decisions in sync with the bulk
+      // action so the visible change is what the versioned payload will serialize.
+      if (!module.objects?.length) return nextModule;
+      const objectMappings = Object.fromEntries(module.objects.map((object) => {
+        const current = module.objectMappings?.[object.key] ?? defaultSourceObjectMapping(module);
+        const next = { ...current };
+        if (Object.prototype.hasOwnProperty.call(patch, "include") && typeof patch.include === "boolean") {
+          next.include = patch.include;
+        }
+        if (Object.prototype.hasOwnProperty.call(patch, "level")) {
+          next.level = patch.level;
+        }
+        if (Object.prototype.hasOwnProperty.call(patch, "exclusionReason")) {
+          next.exclusionReason = patch.exclusionReason;
+        }
+        if (patch.mappings) {
+          next.mappings = patch.mappings.map((mapping) => ({
+            ...mapping,
+            ...(mapping.valueMappings
+              ? { valueMappings: mapping.valueMappings.map((value) => ({ ...value })) }
+              : {}),
+          }));
+        }
+        return [object.key, next] as const;
+      }));
+      return { ...nextModule, objectMappings };
+    }),
   };
 }
 
@@ -262,12 +291,14 @@ export function SourceAcceptanceFields({
   password,
   onAcceptedChange,
   onPasswordChange,
+  disabled = false,
 }: {
   source: SourceView | null;
   accepted: boolean;
   password: string;
   onAcceptedChange: (accepted: boolean) => void;
   onPasswordChange: (password: string) => void;
+  disabled?: boolean;
 }) {
   if (!source?.assertion) {
     return (
@@ -292,6 +323,7 @@ export function SourceAcceptanceFields({
           type="checkbox"
           checked={accepted}
           onChange={(event) => onAcceptedChange(event.target.checked)}
+          disabled={disabled}
         />
         I accept this exact source assertion as the person authorizing this project start.
       </label>
@@ -302,6 +334,7 @@ export function SourceAcceptanceFields({
           value={password}
           onChange={(event) => onPasswordChange(event.target.value)}
           autoComplete="current-password"
+          disabled={disabled}
         />
         <small>
           Your password is used only for this finalization request and is never saved in the draft.
@@ -316,6 +349,7 @@ export default function ProjectSetupSourcePanel({
   draftId,
   draftVersion,
   kind,
+  canAcceptSource = true,
   selectedCategories,
   levelOptions,
   initialState,
@@ -1428,12 +1462,19 @@ export default function ProjectSetupSourcePanel({
             source={source}
             accepted={accepted}
             password={password}
+            disabled={!canAcceptSource}
             onAcceptedChange={(next) => {
               setAccepted(next);
               setNotice("Unsaved source acceptance. Save the project review before finalization.");
             }}
             onPasswordChange={setPassword}
           />
+          {!canAcceptSource && (
+            <p className="setupSourcePending" role="status">
+              Only an AeroLink administrator can accept source facts for finalization. You can
+              continue reviewing and saving this draft.
+            </p>
+          )}
         </>
       )}
 
