@@ -1777,6 +1777,7 @@
       "file": "ProjectSetupEndpoints.cs",
       "coveredBy": [
         "ProjectSetupApiTests",
+        "ProjectSetupAuthorizationApiTests",
         "ProjectSetupBoundaryRegressionApiTests",
         "ProjectSetupDiscoveryApiTests",
         "ProjectSetupInceptionApiTests",
@@ -1810,6 +1811,7 @@
       "path": "/api/project-setups/{draftId:guid}/source/native",
       "file": "ProjectSetupSourceEndpoints.cs",
       "coveredBy": [
+        "ProjectSetupAuthorizationApiTests",
         "ProjectSetupInceptionApiTests"
       ]
     },
@@ -2578,6 +2580,7 @@
       "path": "/api/project-setups/{draftId:guid}/source/configuration",
       "file": "ProjectSetupSourceEndpoints.cs",
       "coveredBy": [
+        "ProjectSetupAuthorizationApiTests",
         "ProjectSetupInceptionApiTests"
       ]
     },

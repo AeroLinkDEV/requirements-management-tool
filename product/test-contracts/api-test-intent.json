@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 911,
-    "cases": 1022,
+    "tests": 912,
+    "cases": 1023,
     "classes": 146,
-    "hostedTests": 863,
-    "hostedCases": 952,
+    "hostedTests": 864,
+    "hostedCases": 953,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 14,
@@ -37,8 +37,8 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 101,
-      "cases": 107,
+      "tests": 102,
+      "cases": 108,
       "unknownCases": 0,
       "classes": 61
     },
@@ -10231,6 +10231,24 @@
     },
     {
       "cls": "ProjectSetupAuthorizationApiTests",
+      "test": "Demoted_native_creator_can_resume_but_current_administrator_must_accept_source",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 94,
+        "end": 233
+      }
+    },
+    {
+      "cls": "ProjectSetupAuthorizationApiTests",
       "test": "Former_creator_can_resume_and_save_but_current_administrator_must_finalize",
       "kind": "Fact",
       "intent": "auth-policy",
@@ -10243,8 +10261,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 15,
-        "end": 89
+        "start": 18,
+        "end": 92
       }
     },
     {

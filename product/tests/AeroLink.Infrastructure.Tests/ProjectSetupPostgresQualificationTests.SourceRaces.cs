@@ -13,6 +13,70 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed partial class ProjectSetupPostgresQualificationTests
 {
     [DisposablePostgresFact]
+    public async Task Concurrent_identical_external_uploads_are_normalized_to_one_package_and_one_conflict_on_postgresql()
+    {
+        await WithSetupDatabaseAsync(async connection =>
+        {
+            using var provider = SetupProvider(connection);
+            Guid accountId;
+            using (var seedScope = provider.CreateScope())
+            {
+                var db = seedScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                var account = new UserAccount("pg-identical-upload-owner", "PG Identical Upload Owner",
+                    "pg-identical-upload-owner@example.test", "fixture-hash", DateTimeOffset.UtcNow);
+                db.Add(account);
+                await db.SaveChangesAsync();
+                accountId = account.Id;
+            }
+            var actor = new AuthenticatedUser(accountId, "pg-identical-upload-owner", "PG Identical Upload Owner",
+                "pg-identical-upload-owner@example.test", true, []);
+            Guid draftId;
+            long expectedVersion;
+            await using (var setupScope = provider.CreateAsyncScope())
+            {
+                var service = setupScope.ServiceProvider.GetRequiredService<ProjectSetupService>();
+                var draft = await PrepareExternalDraftAsync(
+                    service, await service.CreateAsync(actor, "Identical upload destination", CancellationToken.None),
+                    actor, "identical-upload.csv");
+                draftId = draft.Id;
+                expectedVersion = draft.Version;
+            }
+
+            var bytes = ExternalSourceBytes("identical-upload.csv");
+            var barrier = new DraftReadBarrier();
+            using var racingProvider = SetupProvider(connection, barrier);
+            async Task<Exception?> UploadAsync()
+            {
+                await using var scope = racingProvider.CreateAsyncScope();
+                try
+                {
+                    await scope.ServiceProvider.GetRequiredService<ProjectSetupInceptionService>()
+                        .UploadAsync(draftId, actor, expectedVersion, "identical-upload.csv",
+                            new MemoryStream(bytes, writable: false), CancellationToken.None);
+                    return null;
+                }
+                catch (Exception ex) { return ex; }
+            }
+
+            var outcomes = await Task.WhenAll(UploadAsync(), UploadAsync());
+            Assert.Equal(2, barrier.Reads);
+            var conflict = Assert.Single(outcomes, x => x is not null);
+            Assert.IsType<ProjectSetupConcurrencyException>(conflict);
+            Assert.Contains("staged the same source first", conflict!.Message, StringComparison.Ordinal);
+
+            await using var verifyScope = provider.CreateAsyncScope();
+            var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var packages = await verifyDb.ProjectSetupSourcePackages.AsNoTracking()
+                .Where(x => x.DraftId == draftId).ToListAsync();
+            Assert.Single(packages);
+            Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant(), packages[0].Sha256);
+            var draftAfterRace = await verifyDb.ProjectSetupDrafts.AsNoTracking().SingleAsync(x => x.Id == draftId);
+            Assert.Equal(expectedVersion + 1, draftAfterRace.Version);
+            Assert.Equal(packages[0].Id, draftAfterRace.SourceImportId);
+        });
+    }
+
+    [DisposablePostgresFact]
     public async Task Concurrent_native_capture_and_external_upload_leave_one_staged_package_on_postgresql()
     {
         await WithSetupDatabaseAsync(async connection =>

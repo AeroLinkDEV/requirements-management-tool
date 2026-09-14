@@ -152,7 +152,7 @@ public sealed class ProjectSetupService(
         string? sourceAssertionHash = null, bool sourceAssertionAccepted = false)
     {
         // Draft management is intentionally broader than project creation: the creator can save, read, and
-        // resume somebody's draft, while only a currently authenticated AeroLink administrator may create the
+        // resume their draft, while only a currently authenticated AeroLink administrator may create the
         // project and, for source starts, accept/materialize its source. Do this before any draft details are
         // exposed through finalization errors.
         RequireAdministrator(actor);
