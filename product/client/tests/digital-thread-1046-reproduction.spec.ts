@@ -56,8 +56,8 @@ for (const mode of ['page-detailed', 'page-compact', 'standalone-control']) test
       expect(await page.evaluate(() => (window as any).__1046.filter((v: any) => v.kind === 'paint').at(-1).emphasisId)).toBe(id)
       expect(await page.locator('.dtCanvasScene').getAttribute('style')).toBe(cameraBefore)
       const after = (await card.boundingBox())!
-      expect(Math.abs(after.y - box.y)).toBeLessThanOrEqual(1)
-      expect(Math.abs(after.x - box.x)).toBeLessThanOrEqual(1)
+      expect.soft(Math.abs(after.y - box.y), `${id} hover source y must stay fixed`).toBeLessThanOrEqual(1)
+      expect.soft(Math.abs(after.x - box.x), `${id} hover source x must stay fixed`).toBeLessThanOrEqual(1)
     }
   }
   try {
