@@ -17,7 +17,10 @@ public sealed class ProjectSetupPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Migration_draft_reload_and_concurrent_edit_are_durable_on_postgresql()
     {
-        var server = ValidateServer(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
+        var rawConnection = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
+        if (string.IsNullOrWhiteSpace(rawConnection))
+            throw new InvalidOperationException("Required project-setup PostgreSQL qualification needs an explicit disposable connection.");
+        var server = ValidateServer(rawConnection);
         var databaseName = $"aerolink_1037_setup_{Guid.NewGuid():N}";
         await CreateDatabaseAsync(server, databaseName);
         try
@@ -122,7 +125,10 @@ public sealed class ProjectSetupPostgresQualificationTests
     {
         public DisposablePostgresFactAttribute()
         {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")))
+            var required = Environment.GetEnvironmentVariable("AEROLINK_REQUIRE_POSTGRES_QUALIFICATION");
+            var mustRun = !string.IsNullOrWhiteSpace(required)
+                && !required.Equals("false", StringComparison.OrdinalIgnoreCase);
+            if (!mustRun && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")))
                 Skip = "Issue #1037 PostgreSQL qualification skipped: set AEROLINK_MIGRATIONS_CONNECTION to the dedicated disposable database.";
         }
     }

@@ -687,6 +687,14 @@ function Invoke-DisposablePostgreSqlGate {
         $attackerBody = @{ providerId = $provider.id; issuer = 'https://login.ci.example.attacker.test/tenant'; externalGroups = @('CI-APPROVERS'); programId = $programId } | ConvertTo-Json -Compress
         $attackerResolved = Invoke-SafeApiRequest -Label 'external-identity-attacker-resolve' -Uri "$baseUri/api/admin/external-identity/resolve" -Method Post -Body $attackerBody -WebSession $session
         if (@($attackerResolved.roles).Count -ne 0) { throw 'Disposable PostgreSQL look-alike issuer unexpectedly resolved a role.' }
+        # Use this gate's verified throwaway server. The runner rejects missing/skipped TRX evidence,
+        # and each qualification creates and drops only its own database on that server.
+        $previousMigrationsConnection = $env:AEROLINK_MIGRATIONS_CONNECTION
+        try {
+            $env:AEROLINK_MIGRATIONS_CONNECTION = "Host=127.0.0.1;Port=$hostPostgreSqlPort;Database=postgres;Username=$databaseUser;Password=$databasePassword"
+            & (Join-Path $PSScriptRoot 'Test-ProjectSetupPostgres.ps1') -NoBuild
+        }
+        finally { $env:AEROLINK_MIGRATIONS_CONNECTION = $previousMigrationsConnection }
         Write-Host '  Disposable PostgreSQL gate passed after exact process/listener ownership proof.' -ForegroundColor Green
     }
     catch {

@@ -795,6 +795,14 @@ migration experimentation, prefer a genuinely disposable PostgreSQL cluster (for
 point design-time EF at `aerolink` itself. Ordinary AeroLink startup applies runtime migrations normally via
 `Database.MigrateAsync()`; design-time EF is a separate, explicitly connected workflow.
 
+The Full changed-area planner and hosted PostgreSQL lane also execute
+`product/scripts/Test-ProjectSetupPostgres.ps1` against their owned disposable server. The runner requires
+an explicit `AEROLINK_MIGRATIONS_CONNECTION`, requires PostgreSQL qualification, and checks that its TRX
+contains passing project-setup tests with no skipped results. A normal infrastructure run without a
+disposable connection may skip these tests; that run is not provider evidence. The standalone runner builds
+the selected test project by default; `-NoBuild` is only for callers that already built the exact candidate.
+Its test boundary refuses persistent port 54329 and non-loopback servers.
+
 ## Attended production restore
 
 1. Confirm the selected archive, its date, and its `.sha256` sidecar; copy both to `product/.local/backups` if necessary.
