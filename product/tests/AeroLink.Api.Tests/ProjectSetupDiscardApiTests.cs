@@ -232,8 +232,22 @@ public sealed class ProjectSetupDiscardApiTests
             new { expectedVersion = capturedVersion });
         Assert.True(discarded.IsSuccessStatusCode, await discarded.Content.ReadAsStringAsync());
 
+        // A page left open on the discarded setup cannot stage or replay source work against it, including the
+        // idempotent native re-selection that exists for a lost response while the setup is still being created.
+        using var staleRecapture = await admin.PostAsJsonAsync($"/api/project-setups/{draftId}/source/native",
+            new { expectedVersion = capturedVersion, baselineId = sourceBaselineId });
+        Assert.Equal(HttpStatusCode.BadRequest, staleRecapture.StatusCode);
+        Assert.Contains("discarded", await staleRecapture.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        using var staleUpload = await admin.PostAsync(
+            $"/api/project-setups/{draftId}/source/upload?expectedVersion={capturedVersion}&fileName=stale.reqif",
+            new ByteArrayContent([1, 2, 3]));
+        Assert.Equal(HttpStatusCode.BadRequest, staleUpload.StatusCode);
+        Assert.Contains("discarded", await staleUpload.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+
         using var scopeAfter = factory.Services.CreateScope();
         var after = scopeAfter.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Single(await after.ProjectSetupSourcePackages.AsNoTracking()
+            .Where(x => x.DraftId == draftId).ToListAsync());
         var package = await after.ProjectSetupSourcePackages.AsNoTracking().SingleAsync(x => x.Id == stagedSourceId);
         Assert.Equal(stagedSha, package.Sha256);
         Assert.Equal(draftId, package.DraftId);

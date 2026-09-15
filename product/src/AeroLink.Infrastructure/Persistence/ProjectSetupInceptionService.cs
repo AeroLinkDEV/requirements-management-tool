@@ -46,6 +46,7 @@ public sealed class ProjectSetupInceptionService(
         long expectedVersion, Guid baselineId, CancellationToken ct)
     {
         var draft = (await LoadDraftAsync(draftId, actor, ct))!;
+        RequireNotDiscarded(draft);
         var baseline = await db.CandidateBaselines.AsNoTracking()
             .SingleOrDefaultAsync(x => x.Id == baselineId, ct)
             ?? throw new ProjectSetupInvalidException("The selected AeroLink baseline was not found.");
@@ -305,12 +306,13 @@ public sealed class ProjectSetupInceptionService(
 
     /// <summary>Checks draft access without reading an upload, before the host grants its larger body allowance.</summary>
     public async Task AuthorizeUploadAsync(Guid draftId, AuthenticatedUser actor, CancellationToken ct) =>
-        _ = await LoadDraftAsync(draftId, actor, ct);
+        RequireNotDiscarded((await LoadDraftAsync(draftId, actor, ct))!);
 
     public async Task<ProjectSetupSourceMutationResult> UploadAsync(Guid draftId, AuthenticatedUser actor,
         long expectedVersion, string fileName, Stream content, CancellationToken ct)
     {
         var draft = (await LoadDraftAsync(draftId, actor, ct))!;
+        RequireNotDiscarded(draft);
         if (string.IsNullOrWhiteSpace(fileName)) throw new ProjectSetupInvalidException("A source file name is required.");
         var bytes = await ReadUploadBoundedAsync(content, ct);
         ProjectCreationSourceAnalysis analysis;
@@ -356,6 +358,7 @@ public sealed class ProjectSetupInceptionService(
         InceptionConfigurationCommand command, CancellationToken ct)
     {
         var draft = (await LoadDraftAsync(draftId, actor, ct))!;
+        RequireNotDiscarded(draft);
         EnsureVersion(draft, command.ExpectedVersion);
         var package = await LoadPackageAsync(draft, ct);
         await ValidateNativePackageAsync(package, actor, ct);
@@ -386,6 +389,7 @@ public sealed class ProjectSetupInceptionService(
         long expectedVersion, CancellationToken ct)
     {
         var draft = (await LoadDraftAsync(draftId, actor, ct))!;
+        RequireNotDiscarded(draft);
         EnsureVersion(draft, expectedVersion);
         var package = await LoadPackageAsync(draft, ct);
         await ValidateNativePackageAsync(package, actor, ct);
@@ -1247,6 +1251,19 @@ public sealed class ProjectSetupInceptionService(
     }
     private static string? Get(JsonElement root, string name) => root.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
     private static void EnsureVersion(ProjectSetupDraft draft, long expected) { if (draft.Version != expected) throw new ProjectSetupConcurrencyException("This setup changed; refresh and retry."); }
+
+    /// <summary>
+    /// A discarded setup is no longer an active draft, so no source operation may change it — not even the
+    /// idempotent replay shortcuts, which exist for a lost HTTP response on a setup that is still being
+    /// created. Refusing here keeps a page left open on the discarded setup from staging new source work or
+    /// reading its own earlier selection as permission to continue. Nothing staged is deleted.
+    /// </summary>
+    private static void RequireNotDiscarded(ProjectSetupDraft draft)
+    {
+        if (draft.State == ProjectSetupState.Abandoned)
+            throw new ProjectSetupInvalidException("This setup was discarded and can no longer be changed.");
+    }
+
     private static void RequireAuthenticated(AuthenticatedUser actor) { if (actor.Id == Guid.Empty) throw new ProjectSetupAccessException(); }
     private static void RequireAdministrator(AuthenticatedUser actor)
     {
