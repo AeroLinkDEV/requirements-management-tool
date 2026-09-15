@@ -378,6 +378,10 @@
 .setupRowActions {
   display: flex;
   gap: 4px;
+  /* The row actions belong to the control row, not to the full-width diagnostics row that follows them. */
+  grid-row: 1;
+  grid-column: 5;
+  align-self: start;
 }
 .setupRowActions button,
 .setupStepPanel > button:not(.setupFinalizeButton) {
@@ -644,10 +648,14 @@
   .setupLadderRows > li {
     grid-template-columns: 28px minmax(170px, 1fr) minmax(240px, 1.4fr);
   }
+  /* Every wide child is placed explicitly: an auto-placed fieldset would land in the 28px row-number column
+     of the next row, which is how the capability labels used to spill across the readings. */
   .setupLadderRows > li > label:last-of-type,
+  .setupLadderRows > li > fieldset,
   .setupVerificationState,
   .setupRowActions {
     grid-column: 2 / -1;
+    grid-row: auto;
   }
 }
 @media (max-width: 620px) {
@@ -680,6 +688,7 @@
   .setupVerificationState,
   .setupRowActions {
     grid-column: 2;
+    grid-row: auto;
   }
   .setupRule > header,
   .setupRuleStage {

@@ -109,6 +109,25 @@ export function profileShapeIsUnsupported(step: VerificationProfileStep): boolea
   return !rawProfileIsExactSupportedProfile(step);
 }
 
+/**
+ * Whether a *saved* answer is genuinely invalid for this level.
+ *
+ * The exact-profile rule is not a general validity test: a level whose verification capability is disabled
+ * validly enables nothing, and a level with verification enabled but no recorded profile validly keeps the
+ * maintained catalogue default. Only an enabled level's explicit list (empty, malformed, reordered, duplicated
+ * or containing non-text entries) and a disabled level that still enables artifacts are invalid.
+ */
+export function savedProfileIsInvalid(
+  step: VerificationProfileStep,
+  catalogueEntry: string = step.catalogueEntry,
+): boolean {
+  if (artifactProfileIsMalformed(step)) return true;
+  const raw = rawProfileEntries(step);
+  if (!hasVerificationCapability(step)) return (raw?.length ?? 0) > 0;
+  if (raw === undefined) return false;
+  return !rawProfileIsExactSupportedProfile(step, catalogueEntry);
+}
+
 /** Why an enabled level's saved answer is not a profile this level can finalize with. */
 export function invalidProfileReason(step: VerificationProfileStep): string {
   if (artifactProfileIsMalformed(step)) return "is not a list of artifact kinds";

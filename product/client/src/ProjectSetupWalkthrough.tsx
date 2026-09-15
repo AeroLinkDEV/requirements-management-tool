@@ -26,8 +26,8 @@ import {
   hasVerificationCapability,
   invalidProfileReason,
   profileSelection,
-  rawProfileIsExactSupportedProfile,
   rawProfileEntries,
+  savedProfileIsInvalid,
   savedArtifactTokens,
   savedArtifactsLabel,
   verificationSummary,
@@ -1761,12 +1761,14 @@ export default function ProjectSetupWalkthrough({
                   {(catalogue.verification.length > 0 || findingsForLevel(step.catalogueEntry).length > 0) && (
                     <div className="setupLadderDiagnostics">
                       {/* Qualifiers live in the wide region: the readings column stays short and legible. */}
-                      {readinessStepForLevel(step.catalogueEntry) &&
-                        savedStepForLevel(step.catalogueEntry) &&
-                        !rawProfileIsExactSupportedProfile(
-                          savedStepForLevel(step.catalogueEntry)!,
-                          catalogue.id,
-                        ) && (
+                      {(() => {
+                        const savedStep = savedStepForLevel(step.catalogueEntry);
+                        return Boolean(
+                          readinessStepForLevel(step.catalogueEntry) &&
+                            savedStep &&
+                            savedProfileIsInvalid(savedStep, catalogue.id),
+                        );
+                      })() && (
                           <p className="setupFieldHint">
                             Effective is the server's reading of the saved profile, and that saved profile
                             is not one of this level's supported choices — repair the level or choose a
