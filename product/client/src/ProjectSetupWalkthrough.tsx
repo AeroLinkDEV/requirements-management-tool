@@ -1766,6 +1766,7 @@ export default function ProjectSetupWalkthrough({
                         return Boolean(
                           readinessStepForLevel(step.catalogueEntry) &&
                             savedStep &&
+                            hasVerificationCapability(savedStep) &&
                             savedProfileIsInvalid(savedStep, catalogue.id),
                         );
                       })() && (
