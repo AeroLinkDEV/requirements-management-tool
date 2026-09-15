@@ -74,6 +74,25 @@ public static class ProjectSetupEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { code = "invalid_draft", error = ex.Message }); }
         });
 
+        // Logically discards one unfinished saved setup. This is not project deletion: the draft keeps its row
+        // (so the action stays attributable and cannot be silently replayed) and no project, build, controlled
+        // record, staged source or shared evidence is removed.
+        app.MapPost("/api/project-setups/{draftId:guid}/discard", async (Guid draftId,
+            DiscardProjectSetupRequest request, HttpContext http, ProjectSetupService service, CancellationToken ct) =>
+        {
+            try
+            {
+                var draft = await service.DiscardAsync(draftId, http.UserAccount(), request.ExpectedVersion, ct);
+                return Results.Ok(View(draft));
+            }
+            catch (ProjectSetupAccessException) { return Results.Forbid(); }
+            catch (ProjectSetupNotFoundException) { return Results.NotFound(); }
+            catch (ProjectSetupConcurrencyException ex) { return Results.Conflict(new { code = "draft_conflict", error = ex.Message }); }
+            catch (ProjectSetupConflictException ex) { return Results.Conflict(new { code = "draft_conflict", error = ex.Message }); }
+            catch (ProjectSetupInvalidException ex) { return Results.BadRequest(new { code = "cannot_discard", error = ex.Message }); }
+            catch (DomainException ex) { return Results.BadRequest(new { code = "cannot_discard", error = ex.Message }); }
+        });
+
         app.MapPost("/api/project-setups/{draftId:guid}/finalize", async (Guid draftId,
             FinalizeProjectSetupRequest request, HttpContext http, ProjectSetupService service, CancellationToken ct) =>
         {
@@ -184,5 +203,6 @@ public sealed class ProjectSetupUpdateRequest
 public sealed record ProjectSetupProjectRequest(string? Name, string? SoftwareProduct);
 public sealed record ProjectSetupStartRequest(ProjectSetupStartKind? Kind, Guid? SourceBaselineId, Guid? SourceImportId);
 public sealed record ProjectSetupBuildRequest(string? Version);
+public sealed record DiscardProjectSetupRequest(long ExpectedVersion);
 public sealed record FinalizeProjectSetupRequest(long ExpectedVersion, string? IdempotencyKey = null,
     string? Password = null, string? SourceAssertionHash = null, bool SourceAssertionAccepted = false);

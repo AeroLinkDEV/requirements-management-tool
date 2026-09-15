@@ -146,6 +146,7 @@ body:has(.projectsPage) { min-width: 0; }
 .setupDraftsHeading h2 { margin: 0 0 4px; font: 700 16px/1.25 var(--font-display); }
 .setupDraftsHeading p, .setupDraftsEmpty { margin: 0; color: var(--ink-500); font-size: 12px; }
 .setupDraftsError { margin: 0 0 12px; color: #8f2f3d; font-size: 12px; line-height: 1.45; }
+.setupDraftsNotice { margin: 0 0 12px; color: #1d5c3a; font-size: 12px; line-height: 1.45; }
 .setupDraftsError button { border: 0; background: transparent; color: #236b9f; padding: 0; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
 .setupDraftsHeading button, .setupDraftCard button { border: 1px solid #236b9f; border-radius: 7px; background: #236b9f; color: white; padding: 8px 11px; font: 700 12px var(--font-body); cursor: pointer; white-space: nowrap; }
 .setupDraftsHeading button:hover, .setupDraftCard button:hover { background: #174f79; }
@@ -155,6 +156,16 @@ body:has(.projectsPage) { min-width: 0; }
 .setupDraftCard strong { color: var(--ink-900); font: 700 14px var(--font-display); overflow-wrap: anywhere; }
 .setupDraftCard span, .setupDraftCard small { color: var(--ink-500); font-size: 11px; line-height: 1.4; }
 .setupDraftCard button { justify-self: start; }
+/* Resuming and discarding are separate actions, so they sit side by side instead of stacking full width. */
+.setupDraftCard .setupDraftCardActions,
+.setupDraftCard .setupDraftDiscardActions { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+.setupDraftCard .quiet { border-color: #c3d3dd; background: white; color: #1d3c52; }
+.setupDraftCard .quiet:hover { background: #eef4f8; }
+/* Discarding an unfinished setup is confirmed against its name before anything is written. */
+.setupDraftCard > .setupDraftDiscard { display: grid; gap: 8px; border: 1px solid #e2c7a8; border-radius: 7px; background: #fdf7ef; padding: 10px; }
+.setupDraftDiscard p { margin: 0; color: #5c4630; font-size: 12px; line-height: 1.45; }
+.setupDraftDiscardActions { justify-content: flex-end; }
+.setupDraftDiscardError { margin: 0; color: #8f2f3d; font-size: 12px; line-height: 1.45; }
 
 .projectsPrimaryGrid {
   grid-template-columns: minmax(280px, 1fr);

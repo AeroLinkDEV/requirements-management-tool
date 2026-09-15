@@ -68,6 +68,12 @@ engineering content. Canonical `SW-NN.NN` identity validation governs new build 
 historical records. Empty-project ladder corrections preserve configuration history and synchronize containers;
 authored or inherited engineering content locks structural changes.
 
+An unfinished saved setup can be discarded by its creator or an administrator, and only from **Draft**: the
+confirmation names the setup, a **Finalizing** or completed setup is refused, and a page left open on the
+discarded setup can no longer save or finalize it. Discard is logical abandonment through the existing
+lifecycle — it stops being offered for resume while its record, staged source and shared evidence remain — and
+never deletes a project, build or controlled record.
+
 Supported capability subsets remain valid. Setup offers review subjects only for the configured change-control
 and verification capabilities; artifact threads and traceability publications distinguish unavailable verification
 from missing coverage using the effective ladder.

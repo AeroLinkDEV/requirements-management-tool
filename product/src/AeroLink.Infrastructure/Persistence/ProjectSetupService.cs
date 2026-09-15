@@ -71,12 +71,54 @@ public sealed class ProjectSetupService(
     public async Task<IReadOnlyList<ProjectSetupDraft>> ListAsync(AuthenticatedUser actor, CancellationToken ct)
     {
         RequireAuthenticated(actor);
-        var query = db.ProjectSetupDrafts.AsNoTracking().AsQueryable();
+        // A discarded setup is no longer active work: it stays in the table for attribution but is not offered
+        // for resume. Completed and in-flight setups remain discoverable so their recorded result is reachable.
+        var query = db.ProjectSetupDrafts.AsNoTracking().AsQueryable()
+            .Where(x => x.State != ProjectSetupState.Abandoned);
         if (!actor.IsAdministrator) query = query.Where(x => x.CreatorUserId == actor.Id);
         // SQLite cannot order DateTimeOffset values server-side. Draft discovery is an intentionally small,
         // authorized list, so materialize it and apply the same stable ordering in the application.
         return (await query.ToListAsync(ct)).OrderByDescending(x => x.UpdatedAt).ThenByDescending(x => x.Id).ToList();
     }
+
+    /// <summary>
+    /// Discards one unfinished saved setup. Authorization is the same creator-or-administrator boundary that
+    /// governs editing; the state guard refuses Completed and Finalizing so abandonment cannot hide a created
+    /// project or a finalization that is still in flight; and the version token plus the draft's concurrency
+    /// token resolve discard against a concurrent save or finalization. Nothing is deleted: the draft row, its
+    /// staged source package and any shared evidence remain, and the setup simply stops being discoverable.
+    /// </summary>
+    public async Task<ProjectSetupDraft> DiscardAsync(Guid draftId, AuthenticatedUser actor,
+        long expectedVersion, CancellationToken ct)
+    {
+        RequireAuthenticated(actor);
+        var draft = await db.ProjectSetupDrafts.SingleOrDefaultAsync(x => x.Id == draftId, ct)
+            ?? throw new ProjectSetupNotFoundException();
+        RequireManage(draft, actor);
+        // A repeat request reaches the state the caller asked for, so it reports the same outcome instead of
+        // turning a double-click or a retried request into an error.
+        if (draft.State == ProjectSetupState.Abandoned) return draft;
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            draft.Abandon(expectedVersion, now);
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent("ProjectSetupDiscarded", actor.UserName,
+                draft.Id.ToString("D"), "Success",
+                $"Discarded the unfinished setup '{SetupName(draft)}'; no project, build or controlled record was deleted.",
+                "local", now));
+            await db.SaveChangesAsync(ct);
+            return draft;
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            db.ChangeTracker.Clear();
+            throw new ProjectSetupConflictException(
+                "This setup changed after it was opened. Refresh the saved setups before discarding.", ex);
+        }
+    }
+
+    private static string SetupName(ProjectSetupDraft draft) =>
+        string.IsNullOrWhiteSpace(draft.ProjectName) ? "Untitled Project" : draft.ProjectName.Trim();
 
     public async Task<ProjectSetupDraft?> ReadAsync(Guid draftId, AuthenticatedUser actor, CancellationToken ct)
     {
@@ -171,6 +213,10 @@ public sealed class ProjectSetupService(
             return CompletedResult(draft);
         if (draft.State == ProjectSetupState.Finalizing)
             throw new ProjectSetupConflictException("This setup is already being finalized. Retry after it completes.");
+        // A discarded setup is not an editable draft any more, so it is refused before any validation or claim;
+        // the recorded state stays truthful rather than resurfacing as a simple validation problem.
+        if (draft.State == ProjectSetupState.Abandoned)
+            throw new ProjectSetupInvalidException("This setup was discarded and cannot be finalized.");
 
         ValidateCommonAnswers(draft);
         if (draft.StartKind == ProjectSetupStartKind.Fresh) ValidateFreshAnswers(draft);

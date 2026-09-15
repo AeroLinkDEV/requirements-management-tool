@@ -1,3 +1,5 @@
+import { apiRequest } from "./apiClient";
+
 export type SetupStep =
   | "Details"
   | "StartingPoint"
@@ -30,6 +32,32 @@ const setupSteps = new Set<SetupStep>([
 
 export const isSetupStep = (value: unknown): value is SetupStep =>
   typeof value === "string" && setupSteps.has(value as SetupStep);
+
+/** What the Projects list shows for one discard attempt: it either happened, or it says why it did not. */
+export type DiscardSetupOutcome = { ok: true } | { ok: false; message: string };
+
+export const setupDraftDisplayName = (draft: Pick<ProjectSetupDraftSummary, "project">) =>
+  draft.project.name.trim() || "Untitled Project";
+
+/**
+ * Logically discards one unfinished saved setup.
+ *
+ * The version the list is showing travels with the request so a stale page cannot discard answers somebody
+ * has since saved, and the server refuses a setup that is being finalized or has already completed. This is
+ * not Project deletion: the action stops the setup being offered for resume and nothing else is removed. The
+ * caller decides what to show; this helper performs exactly one request and never retries a version conflict.
+ */
+export async function discardProjectSetupDraft(
+  api: string,
+  draftId: string,
+  expectedVersion: number,
+): Promise<void> {
+  await apiRequest(`${api}/api/project-setups/${draftId}/discard`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expectedVersion }),
+  });
+}
 
 const asObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
