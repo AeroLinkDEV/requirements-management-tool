@@ -39,9 +39,10 @@ $script:ReconcileTaskName = 'AeroLinkProductionSourceReconcile'
 # deliberate headroom rather than treated as a universal sizing rule.
 #
 #   supported upgrade deadline   2400 s   ~1.85x that one completed observation
-#   continuation wrapper         2700 s   upgrade budget + 300 s for the continuation's own inspection,
-#                                         topology restoration, tunnel restore and verification, which sit
-#                                         OUTSIDE the upgrade the inner deadline covers
+#
+# The continuation wrapper is NOT chosen next to that number; it is composed from the stages it contains,
+# immediately below. An earlier revision picked 2700 s alongside the upgrade deadline, which was smaller
+# than the sum of its own stages and could therefore terminate work still inside its component allowance.
 #
 # THE SEQUENTIAL ARGUMENT, which a plain "inner < outer" ordering misses. One task run can make more than
 # one continuation attempt: the reconciliation path runs a primary handoff and, on failure, a recovery
