@@ -2245,8 +2245,34 @@ async function expectRegionsDoNotOverlap(first: Locator, second: Locator, label:
  * given viewport. This is the regression check for the collapsed-column defect: an auto-placed fieldset in the
  * row-number column still renders, so only geometry catches it.
  */
+/** The widths the row layout is qualified at: both sides of every responsive transition plus the reported ones. */
+const ladderLayoutWidths = [1280, 1101, 1099, 1024, 981, 980, 900, 621, 619];
+
 async function expectLadderRowLayout(page: Page, width: number) {
   await page.setViewportSize({ width, height: 1400 });
+  // A row that overflows the panel expands the document instead of failing an intersection check, which is how
+  // the 981-1024px controls escaped the earlier geometry assertions.
+  const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  // At and above the widths the reviewer reported, the page itself must fit the viewport. (Below ~960px the
+  // banner keeps a larger min-content width, a pre-existing page-level condition outside this row's scope;
+  // the row and its regions are still asserted against the panel and the viewport at every width below.)
+  if (width >= 981) {
+    expect(documentWidth, `the page must not scroll horizontally at ${width}px`).toBeLessThanOrEqual(width + 1);
+  }
+  const panel = page.locator(".setupStepPanel").first();
+  const panelBox = await panel.boundingBox();
+  expect(panelBox, `the ladder panel must be rendered at ${width}px`).toBeTruthy();
+  const ladder = page.locator(".setupLadderRows").first();
+  const ladderBox = await ladder.boundingBox();
+  expect(ladderBox, `the ladder list must be rendered at ${width}px`).toBeTruthy();
+  expect(
+    ladderBox!.x + ladderBox!.width,
+    `the ladder must end inside the panel at ${width}px`,
+  ).toBeLessThanOrEqual(panelBox!.x + panelBox!.width + 1);
+  expect(
+    ladderBox!.x + ladderBox!.width,
+    `the ladder must end inside the viewport at ${width}px`,
+  ).toBeLessThanOrEqual(width + 1);
   const rows = page.locator(".setupLadderRows > li");
   const count = await rows.count();
   expect(count, `the ladder must render rows at ${width}px`).toBeGreaterThan(0);
@@ -2259,8 +2285,31 @@ async function expectLadderRowLayout(page: Page, width: number) {
       `row ${index} capabilities keep a readable width at ${width}px`,
     ).toBeGreaterThan(200);
     const actions = row.locator(".setupRowActions");
-    await expectRegionsDoNotOverlap(capabilities, actions, `row ${index} capabilities vs actions at ${width}px`);
     const readings = row.locator(".setupVerificationState");
+    const diagnostics = row.locator(".setupLadderDiagnostics");
+    const regions: [string, Locator][] = [
+      ["capabilities", capabilities],
+      ["actions", actions],
+      ["readings", readings],
+      ["diagnostics", diagnostics],
+    ];
+    for (const [name, region] of regions) {
+      if ((await region.count()) === 0) continue;
+      const box = await region.boundingBox();
+      expect(box, `row ${index} ${name} must be rendered at ${width}px`).toBeTruthy();
+      expect(box!.x, `row ${index} ${name} must start inside the panel at ${width}px`).toBeGreaterThanOrEqual(
+        panelBox!.x - 1,
+      );
+      expect(
+        box!.x + box!.width,
+        `row ${index} ${name} must end inside the panel at ${width}px`,
+      ).toBeLessThanOrEqual(panelBox!.x + panelBox!.width + 1);
+      expect(
+        box!.x + box!.width,
+        `row ${index} ${name} must end inside the viewport at ${width}px`,
+      ).toBeLessThanOrEqual(width + 1);
+    }
+    await expectRegionsDoNotOverlap(capabilities, actions, `row ${index} capabilities vs actions at ${width}px`);
     if ((await readings.count()) > 0) {
       await expectRegionsDoNotOverlap(
         capabilities,
@@ -2268,8 +2317,12 @@ async function expectLadderRowLayout(page: Page, width: number) {
         `row ${index} capabilities vs readings at ${width}px`,
       );
       await expectRegionsDoNotOverlap(readings, actions, `row ${index} readings vs actions at ${width}px`);
+      // Facts values keep enough width that a short profile name cannot break across lines.
+      for (const value of await row.locator(".setupVerificationFacts dd").all()) {
+        const box = await value.boundingBox();
+        expect(box?.width ?? 0, `row ${index} reading values stay legible at ${width}px`).toBeGreaterThan(140);
+      }
     }
-    const diagnostics = row.locator(".setupLadderDiagnostics");
     if ((await diagnostics.count()) > 0) {
       await expectRegionsDoNotOverlap(
         diagnostics,
@@ -2325,6 +2378,49 @@ function recordedContradictoryLadder() {
   };
 }
 
+/**
+ * PRE-1045-01 (containment): the row must fit the step panel and the window at the widths the reviewer
+ * reported, with the actions visible rather than pushed off the right edge. This is deliberately narrow so a
+ * failure names containment rather than any other layout property.
+ */
+test("the ladder stays inside its panel and the reported viewport widths", async ({ page }, testInfo) => {
+  test.setTimeout(180_000);
+  await login(page, "admin", { openProject: false });
+  await startFreshDraftAtLadder(page, `Viewport containment ${Date.now().toString(36)}`, "0.01");
+  await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+
+  for (const width of [1024, 981]) {
+    await page.setViewportSize({ width, height: 1200 });
+    const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(documentWidth, `the page must fit ${width}px without horizontal scrolling`).toBeLessThanOrEqual(
+      width + 1,
+    );
+    const panel = await page.locator(".setupStepPanel").first().boundingBox();
+    expect(panel, `the ladder panel must be rendered at ${width}px`).toBeTruthy();
+    const ladder = await page.locator(".setupLadderRows").first().boundingBox();
+    expect(ladder, `the ladder list must be rendered at ${width}px`).toBeTruthy();
+    expect(
+      ladder!.x + ladder!.width,
+      `the ladder must stay inside the panel at ${width}px`,
+    ).toBeLessThanOrEqual(panel!.x + panel!.width + 1);
+    const actions = systemRowOf(page).locator(".setupRowActions");
+    await expect(actions, `row actions must be visible at ${width}px`).toBeVisible();
+    const actionsBox = await actions.boundingBox();
+    expect(
+      actionsBox!.x + actionsBox!.width,
+      `row actions must stay inside the viewport at ${width}px`,
+    ).toBeLessThanOrEqual(width + 1);
+    const readings = systemRowOf(page).locator(".setupVerificationState");
+    const readingsBox = await readings.boundingBox();
+    expect(
+      readingsBox!.x + readingsBox!.width,
+      `the readings must stay inside the panel at ${width}px`,
+    ).toBeLessThanOrEqual(panel!.x + panel!.width + 1);
+    // The window's own capture, not a full-page one: this is what the reviewer's evidence showed.
+    await page.screenshot({ path: testInfo.outputPath(`ladder-viewport-${width}.png`) });
+  }
+});
+
 test("the ladder row keeps facts, findings and repairs readable at desktop and narrow widths", async ({
   page,
 }, testInfo) => {
@@ -2334,7 +2430,7 @@ test("the ladder row keeps facts, findings and repairs readable at desktop and n
 
   // Ordinary software rows with a profile selector.
   await startFreshDraftAtLadder(page, `Layout ordinary ${suffix}`, "0.01");
-  for (const width of [1280, 981, 979, 900, 621, 619]) {
+  for (const width of ladderLayoutWidths) {
     await expectLadderRowLayout(page, width);
   }
   await page.setViewportSize({ width: 1280, height: 1100 });
@@ -2351,7 +2447,7 @@ test("the ladder row keeps facts, findings and repairs readable at desktop and n
   );
   await page.goto(`/projects/setup/${contradictoryDraftId}`);
   await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
-  for (const width of [1280, 981, 979, 900, 621, 619]) {
+  for (const width of ladderLayoutWidths) {
     await expectLadderRowLayout(page, width);
   }
   await page.setViewportSize({ width: 900, height: 1400 });
@@ -2359,7 +2455,7 @@ test("the ladder row keeps facts, findings and repairs readable at desktop and n
   await systemRowOf(page)
     .getByRole("button", { name: "Keep verification disabled and remove the enabled artifacts" })
     .click();
-  for (const width of [1280, 979, 900, 621]) {
+  for (const width of ladderLayoutWidths) {
     await expectLadderRowLayout(page, width);
   }
   await page.setViewportSize({ width: 900, height: 1400 });
@@ -2369,7 +2465,7 @@ test("the ladder row keeps facts, findings and repairs readable at desktop and n
   const emptyDraftId = await seedSoftwareProfileDraft(page, `Layout empty ${suffix}`, [], []);
   await page.goto(`/projects/setup/${emptyDraftId}`);
   await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
-  for (const width of [1280, 979, 900, 621]) {
+  for (const width of ladderLayoutWidths) {
     await expectLadderRowLayout(page, width);
   }
   const emptyRow = highLevelRowOf(page);
@@ -2386,7 +2482,7 @@ test("the ladder row keeps facts, findings and repairs readable at desktop and n
   ]);
   await page.goto(`/projects/setup/${invalidDraftId}`);
   await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
-  for (const width of [1280, 979, 900, 621]) {
+  for (const width of ladderLayoutWidths) {
     await expectLadderRowLayout(page, width);
   }
   await page.setViewportSize({ width: 1280, height: 1100 });
