@@ -98,7 +98,7 @@ public static class ProjectSetupEndpoints
             catch (ProjectSetupAccessException) { return Results.Forbid(); }
             catch (ProjectSetupNotFoundException) { return Results.NotFound(); }
             catch (ProjectSetupConflictException ex) { return Results.Conflict(new { code = "finalization_conflict", error = ex.Message }); }
-            catch (ProjectSetupInvalidException ex) { return Results.BadRequest(new { code = "cannot_finalize", error = ex.Message }); }
+        catch (ProjectSetupInvalidException ex) { return Results.BadRequest(new { code = "cannot_finalize", error = ex.Message, findings = ex.Findings }); }
             catch (DomainException ex) { return Results.BadRequest(new { code = "cannot_finalize", error = ex.Message }); }
         });
     }
@@ -134,6 +134,10 @@ public static class ProjectSetupEndpoints
             definition = Parse(draft.ReviewRulesJson),
             suggestedDefinition = SuggestedRules(draft),
         },
+        // The authoritative, side-effect-free verdict for this saved configuration. Its scope is the
+        // ladder/profile and review-rule compatibility only; administrator authority, unsaved local edits,
+        // source reconciliation, the source signature and the final transactional gate stay separate.
+        validation = ProjectSetupReadiness.Evaluate(draft),
         repository = Parse(draft.RepositoryJson),
         mapping = Parse(draft.MappingJson),
         finalization = draft.CompletedProjectId is null ? null : new { programId = draft.CompletedProgramId, projectId = draft.CompletedProjectId, releaseId = draft.CompletedReleaseId },

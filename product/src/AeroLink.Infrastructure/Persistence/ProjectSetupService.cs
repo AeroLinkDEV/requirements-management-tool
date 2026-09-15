@@ -494,24 +494,25 @@ public sealed class ProjectSetupService(
         string? ladderJson = null)
     {
         ladderJson ??= draft.LadderJson;
-        using var document = JsonDocument.Parse(ladderJson);
-        if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.EnumerateObject().Any() == false)
-            return NewProjectLadderFactory.Create(projectId, now);
-
-        var definition = Deserialize<LadderDefinitionWire>(draft.LadderJson, "ladder");
-        if (definition.Steps is null || definition.Steps.Count == 0)
-            throw new ProjectSetupInvalidException("The reviewed ladder must contain at least one supported level.");
+        // The final gate reads the same interpretation the readiness verdict and the offered standard used,
+        // so an unrecognized artifact token is diagnosed by level and field instead of surfacing only as an
+        // undifferentiated payload error.
+        var reading = ProjectSetupLadderReader.Read(ladderJson);
+        if (reading.IsDefault) return NewProjectLadderFactory.Create(projectId, now);
+        if (reading.Findings.Count > 0)
+            throw new ProjectSetupInvalidException(reading.Findings[0].Message, reading.Findings);
         IReadOnlyList<LadderStepDraft> steps;
         IReadOnlyList<LadderRelationshipDraft> relationships;
         try
         {
             (steps, relationships) = ProjectLadderDraftValidator.Validate(
-                definition.Steps.Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position,
-                    x.Capabilities, x.EnabledArtifactKinds)).ToArray(),
-                (definition.Relationships ?? []).Select(x => new LadderRelationshipDraft(x.Parent, x.Child)).ToArray(),
-                LegacyLadderPolicy.Instance);
+                reading.Steps, reading.Relationships, LegacyLadderPolicy.Instance);
         }
-        catch (DomainException ex) { throw new ProjectSetupInvalidException(ex.Message, ex); }
+        catch (DomainException ex)
+        {
+            throw new ProjectSetupInvalidException(ex.Message, ex, ProjectLadderDraftValidator.Inspect(
+                reading.Steps, reading.Relationships, LegacyLadderPolicy.Instance));
+        }
 
         var ladder = ProjectLadderConfiguration.CreateDraft(projectId, now);
         var byName = new Dictionary<string, ProjectLadderStep>(StringComparer.Ordinal);
@@ -641,10 +642,6 @@ public sealed class ProjectSetupService(
         return false;
     }
 
-    private sealed record LadderDefinitionWire(List<LadderStepWire>? Steps, List<LadderRelationshipWire>? Relationships);
-    private sealed record LadderStepWire(string CatalogueEntry, int Position, LevelCapabilities Capabilities,
-        List<VerificationArtifactKind>? EnabledArtifactKinds);
-    private sealed record LadderRelationshipWire(string Parent, string Child);
     private sealed record ReviewRulesWire(List<ReviewRuleWire>? Rules);
     private sealed record ReviewRuleWire(ReviewSubject Subject, string? Name, List<ReviewStageWire>? Stages);
     private sealed record ReviewStageWire(string Name, ProgramRole RequiredRole, ReviewStageKind Kind,
@@ -662,6 +659,18 @@ public sealed class ProjectSetupConflictException : InvalidOperationException
 }
 public sealed class ProjectSetupInvalidException : InvalidOperationException
 {
+    /// <summary>
+    /// Structured, level-identified findings when the refusal came from a diagnosable configuration.
+    /// Null means the message is the whole answer; callers must not synthesize findings to fill it.
+    /// </summary>
+    public IReadOnlyList<LadderFinding>? Findings { get; }
+
     public ProjectSetupInvalidException(string message) : base(message) { }
     public ProjectSetupInvalidException(string message, Exception inner) : base(message, inner) { }
+
+    public ProjectSetupInvalidException(string message, IReadOnlyList<LadderFinding> findings)
+        : base(message) => Findings = findings;
+
+    public ProjectSetupInvalidException(string message, Exception inner, IReadOnlyList<LadderFinding> findings)
+        : base(message, inner) => Findings = findings;
 }

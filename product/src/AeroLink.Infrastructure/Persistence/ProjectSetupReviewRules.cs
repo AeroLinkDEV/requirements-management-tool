@@ -35,19 +35,44 @@ public static class ProjectSetupReviewRules
         if (string.IsNullOrWhiteSpace(ladderJson))
             throw new InvalidOperationException("A setup ladder is required before review rules can be suggested.");
 
-        using var document = JsonDocument.Parse(ladderJson);
-        if (document.RootElement.ValueKind == JsonValueKind.Object
-            && !document.RootElement.EnumerateObject().Any())
-            return SuggestedJson(NewProjectLadderFactory.Create(projectId, DateTimeOffset.UtcNow));
-
-        var steps = document.RootElement.TryGetProperty("steps", out var stepList)
-            && stepList.ValueKind == JsonValueKind.Array
-            ? stepList.EnumerateArray().Select(ParseStep).ToArray()
-            : throw new InvalidOperationException("A reviewed ladder must provide typed steps.");
-
+        // The standard must describe the ladder the finalizer will actually validate. Reading the same way
+        // both do — including the capability-dependent fallback for an absent profile — is what keeps the
+        // offered subjects equal to the applicable subjects.
+        var reading = ProjectSetupLadderReader.Read(ladderJson);
+        if (reading.Findings.Count > 0) throw new InvalidOperationException(reading.Findings[0].Message);
+        if (reading.IsDefault) return SuggestedJson(NewProjectLadderFactory.Create(projectId, DateTimeOffset.UtcNow));
+        var steps = reading.Steps;
         return JsonSerializer.Serialize(new ReviewRulesDocument(
-            ApplicableRules(steps).Select(ToWire).ToArray()), WireJson);
+            ApplicableRules(steps, LegacyLadderPolicy.Instance).Select(ToWire).ToArray()), WireJson);
     }
+
+    /// <summary>Reads the persisted definition's shape and named subjects without rejecting its content.</summary>
+    public static ReviewDefinitionReading InspectDefinition(string rulesJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(rulesJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("rules", out var rules)
+                || rules.ValueKind != JsonValueKind.Array)
+                return new ReviewDefinitionReading(false, []);
+            var subjects = rules.EnumerateArray()
+                .Select(rule => rule.ValueKind == JsonValueKind.Object
+                    && rule.TryGetProperty("subject", out var subject)
+                    && subject.ValueKind == JsonValueKind.String
+                        ? subject.GetString() ?? string.Empty
+                        : string.Empty)
+                .Where(x => x.Length > 0)
+                .ToArray();
+            return new ReviewDefinitionReading(true, subjects);
+        }
+        catch (JsonException)
+        {
+            return new ReviewDefinitionReading(false, []);
+        }
+    }
+
+    public static IReadOnlyList<string> SubjectsOf(string rulesJson) => InspectDefinition(rulesJson).Subjects;
 
     public static bool IsEmptyDefinition(string json)
     {
@@ -56,15 +81,35 @@ public static class ProjectSetupReviewRules
             && !document.RootElement.EnumerateObject().Any();
     }
 
-    private static IReadOnlyList<Rule> ApplicableRules(ProjectLadderConfiguration ladder)
-    {
-        var steps = ladder.Steps.Select(x => new Step(
-            Enum.Parse<RequirementLevel>(x.CatalogueEntry, false), x.Capabilities, x.EnabledArtifactKinds.ToHashSet())).ToArray();
-        return ApplicableRules(steps);
-    }
+    private static IReadOnlyList<Rule> ApplicableRules(ProjectLadderConfiguration ladder) => ApplicableRules(
+        ladder.Steps.Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position, x.Capabilities,
+            x.EnabledArtifactKinds.ToArray())).ToArray(), LegacyLadderPolicy.Instance);
 
     public static HashSet<ReviewSubject> ApplicableSubjects(ProjectLadderConfiguration ladder) =>
         ApplicableRules(ladder).Select(x => x.Subject).ToHashSet();
+
+    /// <summary>
+    /// The subjects a supplied ladder makes applicable, applying the maintained fallback for an absent
+    /// profile so the offered standard and the finalizer agree for the same saved input.
+    /// </summary>
+    public static IReadOnlyList<ReviewSubject> ApplicableSubjects(IReadOnlyList<LadderStepDraft> steps,
+        ILadderPolicy policy) => ApplicableRules(steps, policy).Select(x => x.Subject).ToArray();
+
+    private static IReadOnlyList<Rule> ApplicableRules(IReadOnlyList<LadderStepDraft> steps, ILadderPolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(policy);
+        var effective = steps
+            .Where(x => Enum.TryParse<RequirementLevel>(x.CatalogueEntry, false, out var level) && Enum.IsDefined(level))
+            .Select(x =>
+            {
+                var level = Enum.Parse<RequirementLevel>(x.CatalogueEntry, false);
+                return new Step(level, x.Capabilities,
+                    x.EffectiveKinds(policy.Definition(level)).ToHashSet());
+            })
+            .ToArray();
+        return ApplicableRules(effective);
+    }
 
     private static IReadOnlyList<Rule> ApplicableRules(IReadOnlyList<Step> steps)
     {
@@ -112,30 +157,6 @@ public static class ProjectSetupReviewRules
             new("Project acceptance", ProgramRole.ProjectEngineer, ReviewStageKind.Approval,
                 ReviewStageAuthorityKind.LeadershipPosition),
         ]);
-
-    private static Step ParseStep(JsonElement element)
-    {
-        if (!element.TryGetProperty("catalogueEntry", out var catalogue)
-            || catalogue.ValueKind != JsonValueKind.String
-            || !Enum.TryParse<RequirementLevel>(catalogue.GetString(), false, out var level)
-            || !Enum.IsDefined(level))
-            throw new InvalidOperationException("A reviewed ladder contains an unsupported catalogue entry.");
-
-        var artifacts = new HashSet<VerificationArtifactKind>();
-        if (element.TryGetProperty("enabledArtifactKinds", out var values)
-            && values.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var value in values.EnumerateArray())
-                if (value.ValueKind == JsonValueKind.String
-                    && Enum.TryParse<VerificationArtifactKind>(value.GetString(), false, out var kind)
-                    && Enum.IsDefined(kind))
-                    artifacts.Add(kind);
-        }
-        var capabilities = element.TryGetProperty("capabilities", out var capabilityValue)
-            ? JsonSerializer.Deserialize<LevelCapabilities>(capabilityValue.GetRawText(), WireJson)
-            : LevelCapabilities.None;
-        return new(level, capabilities, artifacts);
-    }
 
     private sealed record Step(RequirementLevel Level, LevelCapabilities Capabilities,
         IReadOnlySet<VerificationArtifactKind> Artifacts);
