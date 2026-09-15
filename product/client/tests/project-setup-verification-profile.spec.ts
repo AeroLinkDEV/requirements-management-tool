@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { apiBase, login } from "./auth";
 import {
   compatibleRememberedProfile,
@@ -2132,6 +2132,64 @@ test("a foreign save response on Save and exit keeps the walkthrough open withou
  * PRE-1045-02: the facts block must separate the last saved answer from the creator's current selection, and
  * a verdict for the saved configuration must not read as the meaning of an unsaved edit.
  */
+/**
+ * PRE-1045-02-F1: an exactly-supported explicit profile is not the only valid saved answer. A disabled level
+ * that enables nothing, and an enabled level that records no profile (maintained catalogue default), are both
+ * valid server configurations and must not be described as unsupported.
+ */
+test("valid disabled-empty and maintained-default profiles are not described as unsupported", async ({ page }) => {
+  test.setTimeout(180_000);
+  await login(page, "admin", { openProject: false });
+  const suffix = Date.now().toString(36);
+
+  const disabledDraft = await seedLadderDraft(page, `Valid disabled ${suffix}`, {
+    steps: [
+      { catalogueEntry: "System", position: 1, capabilities: 5, enabledArtifactKinds: [] },
+      { catalogueEntry: "HighLevel", position: 2, capabilities: 5, enabledArtifactKinds: [] },
+      { catalogueEntry: "LowLevel", position: 3, capabilities: 13, enabledArtifactKinds: [] },
+    ],
+    relationships: [
+      { parent: "System", child: "HighLevel" },
+      { parent: "HighLevel", child: "LowLevel" },
+    ],
+  });
+  await page.goto(`/projects/setup/${disabledDraft}`);
+  await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+  const disabled = await persistedDraft(page, disabledDraft);
+  expect(disabled.validation?.ladderValid, "the server accepts a coherently disabled ladder").toBe(true);
+  await expect(page.getByText(/not one of this level's supported choices/i)).toHaveCount(0);
+  await expect(page.locator(".setupVerificationFacts").first()).toContainText(/none selected/);
+  await expect(page.locator(".setupLadderRepairs")).toHaveCount(0);
+
+  // Verification enabled with no recorded profile: the maintained default, not an unsupported answer.
+  const defaultDraft = await seedLadderDraft(page, `Valid default ${suffix}`, {
+    steps: [
+      { catalogueEntry: "System", position: 1, capabilities: 7 },
+      { catalogueEntry: "HighLevel", position: 2, capabilities: 7 },
+      { catalogueEntry: "LowLevel", position: 3, capabilities: 15 },
+    ],
+    relationships: [
+      { parent: "System", child: "HighLevel" },
+      { parent: "HighLevel", child: "LowLevel" },
+    ],
+  });
+  await page.goto(`/projects/setup/${defaultDraft}`);
+  await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+  const maintained = await persistedDraft(page, defaultDraft);
+  expect(maintained.validation?.ladderValid, "the server accepts the maintained defaults").toBe(true);
+  await expect(page.getByText(/not one of this level's supported choices/i)).toHaveCount(0);
+  await expect(page.locator(".setupLadderRepairs")).toHaveCount(0);
+  const defaultFacts = highLevelRowOf(page).locator(".setupVerificationFacts");
+  await expect(defaultFacts).toContainText(/none recorded/);
+  await expect(defaultFacts).toContainText(/Case/);
+
+  // The invalid cases keep being identified: an enabled level with an explicitly empty profile.
+  const emptyDraft = await seedSoftwareProfileDraft(page, `Valid default contrast ${suffix}`, [], []);
+  await page.goto(`/projects/setup/${emptyDraft}`);
+  await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+  await expect(page.getByText(/not one of this level's supported choices/i)).toHaveCount(1);
+});
+
 test("an unsaved profile change is not presented as the saved interpretation", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   await login(page, "admin", { openProject: false });
@@ -2169,28 +2227,153 @@ test("an unsaved profile change is not presented as the saved interpretation", a
  * PRE-1045-01: the ladder row keeps its facts, diagnostics and actions in deliberate regions at desktop and
  * narrower widths; these captures are the visual evidence for that layout.
  */
+/** Fails when two rendered regions intersect. Capturing images alone cannot catch a collapsed column. */
+async function expectRegionsDoNotOverlap(first: Locator, second: Locator, label: string) {
+  const a = await first.boundingBox();
+  const b = await second.boundingBox();
+  expect(a && b, `${label}: both regions must be rendered`).toBeTruthy();
+  const intersects =
+    a!.x < b!.x + b!.width &&
+    b!.x < a!.x + a!.width &&
+    a!.y < b!.y + b!.height &&
+    b!.y < a!.y + a!.height;
+  expect(intersects, `${label}: ${JSON.stringify(a)} must not overlap ${JSON.stringify(b)}`).toBe(false);
+}
+
+/**
+ * Asserts the ladder row regions do not overlap and that the capability group keeps a usable width at the
+ * given viewport. This is the regression check for the collapsed-column defect: an auto-placed fieldset in the
+ * row-number column still renders, so only geometry catches it.
+ */
+async function expectLadderRowLayout(page: Page, width: number) {
+  await page.setViewportSize({ width, height: 1400 });
+  const rows = page.locator(".setupLadderRows > li");
+  const count = await rows.count();
+  expect(count, `the ladder must render rows at ${width}px`).toBeGreaterThan(0);
+  for (let index = 0; index < count; index += 1) {
+    const row = rows.nth(index);
+    const capabilities = row.locator("fieldset").first();
+    const capabilitiesBox = await capabilities.boundingBox();
+    expect(
+      capabilitiesBox?.width ?? 0,
+      `row ${index} capabilities keep a readable width at ${width}px`,
+    ).toBeGreaterThan(200);
+    const actions = row.locator(".setupRowActions");
+    await expectRegionsDoNotOverlap(capabilities, actions, `row ${index} capabilities vs actions at ${width}px`);
+    const readings = row.locator(".setupVerificationState");
+    if ((await readings.count()) > 0) {
+      await expectRegionsDoNotOverlap(
+        capabilities,
+        readings,
+        `row ${index} capabilities vs readings at ${width}px`,
+      );
+      await expectRegionsDoNotOverlap(readings, actions, `row ${index} readings vs actions at ${width}px`);
+    }
+    const diagnostics = row.locator(".setupLadderDiagnostics");
+    if ((await diagnostics.count()) > 0) {
+      await expectRegionsDoNotOverlap(
+        diagnostics,
+        actions,
+        `row ${index} diagnostics vs actions at ${width}px`,
+      );
+      if ((await readings.count()) > 0)
+        await expectRegionsDoNotOverlap(
+          diagnostics,
+          readings,
+          `row ${index} diagnostics vs readings at ${width}px`,
+        );
+    }
+  }
+}
+
+/** A draft saved with exactly the supplied ladder; the maintained standard is derived from it. */
+async function seedLadderDraft(page: Page, projectName: string, ladder: unknown) {
+  const created = await page.request.post(`${apiBase}/api/project-setups`, { data: { projectName } });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const draftId = ((await created.json()) as { draftId: string }).draftId;
+  const saved = await page.request.put(`${apiBase}/api/project-setups/${draftId}`, {
+    data: {
+      expectedVersion: 1,
+      currentStep: "Ladder",
+      project: { name: projectName, softwareProduct: `${projectName} software` },
+      start: { kind: "Fresh" },
+      build: { version: "0.01" },
+      selectedCategories: [],
+      ladder,
+      reviewRules: {},
+      reviewRulesAccepted: true,
+      repository: { mode: "ConfigureLater" },
+      mapping: {},
+    },
+  });
+  expect(saved.ok(), await saved.text()).toBeTruthy();
+  return draftId;
+}
+
+/** The recorded contradictory owner shape: System mask 5 with an enabled Procedure. */
+function recordedContradictoryLadder() {
+  return {
+    steps: [
+      { catalogueEntry: "System", position: 1, capabilities: 5, enabledArtifactKinds: ["Procedure"] },
+      { catalogueEntry: "HighLevel", position: 2, capabilities: 7, enabledArtifactKinds: ["Case", "Procedure"] },
+      { catalogueEntry: "LowLevel", position: 3, capabilities: 15, enabledArtifactKinds: ["Case", "Procedure"] },
+    ],
+    relationships: [
+      { parent: "System", child: "HighLevel" },
+      { parent: "HighLevel", child: "LowLevel" },
+    ],
+  };
+}
+
 test("the ladder row keeps facts, findings and repairs readable at desktop and narrow widths", async ({
   page,
 }, testInfo) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   await login(page, "admin", { openProject: false });
   const suffix = Date.now().toString(36);
 
   // Ordinary software rows with a profile selector.
   await startFreshDraftAtLadder(page, `Layout ordinary ${suffix}`, "0.01");
-  await page.setViewportSize({ width: 1280, height: 1000 });
+  for (const width of [1280, 981, 979, 900, 621, 619]) {
+    await expectLadderRowLayout(page, width);
+  }
+  await page.setViewportSize({ width: 1280, height: 1100 });
   await page.screenshot({ path: testInfo.outputPath("ladder-ordinary-1280.png"), fullPage: true });
-  await page.setViewportSize({ width: 900, height: 1100 });
-  await page.screenshot({ path: testInfo.outputPath("ladder-ordinary-900.png"), fullPage: true });
   await page.setViewportSize({ width: 620, height: 1100 });
   await page.screenshot({ path: testInfo.outputPath("ladder-ordinary-620.png"), fullPage: true });
+  await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+
+  // Contradictory owner shape, then the disabled-preserving repair (a repaired-but-unsaved state).
+  const contradictoryDraftId = await seedLadderDraft(
+    page,
+    `Layout contradictory ${suffix}`,
+    recordedContradictoryLadder(),
+  );
+  await page.goto(`/projects/setup/${contradictoryDraftId}`);
+  await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+  for (const width of [1280, 981, 979, 900, 621, 619]) {
+    await expectLadderRowLayout(page, width);
+  }
+  await page.setViewportSize({ width: 900, height: 1400 });
+  await page.screenshot({ path: testInfo.outputPath("ladder-contradictory-900.png"), fullPage: true });
+  await systemRowOf(page)
+    .getByRole("button", { name: "Keep verification disabled and remove the enabled artifacts" })
+    .click();
+  for (const width of [1280, 979, 900, 621]) {
+    await expectLadderRowLayout(page, width);
+  }
+  await page.setViewportSize({ width: 900, height: 1400 });
+  await page.screenshot({ path: testInfo.outputPath("ladder-repaired-unsaved-900.png"), fullPage: true });
 
   // Explicit-empty software profile: the finding must not overlap the selector.
   const emptyDraftId = await seedSoftwareProfileDraft(page, `Layout empty ${suffix}`, [], []);
-  await page.setViewportSize({ width: 1280, height: 1000 });
   await page.goto(`/projects/setup/${emptyDraftId}`);
   await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+  for (const width of [1280, 979, 900, 621]) {
+    await expectLadderRowLayout(page, width);
+  }
   const emptyRow = highLevelRowOf(page);
+  await page.setViewportSize({ width: 1280, height: 1100 });
   await page.screenshot({ path: testInfo.outputPath("ladder-explicit-empty-1280.png"), fullPage: true });
   await page.setViewportSize({ width: 900, height: 1100 });
   await page.screenshot({ path: testInfo.outputPath("ladder-explicit-empty-900.png"), fullPage: true });
@@ -2201,9 +2384,12 @@ test("the ladder row keeps facts, findings and repairs readable at desktop and n
     "Procedure",
     "Case",
   ]);
-  await page.setViewportSize({ width: 1280, height: 1000 });
   await page.goto(`/projects/setup/${invalidDraftId}`);
   await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+  for (const width of [1280, 979, 900, 621]) {
+    await expectLadderRowLayout(page, width);
+  }
+  await page.setViewportSize({ width: 1280, height: 1100 });
   await page.screenshot({ path: testInfo.outputPath("ladder-invalid-1280.png"), fullPage: true });
   await page.setViewportSize({ width: 900, height: 1100 });
   await page.screenshot({ path: testInfo.outputPath("ladder-invalid-900.png"), fullPage: true });
