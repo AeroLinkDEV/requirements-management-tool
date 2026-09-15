@@ -287,6 +287,43 @@
 .setupLadderRows > li > label:last-of-type {
   align-self: stretch;
 }
+.setupVerificationState {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  font-size: 11px;
+}
+.setupVerificationFacts {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+.setupVerificationFacts > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 6px;
+}
+.setupVerificationFacts dt {
+  color: var(--ink-500);
+  font-weight: 700;
+}
+.setupVerificationFacts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.setupVerificationState button {
+  justify-self: start;
+  border: 1px solid #bed0db;
+  border-radius: 6px;
+  background: white;
+  color: #236b9f;
+  padding: 6px 8px;
+  font: 650 11px var(--font-body);
+  cursor: pointer;
+}
+.setupVerificationState button:hover {
+  background: #edf7fa;
+}
 .setupRowActions {
   display: flex;
   gap: 4px;
