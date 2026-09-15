@@ -208,6 +208,137 @@ function Stop-AeroLinkProvenProcess {
     if (-not $exited) { throw 'Termination was requested for the owned process, but its exit was not proven within ten seconds.' }
 }
 
+function Get-AeroLinkProcessDescendantSnapshot {
+    <#
+      .SYNOPSIS The live descendants of a process, captured with the identity needed to stop them safely.
+      .DESCRIPTION
+        Must be taken BEFORE the root is terminated, and that ordering is not incidental. Windows reparents
+        orphans, so once the root is gone the parent links that identify its descendants are gone with it,
+        and what was transient transition work becomes indistinguishable from anything else on the machine.
+
+        Each entry carries ProcessId, StartedAt and ExecutablePath so termination can be identity-proven
+        rather than PID-based. A PID alone is not an identity: between the snapshot and the stop, a process
+        can exit and its number be reused by something unrelated.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][int]$ProcessId)
+    $all = @()
+    try { $all = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop) } catch { return @() }
+    $byParent = @{}
+    foreach ($entry in $all) {
+        $parent = [int]$entry.ParentProcessId
+        if (-not $byParent.ContainsKey($parent)) { $byParent[$parent] = [System.Collections.ArrayList]::new() }
+        [void]$byParent[$parent].Add($entry)
+    }
+    $descendants = [System.Collections.ArrayList]::new()
+    $seen = @{}
+    $queue = [System.Collections.Queue]::new()
+    $queue.Enqueue([int]$ProcessId)
+    while ($queue.Count -gt 0) {
+        $current = [int]$queue.Dequeue()
+        if (-not $byParent.ContainsKey($current)) { continue }
+        foreach ($child in $byParent[$current]) {
+            $childId = [int]$child.ProcessId
+            # A cycle is impossible in a real tree, but PID reuse inside one snapshot can fake one.
+            if ($seen.ContainsKey($childId)) { continue }
+            $seen[$childId] = $true
+            # WMI supplies the TOPOLOGY, never the identity used to authorize a stop. Win32_Process
+            # CreationDate has one-second granularity, so its ticks never equal the value
+            # Stop-AeroLinkProvenProcess compares against (GetProcessTimes, 100 ns) - and the stop then
+            # refuses every descendant with "start/executable identity changed". Measured: three live
+            # descendants, zero stopped, cleanup reported unproven for a reason that had nothing to do with
+            # the processes. So start time and image path come from the process itself, at full precision.
+            $startedAt = $null
+            $imagePath = [string]$child.ExecutablePath
+            try {
+                $live = Get-Process -Id $childId -ErrorAction Stop
+                $startedAt = $live.StartTime.ToUniversalTime()
+                if ($live.Path) { $imagePath = $live.Path }
+            }
+            catch { $startedAt = $null }
+            [void]$descendants.Add([pscustomobject]@{
+                    ProcessId      = $childId
+                    ParentId       = $current
+                    StartedAt      = $startedAt
+                    ExecutablePath = $imagePath
+                    CommandLine    = [string]$child.CommandLine
+                })
+            $queue.Enqueue($childId)
+        }
+    }
+    return @($descendants)
+}
+
+function Stop-AeroLinkTransientProcessTree {
+    <#
+      .SYNOPSIS Stops transient work under a root, preserving declared survivors, and reports what is proven.
+      .DESCRIPTION
+        The distinction this exists to make is between work still PERFORMING a transition and services the
+        transition has already RESTORED. A transition deliberately leaves an API and a tunnel running; those
+        are its product. Everything else beneath it - a build, an extraction, a restore, a migration - is
+        transient work that must be stopped before anything may recover, because a second attempt running
+        over live transition work is two writers on one installation.
+
+        So this is deliberately NOT a tree killer. Ids in -PreserveProcessId are never touched, and every
+        other descendant is stopped through the same identity-proven path as the root: it terminates only if
+        start time and image path still match the snapshot.
+
+        Returns Proven=$false if ANY transient process cannot be shown to have stopped. That is the honest
+        answer, and the caller must treat it as "recovery is unsafe" rather than as a tidy-up failure.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()]$Descendant,
+        [int[]]$PreserveProcessId = @()
+    )
+    $preserved = @{}
+    foreach ($id in $PreserveProcessId) { $preserved[[int]$id] = $true }
+    $problems = [System.Collections.Generic.List[string]]::new()
+    $stopped = [System.Collections.Generic.List[int]]::new()
+    $skipped = [System.Collections.Generic.List[int]]::new()
+    foreach ($entry in @($Descendant)) {
+        $id = [int]$entry.ProcessId
+        if ($preserved.ContainsKey($id)) { [void]$skipped.Add($id); continue }
+        # Already gone is the common case, and it is a success rather than a failure.
+        $live = $null
+        try { $live = Get-Process -Id $id -ErrorAction SilentlyContinue } catch { }
+        if (-not $live) { continue }
+        if ($null -eq $entry.StartedAt -or [string]::IsNullOrWhiteSpace($entry.ExecutablePath)) {
+            # Without start/image proof this cannot be stopped safely, and pretending otherwise risks
+            # terminating an unrelated process that inherited the number.
+            [void]$problems.Add("PID $id could not be stopped: its start/executable identity was unavailable.")
+            continue
+        }
+        try {
+            Stop-AeroLinkProvenProcess -Process ([pscustomobject]@{
+                    ProcessId = $id; StartedAt = $entry.StartedAt; ExecutablePath = $entry.ExecutablePath
+                })
+            [void]$stopped.Add($id)
+        }
+        catch {
+            # A stop that failed BECAUSE the process was already going is not an unproven stop. Terminating
+            # the root takes its console host and other short-lived children with it, and those races
+            # surfaced as "a device attached to the system is not functioning" against a process that was
+            # already gone. What matters is the end state, so re-read it before calling this a problem.
+            $failure = $_.Exception.Message
+            $stillThere = $null
+            try { $stillThere = Get-Process -Id $id -ErrorAction SilentlyContinue } catch { }
+            if ($stillThere) { [void]$problems.Add("PID $id could not be stopped: $failure") }
+        }
+    }
+    # Requested is not stopped. Re-read each one before claiming anything.
+    foreach ($id in $stopped) {
+        try { if ($null -ne (Get-Process -Id $id -ErrorAction SilentlyContinue)) { [void]$problems.Add("PID $id was still running after termination was requested.") } }
+        catch { [void]$problems.Add("PID $id could not be re-checked after termination.") }
+    }
+    return [pscustomobject]@{
+        Proven       = ($problems.Count -eq 0)
+        StoppedIds   = @($stopped)
+        PreservedIds = @($skipped)
+        Detail       = if ($problems.Count -eq 0) { 'All transient transition work is proven stopped.' } else { ($problems -join ' | ') }
+    }
+}
+
 function Push-AeroLinkDeterministicProcessInputEncoding {
     <#
       .SYNOPSIS Pins the encoding a child's redirected stdin will use, and returns what to restore.
@@ -276,4 +407,4 @@ function Write-AeroLinkProcessControlToken {
     $stream.Flush()
 }
 
-Export-ModuleMember -Function Grant-AeroLinkCreatedProcessAccess, Get-AeroLinkProcessStartIdentity, Get-AeroLinkNativeProcessIdentity, Stop-AeroLinkProvenProcess, Write-AeroLinkProcessControlToken, Push-AeroLinkDeterministicProcessInputEncoding, Pop-AeroLinkDeterministicProcessInputEncoding
+Export-ModuleMember -Function Grant-AeroLinkCreatedProcessAccess, Get-AeroLinkProcessStartIdentity, Get-AeroLinkNativeProcessIdentity, Stop-AeroLinkProvenProcess, Write-AeroLinkProcessControlToken, Push-AeroLinkDeterministicProcessInputEncoding, Pop-AeroLinkDeterministicProcessInputEncoding, Get-AeroLinkProcessDescendantSnapshot, Stop-AeroLinkTransientProcessTree

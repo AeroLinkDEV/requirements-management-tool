@@ -202,6 +202,17 @@ function New-AeroLinkLogTail {
         So a single Decoder and a partial-line buffer live for the whole wait. Complete lines are emitted;
         an unterminated tail is held until its newline arrives or Flush is called at the end.
 
+        TWO MORE LIFECYCLE CASES, both normal for these inputs and both previously wrong.
+
+        The production-helper log FILENAMES are reused from attempt to attempt, while remote-demo.log
+        accumulates history. Starting at offset zero therefore replayed a previous run's output as though it
+        were this attempt's progress. -StartAtEnd binds a tail to the CURRENT attempt by beginning at the
+        file's length as it is at that moment. And when a reused file is replaced or truncated, its length
+        goes BACKWARDS past the recorded position; without noticing that, the tail sits beyond the end of the
+        new, shorter file and emits nothing at all for the whole attempt. Truncation is now detected and the
+        decoder, the partial line and the position are all reset together, because a half-decoded character
+        from the old file means nothing in the new one.
+
         Sharing is FileShare ReadWrite + Delete because the child is writing this file concurrently. Anything
         narrower would turn progress reporting into a write failure inside the child, which is exactly
         backwards: reporting on the work must never be able to break the work.
@@ -209,40 +220,60 @@ function New-AeroLinkLogTail {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$Path,
+        # Bind to the current attempt rather than replaying a reused log's previous contents.
+        [switch]$StartAtEnd,
         [string]$Prefix = ''
     )
+    $start = [long]0
+    if ($StartAtEnd -and (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        try { $start = (Get-Item -LiteralPath $Path).Length } catch { $start = 0 }
+    }
     $tail = [pscustomobject]@{
         Path      = $Path
         Prefix    = $Prefix
-        Position  = [long]0
+        Position  = $start
         Decoder   = [System.Text.Encoding]::UTF8.GetDecoder()
         Pending   = ''
         Emitted   = [long]0
+        Truncations = 0
     }
-    $tail | Add-Member -MemberType ScriptMethod -Name Read -Value {
-        if (-not (Test-Path -LiteralPath $this.Path -PathType Leaf)) { return @() }
+    # One chunk of a read. Returns $true when it consumed bytes, so callers can drain a backlog.
+    $tail | Add-Member -MemberType ScriptMethod -Name ReadChunk -Value {
+        if (-not (Test-Path -LiteralPath $this.Path -PathType Leaf)) { return $false }
         $stream = $null
         try {
             $stream = [System.IO.File]::Open($this.Path, [System.IO.FileMode]::Open,
                 [System.IO.FileAccess]::Read,
                 [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
         }
-        catch { return @() }
+        catch { return $false }
         try {
-            if ($stream.Length -le $this.Position) { return @() }
+            # The file was replaced or truncated - a reused helper log for the next attempt. Restart from
+            # the beginning and drop the decoder and partial line with it: a half-decoded character from the
+            # previous file is meaningless against the new one.
+            if ($stream.Length -lt $this.Position) {
+                $this.Position = [long]0
+                $this.Decoder = [System.Text.Encoding]::UTF8.GetDecoder()
+                $this.Pending = ''
+                $this.Truncations = $this.Truncations + 1
+            }
+            if ($stream.Length -le $this.Position) { return $false }
             [void]$stream.Seek($this.Position, [System.IO.SeekOrigin]::Begin)
             $count = [int][Math]::Min([long]65536, $stream.Length - $this.Position)
             $buffer = New-Object byte[] $count
             $read = $stream.Read($buffer, 0, $count)
-            if ($read -le 0) { return @() }
+            if ($read -le 0) { return $false }
             $this.Position = $this.Position + $read
             # The retained decoder carries any incomplete multi-byte sequence into the next call.
             $chars = New-Object char[] ($this.Decoder.GetCharCount($buffer, 0, $read))
             $decoded = $this.Decoder.GetChars($buffer, 0, $read, $chars, 0)
             $this.Pending = $this.Pending + (New-Object string($chars, 0, $decoded))
+            return $true
         }
-        catch { return @() }
+        catch { return $false }
         finally { if ($stream) { $stream.Dispose() } }
+    }
+    $tail | Add-Member -MemberType ScriptMethod -Name TakeCompleteLines -Value {
         $lines = @()
         # Only complete lines leave the buffer; the remainder waits for its newline.
         while ($true) {
@@ -255,11 +286,33 @@ function New-AeroLinkLogTail {
         $this.Emitted = $this.Emitted + $lines.Count
         return $lines
     }
+    $tail | Add-Member -MemberType ScriptMethod -Name Read -Value {
+        [void]$this.ReadChunk()
+        return $this.TakeCompleteLines()
+    }
     $tail | Add-Member -MemberType ScriptMethod -Name Flush -Value {
-        $lines = @($this.Read())
+        # Drain the backlog, not one 64 KiB chunk of it. A busy restore can append far more than one chunk
+        # between the last poll and the child's exit, and a single Read silently dropped the rest.
+        #
+        # Bounded by a SNAPSHOT of the length taken now, and by a chunk ceiling, so this drains what exists
+        # at the moment of flushing and then stops. It must never become a wait for end-of-file: that is the
+        # defect this whole runner exists to remove, and surviving services hold these handles open.
+        $snapshot = [long]0
+        if (Test-Path -LiteralPath $this.Path -PathType Leaf) {
+            try { $snapshot = (Get-Item -LiteralPath $this.Path).Length } catch { $snapshot = 0 }
+        }
+        $lines = @()
+        $chunks = 0
+        while ($this.Position -lt $snapshot -and $chunks -lt 4096) {
+            if (-not $this.ReadChunk()) { break }
+            $chunks = $chunks + 1
+            $lines += $this.TakeCompleteLines()
+        }
+        $lines += $this.TakeCompleteLines()
         if (-not [string]::IsNullOrEmpty($this.Pending)) {
             $lines += $this.Pending.TrimEnd("`r")
             $this.Pending = ''
+            $this.Emitted = $this.Emitted + 1
         }
         return $lines
     }
@@ -311,7 +364,11 @@ function Invoke-AeroLinkOwnedTransitionScript {
         # Additional logs written by the work itself rather than by the child's stdout - the production
         # launcher's own redirected files and remote-demo.log. Without these the operator sees the
         # continuation's stdout only, which is nearly silent during backup, restore and build.
-        [string[]]$AdditionalProgressLog = @()
+        [string[]]$AdditionalProgressLog = @(),
+        # Services the transition has already RESTORED, which must survive a timeout: they are the product of
+        # the work, not leftovers of it. Everything else beneath the continuation is transient transition
+        # work and is stopped with proof before the caller may recover.
+        [int[]]$PreserveProcessId = @()
     )
     $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
     # An absent script still LAUNCHES powershell.exe successfully; the host then exits -196608. That is
@@ -365,43 +422,64 @@ function Invoke-AeroLinkOwnedTransitionScript {
     try { $imagePath = $started.Path } catch { }
     if (-not $imagePath) { $imagePath = $powershell }
 
-    $tails = @()
-    if ($StreamToHost) {
-        $tails += (New-AeroLinkLogTail -Path $StandardOutput -Prefix '      ')
-        $tails += (New-AeroLinkLogTail -Path $StandardError -Prefix '      [stderr] ')
-        foreach ($extra in $AdditionalProgressLog) {
-            if ($extra) { $tails += (New-AeroLinkLogTail -Path $extra -Prefix "      [$(Split-Path -Leaf $extra)] ") }
-        }
-    }
-
+    # EVERYTHING past a successful Start-Process runs inside this boundary.
+    #
+    # Handle acquisition, tail construction, polling and host output can all throw, and an exception escaping
+    # here left a live child with no result and no owner: the caller's catch recorded "failure" while the
+    # transition carried on running, and a later compensation would restart production over it. So no failure
+    # after launch is allowed to escape as an exception; each one becomes a structured result that says
+    # whether recovery is safe.
     $clock = [Diagnostics.Stopwatch]::StartNew()
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    $lastProgress = [Diagnostics.Stopwatch]::StartNew()
     $timedOut = $false
-    while ($true) {
-        $started.Refresh()
-        if ($started.HasExited) { break }
-        if ((Get-Date) -ge $deadline) { $timedOut = $true; break }
-        foreach ($tail in $tails) {
-            foreach ($line in @($tail.Read())) { Write-Host "$($tail.Prefix)$line" }
+    $faulted = $null
+    $tails = @()
+    try {
+        if ($StreamToHost) {
+            # StartAtEnd binds these tails to THIS attempt. The helper log filenames are reused between
+            # attempts, so starting at zero replays the previous attempt's output as though it were progress.
+            $tails += (New-AeroLinkLogTail -Path $StandardOutput -Prefix '      ' -StartAtEnd)
+            $tails += (New-AeroLinkLogTail -Path $StandardError -Prefix '      [stderr] ' -StartAtEnd)
+            foreach ($extra in $AdditionalProgressLog) {
+                if ($extra) { $tails += (New-AeroLinkLogTail -Path $extra -Prefix "      [$(Split-Path -Leaf $extra)] " -StartAtEnd) }
+            }
         }
-        if ($StreamToHost -and $lastProgress.Elapsed.TotalSeconds -ge $ProgressIntervalSeconds) {
-            $remaining = [int][Math]::Max(0, ($deadline - (Get-Date)).TotalSeconds)
-            # Phase, elapsed and the deadline that applies, so a quiet stretch is legible as "still inside
-            # budget" rather than as an unexplained absence of output.
-            Write-Host ("      [$StepName] running for $([int]$clock.Elapsed.TotalSeconds)s; " +
-                "${remaining}s of the ${TimeoutSeconds}s budget remaining; logs: $StandardOutput") -ForegroundColor DarkGray
-            $lastProgress.Restart()
-        }
-        Start-Sleep -Milliseconds 250
-    }
-    foreach ($tail in $tails) {
-        foreach ($line in @($tail.Flush())) { Write-Host "$($tail.Prefix)$line" }
-    }
 
-    if ($timedOut) {
-        # Bounded, identity-proven termination of the continuation ONLY. Restored services are the product
-        # of the work and are never touched here.
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        $lastProgress = [Diagnostics.Stopwatch]::StartNew()
+        while ($true) {
+            $started.Refresh()
+            if ($started.HasExited) { break }
+            if ((Get-Date) -ge $deadline) { $timedOut = $true; break }
+            foreach ($tail in $tails) {
+                foreach ($line in @($tail.Read())) { Write-Host "$($tail.Prefix)$line" }
+            }
+            if ($StreamToHost -and $lastProgress.Elapsed.TotalSeconds -ge $ProgressIntervalSeconds) {
+                $remaining = [int][Math]::Max(0, ($deadline - (Get-Date)).TotalSeconds)
+                # Phase, elapsed and the deadline that applies, so a quiet stretch is legible as "still inside
+                # budget" rather than as an unexplained absence of output.
+                Write-Host ("      [$StepName] running for $([int]$clock.Elapsed.TotalSeconds)s; " +
+                    "${remaining}s of the ${TimeoutSeconds}s budget remaining; logs: $StandardOutput") -ForegroundColor DarkGray
+                $lastProgress.Restart()
+            }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+    catch { $faulted = $_.Exception.Message }
+
+    # Best-effort final drain. It must never be able to fail the call or, worse, block it.
+    try {
+        foreach ($tail in $tails) {
+            foreach ($line in @($tail.Flush())) { Write-Host "$($tail.Prefix)$line" }
+        }
+    }
+    catch { }
+
+    if ($timedOut -or $faulted) {
+        # Snapshot the descendants BEFORE terminating the root. Windows reparents orphans, so afterwards the
+        # links that identify this transition's transient work are gone.
+        $descendants = @()
+        try { $descendants = @(Get-AeroLinkProcessDescendantSnapshot -ProcessId $processId) } catch { $descendants = @() }
+
         $cleanupProven = $false
         $cleanupDetail = ''
         try {
@@ -419,15 +497,31 @@ function Invoke-AeroLinkOwnedTransitionScript {
             }
             catch { $cleanupProven = $false; $cleanupDetail = 'The continuation exit could not be verified.' }
         }
+
+        # Stopping the immediate child does NOT establish that the transition stopped. The expensive work -
+        # extraction, restore, migration - runs in descendants, and one of those still holding the
+        # installation is exactly what makes a recovery attempt unsafe. Restored services are preserved by
+        # id; everything else under this root is transient work and must be proven stopped.
+        $transientDetail = ''
+        if ($descendants.Count -gt 0) {
+            try {
+                $transient = Stop-AeroLinkTransientProcessTree -Descendant $descendants -PreserveProcessId $PreserveProcessId
+                if (-not $transient.Proven) { $cleanupProven = $false; $transientDetail = $transient.Detail }
+            }
+            catch { $cleanupProven = $false; $transientDetail = "Transient transition work could not be stopped: $($_.Exception.Message)" }
+        }
+
         $clock.Stop()
+        $reason = if ($faulted) { "failed after launch ($faulted)" } else { "exceeded $TimeoutSeconds seconds" }
+        $outcome = if ($timedOut) { 'TimedOut' } else { 'Faulted' }
         $detail = if ($cleanupProven) {
-            "Step '$StepName' (PID $processId) exceeded $TimeoutSeconds seconds and was terminated; its exit is proven. Logs: stdout=$StandardOutput stderr=$StandardError"
+            "Step '$StepName' (PID $processId) $reason and was terminated; its exit and all transient transition work are proven stopped. Logs: stdout=$StandardOutput stderr=$StandardError"
         }
         else {
-            "Step '$StepName' (PID $processId) exceeded $TimeoutSeconds seconds and its shutdown could NOT be proven ($cleanupDetail). The transition may still be executing. Logs: stdout=$StandardOutput stderr=$StandardError"
+            "Step '$StepName' (PID $processId) $reason and the shutdown could NOT be proven ($cleanupDetail $transientDetail). Transition work may still be executing, so recovery is unsafe. Logs: stdout=$StandardOutput stderr=$StandardError"
         }
         return [pscustomobject]@{
-            Outcome = 'TimedOut'; ExitCode = $null; TimedOut = $true; CleanupProven = $cleanupProven
+            Outcome = $outcome; ExitCode = $null; TimedOut = $timedOut; CleanupProven = $cleanupProven
             ProcessId = $processId; ElapsedSeconds = [int]$clock.Elapsed.TotalSeconds
             StdOutPath = $StandardOutput; StdErrPath = $StandardError; Detail = $detail
         }
@@ -438,7 +532,7 @@ function Invoke-AeroLinkOwnedTransitionScript {
     try { $exitCode = [AeroLink.ProcessAccess]::ExitCode($nativeHandle) } catch { $exitCode = $null }
     if ($null -eq $exitCode) {
         # The child finished but its result cannot be read. That is not success and must not be reported as
-        # one; the caller's compensation has to run.
+        # one; the caller's compensation has to run. The child HAS exited, so recovery itself is safe.
         return [pscustomobject]@{
             Outcome = 'ExitUnavailable'; ExitCode = $null; TimedOut = $false; CleanupProven = $true
             ProcessId = $processId; ElapsedSeconds = [int]$clock.Elapsed.TotalSeconds

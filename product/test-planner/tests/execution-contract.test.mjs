@@ -440,10 +440,14 @@ test('the native Windows operator owner retains the complete family and evidence
   // Derive this inventory from the live workflow so a newly added native contract is not silently omitted from
   // the planner proof. The schedule preview is a distinct non-mutating check and is included separately below.
   const nativeScripts = [...job.matchAll(/& \.\/product\/scripts\/([^\s]+\.ps1)/g)].map(match => match[1])
-  assert.ok(nativeScripts.length >= 14, 'the native owner must execute the complete current operator family')
+  assert.ok(nativeScripts.length >= 15, 'the native owner must execute the complete current operator family')
   for (const name of [
     'AeroLinkEvidenceStore.Tests.ps1', 'AeroLinkBackupVerification.Tests.ps1', 'AeroLinkRestoreContract.Tests.ps1',
     'AeroLinkMigrationPosture.Tests.ps1', 'AeroLinkRemoteDemo.Tests.ps1', 'AeroLinkRemoteDemoRecovery.Tests.ps1',
+    // The transition handoff and its budgets. Adding a suite to the LOCAL runner list changes nothing here,
+    // and that is not a visible failure: the suite simply never runs on a protected candidate, so the
+    // regression it exists to catch would merge green.
+    'AeroLinkTransitionHandoff.Tests.ps1',
     'AeroLinkLauncherContract.Tests.ps1', 'AeroLinkBootstrap.Tests.ps1', 'AeroLinkInstallation.Tests.ps1',
     'AeroLinkProductionSource.Tests.ps1', 'AeroLinkRuntimeIdentity.Tests.ps1', 'AeroLinkUpgrade.Tests.ps1',
     'Get-AeroLinkTestPlan.Tests.ps1', 'AeroLinkTestDiagnostics.Tests.ps1',

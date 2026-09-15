@@ -72,10 +72,99 @@ $script:ReconcileTaskName = 'AeroLinkProductionSourceReconcile'
 # is not the dedicated production source it re-runs the whole Update in that source - so its budget must
 # exceed a COMPLETE inner Update, recovery attempt included, or the outer wrapper expires while the delegated
 # update is legitimately recovering. It sits above the 6000 s worst case and below the task limit.
+# THE COMPONENT STAGES, because the continuation budget has to be COMPOSED from what it contains rather
+# than picked next to it. Start-AeroLinkRemoteDemo runs these sequentially inside one continuation:
+#
+#     PostgreSQL recovery        300 s
+#     production launcher       2400 s   (the clone-validated upgrade lives here)
+#     ngrok protection wait      120 s
+#     inspection, identity checks, topology restore, cleanup   300 s
+#     --------------------------------
+#     continuation             3120 s
+#
+# A 2700 s continuation - the previous value - was SMALLER than the sum of the stages it contains, so it
+# could terminate work that was still inside its own component allowance. That is the same defect as the
+# original 900 s, one level up.
+$script:AeroLinkPostgresRecoveryTimeoutSeconds = 300
 $script:AeroLinkSupportedUpgradeTimeoutSeconds = 2400
-$script:AeroLinkTransitionContinuationTimeoutSeconds = 2700
-$script:AeroLinkDelegatedUpdateTimeoutSeconds = 6600
-$script:AeroLinkInstalledTaskTimeLimit = 'PT120M'
+$script:AeroLinkNgrokProtectionWaitSeconds = 120
+$script:AeroLinkContinuationOverheadSeconds = 300
+$script:AeroLinkTransitionContinuationTimeoutSeconds =
+    $script:AeroLinkPostgresRecoveryTimeoutSeconds +
+    $script:AeroLinkSupportedUpgradeTimeoutSeconds +
+    $script:AeroLinkNgrokProtectionWaitSeconds +
+    $script:AeroLinkContinuationOverheadSeconds
+
+# The post-advance continuation re-enters the updated script with -Action Update. The handoff guard means it
+# sees AlreadyCurrent and takes the restore path rather than advancing again, so it costs one continuation
+# plus its own inspection - not another full advance.
+$script:AeroLinkOuterOverheadSeconds = 600
+$script:AeroLinkPostAdvanceContinuationTimeoutSeconds =
+    $script:AeroLinkTransitionContinuationTimeoutSeconds + $script:AeroLinkOuterOverheadSeconds
+
+# One reconcile/start run may make a primary handoff AND a recovery handoff, and the recovery path can
+# itself re-enter the clone-validated upgrade through the launcher, so both are upgrade-capable.
+$script:AeroLinkSequentialContinuationAttempts = 2
+$script:AeroLinkReconcileWorstCaseSeconds =
+    ($script:AeroLinkSequentialContinuationAttempts * $script:AeroLinkTransitionContinuationTimeoutSeconds) +
+    $script:AeroLinkOuterOverheadSeconds
+
+# The OUTER delegation wraps a COMPLETE inner Update - advance, post-advance continuation, and that Update's
+# own compensation. It must strictly outlast it, so it cannot share the inner allowance: an enclosing wrapper
+# with the same independently restarted budget as the thing it encloses does not outlast it.
+$script:AeroLinkDelegatedUpdateTimeoutSeconds =
+    $script:AeroLinkPostAdvanceContinuationTimeoutSeconds + $script:AeroLinkReconcileWorstCaseSeconds
+
+# Finally the installed tasks. They must exceed the work THEY can actually run, because ExecutionTimeLimit
+# is a hard terminate that discharges nothing.
+#
+# Which is the reconcile worst case (6840 s), NOT the delegated update. Both installed tasks invoke
+# AeroLinkRemoteDemo.ps1 (-Action Start -Scheduled / -Action Reconcile -Scheduled); neither invokes
+# Configure-AeroLinkProductionSource.ps1, so the delegation path is operator-invoked from the BAT and is
+# never under a Task Scheduler limit. Sizing the tasks for it would have cost more than three hours of
+# skipped reconciliation to bound a path they cannot reach.
+#
+#     PT135M = 8100 s  >  6840 s reconcile worst case, with 1260 s of margin.
+$script:AeroLinkInstalledTaskTimeLimit = 'PT135M'
+
+function New-AeroLinkRecoveryUnsafeError {
+    <#
+      .SYNOPSIS A transition failure that must NOT be retried, carried as data rather than as wording.
+      .DESCRIPTION
+        "Recovery must not start" used to be only the TEXT of an ordinary exception - and every caller that
+        retries a failed handoff does so from a catch that never reads the message. Measured with an injected
+        runner result of TimedOut/CleanupProven=false: the handoff threw its distinct message, the
+        reconciliation caught it like any other failure and started a second handoff anyway. Two attempts,
+        the second running over transition work that was never proven stopped.
+
+        So the signal travels in Exception.Data, which survives the throw and is cheap to test inside a
+        catch. This repository already reads Exception.Data that way for HTTP status codes.
+
+        It marks ONLY the unsafe case. A failure whose transient work IS proven stopped stays ordinary and
+        recoverable - refusing to recover from those would leave the demo dark for a fault that recovery
+        exists to fix.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Message)
+    $unsafe = New-Object System.InvalidOperationException($Message)
+    $unsafe.Data['AeroLinkRecoveryUnsafe'] = $true
+    return $unsafe
+}
+
+function Test-AeroLinkRecoveryUnsafeError {
+    <#
+      .SYNOPSIS Whether a caught failure forbids recovery because transition work may still be running.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowNull()]$ErrorRecord)
+    if ($null -eq $ErrorRecord) { return $false }
+    $exception = if ($ErrorRecord -is [System.Management.Automation.ErrorRecord]) { $ErrorRecord.Exception } else { $ErrorRecord }
+    while ($null -ne $exception) {
+        try { if ($exception.Data -and $exception.Data['AeroLinkRecoveryUnsafe']) { return $true } } catch { }
+        $exception = $exception.InnerException
+    }
+    return $false
+}
 
 function Get-AeroLinkTransitionBudget {
     <#
@@ -84,10 +173,17 @@ function Get-AeroLinkTransitionBudget {
     [CmdletBinding()]
     param()
     return [pscustomobject]@{
-        SupportedUpgradeSeconds = $script:AeroLinkSupportedUpgradeTimeoutSeconds
-        ContinuationSeconds     = $script:AeroLinkTransitionContinuationTimeoutSeconds
-        DelegatedUpdateSeconds  = $script:AeroLinkDelegatedUpdateTimeoutSeconds
-        InstalledTaskTimeLimit  = $script:AeroLinkInstalledTaskTimeLimit
+        PostgresRecoverySeconds      = $script:AeroLinkPostgresRecoveryTimeoutSeconds
+        SupportedUpgradeSeconds      = $script:AeroLinkSupportedUpgradeTimeoutSeconds
+        NgrokProtectionSeconds       = $script:AeroLinkNgrokProtectionWaitSeconds
+        ContinuationOverheadSeconds  = $script:AeroLinkContinuationOverheadSeconds
+        ContinuationSeconds          = $script:AeroLinkTransitionContinuationTimeoutSeconds
+        OuterOverheadSeconds         = $script:AeroLinkOuterOverheadSeconds
+        PostAdvanceContinuationSeconds = $script:AeroLinkPostAdvanceContinuationTimeoutSeconds
+        SequentialAttempts           = $script:AeroLinkSequentialContinuationAttempts
+        ReconcileWorstCaseSeconds    = $script:AeroLinkReconcileWorstCaseSeconds
+        DelegatedUpdateSeconds       = $script:AeroLinkDelegatedUpdateTimeoutSeconds
+        InstalledTaskTimeLimit       = $script:AeroLinkInstalledTaskTimeLimit
     }
 }
 
@@ -982,11 +1078,13 @@ function Start-AeroLinkRemoteDemo {
         # Reads /health/identity from the running local API. Injectable for the same reason.
         [scriptblock]$RuntimeIdentityProbe,
         [switch]$SkipSourceReconciliation,
-        [int]$PostgresRecoveryTimeoutSeconds = 300,
+        # These three are the component stages the continuation budget is composed from; they share its
+        # constants so the composition cannot drift apart from the value derived at the top of this module.
+        [int]$PostgresRecoveryTimeoutSeconds = $script:AeroLinkPostgresRecoveryTimeoutSeconds,
         # Same budget as the initiating attempt: recovery restores topology through the production launcher,
         # which can itself re-enter the clone-validated upgrade, so this is a second upgrade-capable attempt.
         [int]$ProductionTimeoutSeconds = $script:AeroLinkSupportedUpgradeTimeoutSeconds,
-        [int]$NgrokProtectionWaitSeconds = 120
+        [int]$NgrokProtectionWaitSeconds = $script:AeroLinkNgrokProtectionWaitSeconds
     )
 
     $run = New-AeroLinkRemoteDemoRun -Scheduled:$Scheduled
@@ -1059,6 +1157,15 @@ function Start-AeroLinkRemoteDemo {
                         }
                         catch {
                             $handoffFailure = $_.Exception.Message
+                            # A retry is only safe when the previous attempt's transition work is PROVEN
+                            # stopped. Otherwise a second continuation would run over the first, which is two
+                            # writers on one installation; the source stays advanced and the obligation is
+                            # retained rather than discharged over live work.
+                            if (Test-AeroLinkRecoveryUnsafeError $_) {
+                                $sourceAdvancedIrreversibly = $true
+                                Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The post-advance handoff failed and its transition work was not proven stopped: $handoffFailure. No recovery attempt was made."
+                                throw
+                            }
                             Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The post-advance handoff failed: $handoffFailure. Recovering the prior topology from a fresh process on the current source."
                             try { Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run -Topology $priorTopology -HeadSha $advanced.HeadSha | Out-Null }
                             catch {
@@ -1092,6 +1199,9 @@ function Start-AeroLinkRemoteDemo {
                     # Nothing was taken down, so nothing is owed: the tunnel refused to stop, or a mismatched
                     # ngrok made the stop refuse. Fail closed, exactly as before.
                     if (-not $obligation.TeardownBegan) { throw }
+                    # Transition work that was never proven stopped forbids this compensation too: it would
+                    # start a fresh-source recovery alongside whatever is still running.
+                    if (Test-AeroLinkRecoveryUnsafeError $_) { throw }
                     $failure = $_.Exception.Message
                     Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The transition failed after teardown began: $failure. Falling back to the verified revision on disk."
                     $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $Config.AeroLinkRoot
@@ -1983,11 +2093,12 @@ function Invoke-AeroLinkRemoteDemoHandoff {
     # proven is called out separately, because the caller must not begin recovery while the previous
     # continuation may still be advancing the same installation.
     if ($handoff.Outcome -eq 'LaunchFailed') { throw "The updated source could not start the transition continuation: $($handoff.Detail)" }
-    if ($handoff.Outcome -eq 'TimedOut') {
+    if ($handoff.Outcome -eq 'TimedOut' -or $handoff.Outcome -eq 'Faulted') {
         if (-not $handoff.CleanupProven) {
-            throw "The transition continuation exceeded $TimeoutSeconds seconds and its shutdown could NOT be proven; it may still be running. Recovery must not start until it has stopped. $($handoff.Detail)"
+            # Marked, not merely worded. Callers retry from a catch, and a catch does not read prose.
+            throw (New-AeroLinkRecoveryUnsafeError ("The transition continuation did not finish within $TimeoutSeconds seconds and its shutdown could NOT be proven; transition work may still be running, so recovery must not start. $($handoff.Detail)"))
         }
-        throw "The transition continuation exceeded $TimeoutSeconds seconds and was terminated; its exit is proven. $($handoff.Detail)"
+        throw "The transition continuation did not finish within $TimeoutSeconds seconds and was terminated; its exit and transient work are proven stopped. $($handoff.Detail)"
     }
     if ($handoff.Outcome -eq 'ExitUnavailable') { throw "The transition continuation exited but its result could not be read, so the transition is not proven complete. $($handoff.Detail)" }
     if ($code -ne 0) { throw "The updated source could not complete the transition (exit code $code)." }
@@ -2186,6 +2297,12 @@ function Invoke-AeroLinkProductionSourceReconciliation {
         try { Invoke-AeroLinkRemoteDemoHandoff -Config $Config -Scheduled:$Scheduled -Run $run -Topology $priorState -PreserveServiceState:$PreserveServiceState -HeadSha $advance.HeadSha }
         catch {
             $handoffFailure = $_.Exception.Message
+            # Same rule as the start path: recovery is permitted only when the previous attempt's transition
+            # work is proven stopped. An unproven one keeps the obligation instead of doubling the writers.
+            if (Test-AeroLinkRecoveryUnsafeError $_) {
+                Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The post-advance handoff failed and its transition work was not proven stopped: $handoffFailure. No recovery attempt was made."
+                throw
+            }
             Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "The post-advance handoff failed: $handoffFailure. Recovering the prior topology on the current source, from a fresh process."
             # Recovery runs from a FRESH process too. The source has already advanced, so this module is the
             # pre-advance generation; recovering here in memory would be the exact stale control plane the
@@ -2423,6 +2540,8 @@ Export-ModuleMember -Function `
     Invoke-AeroLinkProductionSourceReconciliation, `
     Invoke-AeroLinkRemoteDemoHandoff, `
     Get-AeroLinkTransitionBudget, `
+    New-AeroLinkRecoveryUnsafeError, `
+    Test-AeroLinkRecoveryUnsafeError, `
     Get-AeroLinkTransitionContinuation, `
     Save-AeroLinkRemoteDemoTaskXml, `
     Install-AeroLinkRemoteDemoTask, `

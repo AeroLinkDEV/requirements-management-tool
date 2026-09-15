@@ -154,21 +154,40 @@ Start-Sleep -Seconds 120
     # #1043: the budgets must stay coherent RELATIVE TO EACH OTHER, not merely large.
     # ---------------------------------------------------------------------------------------------
     $budget = Get-AeroLinkTransitionBudget
+    # COMPOSITION, not arithmetic over chosen numbers. The continuation must cover every stage it actually
+    # contains; a continuation smaller than the sum of its stages terminates work still inside its own
+    # component allowance, which is the original 900 s defect one level up.
+    $stageSum = $budget.PostgresRecoverySeconds + $budget.SupportedUpgradeSeconds + $budget.NgrokProtectionSeconds
+    Assert-True ($budget.ContinuationSeconds -ge $stageSum) `
+        "Scenario 6: the continuation budget ($($budget.ContinuationSeconds) s) must cover its sequential stages ($stageSum s: PostgreSQL recovery, production launcher, ngrok protection)."
     Assert-True ($budget.SupportedUpgradeSeconds -lt $budget.ContinuationSeconds) `
         'Scenario 6: the supported-upgrade deadline must expire before the continuation wrapper.'
-    Assert-True ($budget.DelegatedUpdateSeconds -gt $budget.ContinuationSeconds) `
-        'Scenario 6: the outer delegated update must outlast a single continuation.'
+    # The post-advance continuation is a nested Update. An enclosing wrapper sharing the same independently
+    # restarted allowance would not outlast what it encloses.
+    Assert-True ($budget.PostAdvanceContinuationSeconds -gt $budget.ContinuationSeconds) `
+        'Scenario 6: the post-advance continuation must outlast a single continuation.'
+    Assert-True ($budget.DelegatedUpdateSeconds -gt $budget.PostAdvanceContinuationSeconds) `
+        'Scenario 6: the outer delegation must strictly outlast the nested update it encloses.'
+    Assert-True ($budget.ReconcileWorstCaseSeconds -ge (($budget.SequentialAttempts * $budget.ContinuationSeconds) + $budget.OuterOverheadSeconds)) `
+        'Scenario 6: the reconcile worst case must account for every permitted sequential attempt plus outer overhead.'
+    Assert-True ($budget.DelegatedUpdateSeconds -ge ($budget.PostAdvanceContinuationSeconds + $budget.ReconcileWorstCaseSeconds)) `
+        'Scenario 6: the outer delegation must cover a complete inner Update including its recovery.'
     if ($budget.InstalledTaskTimeLimit -match '^PT(?<minutes>\d+)M$') {
         $taskSeconds = [int]$Matches['minutes'] * 60
-        # Two sequential continuations are reachable: a primary handoff and then a recovery handoff, and the
-        # recovery path can itself re-enter the clone-validated upgrade.
-        $sequentialWorstCase = (2 * $budget.ContinuationSeconds) + 600
-        Assert-True ($taskSeconds -gt $sequentialWorstCase) `
-            "Scenario 6: the installed task limit ($taskSeconds s) must exceed the sequential worst case ($sequentialWorstCase s), or Task Scheduler hard-terminates a transition that is still inside its own budget."
-        Assert-True ($taskSeconds -gt $budget.DelegatedUpdateSeconds) `
-            'Scenario 6: the installed task limit must exceed the outer delegated-update budget.'
+        # The installed tasks invoke AeroLinkRemoteDemo.ps1 only, so the reconcile worst case is the bound
+        # they must clear. They cannot reach the operator-invoked delegation path.
+        Assert-True ($taskSeconds -gt $budget.ReconcileWorstCaseSeconds) `
+            "Scenario 6: the installed task limit ($taskSeconds s) must exceed the reconcile worst case ($($budget.ReconcileWorstCaseSeconds) s), or Task Scheduler hard-terminates a transition still inside its own budget."
     }
     else { $script:failures.Add("Scenario 6: the installed task limit '$($budget.InstalledTaskTimeLimit)' is not in PT<minutes>M form.") }
+    # The scheduled tasks must not be able to reach the delegation path; if they ever do, the task limit
+    # above is sized against the wrong bound.
+    foreach ($taskXml in @((Get-AeroLinkReconcileTaskXml -Config ([pscustomobject]@{
+                    AeroLinkRoot = 'C:\aerolink'; StatePath = 'C:\state'; LogsPath = 'C:\logs'; PublicUrl = 'https://x.invalid'
+                }) -IntervalMinutes 30))) {
+        Assert-True ($taskXml -notmatch 'Configure-AeroLinkProductionSource') `
+            'Scenario 6: an installed task must not invoke the delegated Update path, which is budgeted for operator invocation.'
+    }
 
     # Both installed task definitions must agree, or the two tasks disagree about how long a transition may take.
     $demoConfig = [pscustomobject]@{
@@ -230,6 +249,135 @@ else {
         Assert-True ($bytes -notlike 'EF BB BF*') `
             "Scenario 8 ($($shellHost.Name)): the stop token must not carry a UTF-8 preamble, got '$bytes'."
     }
+
+    # ---------------------------------------------------------------------------------------------
+    # #1053: a timeout must stop TRANSIENT MAINTENANCE DESCENDANTS, not merely the immediate child.
+    # ---------------------------------------------------------------------------------------------
+    # Stopping the continuation alone proves nothing about the transition: the expensive work - extraction,
+    # restore, migration - runs in its descendants, and one of those still holding the installation is
+    # exactly what makes a recovery attempt unsafe.
+    $maintenanceScript = Join-Path $root 'maintenance.ps1'
+    Set-Content -LiteralPath $maintenanceScript -Encoding ASCII -Value @'
+param([string]$Marker, [string]$Touch)
+Set-Content -LiteralPath $Marker -Value $PID -Encoding ASCII
+Start-Sleep -Seconds 60
+# Reached only if this was never stopped; proves work continued after cleanup was reported.
+Set-Content -LiteralPath $Touch -Value 'wrote after cleanup' -Encoding ASCII
+'@
+    $parentScript = Join-Path $root 'spawns-maintenance.ps1'
+    Set-Content -LiteralPath $parentScript -Encoding ASCII -Value @'
+param([string]$MaintenanceScript, [string]$Marker, [string]$Touch)
+$powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+Start-Process -FilePath $powershell `
+    -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$MaintenanceScript`" -Marker `"$Marker`" -Touch `"$Touch`"" `
+    -WindowStyle Hidden | Out-Null
+Start-Sleep -Seconds 60
+'@
+    $descLogs = Join-Path $root 'descendant'
+    New-Item -ItemType Directory -Path $descLogs -Force | Out-Null
+    $maintenanceMarker = Join-Path $descLogs 'maintenance.pid'
+    $maintenanceTouch = Join-Path $descLogs 'after-cleanup.txt'
+    $descResult = Invoke-AeroLinkOwnedTransitionScript -ScriptPath $parentScript `
+        -ArgumentList @('-MaintenanceScript', $maintenanceScript, '-Marker', $maintenanceMarker, '-Touch', $maintenanceTouch) `
+        -StandardOutput (Join-Path $descLogs 'desc.stdout.log') -StandardError (Join-Path $descLogs 'desc.stderr.log') `
+        -TimeoutSeconds 5 -StepName 'maintenance descendant'
+    Assert-True ($descResult.Outcome -eq 'TimedOut') "Scenario 9: the over-budget continuation must report TimedOut, got '$($descResult.Outcome)'."
+    $maintenancePid = $null
+    if (Test-Path -LiteralPath $maintenanceMarker) {
+        $maintenancePid = [int](Get-Content -LiteralPath $maintenanceMarker -Raw).Trim()
+        $startedProcessIds.Add($maintenancePid)
+    }
+    Assert-True ($null -ne $maintenancePid) 'Scenario 9: the maintenance descendant should have recorded its PID.'
+    if ($maintenancePid) {
+        Start-Sleep -Milliseconds 750
+        $maintenanceAlive = $null -ne (Get-Process -Id $maintenancePid -ErrorAction SilentlyContinue)
+        Assert-True (-not $maintenanceAlive) `
+            'Scenario 9: transient maintenance work must be stopped before cleanup may be reported proven.'
+        # CleanupProven is the caller''s permission to recover. It must be false while anything transient lives.
+        Assert-True (($descResult.CleanupProven -and -not $maintenanceAlive) -or (-not $descResult.CleanupProven)) `
+            'Scenario 9: CleanupProven must never be true while transient transition work is still running.'
+    }
+    Assert-True (-not (Test-Path -LiteralPath $maintenanceTouch)) `
+        'Scenario 9: no transient descendant may write after cleanup has been reported proven.'
+
+    # A declared restored service under the same root must SURVIVE: it is the product of the transition.
+    $preserveLogs = Join-Path $root 'preserve'
+    New-Item -ItemType Directory -Path $preserveLogs -Force | Out-Null
+    $preservePid = $null
+    $preserveProcess = Start-Process -FilePath $powershell `
+        -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $survivorScript, '-Seconds', '45') `
+        -WindowStyle Hidden -PassThru
+    $preservePid = $preserveProcess.Id
+    $startedProcessIds.Add($preservePid)
+    $snapshot = @([pscustomobject]@{
+            ProcessId      = $preservePid
+            StartedAt      = $preserveProcess.StartTime.ToUniversalTime()
+            ExecutablePath = $preserveProcess.Path
+        })
+    $preserveResult = Stop-AeroLinkTransientProcessTree -Descendant $snapshot -PreserveProcessId @($preservePid)
+    Assert-True ($preserveResult.Proven) 'Scenario 10: preserving a restored service must still report proven.'
+    Assert-True ($preserveResult.PreservedIds -contains $preservePid) 'Scenario 10: the restored service must be reported as preserved.'
+    Start-Sleep -Milliseconds 500
+    Assert-True ($null -ne (Get-Process -Id $preservePid -ErrorAction SilentlyContinue)) `
+        'Scenario 10: a declared restored service must never be terminated by transient cleanup.'
+    Stop-Process -Id $preservePid -Force -ErrorAction SilentlyContinue
+
+    # ---------------------------------------------------------------------------------------------
+    # #1053: unproven cleanup must STOP the retry, structurally - not merely say so in a message.
+    # ---------------------------------------------------------------------------------------------
+    # Every caller retries a failed handoff from a catch, and a catch does not read prose. The signal has to
+    # be data that survives the throw.
+    $unsafe = New-AeroLinkRecoveryUnsafeError -Message 'transition work was not proven stopped'
+    $safeError = New-Object System.InvalidOperationException('an ordinary recoverable failure')
+    $attempts = 0
+    try {
+        try { $attempts++; throw $unsafe }
+        catch {
+            if (-not (Test-AeroLinkRecoveryUnsafeError $_)) { $attempts++ }
+        }
+    }
+    catch { }
+    Assert-True ($attempts -eq 1) "Scenario 11: an unproven-cleanup failure must not be retried; attempts=$attempts."
+    $safeAttempts = 0
+    try {
+        try { $safeAttempts++; throw $safeError }
+        catch { if (-not (Test-AeroLinkRecoveryUnsafeError $_)) { $safeAttempts++ } }
+    }
+    catch { }
+    # Recovery must still work for ordinary failures, or a fixable fault leaves the demo dark.
+    Assert-True ($safeAttempts -eq 2) "Scenario 11: an ordinary failure must remain recoverable; attempts=$safeAttempts."
+    Assert-True (Test-AeroLinkRecoveryUnsafeError $unsafe) 'Scenario 11: the unsafe marker must be detectable on the raw exception.'
+    Assert-True (-not (Test-AeroLinkRecoveryUnsafeError $safeError)) 'Scenario 11: an ordinary failure must not be marked unsafe.'
+    Assert-True (-not (Test-AeroLinkRecoveryUnsafeError $null)) 'Scenario 11: a null failure must not be marked unsafe.'
+
+    # ---------------------------------------------------------------------------------------------
+    # #1043 / R5: reused and truncated logs, and a backlog larger than one read chunk.
+    # ---------------------------------------------------------------------------------------------
+    # The helper log FILENAMES are reused between attempts while remote-demo.log accumulates history, so
+    # both cases below are normal lifecycle, not edge cases.
+    $reusedPath = Join-Path $root 'reused.log'
+    Set-Content -LiteralPath $reusedPath -Value "previous attempt line A`r`nprevious attempt line B" -Encoding ASCII
+    $boundTail = New-AeroLinkLogTail -Path $reusedPath -StartAtEnd
+    $priorLines = @($boundTail.Read())
+    Assert-True ($priorLines.Count -eq 0) `
+        "Scenario 12: a tail bound to the current attempt must not replay a previous attempt's output, got $($priorLines.Count) line(s)."
+    # The file is then replaced by this attempt's much shorter log.
+    Set-Content -LiteralPath $reusedPath -Value "current attempt line 1`r`n" -Encoding ASCII
+    $afterTruncation = @($boundTail.Read())
+    Assert-True ($afterTruncation -contains 'current attempt line 1') `
+        "Scenario 12: after truncation/replacement the tail must resume from the new file, got '$($afterTruncation -join '|')'."
+
+    # A busy restore can append far more than one 64 KiB chunk between the last poll and the child's exit.
+    $backlogPath = Join-Path $root 'backlog.log'
+    $builder = New-Object System.Text.StringBuilder
+    for ($i = 1; $i -le 10000; $i++) { [void]$builder.AppendLine("restore progress line $i") }
+    Set-Content -LiteralPath $backlogPath -Value $builder.ToString() -Encoding ASCII -NoNewline
+    $backlogTail = New-AeroLinkLogTail -Path $backlogPath
+    $drained = @($backlogTail.Flush())
+    Assert-True ($drained.Count -eq 10000) `
+        "Scenario 12: the final drain must return the whole backlog, not one chunk of it; got $($drained.Count) of 10000 lines."
+    Assert-True ($drained[0] -eq 'restore progress line 1' -and $drained[-1] -eq 'restore progress line 10000') `
+        'Scenario 12: the drained backlog must be complete and in order.'
 }
 finally {
     foreach ($processId in $startedProcessIds) {
@@ -243,4 +391,6 @@ if ($failures.Count -gt 0) {
     foreach ($failure in $failures) { Write-Host "FAIL: $failure" -ForegroundColor Red }
     throw "Transition handoff contracts failed ($($failures.Count))."
 }
-Write-Host 'Transition handoff contracts passed (survivor handoff, proven timeout cleanup, truthful exit results, tail integrity, budget coherence, stop-token bytes).' -ForegroundColor Green
+Write-Host ('Transition handoff contracts passed (survivor handoff, proven timeout cleanup, transient descendant ownership, ' +
+    'preserved restored services, no retry after unproven cleanup, truthful exit results, tail integrity across split ' +
+    'characters/reused logs/multi-chunk backlog, budget composition, stop-token bytes).') -ForegroundColor Green

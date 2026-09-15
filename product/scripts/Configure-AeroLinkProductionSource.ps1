@@ -294,7 +294,7 @@ switch ($Action) {
                 $continuation = Invoke-AeroLinkOwnedTransitionScript -ScriptPath $updatedScript -ArgumentList @('-Action', 'Update') `
                     -StandardOutput (Join-Path $continuationLogs 'continuation.stdout.log') `
                     -StandardError (Join-Path $continuationLogs 'continuation.stderr.log') `
-                    -TimeoutSeconds (Get-AeroLinkTransitionBudget).DelegatedUpdateSeconds `
+                    -TimeoutSeconds (Get-AeroLinkTransitionBudget).PostAdvanceContinuationSeconds `
                     -StepName 'source continuation' -StreamToHost
                 if ($continuation.Outcome -eq 'Completed') { $childExit = $continuation.ExitCode }
                 else { $continuationFailure = $continuation.Detail }
@@ -310,13 +310,26 @@ switch ($Action) {
             }
             if ($continuationFailure) { Write-Host "      $continuationFailure" -ForegroundColor Yellow }
 
-            # A continuation that timed out WITHOUT a proven shutdown may still be advancing this
-            # installation. Restarting production on top of it would put two writers on one source, so the
-            # restoration obligation is retained and reported instead of being discharged over a live
-            # transition. This is the one failure that must not fall through to the restart below.
-            if ($null -ne $continuation -and $continuation.Outcome -eq 'TimedOut' -and -not $continuation.CleanupProven) {
-                throw ("The source was advanced to $($result.HeadSha), but the continuation exceeded its budget and its shutdown could NOT be proven. " +
-                    "It may still be running, so production was NOT restarted here and the restoration obligation is retained. $($continuation.Detail)")
+            # Recovery is permitted only when this attempt's transition work is PROVEN stopped.
+            #
+            # Two distinct unsafe shapes, and the second one was initially missed. The runner can report a
+            # timeout or a post-launch fault whose cleanup was not proven - and it can also fail so early
+            # that $continuation is still $null, which is precisely the case where nothing is known about the
+            # child at all. Treating "no result" as safe would restart production over a live continuation,
+            # so an unknown cleanup state is never permission to restart.
+            $recoveryUnsafe = $false
+            $unsafeDetail = ''
+            if ($null -eq $continuation) {
+                $recoveryUnsafe = $true
+                $unsafeDetail = "The continuation produced no result ($continuationFailure), so nothing is known about whether it stopped."
+            }
+            elseif ($continuation.Outcome -ne 'Completed' -and -not $continuation.CleanupProven) {
+                $recoveryUnsafe = $true
+                $unsafeDetail = $continuation.Detail
+            }
+            if ($recoveryUnsafe) {
+                throw ("The source was advanced to $($result.HeadSha), but the continuation did not finish and its shutdown could NOT be proven. " +
+                    "Transition work may still be running, so production was NOT restarted here and the restoration obligation is retained. $unsafeDetail")
             }
 
             # The obligation is retained until the child positively discharges it. Exiting on the child's
