@@ -1139,7 +1139,7 @@ jobs:
           fi
           echo "Shard ${{ matrix.shard }} of ${{ strategy.job-total }}: $expected tests across ${#files[@]} spec files."
 
-          npx playwright test "${files[@]}" --reporter=list,json
+          npx playwright test "${files[@]}" --reporter=list,json,./scripts/browser-storage-reporter.mjs
 
           # The plan anchors each name so a spec contained in a longer one cannot be pulled into a shard it was
           # not given. This stays as the backstop: an anchor that stopped working, or a mistyped plan running
@@ -1271,7 +1271,7 @@ jobs:
         env:
           AEROLINK_E2E_SKIP_BUILD: "true"
           PLAYWRIGHT_JSON_OUTPUT_NAME: journey-durations-production.json
-        run: npm run test:production -- --reporter=list,json
+        run: npm run test:production -- --reporter=list,json,./scripts/browser-storage-reporter.mjs
       - name: Mark test complete
         if: always()
         continue-on-error: true
@@ -1393,7 +1393,7 @@ jobs:
             echo "::error::Full shard planned no spec files. Discovery or packing is broken."
             exit 1
           fi
-          npx playwright test "${files[@]}" --reporter=list,json
+          npx playwright test "${files[@]}" --reporter=list,json,./scripts/browser-storage-reporter.mjs
           actual="$(node -e "const s=require('./journey-durations-full-${{ matrix.shard }}.json').stats; console.log(s.expected + s.unexpected + s.flaky + s.skipped)")"
           if [ "$actual" != "$expected" ]; then
             echo "::error::Full shard planned $expected tests but ran $actual."
