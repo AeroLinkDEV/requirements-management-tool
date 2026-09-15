@@ -1721,3 +1721,311 @@ test("a late load describing another draft does not replace the draft that was j
   await page.unroute(/\/api\/project-setups$/);
   await page.unroute(new RegExp(`/api/project-setups/${createdId}$`));
 });
+
+/** A deterministic barrier: the test decides when this mocked response completes. */
+function deferred() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+/** A real saved draft the journey can open and resume, with its real server view. */
+async function seedLifecycleDraft(page: Page, projectName: string, currentStep: string) {
+  const created = await page.request.post(`${apiBase}/api/project-setups`, { data: { projectName } });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const draftId = ((await created.json()) as { draftId: string }).draftId;
+  const saved = await page.request.put(`${apiBase}/api/project-setups/${draftId}`, {
+    data: {
+      expectedVersion: 1,
+      currentStep,
+      project: { name: projectName, softwareProduct: `${projectName} software` },
+      start: { kind: "Fresh" },
+      build: { version: "0.01" },
+      selectedCategories: [],
+      ladder: {
+        steps: [
+          { catalogueEntry: "System", position: 1, capabilities: 7, enabledArtifactKinds: ["Procedure"] },
+          { catalogueEntry: "HighLevel", position: 2, capabilities: 7, enabledArtifactKinds: ["Case", "Procedure"] },
+          { catalogueEntry: "LowLevel", position: 3, capabilities: 15, enabledArtifactKinds: ["Case", "Procedure"] },
+        ],
+        relationships: [
+          { parent: "System", child: "HighLevel" },
+          { parent: "HighLevel", child: "LowLevel" },
+        ],
+      },
+      reviewRules: {},
+      reviewRulesAccepted: true,
+      repository: { mode: "ConfigureLater" },
+      mapping: {},
+    },
+  });
+  expect(saved.ok(), await saved.text()).toBeTruthy();
+  const read = await page.request.get(`${apiBase}/api/project-setups/${draftId}`);
+  expect(read.ok(), await read.text()).toBeTruthy();
+  return { draftId, body: (await read.json()) as Record<string, unknown> };
+}
+
+/** The saved view with a verdict that describes an older version, so the recheck control is offered. */
+function withStaleVerdict(body: Record<string, unknown>) {
+  const validation = body.validation as Record<string, unknown>;
+  return {
+    ...body,
+    validation: { ...validation, version: (body.version as number) - 1 },
+  };
+}
+
+/** An otherwise-acceptable view for the same draft at a newer version. */
+function atNewerVersion(body: Record<string, unknown>, offset: number) {
+  const validation = body.validation as Record<string, unknown>;
+  const version = (body.version as number) + offset;
+  return {
+    ...body,
+    version,
+    validation: { ...validation, version },
+  };
+}
+
+test("a pending recheck for one draft cannot enter the screen of another draft", async ({ page }) => {
+  test.setTimeout(180_000);
+  await login(page, "admin", { openProject: false });
+  const suffix = Date.now().toString(36);
+  const draftA = await seedLifecycleDraft(page, `Lifecycle A ${suffix}`, "Review");
+  const draftB = await seedLifecycleDraft(page, `Lifecycle B ${suffix}`, "Details");
+  const aBody = withStaleVerdict(draftA.body);
+
+  const recheckGate = deferred();
+  const bGate = deferred();
+  // User actions issue exactly one read; mounts may issue more than one in a development build. The recheck
+  // barrier is therefore one-shot, while the other draft's mount reads are held until their gate opens.
+  let holdRecheck = false;
+  let recheckReached = false;
+  let bReached = false;
+  await page.route(new RegExp(`/api/project-setups/${draftA.draftId}$`), async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    if (!holdRecheck) {
+      await route.fulfill({ json: aBody });
+      return;
+    }
+    holdRecheck = false;
+    recheckReached = true;
+    await recheckGate.promise;
+    await route.fulfill({
+      json: { ...aBody, project: { name: "Stale A answers", softwareProduct: "Stale A product" } },
+    });
+  });
+  await page.route(new RegExp(`/api/project-setups/${draftB.draftId}$`), async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    bReached = true;
+    await bGate.promise;
+    await route.fulfill({ json: draftB.body });
+  });
+
+  await page.goto(`/projects/setup/${draftA.draftId}`);
+  await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+  holdRecheck = true;
+  await page.getByRole("button", { name: /Recheck the saved configuration/i }).click();
+  await expect.poll(() => recheckReached).toBe(true);
+
+  // Leave A through the application's own navigation and resume B in the same screen instance. B's own read
+  // is still pending when A's recheck completes.
+  await page.getByRole("button", { name: "Projects" }).click();
+  await expect(page.getByRole("heading", { name: "Projects", level: 1 })).toBeVisible();
+  const bCard = page.locator(`[data-setup-draft-id="${draftB.draftId}"]`);
+  await expect(bCard).toHaveCount(1);
+  await bCard.getByRole("button").click();
+  await expect.poll(() => bReached).toBe(true);
+  await expect(page.getByText(/Opening the saved project setup/i)).toBeVisible();
+
+  const aRecheckLanded = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/project-setups/${draftA.draftId}`) &&
+      response.request().method() === "GET",
+  );
+  recheckGate.release();
+  await aRecheckLanded;
+
+  // Nothing from A may enter B's screen: no answers, no notice, no findings, and B is still opening.
+  await expect(page.getByText(/Opening the saved project setup/i)).toBeVisible();
+  await expect(page.getByText("Stale A answers")).toHaveCount(0);
+  await expect(page.locator(".projectSetupNotice")).toHaveCount(0);
+  await expect(page.locator(".projectSetupError")).toHaveCount(0);
+
+  bGate.release();
+  await expect(page.getByRole("heading", { name: "Project details", level: 2 })).toBeVisible();
+  await expect(page.getByLabel("Project name")).toHaveValue(`Lifecycle B ${suffix}`);
+  await expect(page.locator(".projectSetupNotice")).toHaveCount(0);
+  await page.unroute(new RegExp(`/api/project-setups/${draftA.draftId}$`));
+  await page.unroute(new RegExp(`/api/project-setups/${draftB.draftId}$`));
+});
+
+test("an older visit's response cannot become current when the same draft is opened again", async ({ page }) => {
+  test.setTimeout(180_000);
+  await login(page, "admin", { openProject: false });
+  const suffix = Date.now().toString(36);
+  const projectNameA = `Lifecycle A ${suffix}`;
+  const draftA = await seedLifecycleDraft(page, projectNameA, "Review");
+  const draftB = await seedLifecycleDraft(page, `Lifecycle B ${suffix}`, "Details");
+  const aBody = withStaleVerdict(draftA.body);
+  // The old request is otherwise perfectly acceptable: same draft, newer version — only its visit is over.
+  const staleA = atNewerVersion(draftA.body, 5);
+  staleA.project = { name: "Stale A answers", softwareProduct: "Stale A product" };
+
+  const recheckGate = deferred();
+  const reopenGate = deferred();
+  const bGate = deferred();
+  let holdRecheck = false;
+  let holdReopen = false;
+  let recheckReached = false;
+  let reopenReached = false;
+  let bReached = false;
+  await page.route(new RegExp(`/api/project-setups/${draftA.draftId}$`), async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    if (holdRecheck) {
+      holdRecheck = false;
+      recheckReached = true;
+      await recheckGate.promise;
+      await route.fulfill({ json: staleA });
+      return;
+    }
+    if (holdReopen) {
+      reopenReached = true;
+      await reopenGate.promise;
+      await route.fulfill({ json: aBody });
+      return;
+    }
+    await route.fulfill({ json: aBody });
+  });
+  await page.route(new RegExp(`/api/project-setups/${draftB.draftId}$`), async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    bReached = true;
+    await bGate.promise;
+    await route.fulfill({ json: draftB.body });
+  });
+
+  await page.goto(`/projects/setup/${draftA.draftId}`);
+  await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+  holdRecheck = true;
+  await page.getByRole("button", { name: /Recheck the saved configuration/i }).click();
+  await expect.poll(() => recheckReached).toBe(true);
+
+  // A -> B, so the old request's visit is over.
+  await page.getByRole("button", { name: "Projects" }).click();
+  const bCard = page.locator(`[data-setup-draft-id="${draftB.draftId}"]`);
+  await expect(bCard).toHaveCount(1);
+  await bCard.getByRole("button").click();
+  await expect.poll(() => bReached).toBe(true);
+  bGate.release();
+  await expect(page.getByRole("heading", { name: "Project details", level: 2 })).toBeVisible();
+
+  // ... and back to A, whose own read is still pending.
+  await page.getByRole("button", { name: "Projects" }).click();
+  const aCard = page.locator(`[data-setup-draft-id="${draftA.draftId}"]`);
+  await expect(aCard).toHaveCount(1);
+  holdReopen = true;
+  await aCard.getByRole("button").click();
+  await expect.poll(() => reopenReached).toBe(true);
+  await expect(page.getByText(/Opening the saved project setup/i)).toBeVisible();
+
+  // The older visit's response is newer than the saved draft and names the same draft, but it is still not this
+  // visit: it must not paint the screen or publish a recheck notice.
+  const oldResponseLanded = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/project-setups/${draftA.draftId}`) &&
+      response.request().method() === "GET",
+  );
+  recheckGate.release();
+  await oldResponseLanded;
+  await expect(page.getByText(/Opening the saved project setup/i)).toBeVisible();
+  await expect(page.getByText("Stale A answers")).toHaveCount(0);
+  await expect(page.locator(".projectSetupNotice")).toHaveCount(0);
+
+  // The current visit's own read still describes A truthfully.
+  reopenGate.release();
+  await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+  await expect(page.locator(".setupReviewList")).toContainText(projectNameA);
+  await expect(page.getByText("Stale A answers")).toHaveCount(0);
+  await expect(page.locator(".projectSetupNotice")).toHaveCount(0);
+  await page.unroute(new RegExp(`/api/project-setups/${draftA.draftId}$`));
+  await page.unroute(new RegExp(`/api/project-setups/${draftB.draftId}$`));
+});
+
+test("a finalization response that arrives after leaving the walkthrough cannot take over navigation", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await login(page, "admin", { openProject: false });
+  const projectName = `Left finalize ${Date.now().toString(36)}`;
+  const draftId = await readyFreshDraftAtReview(page, projectName);
+
+  // Hold the REAL server response: the request reaches the server (and commits), and only its delivery is
+  // delayed — the distinction the request-lifecycle correction turns on.
+  const holdResponse = deferred();
+  let responseHeld = false;
+  await page.route(/\/api\/project-setups\/[0-9a-f-]+\/finalize$/i, async (route) => {
+    const response = await route.fetch();
+    responseHeld = true;
+    await holdResponse.promise;
+    await route.fulfill({ response });
+  });
+  await page.getByRole("button", { name: "Create Project" }).click();
+  await expect.poll(() => responseHeld).toBe(true);
+
+  // Leave through the application's own navigation while the response is in flight.
+  await page.getByRole("button", { name: "Projects" }).click();
+  await expect(page.getByRole("heading", { name: "Projects", level: 1 })).toBeVisible();
+
+  // The abandoned instance's continuation would go through the parent callback, which both pushes the build
+  // selector route and reloads workspaces. Observe for that bounded window rather than assuming it is idle.
+  let abandonedNavigation = false;
+  const observe = (request: { method: () => string; url: () => string }) => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "GET" && (path.endsWith("/builds") || path === "/api/workspaces"))
+      abandonedNavigation = true;
+  };
+  page.on("request", observe);
+  const finalizeLanded = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname.endsWith("/finalize") && response.request().method() === "POST",
+  );
+  holdResponse.release();
+  await finalizeLanded;
+  await page.waitForTimeout(750);
+  page.off("request", observe);
+  expect(abandonedNavigation, "an abandoned finalization must not navigate or reload through the parent").toBe(false);
+  await expect(page.getByRole("heading", { name: "Projects", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Project created", level: 2 })).toHaveCount(0);
+  await expect(page.locator(".projectSetupError")).toHaveCount(0);
+  await expect(page.locator(".projectSetupNotice")).toHaveCount(0);
+
+  // The committed result is still recoverable by opening the draft again, with its real identities and no
+  // duplicate project.
+  await page.goto(`/projects/setup/${draftId}`);
+  await expect(page.getByRole("heading", { name: "Project created", level: 2 })).toBeVisible();
+  await expect(page.locator(".setupReviewList")).toContainText("SW-00.01");
+  await page.getByRole("button", { name: "Open build lineage" }).click();
+  await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+\/builds$/);
+
+  const workspaces = await page.request.get(`${apiBase}/api/workspaces`);
+  expect(workspaces.ok(), await workspaces.text()).toBeTruthy();
+  const listing = (await workspaces.json()) as {
+    projects: { project: { name: string } }[];
+  }[];
+  const matches = listing.flatMap((workspace) => workspace.projects)
+    .filter((entry) => entry.project.name === projectName);
+  expect(matches, "exactly one project for the completed setup").toHaveLength(1);
+  await page.unroute(/\/api\/project-setups\/[0-9a-f-]+\/finalize$/i);
+});
