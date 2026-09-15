@@ -544,17 +544,35 @@ export default function ProjectSetupWalkthrough({
   const [notice, setNotice] = useState("");
   const [sourceState, setSourceState] = useState<SourceDraftState>(emptySourceState);
   const finalizationKey = useRef<string | undefined>(undefined);
-  const draftLoadGeneration = useRef(0);
   // Local edits made while a request is in flight. A response that no longer describes what is on screen
   // must not overwrite it, and must not restore a readiness claim for answers it never validated.
   const editGeneration = useRef(0);
   // The draft as it is on screen right now, so an asynchronous response can be judged against the answers it
   // would replace instead of against its own copy of the verdict it carries.
   const draftRef = useRef<SetupDraft | undefined>(undefined);
-  // The draft whose responses this instance currently accepts. A deliberate switch (creating a draft, or being
-  // asked to open another one) establishes the new scope here, so a late or foreign response is refused
-  // against the scope itself rather than only against the answers of the moment.
-  const activeDraftId = useRef<string | undefined>(undefined);
+  /**
+   * One visit to one draft: the token a request captures when it starts and must still hold to apply anything.
+   * Leaving the walkthrough retires this instance's authority, and opening another draft (or opening the same
+   * draft again) creates a new token — so a late response from an earlier visit cannot become current merely
+   * because the draft identity matches again.
+   */
+  type RequestScope = { draftId: string; visit: number };
+  const scopeRef = useRef<RequestScope | undefined>(undefined);
+  const visitCounter = useRef(0);
+  // Busy flags belong to the operation that set them, so an obsolete attempt's cleanup cannot clear a newer
+  // attempt's state.
+  const saveAttempt = useRef(0);
+  const revalidateAttempt = useRef(0);
+  const finalizeAttempt = useRef(0);
+  // Development builds mount, clean up and re-run effects; only a real unmount retires this instance.
+  const instanceAlive = useRef(true);
+  useEffect(() => {
+    instanceAlive.current = true;
+    return () => {
+      instanceAlive.current = false;
+      scopeRef.current = undefined;
+    };
+  }, []);
   // Structured refusal findings, retained with the exact draft version they were reported for.
   const [finalizationFindings, setFinalizationFindings] = useState<
     { draftId: string; version: number; findings: LadderFinding[] } | null
@@ -578,7 +596,7 @@ export default function ProjectSetupWalkthrough({
    * its older verdict — onto newer answers. Every caller must treat `false` as "apply nothing at all".
    */
   const adoptServerDraft = useCallback((candidate: SetupDraft): boolean => {
-    if (!candidate || candidate.draftId !== activeDraftId.current) return false;
+    if (!candidate || candidate.draftId !== scopeRef.current?.draftId) return false;
     const current = draftRef.current;
     if (current && current.draftId === candidate.draftId && candidate.version < current.version)
       return false;
@@ -587,12 +605,28 @@ export default function ProjectSetupWalkthrough({
     return true;
   }, []);
 
+  /** Opens a new request scope for one visit to one draft and retires the previous visit's authority. */
+  const beginScope = useCallback((draftId: string): RequestScope => {
+    const scope = { draftId, visit: ++visitCounter.current };
+    scopeRef.current = scope;
+    // Attempt-specific state belongs to one visit to one draft.
+    setFinalizationFindings(null);
+    finalizationKey.current = undefined;
+    return scope;
+  }, []);
+
+  const scopeIsCurrent = useCallback(
+    (scope: RequestScope | undefined) => Boolean(scope && instanceAlive.current && scopeRef.current === scope),
+    [],
+  );
+
   /**
    * Adopts a draft version reported by another endpoint. A source call can advance the draft without
    * returning the setup view, so the verdict that described the earlier version is dropped rather than
    * carried forward as though it validated answers nobody has read yet.
    */
   const adoptDraftVersion = useCallback((version: number) => {
+    if (!instanceAlive.current || !scopeRef.current) return;
     const current = draftRef.current;
     if (!current || version <= current.version) return;
     const next = { ...current, version, validation: null };
@@ -602,15 +636,13 @@ export default function ProjectSetupWalkthrough({
 
   const loadDraft = useCallback(
     async (id: string) => {
-      const generation = ++draftLoadGeneration.current;
-      const isCurrentLoad = () => draftLoadGeneration.current === generation;
       // Opening this draft is the explicit scope for everything this load may apply.
-      activeDraftId.current = id;
+      const scope = beginScope(id);
       setLoading(true);
       setError("");
       try {
         const loaded = await apiRequest<SetupDraft>(`${api}/api/project-setups/${id}`);
-        if (!isCurrentLoad()) return;
+        if (!scopeIsCurrent(scope)) return;
         // A response that is not this draft's own current state applies nothing at all: no answers, no step,
         // no source state and no notice about a draft that is no longer on screen.
         if (!adoptServerDraft(loaded)) {
@@ -625,7 +657,7 @@ export default function ProjectSetupWalkthrough({
         if (loaded.start?.kind === "AeroLinkBaseline" || loaded.start?.kind === "ExternalBaseline") {
           try {
             const sourceEnvelope = await apiRequest<unknown>(`${api}/api/project-setups/${id}/source`);
-            if (!isCurrentLoad()) return;
+            if (!scopeIsCurrent(scope)) return;
             const sourceRecord = asObject(sourceEnvelope);
             const source = decodeSourceView(sourceRecord.source ?? sourceEnvelope);
             const sourceVersion = typeof sourceRecord.draftVersion === "number" ? sourceRecord.draftVersion : loaded.version;
@@ -638,7 +670,7 @@ export default function ProjectSetupWalkthrough({
               }
             }
           } catch (failure) {
-            if (!isCurrentLoad()) return;
+            if (!scopeIsCurrent(scope)) return;
             // A missing source is a truthful pending state on a resumable draft. Other failures are
             // surfaced while leaving the already loaded project answers available for retry.
             if (!(failure instanceof ApiError && failure.status === 404)) {
@@ -647,7 +679,7 @@ export default function ProjectSetupWalkthrough({
           }
         }
       } catch (failure) {
-        if (!isCurrentLoad()) return;
+        if (!scopeIsCurrent(scope)) return;
         setError(
           operationError(
             failure,
@@ -655,10 +687,10 @@ export default function ProjectSetupWalkthrough({
           ),
         );
       } finally {
-        if (isCurrentLoad()) setLoading(false);
+        if (scopeIsCurrent(scope)) setLoading(false);
       }
     },
-    [adoptDraftVersion, adoptServerDraft, api],
+    [adoptDraftVersion, adoptServerDraft, api, beginScope, scopeIsCurrent],
   );
 
   useEffect(() => {
@@ -667,6 +699,8 @@ export default function ProjectSetupWalkthrough({
       void loadDraft(draftId);
       return () => {
         active = false;
+        // The visit is over: whatever this draft's earlier requests still hold must apply nothing.
+        scopeRef.current = undefined;
       };
     }
     setLoading(true);
@@ -680,7 +714,7 @@ export default function ProjectSetupWalkthrough({
         if (!active) return;
         const createdDraft = draftFromCreate(created);
         onDraftCreated?.(createdDraft.draftId);
-        activeDraftId.current = createdDraft.draftId;
+        beginScope(createdDraft.draftId);
         draftRef.current = createdDraft;
         setDraft(createdDraft);
         setValues(valuesFromDraft(createdDraft));
@@ -695,8 +729,9 @@ export default function ProjectSetupWalkthrough({
       });
     return () => {
       active = false;
+      scopeRef.current = undefined;
     };
-  }, [api, draftId, loadDraft, onDraftCreated]);
+  }, [api, beginScope, draftId, loadDraft, onDraftCreated]);
 
   const update = <K extends keyof SetupValues>(key: K, value: SetupValues[K]) => {
     editGeneration.current += 1;
@@ -873,6 +908,9 @@ export default function ProjectSetupWalkthrough({
     flushSource = false,
   ) => {
     if (!draft || !values) return false;
+    const scope = scopeRef.current;
+    if (!scope || !scopeIsCurrent(scope)) return false;
+    const attempt = ++saveAttempt.current;
     // The edit generation and the answers it describes are captured together, before any await. Capturing
     // it after the asynchronous source flush would let a save claim the newer edit generation while
     // submitting the older payload — and then overwrite, or navigate away from, answers it never saved.
@@ -909,9 +947,12 @@ export default function ProjectSetupWalkthrough({
         },
       );
       const saved = "draft" in response ? response.draft : response;
+      // A response that arrives after this visit ended, or after another draft was opened, applies nothing and
+      // cannot authorize the caller to move on.
+      if (!scopeIsCurrent(scope)) return false;
       const adopted = adoptServerDraft(saved);
       const superseded = editGeneration.current !== generationAtRequest;
-      const foreignResponse = saved.draftId !== activeDraftId.current;
+      const foreignResponse = saved.draftId !== scope.draftId;
       // Answers typed while this save was in flight are newer than the response. Adopt the saved draft and
       // its verdict, but never replace what the creator is currently editing with what they had already
       // changed; the outstanding edit keeps readiness unavailable until they save again.
@@ -937,6 +978,7 @@ export default function ProjectSetupWalkthrough({
       if (exitAfterSave) onExit();
       return saved;
     } catch (failure) {
+      if (!scopeIsCurrent(scope)) return false;
       setError(
         operationError(
           failure,
@@ -945,7 +987,7 @@ export default function ProjectSetupWalkthrough({
       );
       return false;
     } finally {
-      setSaving(false);
+      if (attempt === saveAttempt.current && instanceAlive.current) setSaving(false);
     }
   };
 
@@ -1007,10 +1049,16 @@ export default function ProjectSetupWalkthrough({
    */
   const revalidate = async () => {
     if (!draft) return;
+    const scope = scopeRef.current;
+    if (!scope || !scopeIsCurrent(scope)) return;
+    const attempt = ++revalidateAttempt.current;
     const generationAtRequest = editGeneration.current;
     setRevalidating(true);
     try {
-      const loaded = await apiRequest<SetupDraft>(`${api}/api/project-setups/${draft.draftId}`);
+      const loaded = await apiRequest<SetupDraft>(`${api}/api/project-setups/${scope.draftId}`);
+      // A response from an earlier visit, or from another draft, applies nothing at all — not even a notice
+      // explaining the rejection, because that notice would land on a different screen.
+      if (!scopeIsCurrent(scope)) return;
       // Compare the response with what is on screen *now*: a request issued before another read or save
       // adopted a newer version must not replace it with the older answers it was sent to describe.
       const live = draftRef.current ?? draft;
@@ -1022,7 +1070,8 @@ export default function ProjectSetupWalkthrough({
         );
         return;
       }
-      adoptServerDraft(loaded);
+      // Never continue past a rejected adoption: no values, source state or success notice.
+      if (!adoptServerDraft(loaded)) return;
       if (editGeneration.current === generationAtRequest) setValues(valuesFromDraft(loaded));
       const sourceChanged = sourceAcceptanceKey(live) !== sourceAcceptanceKey(loaded);
       if (sourceChanged) {
@@ -1043,6 +1092,7 @@ export default function ProjectSetupWalkthrough({
           : "Rechecked the saved configuration against the server's maintained rules.",
       );
     } catch (failure) {
+      if (!scopeIsCurrent(scope)) return;
       setError(
         operationError(
           failure,
@@ -1050,7 +1100,7 @@ export default function ProjectSetupWalkthrough({
         ),
       );
     } finally {
-      setRevalidating(false);
+      if (attempt === revalidateAttempt.current && instanceAlive.current) setRevalidating(false);
     }
   };
 
@@ -1060,9 +1110,10 @@ export default function ProjectSetupWalkthrough({
    * three different facts, and only the first two are established by the server.
    */
   const recoverFinalization = async (failure: unknown, attempted: SetupDraft) => {
-    // The creator may have left this draft while the attempt was in flight; a result for a scope that is no
-    // longer active must not write errors, notices, findings or completion claims onto another draft.
-    if (attempted.draftId !== activeDraftId.current) return;
+    // The creator may have left this draft, or the whole walkthrough, while the attempt was in flight; a result
+    // for a retired request scope must not write errors, notices, findings or completion claims anywhere.
+    const scope = scopeRef.current;
+    if (!scope || scope.draftId !== attempted.draftId || !scopeIsCurrent(scope)) return;
     const generationAtRequest = editGeneration.current;
     const status = failure instanceof ApiError ? failure.status : undefined;
     // Only a truthful, attributable statement may be repeated. The generic 5xx fallback ("No success was
@@ -1080,7 +1131,7 @@ export default function ProjectSetupWalkthrough({
     } catch {
       recoveryFailed = true;
     }
-    if (attempted.draftId !== activeDraftId.current) return;
+    if (!scopeIsCurrent(scope)) return;
     // A recovered view is evidence only once it is established as this attempted draft's own current state.
     // A foreign response, or one older than what is already on screen, is adopted by nothing: it changes no
     // answers, no step, no source acceptance and no completion claim.
@@ -1197,6 +1248,9 @@ export default function ProjectSetupWalkthrough({
       setError("Only an AeroLink administrator can finalize a new Project. Your saved setup remains available for editing and resume.");
       return;
     }
+    const scope = scopeRef.current;
+    if (!scope || !scopeIsCurrent(scope)) return;
+    const attempt = ++finalizeAttempt.current;
     setFinalizing(true);
     setError("");
     setNotice("");
@@ -1227,24 +1281,28 @@ export default function ProjectSetupWalkthrough({
         },
       );
       // A completion may only navigate for the scope that asked for it.
-      if (attempted.draftId !== activeDraftId.current) return;
+      if (!scopeIsCurrent(scope) || attempted.draftId !== scope.draftId) return;
       onCompleted(result);
     } catch (failure) {
       // Recovery is awaited so the message on screen describes the settled outcome, not the request that
       // may or may not have committed.
+      if (!scopeIsCurrent(scope)) return;
       await recoverFinalization(failure, attempted);
     } finally {
-      setFinalizing(false);
+      if (attempt === finalizeAttempt.current && instanceAlive.current) setFinalizing(false);
     }
   };
 
   const goTo = async (target: SetupStep) => {
     if (target === currentStep) return;
+    const scope = scopeRef.current;
     if (
       (hasUnsavedChanges || target !== draft?.currentStep) &&
       !(await saveDraft(false, target, undefined, currentStep === "StartingPoint"))
     )
       return;
+    // A save that was superseded by leaving this scope must not move the newer screen to a step.
+    if (!scope || !scopeIsCurrent(scope)) return;
     setCurrentStep(target);
   };
 
