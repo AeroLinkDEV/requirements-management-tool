@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
+import { join } from "node:path";
 import { apiBase, login } from "./auth";
+
+/**
+ * Review evidence this journey commits under product/docs/screenshots so the reviewer can see the
+ * screen rather than only read an assertion about it.
+ */
+const reviewEvidence = (name: string) => join("..", "docs", "screenshots", name);
 
 /**
  * #1045 browser coverage for a project setup whose verification capability is disabled.
@@ -113,7 +120,7 @@ test("disabling verification at System leaves no enabled verification artifact",
   expect(step(persisted, "HighLevel")?.enabledArtifactKinds).toEqual(["Case", "Procedure"]);
   expect(step(persisted, "LowLevel")?.enabledArtifactKinds).toEqual(["Case", "Procedure"]);
   expect(persisted.validation?.ladderValid, "the ordinary toggle now produces a coherent ladder").toBe(true);
-  await page.screenshot({ path: testInfo.outputPath("ladder-step-disabled-system.png"), fullPage: true });
+  await page.screenshot({ path: reviewEvidence("project-setup-1045-disabled-system.png"), fullPage: true });
 });
 
 test("re-ticking a stale rule definition cannot make a changed ladder ready", async ({ page }) => {
@@ -512,7 +519,7 @@ test("the final review states each level's verification profile, including a dis
   await expect(review).toContainText(/System[^]{0,240}?[Vv]erification[^]{0,120}?(disabled|off|none)/);
   await expect(review).toContainText(/High[- ]?Level[^]{0,240}?[Vv]erification/);
   await expect(review).toContainText(/Low[- ]?Level[^]{0,240}?[Vv]erification/);
-  await page.screenshot({ path: testInfo.outputPath("review-profile-summary.png"), fullPage: true });
+  await page.screenshot({ path: reviewEvidence("project-setup-1045-review-summary.png"), fullPage: true });
 });
 
 test("answers typed while a save is in flight are kept and do not restore readiness", async ({ page }) => {
