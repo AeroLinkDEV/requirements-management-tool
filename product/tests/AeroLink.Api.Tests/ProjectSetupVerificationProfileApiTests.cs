@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
@@ -12,13 +13,12 @@ using Microsoft.Extensions.DependencyInjection;
 namespace AeroLink.Api.Tests;
 
 /// <summary>
-/// #1045 server-side reproduction and invariant coverage for a level whose verification capability is
-/// disabled. The recorded owner failure is a saved draft that disables verification at System while the
-/// level still enables the Procedure artifact. Draft saves must stay recoverable; finalization is the gate
-/// that refuses the contradiction, and a refused finalization must commit nothing at all.
+/// #1045 server-side coverage for a project setup whose verification capability is disabled, plus the
+/// default semantics that make "absent", "explicitly empty", "valid" and "unrecognized" different facts.
 ///
-/// These tests intentionally describe the shape the walkthrough must be able to produce so the correction
-/// is measured against the real service rather than a browser approximation.
+/// The recorded owner failure is a saved draft that disables verification at System while the level still
+/// enables Procedure. Draft saves stay recoverable; the authoritative readiness verdict explains what is
+/// wrong by level and field; finalization refuses it and commits nothing.
 /// </summary>
 public sealed class ProjectSetupVerificationProfileApiTests
 {
@@ -26,9 +26,12 @@ public sealed class ProjectSetupVerificationProfileApiTests
     private const int Verification = 2;
     private const int RequirementsDocument = 4;
     private const int CodeTraceability = 8;
+    private const int SoftwareCapabilities = ChangeControl | Verification | RequirementsDocument;
+    private const int LowLevelCapabilities = SoftwareCapabilities | CodeTraceability;
+    private const int SystemWithoutVerification = ChangeControl | RequirementsDocument;
 
     [Fact]
-    public async Task Recorded_contradictory_draft_is_refused_and_leaves_no_partial_or_mutated_state()
+    public async Task Recorded_contradictory_draft_is_refused_with_no_partial_state_and_a_truthful_verdict()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -38,8 +41,7 @@ public sealed class ProjectSetupVerificationProfileApiTests
         var draftId = await CreateDraftAsync(client, projectName);
 
         // The recorded owner shape: System keeps Procedure while the capability mask disables verification.
-        // A save must still succeed — an intermediate draft is deliberately recoverable.
-        var saved = await SaveAsync(client, draftId, expectedVersion: 1, new
+        var saved = await SaveAsync(client, draftId, new
         {
             expectedVersion = 1,
             currentStep = "Review",
@@ -47,7 +49,8 @@ public sealed class ProjectSetupVerificationProfileApiTests
             start = new { kind = "Fresh" },
             build = new { version = "0.01" },
             selectedCategories = Array.Empty<string>(),
-            ladder = ContradictoryLadder(),
+            ladder = Ladder(systemKinds: ["Procedure"], systemCapabilities: SystemWithoutVerification,
+                highLevelKinds: ["Case", "Procedure"], lowLevelKinds: ["Case", "Procedure"]),
             reviewRules = new { },
             reviewRulesAccepted = true,
             repository = new { mode = "ConfigureLater" },
@@ -55,33 +58,45 @@ public sealed class ProjectSetupVerificationProfileApiTests
         });
         Assert.Equal(2, saved.GetProperty("version").GetInt64());
         Assert.Equal("SW-00.01", saved.GetProperty("build").GetProperty("officialName").GetString());
-        Assert.True(saved.GetProperty("reviewRules").GetProperty("accepted").GetBoolean());
 
+        // A save must succeed, and the authoritative verdict must say plainly that this is not viable.
+        var validation = saved.GetProperty("validation");
+        Assert.False(validation.GetProperty("configurationReady").GetBoolean());
+        Assert.False(validation.GetProperty("ladderValid").GetBoolean());
+        var finding = Findings(validation).Single(x => x.GetProperty("code").GetString()
+            == "verification_disabled_with_artifacts");
+        Assert.Equal("System", finding.GetProperty("level").GetString());
+        Assert.Equal("enabledArtifactKinds", finding.GetProperty("field").GetString());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var before = await ProjectStateCountsAsync(db);
         using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
             new { expectedVersion = 2, idempotencyKey = $"recorded-shape-{draftId:N}" });
         Assert.Equal(HttpStatusCode.BadRequest, finalized.StatusCode);
         using var failure = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        // The compatible top-level fields stay exactly as they were for existing callers.
         Assert.Equal("cannot_finalize", failure.RootElement.GetProperty("code").GetString());
         Assert.Equal("A level without verification capability cannot enable verification artifacts.",
             failure.RootElement.GetProperty("error").GetString());
+        // The refusal is also diagnosable by machine, not only by reading English.
+        var refused = Findings(failure.RootElement).Single(x => x.GetProperty("code").GetString()
+            == "verification_disabled_with_artifacts");
+        Assert.Equal("System", refused.GetProperty("level").GetString());
 
-        // A refused finalization proves nothing about rollback by itself. Read the authoritative state.
-        using var resumed = await client.GetAsync($"/api/project-setups/{draftId}");
-        Assert.Equal(HttpStatusCode.OK, resumed.StatusCode);
-        using var resumedBody = JsonDocument.Parse(await resumed.Content.ReadAsStringAsync());
-        Assert.Equal("Draft", resumedBody.RootElement.GetProperty("state").GetString());
-        Assert.Equal(2, resumedBody.RootElement.GetProperty("version").GetInt64());
         // Every saved answer the creator is entitled to keep survives the refusal unchanged.
-        Assert.Equal(projectName, resumedBody.RootElement.GetProperty("project").GetProperty("name").GetString());
-        Assert.Equal("GPS 2.0", resumedBody.RootElement.GetProperty("project").GetProperty("softwareProduct").GetString());
-        Assert.Equal("0.01", resumedBody.RootElement.GetProperty("build").GetProperty("version").GetString());
-        // The contradictory-but-saveable shape is preserved verbatim so the creator can repair it in place
-        // rather than losing answers to a silent normalization.
+        var resumed = await ReadDraftAsync(client, draftId);
+        Assert.Equal("Draft", resumed.GetProperty("state").GetString());
+        Assert.Equal(2, resumed.GetProperty("version").GetInt64());
+        Assert.Equal(projectName, resumed.GetProperty("project").GetProperty("name").GetString());
+        Assert.Equal("GPS 2.0", resumed.GetProperty("project").GetProperty("softwareProduct").GetString());
+        Assert.Equal("0.01", resumed.GetProperty("build").GetProperty("version").GetString());
         Assert.Equal("System:5:Procedure|HighLevel:7:Case,Procedure|LowLevel:15:Case,Procedure",
-            StoredLadderOf(resumedBody.RootElement));
+            StoredLadderOf(resumed));
+        Assert.False(resumed.GetProperty("validation").GetProperty("configurationReady").GetBoolean());
 
-        using var scope = factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        // A refusal must leave no partial committed state anywhere the transaction could write.
+        Assert.Equal(before, await ProjectStateCountsAsync(db));
         Assert.Empty(await db.Projects.Where(x => x.Name == projectName).ToListAsync());
         Assert.Null((await db.ProjectSetupDrafts.AsNoTracking().SingleAsync(x => x.Id == draftId)).CompletedProjectId);
     }
@@ -95,7 +110,7 @@ public sealed class ProjectSetupVerificationProfileApiTests
 
         var projectName = $"Disabled system verification {Guid.NewGuid():N}";
         var draftId = await CreateDraftAsync(client, projectName);
-        var saved = await SaveAsync(client, draftId, expectedVersion: 1, new
+        var saved = await SaveAsync(client, draftId, new
         {
             expectedVersion = 1,
             currentStep = "Review",
@@ -103,7 +118,8 @@ public sealed class ProjectSetupVerificationProfileApiTests
             start = new { kind = "Fresh" },
             build = new { version = "0.01" },
             selectedCategories = Array.Empty<string>(),
-            ladder = CoherentDisabledSystemLadder(),
+            ladder = Ladder(systemKinds: [], systemCapabilities: SystemWithoutVerification,
+                highLevelKinds: ["Case", "Procedure"], lowLevelKinds: ["Case"]),
             reviewRules = new { },
             reviewRulesAccepted = true,
             repository = new { mode = "ConfigureLater" },
@@ -111,18 +127,16 @@ public sealed class ProjectSetupVerificationProfileApiTests
         });
 
         // The accepted definition must describe this ladder exactly: no System test subjects, because the
-        // System level no longer enables verification.
-        var subjects = saved.GetProperty("reviewRules").GetProperty("definition").GetProperty("rules")
-            .EnumerateArray().Select(x => x.GetProperty("subject").GetString()).ToArray();
+        // System level no longer enables verification, and no LowLevel procedure subject either.
+        var subjects = SubjectsOf(saved.GetProperty("reviewRules").GetProperty("definition"));
         Assert.DoesNotContain("SystemTest", subjects);
         Assert.Contains("System", subjects);
         Assert.Contains("Software", subjects);
         Assert.Contains("HighLevelSoftwareCase", subjects);
         Assert.Contains("HighLevelSoftwareProcedure", subjects);
         Assert.Contains("LowLevelSoftwareCase", subjects);
-        // The Case-only LowLevel profile must not acquire a procedure subject for its author's convenience.
         Assert.DoesNotContain("LowLevelSoftwareProcedure", subjects);
-        Assert.Equal(5, subjects.Length);
+        Assert.True(saved.GetProperty("validation").GetProperty("configurationReady").GetBoolean());
 
         using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
             new { expectedVersion = 2, idempotencyKey = $"disabled-system-{draftId:N}" });
@@ -130,35 +144,51 @@ public sealed class ProjectSetupVerificationProfileApiTests
         using var result = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
         Assert.Equal("Completed", result.RootElement.GetProperty("state").GetString());
         Assert.False(result.RootElement.GetProperty("alreadyCompleted").GetBoolean());
-        Assert.Equal("0.01", result.RootElement.GetProperty("version").GetString());
         Assert.Equal("SW-00.01", result.RootElement.GetProperty("officialBuildName").GetString());
         var projectId = result.RootElement.GetProperty("projectId").GetGuid();
         var releaseId = result.RootElement.GetProperty("releaseId").GetGuid();
 
-        using var replay = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
-            new { expectedVersion = 2, idempotencyKey = $"disabled-system-{draftId:N}-retry" });
-        Assert.True(replay.IsSuccessStatusCode, await replay.Content.ReadAsStringAsync());
-        using var replayBody = JsonDocument.Parse(await replay.Content.ReadAsStringAsync());
-        Assert.True(replayBody.RootElement.GetProperty("alreadyCompleted").GetBoolean());
-        Assert.Equal(projectId, replayBody.RootElement.GetProperty("projectId").GetGuid());
-        Assert.Equal(releaseId, replayBody.RootElement.GetProperty("releaseId").GetGuid());
+        // A same-key retry recovers the recorded result instead of creating a second project.
+        using var sameKey = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 2, idempotencyKey = $"disabled-system-{draftId:N}" });
+        Assert.True(sameKey.IsSuccessStatusCode, await sameKey.Content.ReadAsStringAsync());
+        using var sameKeyBody = JsonDocument.Parse(await sameKey.Content.ReadAsStringAsync());
+        Assert.True(sameKeyBody.RootElement.GetProperty("alreadyCompleted").GetBoolean());
+        Assert.Equal(projectId, sameKeyBody.RootElement.GetProperty("projectId").GetGuid());
+        Assert.Equal(releaseId, sameKeyBody.RootElement.GetProperty("releaseId").GetGuid());
+
+        // A different key on a completed draft recovers the same identities rather than a second project.
+        using var otherKey = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 2, idempotencyKey = $"disabled-system-{draftId:N}-other" });
+        Assert.True(otherKey.IsSuccessStatusCode, await otherKey.Content.ReadAsStringAsync());
+        using var otherKeyBody = JsonDocument.Parse(await otherKey.Content.ReadAsStringAsync());
+        Assert.True(otherKeyBody.RootElement.GetProperty("alreadyCompleted").GetBoolean());
+        Assert.Equal(projectId, otherKeyBody.RootElement.GetProperty("projectId").GetGuid());
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var steps = await db.ProjectLadderSteps.AsNoTracking().Where(x => x.ProjectId == projectId)
             .OrderBy(x => x.Position).ToListAsync();
         Assert.Equal(3, steps.Count);
-        var system = steps.Single(x => x.CatalogueEntry == "System");
-        Assert.Equal((LevelCapabilities)(ChangeControl | RequirementsDocument), system.Capabilities);
-        Assert.Empty(system.EnabledArtifactKinds);
-        // The other levels keep exactly the profile they were accepted with.
-        var highLevel = steps.Single(x => x.CatalogueEntry == "HighLevel");
+        Assert.Equal((LevelCapabilities)SystemWithoutVerification,
+            steps.Single(x => x.CatalogueEntry == "System").Capabilities);
+        Assert.Empty(steps.Single(x => x.CatalogueEntry == "System").EnabledArtifactKinds);
         Assert.Equal(new[] { VerificationArtifactKind.Case, VerificationArtifactKind.Procedure },
-            highLevel.EnabledArtifactKinds);
+            steps.Single(x => x.CatalogueEntry == "HighLevel").EnabledArtifactKinds);
         Assert.Equal(new[] { VerificationArtifactKind.Case },
             steps.Single(x => x.CatalogueEntry == "LowLevel").EnabledArtifactKinds);
 
-        // No inappropriate verification scaffolding for the disabled level, and no fabricated content.
+        // Effective/resolved configuration, not only the stored columns.
+        var stored = await db.ProjectLadderConfigurations.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == projectId);
+        var activation = await db.ProjectLadderConfigurationHistories.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == projectId);
+        Assert.Equal(stored.Version, activation.Revision);
+        Assert.Equal(ProjectLadderSnapshot.CurrentSchemaVersion, activation.SnapshotSchemaVersion);
+        Assert.True(ProjectLadderSnapshot.Verify(activation.CanonicalSnapshot, activation.SnapshotHash,
+            activation.SnapshotSchemaVersion), "the activated ladder snapshot must verify against its hash");
+
+        // No inappropriate verification scaffolding, and no fabricated engineering content or history.
         var containers = await db.TestProcedureDocuments.AsNoTracking()
             .Where(x => x.ProjectId == projectId).ToListAsync();
         Assert.DoesNotContain(containers, x => x.Level == TestProcedureLevel.System);
@@ -172,24 +202,180 @@ public sealed class ProjectSetupVerificationProfileApiTests
             containers.Select(x => (x.Level, x.ArtifactKind)).OrderBy(x => x.Level).ThenBy(x => x.ArtifactKind).ToArray());
         Assert.Empty(await db.Requirements.Where(x => x.ProjectId == projectId).ToListAsync());
         Assert.Empty(await db.TestProcedures.Where(x => x.ProjectId == projectId).ToListAsync());
+        Assert.Empty(await db.SoftwareBuilds.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync());
+        Assert.Empty(await db.CandidateBaselines.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync());
 
-        // Applicable review workflows match the accepted profile exactly once each.
         var workflows = await db.ReviewWorkflows.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync();
         Assert.Equal(5, workflows.Count);
         Assert.DoesNotContain(workflows, x => x.AppliesTo == ReviewSubject.SystemTest);
         Assert.All(workflows, x => Assert.Equal(ReviewWorkflowState.Active, x.State));
 
-        // The first build is a real, In Work build at the exact requested version identity. A Fresh start
-        // records no inherited or fabricated build row: exactly one unpaid-as-released release exists.
-        Assert.Empty(await db.SoftwareBuilds.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync());
-        Assert.Empty(await db.CandidateBaselines.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync());
-        var releases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync();
-        var release = Assert.Single(releases);
+        var release = Assert.Single(await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync());
         Assert.Equal(releaseId, release.Id);
         Assert.Equal("SW-00.01", release.CanonicalIdentity);
         Assert.False(release.IsReleased);
         var programId = (await db.Projects.AsNoTracking().SingleAsync(x => x.Id == projectId)).ProgramId;
         Assert.Equal(1, await db.Programs.CountAsync(x => x.Id == programId));
+        Assert.Equal(1, await db.ProgramMemberships.CountAsync(x => x.ProgramId == programId));
+    }
+
+    [Fact]
+    public async Task A_missing_software_profile_keeps_the_legacy_case_only_interpretation_everywhere()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var projectName = $"Missing profile {Guid.NewGuid():N}";
+        var draftId = await CreateDraftAsync(client, projectName);
+        // HighLevel carries no profile property at all; System and LowLevel are explicit.
+        var saved = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 1,
+            currentStep = "Review",
+            project = new { name = projectName, softwareProduct = "Missing profile product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+
+        var validation = saved.GetProperty("validation");
+        var highLevel = validation.GetProperty("steps").EnumerateArray()
+            .Single(x => x.GetProperty("level").GetString() == "HighLevel");
+        Assert.Equal(JsonValueKind.Null, highLevel.GetProperty("stored").ValueKind);
+        Assert.Equal(["Case"], Strings(highLevel.GetProperty("effective")));
+        Assert.Equal("catalogue-fallback", highLevel.GetProperty("profileSource").GetString());
+        Assert.True(validation.GetProperty("ladderValid").GetBoolean(), saved.GetRawText());
+
+        // The offered standard must describe the same interpretation the finalizer applies. The legacy
+        // software fallback is Case-only; it is not the walkthrough's new-project Case + Procedure default.
+        var subjects = SubjectsOf(saved.GetProperty("reviewRules").GetProperty("definition"));
+        Assert.Contains("HighLevelSoftwareCase", subjects);
+        Assert.DoesNotContain("HighLevelSoftwareProcedure", subjects);
+        Assert.True(validation.GetProperty("configurationReady").GetBoolean());
+
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 2, idempotencyKey = $"missing-profile-{draftId:N}" });
+        Assert.True(finalized.IsSuccessStatusCode, await finalized.Content.ReadAsStringAsync());
+        using var result = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        var projectId = result.RootElement.GetProperty("projectId").GetGuid();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(new[] { VerificationArtifactKind.Case },
+            (await db.ProjectLadderSteps.AsNoTracking().SingleAsync(
+                x => x.ProjectId == projectId && x.CatalogueEntry == "HighLevel")).EnabledArtifactKinds);
+        var workflows = await db.ReviewWorkflows.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync();
+        Assert.Contains(workflows, x => x.AppliesTo == ReviewSubject.HighLevelSoftwareCase);
+        Assert.DoesNotContain(workflows, x => x.AppliesTo == ReviewSubject.HighLevelSoftwareProcedure);
+    }
+
+    [Fact]
+    public async Task Explicit_empty_profile_with_verification_enabled_stays_empty_and_is_diagnosed_by_level()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var projectName = $"Explicit empty {Guid.NewGuid():N}";
+        var draftId = await CreateDraftAsync(client, projectName);
+        var saved = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 1,
+            currentStep = "Review",
+            project = new { name = projectName, softwareProduct = "Explicit empty product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(systemKinds: ["Procedure"], highLevelKinds: [], lowLevelKinds: ["Case"]),
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+
+        // The stored intent is untouched: an explicit empty list is not "fill in the default".
+        Assert.Equal("System:7:Procedure|HighLevel:7:|LowLevel:15:Case", StoredLadderOf(saved));
+        var validation = saved.GetProperty("validation");
+        var highLevel = validation.GetProperty("steps").EnumerateArray()
+            .Single(x => x.GetProperty("level").GetString() == "HighLevel");
+        Assert.Empty(Strings(highLevel.GetProperty("stored")));
+        Assert.Empty(Strings(highLevel.GetProperty("effective")));
+        Assert.Equal("explicit", highLevel.GetProperty("profileSource").GetString());
+        Assert.False(validation.GetProperty("ladderValid").GetBoolean());
+        var finding = Findings(validation).Single(x => x.GetProperty("code").GetString()
+            == "verification_profile_invalid");
+        Assert.Equal("HighLevel", finding.GetProperty("level").GetString());
+        Assert.Contains("Case", finding.GetProperty("message").GetString());
+        Assert.False(validation.GetProperty("configurationReady").GetBoolean());
+
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 2, idempotencyKey = $"explicit-empty-{draftId:N}" });
+        Assert.Equal(HttpStatusCode.BadRequest, finalized.StatusCode);
+        using var failure = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        Assert.Contains("Case, Procedure", failure.RootElement.GetProperty("error").GetString());
+        Assert.Equal("HighLevel", Findings(failure.RootElement)
+            .Single(x => x.GetProperty("code").GetString() == "verification_profile_invalid")
+            .GetProperty("level").GetString());
+
+        var resumed = await ReadDraftAsync(client, draftId);
+        Assert.Empty(Strings(resumed.GetProperty("ladder").GetProperty("steps").EnumerateArray()
+            .Single(x => x.GetProperty("catalogueEntry").GetString() == "HighLevel")
+            .GetProperty("enabledArtifactKinds")));
+        Assert.Equal(ProjectSetupState.Draft,
+            (await factory.Services.CreateScope().ServiceProvider.GetRequiredService<AeroLinkDbContext>()
+                .ProjectSetupDrafts.AsNoTracking().SingleAsync(x => x.Id == draftId)).State);
+    }
+
+    [Fact]
+    public async Task Unrecognized_artifact_token_is_diagnosed_by_level_and_token_not_as_a_payload_error()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var projectName = $"Unknown token {Guid.NewGuid():N}";
+        var draftId = await CreateDraftAsync(client, projectName);
+        var saved = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 1,
+            currentStep = "Review",
+            project = new { name = projectName, softwareProduct = "Unknown token product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(highLevelKinds: ["Case", "Rubbish"]),
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+
+        // The stored token is preserved, never filtered into a shorter apparently valid profile.
+        Assert.Equal(["Case", "Rubbish"], Strings(saved.GetProperty("ladder").GetProperty("steps")
+            .EnumerateArray().Single(x => x.GetProperty("catalogueEntry").GetString() == "HighLevel")
+            .GetProperty("enabledArtifactKinds")));
+        var validation = saved.GetProperty("validation");
+        Assert.False(validation.GetProperty("ladderValid").GetBoolean());
+        var finding = Findings(validation).Single(x => x.GetProperty("code").GetString()
+            == "artifact_kind_unrecognized");
+        Assert.Equal("HighLevel", finding.GetProperty("level").GetString());
+        Assert.Equal("enabledArtifactKinds", finding.GetProperty("field").GetString());
+        Assert.Equal("Rubbish", finding.GetProperty("token").GetString());
+
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 2, idempotencyKey = $"unknown-token-{draftId:N}" });
+        Assert.Equal(HttpStatusCode.BadRequest, finalized.StatusCode);
+        using var failure = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        Assert.NotEqual("The ladder payload is invalid JSON.", failure.RootElement.GetProperty("error").GetString());
+        Assert.Equal("Rubbish", Findings(failure.RootElement)
+            .Single(x => x.GetProperty("code").GetString() == "artifact_kind_unrecognized")
+            .GetProperty("token").GetString());
     }
 
     [Fact]
@@ -201,9 +387,7 @@ public sealed class ProjectSetupVerificationProfileApiTests
 
         var projectName = $"Stale coverage {Guid.NewGuid():N}";
         var draftId = await CreateDraftAsync(client, projectName);
-
-        // First save: System verification is enabled, so the accepted standard covers SystemTest.
-        var enabled = await SaveAsync(client, draftId, expectedVersion: 1, new
+        var enabled = await SaveAsync(client, draftId, new
         {
             expectedVersion = 1,
             currentStep = "WorkingRules",
@@ -211,21 +395,19 @@ public sealed class ProjectSetupVerificationProfileApiTests
             start = new { kind = "Fresh" },
             build = new { version = "0.01" },
             selectedCategories = Array.Empty<string>(),
-            ladder = CoherentEnabledSystemLadder(),
+            ladder = Ladder(),
             reviewRules = new { },
             reviewRulesAccepted = true,
             repository = new { mode = "ConfigureLater" },
             mapping = new { },
         });
         var staleDefinition = enabled.GetProperty("reviewRules").GetProperty("definition").Clone();
-        var staleSubjects = staleDefinition.GetProperty("rules").EnumerateArray()
-            .Select(x => x.GetProperty("subject").GetString()).ToArray();
-        Assert.Contains("SystemTest", staleSubjects);
+        Assert.Contains("SystemTest", SubjectsOf(staleDefinition));
 
-        // Second save: the ladder no longer enables System verification, but the creator re-accepts the
-        // structurally complete definition that was written for the previous ladder. Clearing and re-ticking
-        // the acceptance control is not coverage.
-        var acceptedStaleSubjectSet = await SaveAsync(client, draftId, expectedVersion: 2, new
+        // The ladder no longer enables System verification, but the creator re-accepts the structurally
+        // complete definition written for the previous ladder. Clearing and re-ticking a checkbox is not
+        // coverage, and the authoritative verdict has to say so before anything is created.
+        var acceptedStale = await SaveAsync(client, draftId, new
         {
             expectedVersion = 2,
             currentStep = "Review",
@@ -233,29 +415,307 @@ public sealed class ProjectSetupVerificationProfileApiTests
             start = new { kind = "Fresh" },
             build = new { version = "0.01" },
             selectedCategories = Array.Empty<string>(),
-            ladder = CoherentDisabledSystemLadder(),
+            ladder = Ladder(systemKinds: [], systemCapabilities: SystemWithoutVerification),
             reviewRules = staleDefinition,
             reviewRulesAccepted = true,
             repository = new { mode = "ConfigureLater" },
             mapping = new { },
         });
-        Assert.Equal("Draft", acceptedStaleSubjectSet.GetProperty("state").GetString());
-        Assert.True(acceptedStaleSubjectSet.GetProperty("reviewRules").GetProperty("accepted").GetBoolean());
+        Assert.Equal("Draft", acceptedStale.GetProperty("state").GetString());
+        var validation = acceptedStale.GetProperty("validation");
+        Assert.True(validation.GetProperty("ladderValid").GetBoolean(), acceptedStale.GetRawText());
+        var review = validation.GetProperty("review");
+        Assert.False(review.GetProperty("covers").GetBoolean());
+        Assert.Equal(["SystemTest"], Strings(review.GetProperty("unexpectedSubjects")));
+        Assert.Empty(Strings(review.GetProperty("missingSubjects")));
+        Assert.False(validation.GetProperty("configurationReady").GetBoolean());
 
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var before = await ProjectStateCountsAsync(db);
         using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
             new { expectedVersion = 3, idempotencyKey = $"stale-coverage-{draftId:N}" });
         Assert.Equal(HttpStatusCode.BadRequest, finalized.StatusCode);
         using var failure = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
-        Assert.Equal("cannot_finalize", failure.RootElement.GetProperty("code").GetString());
         Assert.Contains("cover each applicable ladder subject exactly once",
             failure.RootElement.GetProperty("error").GetString());
+        // This refusal happens after the claim and after the program, project, release, ladder, membership
+        // and repository rows were staged, so it is real evidence that the whole unit rolled back.
+        Assert.Equal(before, await ProjectStateCountsAsync(db));
+        var draft = await db.ProjectSetupDrafts.AsNoTracking().SingleAsync(x => x.Id == draftId);
+        Assert.Equal(ProjectSetupState.Draft, draft.State);
+        Assert.Equal(3, draft.Version);
+    }
+
+    [Theory]
+    [InlineData("duplicate")]
+    [InlineData("missing")]
+    [InlineData("extra")]
+    public async Task Exact_rule_coverage_is_required_beyond_set_membership(string mutation)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var projectName = $"Coverage {mutation} {Guid.NewGuid():N}";
+        var draftId = await CreateDraftAsync(client, projectName);
+        var seeded = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 1,
+            currentStep = "WorkingRules",
+            project = new { name = projectName, softwareProduct = "Coverage product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+        var rules = seeded.GetProperty("reviewRules").GetProperty("definition").GetProperty("rules")
+            .EnumerateArray().Select(x => JsonNode.Parse(x.GetRawText())!).ToList();
+        Assert.Equal(5, rules.Count);
+        var mutated = new JsonArray(rules.Select(x => JsonNode.Parse(x!.ToJsonString())!).ToArray());
+        switch (mutation)
+        {
+            case "duplicate":
+                mutated.Add(JsonNode.Parse(rules[0]!.ToJsonString()));
+                break;
+            case "missing":
+                mutated.RemoveAt(mutated.Count - 1);
+                break;
+            default:
+                var extra = JsonNode.Parse(rules[0]!.ToJsonString())!;
+                extra["subject"] = "Interface";
+                mutated.Add(extra);
+                break;
+        }
+
+        var accepted = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 2,
+            currentStep = "Review",
+            project = new { name = projectName, softwareProduct = "Coverage product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { rules = mutated },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+        var review = accepted.GetProperty("validation").GetProperty("review");
+        Assert.False(review.GetProperty("covers").GetBoolean());
+        switch (mutation)
+        {
+            case "duplicate":
+                Assert.Equal(["System"], Strings(review.GetProperty("duplicateSubjects")));
+                break;
+            case "missing":
+                Assert.Equal(["LowLevelSoftwareCase"], Strings(review.GetProperty("missingSubjects")));
+                break;
+            default:
+                Assert.Equal(["Interface"], Strings(review.GetProperty("unexpectedSubjects")));
+                break;
+        }
+
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 3, idempotencyKey = $"coverage-{mutation}-{draftId:N}" });
+        Assert.Equal(HttpStatusCode.BadRequest, finalized.StatusCode);
+        using var failure = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        Assert.Contains("cover each applicable ladder subject exactly once",
+            failure.RootElement.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Compatible_customised_rules_remain_supported_end_to_end()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var projectName = $"Custom rules {Guid.NewGuid():N}";
+        var draftId = await CreateDraftAsync(client, projectName);
+        var seeded = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 1,
+            currentStep = "WorkingRules",
+            project = new { name = projectName, softwareProduct = "Custom rules product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+        var rules = new JsonArray(seeded.GetProperty("reviewRules").GetProperty("definition")
+            .GetProperty("rules").EnumerateArray()
+            .Select(x => JsonNode.Parse(x.GetRawText())!).ToArray());
+        // A compatible adjustment: same subjects, the project's own stage name and a supported authority.
+        var first = rules[0]!;
+        first["name"] = "System change control board";
+        var stages = (JsonArray)first["stages"]!;
+        stages[0]!["name"] = "Independent system review";
+        stages[0]!["requiredRole"] = "SystemEngineer";
+
+        var accepted = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 2,
+            currentStep = "Review",
+            project = new { name = projectName, softwareProduct = "Custom rules product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { rules },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+        Assert.True(accepted.GetProperty("validation").GetProperty("configurationReady").GetBoolean(),
+            accepted.GetRawText());
+
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 3, idempotencyKey = $"custom-rules-{draftId:N}" });
+        Assert.True(finalized.IsSuccessStatusCode, await finalized.Content.ReadAsStringAsync());
+        using var result = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        var projectId = result.RootElement.GetProperty("projectId").GetGuid();
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-        Assert.Empty(await db.Projects.Where(x => x.Name == projectName).ToListAsync());
-        Assert.Equal(ProjectSetupState.Draft,
-            (await db.ProjectSetupDrafts.AsNoTracking().SingleAsync(x => x.Id == draftId)).State);
-        Assert.Equal(3, (await db.ProjectSetupDrafts.AsNoTracking().SingleAsync(x => x.Id == draftId)).Version);
+        var workflow = await db.ReviewWorkflows.AsNoTracking()
+            .Include(x => x.Stages)
+            .SingleAsync(x => x.ProjectId == projectId && x.AppliesTo == ReviewSubject.System);
+        Assert.Equal("System change control board", workflow.Name);
+        Assert.Contains(workflow.Stages, x => x.Name == "Independent system review");
+    }
+
+    [Fact]
+    public async Task A_ladder_with_no_applicable_subjects_is_truthfully_ready_with_an_empty_standard()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var projectName = $"No subjects {Guid.NewGuid():N}";
+        var draftId = await CreateDraftAsync(client, projectName);
+        var saved = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 1,
+            currentStep = "Review",
+            project = new { name = projectName, softwareProduct = "No subjects product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = new
+            {
+                steps = new[]
+                {
+                    new { catalogueEntry = "Customer", position = 1, capabilities = 0,
+                        enabledArtifactKinds = Array.Empty<string>() },
+                },
+                relationships = Array.Empty<object>(),
+            },
+            reviewRules = new { rules = Array.Empty<object>() },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+        var validation = saved.GetProperty("validation");
+        Assert.True(validation.GetProperty("ladderValid").GetBoolean());
+        Assert.Empty(Strings(validation.GetProperty("review").GetProperty("applicableSubjects")));
+        Assert.True(validation.GetProperty("review").GetProperty("covers").GetBoolean());
+        Assert.True(validation.GetProperty("configurationReady").GetBoolean(), saved.GetRawText());
+
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 2, idempotencyKey = $"no-subjects-{draftId:N}" });
+        Assert.True(finalized.IsSuccessStatusCode, await finalized.Content.ReadAsStringAsync());
+        using var result = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        var projectId = result.RootElement.GetProperty("projectId").GetGuid();
+        var db = factory.Services.CreateScope().ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Empty(await db.ReviewWorkflows.Where(x => x.ProjectId == projectId).ToListAsync());
+    }
+
+    [Fact]
+    public async Task New_project_default_finalizes_with_case_and_procedure()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var projectName = $"Default ladder {Guid.NewGuid():N}";
+        var draftId = await CreateDraftAsync(client, projectName);
+        var saved = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 1,
+            currentStep = "Review",
+            project = new { name = projectName, softwareProduct = "Default ladder product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = new { },
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+        var steps = saved.GetProperty("validation").GetProperty("steps").EnumerateArray().ToArray();
+        Assert.Equal(["Procedure"],
+            Strings(steps.Single(x => x.GetProperty("level").GetString() == "System").GetProperty("effective")));
+        Assert.Equal(["Case", "Procedure"],
+            Strings(steps.Single(x => x.GetProperty("level").GetString() == "HighLevel").GetProperty("effective")));
+        Assert.True(saved.GetProperty("validation").GetProperty("configurationReady").GetBoolean());
+
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 2, idempotencyKey = $"default-ladder-{draftId:N}" });
+        Assert.True(finalized.IsSuccessStatusCode, await finalized.Content.ReadAsStringAsync());
+        using var result = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        var projectId = result.RootElement.GetProperty("projectId").GetGuid();
+        var db = factory.Services.CreateScope().ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(new[] { VerificationArtifactKind.Case, VerificationArtifactKind.Procedure },
+            (await db.ProjectLadderSteps.AsNoTracking()
+                .SingleAsync(x => x.ProjectId == projectId && x.CatalogueEntry == "HighLevel")).EnabledArtifactKinds);
+    }
+
+    private static object Ladder(string[]? systemKinds = null, int systemCapabilities = SoftwareCapabilities,
+        string[]? highLevelKinds = null, string[]? lowLevelKinds = null)
+    {
+        var system = new Dictionary<string, object?>
+        {
+            ["catalogueEntry"] = "System",
+            ["position"] = 1,
+            ["capabilities"] = systemCapabilities,
+        };
+        var highLevel = new Dictionary<string, object?>
+        {
+            ["catalogueEntry"] = "HighLevel",
+            ["position"] = 2,
+            ["capabilities"] = SoftwareCapabilities,
+        };
+        var lowLevel = new Dictionary<string, object?>
+        {
+            ["catalogueEntry"] = "LowLevel",
+            ["position"] = 3,
+            ["capabilities"] = LowLevelCapabilities,
+        };
+        // A null array means "the draft carries no profile property at all", which is a different saved
+        // fact from an explicitly empty list and must stay that way through save and resume.
+        if (systemKinds is not null) system["enabledArtifactKinds"] = systemKinds;
+        if (highLevelKinds is not null) highLevel["enabledArtifactKinds"] = highLevelKinds;
+        if (lowLevelKinds is not null) lowLevel["enabledArtifactKinds"] = lowLevelKinds;
+        return new
+        {
+            steps = new[] { system, highLevel, lowLevel },
+            relationships = new[]
+            {
+                new { parent = "System", child = "HighLevel" },
+                new { parent = "HighLevel", child = "LowLevel" },
+            },
+        };
     }
 
     private static async Task<Guid> CreateDraftAsync(HttpClient client, string projectName)
@@ -266,84 +726,68 @@ public sealed class ProjectSetupVerificationProfileApiTests
         return body.RootElement.GetProperty("draftId").GetGuid();
     }
 
-    private static async Task<JsonElement> SaveAsync(HttpClient client, Guid draftId, long expectedVersion,
-        object payload)
+    /// <summary>
+    /// Counts every record a completed creation could leave behind. Comparing the whole set before and
+    /// after a refusal is stronger than checking that one named project is absent: a partially committed
+    /// transaction would move at least one of these counters.
+    /// </summary>
+    private static async Task<Dictionary<string, int>> ProjectStateCountsAsync(AeroLinkDbContext db) => new()
+    {
+        ["programs"] = await db.Programs.CountAsync(),
+        ["projects"] = await db.Projects.CountAsync(),
+        ["releases"] = await db.Releases.CountAsync(),
+        ["softwareBuilds"] = await db.SoftwareBuilds.CountAsync(),
+        ["candidateBaselines"] = await db.CandidateBaselines.CountAsync(),
+        ["ladderConfigurations"] = await db.ProjectLadderConfigurations.CountAsync(),
+        ["ladderSteps"] = await db.ProjectLadderSteps.CountAsync(),
+        ["ladderHistory"] = await db.ProjectLadderConfigurationHistories.CountAsync(),
+        ["reviewWorkflows"] = await db.ReviewWorkflows.CountAsync(),
+        ["procedureDocuments"] = await db.TestProcedureDocuments.CountAsync(),
+        ["memberships"] = await db.ProgramMemberships.CountAsync(),
+        ["requirements"] = await db.Requirements.CountAsync(),
+        ["testProcedures"] = await db.TestProcedures.CountAsync(),
+        ["auditEvents"] = await db.SecurityAuditEvents.CountAsync(),
+    };
+
+    private static async Task<JsonElement> SaveAsync(HttpClient client, Guid draftId, object payload)
     {
         using var saved = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", payload);
         var text = await saved.Content.ReadAsStringAsync();
-        Assert.True(saved.IsSuccessStatusCode, $"{saved.StatusCode} (expectedVersion {expectedVersion}): {text}");
+        Assert.True(saved.IsSuccessStatusCode, $"{saved.StatusCode}: {text}");
         using var document = JsonDocument.Parse(text);
         return document.RootElement.Clone();
     }
 
-    private static object ContradictoryLadder() => new
+    private static async Task<JsonElement> ReadDraftAsync(HttpClient client, Guid draftId)
     {
-        steps = new[]
-        {
-            new { catalogueEntry = "System", position = 1,
-                capabilities = ChangeControl | RequirementsDocument,
-                enabledArtifactKinds = new[] { "Procedure" } },
-            new { catalogueEntry = "HighLevel", position = 2,
-                capabilities = ChangeControl | Verification | RequirementsDocument,
-                enabledArtifactKinds = new[] { "Case", "Procedure" } },
-            new { catalogueEntry = "LowLevel", position = 3,
-                capabilities = ChangeControl | Verification | RequirementsDocument | CodeTraceability,
-                enabledArtifactKinds = new[] { "Case", "Procedure" } },
-        },
-        relationships = new[]
-        {
-            new { parent = "System", child = "HighLevel" },
-            new { parent = "HighLevel", child = "LowLevel" },
-        },
-    };
+        using var resumed = await client.GetAsync($"/api/project-setups/{draftId}");
+        Assert.Equal(HttpStatusCode.OK, resumed.StatusCode);
+        using var document = JsonDocument.Parse(await resumed.Content.ReadAsStringAsync());
+        return document.RootElement.Clone();
+    }
 
-    private static object CoherentDisabledSystemLadder() => new
-    {
-        steps = new[]
-        {
-            new { catalogueEntry = "System", position = 1,
-                capabilities = ChangeControl | RequirementsDocument,
-                enabledArtifactKinds = Array.Empty<string>() },
-            new { catalogueEntry = "HighLevel", position = 2,
-                capabilities = ChangeControl | Verification | RequirementsDocument,
-                enabledArtifactKinds = new[] { "Case", "Procedure" } },
-            new { catalogueEntry = "LowLevel", position = 3,
-                capabilities = ChangeControl | Verification | RequirementsDocument | CodeTraceability,
-                enabledArtifactKinds = new[] { "Case" } },
-        },
-        relationships = new[]
-        {
-            new { parent = "System", child = "HighLevel" },
-            new { parent = "HighLevel", child = "LowLevel" },
-        },
-    };
+    private static JsonElement[] Findings(JsonElement owner) => owner.GetProperty("findings")
+        .EnumerateArray().Select(x => x.Clone()).ToArray();
 
-    private static object CoherentEnabledSystemLadder() => new
-    {
-        steps = new[]
-        {
-            new { catalogueEntry = "System", position = 1,
-                capabilities = ChangeControl | Verification | RequirementsDocument,
-                enabledArtifactKinds = new[] { "Procedure" } },
-            new { catalogueEntry = "HighLevel", position = 2,
-                capabilities = ChangeControl | Verification | RequirementsDocument,
-                enabledArtifactKinds = new[] { "Case", "Procedure" } },
-            new { catalogueEntry = "LowLevel", position = 3,
-                capabilities = ChangeControl | Verification | RequirementsDocument | CodeTraceability,
-                enabledArtifactKinds = new[] { "Case", "Procedure" } },
-        },
-        relationships = new[]
-        {
-            new { parent = "System", child = "HighLevel" },
-            new { parent = "HighLevel", child = "LowLevel" },
-        },
-    };
+    private static string[] SubjectsOf(JsonElement definition) => definition.GetProperty("rules")
+        .EnumerateArray().Select(x => x.GetProperty("subject").GetString() ?? string.Empty).ToArray();
 
-    /// <summary>Reads the resume payload back into the same three-tuple shape save/resume must preserve.</summary>
+    private static string[] Strings(JsonElement array) => array.ValueKind == JsonValueKind.Null
+        ? []
+        : array.EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToArray();
+
+    /// <summary>
+    /// Reads the resume payload back into the exact stored shape save/resume must preserve. An omitted
+    /// profile is reported as <c>&lt;absent&gt;</c> so "never supplied" cannot be confused with "supplied
+    /// empty" — the distinction the whole correction turns on.
+    /// </summary>
     private static string StoredLadderOf(JsonElement draft) => string.Join("|", draft
         .GetProperty("ladder").GetProperty("steps").EnumerateArray()
+        .OrderBy(x => x.GetProperty("position").GetInt32())
         .Select(step => $"{step.GetProperty("catalogueEntry").GetString()}:" +
-            $"{(int)step.GetProperty("capabilities").GetInt32()}:" +
-            string.Join(",", step.GetProperty("enabledArtifactKinds").EnumerateArray()
-                .Select(kind => kind.GetString()))));
+            $"{step.GetProperty("capabilities").GetInt32()}:" +
+            (step.TryGetProperty("enabledArtifactKinds", out var kinds)
+                && kinds.ValueKind == JsonValueKind.Array
+                    ? string.Join(",", kinds.EnumerateArray().Select(kind => kind.GetString()))
+                    : "<absent>")));
 }

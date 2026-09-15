@@ -798,6 +798,36 @@ test("a delayed stale source load cannot clear a new acceptance", async ({ page 
     },
     repository: { mode: "ConfigureLater", provider: "GitLab", endpoint: null },
     mapping: {},
+    // The server issues its authoritative verdict with every draft read; the source race below is about
+    // which load wins, so the fixture has to carry the same verdict the real response does.
+    validation: {
+      draftId,
+      version: 4,
+      evaluatedConfigurationHash: "delayed-configuration-hash",
+      ladderValid: true,
+      steps: [
+        {
+          level: "System",
+          capabilities: 7,
+          stored: ["Procedure"],
+          effective: ["Procedure"],
+          profileSource: "explicit",
+        },
+      ],
+      findings: [],
+      review: {
+        applicableSubjects: ["System"],
+        acceptedSubjects: ["System"],
+        missingSubjects: [],
+        unexpectedSubjects: [],
+        duplicateSubjects: [],
+        accepted: true,
+        definitionConcrete: true,
+        acceptanceMatchesConfiguration: true,
+        covers: true,
+      },
+      configurationReady: true,
+    },
   };
   let sourceGets = 0;
   await page.route(new RegExp(`/api/project-setups/${draftId}$`), async (route) => {
