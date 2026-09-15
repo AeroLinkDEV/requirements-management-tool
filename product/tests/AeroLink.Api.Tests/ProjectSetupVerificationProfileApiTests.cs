@@ -290,6 +290,38 @@ public sealed class ProjectSetupVerificationProfileApiTests
         var workflows = await db.ReviewWorkflows.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync();
         Assert.Contains(workflows, x => x.AppliesTo == ReviewSubject.HighLevelSoftwareCase);
         Assert.DoesNotContain(workflows, x => x.AppliesTo == ReviewSubject.HighLevelSoftwareProcedure);
+
+        // An explicit null is the other way the wire can carry "no profile was recorded". It must reach the
+        // same maintained interpretation as an absent property — and stay null on read, not become [].
+        var nullDraft = await CreateDraftAsync(client, $"{projectName} null");
+        var savedNull = await SaveAsync(client, nullDraft, new
+        {
+            expectedVersion = 1,
+            currentStep = "Review",
+            project = new { name = $"{projectName} null", softwareProduct = "Null profile product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"], highLevelProfileIsNull: true),
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+        var nullValidation = savedNull.GetProperty("validation");
+        var nullHighLevel = nullValidation.GetProperty("steps").EnumerateArray()
+            .Single(x => x.GetProperty("level").GetString() == "HighLevel");
+        Assert.Equal(JsonValueKind.Null, nullHighLevel.GetProperty("stored").ValueKind);
+        Assert.Equal(["Case"], Strings(nullHighLevel.GetProperty("effective")));
+        Assert.Equal("catalogue-fallback", nullHighLevel.GetProperty("profileSource").GetString());
+        Assert.True(nullValidation.GetProperty("ladderValid").GetBoolean(), savedNull.GetRawText());
+        var nullRead = await ReadDraftAsync(client, nullDraft);
+        var storedNullStep = nullRead.GetProperty("ladder").GetProperty("steps").EnumerateArray()
+            .Single(x => x.GetProperty("catalogueEntry").GetString() == "HighLevel");
+        Assert.Equal(JsonValueKind.Null, storedNullStep.GetProperty("enabledArtifactKinds").ValueKind);
+        var nullSubjects = SubjectsOf(savedNull.GetProperty("reviewRules").GetProperty("definition"));
+        Assert.Contains("HighLevelSoftwareCase", nullSubjects);
+        Assert.DoesNotContain("HighLevelSoftwareProcedure", nullSubjects);
     }
 
     [Fact]
@@ -699,6 +731,224 @@ public sealed class ProjectSetupVerificationProfileApiTests
         Assert.Equal(1, Assert.Single(Findings(failure.RootElement)).GetProperty("stageIndex").GetInt32());
     }
 
+    /// <summary>
+    /// C2R-03: a position that is missing, null, fractional or textual is authoring input the maintained
+    /// contract never replaced with a valid position — the prior typed payload read a missing position as 0
+    /// (refused by the validator) and a null or fractional one as a payload refusal. The draft stays saveable
+    /// and readable with a named finding, and finalization stays fail-closed with the same finding.
+    /// </summary>
+    [Theory]
+    [InlineData("missing", "ladder_position_missing")]
+    [InlineData("null", "ladder_position_missing")]
+    [InlineData("fractional", "ladder_position_unreadable")]
+    [InlineData("text", "ladder_position_unreadable")]
+    public async Task A_step_without_a_readable_position_is_diagnosed_and_refused(string mutation,
+        string expectedCode)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var projectName = $"Position {mutation} {Guid.NewGuid():N}";
+        var draftId = await CreateDraftAsync(client, projectName);
+        var ladder = JsonNode.Parse(JsonSerializer.Serialize(Ladder(lowLevelKinds: ["Case"])))!;
+        var systemStep = ladder["steps"]!.AsArray()[0]!.AsObject();
+        switch (mutation)
+        {
+            case "missing":
+                systemStep.Remove("position");
+                break;
+            case "null":
+                systemStep["position"] = null;
+                break;
+            case "fractional":
+                systemStep["position"] = 1.5;
+                break;
+            default:
+                systemStep["position"] = "first";
+                break;
+        }
+
+        var saved = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 1,
+            currentStep = "Review",
+            project = new { name = projectName, softwareProduct = "Position product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = new { steps = ladder["steps"], relationships = ladder["relationships"] },
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+
+        // Saving and resuming stay usable; the verdict names the position and refuses to call it valid.
+        Assert.Equal("Draft", saved.GetProperty("state").GetString());
+        var validation = saved.GetProperty("validation");
+        Assert.False(validation.GetProperty("ladderValid").GetBoolean());
+        Assert.Contains(Findings(validation), x => x.GetProperty("code").GetString() == expectedCode
+            && x.GetProperty("field").GetString() == "position" && x.GetProperty("level").GetString() == "System");
+
+        var read = await ReadDraftAsync(client, draftId);
+        var stored = read.GetProperty("ladder").GetProperty("steps").EnumerateArray().First();
+        switch (mutation)
+        {
+            case "missing":
+                Assert.False(stored.TryGetProperty("position", out _),
+                    "the missing position must not be invented on read");
+                break;
+            case "null":
+                Assert.Equal(JsonValueKind.Null, stored.GetProperty("position").ValueKind);
+                break;
+            case "fractional":
+                Assert.Equal(1.5, stored.GetProperty("position").GetDouble());
+                break;
+            default:
+                Assert.Equal("first", stored.GetProperty("position").GetString());
+                break;
+        }
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var before = await ProjectStateCountsAsync(db);
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 2, idempotencyKey = $"position-{mutation}-{draftId:N}" });
+        Assert.Equal(HttpStatusCode.BadRequest, finalized.StatusCode);
+        using var failure = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        Assert.Equal("cannot_finalize", failure.RootElement.GetProperty("code").GetString());
+        Assert.Contains(Findings(failure.RootElement),
+            x => x.GetProperty("code").GetString() == expectedCode);
+        Assert.Equal(before, await ProjectStateCountsAsync(db));
+    }
+
+    /// <summary>
+    /// C2R-04: the wire contract resolves a subject name case-insensitively and the finalizer compares it the
+    /// same way, so the verdict must agree. The same otherwise-valid definition, spelled in lower case, must
+    /// read as covered and ready — and must be accepted by the gate it claims readiness for.
+    /// </summary>
+    [Fact]
+    public async Task A_supported_subject_spelling_reads_the_same_in_the_verdict_and_at_the_gate()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var projectName = $"Subject casing {Guid.NewGuid():N}";
+        var draftId = await CreateDraftAsync(client, projectName);
+        var seeded = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 1,
+            currentStep = "WorkingRules",
+            project = new { name = projectName, softwareProduct = "Subject casing product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+        var rules = seeded.GetProperty("reviewRules").GetProperty("definition").GetProperty("rules")
+            .EnumerateArray().Select(x => JsonNode.Parse(x.GetRawText())!).ToList();
+        foreach (var rule in rules)
+            rule["subject"] = rule["subject"]!.GetValue<string>().ToLowerInvariant();
+        var lowerCased = new JsonArray(rules.Select(x => JsonNode.Parse(x!.ToJsonString())!).ToArray());
+
+        var accepted = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 2,
+            currentStep = "Review",
+            project = new { name = projectName, softwareProduct = "Subject casing product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { rules = lowerCased },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+
+        var review = accepted.GetProperty("validation").GetProperty("review");
+        Assert.True(review.GetProperty("covers").GetBoolean(), accepted.GetRawText());
+        Assert.Empty(Strings(review.GetProperty("missingSubjects")));
+        Assert.Empty(Strings(review.GetProperty("unexpectedSubjects")));
+        Assert.Empty(Strings(review.GetProperty("duplicateSubjects")));
+        Assert.True(review.GetProperty("definitionValid").GetBoolean());
+        Assert.True(accepted.GetProperty("validation").GetProperty("configurationReady").GetBoolean());
+
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 3, idempotencyKey = $"subject-casing-{draftId:N}" });
+        Assert.True(finalized.IsSuccessStatusCode, await finalized.Content.ReadAsStringAsync());
+        using var result = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        Assert.Equal("Completed", result.RootElement.GetProperty("state").GetString());
+    }
+
+    /// <summary>
+    /// C2R-04: duplicates are identified the way the finalizer identifies subjects — case-insensitively — so a
+    /// second spelling of the same subject is a duplicate, not a covered second rule.
+    /// </summary>
+    [Fact]
+    public async Task Differently_cased_duplicate_subjects_are_not_covered()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var projectName = $"Subject duplicate {Guid.NewGuid():N}";
+        var draftId = await CreateDraftAsync(client, projectName);
+        var seeded = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 1,
+            currentStep = "WorkingRules",
+            project = new { name = projectName, softwareProduct = "Subject duplicate product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+        var rules = seeded.GetProperty("reviewRules").GetProperty("definition").GetProperty("rules")
+            .EnumerateArray().Select(x => JsonNode.Parse(x.GetRawText())!).ToList();
+        var duplicate = JsonNode.Parse(rules[0]!.ToJsonString())!;
+        duplicate["subject"] = duplicate["subject"]!.GetValue<string>().ToLowerInvariant();
+        rules.Add(duplicate);
+        var withDuplicate = new JsonArray(rules.Select(x => JsonNode.Parse(x!.ToJsonString())!).ToArray());
+
+        var accepted = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 2,
+            currentStep = "Review",
+            project = new { name = projectName, softwareProduct = "Subject duplicate product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { rules = withDuplicate },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+
+        var review = accepted.GetProperty("validation").GetProperty("review");
+        Assert.False(review.GetProperty("covers").GetBoolean());
+        Assert.Single(Strings(review.GetProperty("duplicateSubjects")));
+        Assert.False(accepted.GetProperty("validation").GetProperty("configurationReady").GetBoolean());
+
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 3, idempotencyKey = $"subject-duplicate-{draftId:N}" });
+        Assert.Equal(HttpStatusCode.BadRequest, finalized.StatusCode);
+        using var failure = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        Assert.Contains("cover each applicable ladder subject exactly once",
+            failure.RootElement.GetProperty("error").GetString());
+    }
+
     [Fact]
     public async Task Compatible_customised_rules_remain_supported_end_to_end()
     {
@@ -799,6 +1049,8 @@ public sealed class ProjectSetupVerificationProfileApiTests
         Assert.True(validation.GetProperty("ladderValid").GetBoolean());
         Assert.Empty(Strings(validation.GetProperty("review").GetProperty("applicableSubjects")));
         Assert.True(validation.GetProperty("review").GetProperty("covers").GetBoolean());
+        Assert.True(validation.GetProperty("review").GetProperty("definitionValid").GetBoolean(),
+            "the empty standard is a valid concrete definition, not an absent one");
         Assert.True(validation.GetProperty("configurationReady").GetBoolean(), saved.GetRawText());
 
         using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
@@ -852,7 +1104,7 @@ public sealed class ProjectSetupVerificationProfileApiTests
     }
 
     private static object Ladder(string[]? systemKinds = null, int systemCapabilities = SoftwareCapabilities,
-        string[]? highLevelKinds = null, string[]? lowLevelKinds = null)
+        string[]? highLevelKinds = null, string[]? lowLevelKinds = null, bool highLevelProfileIsNull = false)
     {
         var system = new Dictionary<string, object?>
         {
@@ -876,6 +1128,8 @@ public sealed class ProjectSetupVerificationProfileApiTests
         // fact from an explicitly empty list and must stay that way through save and resume.
         if (systemKinds is not null) system["enabledArtifactKinds"] = systemKinds;
         if (highLevelKinds is not null) highLevel["enabledArtifactKinds"] = highLevelKinds;
+        // An explicit null is a third saved fact: the property is present and carries no value.
+        if (highLevelProfileIsNull) highLevel["enabledArtifactKinds"] = null;
         if (lowLevelKinds is not null) lowLevel["enabledArtifactKinds"] = lowLevelKinds;
         return new
         {

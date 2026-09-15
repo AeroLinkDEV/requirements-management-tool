@@ -1,6 +1,12 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { apiBase, login } from "./auth";
+import {
+  compatibleRememberedProfile,
+  enabledVerificationProfileInvalid,
+  profileSelection,
+  savedArtifactsLabel,
+} from "../src/projectSetupVerificationProfile";
 
 /**
  * Screenshots are captured into the run's own output directory. Promoting one into
@@ -1188,6 +1194,17 @@ test("System, HLR and LLR verification can be disabled independently and all tog
   await page.getByRole("button", { name: /Requirement ladder/ }).click();
   await verificationCheckbox(systemRowOf(page)).check();
   await expect(systemRowOf(page).locator(".setupVerificationFacts")).toContainText(/Procedure/);
+
+  // LLR restores the compatible Case-only choice it was disabled from, not the Case + Procedure default,
+  // and the restored profile is what the server stores.
+  const lowLevelRowAgain = page.locator(".setupLadderRows > li").nth(2);
+  await verificationCheckbox(lowLevelRowAgain).check();
+  await expect(lowLevelRowAgain.getByLabel("Verification profile")).toHaveValue("Case");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Review and approval rules", level: 2 })).toBeVisible();
+  const restored = await persistedDraft(page, draftId);
+  expect(step(restored, "LowLevel")?.capabilities).toBe(15);
+  expect(step(restored, "LowLevel")?.enabledArtifactKinds).toEqual(["Case"]);
 });
 
 test("save and exit does not leave while newer unsaved answers remain", async ({ page }, testInfo) => {
@@ -1316,4 +1333,391 @@ test("a delayed recheck cannot regress a version the draft advanced past", async
   await expect(page.locator(".projectSetupNotice")).toContainText(/older than the one on this screen/i);
   await expect(page.getByRole("heading", { name: "Repository setup", level: 2 })).toBeVisible();
   await page.unroute(new RegExp(`/api/project-setups/${draftId}$`));
+});
+
+/**
+ * C2R-02 helper assertions. These run the real source module the walkthrough uses, so the compatibility rule
+ * is asserted directly as well as through the screens below.
+ */
+test("the profile helpers judge the raw saved answer without filtering or reordering", () => {
+  const step = (catalogueEntry: string, capabilities: number, enabledArtifactKinds?: unknown) => ({
+    catalogueEntry,
+    capabilities,
+    enabledArtifactKinds,
+  });
+
+  // Only the exact supported shapes are compatible; nothing is shortened, reordered or de-duplicated.
+  expect(compatibleRememberedProfile(step("HighLevel", 7, ["Case", 7]))).toBeUndefined();
+  expect(compatibleRememberedProfile(step("HighLevel", 7, ["Procedure", "Case"]))).toBeUndefined();
+  expect(compatibleRememberedProfile(step("HighLevel", 7, ["Case", "Case"]))).toBeUndefined();
+  expect(compatibleRememberedProfile(step("HighLevel", 7, [7, 8]))).toBeUndefined();
+  expect(compatibleRememberedProfile(step("HighLevel", 7, ["Case", "Procedure", "Case"]))).toBeUndefined();
+  expect(compatibleRememberedProfile(step("System", 7, ["Case"]))).toBeUndefined();
+  expect(compatibleRememberedProfile(step("HighLevel", 7, ["Case"]))).toEqual(["Case"]);
+  expect(compatibleRememberedProfile(step("HighLevel", 7, ["Case", "Procedure"]))).toEqual([
+    "Case",
+    "Procedure",
+  ]);
+  expect(compatibleRememberedProfile(step("System", 7, ["Procedure"]))).toEqual(["Procedure"]);
+
+  // The control shows an unanswered choice unless the raw answer is exactly one supported profile.
+  expect(profileSelection(step("HighLevel", 7, ["Procedure", "Case"]))).toBe("");
+  expect(profileSelection(step("HighLevel", 7, ["Case", 7]))).toBe("");
+  expect(profileSelection(step("HighLevel", 7, []))).toBe("");
+  expect(profileSelection(step("HighLevel", 7, ["Case"]))).toBe("Case");
+  expect(profileSelection(step("HighLevel", 7, ["Case", "Procedure"]))).toBe("Case+Procedure");
+
+  // Saved content stays distinguishable from genuinely absent or empty content.
+  expect(savedArtifactsLabel(step("HighLevel", 7))).toBe("none recorded");
+  expect(savedArtifactsLabel(step("HighLevel", 7, []))).toBe("none selected");
+  expect(savedArtifactsLabel(step("HighLevel", 7, ["Case", 7]))).toContain("not artifact kinds");
+  expect(savedArtifactsLabel(step("HighLevel", 7, ["Procedure", "Case"]))).toBe("Procedure, Case");
+  expect(savedArtifactsLabel(step("HighLevel", 7, "Case"))).toContain("not a list of artifact kinds");
+
+  expect(enabledVerificationProfileInvalid(step("HighLevel", 7, ["Case", 7]))).toBe(true);
+  expect(enabledVerificationProfileInvalid(step("HighLevel", 7, ["Procedure", "Case"]))).toBe(true);
+  expect(enabledVerificationProfileInvalid(step("System", 7, ["Case"]))).toBe(true);
+  expect(enabledVerificationProfileInvalid(step("HighLevel", 7, ["Case"]))).toBe(false);
+  expect(enabledVerificationProfileInvalid(step("HighLevel", 7, ["Case", "Procedure"]))).toBe(false);
+  expect(enabledVerificationProfileInvalid(step("HighLevel", 7))).toBe(false);
+});
+
+/**
+ * Saves a draft whose HighLevel profile is exactly the supplied raw value. The accepted standard is derived
+ * first for the profile that value effectively means (`effectiveKinds`), so the draft's only problem is the
+ * raw shape under test rather than a subject mismatch.
+ */
+async function seedSoftwareProfileDraft(
+  page: Page,
+  projectName: string,
+  highLevelKinds: unknown,
+  effectiveKinds: unknown[] = ["Case"],
+) {
+  const created = await page.request.post(`${apiBase}/api/project-setups`, { data: { projectName } });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const draftId = ((await created.json()) as { draftId: string }).draftId;
+  const ladderWith = (kinds: unknown) => ({
+    steps: [
+      { catalogueEntry: "System", position: 1, capabilities: 7, enabledArtifactKinds: ["Procedure"] },
+      { catalogueEntry: "HighLevel", position: 2, capabilities: 7, enabledArtifactKinds: kinds },
+      { catalogueEntry: "LowLevel", position: 3, capabilities: 15, enabledArtifactKinds: ["Case"] },
+    ],
+    relationships: [
+      { parent: "System", child: "HighLevel" },
+      { parent: "HighLevel", child: "LowLevel" },
+    ],
+  });
+  const first = await page.request.put(`${apiBase}/api/project-setups/${draftId}`, {
+    data: {
+      expectedVersion: 1,
+      currentStep: "WorkingRules",
+      project: { name: projectName, softwareProduct: `${projectName} software` },
+      start: { kind: "Fresh" },
+      build: { version: "0.01" },
+      selectedCategories: [],
+      ladder: ladderWith(effectiveKinds),
+      reviewRules: {},
+      reviewRulesAccepted: true,
+      repository: { mode: "ConfigureLater" },
+      mapping: {},
+    },
+  });
+  expect(first.ok(), await first.text()).toBeTruthy();
+  const definition = (await first.json()).reviewRules.definition as unknown;
+  const saved = await page.request.put(`${apiBase}/api/project-setups/${draftId}`, {
+    data: {
+      expectedVersion: 2,
+      currentStep: "Ladder",
+      project: { name: projectName, softwareProduct: `${projectName} software` },
+      start: { kind: "Fresh" },
+      build: { version: "0.01" },
+      selectedCategories: [],
+      ladder: ladderWith(highLevelKinds),
+      reviewRules: definition,
+      reviewRulesAccepted: true,
+      repository: { mode: "ConfigureLater" },
+      mapping: {},
+    },
+  });
+  expect(saved.ok(), await saved.text()).toBeTruthy();
+  return draftId;
+}
+
+test("an invalid raw profile is never shortened, reordered or remembered as a valid choice", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(240_000);
+  await login(page, "admin", { openProject: false });
+  const suffix = Date.now().toString(36);
+  const invalidCases: {
+    label: string;
+    kinds: unknown[];
+    effective: unknown[];
+    saved: RegExp;
+    reason: RegExp;
+  }[] = [
+    { label: "a non-text entry", kinds: ["Case", 7], effective: ["Case"], saved: /not artifact kinds/i, reason: /not artifact kinds/i },
+    { label: "only non-text entries", kinds: [7, 8], effective: [], saved: /not artifact kinds/i, reason: /not artifact kinds/i },
+    {
+      label: "reversed order",
+      kinds: ["Procedure", "Case"],
+      effective: ["Procedure", "Case"],
+      saved: /Procedure, Case/,
+      reason: /not one of this level's supported profiles/i,
+    },
+    {
+      label: "a duplicate kind",
+      kinds: ["Case", "Case"],
+      effective: ["Case"],
+      saved: /Case, Case/,
+      reason: /not one of this level's supported profiles/i,
+    },
+  ];
+
+  for (const invalid of invalidCases) {
+    const projectName = `Invalid profile ${invalid.label} ${suffix}`;
+    const draftId = await seedSoftwareProfileDraft(page, projectName, invalid.kinds, invalid.effective);
+    await page.goto(`/projects/setup/${draftId}`);
+    await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+
+    const row = highLevelRowOf(page);
+    // The saved list is described as what it is, never as a shorter valid profile, and the control that
+    // records a decision stays unanswered.
+    await expect(row.locator(".setupVerificationFacts")).toContainText(invalid.saved);
+    await expect(row.getByLabel("Verification profile")).toHaveValue("");
+    await expect(row.locator('[role="alert"]').first()).toContainText(invalid.reason);
+    await page.screenshot({
+      path: testInfo.outputPath(`invalid-profile-${invalid.label.replaceAll(" ", "-")}.png`),
+      fullPage: true,
+    });
+
+    // A supported save preserves the raw answer exactly.
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "Review and approval rules", level: 2 })).toBeVisible();
+    let persisted = await persistedDraft(page, draftId);
+    expect(step(persisted, "HighLevel")?.enabledArtifactKinds).toEqual(invalid.kinds);
+
+    // Turning verification off and on again does not restore a filtered approximation of it.
+    await page.getByRole("button", { name: /Requirement ladder/ }).click();
+    const reopened = highLevelRowOf(page);
+    await verificationCheckbox(reopened).uncheck();
+    await expect(reopened.locator(".setupVerificationFacts")).toContainText(/none selected/);
+    await verificationCheckbox(reopened).check();
+    await expect(reopened.getByLabel("Verification profile")).toHaveValue("");
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "Review and approval rules", level: 2 })).toBeVisible();
+    persisted = await persistedDraft(page, draftId);
+    expect(step(persisted, "HighLevel")?.capabilities).toBe(7);
+    expect(step(persisted, "HighLevel")?.enabledArtifactKinds).toEqual([]);
+  }
+
+  // Valid profiles keep being remembered and restored exactly.
+  const validCases: { kinds: string[]; selection: string }[] = [
+    { kinds: ["Case"], selection: "Case" },
+    { kinds: ["Case", "Procedure"], selection: "Case+Procedure" },
+  ];
+  for (const valid of validCases) {
+    const draftId = await seedSoftwareProfileDraft(page, `Valid profile ${valid.selection} ${suffix}`, valid.kinds);
+    await page.goto(`/projects/setup/${draftId}`);
+    await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+    const row = highLevelRowOf(page);
+    await expect(row.getByLabel("Verification profile")).toHaveValue(valid.selection);
+
+    await verificationCheckbox(row).uncheck();
+    await expect(row.locator(".setupVerificationFacts")).toContainText(/none selected/);
+    await verificationCheckbox(row).check();
+    await expect(row.getByLabel("Verification profile")).toHaveValue(valid.selection);
+
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "Review and approval rules", level: 2 })).toBeVisible();
+    const persisted = await persistedDraft(page, draftId);
+    expect(step(persisted, "HighLevel")?.enabledArtifactKinds).toEqual(valid.kinds);
+  }
+});
+
+/** A source draft taken to the Review step through mocked transport, with everything else coherent. */
+async function sourceDraftAtReview(page: Page, projectName: string) {
+  const draftId = "00000000-0000-4000-8000-000000001050";
+  const ladder = {
+    steps: [
+      { catalogueEntry: "System", position: 1, capabilities: 7, enabledArtifactKinds: ["Procedure"] },
+      { catalogueEntry: "HighLevel", position: 2, capabilities: 7, enabledArtifactKinds: ["Case", "Procedure"] },
+      { catalogueEntry: "LowLevel", position: 3, capabilities: 15, enabledArtifactKinds: ["Case", "Procedure"] },
+    ],
+    relationships: [
+      { parent: "System", child: "HighLevel" },
+      { parent: "HighLevel", child: "LowLevel" },
+    ],
+  };
+  const shaped = await serverShapedDraft(page, projectName, ladder);
+  const current = {
+    ...shaped,
+    draftId,
+    state: "Draft",
+    currentStep: "Review",
+    version: 6,
+    project: { name: projectName, softwareProduct: `${projectName} software` },
+    start: { kind: "ExternalBaseline", sourceBaselineId: null, sourceImportId: stagedSource.id },
+    selectedCategories: ["Requirements"],
+    validation: { ...shaped.validation, draftId, version: 6 },
+  };
+  return { draftId, current };
+}
+
+test("a rejected stale recovery leaves the current answers and source acceptance unchanged", async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, "admin", { openProject: false });
+  const projectName = `Stale recovery ${Date.now().toString(36)}`;
+  const { draftId, current } = await sourceDraftAtReview(page, projectName);
+  let recovery: "current" | "stale" = "current";
+  await page.route(new RegExp(`/api/project-setups/${draftId}$`), async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      json:
+        recovery === "current"
+          ? current
+          : {
+              ...current,
+              version: 5,
+              project: { name: "Stale answers", softwareProduct: "Stale product" },
+              start: {
+                kind: "ExternalBaseline",
+                sourceBaselineId: null,
+                sourceImportId: "00000000-0000-4000-8000-000000001099",
+              },
+              validation: { ...current.validation, version: 5 },
+            },
+    });
+  });
+  await page.route(new RegExp(`/api/project-setups/${draftId}/source$`), async (route) => {
+    await route.fulfill({ json: { draftVersion: 6, source: stagedSource } });
+  });
+  await page.route(/\/api\/project-setups\/[0-9a-f-]+\/finalize$/i, async (route) => {
+    recovery = "stale";
+    await route.fulfill({ status: 500 });
+  });
+
+  await page.goto(`/projects/setup/${draftId}`);
+  await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+  await page.getByLabel(/I accept this exact source assertion/i).check();
+  await page.getByLabel("Password to finalize source acceptance").fill("AeroLink!2026");
+  await expect(page.getByRole("button", { name: "Create Project" })).toBeEnabled();
+
+  await page.getByRole("button", { name: "Create Project" }).click();
+
+  // The older read is refused as a whole: no answers, no step, no source acceptance, no claims.
+  await expect(page.locator(".projectSetupError")).toContainText(/not this draft's current state/i);
+  await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+  await expect(page.locator(".setupReviewList")).toContainText(projectName);
+  await expect(page.locator(".setupReviewList")).not.toContainText("Stale answers");
+  await expect(page.getByLabel(/I accept this exact source assertion/i)).toBeChecked();
+  await expect(page.getByLabel("Password to finalize source acceptance")).toHaveValue("AeroLink!2026");
+  await expect(page.getByRole("heading", { name: "Project created", level: 2 })).toHaveCount(0);
+  await page.unroute(new RegExp(`/api/project-setups/${draftId}$`));
+  await page.unroute(new RegExp(`/api/project-setups/${draftId}/source$`));
+  await page.unroute(/\/api\/project-setups\/[0-9a-f-]+\/finalize$/i);
+});
+
+test("a completed result for another draft cannot announce success", async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, "admin", { openProject: false });
+  const projectName = `Foreign completion ${Date.now().toString(36)}`;
+  const { draftId, current } = await sourceDraftAtReview(page, projectName);
+  let recovery: "current" | "foreign" = "current";
+  await page.route(new RegExp(`/api/project-setups/${draftId}$`), async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      json:
+        recovery === "current"
+          ? current
+          : {
+              ...current,
+              draftId: "00000000-0000-4000-8000-000000001051",
+              state: "Completed",
+              version: 7,
+              finalization: {
+                programId: "00000000-0000-4000-8000-000000001060",
+                projectId: "00000000-0000-4000-8000-000000001061",
+                releaseId: "00000000-0000-4000-8000-000000001062",
+              },
+            },
+    });
+  });
+  await page.route(new RegExp(`/api/project-setups/${draftId}/source$`), async (route) => {
+    await route.fulfill({ json: { draftVersion: 6, source: stagedSource } });
+  });
+  await page.route(/\/api\/project-setups\/[0-9a-f-]+\/finalize$/i, async (route) => {
+    // The recovery read that follows now answers for a different draft's completion.
+    recovery = "foreign";
+    await route.fulfill({ status: 500 });
+  });
+
+  await page.goto(`/projects/setup/${draftId}`);
+  await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+  await page.getByLabel(/I accept this exact source assertion/i).check();
+  await page.getByLabel("Password to finalize source acceptance").fill("AeroLink!2026");
+  await expect(page.getByRole("button", { name: "Create Project" })).toBeEnabled();
+  await page.getByRole("button", { name: "Create Project" }).click();
+
+  await expect(page.getByRole("heading", { name: "Project created", level: 2 })).toHaveCount(0);
+  // No success notice of any kind: the foreign completion was never adopted.
+  await expect(page.locator(".projectSetupNotice")).toHaveCount(0);
+  await expect(page.locator(".projectSetupError")).toContainText(/not this draft's current state/i);
+  await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
+  await page.unroute(new RegExp(`/api/project-setups/${draftId}$`));
+  await page.unroute(new RegExp(`/api/project-setups/${draftId}/source$`));
+  await page.unroute(/\/api\/project-setups\/[0-9a-f-]+\/finalize$/i);
+});
+
+test("a late load describing another draft does not replace the draft that was just created", async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, "admin", { openProject: false });
+  const createdId = "00000000-0000-4000-8000-000000001052";
+  await page.route(/\/api\/project-setups$/, async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 201,
+      json: { draftId: createdId, state: "Draft", currentStep: "Details", version: 1 },
+    });
+  });
+  await page.route(new RegExp(`/api/project-setups/${createdId}$`), async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    // The late read belongs to another draft: it must not enter this draft's scope.
+    await route.fulfill({
+      json: {
+        draftId: "00000000-0000-4000-8000-000000001053",
+        state: "Draft",
+        currentStep: "Review",
+        version: 9,
+        project: { name: "Foreign draft", softwareProduct: "Foreign product" },
+        start: { kind: "Fresh" },
+        build: { version: "1.02" },
+        selectedCategories: [],
+        ladder: { steps: [], relationships: [] },
+        reviewRules: { accepted: true, definition: { rules: [] } },
+        repository: { mode: "ConfigureLater" },
+        mapping: {},
+      },
+    });
+  });
+
+  await page.goto("/projects/new");
+  await expect(page.getByRole("heading", { name: "Project details", level: 2 })).toBeVisible();
+  await expect(page.getByLabel("Project name")).toHaveValue("");
+  await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toHaveCount(0);
+  await expect(page.locator(".projectSetupError")).toContainText(/different saved setup than the one requested/i);
+  await page.unroute(/\/api\/project-setups$/);
+  await page.unroute(new RegExp(`/api/project-setups/${createdId}$`));
 });
