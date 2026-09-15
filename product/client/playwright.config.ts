@@ -1,7 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 import { existsSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { createBrowserStorage } from './scripts/browser-storage.mjs'
 
 // The journeys must be runnable wherever the product is developed, not only on Windows. Both servers are
 // therefore launched as plain commands with their configuration supplied through webServer.env, rather
@@ -15,7 +16,8 @@ const localDotnet = [windowsDotnet, posixDotnet].find(candidate => candidate && 
 const dotnet = process.env.AEROLINK_DOTNET ?? localDotnet ?? 'dotnet'
 const runId = process.env.AEROLINK_E2E_RUN_ID ?? `${Date.now()}`
 process.env.AEROLINK_E2E_RUN_ID = runId
-const e2eDatabase = join(tmpdir(), `aerolink-e2e-${runId}.db`).replaceAll('\\', '/')
+const storage = createBrowserStorage(runId)
+const e2eDatabase = storage.database
 const e2eApiPort = process.env.AEROLINK_E2E_API_PORT ?? '5082'
 const e2eClientPort = process.env.AEROLINK_E2E_CLIENT_PORT ?? '5174'
 const skipApiBuild = process.env.AEROLINK_E2E_SKIP_BUILD === 'true'
@@ -70,7 +72,7 @@ export default defineConfig({
   // and far enough above the work that a failure means something. A genuine hang still fails, fifteen
   // seconds later, which is the trade: slower to report the real thing, and it reports the real thing.
   expect: { timeout: 15_000 },
-  reporter: [['list'], ['./tests/slow-test-reporter.ts'], ['html', { open: 'never', outputFolder: reportDir }]],
+  reporter: [['list'], ['./tests/slow-test-reporter.ts'], ['html', { open: 'never', outputFolder: reportDir }], ['./scripts/browser-storage-reporter.mjs', { runId }]],
   use: {
     baseURL: `http://127.0.0.1:${e2eClientPort}`,
     trace: 'retain-on-failure',
@@ -112,6 +114,7 @@ export default defineConfig({
         'Logging__LogLevel__Microsoft.AspNetCore': 'Information',
         'Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command': 'Warning',
         Database__Provider: 'Sqlite',
+        Evidence__Root: storage.evidence,
         DemoData__Enabled: 'false',
         Identity__SeedDemoAccounts: 'true',
         Identity__AllowDemoAccounts: 'true',

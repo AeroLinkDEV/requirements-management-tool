@@ -1,8 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
 import { existsSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createBrowserStorage } from './scripts/browser-storage.mjs'
 
 /**
  * The journeys, run against the artifact a demonstration or a deployment actually serves.
@@ -26,7 +27,8 @@ const localDotnet = [windowsDotnet, posixDotnet].find(candidate => candidate && 
 const dotnet = process.env.AEROLINK_DOTNET ?? localDotnet ?? 'dotnet'
 const runId = process.env.AEROLINK_E2E_RUN_ID ?? `production-${Date.now()}`
 process.env.AEROLINK_E2E_RUN_ID = runId
-const database = join(tmpdir(), `aerolink-production-${runId}.db`).replaceAll('\\', '/')
+const storage = createBrowserStorage(runId)
+const database = storage.database
 const port = process.env.AEROLINK_E2E_PRODUCTION_PORT ?? '5086'
 const origin = `http://127.0.0.1:${port}`
 const skipApiBuild = process.env.AEROLINK_E2E_SKIP_BUILD === 'true'
@@ -45,7 +47,7 @@ export default defineConfig({
   testDir: './tests/production',
   globalSetup: './tests/global-setup.ts',
   outputDir: process.env.AEROLINK_E2E_OUTPUT_DIR ?? 'test-results-production',
-  reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report-production' }]],
+  reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report-production' }], ['./scripts/browser-storage-reporter.mjs', { runId }]],
   fullyParallel: false,
   workers: 1,
   // The same fifteen seconds as the development journeys, and for the same reason: these assertions wait on
@@ -83,6 +85,7 @@ export default defineConfig({
         // never be the thing under test.
         Client__StaticFiles: join(clientDir, 'dist'),
         Database__Provider: 'Sqlite',
+        Evidence__Root: storage.evidence,
         DemoData__Enabled: 'false',
         Identity__SeedDemoAccounts: 'true',
         Identity__AllowDemoAccounts: 'true',

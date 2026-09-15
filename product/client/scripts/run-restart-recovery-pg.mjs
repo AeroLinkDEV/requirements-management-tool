@@ -7,6 +7,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
+import { removeBrowserStorage } from './browser-storage.mjs';
 
 const connection = process.env.AEROLINK_E2E_CONNECTION_STRING ?? "";
 
@@ -264,6 +265,7 @@ function runPhase(phase) {
       cwd: process.cwd(),
       env: {
         ...process.env,
+        AEROLINK_E2E_RUN_ID: runId,
         AEROLINK_RESTART_RECOVERY_PHASE: phase,
         AEROLINK_RESTART_RECOVERY_STATE_FILE: stateFile,
         AEROLINK_E2E_OUTPUT_DIR: phaseResultsDirectory,
@@ -334,6 +336,7 @@ try {
   console.error(manifest.error);
   process.exitCode = 1;
 } finally {
+  removeBrowserStorage(runId);
   const final = repositoryState();
   manifest.commitAfter = final.sha;
   manifest.dirtyAfter = final.dirty;

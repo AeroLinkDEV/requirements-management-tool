@@ -272,6 +272,22 @@ export default function DigitalThreadPage({
   // A Problem Report can remain a local Network selection because its kind has no Digital Thread focal
   // segment. This marker distinguishes that intentional selection from a bare route reached by navigation.
   const bareSelectionRef = useRef<string | null>(null)
+  // Internal route feedback publishes exact identity without becoming a new board arrival.
+  // Back/forward and external entries have no matching pending feedback and retain landing semantics.
+  const routeIdentity = `${active}|${projectId}|${releaseId}|${baselineId}|${focalKind ?? ""}|${focalId ?? ""}`
+  const pendingNetworkRoute = useRef<string | null>(null)
+  const networkArrival = useRef({ route: routeIdentity, id: focalId, revision: 0 })
+  if (networkArrival.current.route !== routeIdentity) {
+    const internal = pendingNetworkRoute.current === routeIdentity
+    if (!internal && active === "network") setNetworkSelectionId(focalKind === "change-request" ? focalId ?? null : null)
+    networkArrival.current = {
+      route: routeIdentity,
+      id: internal ? networkArrival.current.id : focalId,
+      revision: networkArrival.current.revision + (internal ? 0 : 1),
+    }
+    pendingNetworkRoute.current = null
+  }
+
 
   const retry = useCallback(() => setAttempt(value => value + 1), [])
 
@@ -587,6 +603,7 @@ export default function DigitalThreadPage({
     (id: string | null) => {
       setNetworkSelectionId(id)
       const node = network?.nodes.find(item => item.id === id) ?? null
+      pendingNetworkRoute.current = `network|${projectId}|${releaseId}|${baselineId}|${node && isChangeNode(node) ? "change-request" : ""}|${node && isChangeNode(node) ? node.id : ""}`
       if (node && isChangeNode(node)) {
         bareSelectionRef.current = null
         go("network", node.id, "change-request")
@@ -597,7 +614,7 @@ export default function DigitalThreadPage({
         go("network")
       }
     },
-    [go, network],
+    [go, network, projectId, releaseId, baselineId],
   )
 
   const insideId = active === "network"
@@ -750,15 +767,16 @@ export default function DigitalThreadPage({
         />
       ) : (
         <DigitalThreadNetwork
+          key={networkArrival.current.revision}
           projection={network}
-          scopeKey={`network|${projectId}|${releaseId}|${baselineId}|${focalId ?? ""}`}
+          scopeKey={`network|${projectId}|${releaseId}|${baselineId}|${networkArrival.current.revision}`}
           representation={representation}
           loading={loading}
           error={error}
           onRetry={retry}
           orderedLevels={orderedLevels}
           buildLabel={buildLabel}
-          focalId={focalId}
+          focalId={networkArrival.current.id}
           selectedId={networkSelectionId}
           onSelect={handleNetworkSelect}
           hrefFor={node => cardHref(node)}

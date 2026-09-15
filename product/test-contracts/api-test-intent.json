@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 929,
-    "cases": 1045,
+    "tests": 930,
+    "cases": 1046,
     "classes": 147,
-    "hostedTests": 881,
-    "hostedCases": 975,
+    "hostedTests": 882,
+    "hostedCases": 976,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 14,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 575,
-      "cases": 649,
+      "tests": 576,
+      "cases": 650,
       "unknownCases": 0,
-      "classes": 113
+      "classes": 114
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -3839,8 +3839,26 @@
         "factory-services"
       ],
       "sourceLines": {
+        "start": 43,
+        "end": 56
+      }
+    },
+    {
+      "cls": "ConfigurationPublicationApiTests",
+      "test": "Expired_repository_export_returns_gone_while_controlled_publication_remains_downloadable",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
         "start": 15,
-        "end": 28
+        "end": 41
       }
     },
     {
