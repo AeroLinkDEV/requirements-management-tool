@@ -1430,6 +1430,28 @@ export default function ProjectSetupWalkthrough({
       </div>
     );
 
+  // A page opened before the setup was discarded still names a draft that no longer accepts answers. The
+  // state is reported as what it is instead of leaving an editable walkthrough that can only fail on save.
+  if (draft.state === "Abandoned")
+    return (
+      <div className="projectSetupPage">
+        <PortalHeader user={user} onSignOut={onSignOut} />
+        <main className="projectSetupMain">
+          <div className="projectSetupError" role="alert">
+            <h1>This setup was discarded</h1>
+            <p>
+              The unfinished setup you opened was discarded, so its saved answers are no longer part of the
+              saved setups and cannot be saved or finalized. No Project, build or controlled record was
+              deleted. Start a new Project when you are ready.
+            </p>
+            <button type="button" onClick={onExit}>
+              Back to Projects
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+
   const activeIndex = stepIndex(currentStep);
   const renderStep = () => {
     if (completedResult)
@@ -1679,10 +1701,35 @@ export default function ProjectSetupWalkthrough({
                     })}
                   </fieldset>
                   {catalogue.verification.length > 0 && (
-                    <div className="setupVerificationState">
+                    <div
+                      className={
+                        catalogue.id === "System"
+                          ? "setupVerificationState setupVerificationStateSystem"
+                          : "setupVerificationState"
+                      }
+                    >
                       {/* The current selection, the last saved answer and the server's interpretation of
                           that saved answer are three different facts. A verdict is never presented as the
                           meaning of an unsaved edit, and an unsaved choice is never labelled as saved. */}
+                      {catalogue.id === "System" ? (
+                        /* System has exactly one verification meaning — its test procedures — so it gets one
+                           plain sentence instead of a profile table and restoration explanation. */
+                        <p className="setupSystemVerification" role="status">
+                          <strong>
+                            System test procedures: {hasVerificationCapability(step) ? "On" : "Off"}
+                            {!levelStepIsSaved(step) && " — Unsaved change"}
+                          </strong>
+                          {!levelStepIsSaved(step) &&
+                            (() => {
+                              const savedSystem = savedStepForLevel("System");
+                              return savedSystem ? (
+                                <small>
+                                  Last saved: {hasVerificationCapability(savedSystem) ? "On" : "Off"}.
+                                </small>
+                              ) : null;
+                            })()}
+                        </p>
+                      ) : (
                       <dl className="setupVerificationFacts">
                         <div>
                           <dt>Capability</dt>
@@ -1720,6 +1767,7 @@ export default function ProjectSetupWalkthrough({
                           </dd>
                         </div>
                       </dl>
+                      )}
                       {hasVerificationCapability(step) && catalogue.id !== "System" && (
                         <label className="setupLadderProfile">
                           Verification profile
@@ -1761,22 +1809,25 @@ export default function ProjectSetupWalkthrough({
                   {(catalogue.verification.length > 0 || findingsForLevel(step.catalogueEntry).length > 0) && (
                     <div className="setupLadderDiagnostics">
                       {/* Qualifiers live in the wide region: the readings column stays short and legible. */}
-                      {(() => {
-                        const savedStep = savedStepForLevel(step.catalogueEntry);
-                        return Boolean(
-                          readinessStepForLevel(step.catalogueEntry) &&
-                            savedStep &&
-                            hasVerificationCapability(savedStep) &&
-                            savedProfileIsInvalid(savedStep, catalogue.id),
-                        );
-                      })() && (
+                      {catalogue.id !== "System" &&
+                        (() => {
+                          const savedStep = savedStepForLevel(step.catalogueEntry);
+                          return Boolean(
+                            readinessStepForLevel(step.catalogueEntry) &&
+                              savedStep &&
+                              hasVerificationCapability(savedStep) &&
+                              savedProfileIsInvalid(savedStep, catalogue.id),
+                          );
+                        })() && (
                           <p className="setupFieldHint">
                             Effective is the server's reading of the saved profile, and that saved profile
                             is not one of this level's supported choices — repair the level or choose a
                             supported profile before saving.
                           </p>
                         )}
-                      {readinessStepForLevel(step.catalogueEntry) && !levelStepIsSaved(step) && (
+                      {catalogue.id !== "System" &&
+                        readinessStepForLevel(step.catalogueEntry) &&
+                        !levelStepIsSaved(step) && (
                         <p className="setupFieldHint">
                           Effective describes the last saved check. Save your current selection so the
                           server can re-check it.
@@ -1814,7 +1865,7 @@ export default function ProjectSetupWalkthrough({
                           supported profile for this level, or repair the level deliberately before saving.
                         </p>
                       )}
-                      {rawProfileEntries(step) === undefined && (
+                      {catalogue.id !== "System" && rawProfileEntries(step) === undefined && (
                         <p className="setupFieldHint">
                           No verification profile is saved for this level. The maintained interpretation
                           of an unspecified profile here is{" "}
@@ -1823,7 +1874,7 @@ export default function ProjectSetupWalkthrough({
                           ; choose a profile to record an explicit decision.
                         </p>
                       )}
-                      {!hasVerificationCapability(step) && (
+                      {catalogue.id !== "System" && !hasVerificationCapability(step) && (
                         <p className="setupFieldHint">
                           Verification is disabled for {levelLabel(step.catalogueEntry)}. Enabling it again
                           does not silently substitute a default: a compatible choice made in this session

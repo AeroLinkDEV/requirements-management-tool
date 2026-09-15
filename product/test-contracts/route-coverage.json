@@ -361,6 +361,7 @@
         "ProjectRepositoryApiTests",
         "ProjectSetupAuthorizationApiTests",
         "ProjectSetupCodeEvidenceApiTests",
+        "ProjectSetupDiscardApiTests",
         "ProjectSetupDiscoveryApiTests",
         "ProjectSetupInceptionApiTests",
         "ProjectSetupKestrelQualificationTests",
@@ -1779,12 +1780,23 @@
         "ProjectSetupApiTests",
         "ProjectSetupAuthorizationApiTests",
         "ProjectSetupBoundaryRegressionApiTests",
+        "ProjectSetupDiscardApiTests",
         "ProjectSetupDiscoveryApiTests",
         "ProjectSetupInceptionApiTests",
         "ProjectSetupKestrelQualificationTests",
         "ProjectSetupLadderCapabilityApiTests",
+        "ProjectSetupPostgresQualificationTests.Discard",
         "ProjectSetupServiceQualificationTests",
         "ProjectSetupVerificationProfileApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/project-setups/{draftId:guid}/discard",
+      "file": "ProjectSetupEndpoints.cs",
+      "coveredBy": [
+        "ProjectSetupDiscardApiTests",
+        "ProjectSetupPostgresQualificationTests.Discard"
       ]
     },
     {
@@ -1794,8 +1806,10 @@
       "coveredBy": [
         "ProjectSetupApiTests",
         "ProjectSetupAuthorizationApiTests",
+        "ProjectSetupDiscardApiTests",
         "ProjectSetupInceptionApiTests",
         "ProjectSetupLadderCapabilityApiTests",
+        "ProjectSetupPostgresQualificationTests.Discard",
         "ProjectSetupServiceQualificationTests",
         "ProjectSetupVerificationProfileApiTests"
       ]
@@ -1814,6 +1828,7 @@
       "file": "ProjectSetupSourceEndpoints.cs",
       "coveredBy": [
         "ProjectSetupAuthorizationApiTests",
+        "ProjectSetupDiscardApiTests",
         "ProjectSetupInceptionApiTests"
       ]
     },
@@ -1830,6 +1845,7 @@
       "path": "/api/project-setups/{draftId:guid}/source/upload",
       "file": "ProjectSetupSourceEndpoints.cs",
       "coveredBy": [
+        "ProjectSetupDiscardApiTests",
         "ProjectSetupInceptionApiTests",
         "ProjectSetupKestrelQualificationTests"
       ]
@@ -2571,9 +2587,11 @@
         "ProjectSetupApiTests",
         "ProjectSetupAuthorizationApiTests",
         "ProjectSetupBoundaryRegressionApiTests",
+        "ProjectSetupDiscardApiTests",
         "ProjectSetupDiscoveryApiTests",
         "ProjectSetupInceptionApiTests",
         "ProjectSetupLadderCapabilityApiTests",
+        "ProjectSetupPostgresQualificationTests.Discard",
         "ProjectSetupServiceQualificationTests",
         "ProjectSetupVerificationProfileApiTests"
       ]

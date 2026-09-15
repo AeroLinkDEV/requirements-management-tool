@@ -143,8 +143,11 @@ test("disabling verification at System leaves no enabled verification artifact",
   const systemRow = systemRowOf(page);
   await verificationCheckbox(systemRow).uncheck();
   // A disabled capability must be unambiguous where it is owned, not a cleared checkbox beside an
-  // artifact the level still enables.
-  await expect(systemRow).toContainText(/verification (is )?(off|disabled)|no verification artifacts/i);
+  // artifact the level still enables. System states its single verification meaning in one sentence.
+  await expect(systemRow.locator(".setupSystemVerification")).toContainText(
+    "System test procedures: Off — Unsaved change",
+  );
+  await expect(systemRow.locator('[role="alert"]')).toHaveCount(0);
 
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Review and approval rules", level: 2 })).toBeVisible();
@@ -1058,13 +1061,26 @@ test("the recorded contradictory draft is repaired without re-enabling verificat
   const systemRow = systemRowOf(page);
   await expect(systemRow).toContainText(/Verification is disabled, but the saved profile still enables Procedure/i);
   await expect(systemRow).not.toContainText(/no verification artifacts are enabled/i);
-  await expect(systemRow.locator(".setupVerificationFacts")).toContainText(/Procedure/);
+  // System states its one verification meaning instead of a software profile table, and the contradiction
+  // stays a finding rather than being folded into a "current selection" reading.
+  await expect(systemRow.locator(".setupSystemVerification")).toContainText("System test procedures: Off");
+  await expect(systemRow.locator(".setupVerificationFacts")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("owner-shape-before-repair.png"), fullPage: true });
 
   // 2. The explicit disabled-preserving repair.
   await systemRow.getByRole("button", { name: "Keep verification disabled and remove the enabled artifacts" }).click();
   await expect(systemRow).not.toContainText(/still enables Procedure/i);
-  await expect(systemRow.locator(".setupVerificationFacts")).toContainText(/none selected/);
+  // The repair is a deliberate unsaved edit, and System says exactly that without a warning panel.
+  await expect(systemRow.locator(".setupSystemVerification")).toContainText(
+    "System test procedures: Off — Unsaved change",
+  );
+  await expect(systemRow.locator(".setupSystemVerification")).toContainText("Last saved: Off.");
+  // The repair is unsaved, so the server's verdict for the saved configuration stays visible and labelled
+  // rather than being cleared by a local edit.
+  await expect(systemRow).toContainText(/From the last saved check/i);
+  await expect(systemRow.locator('[role="alert"]')).toHaveText(
+    /A level without verification capability cannot enable verification artifacts/i,
+  );
   await expect(verificationCheckbox(systemRow)).not.toBeChecked();
   await page.screenshot({ path: testInfo.outputPath("owner-shape-after-repair.png"), fullPage: true });
 
@@ -1193,7 +1209,11 @@ test("System, HLR and LLR verification can be disabled independently and all tog
   // Re-enabling System verification visibly selects its sole valid profile instead of inventing a choice.
   await page.getByRole("button", { name: /Requirement ladder/ }).click();
   await verificationCheckbox(systemRowOf(page)).check();
-  await expect(systemRowOf(page).locator(".setupVerificationFacts")).toContainText(/Procedure/);
+  // Re-enabling System has an explicit coherent profile: its one maintained meaning, stated plainly and
+  // flagged as an unsaved change until the server accepts it.
+  await expect(systemRowOf(page).locator(".setupSystemVerification")).toContainText(
+    "System test procedures: On — Unsaved change",
+  );
 
   // LLR restores the compatible Case-only choice it was disabled from, not the Case + Procedure default,
   // and the restored profile is what the server stores.
@@ -1205,6 +1225,8 @@ test("System, HLR and LLR verification can be disabled independently and all tog
   const restored = await persistedDraft(page, draftId);
   expect(step(restored, "LowLevel")?.capabilities).toBe(15);
   expect(step(restored, "LowLevel")?.enabledArtifactKinds).toEqual(["Case"]);
+  expect(step(restored, "System")?.capabilities, "system verification is stored as enabled again").toBe(7);
+  expect(step(restored, "System")?.enabledArtifactKinds).toEqual(["Procedure"]);
 });
 
 test("save and exit does not leave while newer unsaved answers remain", async ({ page }, testInfo) => {
@@ -1842,7 +1864,7 @@ test("a pending recheck for one draft cannot enter the screen of another draft",
   await expect(page.getByRole("heading", { name: "Projects", level: 1 })).toBeVisible();
   const bCard = page.locator(`[data-setup-draft-id="${draftB.draftId}"]`);
   await expect(bCard).toHaveCount(1);
-  await bCard.getByRole("button").click();
+  await bCard.getByRole("button", { name: "Resume setup" }).click();
   await expect.poll(() => bReached).toBe(true);
   await expect(page.getByText(/Opening the saved project setup/i)).toBeVisible();
 
@@ -1928,7 +1950,7 @@ test("an older visit's response cannot become current when the same draft is ope
   await page.getByRole("button", { name: "Projects" }).click();
   const bCard = page.locator(`[data-setup-draft-id="${draftB.draftId}"]`);
   await expect(bCard).toHaveCount(1);
-  await bCard.getByRole("button").click();
+  await bCard.getByRole("button", { name: "Resume setup" }).click();
   await expect.poll(() => bReached).toBe(true);
   bGate.release();
   await expect(page.getByRole("heading", { name: "Project details", level: 2 })).toBeVisible();
@@ -1938,7 +1960,7 @@ test("an older visit's response cannot become current when the same draft is ope
   const aCard = page.locator(`[data-setup-draft-id="${draftA.draftId}"]`);
   await expect(aCard).toHaveCount(1);
   holdReopen = true;
-  await aCard.getByRole("button").click();
+  await aCard.getByRole("button", { name: "Resume setup" }).click();
   await expect.poll(() => reopenReached).toBe(true);
   await expect(page.getByText(/Opening the saved project setup/i)).toBeVisible();
 
@@ -2158,7 +2180,8 @@ test("valid disabled-empty and maintained-default profiles are not described as 
   const disabled = await persistedDraft(page, disabledDraft);
   expect(disabled.validation?.ladderValid, "the server accepts a coherently disabled ladder").toBe(true);
   await expect(page.getByText(/not one of this level's supported choices/i)).toHaveCount(0);
-  await expect(page.locator(".setupVerificationFacts").first()).toContainText(/none selected/);
+  await expect(systemRowOf(page).locator(".setupSystemVerification")).toContainText("System test procedures: Off");
+  await expect(highLevelRowOf(page).locator(".setupVerificationFacts")).toContainText(/none selected/);
   await expect(page.locator(".setupLadderRepairs")).toHaveCount(0);
 
   // Verification enabled with no recorded profile: the maintained default, not an unsupported answer.
