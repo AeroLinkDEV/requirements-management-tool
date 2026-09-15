@@ -1783,7 +1783,8 @@
         "ProjectSetupInceptionApiTests",
         "ProjectSetupKestrelQualificationTests",
         "ProjectSetupLadderCapabilityApiTests",
-        "ProjectSetupServiceQualificationTests"
+        "ProjectSetupServiceQualificationTests",
+        "ProjectSetupVerificationProfileApiTests"
       ]
     },
     {
@@ -1795,7 +1796,8 @@
         "ProjectSetupAuthorizationApiTests",
         "ProjectSetupInceptionApiTests",
         "ProjectSetupLadderCapabilityApiTests",
-        "ProjectSetupServiceQualificationTests"
+        "ProjectSetupServiceQualificationTests",
+        "ProjectSetupVerificationProfileApiTests"
       ]
     },
     {
@@ -2572,7 +2574,8 @@
         "ProjectSetupDiscoveryApiTests",
         "ProjectSetupInceptionApiTests",
         "ProjectSetupLadderCapabilityApiTests",
-        "ProjectSetupServiceQualificationTests"
+        "ProjectSetupServiceQualificationTests",
+        "ProjectSetupVerificationProfileApiTests"
       ]
     },
     {
