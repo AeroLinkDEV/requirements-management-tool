@@ -208,4 +208,72 @@ function Stop-AeroLinkProvenProcess {
     if (-not $exited) { throw 'Termination was requested for the owned process, but its exit was not proven within ten seconds.' }
 }
 
-Export-ModuleMember -Function Grant-AeroLinkCreatedProcessAccess, Get-AeroLinkProcessStartIdentity, Get-AeroLinkNativeProcessIdentity, Stop-AeroLinkProvenProcess
+function Push-AeroLinkDeterministicProcessInputEncoding {
+    <#
+      .SYNOPSIS Pins the encoding a child's redirected stdin will use, and returns what to restore.
+      .DESCRIPTION
+        A redirected StandardInput is a StreamWriter built over Console.InputEncoding - the AMBIENT console
+        codepage, captured when the Process object first hands the property out. On .NET Framework (Windows
+        PowerShell 5.1) that encoding is used exactly as given, so under a UTF-8 console (chcp 65001, or a
+        host that assigns [Console]::InputEncoding) its preamble is emitted and the child received
+
+            EF BB BF 73 74 6F 70 0D 0A   instead of   73 74 6F 70 0D 0A
+
+        and an exact token match failed. PowerShell 7 wraps the same stream in ConsoleEncoding, which
+        suppresses the preamble, so one script stopped the owned API helper under 7 and ran it to its
+        diagnostic bound under 5.1 - surfacing as unprovable cleanup rather than as an encoding problem.
+
+        Writing raw bytes to BaseStream is NOT sufficient and that was measured, not assumed: the
+        StandardInput getter sets AutoFlush, which flushes the writer as it is created, so the preamble is
+        already in the pipe before any caller writes a thing. The encoding therefore has to be pinned BEFORE
+        the process starts, which is what this does.
+
+        Fails soft by design. A process with no console cannot set this, and that case is not a failure: the
+        helper's reader decodes its stdin as UTF-8 and consumes a leading preamble, so the token still
+        matches. Both halves exist because either alone leaves the token host-dependent in one direction.
+    #>
+    [CmdletBinding()]
+    param()
+    try {
+        $previous = [Console]::InputEncoding
+        # UTF-8 WITHOUT the byte-order-mark preamble. ASCII tokens are then byte-identical on every host.
+        [Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
+        return $previous
+    }
+    catch { return $null }
+}
+
+function Pop-AeroLinkDeterministicProcessInputEncoding {
+    <#
+      .SYNOPSIS Restores the console input encoding captured by Push-AeroLinkDeterministicProcessInputEncoding.
+    #>
+    [CmdletBinding()]
+    param($Previous)
+    if ($null -eq $Previous) { return }
+    try { [Console]::InputEncoding = $Previous } catch { }
+}
+
+function Write-AeroLinkProcessControlToken {
+    <#
+      .SYNOPSIS Writes a control token to an owned child's redirected stdin as exact bytes.
+      .DESCRIPTION
+        Paired with Push-AeroLinkDeterministicProcessInputEncoding, which is what actually removes the
+        preamble. This writes the token's bytes straight to the underlying stream so that no encoder chosen
+        from console state sits between the caller and the pipe for the token itself.
+
+        The token stays an exact match at both ends. This is a byte-determinism fix, not a loosened protocol.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Process,
+        [Parameter(Mandatory)][ValidatePattern('^[\x21-\x7E]+$')][string]$Token
+    )
+    # ASCII by construction, via the validation above: an ASCII-range token has identical bytes in UTF-8, so
+    # this writes exactly the token and a CRLF with no preamble and no codepage dependence.
+    $bytes = [System.Text.Encoding]::ASCII.GetBytes($Token + "`r`n")
+    $stream = $Process.StandardInput.BaseStream
+    $stream.Write($bytes, 0, $bytes.Length)
+    $stream.Flush()
+}
+
+Export-ModuleMember -Function Grant-AeroLinkCreatedProcessAccess, Get-AeroLinkProcessStartIdentity, Get-AeroLinkNativeProcessIdentity, Stop-AeroLinkProvenProcess, Write-AeroLinkProcessControlToken, Push-AeroLinkDeterministicProcessInputEncoding, Pop-AeroLinkDeterministicProcessInputEncoding

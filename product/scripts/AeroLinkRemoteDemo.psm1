@@ -22,6 +22,75 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1')
 $script:RemoteDemoTaskName = 'AeroLinkRemoteDemoRecovery'
 $script:ReconcileTaskName = 'AeroLinkProductionSourceReconcile'
 
+# Transition budgets, in one place, because they only mean anything RELATIVE TO EACH OTHER.
+#
+# They used to be three independent literals - 900 s for the launcher helper, 900 s for recovery, PT30M in
+# two separately maintained task XML blocks - and a supported clone-validated upgrade simply costs more than
+# that. Measured on the transition in #1043: a 417,902,860-byte archive with 51,573 manifest entries, whose
+# verified backup finished about 9.5 minutes in, with isolated extraction and restore still progressing at
+# about 16 minutes. The 900-second deadline expired in the middle of correct work, and because the deadline
+# is what stops the runtime and tunnel, the machine was left with them down. Recovery then retried the same
+# expensive work under the same deadline and reached the same point.
+#
+# THE SIZING OBSERVATION. One supported upgrade of this kind has been recorded end to end: the manual
+# supported upgrade of 2026-09-14 took approximately 21 minutes 35 seconds (1295 s), covering verified
+# backup, isolated restore, migrations, current-code read-only proof, launcher restart and tunnel
+# restoration. That is ONE completed observation, not a p99, and the budgets below are derived from it with
+# deliberate headroom rather than treated as a universal sizing rule.
+#
+#   supported upgrade deadline   2400 s   ~1.85x that one completed observation
+#   continuation wrapper         2700 s   upgrade budget + 300 s for the continuation's own inspection,
+#                                         topology restoration, tunnel restore and verification, which sit
+#                                         OUTSIDE the upgrade the inner deadline covers
+#
+# THE SEQUENTIAL ARGUMENT, which a plain "inner < outer" ordering misses. One task run can make more than
+# one continuation attempt: the reconciliation path runs a primary handoff and, on failure, a recovery
+# handoff, and Start-AeroLinkRemoteDemo has the same shape. The recovery attempt is NOT a tidy-up - it
+# restores topology through Start-AeroLinkProduction.ps1, which can itself re-enter
+# Invoke-AeroLinkCloneValidatedUpgrade - so it must be budgeted as a second upgrade-capable attempt:
+#
+#   worst case per task run = 2 x 2700 s   two sequential continuations
+#                           +     600 s   outer inspection, teardown, obligation write, cleanup
+#                           =    6000 s
+#   installed task limit      PT120M = 7200 s, leaving 1200 s of margin above that worst case.
+#
+# THE ORDERING that must not drift:
+#
+#   supported upgrade  <  continuation wrapper  <  sum of allowed attempts  <  task ExecutionTimeLimit
+#
+# The inner deadlines must expire first, because those paths report truthfully, prove the continuation
+# actually stopped, discharge the restart obligation and release the lease. Task Scheduler's
+# ExecutionTimeLimit is a hard terminate that does none of those things, so it must never be the thing that
+# fires. The previous values had this backwards - PT30M over two 900 s attempts - and the two XML blocks
+# must stay equal, or the recovery and reconcile tasks disagree about how long a transition may take.
+#
+# ACCEPTED CONSEQUENCE. Both installed tasks set MultipleInstancesPolicy=IgnoreNew, so a long run does not
+# stack instances; the 30-minute triggers during it are skipped instead. A worst-case run therefore skips
+# reconciliation triggers for up to two hours. That is the correct trade against hard-terminating a
+# transition midway and leaving HOME with its runtime and tunnel down.
+# And the OUTER delegation wrapper, which is a different thing again. When Update runs from a checkout that
+# is not the dedicated production source it re-runs the whole Update in that source - so its budget must
+# exceed a COMPLETE inner Update, recovery attempt included, or the outer wrapper expires while the delegated
+# update is legitimately recovering. It sits above the 6000 s worst case and below the task limit.
+$script:AeroLinkSupportedUpgradeTimeoutSeconds = 2400
+$script:AeroLinkTransitionContinuationTimeoutSeconds = 2700
+$script:AeroLinkDelegatedUpdateTimeoutSeconds = 6600
+$script:AeroLinkInstalledTaskTimeLimit = 'PT120M'
+
+function Get-AeroLinkTransitionBudget {
+    <#
+      .SYNOPSIS The transition budgets, so callers outside this module cannot drift from the derivation above.
+    #>
+    [CmdletBinding()]
+    param()
+    return [pscustomobject]@{
+        SupportedUpgradeSeconds = $script:AeroLinkSupportedUpgradeTimeoutSeconds
+        ContinuationSeconds     = $script:AeroLinkTransitionContinuationTimeoutSeconds
+        DelegatedUpdateSeconds  = $script:AeroLinkDelegatedUpdateTimeoutSeconds
+        InstalledTaskTimeLimit  = $script:AeroLinkInstalledTaskTimeLimit
+    }
+}
+
 function Get-AeroLinkRemoteDemoConfigPath {
     return Join-Path $env:LOCALAPPDATA 'AeroLink\RemoteDemo\remote-demo.config.psd1'
 }
@@ -751,7 +820,9 @@ function Invoke-AeroLinkProductionLauncher {
         [scriptblock]$LocalReadyTest,
         [scriptblock]$HelperLauncher,
         [scriptblock]$HelperStopper,
-        [int]$TimeoutSeconds = 900,
+        # Must cover a supported clone-validated upgrade, not just a plain start. See the budget derivation
+        # at the top of this module; injectable so the contract suite can drive the deadline in seconds.
+        [int]$TimeoutSeconds = $script:AeroLinkSupportedUpgradeTimeoutSeconds,
         [int]$PollIntervalSeconds = 3,
         [int]$GraceSeconds = 5,
         # How long to keep polling readiness AFTER the launcher child has exited. A launcher that has already
@@ -912,7 +983,9 @@ function Start-AeroLinkRemoteDemo {
         [scriptblock]$RuntimeIdentityProbe,
         [switch]$SkipSourceReconciliation,
         [int]$PostgresRecoveryTimeoutSeconds = 300,
-        [int]$ProductionTimeoutSeconds = 900,
+        # Same budget as the initiating attempt: recovery restores topology through the production launcher,
+        # which can itself re-enter the clone-validated upgrade, so this is a second upgrade-capable attempt.
+        [int]$ProductionTimeoutSeconds = $script:AeroLinkSupportedUpgradeTimeoutSeconds,
         [int]$NgrokProtectionWaitSeconds = 120
     )
 
@@ -1368,7 +1441,7 @@ $bootTrigger    <LogonTrigger>
     <AllowStartOnDemand>true</AllowStartOnDemand>
     <Enabled>true</Enabled>
     <Hidden>false</Hidden>
-    <ExecutionTimeLimit>PT30M</ExecutionTimeLimit>
+    <ExecutionTimeLimit>$($script:AeroLinkInstalledTaskTimeLimit)</ExecutionTimeLimit>
     <Priority>7</Priority>
   </Settings>
   <Actions Context="Author">
@@ -1443,7 +1516,7 @@ function Get-AeroLinkReconcileTaskXml {
     <AllowStartOnDemand>true</AllowStartOnDemand>
     <Enabled>true</Enabled>
     <Hidden>false</Hidden>
-    <ExecutionTimeLimit>PT30M</ExecutionTimeLimit>
+    <ExecutionTimeLimit>$($script:AeroLinkInstalledTaskTimeLimit)</ExecutionTimeLimit>
     <Priority>7</Priority>
   </Settings>
   <Actions Context="Author">
@@ -1852,7 +1925,11 @@ function Invoke-AeroLinkRemoteDemoHandoff {
         $Topology,
         [switch]$PreserveServiceState,
         # The revision handed off, so the guard expires with this generation.
-        [string]$HeadSha
+        [string]$HeadSha,
+        # The continuation's bounded budget. Covers a clone-validated upgrade plus the topology restoration
+        # and verification around it; see the budget derivation at the top of this module. Injectable in
+        # seconds so the contract suite can drive timeout and recovery paths without waiting out the real one.
+        [int]$TimeoutSeconds = $script:AeroLinkTransitionContinuationTimeoutSeconds
     )
     $script = Join-Path $Config.AeroLinkRoot 'product\scripts\AeroLinkRemoteDemo.ps1'
     if (-not (Test-Path -LiteralPath $script -PathType Leaf)) {
@@ -1872,15 +1949,47 @@ function Invoke-AeroLinkRemoteDemoHandoff {
                 priorTunnel  = [bool]($Topology -and $Topology.TunnelRunning)
                 priorRuntime = [bool]($Topology -and $Topology.RuntimeRunning)
             } | ConvertTo-Json -Compress)
-        $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script, '-Action', 'Continue')
-        if ($Scheduled) { $arguments += '-Scheduled' }
-        & powershell.exe @arguments
-        $code = $LASTEXITCODE
+        $childArguments = @('-Action', 'Continue')
+        if ($Scheduled) { $childArguments += '-Scheduled' }
+        $logDirectory = $Config.LogsPath
+        if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
+        # File-redirected, and waited on the PROCESS OBJECT rather than on stdout EOF.
+        #
+        # `& powershell.exe` returned only when the child's redirected output reached EOF, and the API and
+        # tunnel this continuation deliberately leaves running inherit that handle - so a continuation that
+        # had already SUCCEEDED held its caller open indefinitely, and with it the HOME transition lease
+        # (#1053). Waiting on the process object ends the wait when the child ends, whatever it intentionally
+        # left running.
+        #
+        # The continuation's own stdout is nearly silent during backup, restore and build, so the launcher's
+        # redirected logs and the remote-demo log are tailed alongside it: the progress an operator needs is
+        # written by the work, not by this wrapper.
+        $handoff = Invoke-AeroLinkOwnedTransitionScript -ScriptPath $script -ArgumentList $childArguments `
+            -StandardOutput (Join-Path $logDirectory 'transition-continuation.stdout.log') `
+            -StandardError (Join-Path $logDirectory 'transition-continuation.stderr.log') `
+            -TimeoutSeconds $TimeoutSeconds -StepName 'transition continuation' -StreamToHost `
+            -AdditionalProgressLog @(
+                (Join-Path $logDirectory 'production-helper.stdout.log'),
+                (Join-Path $logDirectory 'production-helper.stderr.log'),
+                (Join-Path $logDirectory 'remote-demo.log'))
+        $code = $handoff.ExitCode
     }
     finally {
         $env:AEROLINK_REMOTE_DEMO_HANDOFF = $previousHandoff
         $env:AEROLINK_TRANSITION_CONTINUATION = $previousContinuation
     }
+    if ($Run) { Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message $handoff.Detail }
+    # Every non-success outcome throws, and names which one it was. A timeout whose shutdown could NOT be
+    # proven is called out separately, because the caller must not begin recovery while the previous
+    # continuation may still be advancing the same installation.
+    if ($handoff.Outcome -eq 'LaunchFailed') { throw "The updated source could not start the transition continuation: $($handoff.Detail)" }
+    if ($handoff.Outcome -eq 'TimedOut') {
+        if (-not $handoff.CleanupProven) {
+            throw "The transition continuation exceeded $TimeoutSeconds seconds and its shutdown could NOT be proven; it may still be running. Recovery must not start until it has stopped. $($handoff.Detail)"
+        }
+        throw "The transition continuation exceeded $TimeoutSeconds seconds and was terminated; its exit is proven. $($handoff.Detail)"
+    }
+    if ($handoff.Outcome -eq 'ExitUnavailable') { throw "The transition continuation exited but its result could not be read, so the transition is not proven complete. $($handoff.Detail)" }
     if ($code -ne 0) { throw "The updated source could not complete the transition (exit code $code)." }
     return [pscustomobject]@{ Detail = 'The transition was completed by a fresh process running the updated source.'; ExitCode = $code }
 }
@@ -2313,6 +2422,7 @@ Export-ModuleMember -Function `
     Install-AeroLinkReconcileTask, `
     Invoke-AeroLinkProductionSourceReconciliation, `
     Invoke-AeroLinkRemoteDemoHandoff, `
+    Get-AeroLinkTransitionBudget, `
     Get-AeroLinkTransitionContinuation, `
     Save-AeroLinkRemoteDemoTaskXml, `
     Install-AeroLinkRemoteDemoTask, `

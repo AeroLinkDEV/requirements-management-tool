@@ -203,7 +203,8 @@ internal static class Program
             captureHandle = new SafeFileHandle(childRead, false);
             captureCancellation = new CancellationTokenSource();
             capture = CaptureAsync(captureHandle, stdoutFile, stderrFile, captureCancellation.Token);
-            var control = Task.Run(() => Console.ReadLine());
+            using var controlReader = OpenControlReader();
+            var control = Task.Run(() => controlReader.ReadLine());
             var stopped = false;
             var rootExited = false;
             var exitCode = 0u;
@@ -244,7 +245,7 @@ internal static class Program
                 }
                 if (control.IsCompleted)
                 {
-                    var command = control.GetAwaiter().GetResult();
+                    var command = NormalizeControlCommand(control.GetAwaiter().GetResult());
                     if (string.Equals(command, "stop", StringComparison.OrdinalIgnoreCase))
                     {
                         stopped = true;
@@ -260,7 +261,7 @@ internal static class Program
                         }
                         rootExited = true;
                     }
-                    else { control = Task.Run(() => Console.ReadLine()); }
+                    else { control = Task.Run(() => controlReader.ReadLine()); }
                 }
             }
 
@@ -630,6 +631,34 @@ internal static class Program
         }
         finally { Marshal.FreeHGlobal(buffer); }
     }
+
+    // A control token arrives as whatever bytes the writing host chose to emit, and the host is not always
+    // the same one. .NET Framework's Process.StandardInput writes through Console.InputEncoding directly, so
+    // under Windows PowerShell 5.1 with a UTF-8 console (chcp 65001) the first write carries that encoding's
+    // preamble: the helper received EF BB BF 73 74 6F 70 and "stop" never matched. PowerShell 7 wraps the same
+    // stream in ConsoleEncoding, which suppresses the preamble, so the identical script stopped the helper on
+    // one host and hung on the other until the diagnostic bound.
+    //
+    // The writer is now explicit about its bytes, which is the real fix; this is the other half. A reader that
+    // only works when the writer is well-behaved leaves the token host-dependent in the opposite direction,
+    // and the failure it produces - a helper that will not stop - costs a whole qualification run to diagnose.
+    //
+    // Console.ReadLine would not do, and the reason is worth keeping. It decodes with Console.InputEncoding,
+    // which is the AMBIENT console codepage, not the stream's. Under the default OEM codepage those three
+    // preamble bytes decode to 'i', '>>', '?' rather than to U+FEFF, so a reader that merely trimmed U+FEFF
+    // still missed the token - that was measured, not assumed. Decoding the redirected stream explicitly as
+    // UTF-8 makes the token independent of the codepage the planner happened to run under, and
+    // detectEncodingFromByteOrderMarks lets the framework consume a leading preamble before it is ever seen
+    // as text. ASCII tokens are unaffected either way.
+    private static StreamReader OpenControlReader() =>
+        new(Console.OpenStandardInput(), new UTF8Encoding(false), detectEncodingFromByteOrderMarks: true);
+
+    // Deliberately a TRIM, not a looser comparison. The token stays an exact match after normalization:
+    // Contains or StartsWith would accept "stopgap" or "stop the world" and this input decides whether a Job
+    // Object holding the API under test is terminated. The U+FEFF trim stays as a second line of defence for
+    // a preamble that arrives mid-stream, where BOM detection no longer applies.
+    private static string NormalizeControlCommand(string? command) =>
+        command is null ? string.Empty : command.Trim('﻿', '​').Trim();
 
     private static void Append(string path, string line) => File.AppendAllText(path, line + Environment.NewLine, Encoding.UTF8);
 
