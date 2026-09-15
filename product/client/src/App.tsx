@@ -40,12 +40,15 @@ import PersonnelCenter from "./PersonnelCenter";
 import ApprovalConfigurationCenter from "./ApprovalConfigurationCenter";
 import ProjectConfigurationCenter from "./ProjectConfigurationCenter";
 import ProjectSetupWalkthrough from "./ProjectSetupWalkthrough";
-import { decodeProjectSetupDraftSummaries } from "./projectSetupDrafts";
-import type { ProjectSetupDraftSummary } from "./projectSetupDrafts";
+import {
+  decodeProjectSetupDraftSummaries,
+  discardProjectSetupDraft,
+} from "./projectSetupDrafts";
+import type { DiscardSetupOutcome, ProjectSetupDraftSummary } from "./projectSetupDrafts";
 import TestChangeRequestEditor from "./TestChangeRequestEditor";
 // Eager, unlike the other fourteen workspaces. See the note above `lazyView`.
 import EnterpriseControlCenter from "./EnterpriseControlCenter";
-import { apiRequest } from "./apiClient";
+import { apiRequest, operationError, recordClientOperationFailure } from "./apiClient";
 import "./App.css";
 import "./Onboarding.css";
 import "./DashboardInteractions.css";
@@ -384,6 +387,29 @@ function App() {
       if (current()) setSetupDraftStatus("error");
     }
   }, [beginSetupDrafts]);
+  /**
+   * Discards one unfinished saved setup. The version the list is showing travels with the request, so a page
+   * left open cannot discard answers somebody has since saved, and the server refuses a setup that is being
+   * finalized or has already completed. The card is removed as soon as the server confirms it, so a discovery
+   * failure after the write cannot make a discarded setup look like it is still there.
+   */
+  const discardSetupDraft = useCallback(
+    async (draft: ProjectSetupDraftSummary): Promise<DiscardSetupOutcome> => {
+      try {
+        await discardProjectSetupDraft(API, draft.draftId, draft.version);
+      } catch (failure) {
+        recordClientOperationFailure("project-setup-discard", failure);
+        return {
+          ok: false,
+          message: operationError(failure, "The unfinished setup could not be discarded."),
+        };
+      }
+      setSetupDrafts(current => current.filter(entry => entry.draftId !== draft.draftId));
+      await loadSetupDrafts();
+      return { ok: true };
+    },
+    [loadSetupDrafts],
+  );
   const { active, project, release, unavailable } = resolveWorkspaceContext(workspaces, route);
   const projectId = project?.project.id ?? "";
   const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
@@ -686,6 +712,7 @@ function App() {
     onRetryDrafts={() => void loadSetupDrafts()}
     onCreateProject={() => openProjectSetup()}
     onResumeSetup={draft => openProjectSetup(draft.draftId)}
+    onDiscardSetup={discardSetupDraft}
     onOpenProject={selected => {
       const workspaceProject = workspaces
         .find(workspace => workspace.program.id === selected.programId)

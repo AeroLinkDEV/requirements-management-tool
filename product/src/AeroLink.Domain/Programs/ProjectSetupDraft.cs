@@ -188,17 +188,33 @@ public sealed class ProjectSetupDraft
         Touch(now);
     }
 
-    public void Abandon(DateTimeOffset now)
+    /// <summary>
+    /// Logically discards one unfinished setup.
+    ///
+    /// The caller owns authorization and the surrounding unit of work. This guard refuses every state whose
+    /// meaning abandonment would hide — a created project, or a finalization that is still in flight — and it
+    /// requires the version the operator was looking at, so a stale page cannot discard answers somebody has
+    /// since saved or claimed. Nothing is physically deleted.
+    /// </summary>
+    public void Abandon(long expectedVersion, DateTimeOffset now)
     {
-        if (State == ProjectSetupState.Completed) throw new DomainException("A completed setup cannot be discarded.");
+        if (State == ProjectSetupState.Completed)
+            throw new DomainException("A completed setup cannot be discarded.");
+        if (State == ProjectSetupState.Finalizing)
+            throw new DomainException("A setup that is being finalized cannot be discarded.");
+        if (State == ProjectSetupState.Abandoned)
+            throw new DomainException("This setup was already discarded.");
+        EnsureVersion(expectedVersion);
         State = ProjectSetupState.Abandoned;
         Touch(now);
     }
 
     private void EnsureEditable()
     {
-        if (State is ProjectSetupState.Completed or ProjectSetupState.Abandoned)
-            throw new DomainException($"A setup in {State} state cannot be edited.");
+        if (State == ProjectSetupState.Abandoned)
+            throw new DomainException("This setup was discarded. It can no longer be saved or finalized.");
+        if (State == ProjectSetupState.Completed)
+            throw new DomainException("This setup is already completed. It can no longer be edited.");
         if (State == ProjectSetupState.Finalizing)
             throw new DomainException("This setup is already being finalized. Retry after it completes.");
     }

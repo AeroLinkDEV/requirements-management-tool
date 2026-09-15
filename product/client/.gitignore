@@ -27,3 +27,8 @@ test-results-*/
 *.sln
 *.sw?
 api-logs/
+
+# Per-run browser evidence. `AEROLINK_E2E_OUTPUT_DIR` points a run at its own directory so one run
+# cannot clear another run's captures; selected images are promoted to product/docs/screenshots
+# deliberately, and the run's own copies stay out of the commit.
+run-output/

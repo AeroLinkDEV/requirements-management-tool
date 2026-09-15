@@ -366,6 +366,20 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+/* System has one verification meaning, so it reads as one plain sentence with a quiet saved-state line. */
+.setupSystemVerification {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: 12px;
+}
+.setupSystemVerification small {
+  color: var(--ink-500);
+  font-size: 11px;
+}
+.setupVerificationStateSystem {
+  grid-template-columns: minmax(0, 1fr);
+}
 .setupVerificationState button {
   justify-self: start;
   border: 1px solid #bed0db;

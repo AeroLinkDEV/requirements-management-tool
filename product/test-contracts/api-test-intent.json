@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 930,
-    "cases": 1046,
-    "classes": 147,
-    "hostedTests": 882,
-    "hostedCases": 976,
+    "tests": 934,
+    "cases": 1050,
+    "classes": 148,
+    "hostedTests": 886,
+    "hostedCases": 980,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 14,
@@ -21,26 +21,26 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 576,
-      "cases": 650,
+      "tests": 577,
+      "cases": 651,
       "unknownCases": 0,
-      "classes": 114
+      "classes": 115
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 176,
-      "cases": 190,
+      "tests": 178,
+      "cases": 192,
       "unknownCases": 0,
-      "classes": 62
+      "classes": 63
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 102,
-      "cases": 108,
+      "tests": 103,
+      "cases": 109,
       "unknownCases": 0,
-      "classes": 61
+      "classes": 62
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -10332,6 +10332,78 @@
       "sourceLines": {
         "start": 18,
         "end": 23
+      }
+    },
+    {
+      "cls": "ProjectSetupDiscardApiTests",
+      "test": "An_unrelated_account_cannot_discard_another_creators_setup",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 135,
+        "end": 182
+      }
+    },
+    {
+      "cls": "ProjectSetupDiscardApiTests",
+      "test": "Creator_discards_an_unfinished_setup_and_a_stale_page_cannot_save_or_finalize_it",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 20,
+        "end": 80
+      }
+    },
+    {
+      "cls": "ProjectSetupDiscardApiTests",
+      "test": "Discard_refuses_a_stale_version_and_setups_that_are_finalizing_or_completed",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 82,
+        "end": 133
+      }
+    },
+    {
+      "cls": "ProjectSetupDiscardApiTests",
+      "test": "Discarding_an_unfinished_setup_preserves_its_staged_native_source_and_the_source_baseline",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 184,
+        "end": 253
       }
     },
     {
