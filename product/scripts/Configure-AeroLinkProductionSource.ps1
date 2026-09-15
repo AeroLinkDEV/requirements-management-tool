@@ -119,6 +119,11 @@ switch ($Action) {
         #
         # Preview, Install and Status stay development-side: Install has to run somewhere before a dedicated
         # source exists, and the read-only actions change nothing.
+        # Both handoffs in this action - the delegation just below and the post-advance continuation later -
+        # need the owned, bounded child runner and the shared transition budgets. Imported here rather than at
+        # the top of the script so the read-only actions keep their current load behaviour.
+        Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
+        Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
         $delegation = $null
         try { $delegation = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $repositoryRoot }
         catch { throw }
@@ -130,12 +135,29 @@ switch ($Action) {
             Write-Host 'This checkout is not the dedicated production source.' -ForegroundColor Yellow
             Write-Host "      Running the update from: $($delegation.DelegateTo)" -ForegroundColor Cyan
             $previousDelegated = $env:AEROLINK_PRODUCTION_SOURCE_DELEGATED
+            $delegated = $null
             try {
                 $env:AEROLINK_PRODUCTION_SOURCE_DELEGATED = '1'
-                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $delegateScript -Action Update
-                exit $LASTEXITCODE
+                # Same defect as the post-advance continuation below (#1053): the delegated Update restores
+                # the API and tunnel, those survivors inherit this call's redirected output handle, and a
+                # native `&` then waits on EOF rather than on the child. The delegate holds no lease of its
+                # own, but the operator's command hangs after the work has already succeeded.
+                $delegatedLogs = Join-Path ([IO.Path]::GetTempPath()) 'aerolink-delegated-update'
+                $delegated = Invoke-AeroLinkOwnedTransitionScript -ScriptPath $delegateScript -ArgumentList @('-Action', 'Update') `
+                    -StandardOutput (Join-Path $delegatedLogs 'delegated-update.stdout.log') `
+                    -StandardError (Join-Path $delegatedLogs 'delegated-update.stderr.log') `
+                    -TimeoutSeconds (Get-AeroLinkTransitionBudget).DelegatedUpdateSeconds `
+                    -StepName 'delegated update' -StreamToHost
             }
             finally { $env:AEROLINK_PRODUCTION_SOURCE_DELEGATED = $previousDelegated }
+            # Nothing was stopped in THIS process, so there is no restart obligation to discharge here; the
+            # delegate owns its own. What must not happen is reporting success for an update that timed out
+            # or whose result could not be read.
+            if ($delegated.Outcome -ne 'Completed') {
+                Write-Host $delegated.Detail -ForegroundColor Yellow
+                throw "The delegated update did not complete ($($delegated.Outcome)). Nothing was changed by this process."
+            }
+            exit $delegated.ExitCode
         }
         if ($delegation.DelegateTo) {
             throw "Delegation did not reach the dedicated production source: $($delegation.Reason) Nothing was changed."
@@ -246,7 +268,14 @@ switch ($Action) {
             $previousHandoff = $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF
             $previousOwed = $env:AEROLINK_RUNTIME_OWED
             $previousAdvanced = $env:AEROLINK_SOURCE_ALREADY_ADVANCED
+            # Starts at 1 so that anything which prevents a positive, readable success is treated as failure
+            # by the compensation below. That default is necessary but NOT sufficient on its own: an
+            # exception thrown here would propagate straight past the compensation, leaving the source
+            # current and the runtime down with nobody owning the restart. So every failure is caught and
+            # converted into a non-zero $childExit rather than allowed to escape.
             $childExit = 1
+            $continuation = $null
+            $continuationFailure = $null
             try {
                 $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF = "$($config.SourceRoot)|$($result.HeadSha)"
                 # The obligation crosses the process boundary: the child must know a runtime was taken down,
@@ -256,13 +285,51 @@ switch ($Action) {
                 # AlreadyCurrent - correctly - and without this it reported "THE SOURCE UPDATE DID NOT HAPPEN"
                 # and exited 1 after successfully completing the very update it was continuing.
                 $env:AEROLINK_SOURCE_ALREADY_ADVANCED = $config.SourceRoot
-                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updatedScript -Action Update
-                $childExit = $LASTEXITCODE
+                # Owned, file-redirected and waited on the process object (#1053). The continuation restores
+                # the API and tunnel and leaves them running by design; under a native `&` those survivors
+                # inherited this process's redirected output handle, so the wait ended on stdout EOF rather
+                # than on the child, and this wrapper sat holding the HOME transition lease long after the
+                # transition had succeeded.
+                $continuationLogs = Join-Path ([IO.Path]::GetTempPath()) 'aerolink-source-continuation'
+                $continuation = Invoke-AeroLinkOwnedTransitionScript -ScriptPath $updatedScript -ArgumentList @('-Action', 'Update') `
+                    -StandardOutput (Join-Path $continuationLogs 'continuation.stdout.log') `
+                    -StandardError (Join-Path $continuationLogs 'continuation.stderr.log') `
+                    -TimeoutSeconds (Get-AeroLinkTransitionBudget).PostAdvanceContinuationSeconds `
+                    -StepName 'source continuation' -StreamToHost
+                if ($continuation.Outcome -eq 'Completed') { $childExit = $continuation.ExitCode }
+                else { $continuationFailure = $continuation.Detail }
+            }
+            catch {
+                $childExit = 1
+                $continuationFailure = $_.Exception.Message
             }
             finally {
                 $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF = $previousHandoff
                 $env:AEROLINK_RUNTIME_OWED = $previousOwed
                 $env:AEROLINK_SOURCE_ALREADY_ADVANCED = $previousAdvanced
+            }
+            if ($continuationFailure) { Write-Host "      $continuationFailure" -ForegroundColor Yellow }
+
+            # Recovery is permitted only when this attempt's transition work is PROVEN stopped.
+            #
+            # Two distinct unsafe shapes, and the second one was initially missed. The runner can report a
+            # timeout or a post-launch fault whose cleanup was not proven - and it can also fail so early
+            # that $continuation is still $null, which is precisely the case where nothing is known about the
+            # child at all. Treating "no result" as safe would restart production over a live continuation,
+            # so an unknown cleanup state is never permission to restart.
+            $recoveryUnsafe = $false
+            $unsafeDetail = ''
+            if ($null -eq $continuation) {
+                $recoveryUnsafe = $true
+                $unsafeDetail = "The continuation produced no result ($continuationFailure), so nothing is known about whether it stopped."
+            }
+            elseif ($continuation.Outcome -ne 'Completed' -and -not $continuation.CleanupProven) {
+                $recoveryUnsafe = $true
+                $unsafeDetail = $continuation.Detail
+            }
+            if ($recoveryUnsafe) {
+                throw ("The source was advanced to $($result.HeadSha), but the continuation did not finish and its shutdown could NOT be proven. " +
+                    "Transition work may still be running, so production was NOT restarted here and the restoration obligation is retained. $unsafeDetail")
             }
 
             # The obligation is retained until the child positively discharges it. Exiting on the child's
