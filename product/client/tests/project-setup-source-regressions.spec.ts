@@ -88,9 +88,13 @@ test("source metadata is read-only and source proof expires after mapping or rel
     const start = body.start as Record<string, unknown> | undefined;
     const build = body.build as Record<string, unknown> | undefined;
     const repository = body.repository as Record<string, unknown> | undefined;
+    // Echo the draft identity from the path, not the last URL segment: the save-and-exit route ends in its
+    // own action name, and a response that named that instead of the draft is not this draft's saved view.
+    const segments = new URL(route.request().url()).pathname.split("/");
+    const draftId = segments[segments.indexOf("project-setups") + 1];
     await route.fulfill({
       json: {
-        draftId: route.request().url().split("/").at(-1),
+        draftId,
         state: "Draft",
         currentStep: typeof body.currentStep === "string" ? body.currentStep : "StartingPoint",
         version: Number(body.expectedVersion ?? 1) + 1,

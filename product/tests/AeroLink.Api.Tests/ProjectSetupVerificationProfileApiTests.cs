@@ -188,6 +188,23 @@ public sealed class ProjectSetupVerificationProfileApiTests
         Assert.True(ProjectLadderSnapshot.Verify(activation.CanonicalSnapshot, activation.SnapshotHash,
             activation.SnapshotSchemaVersion), "the activated ladder snapshot must verify against its hash");
 
+        // The maintained resolver — the authority a runtime consumer reads the ladder through — must derive
+        // exactly the accepted profile from the persisted configuration, including the disabled System level.
+        var storedForResolution = await db.ProjectLadderConfigurations.AsNoTracking()
+            .Include(x => x.Steps).Include(x => x.AllowedUpstream)
+            .SingleAsync(x => x.ProjectId == projectId);
+        var resolved = ProjectLadderResolver.Resolve(storedForResolution);
+        Assert.Empty(resolved.Steps.Single(x => x.Level == RequirementLevel.System).EnabledArtifactKinds!);
+        Assert.Equal(new[] { VerificationArtifactKind.Case, VerificationArtifactKind.Procedure },
+            resolved.Steps.Single(x => x.Level == RequirementLevel.HighLevel).EnabledArtifactKinds);
+        Assert.Equal(new[] { VerificationArtifactKind.Case },
+            resolved.Steps.Single(x => x.Level == RequirementLevel.LowLevel).EnabledArtifactKinds);
+        Assert.Equal(2, resolved.AllowedUpstream.Count);
+        Assert.Contains(resolved.AllowedUpstream,
+            x => x.Parent == RequirementLevel.System && x.Child == RequirementLevel.HighLevel);
+        Assert.Contains(resolved.AllowedUpstream,
+            x => x.Parent == RequirementLevel.HighLevel && x.Child == RequirementLevel.LowLevel);
+
         // No inappropriate verification scaffolding, and no fabricated engineering content or history.
         var containers = await db.TestProcedureDocuments.AsNoTracking()
             .Where(x => x.ProjectId == projectId).ToListAsync();
@@ -529,6 +546,159 @@ public sealed class ProjectSetupVerificationProfileApiTests
             failure.RootElement.GetProperty("error").GetString());
     }
 
+    /// <summary>
+    /// C2-01 counterexample: subjects that cover the ladder exactly are still not a valid definition. A rule
+    /// with named, otherwise valid Review stages but no Approval stage is refused by the final gate, so the
+    /// readiness verdict must not call the saved configuration ready — and the refusal must name the rule.
+    /// </summary>
+    [Fact]
+    public async Task A_rule_without_an_approval_stage_is_not_ready_and_is_refused_by_rule()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var projectName = $"Incomplete definition {Guid.NewGuid():N}";
+        var draftId = await CreateDraftAsync(client, projectName);
+        var seeded = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 1,
+            currentStep = "WorkingRules",
+            project = new { name = projectName, softwareProduct = "Incomplete definition product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+        var rules = seeded.GetProperty("reviewRules").GetProperty("definition").GetProperty("rules")
+            .EnumerateArray().Select(x => JsonNode.Parse(x.GetRawText())!).ToList();
+        // Drop only the Approval signature. Coverage, names, roles and the Review stages all stay valid.
+        var first = rules[0]!;
+        var stagesWithoutApproval = new JsonArray(first["stages"]!.AsArray()
+            .Where(x => x!["kind"]!.GetValue<string>() != "Approval")
+            .Select(x => JsonNode.Parse(x!.ToJsonString())!)
+            .ToArray());
+        first["stages"] = stagesWithoutApproval;
+        var mutated = new JsonArray(rules.Select(x => JsonNode.Parse(x!.ToJsonString())!).ToArray());
+
+        var saved = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 2,
+            currentStep = "Review",
+            project = new { name = projectName, softwareProduct = "Incomplete definition product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { rules = mutated },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+
+        // The incomplete definition is saved — draft recovery is not narrowed — but it is not ready.
+        Assert.Equal("Draft", saved.GetProperty("state").GetString());
+        var validation = saved.GetProperty("validation");
+        Assert.True(validation.GetProperty("ladderValid").GetBoolean());
+        var review = validation.GetProperty("review");
+        Assert.True(review.GetProperty("covers").GetBoolean(), "the subjects still cover this ladder exactly");
+        Assert.False(review.GetProperty("definitionValid").GetBoolean());
+        Assert.False(validation.GetProperty("configurationReady").GetBoolean());
+        var definitionFinding = Assert.Single(Findings(review, "definitionFindings"));
+        Assert.Equal("review_rule_missing_signature_kind", definitionFinding.GetProperty("code").GetString());
+        Assert.Equal("System", definitionFinding.GetProperty("subject").GetString());
+        Assert.Contains("requires explicit Review and Approval stages",
+            definitionFinding.GetProperty("message").GetString());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var before = await ProjectStateCountsAsync(db);
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 3, idempotencyKey = $"incomplete-definition-{draftId:N}" });
+        Assert.Equal(HttpStatusCode.BadRequest, finalized.StatusCode);
+        using var failure = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        Assert.Equal("cannot_finalize", failure.RootElement.GetProperty("code").GetString());
+        Assert.Contains("requires explicit Review and Approval stages",
+            failure.RootElement.GetProperty("error").GetString());
+        var refusalFinding = Assert.Single(Findings(failure.RootElement));
+        Assert.Equal("review_rule_missing_signature_kind", refusalFinding.GetProperty("code").GetString());
+        Assert.Equal("System", refusalFinding.GetProperty("subject").GetString());
+        Assert.Equal(before, await ProjectStateCountsAsync(db));
+        Assert.Equal(ProjectSetupState.Draft,
+            (await db.ProjectSetupDrafts.AsNoTracking().SingleAsync(x => x.Id == draftId)).State);
+    }
+
+    /// <summary>
+    /// C2-01: a stage whose stored authority the workflow authority refuses — here a signature meaning
+    /// demanded as a base role — is also a definition problem, diagnosed by rule and stage rather than as an
+    /// undifferentiated payload error.
+    /// </summary>
+    [Fact]
+    public async Task A_stage_demanding_an_unconfigurable_authority_is_not_ready_and_names_its_stage()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var projectName = $"Unconfigurable authority {Guid.NewGuid():N}";
+        var draftId = await CreateDraftAsync(client, projectName);
+        var seeded = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 1,
+            currentStep = "WorkingRules",
+            project = new { name = projectName, softwareProduct = "Unconfigurable authority product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+        var rules = seeded.GetProperty("reviewRules").GetProperty("definition").GetProperty("rules")
+            .EnumerateArray().Select(x => JsonNode.Parse(x.GetRawText())!).ToList();
+        rules[0]!["stages"]!.AsArray()[0]!["requiredRole"] = "Reviewer";
+        rules[0]!["stages"]!.AsArray()[0]!["authorityKind"] = "BaseRole";
+        var mutated = new JsonArray(rules.Select(x => JsonNode.Parse(x!.ToJsonString())!).ToArray());
+
+        var saved = await SaveAsync(client, draftId, new
+        {
+            expectedVersion = 2,
+            currentStep = "Review",
+            project = new { name = projectName, softwareProduct = "Unconfigurable authority product" },
+            start = new { kind = "Fresh" },
+            build = new { version = "0.01" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = Ladder(lowLevelKinds: ["Case"]),
+            reviewRules = new { rules = mutated },
+            reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+            mapping = new { },
+        });
+
+        var review = saved.GetProperty("validation").GetProperty("review");
+        Assert.True(review.GetProperty("covers").GetBoolean());
+        Assert.False(review.GetProperty("definitionValid").GetBoolean());
+        Assert.False(saved.GetProperty("validation").GetProperty("configurationReady").GetBoolean());
+        var finding = Assert.Single(Findings(review, "definitionFindings"));
+        Assert.Equal("review_stage_authority_invalid", finding.GetProperty("code").GetString());
+        Assert.Equal("System", finding.GetProperty("subject").GetString());
+        Assert.Equal(1, finding.GetProperty("stageIndex").GetInt32());
+        Assert.Contains("signature meaning", finding.GetProperty("message").GetString());
+
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize",
+            new { expectedVersion = 3, idempotencyKey = $"authority-{draftId:N}" });
+        Assert.Equal(HttpStatusCode.BadRequest, finalized.StatusCode);
+        using var failure = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        Assert.Contains("signature meaning", failure.RootElement.GetProperty("error").GetString());
+        Assert.Equal(1, Assert.Single(Findings(failure.RootElement)).GetProperty("stageIndex").GetInt32());
+    }
+
     [Fact]
     public async Task Compatible_customised_rules_remain_supported_end_to_end()
     {
@@ -740,9 +910,16 @@ public sealed class ProjectSetupVerificationProfileApiTests
         ["candidateBaselines"] = await db.CandidateBaselines.CountAsync(),
         ["ladderConfigurations"] = await db.ProjectLadderConfigurations.CountAsync(),
         ["ladderSteps"] = await db.ProjectLadderSteps.CountAsync(),
+        ["ladderAllowedUpstreams"] = await db.ProjectLadderAllowedUpstreams.CountAsync(),
         ["ladderHistory"] = await db.ProjectLadderConfigurationHistories.CountAsync(),
         ["reviewWorkflows"] = await db.ReviewWorkflows.CountAsync(),
+        ["reviewWorkflowStages"] = await db.Set<ReviewWorkflowStage>().CountAsync(),
+        ["reviewCycles"] = await db.ReviewCycles.CountAsync(),
         ["procedureDocuments"] = await db.TestProcedureDocuments.CountAsync(),
+        ["procedureDocumentNodes"] = await db.TestProcedureDocumentNodes.CountAsync(),
+        ["repositoryConfigurations"] = await db.ProjectRepositoryConfigurations.CountAsync(),
+        ["verificationVocabularies"] = await db.ProjectVerificationVocabularies.CountAsync(),
+        ["verificationMethods"] = await db.ProjectVerificationMethods.CountAsync(),
         ["memberships"] = await db.ProgramMemberships.CountAsync(),
         ["requirements"] = await db.Requirements.CountAsync(),
         ["testProcedures"] = await db.TestProcedures.CountAsync(),
@@ -767,6 +944,9 @@ public sealed class ProjectSetupVerificationProfileApiTests
     }
 
     private static JsonElement[] Findings(JsonElement owner) => owner.GetProperty("findings")
+        .EnumerateArray().Select(x => x.Clone()).ToArray();
+
+    private static JsonElement[] Findings(JsonElement owner, string property) => owner.GetProperty(property)
         .EnumerateArray().Select(x => x.Clone()).ToArray();
 
     private static string[] SubjectsOf(JsonElement definition) => definition.GetProperty("rules")
