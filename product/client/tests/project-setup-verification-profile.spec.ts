@@ -1484,6 +1484,8 @@ test("an invalid raw profile is never shortened, reordered or remembered as a va
     // The saved list is described as what it is, never as a shorter valid profile, and the control that
     // records a decision stays unanswered.
     await expect(row.locator(".setupVerificationFacts")).toContainText(invalid.saved);
+    // The qualifier lives in the wide diagnostics region, not in the narrow readings column.
+    await expect(row).toContainText(/not one of this level's supported choices/i);
     await expect(row.getByLabel("Verification profile")).toHaveValue("");
     await expect(row.locator('[role="alert"]').first()).toContainText(invalid.reason);
     await page.screenshot({
@@ -2028,4 +2030,181 @@ test("a finalization response that arrives after leaving the walkthrough cannot 
     .filter((entry) => entry.project.name === projectName);
   expect(matches, "exactly one project for the completed setup").toHaveLength(1);
   await page.unroute(/\/api\/project-setups\/[0-9a-f-]+\/finalize$/i);
+});
+
+/**
+ * C2R-01-F1: a save response that does not describe the requested draft is not a save. It must not publish a
+ * success notice, must not advance the walkthrough, and must not hand its version to a later source operation.
+ * The transport is mocked (the real API does not spontaneously return foreign ids); the distinction under test
+ * is the client's own response-rejection boundary.
+ */
+test("a foreign save response on Continue does not report success or advance", async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page, "admin", { openProject: false });
+  const projectName = `Foreign save ${Date.now().toString(36)}`;
+  const draftId = await startFreshDraftAtLadder(page, projectName, "0.01");
+  // A real edit that is not yet saved, exactly as the reviewer's reproduction describes.
+  await highLevelRowOf(page).getByLabel("Verification profile").selectOption("Case");
+
+  await page.route(/\/api\/project-setups\/[0-9a-f-]+$/i, async (route) => {
+    if (route.request().method() !== "PUT") {
+      await route.continue();
+      return;
+    }
+    // The body describes another draft and is not forwarded: nothing was committed for this one.
+    const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+    await route.fulfill({
+      status: 200,
+      json: {
+        draftId: "00000000-0000-4000-8000-000000001070",
+        state: "Draft",
+        currentStep: "WorkingRules",
+        version: 42,
+        project: { name: "Foreign draft", softwareProduct: "Foreign product" },
+        start: { kind: "Fresh" },
+        build: { version: "1.02" },
+        selectedCategories: [],
+        ladder: body.ladder ?? {},
+        reviewRules: { accepted: true, definition: { rules: [] } },
+        repository: { mode: "ConfigureLater" },
+        mapping: {},
+      },
+    });
+  });
+
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  const failure = page.locator(".projectSetupError");
+  await expect(failure).toContainText(/did not describe this setup/i);
+  await expect(page.locator(".projectSetupNotice")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Review and approval rules", level: 2 })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+  // The unsaved edit is still exactly what the creator chose.
+  await expect(highLevelRowOf(page).getByLabel("Verification profile")).toHaveValue("Case");
+  await page.unroute(/\/api\/project-setups\/[0-9a-f-]+$/i);
+
+  // With the real endpoint restored, the same action commits and advances.
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("heading", { name: "Review and approval rules", level: 2 })).toBeVisible();
+  const persisted = await persistedDraft(page, draftId);
+  expect(step(persisted, "HighLevel")?.enabledArtifactKinds).toEqual(["Case"]);
+});
+
+test("a foreign save response on Save and exit keeps the walkthrough open without a saved notice", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await login(page, "admin", { openProject: false });
+  const projectName = `Foreign exit ${Date.now().toString(36)}`;
+  const draftId = await startFreshDraftAtLadder(page, projectName, "0.01");
+
+  await page.route(/\/api\/project-setups\/[0-9a-f-]+\/save-and-exit$/i, async (route) => {
+    await route.fulfill({
+      status: 200,
+      json: {
+        saved: true,
+        draft: {
+          draftId: "00000000-0000-4000-8000-000000001071",
+          state: "Draft",
+          currentStep: "Review",
+          version: 42,
+          project: { name: "Foreign draft", softwareProduct: "Foreign product" },
+          start: { kind: "Fresh" },
+          build: { version: "1.02" },
+          selectedCategories: [],
+          ladder: { steps: [], relationships: [] },
+          reviewRules: { accepted: true, definition: { rules: [] } },
+          repository: { mode: "ConfigureLater" },
+          mapping: {},
+        },
+      },
+    });
+  });
+  await page.getByRole("button", { name: "Save and exit" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/projects/setup/${draftId}$`));
+  await expect(page.locator(".projectSetupError")).toContainText(/did not describe this setup/i);
+  await expect(page.locator(".projectSetupNotice")).toHaveCount(0);
+  await page.unroute(/\/api\/project-setups\/[0-9a-f-]+\/save-and-exit$/i);
+});
+
+/**
+ * PRE-1045-02: the facts block must separate the last saved answer from the creator's current selection, and
+ * a verdict for the saved configuration must not read as the meaning of an unsaved edit.
+ */
+test("an unsaved profile change is not presented as the saved interpretation", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await login(page, "admin", { openProject: false });
+  const projectName = `Unsaved profile ${Date.now().toString(36)}`;
+  const draftId = await seedSoftwareProfileDraft(page, projectName, ["Case", "Procedure"], [
+    "Case",
+    "Procedure",
+  ]);
+  await page.goto(`/projects/setup/${draftId}`);
+  await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+
+  const row = highLevelRowOf(page);
+  const facts = row.locator(".setupVerificationFacts");
+  await expect(row.getByLabel("Verification profile")).toHaveValue("Case+Procedure");
+  await expect(facts).toContainText(/Last saved artifacts/);
+  await expect(facts).toContainText(/Case, Procedure/);
+  await expect(facts).not.toContainText(/not saved yet/);
+  await expect(facts).not.toContainText(/from the last saved check/);
+  await page.screenshot({ path: testInfo.outputPath("profile-saved-case-and-procedure.png"), fullPage: true });
+
+  // The creator selects Case-only without saving anything.
+  await row.getByLabel("Verification profile").selectOption("Case");
+
+  await expect(facts).toContainText(/Case, Procedure/);
+  await expect(facts).toContainText(/Current selection/);
+  await expect(facts).toContainText(/Case — not saved yet/);
+  // The effective reading describes the saved check and says so, rather than the unsaved choice.
+  await expect(row).toContainText(/Effective describes the last saved check/i);
+  await expect(facts).not.toContainText(/^Case$/);
+  await expect(verificationCheckbox(row)).toBeChecked();
+  await page.screenshot({ path: testInfo.outputPath("profile-unsaved-case-only.png"), fullPage: true });
+});
+
+/**
+ * PRE-1045-01: the ladder row keeps its facts, diagnostics and actions in deliberate regions at desktop and
+ * narrower widths; these captures are the visual evidence for that layout.
+ */
+test("the ladder row keeps facts, findings and repairs readable at desktop and narrow widths", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(180_000);
+  await login(page, "admin", { openProject: false });
+  const suffix = Date.now().toString(36);
+
+  // Ordinary software rows with a profile selector.
+  await startFreshDraftAtLadder(page, `Layout ordinary ${suffix}`, "0.01");
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.screenshot({ path: testInfo.outputPath("ladder-ordinary-1280.png"), fullPage: true });
+  await page.setViewportSize({ width: 900, height: 1100 });
+  await page.screenshot({ path: testInfo.outputPath("ladder-ordinary-900.png"), fullPage: true });
+  await page.setViewportSize({ width: 620, height: 1100 });
+  await page.screenshot({ path: testInfo.outputPath("ladder-ordinary-620.png"), fullPage: true });
+
+  // Explicit-empty software profile: the finding must not overlap the selector.
+  const emptyDraftId = await seedSoftwareProfileDraft(page, `Layout empty ${suffix}`, [], []);
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.goto(`/projects/setup/${emptyDraftId}`);
+  await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+  const emptyRow = highLevelRowOf(page);
+  await page.screenshot({ path: testInfo.outputPath("ladder-explicit-empty-1280.png"), fullPage: true });
+  await page.setViewportSize({ width: 900, height: 1100 });
+  await page.screenshot({ path: testInfo.outputPath("ladder-explicit-empty-900.png"), fullPage: true });
+  await expect(emptyRow.getByLabel("Verification profile")).toHaveValue("");
+
+  // Invalid raw profile (reversed) with its statement and unanswered control.
+  const invalidDraftId = await seedSoftwareProfileDraft(page, `Layout invalid ${suffix}`, ["Procedure", "Case"], [
+    "Procedure",
+    "Case",
+  ]);
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.goto(`/projects/setup/${invalidDraftId}`);
+  await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("ladder-invalid-1280.png"), fullPage: true });
+  await page.setViewportSize({ width: 900, height: 1100 });
+  await page.screenshot({ path: testInfo.outputPath("ladder-invalid-900.png"), fullPage: true });
 });
