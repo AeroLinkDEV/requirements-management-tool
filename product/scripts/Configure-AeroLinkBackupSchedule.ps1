@@ -5,8 +5,8 @@ param(
 
     [string]$DailyAt = '02:00',
 
-    [ValidateRange(1, 3650)]
-    [int]$RetentionDays = 30,
+    [ValidateRange(1, 15)]
+    [int]$RetentionDays = 15,
 
     [ValidateNotNullOrEmpty()]
     [string]$TaskName = 'AeroLink Daily Backup'

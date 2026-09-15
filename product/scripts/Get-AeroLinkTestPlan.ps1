@@ -294,10 +294,10 @@ function Invoke-ScriptContractSuite {
     $previewShell = Get-Command powershell.exe -ErrorAction SilentlyContinue
     if (-not $previewShell) { $previewShell = Get-Command pwsh.exe -ErrorAction SilentlyContinue }
     if (-not $previewShell) { throw 'PowerShell is required for the script-contract family.' }
-    $preview = & $previewShell.Source -NoProfile -ExecutionPolicy Bypass -File $previewScript -Action Preview -DailyAt 02:00 -RetentionDays 30 2>&1
+    $preview = & $previewShell.Source -NoProfile -ExecutionPolicy Bypass -File $previewScript -Action Preview -DailyAt 02:00 -RetentionDays 15 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Backup schedule preview contract failed.' }
     $previewText = $preview -join "`n"
-    foreach ($expected in @('Schedule\s*:\s*Daily', 'DailyAt\s*:\s*02:00', 'RetentionDays\s*:\s*30', 'Invoke-AeroLinkScheduledBackup\.ps1', '-RetentionDays 30')) {
+    foreach ($expected in @('Schedule\s*:\s*Daily', 'DailyAt\s*:\s*02:00', 'RetentionDays\s*:\s*15', 'Invoke-AeroLinkScheduledBackup\.ps1', '-RetentionDays 15')) {
         if ($previewText -notmatch $expected) { throw "Backup schedule preview did not contain '$expected'." }
     }
     foreach ($scriptName in @(
@@ -579,6 +579,8 @@ function Invoke-DisposablePostgreSqlGate {
     # reported the same sentence, and finding the real one meant instrumenting the script by hand.
     $primaryFailure = $null
     $tempRoot = [IO.Path]::GetTempPath()
+    $apiEvidenceRoot = Join-Path $tempRoot "aerolink-planner-$runId-evidence"
+    if (Test-Path -LiteralPath $apiEvidenceRoot) { throw 'Disposable planner evidence path already exists.' }
     $dockerEnvFile = Join-Path $tempRoot "aerolink-planner-$runId-docker.env"; $apiEnvFile = Join-Path $tempRoot "aerolink-planner-$runId-api.env"
     $apiStatus = Join-Path $tempRoot "aerolink-planner-$runId-api.status"; $apiOutput = Join-Path $tempRoot "aerolink-planner-$runId-api.out.log"; $apiError = Join-Path $tempRoot "aerolink-planner-$runId-api.err.log"
     try {
@@ -606,6 +608,7 @@ function Invoke-DisposablePostgreSqlGate {
         if (-not (Test-Path -LiteralPath $apiDll -PathType Leaf)) { throw 'The disposable PostgreSQL API build is missing.' }
         Get-RestrictedSecretFile -Path $apiEnvFile -Lines @(
             'ASPNETCORE_ENVIRONMENT=Production', 'ASPNETCORE_URLS=http://127.0.0.1:0', 'Database__Provider=PostgreSql',
+            "Evidence__Root=$apiEvidenceRoot",
             "ConnectionStrings__AeroLink=Host=127.0.0.1;Port=$hostPostgreSqlPort;Database=$database;Username=$databaseUser;Password=$databasePassword",
             'DemoData__Enabled=false', 'Identity__SeedDemoAccounts=false', 'Identity__AllowDemoAccounts=false', 'Identity__CookieSecure=false', "Identity__BootstrapSecret=$apiSecret"
         )
@@ -723,6 +726,15 @@ function Invoke-DisposablePostgreSqlGate {
         if ($containerIntent) { Remove-DockerOwnedResource -Docker $docker -Kind container -Name $containerName -RunId $runId -CleanupErrors $cleanupErrors }
         if ($volumeIntent) { Remove-DockerOwnedResource -Docker $docker -Kind volume -Name $volumeName -RunId $runId -CleanupErrors $cleanupErrors }
         if ($secretFileIntent) { foreach ($path in @($dockerEnvFile, $apiEnvFile, $apiStatus, $apiOutput, $apiError)) { Remove-ExactTemporaryFile -Path $path -CleanupErrors $cleanupErrors } }
+        if ($cleanupErrors.Count -eq 0 -and (Test-Path -LiteralPath $apiEvidenceRoot)) {
+            try {
+                $prefix = [IO.Path]::GetFullPath($tempRoot).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+                if (-not [IO.Path]::GetFullPath($apiEvidenceRoot).StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Planner evidence cleanup escaped temp.' }
+                $entries = @(Get-Item -LiteralPath $apiEvidenceRoot) + @(Get-ChildItem -LiteralPath $apiEvidenceRoot -Recurse -Force)
+                if (@($entries | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) { throw 'Planner evidence cleanup refused a reparse point.' }
+                Remove-Item -LiteralPath $apiEvidenceRoot -Recurse -Force -ErrorAction Stop
+            } catch { [void]$cleanupErrors.Add('Owned planner evidence cleanup was not proven.') }
+        }
         if ($cleanupErrors.Count -gt 0) {
             $cleanupDetail = ($cleanupErrors -join ' | ')
             if ($null -ne $primaryFailure) {

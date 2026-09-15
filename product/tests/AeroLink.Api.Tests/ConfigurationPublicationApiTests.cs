@@ -13,6 +13,34 @@ namespace AeroLink.Api.Tests;
 public sealed class ConfigurationPublicationApiTests(ShowcaseApiFixture showcase)
 {
     [Fact]
+    public async Task Expired_repository_export_returns_gone_while_controlled_publication_remains_downloadable()
+    {
+        using var factory = showcase.CreateFactory();
+        using var client = factory.CreateClient();
+        await ShowcaseApiFixture.LoginAdministratorAsync(client);
+        Guid expiredId, controlledId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var files = scope.ServiceProvider.GetRequiredService<EvidenceFileStore>();
+            using var bytes = new MemoryStream("retained publication"u8.ToArray());
+            var file = await files.StoreAsync(bytes, "controlled.csv", "text/csv", default);
+            var now = DateTimeOffset.UtcNow;
+            var result = JsonSerializer.Serialize(new { file.StorageKey, file.OriginalFileName, file.ContentType, ExpiresAt = now.AddDays(-1) });
+            var expired = new AeroLink.Domain.Requirements.EnterpriseOperationJob(showcase.Summary.ProjectId, "BackgroundRepositoryExport", "{}", 1, "test", now);
+            var controlled = new AeroLink.Domain.Requirements.EnterpriseOperationJob(showcase.Summary.ProjectId, "BackgroundControlledPublication", "{}", 1, "test", now);
+            foreach (var job in new[] { expired, controlled }) { job.RunInline("test", now); job.Complete(1, 0, result, now); db.EnterpriseOperationJobs.Add(job); }
+            await db.SaveChangesAsync(); expiredId = expired.Id; controlledId = controlled.Id;
+        }
+        using var gone = await client.GetAsync($"/api/enterprise-hardening/jobs/{expiredId}/download");
+        Assert.Equal(HttpStatusCode.Gone, gone.StatusCode);
+        Assert.Equal("export_expired", (await gone.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        using var retained = await client.GetAsync($"/api/enterprise-hardening/jobs/{controlledId}/download");
+        Assert.Equal(HttpStatusCode.OK, retained.StatusCode);
+        Assert.Equal("retained publication", await retained.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task Configuration_publications_are_resumable_integrity_checked_and_packaged_with_verifiable_manifest()
     {
         using var factory=showcase.CreateFactory(enableEnterpriseJobWorker:true);using var client=factory.CreateClient();await ShowcaseApiFixture.LoginAdministratorAsync(client);Guid projectId,activeBaselineId,releasedBaselineId,templateRevisionId;

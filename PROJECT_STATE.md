@@ -370,6 +370,8 @@ authoritatively documented in [product/docs/CHANGE_REQUEST_LOADS.md](product/doc
 
 ## Operations and recovery
 
+Operational backup retention keeps at most one complete restore point per database per local day for 15 days. Ordinary repository CSV exports have a seven-day download lifetime and automatic file cleanup; controlled publications and engineering history retain their existing lifecycle. Disposable browser tests own separate database and evidence storage.
+
 The repository provides stable Windows root launchers for development, production-style local operation, shared/remote demo modes, backup, restore validation, diagnostics, and related operator actions.
 
 Those root launchers are intentionally treated as compatibility surfaces; their real logic generally delegates into `product/scripts`.

@@ -51,7 +51,7 @@ if (-not $Apply) {
 
 if (-not $SkipBackup) {
     if ($Database -ne 'aerolink') { throw '-SkipBackup is required for an isolated validation database.' }
-    & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -RetentionDays 30
+    & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -RetentionDays 15
     if ($LASTEXITCODE -ne 0) { throw 'The pre-purge backup did not complete successfully.' }
 }
 

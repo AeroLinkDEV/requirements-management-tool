@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [int]$RetentionDays = 30,
+    [ValidateRange(0,15)][int]$RetentionDays = 15,
     [string]$Database = 'aerolink',
     [int]$PostgresPort = 54329,
     [string]$BackupRoot,
@@ -41,6 +41,9 @@ if (-not $PostgresAlreadyRunning) {
         -TimeoutSeconds 420 -StepName 'Start-Postgres.ps1 (backup)'
     if ($start.ExitCode -ne 0) { throw "PostgreSQL is not available for backup: $($start.Detail)" }
 }
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupRetention.psm1') -Force
+$backupLock = Enter-AeroLinkBackupLock -BackupRoot $backupRoot
+try {
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
 try {
@@ -88,8 +91,10 @@ finally {
     if ((Test-Path $staging) -and $resolvedStaging.StartsWith($resolvedBackup, [StringComparison]::OrdinalIgnoreCase)) { Remove-Item -LiteralPath (ConvertTo-AeroLinkArchiveIoPath $staging) -Recurse -Force }
 }
 
-if ($RetentionDays -gt 0) {
-    Get-ChildItem -LiteralPath $backupRoot -File -Filter 'aerolink-*.zip*' | Where-Object LastWriteTime -lt (Get-Date).AddDays(-$RetentionDays) | Remove-Item -Force
+if ($RetentionDays -gt 0 -or $Database -eq 'aerolink') {
+    $days = if ($RetentionDays -gt 0) { $RetentionDays } else { 15 }
+    $retentionPlan = @(Get-AeroLinkBackupRetentionPlan -BackupRoot $backupRoot -RetentionDays $days)
+    Invoke-AeroLinkBackupRetentionPlan -BackupRoot $backupRoot -Plan $retentionPlan
 }
 Write-Host "AeroLink backup complete: $archive" -ForegroundColor Green
 Write-Host "SHA-256: $archiveHash"
@@ -105,3 +110,4 @@ Write-Host "SHA-256: $archiveHash"
     BackupRoot = $backupRoot
     Database   = $Database
 }
+} finally { $backupLock.Dispose() }

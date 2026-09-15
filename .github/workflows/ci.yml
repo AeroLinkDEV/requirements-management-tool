@@ -861,14 +861,14 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          $preview = & ./product/scripts/Configure-AeroLinkBackupSchedule.ps1 -Action Preview -DailyAt 02:00 -RetentionDays 30
-          if ($preview.Schedule -ne 'Daily' -or $preview.DailyAt -ne '02:00' -or $preview.RetentionDays -ne 30) {
+          $preview = & ./product/scripts/Configure-AeroLinkBackupSchedule.ps1 -Action Preview -DailyAt 02:00 -RetentionDays 15
+          if ($preview.Schedule -ne 'Daily' -or $preview.DailyAt -ne '02:00' -or $preview.RetentionDays -ne 15) {
             throw 'The default daily backup schedule contract changed unexpectedly.'
           }
           if (-not (Test-Path -LiteralPath $preview.Runner -PathType Leaf)) {
             throw 'The scheduled backup runner does not resolve to a file.'
           }
-          if ($preview.Arguments -notlike '*Invoke-AeroLinkScheduledBackup.ps1*' -or $preview.Arguments -notlike '*-RetentionDays 30*') {
+          if ($preview.Arguments -notlike '*Invoke-AeroLinkScheduledBackup.ps1*' -or $preview.Arguments -notlike '*-RetentionDays 15*') {
             throw 'The scheduled task no longer invokes the verified backup runner with retention.'
           }
 

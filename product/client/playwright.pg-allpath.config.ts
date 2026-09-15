@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createBrowserStorage } from './scripts/browser-storage.mjs';
 
 const apiPort = process.env.AEROLINK_E2E_API_PORT ?? "5095";
 const clientPort = process.env.AEROLINK_E2E_CLIENT_PORT ?? "5195";
@@ -50,6 +51,9 @@ function validateOwnedPostgresConnection(value: string) {
   }
 }
 validateOwnedPostgresConnection(database);
+const runId = process.env.AEROLINK_E2E_RUN_ID;
+if (!runId) throw new Error('The restart-recovery owner must provide AEROLINK_E2E_RUN_ID.');
+const storage = createBrowserStorage(runId);
 process.env.AEROLINK_E2E_API_BASE = `http://127.0.0.1:${apiPort}`;
 
 export default defineConfig({
@@ -85,6 +89,7 @@ export default defineConfig({
             }
           : {}),
         Database__Provider: "PostgreSql",
+        Evidence__Root: storage.evidence,
         ConnectionStrings__AeroLink: database,
         DemoData__Enabled: "false",
         Identity__SeedDemoAccounts: "true",

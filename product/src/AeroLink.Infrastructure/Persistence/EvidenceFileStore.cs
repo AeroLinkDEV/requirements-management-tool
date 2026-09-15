@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace AeroLink.Infrastructure.Persistence;
 
 public sealed record StoredEvidence(string OriginalFileName, string ContentType, long Size, string Sha256, string StorageKey);
+public sealed record TemporaryExport(StoredEvidence File, DateTimeOffset ExpiresAt);
 public sealed record RestoredEvidence(string? QuarantineKey);
 public sealed record StagedEvidence(string OriginalFileName, string ContentType, long Size, string Sha256,
     string StagingKey, string StorageKey);
@@ -27,6 +28,40 @@ public sealed class EvidenceFileStore
         Directory.CreateDirectory(_root);
     }
     public string RootPath => _root;
+    public async Task<TemporaryExport> StoreTemporaryExportAsync(Stream source, string fileName, string contentType,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        var expires = DateTimeOffset.FromUnixTimeSeconds(now.AddDays(7).ToUnixTimeSeconds());
+        var staged = await StageAsync(source, Guid.NewGuid(), "export", fileName, contentType, ct);
+        staged = staged with { StorageKey = $"temporary-exports/{expires.ToUnixTimeSeconds()}/{Guid.NewGuid():N}.csv" };
+        try
+        {
+            await PromoteAsync(staged, ct);
+            return new(new(staged.OriginalFileName, staged.ContentType, staged.Size, staged.Sha256, staged.StorageKey), expires);
+        }
+        catch { Delete(staged.StagingKey); throw; }
+    }
+
+    public int RemoveExpiredTemporaryExports(DateTimeOffset now)
+    {
+        var root = Resolve("temporary-exports");
+        if (!Directory.Exists(root)) return 0;
+        EnsureNoReparsePoints(root);
+        var removed = 0;
+        foreach (var directory in Directory.EnumerateDirectories(root))
+        {
+            EnsureNoReparsePoints(directory);
+            if (!long.TryParse(Path.GetFileName(directory), out var expires) || expires > now.ToUnixTimeSeconds()) continue;
+            foreach (var path in Directory.EnumerateFiles(directory))
+            {
+                EnsureNoReparsePoints(path);
+                if (Path.GetExtension(path) != ".csv" || !Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out _)) continue;
+                File.Delete(path); removed++;
+            }
+            if (!Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory);
+        }
+        return removed;
+    }
     public async Task<StoredEvidence> StoreAsync(Stream source, string originalFileName, string contentType, CancellationToken ct)
     {
         var staged = await StageAsync(source, Guid.NewGuid(), "object", originalFileName, contentType, ct);

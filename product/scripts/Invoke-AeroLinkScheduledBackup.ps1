@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
-    [ValidateRange(1, 3650)]
-    [int]$RetentionDays = 30
+    [ValidateRange(1, 15)]
+    [int]$RetentionDays = 15
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,9 +23,8 @@ try {
     $backupOutput = & $backupScript -RetentionDays $RetentionDays 2>&1
     if ($backupOutput) { $backupOutput | Out-String | Add-Content -LiteralPath $logPath -Encoding UTF8 }
 
-    $archive = Get-ChildItem -LiteralPath $backupRoot -Filter 'aerolink-*.zip' -File |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1
+    $capture = @($backupOutput | Where-Object { $_ -is [pscustomobject] -and $_.PSObject.Properties['Archive'] }) | Select-Object -Last 1
+    $archive = if ($capture) { Get-Item -LiteralPath $capture.Archive } else { $null }
     if (-not $archive -or $archive.LastWriteTime -lt $startedAt.AddMinutes(-1)) {
         throw 'The scheduled backup did not produce a new AeroLink archive.'
     }

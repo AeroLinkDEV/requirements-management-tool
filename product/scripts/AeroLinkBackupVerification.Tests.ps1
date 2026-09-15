@@ -1,4 +1,5 @@
 $ErrorActionPreference='Stop'
+& (Join-Path $PSScriptRoot 'AeroLinkBackupRetention.Tests.ps1')
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkBackupArchive.psm1') -Force
 $root=Join-Path ([IO.Path]::GetTempPath()) ('aerolink-relocated-backup-'+[Guid]::NewGuid().ToString('N'))
 $verificationRoot=Join-Path $root 'verification';$staging=Join-Path $root 'source';$relocated=Join-Path $root 'relocated backup Ω';New-Item -ItemType Directory -Path (Join-Path $staging 'evidence\ab') -Force|Out-Null;New-Item -ItemType Directory -Path $relocated -Force|Out-Null;New-Item -ItemType Directory -Path $verificationRoot -Force|Out-Null

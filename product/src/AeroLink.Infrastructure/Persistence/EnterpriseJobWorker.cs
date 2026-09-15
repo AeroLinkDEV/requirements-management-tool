@@ -21,6 +21,7 @@ public sealed class EnterpriseJobWorker(IServiceScopeFactory scopes, ILogger<Ent
     /// Machine name and process, because two instances on one host is the case that used to double-run a job.
     /// </summary>
     private readonly string _worker = $"{Environment.MachineName}/{Environment.ProcessId}";
+    private DateTimeOffset _nextExportCleanup;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -30,6 +31,12 @@ public sealed class EnterpriseJobWorker(IServiceScopeFactory scopes, ILogger<Ent
             {
                 await RecoverAbandoned(stoppingToken);
                 await ProcessNext(stoppingToken);
+                if (DateTimeOffset.UtcNow >= _nextExportCleanup)
+                {
+                    using var cleanupScope = scopes.CreateScope();
+                    cleanupScope.ServiceProvider.GetRequiredService<EvidenceFileStore>().RemoveExpiredTemporaryExports(DateTimeOffset.UtcNow);
+                    _nextExportCleanup = DateTimeOffset.UtcNow.AddMinutes(10);
+                }
             }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested) { logger.LogError(ex, "Enterprise background job polling failed."); }
             try { await Task.Delay(2000, stoppingToken); } catch (OperationCanceledException) { return; }
@@ -175,8 +182,10 @@ public sealed class EnterpriseJobWorker(IServiceScopeFactory scopes, ILogger<Ent
                 var current = rows.GroupBy(x => x.BaseNumber).Select(x => x.OrderByDescending(r => r.Revision).First()).OrderBy(x => x.BaseNumber).ToList();
                 static string Csv(string value) => "\"" + value.Replace("\"", "\"\"") + "\"";
                 var text = new StringBuilder("Identifier,Revision,Level,Statement,Verification,State\r\n"); foreach (var row in current) text.AppendLine($"{Csv(row.BaseNumber)},{row.Revision},{Csv(row.Level)},{Csv(row.Statement)},{Csv(row.VerificationMethod)},{Csv(row.State)}");
-                await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(text.ToString())); var stored = await scope.ServiceProvider.GetRequiredService<EvidenceFileStore>().StoreAsync(stream, $"aerolink-requirements-{job.Id:N}.csv", "text/csv", ct);
-                result = new { requirements, revisions, attachments, generatedAt = DateTimeOffset.UtcNow, format = "controlled-csv", stored.StorageKey, stored.OriginalFileName, stored.ContentType, stored.Size, stored.Sha256 };
+                await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(text.ToString()));
+                var export = await scope.ServiceProvider.GetRequiredService<EvidenceFileStore>().StoreTemporaryExportAsync(stream, $"aerolink-requirements-{job.Id:N}.csv", "text/csv", DateTimeOffset.UtcNow, ct);
+                var stored = export.File;
+                result = new { requirements, revisions, attachments, generatedAt = DateTimeOffset.UtcNow, format = "controlled-csv", stored.StorageKey, stored.OriginalFileName, stored.ContentType, stored.Size, stored.Sha256, export.ExpiresAt };
             }
             else result = new { requirements, revisions, attachments, generatedAt = DateTimeOffset.UtcNow, format = "integrity-manifest" };
             job.Complete(job.ItemCount, 0, JsonSerializer.Serialize(result), DateTimeOffset.UtcNow);
