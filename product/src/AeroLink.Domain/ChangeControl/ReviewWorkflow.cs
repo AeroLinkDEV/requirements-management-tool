@@ -137,7 +137,7 @@ public sealed class ReviewWorkflowStage
     /// position roles are demanded through <see cref="ReviewStageAuthorityKind.LeadershipPosition"/>, never
     /// as base membership.
     /// </summary>
-    internal static void ValidateAuthority(ProgramRole requiredRole, ReviewStageAuthorityKind? authorityKind)
+    public static void ValidateAuthority(ProgramRole requiredRole, ReviewStageAuthorityKind? authorityKind)
     {
         if (authorityKind is null) return; // legacy row: recorded before the cutover, answered compatibly
         if (authorityKind == ReviewStageAuthorityKind.BaseRole)

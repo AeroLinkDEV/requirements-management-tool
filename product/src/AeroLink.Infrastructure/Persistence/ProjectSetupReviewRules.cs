@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
@@ -35,18 +36,206 @@ public static class ProjectSetupReviewRules
         if (string.IsNullOrWhiteSpace(ladderJson))
             throw new InvalidOperationException("A setup ladder is required before review rules can be suggested.");
 
-        using var document = JsonDocument.Parse(ladderJson);
-        if (document.RootElement.ValueKind == JsonValueKind.Object
-            && !document.RootElement.EnumerateObject().Any())
-            return SuggestedJson(NewProjectLadderFactory.Create(projectId, DateTimeOffset.UtcNow));
-
-        var steps = document.RootElement.TryGetProperty("steps", out var stepList)
-            && stepList.ValueKind == JsonValueKind.Array
-            ? stepList.EnumerateArray().Select(ParseStep).ToArray()
-            : throw new InvalidOperationException("A reviewed ladder must provide typed steps.");
-
+        // The standard must describe the ladder the finalizer will actually validate. Reading the same way
+        // both do — including the capability-dependent fallback for an absent profile — is what keeps the
+        // offered subjects equal to the applicable subjects.
+        var reading = ProjectSetupLadderReader.Read(ladderJson);
+        // A step's position does not change which subjects the ladder makes applicable (its level, capabilities
+        // and artifacts do), so a draft whose positions still need repair can be offered and can accept the
+        // standard it will be judged against. The readiness verdict and the final gate keep refusing the draft.
+        var blocking = reading.Findings.Where(x => x.Field != "position").ToArray();
+        if (blocking.Length > 0) throw new InvalidOperationException(blocking[0].Message);
+        if (reading.IsDefault) return SuggestedJson(NewProjectLadderFactory.Create(projectId, DateTimeOffset.UtcNow));
+        var steps = reading.Steps;
         return JsonSerializer.Serialize(new ReviewRulesDocument(
-            ApplicableRules(steps).Select(ToWire).ToArray()), WireJson);
+            ApplicableRules(steps, LegacyLadderPolicy.Instance).Select(ToWire).ToArray()), WireJson);
+    }
+
+    /// <summary>Reads the persisted definition's shape and named subjects without rejecting its content.</summary>
+    public static ReviewDefinitionReading InspectDefinition(string rulesJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(rulesJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("rules", out var rules)
+                || rules.ValueKind != JsonValueKind.Array)
+                return new ReviewDefinitionReading(false, []);
+            var subjects = rules.EnumerateArray()
+                .Select(rule => rule.ValueKind == JsonValueKind.Object
+                    && rule.TryGetProperty("subject", out var subject)
+                    && subject.ValueKind == JsonValueKind.String
+                        ? subject.GetString() ?? string.Empty
+                        : string.Empty)
+                .Where(x => x.Length > 0)
+                .ToArray();
+            return new ReviewDefinitionReading(true, subjects, rules.GetArrayLength());
+        }
+        catch (JsonException)
+        {
+            return new ReviewDefinitionReading(false, []);
+        }
+    }
+
+    public static IReadOnlyList<string> SubjectsOf(string rulesJson) => InspectDefinition(rulesJson).Subjects;
+
+    /// <summary>
+    /// The semantic validity of one concrete review definition, read without throwing.
+    ///
+    /// This is the same authority materializing the workflows uses: every rule names a supported subject,
+    /// carries a name the workflow accepts, and has at least one named Review stage and one named Approval
+    /// stage whose required authority is a configurable base project role or an accountable Project
+    /// Leadership position. <see cref="ProjectSetupService"/> refuses finalization on exactly these findings,
+    /// so a readiness verdict can never be more permissive than the final gate — the failure this method
+    /// exists to prevent is a green "ready" screen that leads to a predictable rejection.
+    /// </summary>
+    public static IReadOnlyList<LadderFinding> InspectRules(string? rulesJson)
+    {
+        JsonDocument document;
+        try
+        {
+            document = JsonDocument.Parse(rulesJson ?? string.Empty);
+        }
+        catch (JsonException)
+        {
+            return [LadderFinding.Review("review_rules_not_json", null, null,
+                "The review rules payload is invalid JSON.")];
+        }
+
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return [LadderFinding.Review("review_rules_not_object", null, null,
+                    "Review rules must be a typed object.")];
+            if (!root.EnumerateObject().Any())
+                return [LadderFinding.Review("review_rules_empty", null, null,
+                    "Review and approval rules must retain a concrete accepted definition.")];
+            if (!root.TryGetProperty("rules", out var rules) || rules.ValueKind != JsonValueKind.Array)
+                return [LadderFinding.Review("review_rules_not_typed", null, null,
+                    "Review rules must contain a typed 'rules' array or be empty for the standard.")];
+
+            var findings = new List<LadderFinding>();
+            var position = 0;
+            foreach (var rule in rules.EnumerateArray())
+            {
+                position += 1;
+                if (rule.ValueKind != JsonValueKind.Object)
+                {
+                    findings.Add(LadderFinding.Review("review_rule_not_object", null, null,
+                        $"Review rule {position} must be a typed object."));
+                    continue;
+                }
+
+                var subjectText = Text(rule, "subject");
+                if (subjectText is null
+                    || !Enum.TryParse<ReviewSubject>(subjectText, true, out var subject)
+                    || !Enum.IsDefined(subject))
+                {
+                    findings.Add(LadderFinding.Review("review_rule_subject_unknown", null, null,
+                        $"Review rule {position} names no supported review subject.", Bound(subjectText)));
+                    continue;
+                }
+                var label = subject.ToString();
+
+                // A null name falls back to the subject name when the workflow is created; an explicitly
+                // blank one reaches the workflow authority and is refused there.
+                if (rule.TryGetProperty("name", out var nameValue) && nameValue.ValueKind == JsonValueKind.String
+                    && string.IsNullOrWhiteSpace(nameValue.GetString()))
+                    findings.Add(LadderFinding.Review("review_rule_unnamed", label, null,
+                        "A review workflow needs a name."));
+
+                if (!rule.TryGetProperty("stages", out var stages) || stages.ValueKind != JsonValueKind.Array)
+                {
+                    findings.Add(LadderFinding.Review("review_rule_stage_missing", label, null,
+                        $"Review rule {label} requires a stage."));
+                    continue;
+                }
+                if (stages.GetArrayLength() == 0)
+                {
+                    findings.Add(LadderFinding.Review("review_rule_stage_missing", label, null,
+                        $"Review rule {label} requires a stage."));
+                    continue;
+                }
+
+                var hasReview = false;
+                var hasApproval = false;
+                var stagePosition = 0;
+                foreach (var stage in stages.EnumerateArray())
+                {
+                    stagePosition += 1;
+                    if (stage.ValueKind != JsonValueKind.Object)
+                    {
+                        findings.Add(LadderFinding.Review("review_stage_not_object", label, stagePosition,
+                            $"Every stage of review rule {label} must be a typed object."));
+                        continue;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(Text(stage, "name")))
+                        findings.Add(LadderFinding.Review("review_stage_unnamed", label, stagePosition,
+                            "A review stage needs a name."));
+
+                    var kindText = Text(stage, "kind");
+                    ReviewStageKind? kind = Enum.TryParse<ReviewStageKind>(kindText ?? string.Empty, true,
+                        out var parsedKind) && Enum.IsDefined(parsedKind)
+                            ? parsedKind
+                            : null;
+                    if (kind is null)
+                        findings.Add(LadderFinding.Review("review_stage_kind_invalid", label, stagePosition,
+                            $"'{Bound(kindText)}' is not a supported signature meaning for review rule {label}."));
+                    else if (kind == ReviewStageKind.Review) hasReview = true;
+                    else hasApproval = true;
+
+                    var roleText = Text(stage, "requiredRole");
+                    var roleKnown = Enum.TryParse<ProgramRole>(roleText ?? string.Empty, true, out var role)
+                        && Enum.IsDefined(role);
+                    if (!roleKnown)
+                    {
+                        findings.Add(LadderFinding.Review("review_stage_authority_invalid", label, stagePosition,
+                            $"'{Bound(roleText)}' is not a supported project authority for review rule {label}."));
+                        continue;
+                    }
+
+                    ReviewStageAuthorityKind? authorityKind = null;
+                    var authorityReadable = true;
+                    if (stage.TryGetProperty("authorityKind", out var authorityValue)
+                        && authorityValue.ValueKind != JsonValueKind.Null)
+                    {
+                        if (authorityValue.ValueKind == JsonValueKind.String
+                            && Enum.TryParse<ReviewStageAuthorityKind>(authorityValue.GetString(), true,
+                                out var parsedAuthority)
+                            && Enum.IsDefined(parsedAuthority))
+                            authorityKind = parsedAuthority;
+                        else
+                            authorityReadable = false;
+                    }
+                    if (!authorityReadable)
+                    {
+                        findings.Add(LadderFinding.Review("review_stage_authority_invalid", label, stagePosition,
+                            $"The authority demanded by stage {stagePosition} of review rule {label} is not "
+                            + "BaseRole or LeadershipPosition."));
+                        continue;
+                    }
+
+                    try
+                    {
+                        // The maintained authority rule itself — a base role must be a configurable role and
+                        // a leadership demand must name one of the accountable positions.
+                        ReviewWorkflowStage.ValidateAuthority(role, authorityKind);
+                    }
+                    catch (DomainException ex)
+                    {
+                        findings.Add(LadderFinding.Review("review_stage_authority_invalid", label, stagePosition,
+                            ex.Message));
+                    }
+                }
+
+                if (!hasReview || !hasApproval)
+                    findings.Add(LadderFinding.Review("review_rule_missing_signature_kind", label, null,
+                        $"Review rule {label} requires explicit Review and Approval stages."));
+            }
+            return findings;
+        }
     }
 
     public static bool IsEmptyDefinition(string json)
@@ -56,15 +245,43 @@ public static class ProjectSetupReviewRules
             && !document.RootElement.EnumerateObject().Any();
     }
 
-    private static IReadOnlyList<Rule> ApplicableRules(ProjectLadderConfiguration ladder)
-    {
-        var steps = ladder.Steps.Select(x => new Step(
-            Enum.Parse<RequirementLevel>(x.CatalogueEntry, false), x.Capabilities, x.EnabledArtifactKinds.ToHashSet())).ToArray();
-        return ApplicableRules(steps);
-    }
+    private static string? Text(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static string Bound(string? value) =>
+        value is null ? string.Empty : ProjectLadderDraftValidator.DiagnosticToken(value);
+
+    private static IReadOnlyList<Rule> ApplicableRules(ProjectLadderConfiguration ladder) => ApplicableRules(
+        ladder.Steps.Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position, x.Capabilities,
+            x.EnabledArtifactKinds.ToArray())).ToArray(), LegacyLadderPolicy.Instance);
 
     public static HashSet<ReviewSubject> ApplicableSubjects(ProjectLadderConfiguration ladder) =>
         ApplicableRules(ladder).Select(x => x.Subject).ToHashSet();
+
+    /// <summary>
+    /// The subjects a supplied ladder makes applicable, applying the maintained fallback for an absent
+    /// profile so the offered standard and the finalizer agree for the same saved input.
+    /// </summary>
+    public static IReadOnlyList<ReviewSubject> ApplicableSubjects(IReadOnlyList<LadderStepDraft> steps,
+        ILadderPolicy policy) => ApplicableRules(steps, policy).Select(x => x.Subject).ToArray();
+
+    private static IReadOnlyList<Rule> ApplicableRules(IReadOnlyList<LadderStepDraft> steps, ILadderPolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        ArgumentNullException.ThrowIfNull(policy);
+        var effective = steps
+            .Where(x => Enum.TryParse<RequirementLevel>(x.CatalogueEntry, false, out var level) && Enum.IsDefined(level))
+            .Select(x =>
+            {
+                var level = Enum.Parse<RequirementLevel>(x.CatalogueEntry, false);
+                return new Step(level, x.Capabilities,
+                    x.EffectiveKinds(policy.Definition(level)).ToHashSet());
+            })
+            .ToArray();
+        return ApplicableRules(effective);
+    }
 
     private static IReadOnlyList<Rule> ApplicableRules(IReadOnlyList<Step> steps)
     {
@@ -112,30 +329,6 @@ public static class ProjectSetupReviewRules
             new("Project acceptance", ProgramRole.ProjectEngineer, ReviewStageKind.Approval,
                 ReviewStageAuthorityKind.LeadershipPosition),
         ]);
-
-    private static Step ParseStep(JsonElement element)
-    {
-        if (!element.TryGetProperty("catalogueEntry", out var catalogue)
-            || catalogue.ValueKind != JsonValueKind.String
-            || !Enum.TryParse<RequirementLevel>(catalogue.GetString(), false, out var level)
-            || !Enum.IsDefined(level))
-            throw new InvalidOperationException("A reviewed ladder contains an unsupported catalogue entry.");
-
-        var artifacts = new HashSet<VerificationArtifactKind>();
-        if (element.TryGetProperty("enabledArtifactKinds", out var values)
-            && values.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var value in values.EnumerateArray())
-                if (value.ValueKind == JsonValueKind.String
-                    && Enum.TryParse<VerificationArtifactKind>(value.GetString(), false, out var kind)
-                    && Enum.IsDefined(kind))
-                    artifacts.Add(kind);
-        }
-        var capabilities = element.TryGetProperty("capabilities", out var capabilityValue)
-            ? JsonSerializer.Deserialize<LevelCapabilities>(capabilityValue.GetRawText(), WireJson)
-            : LevelCapabilities.None;
-        return new(level, capabilities, artifacts);
-    }
 
     private sealed record Step(RequirementLevel Level, LevelCapabilities Capabilities,
         IReadOnlySet<VerificationArtifactKind> Artifacts);

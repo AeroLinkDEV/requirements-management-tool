@@ -636,6 +636,219 @@ public sealed class ProjectSetupInceptionApiTests
             await after.CandidateBaselines.Where(x => x.Id == sourceBaselineId).Select(x => x.State).SingleAsync());
     }
 
+    /// <summary>
+    /// I09 for the native path: a real AeroLink baseline is captured, reconciled and accepted, then the
+    /// creator repairs a capability profile on the draft. That change must invalidate the accepted
+    /// reconciliation while keeping the exact staged source and every unrelated answer, and the supported
+    /// flow must reconcile, re-accept and materialize the repaired configuration.
+    /// </summary>
+    [Fact]
+    public async Task Native_source_repair_invalidates_reconciliation_and_reaccepts_the_repaired_profile()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+        var now = DateTimeOffset.UtcNow;
+        Guid sourceBaselineId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new ProgramRecord("Native repair program", "NRP");
+            var project = new ProjectRecord(program.Id, "Native repair source", "Native repair product");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            var baseline = new CandidateBaseline("SW-92.01", 0, project.Id, release.Id, null,
+                "Native repair source", "source.manager", now);
+            var sourceChange = new SystemChangeRequest("SRCR-920001", 0, project.Id, release.Id,
+                "Native repair requirement", "Problem", "Analysis", "Solution", "source.author", now);
+            var requirement = new RequirementArtifact(project.Id, "SYSR-920001", RequirementLevel.System, now);
+            var requirementRevision = new RequirementRevision(requirement.Id, 0,
+                "The repaired source requirement shall remain attributable.", "Source rationale", "",
+                RequirementRevisionState.Active, sourceChange.Id, baseline.Id, now);
+            var procedure = new TestProcedure(project.Id, "SYSTP-920001", "Native repair procedure",
+                "source.owner", now, TestProcedureLevel.System);
+            var procedureRevision = new TestProcedureRevision(procedure.Id, 2, "Source objective",
+                "Source preconditions", "Source steps", "Source expected result", TestProcedureState.Approved,
+                "source.author", now);
+            baseline.FreezeForInception("source.manager", now);
+            baseline.MarkRequirementsMaterialized("source.manager", new string('c', 64), 1, now);
+            baseline.MarkTestProceduresMaterialized("source.manager", new string('d', 64), 1, now);
+            db.AddRange(program, project, release, baseline, sourceChange, requirement, requirementRevision,
+                new BaselineRequirementSelection(baseline.Id, requirement.Id, requirementRevision.Id), procedure,
+                procedureRevision, new BaselineTestProcedureSelection(baseline.Id, procedure.Id, procedureRevision.Id));
+            await db.SaveChangesAsync();
+            sourceBaselineId = baseline.Id;
+        }
+
+        using var created = await client.PostAsJsonAsync("/api/project-setups", new { projectName = "Native repair destination" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        using var createdBody = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+        var draftId = createdBody.RootElement.GetProperty("draftId").GetGuid();
+        using var details = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        {
+            expectedVersion = 1,
+            currentStep = "StartingPoint",
+            project = new { name = "Native repair destination", softwareProduct = "Native repair destination product" },
+            build = new { version = "1.4" },
+            selectedCategories = Array.Empty<string>(),
+            ladder = new { }, reviewRules = new { }, reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" }, mapping = new { },
+        });
+        Assert.Equal(HttpStatusCode.OK, details.StatusCode);
+
+        using var capture = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/source/native", new
+        {
+            expectedVersion = 2, baselineId = sourceBaselineId,
+        });
+        Assert.Equal(HttpStatusCode.OK, capture.StatusCode);
+        using var captureBody = JsonDocument.Parse(await capture.Content.ReadAsStringAsync());
+        var capturedVersion = captureBody.RootElement.GetProperty("draftVersion").GetInt64();
+
+        using var observedResponse = await client.GetAsync($"/api/project-setups/{draftId}/source");
+        Assert.Equal(HttpStatusCode.OK, observedResponse.StatusCode);
+        using var observed = JsonDocument.Parse(await observedResponse.Content.ReadAsStringAsync());
+        var stagedSourceId = observed.RootElement.GetProperty("id").GetGuid();
+        var stagedSourceSha = observed.RootElement.GetProperty("sha256").GetString();
+        var stagedObjectKeys = observed.RootElement.GetProperty("modules").EnumerateArray()
+            .SelectMany(x => x.GetProperty("objects").EnumerateArray())
+            .Select(x => x.GetProperty("key").GetString()).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+
+        using var configured = await client.PutAsJsonAsync($"/api/project-setups/{draftId}/source/configuration", new
+        {
+            expectedVersion = capturedVersion,
+            selectedCategories = new[] { "Requirements", "Procedures" },
+            mapping = BuildNativeMapping(observed.RootElement), metadata = new { },
+        });
+        Assert.Equal(HttpStatusCode.OK, configured.StatusCode);
+        using var configuredBody = JsonDocument.Parse(await configured.Content.ReadAsStringAsync());
+        Assert.Equal("Reconciled", configuredBody.RootElement.GetProperty("stage").GetString());
+        var configuredVersion = configuredBody.RootElement.GetProperty("draftVersion").GetInt64();
+        using var readyResponse = await client.GetAsync($"/api/project-setups/{draftId}/source");
+        using var ready = JsonDocument.Parse(await readyResponse.Content.ReadAsStringAsync());
+        var acceptedAssertionHash = ready.RootElement.GetProperty("assertion").GetProperty("hash").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(acceptedAssertionHash));
+
+        // The creator's repair: an explicit ladder with a Case-only software profile. The accepted
+        // reconciliation was written for the previous ladder, so it can no longer stand.
+        using var repaired = await client.PutAsJsonAsync($"/api/project-setups/{draftId}", new
+        {
+            expectedVersion = configuredVersion,
+            currentStep = "Ladder",
+            project = new { name = "Native repair destination", softwareProduct = "Native repair destination product" },
+            build = new { version = "1.4" },
+            ladder = new
+            {
+                steps = new object[]
+                {
+                    new { catalogueEntry = "System", position = 1, capabilities = 7,
+                        enabledArtifactKinds = new[] { "Procedure" } },
+                    new { catalogueEntry = "HighLevel", position = 2, capabilities = 7,
+                        enabledArtifactKinds = new[] { "Case" } },
+                    new { catalogueEntry = "LowLevel", position = 3, capabilities = 15,
+                        enabledArtifactKinds = new[] { "Case" } },
+                },
+                relationships = new object[]
+                {
+                    new { parent = "System", child = "HighLevel" },
+                    new { parent = "HighLevel", child = "LowLevel" },
+                },
+            },
+            reviewRules = new { }, reviewRulesAccepted = true,
+            repository = new { mode = "ConfigureLater" },
+        });
+        Assert.Equal(HttpStatusCode.OK, repaired.StatusCode);
+        using var repairedBody = JsonDocument.Parse(await repaired.Content.ReadAsStringAsync());
+        var repairedVersion = repairedBody.RootElement.GetProperty("version").GetInt64();
+        // The readiness verdict is scoped to ladder/profile and rule compatibility, so it can still describe a
+        // compatible ladder; the source acceptance is the fact the repair invalidates — and the final gate must
+        // refuse the stale assertion until the source is reconciled and accepted again.
+        using var refusedBeforeReconcile = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize", new
+        {
+            expectedVersion = repairedVersion, idempotencyKey = "native-repair-before-reconcile",
+            password = AeroLinkApiFactory.AdministratorPassword,
+            sourceAssertionHash = acceptedAssertionHash, sourceAssertionAccepted = true,
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, refusedBeforeReconcile.StatusCode);
+        using var refusal = JsonDocument.Parse(await refusedBeforeReconcile.Content.ReadAsStringAsync());
+        Assert.Equal("cannot_finalize", refusal.RootElement.GetProperty("code").GetString());
+
+        // The exact staged source and the unrelated answers survive the repair.
+        using var afterRepairResponse = await client.GetAsync($"/api/project-setups/{draftId}/source");
+        using var afterRepair = JsonDocument.Parse(await afterRepairResponse.Content.ReadAsStringAsync());
+        Assert.Equal(stagedSourceId, afterRepair.RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(stagedSourceSha, afterRepair.RootElement.GetProperty("sha256").GetString());
+        Assert.Equal(JsonValueKind.Null, afterRepair.RootElement.GetProperty("reconciliation").ValueKind);
+        Assert.Equal(JsonValueKind.Null, afterRepair.RootElement.GetProperty("assertion").ValueKind);
+        Assert.Equal(stagedObjectKeys, afterRepair.RootElement.GetProperty("modules").EnumerateArray()
+            .SelectMany(x => x.GetProperty("objects").EnumerateArray())
+            .Select(x => x.GetProperty("key").GetString()).OrderBy(x => x, StringComparer.Ordinal).ToArray());
+        using var draftAfterRepairResponse = await client.GetAsync($"/api/project-setups/{draftId}");
+        using var draftAfterRepair = JsonDocument.Parse(await draftAfterRepairResponse.Content.ReadAsStringAsync());
+        Assert.Equal("Native repair destination",
+            draftAfterRepair.RootElement.GetProperty("project").GetProperty("name").GetString());
+        Assert.Equal("1.4", draftAfterRepair.RootElement.GetProperty("build").GetProperty("version").GetString());
+        Assert.Equal("AeroLinkBaseline", draftAfterRepair.RootElement.GetProperty("start").GetProperty("kind").GetString());
+        Assert.Equal(sourceBaselineId,
+            draftAfterRepair.RootElement.GetProperty("start").GetProperty("sourceBaselineId").GetGuid());
+        Assert.Equal(new[] { "Procedures", "Requirements" },
+            draftAfterRepair.RootElement.GetProperty("selectedCategories").EnumerateArray()
+                .Select(x => x.GetString() ?? "").OrderBy(x => x, StringComparer.Ordinal).ToArray());
+
+        // Reconcile and accept again through the supported flow, then materialize the repaired configuration.
+        using var reconciled = await client.PutAsJsonAsync($"/api/project-setups/{draftId}/source/configuration", new
+        {
+            expectedVersion = repairedVersion,
+            selectedCategories = new[] { "Requirements", "Procedures" },
+            mapping = BuildNativeMapping(afterRepair.RootElement), metadata = new { },
+        });
+        Assert.Equal(HttpStatusCode.OK, reconciled.StatusCode);
+        using var reconciledBody = JsonDocument.Parse(await reconciled.Content.ReadAsStringAsync());
+        Assert.Equal("Reconciled", reconciledBody.RootElement.GetProperty("stage").GetString());
+        var reacceptedVersion = reconciledBody.RootElement.GetProperty("draftVersion").GetInt64();
+        using var reacceptedResponse = await client.GetAsync($"/api/project-setups/{draftId}/source");
+        using var reaccepted = JsonDocument.Parse(await reacceptedResponse.Content.ReadAsStringAsync());
+        var reacceptedAssertionHash = reaccepted.RootElement.GetProperty("assertion").GetProperty("hash").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(reacceptedAssertionHash));
+        // Re-reconciliation is a new committed configuration step, whether or not this particular content
+        // produces a different manifest hash (the System-only source is unaffected by a software profile).
+        Assert.True(reacceptedVersion > repairedVersion, "re-reconciliation advanced the draft");
+
+        using var finalized = await client.PostAsJsonAsync($"/api/project-setups/{draftId}/finalize", new
+        {
+            expectedVersion = reacceptedVersion, idempotencyKey = "native-repair-1",
+            password = AeroLinkApiFactory.AdministratorPassword,
+            sourceAssertionHash = reacceptedAssertionHash, sourceAssertionAccepted = true,
+        });
+        Assert.True(finalized.IsSuccessStatusCode,
+            $"{finalized.StatusCode}: {await finalized.Content.ReadAsStringAsync()}");
+        using var finalizedBody = JsonDocument.Parse(await finalized.Content.ReadAsStringAsync());
+        var projectId = finalizedBody.RootElement.GetProperty("projectId").GetGuid();
+
+        // The created project carries the repaired profile and the materialized native content, and the source
+        // baseline is untouched evidence rather than consumed input.
+        using var scopeAfter = factory.Services.CreateScope();
+        var after = scopeAfter.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var steps = await after.ProjectLadderSteps.AsNoTracking().Where(x => x.ProjectId == projectId)
+            .OrderBy(x => x.Position).ToListAsync();
+        Assert.Equal(new[] { VerificationArtifactKind.Case },
+            steps.Single(x => x.CatalogueEntry == "HighLevel").EnabledArtifactKinds);
+        Assert.Equal(new[] { VerificationArtifactKind.Case },
+            steps.Single(x => x.CatalogueEntry == "LowLevel").EnabledArtifactKinds);
+        var materializedRequirement = await after.Requirements.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == projectId);
+        var materializedRevision = await after.RequirementRevisions.AsNoTracking()
+            .SingleAsync(x => x.ArtifactId == materializedRequirement.Id);
+        Assert.Contains("repaired source requirement", materializedRevision.Statement,
+            StringComparison.OrdinalIgnoreCase);
+        var sourceRecordForRequirement = await after.ProjectInceptionSourceRecords.AsNoTracking()
+            .SingleAsync(x => x.ProjectId == projectId && x.TargetKind == "Requirement");
+        Assert.Contains("SYSR-920001", sourceRecordForRequirement.SourceSnapshotJson, StringComparison.Ordinal);
+        var targetProcedure = await after.TestProcedures.SingleAsync(x => x.ProjectId == projectId);
+        Assert.Equal("", targetProcedure.OwnerId);
+        Assert.Equal(CandidateBaselineState.Frozen,
+            await after.CandidateBaselines.Where(x => x.Id == sourceBaselineId).Select(x => x.State).SingleAsync());
+    }
+
     [Theory]
     [InlineData("source.csv")]
     [InlineData("source.xlsx")]

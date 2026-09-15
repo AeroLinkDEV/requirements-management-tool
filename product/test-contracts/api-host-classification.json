@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 146,
-    "tests": 914,
-    "knownCases": 1025,
+    "classes": 147,
+    "tests": 930,
+    "knownCases": 1046,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -26,9 +26,9 @@
       "unknownCaseTests": 0
     },
     "reusable-host": {
-      "classes": 54,
-      "tests": 327,
-      "knownCases": 368,
+      "classes": 55,
+      "tests": 343,
+      "knownCases": 389,
       "unknownCaseTests": 0
     }
   },
@@ -1176,6 +1176,18 @@
       ]
     },
     {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "tests": 15,
+      "knownCases": 20,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ControlledAttachmentMutationApiTests",
       "tests": 12,
       "knownCases": 12,
@@ -1287,6 +1299,19 @@
       ]
     },
     {
+      "cls": "ProjectSetupInceptionApiTests",
+      "tests": 8,
+      "knownCases": 10,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "BuildTestSetApiTests",
       "tests": 7,
       "knownCases": 8,
@@ -1313,18 +1338,6 @@
       "cls": "ProcedureSavedViewApiTests",
       "tests": 7,
       "knownCases": 14,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "auth-policy",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProjectSetupInceptionApiTests",
-      "tests": 7,
-      "knownCases": 9,
       "unknownCaseTests": 0,
       "classification": "reusable-host",
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",

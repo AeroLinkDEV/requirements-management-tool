@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 914,
-    "cases": 1025,
-    "classes": 146,
-    "hostedTests": 866,
-    "hostedCases": 955,
+    "tests": 930,
+    "cases": 1046,
+    "classes": 147,
+    "hostedTests": 882,
+    "hostedCases": 976,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 14,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 569,
-      "cases": 638,
+      "tests": 576,
+      "cases": 650,
       "unknownCases": 0,
-      "classes": 113
+      "classes": 114
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 167,
-      "cases": 181,
+      "tests": 176,
+      "cases": 190,
       "unknownCases": 0,
-      "classes": 60
+      "classes": 62
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -10365,8 +10365,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 639,
-        "end": 885
+        "start": 852,
+        "end": 1098
       }
     },
     {
@@ -10403,6 +10403,24 @@
       "sourceLines": {
         "start": 109,
         "end": 285
+      }
+    },
+    {
+      "cls": "ProjectSetupInceptionApiTests",
+      "test": "Native_source_repair_invalidates_reconciliation_and_reaccepts_the_repaired_profile",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 645,
+        "end": 850
       }
     },
     {
@@ -10559,6 +10577,271 @@
       "sourceLines": {
         "start": 15,
         "end": 83
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "A_ladder_with_no_applicable_subjects_is_truthfully_ready_with_an_empty_standard",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 1017,
+        "end": 1063
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "A_missing_software_profile_keeps_the_legacy_case_only_interpretation_everywhere",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 239,
+        "end": 325
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "A_rule_without_an_approval_stage_is_not_ready_and_is_refused_by_rule",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 586,
+        "end": 665
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "A_stage_demanding_an_unconfigurable_authority_is_not_ready_and_names_its_stage",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 672,
+        "end": 732
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "A_stale_review_definition_that_no_longer_covers_the_ladder_is_refused_even_when_re_accepted",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 430,
+        "end": 497
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "A_step_without_a_readable_position_is_diagnosed_and_refused",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 4,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 740,
+        "end": 824
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "A_supported_subject_spelling_reads_the_same_in_the_verdict_and_at_the_gate",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 831,
+        "end": 888
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "Compatible_customised_rules_remain_supported_end_to_end",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 952,
+        "end": 1015
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "Differently_cased_duplicate_subjects_are_not_covered",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 894,
+        "end": 950
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "Disabled_system_verification_finalizes_into_a_real_project_without_system_verification_scaffolding",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 104,
+        "end": 237
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "Exact_rule_coverage_is_required_beyond_set_membership",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 3,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 499,
+        "end": 579
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "Explicit_empty_profile_with_verification_enabled_stays_empty_and_is_diagnosed_by_level",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 327,
+        "end": 382
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "New_project_default_finalizes_with_case_and_procedure",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 1065,
+        "end": 1104
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "Recorded_contradictory_draft_is_refused_with_no_partial_state_and_a_truthful_verdict",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 33,
+        "end": 102
+      }
+    },
+    {
+      "cls": "ProjectSetupVerificationProfileApiTests",
+      "test": "Unrecognized_artifact_token_is_diagnosed_by_level_and_token_not_as_a_payload_error",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 384,
+        "end": 428
       }
     },
     {

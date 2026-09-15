@@ -494,24 +494,25 @@ public sealed class ProjectSetupService(
         string? ladderJson = null)
     {
         ladderJson ??= draft.LadderJson;
-        using var document = JsonDocument.Parse(ladderJson);
-        if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.EnumerateObject().Any() == false)
-            return NewProjectLadderFactory.Create(projectId, now);
-
-        var definition = Deserialize<LadderDefinitionWire>(draft.LadderJson, "ladder");
-        if (definition.Steps is null || definition.Steps.Count == 0)
-            throw new ProjectSetupInvalidException("The reviewed ladder must contain at least one supported level.");
+        // The final gate reads the same interpretation the readiness verdict and the offered standard used,
+        // so an unrecognized artifact token is diagnosed by level and field instead of surfacing only as an
+        // undifferentiated payload error.
+        var reading = ProjectSetupLadderReader.Read(ladderJson);
+        if (reading.IsDefault) return NewProjectLadderFactory.Create(projectId, now);
+        if (reading.Findings.Count > 0)
+            throw new ProjectSetupInvalidException(reading.Findings[0].Message, reading.Findings);
         IReadOnlyList<LadderStepDraft> steps;
         IReadOnlyList<LadderRelationshipDraft> relationships;
         try
         {
             (steps, relationships) = ProjectLadderDraftValidator.Validate(
-                definition.Steps.Select(x => new LadderStepDraft(x.CatalogueEntry, x.Position,
-                    x.Capabilities, x.EnabledArtifactKinds)).ToArray(),
-                (definition.Relationships ?? []).Select(x => new LadderRelationshipDraft(x.Parent, x.Child)).ToArray(),
-                LegacyLadderPolicy.Instance);
+                reading.Steps, reading.Relationships, LegacyLadderPolicy.Instance);
         }
-        catch (DomainException ex) { throw new ProjectSetupInvalidException(ex.Message, ex); }
+        catch (DomainException ex)
+        {
+            throw new ProjectSetupInvalidException(ex.Message, ex, ProjectLadderDraftValidator.Inspect(
+                reading.Steps, reading.Relationships, LegacyLadderPolicy.Instance));
+        }
 
         var ladder = ProjectLadderConfiguration.CreateDraft(projectId, now);
         var byName = new Dictionary<string, ProjectLadderStep>(StringComparer.Ordinal);
@@ -536,29 +537,41 @@ public sealed class ProjectSetupService(
         if (parsed.RootElement.ValueKind != JsonValueKind.Object || !parsed.RootElement.EnumerateObject().Any())
             throw new ProjectSetupInvalidException("Review and approval rules must retain a concrete accepted definition.");
 
-        var supplied = Deserialize<ReviewRulesWire>(rulesJson, "review rules");
-        if (supplied.Rules is null)
-            throw new ProjectSetupInvalidException("The reviewed rules must contain a typed rules array.");
+        // Definition semantics come from the same authority the readiness verdict uses. A configuration the
+        // verdict reported as ready therefore cannot be refused here for a reason the verdict never saw, and
+        // a refusal names the affected rule and stage instead of only the payload.
+        var definitionFindings = ProjectSetupReviewRules.InspectRules(rulesJson);
+        var definition = ProjectSetupReviewRules.InspectDefinition(rulesJson);
+        if (!definition.HasRulesArray)
+            throw new ProjectSetupInvalidException("The reviewed rules must contain a typed rules array.",
+                definitionFindings);
         var applicable = ApplicableSubjects(ladder);
-        if (supplied.Rules.Count == 0)
+        if (definition.RuleCount == 0)
         {
             if (applicable.Count != 0)
                 throw new ProjectSetupInvalidException("The reviewed rules must cover each applicable ladder subject.");
             return; // A Customer-only/non-verification ladder truthfully has no review workflows to offer.
         }
-        var suppliedSubjects = supplied.Rules.Select(x => x.Subject).ToArray();
-        if (suppliedSubjects.Distinct().Count() != suppliedSubjects.Length || !applicable.SetEquals(suppliedSubjects))
+        // Subject names are compared the way the typed read resolves them, case-insensitively, so a
+        // definition the wire contract accepts is not refused here for its letter case.
+        var suppliedSubjects = definition.Subjects;
+        var applicableNames = applicable.Select(x => x.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (suppliedSubjects.Distinct(StringComparer.OrdinalIgnoreCase).Count() != suppliedSubjects.Count
+            || !applicableNames.SetEquals(suppliedSubjects))
             throw new ProjectSetupInvalidException("Review rules must cover each applicable ladder subject exactly once.");
+        if (definitionFindings.Count > 0)
+            throw new ProjectSetupInvalidException(definitionFindings[0].Message, definitionFindings);
+
+        // Every rule and stage is now known to be readable by the workflow authority, so the typed read is
+        // only the materialization step.
+        var supplied = Deserialize<ReviewRulesWire>(rulesJson, "review rules");
+        if (supplied.Rules is null)
+            throw new ProjectSetupInvalidException("The reviewed rules must contain a typed rules array.");
         foreach (var suppliedRule in supplied.Rules)
         {
-            if (suppliedRule.Stages is null || suppliedRule.Stages.Count == 0)
-                throw new ProjectSetupInvalidException($"Review rule {suppliedRule.Subject} requires a stage.");
-            if (!suppliedRule.Stages.Any(x => x.Kind == ReviewStageKind.Review)
-                || !suppliedRule.Stages.Any(x => x.Kind == ReviewStageKind.Approval))
-                throw new ProjectSetupInvalidException($"Review rule {suppliedRule.Subject} requires explicit Review and Approval stages.");
             var workflow = new ReviewWorkflow(projectId, suppliedRule.Name ?? suppliedRule.Subject.ToString(),
                 suppliedRule.Subject, ReviewMode.Sequential,
-                suppliedRule.Stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole, x.Kind,
+                suppliedRule.Stages!.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole, x.Kind,
                     x.AuthorityKind)).ToArray(), actor, now);
             workflow.Activate(actor, now);
             db.ReviewWorkflows.Add(workflow);
@@ -641,10 +654,6 @@ public sealed class ProjectSetupService(
         return false;
     }
 
-    private sealed record LadderDefinitionWire(List<LadderStepWire>? Steps, List<LadderRelationshipWire>? Relationships);
-    private sealed record LadderStepWire(string CatalogueEntry, int Position, LevelCapabilities Capabilities,
-        List<VerificationArtifactKind>? EnabledArtifactKinds);
-    private sealed record LadderRelationshipWire(string Parent, string Child);
     private sealed record ReviewRulesWire(List<ReviewRuleWire>? Rules);
     private sealed record ReviewRuleWire(ReviewSubject Subject, string? Name, List<ReviewStageWire>? Stages);
     private sealed record ReviewStageWire(string Name, ProgramRole RequiredRole, ReviewStageKind Kind,
@@ -662,6 +671,18 @@ public sealed class ProjectSetupConflictException : InvalidOperationException
 }
 public sealed class ProjectSetupInvalidException : InvalidOperationException
 {
+    /// <summary>
+    /// Structured, level-identified findings when the refusal came from a diagnosable configuration.
+    /// Null means the message is the whole answer; callers must not synthesize findings to fill it.
+    /// </summary>
+    public IReadOnlyList<LadderFinding>? Findings { get; }
+
     public ProjectSetupInvalidException(string message) : base(message) { }
     public ProjectSetupInvalidException(string message, Exception inner) : base(message, inner) { }
+
+    public ProjectSetupInvalidException(string message, IReadOnlyList<LadderFinding> findings)
+        : base(message) => Findings = findings;
+
+    public ProjectSetupInvalidException(string message, Exception inner, IReadOnlyList<LadderFinding> findings)
+        : base(message, inner) => Findings = findings;
 }

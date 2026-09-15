@@ -245,8 +245,10 @@
 }
 .setupLadderRows > li {
   display: grid;
-  grid-template-columns: 28px minmax(170px, 1fr) minmax(260px, 1.6fr) minmax(160px, 0.8fr) auto;
-  align-items: end;
+  /* number | level | capabilities | row actions; the readings and the diagnostics/repairs take their own
+     full-width rows, so the row fits the step panel and the facts keep enough width to stay legible. */
+  grid-template-columns: 26px minmax(140px, 0.9fr) minmax(210px, 1.5fr) auto;
+  align-items: start;
   gap: 13px;
   border: 1px solid #dde6eb;
   border-radius: 8px;
@@ -287,9 +289,103 @@
 .setupLadderRows > li > label:last-of-type {
   align-self: stretch;
 }
+.setupVerificationState {
+  display: grid;
+  grid-template-columns: minmax(230px, 1fr) minmax(200px, 0.7fr);
+  grid-column: 1 / -1;
+  gap: 7px;
+  min-width: 0;
+  font-size: 11px;
+}
+.setupLadderProfile {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.setupLadderProfile select {
+  width: 100%;
+  max-width: 240px;
+}
+.setupLadderProfileRepair {
+  justify-self: start;
+  border: 1px solid #bed0db;
+  border-radius: 6px;
+  background: white;
+  color: #236b9f;
+  padding: 6px 8px;
+  font: 650 11px var(--font-body);
+  cursor: pointer;
+}
+.setupLadderProfileRepair:hover {
+  background: #edf7fa;
+}
+/* Diagnostics and repairs own a full-width row of their own: readings, findings and repair controls can no
+   longer be auto-placed into a narrow control column, and long findings stay readable. */
+.setupLadderDiagnostics {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.setupLadderDiagnostics > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.setupLadderRepairs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.setupLadderRepairs button {
+  border: 1px solid #bed0db;
+  border-radius: 6px;
+  background: white;
+  color: #236b9f;
+  padding: 7px 10px;
+  font: 650 11px var(--font-body);
+  cursor: pointer;
+}
+.setupLadderRepairs button:hover {
+  background: #edf7fa;
+}
+.setupVerificationFacts {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+}
+.setupVerificationFacts > div {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 6px;
+}
+.setupVerificationFacts dt {
+  color: var(--ink-500);
+  font-weight: 700;
+}
+.setupVerificationFacts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.setupVerificationState button {
+  justify-self: start;
+  border: 1px solid #bed0db;
+  border-radius: 6px;
+  background: white;
+  color: #236b9f;
+  padding: 6px 8px;
+  font: 650 11px var(--font-body);
+  cursor: pointer;
+}
+.setupVerificationState button:hover {
+  background: #edf7fa;
+}
 .setupRowActions {
   display: flex;
   gap: 4px;
+  /* The row actions belong to the control row, not to the full-width diagnostics row that follows them. */
+  grid-row: 1;
+  grid-column: 4;
+  align-self: start;
 }
 .setupRowActions button,
 .setupStepPanel > button:not(.setupFinalizeButton) {
@@ -546,7 +642,9 @@
   font-size: 12px;
 }
 
-@media (max-width: 980px) {
+/* The step panel keeps a fixed sidebar beside it until this width, and the control row no longer fits a
+   narrower panel: stacking the layout here keeps every control inside the panel and the viewport. */
+@media (max-width: 1100px) {
   .projectSetupLayout {
     grid-template-columns: 1fr;
   }
@@ -556,9 +654,17 @@
   .setupLadderRows > li {
     grid-template-columns: 28px minmax(170px, 1fr) minmax(240px, 1.4fr);
   }
+  .setupVerificationState {
+    grid-template-columns: 1fr;
+  }
+  /* Every wide child is placed explicitly: an auto-placed fieldset would land in the 28px row-number column
+     of the next row, which is how the capability labels used to spill across the readings. */
   .setupLadderRows > li > label:last-of-type,
+  .setupLadderRows > li > fieldset,
+  .setupVerificationState,
   .setupRowActions {
     grid-column: 2 / -1;
+    grid-row: auto;
   }
 }
 @media (max-width: 620px) {
@@ -588,8 +694,10 @@
   .setupLadderRows > li > label,
   .setupLadderRows > li > fieldset,
   .setupLadderRows > li > label:last-of-type,
+  .setupVerificationState,
   .setupRowActions {
     grid-column: 2;
+    grid-row: auto;
   }
   .setupRule > header,
   .setupRuleStage {
