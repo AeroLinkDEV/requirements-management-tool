@@ -24,9 +24,56 @@ type LadderStep = {
   catalogueEntry: string;
   position: number;
   capabilities: number;
-  enabledArtifactKinds?: VerificationKind[];
+  /**
+   * The persisted profile, kept exactly as it was saved. `undefined` means the draft never carried a
+   * profile for this level, which is a different fact from an explicitly empty list and from a list this
+   * version does not recognize; collapsing them is how a disabled level acquires artifacts nobody chose.
+   */
+  enabledArtifactKinds?: unknown;
 };
 type LadderDefinition = { steps: LadderStep[]; relationships: { parent: string; child: string }[] };
+
+/** One server-diagnosed problem, identified by code and by the level and field it belongs to. */
+type LadderFinding = {
+  code: string;
+  level?: string | null;
+  field?: string | null;
+  message: string;
+  token?: string | null;
+};
+type ReadinessStep = {
+  level: string;
+  capabilities: number;
+  stored?: string[] | null;
+  effective: string[];
+  profileSource: string;
+};
+type ReadinessReview = {
+  applicableSubjects: string[];
+  acceptedSubjects: string[];
+  missingSubjects: string[];
+  unexpectedSubjects: string[];
+  duplicateSubjects: string[];
+  accepted: boolean;
+  definitionConcrete: boolean;
+  acceptanceMatchesConfiguration: boolean;
+  covers: boolean;
+};
+/**
+ * The server's authoritative verdict for one saved configuration. Its scope is the ladder/profile and
+ * review-rule compatibility only; administrator authority, unsaved edits, source reconciliation, the
+ * source signature and the final transactional gate remain separate facts computed beside it.
+ */
+type ReadinessView = {
+  draftId: string;
+  version: number;
+  evaluatedConfigurationHash?: string | null;
+  ladderValid: boolean;
+  steps: ReadinessStep[];
+  findings: LadderFinding[];
+  review: ReadinessReview;
+  configurationReady: boolean;
+};
 type ReviewStage = {
   name: string;
   kind: "Review" | "Approval";
@@ -54,6 +101,7 @@ type SetupDraft = {
   selectedCategories: string[];
   ladder: unknown;
   reviewRules: { accepted: boolean; acceptanceHash?: string | null; definition?: unknown; suggestedDefinition?: unknown };
+  validation?: ReadinessView | null;
   repository: unknown;
   mapping: unknown;
   finalization?: { programId: string; projectId: string; releaseId: string } | null;
@@ -159,6 +207,63 @@ const asObject = (value: unknown): Record<string, unknown> =>
 const isUuid = (value: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim());
 
+/** Absent and null both mean "the draft carried no profile"; anything else is returned untouched. */
+function preservedArtifactProfile(value: unknown): unknown {
+  if (value === undefined || value === null) return undefined;
+  return Array.isArray(value) ? [...value] : value;
+}
+
+/** The artifact kinds this build understands, or undefined when the draft carried no profile at all. */
+function recognizedArtifactKinds(step: LadderStep): VerificationKind[] | undefined {
+  if (!Array.isArray(step.enabledArtifactKinds)) return undefined;
+  return step.enabledArtifactKinds.filter(
+    (kind): kind is VerificationKind => kind === "Case" || kind === "Procedure",
+  );
+}
+
+/** Tokens the draft carries that this build cannot interpret. They are shown, never silently dropped. */
+function unrecognizedArtifactTokens(step: LadderStep): string[] {
+  if (!Array.isArray(step.enabledArtifactKinds)) return [];
+  return step.enabledArtifactKinds.filter(
+    (kind): kind is string => typeof kind === "string" && kind !== "Case" && kind !== "Procedure",
+  );
+}
+
+/** A profile the server could not read as a list at all. Kept verbatim so a save cannot rewrite it. */
+function artifactProfileIsMalformed(step: LadderStep): boolean {
+  return step.enabledArtifactKinds !== undefined && !Array.isArray(step.enabledArtifactKinds);
+}
+
+function hasVerificationCapability(step: LadderStep) {
+  return (step.capabilities & 2) !== 0;
+}
+
+function profileSelection(step: LadderStep): "" | "Case" | "Case+Procedure" {
+  const kinds = recognizedArtifactKinds(step);
+  if (!kinds || kinds.length === 0) return "";
+  return kinds.includes("Procedure") ? "Case+Procedure" : "Case";
+}
+
+function levelLabel(levelId: string) {
+  return levelCatalogue.find((level) => level.id === levelId)?.label ?? levelId;
+}
+
+function capabilitySummary(step: LadderStep) {
+  const labels = capabilityLabels.filter((_, index) => (step.capabilities & (1 << index)) !== 0);
+  return labels.length ? labels.join(", ") : "No capabilities";
+}
+
+/** What a level verifies, said plainly — including that it verifies nothing. */
+function verificationSummary(step: LadderStep, verdict?: ReadinessStep) {
+  if (!hasVerificationCapability(step))
+    return "Verification disabled — no verification artifacts are enabled.";
+  const effective = verdict?.effective ?? recognizedArtifactKinds(step);
+  const stated = effective && effective.length ? effective.join(" + ") : "profile not yet chosen";
+  return `Verification enabled · ${stated}${
+    verdict?.profileSource === "catalogue-fallback" ? " (maintained default for an unspecified profile)" : ""
+  }`;
+}
+
 function normalizeLadder(value: unknown): LadderDefinition {
   const source = asObject(value);
   const rawSteps = Array.isArray(source.steps) ? source.steps : [];
@@ -167,18 +272,16 @@ function normalizeLadder(value: unknown): LadderDefinition {
     const catalogueEntry = typeof row.catalogueEntry === "string" ? row.catalogueEntry : "";
     const catalogue = levelCatalogue.find((level) => level.id === catalogueEntry);
     if (!catalogue) return [];
-    const enabled = Array.isArray(row.enabledArtifactKinds)
-      ? row.enabledArtifactKinds.filter(
-          (kind): kind is VerificationKind => kind === "Case" || kind === "Procedure",
-        )
-      : [...catalogue.verification];
     return [
       {
         catalogueEntry,
         position: typeof row.position === "number" ? row.position : index + 1,
         capabilities:
           typeof row.capabilities === "number" ? row.capabilities : catalogue.capabilities,
-        enabledArtifactKinds: enabled.length ? enabled : [...catalogue.verification],
+        // Saved intent is preserved verbatim: an absent profile stays absent, an explicit list — empty,
+        // valid or unrecognized — stays exactly as the server stored it. Only the server decides what an
+        // absent profile means, and it says so in the readiness verdict.
+        enabledArtifactKinds: preservedArtifactProfile(row.enabledArtifactKinds),
       },
     ];
   });
@@ -418,11 +521,21 @@ export default function ProjectSetupWalkthrough({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
+  const [revalidating, setRevalidating] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [sourceState, setSourceState] = useState<SourceDraftState>(emptySourceState);
   const finalizationKey = useRef<string | undefined>(undefined);
   const draftLoadGeneration = useRef(0);
+  // Local edits made while a request is in flight. A response that no longer describes what is on screen
+  // must not overwrite it, and must not restore a readiness claim for answers it never validated.
+  const editGeneration = useRef(0);
+  // A compatible profile the creator chose in this session, keyed by draft and level identity rather than
+  // by row position, so reordering or switching drafts cannot restore another level's choice.
+  const rememberedProfiles = useRef<Map<string, VerificationKind[]>>(new Map());
+  useEffect(() => {
+    rememberedProfiles.current.clear();
+  }, [draft?.draftId]);
   const sourceSaveRef = useRef<(() => Promise<number | null>) | null>(null);
   const flushingSourceRef = useRef(false);
   const registerSourceSave = useCallback((save: (() => Promise<number | null>) | null) => {
@@ -451,7 +564,13 @@ export default function ProjectSetupWalkthrough({
             const sourceVersion = typeof sourceRecord.draftVersion === "number" ? sourceRecord.draftVersion : loaded.version;
             if (source) {
               setSourceState({ source, assertionAccepted: false, password: "" });
-              if (sourceVersion >= loaded.version) setDraft((current) => current ? { ...current, version: sourceVersion } : current);
+              if (sourceVersion > loaded.version) {
+                // The draft moved past the version the loaded verdict describes. Inheriting that verdict
+                // would claim the newer answers were validated when they were never read.
+                setDraft((current) =>
+                  current ? { ...current, version: sourceVersion, validation: null } : current,
+                );
+              }
             }
           } catch (failure) {
             if (!isCurrentLoad()) return;
@@ -513,6 +632,7 @@ export default function ProjectSetupWalkthrough({
   }, [api, draftId, loadDraft, onDraftCreated]);
 
   const update = <K extends keyof SetupValues>(key: K, value: SetupValues[K]) => {
+    editGeneration.current += 1;
     setValues((current) => {
       if (!current) return current;
       const next = { ...current, [key]: value };
@@ -592,23 +712,39 @@ export default function ProjectSetupWalkthrough({
   );
   const versionIdentity = values ? officialBuildName(values.buildVersion) : undefined;
   const versionOrder = values ? buildVersionOrder(values.buildVersion) : undefined;
-  const completedDraft = draft?.state === "Completed" ? draft : undefined;
-  const completedResult: FinalizationResult | undefined =
-    completedDraft?.finalization?.programId &&
-    completedDraft.finalization.projectId &&
-    completedDraft.finalization.releaseId
+  /** The authoritative completed outcome a draft records, if it has one. */
+  const finalizationResultFromDraft = (source: SetupDraft): FinalizationResult | undefined =>
+    source.finalization?.programId && source.finalization.projectId && source.finalization.releaseId
       ? {
           state: "Completed",
           alreadyCompleted: true,
-          programId: completedDraft.finalization.programId,
-          projectId: completedDraft.finalization.projectId,
-          releaseId: completedDraft.finalization.releaseId,
-          version: completedDraft.build.version,
+          programId: source.finalization.programId,
+          projectId: source.finalization.projectId,
+          releaseId: source.finalization.releaseId,
+          version: source.build.version,
           officialBuildName:
-            completedDraft.build.officialName ??
-            officialBuildName(completedDraft.build.version) ??
+            source.build.officialName ??
+            officialBuildName(source.build.version) ??
             "Identity unavailable",
         }
+      : undefined;
+  const completedResult =
+    draft?.state === "Completed" ? finalizationResultFromDraft(draft) : undefined;
+  // The server's verdict describes one saved configuration. It is only evidence while it describes the
+  // draft and version on screen; a verdict that arrived for other answers is not inherited by these ones.
+  const validationIsCurrent = Boolean(
+    draft?.validation &&
+      draft.validation.draftId === draft.draftId &&
+      draft.validation.version === draft.version,
+  );
+  const configurationReady = validationIsCurrent && draft?.validation?.configurationReady === true;
+  const findingsForLevel = (level: string) =>
+    validationIsCurrent
+      ? (draft?.validation?.findings ?? []).filter((finding) => finding.level === level)
+      : [];
+  const readinessStepForLevel = (level: string) =>
+    validationIsCurrent
+      ? draft?.validation?.steps.find((step) => step.level === level)
       : undefined;
   const freshComplete =
     values?.startKind === "Fresh" &&
@@ -616,16 +752,16 @@ export default function ProjectSetupWalkthrough({
     Boolean(values.softwareProduct.trim()) &&
     versionOrder !== undefined &&
     values.ladder.steps.length > 0 &&
-    values.reviewRulesAccepted &&
-    reviewRulesAreComplete(values.reviewRulesDefinition);
+    !hasUnsavedChanges &&
+    configurationReady;
   const sourceComplete =
     values?.startKind !== "Fresh" &&
     Boolean(values?.projectName.trim()) &&
     Boolean(values?.softwareProduct.trim()) &&
     versionOrder !== undefined &&
     Boolean(values?.ladder.steps.length) &&
-    values?.reviewRulesAccepted === true &&
-    reviewRulesAreComplete(values?.reviewRulesDefinition) &&
+    !hasUnsavedChanges &&
+    configurationReady &&
     Boolean(
       sourceState.source?.reconciliation?.ready &&
         sourceState.source.assertion?.hash &&
@@ -655,9 +791,7 @@ export default function ProjectSetupWalkthrough({
     try {
       const version = await sourceSaveRef.current();
       if (version !== null) {
-        setDraft((current) =>
-          current && version >= current.version ? { ...current, version } : current,
-        );
+        adoptDraftVersion(version);
       }
       return version;
     } finally {
@@ -690,6 +824,7 @@ export default function ProjectSetupWalkthrough({
       if (sourceVersion === null) return false;
       expectedVersion = sourceVersion;
     }
+    const generationAtRequest = editGeneration.current;
     setSaving(true);
     setError("");
     setNotice("");
@@ -704,7 +839,10 @@ export default function ProjectSetupWalkthrough({
       );
       const saved = "draft" in response ? response.draft : response;
       setDraft(saved);
-      setValues(valuesFromDraft(saved));
+      // Answers typed while this save was in flight are newer than the response. Adopt the saved draft and
+      // its verdict, but never replace what the creator is currently editing with what they had already
+      // changed; the outstanding edit keeps readiness unavailable until they save again.
+      if (editGeneration.current === generationAtRequest) setValues(valuesFromDraft(saved));
       setCurrentStep(saved.currentStep);
       setNotice("Saved on the server. You can resume this setup after signing out or restarting.");
       if (exitAfterSave) onExit();
@@ -751,9 +889,20 @@ export default function ProjectSetupWalkthrough({
     return saved ? saved.version : null;
   };
 
-  const updateSourceVersion = useCallback((version: number) => {
-    setDraft((current) => (current && version >= current.version ? { ...current, version } : current));
+  /**
+   * Adopts a draft version reported by another endpoint. A source call can advance the draft without
+   * returning the setup view, so the verdict that described the earlier version is dropped rather than
+   * carried forward as though it validated answers nobody has read yet.
+   */
+  const adoptDraftVersion = useCallback((version: number) => {
+    setDraft((current) => {
+      if (!current || version < current.version) return current;
+      if (version === current.version) return current;
+      return { ...current, version, validation: null };
+    });
   }, []);
+
+  const updateSourceVersion = adoptDraftVersion;
 
   const updateSourceCategories = useCallback((categories: string[]) => {
     setValues((current) => {
@@ -774,6 +923,101 @@ export default function ProjectSetupWalkthrough({
   const updateSourceState = useCallback((next: SourceDraftState) => {
     setSourceState(next);
   }, []);
+
+  /**
+   * Re-reads the saved configuration so the server can re-issue its verdict for a draft whose version
+   * moved without the answers changing. It deliberately keeps the loaded source state: a recheck must not
+   * throw away a staged source, an accepted assertion, or anything the creator has already answered.
+   */
+  const revalidate = async () => {
+    if (!draft) return;
+    const generationAtRequest = editGeneration.current;
+    setRevalidating(true);
+    try {
+      const loaded = await apiRequest<SetupDraft>(`${api}/api/project-setups/${draft.draftId}`);
+      setDraft(loaded);
+      if (editGeneration.current === generationAtRequest) setValues(valuesFromDraft(loaded));
+      setNotice("Rechecked the saved configuration against the server's maintained rules.");
+    } catch (failure) {
+      setError(
+        operationError(
+          failure,
+          "The saved configuration could not be rechecked. Your answers remain on the server.",
+        ),
+      );
+    } finally {
+      setRevalidating(false);
+    }
+  };
+
+  /**
+   * Decides the visible result of a failed finalization from authoritative recovered state rather than
+   * from the fact that a request threw. A refusal, a committed result and an unresolved attempt are
+   * three different facts, and only the first two are established by the server.
+   */
+  const recoverFinalization = async (failure: unknown, attempted: SetupDraft) => {
+    const generationAtRequest = editGeneration.current;
+    const status = failure instanceof ApiError ? failure.status : undefined;
+    const reported = operationError(failure, "The project could not be finalized.");
+    let recovered: SetupDraft | undefined;
+    let recoveryFailed = false;
+    try {
+      recovered = await apiRequest<SetupDraft>(`${api}/api/project-setups/${attempted.draftId}`);
+    } catch {
+      recoveryFailed = true;
+    }
+    if (recovered) {
+      setDraft(recovered);
+      if (editGeneration.current === generationAtRequest) setValues(valuesFromDraft(recovered));
+      setCurrentStep(recovered.currentStep);
+      // A recorded completion outranks the exception that prompted the recovery read.
+      const completed = finalizationResultFromDraft(recovered);
+      if (recovered.state === "Completed" && completed) {
+        // Show the recorded outcome on this screen rather than navigating past it: the creator still gets
+        // the explicit build selection, and a lost response is not retold as a failure.
+        setError("");
+        setNotice(
+          "The Project was created. The earlier response was lost before it arrived, so this is the recorded result.",
+        );
+        return;
+      }
+    }
+    if (status === 400) {
+      setError(
+        `${reported} The saved configuration is still a recoverable draft; repair what the findings identify, save it, and retry.`,
+      );
+      return;
+    }
+    if (status === 403) {
+      setError(
+        `${reported} Only an AeroLink administrator can create a Project. Your saved setup remains available for editing and resume.`,
+      );
+      return;
+    }
+    if (status === 409) {
+      setError(
+        `${reported} This saved setup has already been reloaded at its current version; review the answers and retry.`,
+      );
+      return;
+    }
+    // A transport failure or a server error does not establish that the transaction rolled back. It may
+    // still be completing, or it may have committed after the response was lost.
+    if (recoveryFailed) {
+      setError(
+        `The result of this finalization could not be confirmed because the recovery read failed. ${reported} This draft is still identified on the server; retry when the service is reachable instead of starting another setup.`,
+      );
+      return;
+    }
+    if (recovered?.state === "Finalizing") {
+      setError(
+        `${reported} The server reports this setup is still being finalized. Wait briefly, then retry from this draft.`,
+      );
+      return;
+    }
+    setError(
+      `The result of this finalization cannot yet be confirmed. ${reported} The server may still be completing this attempt; retry the same request from this draft rather than starting another setup.`,
+    );
+  };
 
   const finalize = async () => {
     if (!draft || !values || (!freshComplete && !sourceComplete)) return;
@@ -806,10 +1050,9 @@ export default function ProjectSetupWalkthrough({
       );
       onCompleted(result);
     } catch (failure) {
-      setError(
-        `${operationError(failure, "The project could not be finalized.")} Retry with the same request; the server protects against duplicate project creation.`,
-      );
-      await loadDraft(draft.draftId);
+      // Recovery is awaited so the message on screen describes the settled outcome, not the request that
+      // may or may not have committed.
+      await recoverFinalization(failure, draft);
     } finally {
       setFinalizing(false);
     }
@@ -1099,6 +1342,28 @@ export default function ProjectSetupWalkthrough({
                     i === index ? { ...current, ...patch } : current,
                   ),
                 });
+              /**
+               * Turning verification off removes the artifacts it enabled, in the same action, so the
+               * saved answers cannot contradict the capability the creator just cleared. Turning it back
+               * on restores a choice made in this session for this draft and level, or asks for one; it
+               * never silently substitutes the new-project default for a profile nobody chose.
+               */
+              const setVerification = (enabled: boolean) => {
+                if (!enabled) {
+                  const kinds = recognizedArtifactKinds(step);
+                  if (draft && kinds && kinds.length)
+                    rememberedProfiles.current.set(`${draft.draftId}:${step.catalogueEntry}`, kinds);
+                  updateStep({ capabilities: step.capabilities & ~2, enabledArtifactKinds: [] });
+                  return;
+                }
+                const restored = draft
+                  ? rememberedProfiles.current.get(`${draft.draftId}:${step.catalogueEntry}`)
+                  : undefined;
+                updateStep({
+                  capabilities: step.capabilities | 2,
+                  enabledArtifactKinds: catalogue.id === "System" ? ["Procedure"] : (restored ?? []),
+                });
+              };
               return (
                 <li key={`${step.catalogueEntry}-${index}`}>
                   <span>{index + 1}</span>
@@ -1135,6 +1400,7 @@ export default function ProjectSetupWalkthrough({
                     <legend>Capabilities</legend>
                     {capabilityLabels.map((label, capabilityIndex) => {
                       const allowed = (catalogue.capabilities & (1 << capabilityIndex)) !== 0;
+                      const isVerification = capabilityIndex === 1;
                       return (
                         <label key={label}>
                           <input
@@ -1142,11 +1408,13 @@ export default function ProjectSetupWalkthrough({
                             checked={allowed && (step.capabilities & (1 << capabilityIndex)) !== 0}
                             disabled={!allowed}
                             onChange={(event) =>
-                              updateStep({
-                                capabilities: event.target.checked
-                                  ? step.capabilities | (1 << capabilityIndex)
-                                  : step.capabilities & ~(1 << capabilityIndex),
-                              })
+                              isVerification
+                                ? setVerification(event.target.checked)
+                                : updateStep({
+                                    capabilities: event.target.checked
+                                      ? step.capabilities | (1 << capabilityIndex)
+                                      : step.capabilities & ~(1 << capabilityIndex),
+                                  })
                             }
                           />
                           {label}
@@ -1154,29 +1422,72 @@ export default function ProjectSetupWalkthrough({
                       );
                     })}
                   </fieldset>
-                  {(step.catalogueEntry === "HighLevel" || step.catalogueEntry === "LowLevel") && (
-                    <label>
-                      Verification profile
-                      <select
-                        value={
-                          step.enabledArtifactKinds?.includes("Procedure")
-                            ? "Case+Procedure"
-                            : "Case"
-                        }
-                        onChange={(event) =>
-                          updateStep({
-                            enabledArtifactKinds:
-                              event.target.value === "Case+Procedure"
-                                ? ["Case", "Procedure"]
-                                : ["Case"],
-                          })
-                        }
-                      >
-                        <option value="Case">Case-only</option>
-                        <option value="Case+Procedure">Case + Procedure</option>
-                      </select>
-                    </label>
+                  {catalogue.verification.length > 0 && (
+                    <div className="setupVerificationState">
+                      {!hasVerificationCapability(step) ? (
+                        <p className="setupFieldHint">
+                          Verification disabled · no verification artifacts are enabled for this level.
+                        </p>
+                      ) : catalogue.id === "System" ? (
+                        <p className="setupFieldHint">Verification enabled · Procedure</p>
+                      ) : (
+                        <>
+                          {recognizedArtifactKinds(step) === undefined && (
+                            <p className="setupFieldHint">
+                              No verification profile is saved for this level. The maintained
+                              interpretation of an unspecified profile here is{" "}
+                              {(readinessStepForLevel(step.catalogueEntry)?.effective ?? []).join(" + ") ||
+                                "no artifacts"}
+                              ; choose a profile to record an explicit decision.
+                            </p>
+                          )}
+                          <label>
+                            Verification profile
+                            <select
+                              value={profileSelection(step)}
+                              onChange={(event) =>
+                                updateStep({
+                                  enabledArtifactKinds:
+                                    event.target.value === "Case+Procedure"
+                                      ? ["Case", "Procedure"]
+                                      : event.target.value === "Case"
+                                        ? ["Case"]
+                                        : [],
+                                })
+                              }
+                            >
+                              <option value="">Choose a verification profile…</option>
+                              <option value="Case">Case-only</option>
+                              <option value="Case+Procedure">Case + Procedure</option>
+                            </select>
+                          </label>
+                        </>
+                      )}
+                      {unrecognizedArtifactTokens(step).length > 0 && (
+                        <p className="setupFieldError" role="alert">
+                          Verification artifacts this version does not recognize:{" "}
+                          {unrecognizedArtifactTokens(step).join(", ")}. Choose a supported profile to
+                          replace them.
+                        </p>
+                      )}
+                      {artifactProfileIsMalformed(step) && (
+                        <p className="setupFieldError" role="alert">
+                          The saved verification profile for this level is not a list of artifact kinds, so
+                          it cannot be kept as a valid choice. Choose a supported profile to replace it.
+                        </p>
+                      )}
+                    </div>
                   )}
+                  {findingsForLevel(step.catalogueEntry).map((finding) => (
+                    <p
+                      className="setupFieldError"
+                      role="alert"
+                      key={`${finding.code}-${finding.token ?? ""}`}
+                    >
+                      {finding.level ? `${levelLabel(finding.level)} — ` : ""}
+                      {finding.message}
+                    </p>
+                  ))}
                   <div className="setupRowActions">
                     <button
                       type="button"
@@ -1287,6 +1598,22 @@ export default function ProjectSetupWalkthrough({
                 These are the concrete rules returned by the server for this ladder. Stage names and
                 authority selections are saved as part of the accepted configuration.
               </p>
+              {validationIsCurrent && draft?.validation?.review.covers === false && (
+                <p className="setupFieldError" role="alert">
+                  The saved rules do not cover this ladder exactly
+                  {draft.validation.review.missingSubjects.length > 0
+                    ? `: required subjects are missing (${draft.validation.review.missingSubjects
+                        .map((subject) => subjectLabels[subject] ?? subject)
+                        .join(", ")})`
+                    : ""}
+                  {draft.validation.review.unexpectedSubjects.length > 0
+                    ? ` and subjects this ladder no longer requires are still present (${draft.validation.review.unexpectedSubjects
+                        .map((subject) => subjectLabels[subject] ?? subject)
+                        .join(", ")})`
+                    : ""}
+                  . Apply the current standard for this ladder and accept it again.
+                </p>
+              )}
               {values.reviewRulesDefinition.rules.length === 0 && <p className="setupFieldHint">The server found no applicable review subjects for this ladder. Acknowledging this empty standard is still required before finalization.</p>}
               {values.reviewRulesDefinition.rules.map((rule, ruleIndex) => (
                 <article className="setupRule" key={`${rule.subject}-${ruleIndex}`}>
@@ -1458,13 +1785,18 @@ export default function ProjectSetupWalkthrough({
           <div>
             <dt>Requirement ladder</dt>
             <dd>
-              {values.ladder.steps
-                .map(
-                  (step) =>
-                    levelCatalogue.find((level) => level.id === step.catalogueEntry)?.label ??
-                    step.catalogueEntry,
-                )
-                .join(" → ") || "Not provided"}
+              {values.ladder.steps.length === 0 ? (
+                "Not provided"
+              ) : (
+                <ul className="setupLadderSummary">
+                  {values.ladder.steps.map((step) => (
+                    <li key={step.catalogueEntry}>
+                      <strong>{levelLabel(step.catalogueEntry)}</strong> · {capabilitySummary(step)} ·{" "}
+                      {verificationSummary(step, readinessStepForLevel(step.catalogueEntry))}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </dd>
           </div>
           <div>
@@ -1480,6 +1812,38 @@ export default function ProjectSetupWalkthrough({
             </dd>
           </div>
         </dl>
+        {validationIsCurrent && (draft?.validation?.findings.length ?? 0) > 0 && (
+          <div className="setupFieldError" role="alert">
+            <strong>This saved configuration is not ready to be created</strong>
+            <ul>
+              {(draft?.validation?.findings ?? []).map((finding) => (
+                <li key={`${finding.code}-${finding.level ?? "ladder"}-${finding.token ?? ""}`}>
+                  {finding.level ? `${levelLabel(finding.level)} — ` : ""}
+                  {finding.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {validationIsCurrent && draft?.validation?.review.covers === false && draft?.validation?.ladderValid && (
+          <p className="setupFieldError" role="alert">
+            The accepted review rules do not cover this saved ladder exactly. Use the review-rules step to
+            apply the current standard, review it, and accept it again.
+          </p>
+        )}
+        {!hasUnsavedChanges && !validationIsCurrent && (
+          <p className="setupPendingNotice" role="status">
+            The saved configuration has moved since it was last checked, so this screen cannot say it is
+            ready. Recheck it against the server&apos;s maintained rules.{" "}
+            <button
+              type="button"
+              onClick={() => void revalidate()}
+              disabled={revalidating || saving || finalizing}
+            >
+              {revalidating ? "Rechecking…" : "Recheck the saved configuration"}
+            </button>
+          </p>
+        )}
         {values.startKind !== "Fresh" && sourceState.source && (
           <>
             <p className={sourceComplete ? "setupReadyNotice" : "setupPendingNotice"} role="status">
