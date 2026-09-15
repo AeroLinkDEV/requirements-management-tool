@@ -95,6 +95,16 @@ const jobStateLabel = (job: Job) => {
   return job.claimedBy ? "Claimed" : "Starting";
 };
 
+const exportExpired = (job: Job) => {
+  if (job.jobType !== "BackgroundRepositoryExport") return false;
+  try {
+    const result = JSON.parse(job.resultJson);
+    return typeof result.ExpiresAt === "string" && Date.parse(result.ExpiresAt) <= Date.now();
+  } catch {
+    return false;
+  }
+};
+
 type Overview = {
   generatedAt: string;
   repository: {
@@ -1151,7 +1161,9 @@ export default function EnterpriseControlCenter({
                       Cancel
                     </button>
                   )}
-                  {x.state === "Completed" && x.jobType.includes("Export") ? (
+                  {x.state === "Completed" && exportExpired(x) ? (
+                    <small>Export expired. Generate a new export.</small>
+                  ) : x.state === "Completed" && x.jobType.includes("Export") ? (
                     <a
                       href={`${api}/api/enterprise-hardening/jobs/${x.id}/download`}
                     >

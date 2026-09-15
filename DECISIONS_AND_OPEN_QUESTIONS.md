@@ -2462,6 +2462,15 @@ successful when the reviewed merge candidate contains no trace of it.
 - **Truthful inherited facts:** Source approval signatures, authors, executions, evidence and lifecycle remain attributed to the source. They do not create destination approvals, test executions or fictitious uploads. Inherited verification content has explicit source origin/lifecycle. Source-backed evidence reads require current source authority and expose unavailable state honestly. Unknown external source metadata remains not supplied; actual upload actor/time/hash must not be substituted for an unknown source extractor, source date or source version.
 - **Continuing owner contract:** Fresh starts contain no baseline or engineering content, staffing is independent, and all starts open the real visual build-lineage overview for explicit selection, including a one-build project. DEC-073's supported version grammar and official `SW-NN.NN` identities are unchanged. Structural ladder correction remains limited to projects with no authored/inherited engineering content.
 
+### DEC-130 - Bounded Operational Backups and Temporary Repository Exports
+
+- **Date:** 2026-09-15 UTC
+- **Status:** Accepted owner direction in the storage review: maximum one daily backup, no backups older than 15 days, and removal of confirmed disposable output. The owner also authorized the reviewed seven-day ordinary-export proposal.
+- **Decision:** Keep the latest complete restore point per database per local calendar day for at most 15 calendar days including today. Extra same-day captures replace the previous retained point after checksum verification; backup creation and retention share an exclusive lock. Nested checkpoint archives follow the same policy. Failure to produce a valid current recovery point is an operational failure, never permission to erase the last recovery point.
+- **Generated output:** New ordinary repository CSV exports expire after seven days. Their attributable job outcome remains, downloads report expiry truthfully, and only the dedicated temporary-export namespace is automatically reclaimed. Draft requirements documents remain generated views. Controlled publications, signed packages, managed documents, approvals, engineering history, and legacy output references do not acquire an inferred deletion policy.
+- **Test isolation:** Disposable browser hosts own explicit temporary database and evidence paths, preserve them through required within-run restarts, and clean them after completion. They never inherit a persistent evidence root.
+- **Consequences:** Existing shared-store cleanup requires an exact inventory and reference/ownership reconciliation. Missing references in one database and equal file hashes alone do not establish disposability. DEC-041's recoverability and DEC-045's isolated qualification remain required.
+
 ## Working Assumptions
 
 Assumptions are not decisions. They remain valid only until confirmed or replaced.

@@ -774,7 +774,7 @@ The normal explicit showcase upgrade separately replaces invalid active upstream
 
 ## Backup and verification
 
-Run `BACKUP_AEROLINK.bat`. The output under `product/.local/backups` contains a PostgreSQL custom-format dump, the exact runtime-configured evidence root, runtime configuration, a database-derived attachment inventory, `manifest.json`, and a ZIP SHA-256 sidecar. `Evidence__Root` has environment precedence, then the active appsettings environment, then appsettings, then the LocalAppData default. Backup fails before publication if a referenced object is missing or does not match its size/SHA-256, if attachment metadata changes during capture, or if a pending/repair-required storage operation or partial candidate/released set exists. Retention defaults to 30 days.
+Run `BACKUP_AEROLINK.bat`. The output under `product/.local/backups` contains a PostgreSQL custom-format dump, the exact runtime-configured evidence root, runtime configuration, a database-derived attachment inventory, `manifest.json`, and a ZIP SHA-256 sidecar. `Evidence__Root` has environment precedence, then the active appsettings environment, then appsettings, then the LocalAppData default. Backup fails before publication if a referenced object is missing or does not match its size/SHA-256, if attachment metadata changes during capture, or if a pending/repair-required storage operation or partial candidate/released set exists. Retention keeps the latest complete archive per database per local calendar day, for at most 15 calendar days including today. A new same-day capture replaces the previous retained point only after survivor checksum verification. Nested checkpoint folders participate in the same policy.
 
 Run `VERIFY_AEROLINK_BACKUP.bat <absolute-or-repository-backup-zip>`. Verification supports an intentionally relocated ZIP when its adjacent sidecar travels with it, checks the sidecar, rejects unsafe ZIP, manifest, and storage-key paths, verifies every declared file, and independently reconciles every attachment inventory row to the archived evidence size/hash. Orphan objects are reported separately and cannot substitute for a missing referenced object.
 
@@ -799,12 +799,12 @@ current Windows user to run the existing complete backup and verification flow a
 The task also runs while the workstation is locked. If the computer is off or the user is signed out at the
 scheduled time, **Start when available** runs it after that user next signs in. Overlapping runs are ignored.
 
-The default schedule retains archives for 30 days. Configure a different time or retention without editing the
+The default schedule retains one archive per day for 15 days. Configure a different time or a shorter retention without editing the
 task by hand:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Configure-AeroLinkBackupSchedule.ps1 `
-  -Action Install -DailyAt 03:30 -RetentionDays 45
+  -Action Install -DailyAt 03:30 -RetentionDays 15
 ```
 
 Inspect or remove the schedule with the same command:
@@ -818,12 +818,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File product\scripts\Configur
 retention without changing Task Scheduler. Each scheduled run appends to
 `product/.local/logs/scheduled-backup.log`, and the task's last result remains visible through `-Action Status`.
 The scheduler deliberately invokes `Backup-AeroLink.ps1` and then `Verify-AeroLinkBackup.ps1`; it does not own a
-second backup implementation or create another database. A future sub-daily trigger can reuse the same runner.
+second backup implementation or create another database. Additional captures still retain only the newest point for each day.
 
 This current-user convenience task is suitable for the local workstation. An operational deployment should run
 the same script under a dedicated service identity whether anyone is signed in, retain task history, alert on
 nonzero exit, and copy archives to separately protected storage. A 24-hour backup target does not replace an
 organization-approved RPO/RTO.
+
+For an existing backup tree, preview the same policy with `Remove-AeroLinkSurplusBackups.ps1 -BackupRoot <absolute-path>`. Add `-Apply` to execute the reviewed policy. The tool refuses links, archive drift, corrupt survivors, and removal of a database's last current recovery point. It includes nested checkpoint archives and removes matching checksum sidecars. Backup and retention operations share an exclusive root lock.
+
+Ordinary repository CSV exports expire after seven days; completed job metadata remains attributable and the download returns `410 export_expired` after expiry. The worker reclaims files from the dedicated temporary-export namespace every ten minutes. Controlled publications, signed packages, uploaded documents, legacy job outputs and their exact historical files are retained. Browser harnesses use owned temporary database/evidence storage, including across a restart-recovery run, and release it after the run.
 
 ## Isolated restore drill
 

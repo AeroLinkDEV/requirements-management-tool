@@ -103,7 +103,7 @@ function Test-RestoredApi([string]$Database, [string]$Root, [object[]]$Inventory
 & (Join-Path $PSScriptRoot 'Verify-AeroLinkBackup.ps1') -BackupArchive $BackupArchive | Out-Host
 if ($production -and -not $DisposableQualification) {
     # A recoverable point is captured while the original database and evidence set are still active.
-    & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -RetentionDays 30
+    & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -RetentionDays 15
     & (Join-Path $PSScriptRoot 'Stop-AeroLink.ps1')
 }
 if ($PostgresPort -eq 54329) { & (Join-Path $PSScriptRoot 'Start-Postgres.ps1') }
