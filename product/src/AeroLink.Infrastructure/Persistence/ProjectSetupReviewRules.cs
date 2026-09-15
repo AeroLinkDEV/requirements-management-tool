@@ -40,7 +40,11 @@ public static class ProjectSetupReviewRules
         // both do — including the capability-dependent fallback for an absent profile — is what keeps the
         // offered subjects equal to the applicable subjects.
         var reading = ProjectSetupLadderReader.Read(ladderJson);
-        if (reading.Findings.Count > 0) throw new InvalidOperationException(reading.Findings[0].Message);
+        // A step's position does not change which subjects the ladder makes applicable (its level, capabilities
+        // and artifacts do), so a draft whose positions still need repair can be offered and can accept the
+        // standard it will be judged against. The readiness verdict and the final gate keep refusing the draft.
+        var blocking = reading.Findings.Where(x => x.Field != "position").ToArray();
+        if (blocking.Length > 0) throw new InvalidOperationException(blocking[0].Message);
         if (reading.IsDefault) return SuggestedJson(NewProjectLadderFactory.Create(projectId, DateTimeOffset.UtcNow));
         var steps = reading.Steps;
         return JsonSerializer.Serialize(new ReviewRulesDocument(

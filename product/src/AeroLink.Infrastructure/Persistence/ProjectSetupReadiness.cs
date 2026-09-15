@@ -53,10 +53,13 @@ public static class ProjectSetupReadiness
         var applicable = ProjectSetupReviewRules.ApplicableSubjects(steps, LegacyLadderPolicy.Instance)
             .Select(x => x.ToString()).ToArray();
         var accepted = ProjectSetupReviewRules.SubjectsOf(draft.ReviewRulesJson);
-        var duplicates = accepted.GroupBy(x => x, StringComparer.Ordinal).Where(x => x.Count() > 1)
+        // Subject identity is one fact in the verdict and in the gate. The wire contract resolves a supplied
+        // subject case-insensitively and the finalizer compares it the same way, so coverage here must too;
+        // the reported spellings stay the ones each side actually supplied so the creator can find them.
+        var duplicates = accepted.GroupBy(x => x, StringComparer.OrdinalIgnoreCase).Where(x => x.Count() > 1)
             .Select(x => x.Key).ToArray();
-        var missing = applicable.Where(x => !accepted.Contains(x)).ToArray();
-        var unexpected = accepted.Where(x => !applicable.Contains(x)).ToArray();
+        var missing = applicable.Where(x => !accepted.Contains(x, StringComparer.OrdinalIgnoreCase)).ToArray();
+        var unexpected = accepted.Where(x => !applicable.Contains(x, StringComparer.OrdinalIgnoreCase)).ToArray();
         var covers = definition.HasRulesArray
             && duplicates.Length == 0 && missing.Length == 0 && unexpected.Length == 0
             && (applicable.Length > 0 || accepted.Count == 0);

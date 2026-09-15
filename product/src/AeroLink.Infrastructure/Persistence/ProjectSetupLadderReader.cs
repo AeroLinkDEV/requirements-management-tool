@@ -85,10 +85,26 @@ internal static class ProjectSetupLadderReader
     private static LadderStepDraft ReadStep(JsonElement element, int index, List<LadderFinding> findings)
     {
         var catalogueEntry = Text(element, "catalogueEntry");
-        var position = element.TryGetProperty("position", out var positionValue)
-            && positionValue.ValueKind == JsonValueKind.Number && positionValue.TryGetInt32(out var parsedPosition)
-                ? parsedPosition
-                : index;
+        // A step's position is authoring input, not a presentation detail. The prior typed contract read it as
+        // an int, so a missing position became 0 — which the validator refused — and a null or fractional one
+        // was a payload refusal. Both stayed fail-closed. This reader keeps that behaviour and explains it: a
+        // position that is absent, null, fractional or unreadable is recorded as a finding and never replaced
+        // with a valid-looking row index, so an incomplete draft stays editable while finalization still
+        // refuses it.
+        var position = index;
+        var hasPosition = element.TryGetProperty("position", out var positionValue);
+        if (!hasPosition || positionValue.ValueKind == JsonValueKind.Null)
+        {
+            findings.Add(new LadderFinding("ladder_position_missing", catalogueEntry, "position",
+                $"The {catalogueEntry} ladder step does not record a position."));
+            position = 0;
+        }
+        else if (positionValue.ValueKind != JsonValueKind.Number || !positionValue.TryGetInt32(out position))
+        {
+            findings.Add(new LadderFinding("ladder_position_unreadable", catalogueEntry, "position",
+                $"The {catalogueEntry} ladder step position is not a whole number."));
+            position = 0;
+        }
         var capabilities = LevelCapabilities.None;
         if (element.TryGetProperty("capabilities", out var capabilityValue))
         {
