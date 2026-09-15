@@ -26,6 +26,7 @@ import {
   hasVerificationCapability,
   invalidProfileReason,
   profileSelection,
+  rawProfileIsExactSupportedProfile,
   rawProfileEntries,
   savedArtifactTokens,
   savedArtifactsLabel,
@@ -807,10 +808,11 @@ export default function ProjectSetupWalkthrough({
       ),
     });
   };
+  /** The last saved view of the answers, so a saved fact is never presented from unsaved local edits. */
+  const savedValues = useMemo(() => (draft ? valuesFromDraft(draft) : undefined), [draft]);
   const hasUnsavedChanges = useMemo(
-    () =>
-      Boolean(draft && values && JSON.stringify(values) !== JSON.stringify(valuesFromDraft(draft))),
-    [draft, values],
+    () => Boolean(values && savedValues && JSON.stringify(values) !== JSON.stringify(savedValues)),
+    [savedValues, values],
   );
   const versionIdentity = values ? officialBuildName(values.buildVersion) : undefined;
   const versionOrder = values ? buildVersionOrder(values.buildVersion) : undefined;
@@ -848,6 +850,16 @@ export default function ProjectSetupWalkthrough({
     validationIsCurrent
       ? draft?.validation?.steps.find((step) => step.level === level)
       : undefined;
+  /**
+   * The last saved answer for one level, the verdict the server issued for it, and whether the creator's
+   * current selection has moved away from it. A verdict is evidence about the saved configuration only.
+   */
+  const savedStepForLevel = (level: string) =>
+    savedValues?.ladder.steps.find((step) => step.catalogueEntry === level);
+  const levelStepIsSaved = (step: LadderStep) => {
+    const savedStep = savedStepForLevel(step.catalogueEntry);
+    return Boolean(savedStep) && JSON.stringify(savedStep) === JSON.stringify(step);
+  };
   const freshComplete =
     values?.startKind === "Fresh" &&
     Boolean(values.projectName.trim()) &&
@@ -953,18 +965,23 @@ export default function ProjectSetupWalkthrough({
       const adopted = adoptServerDraft(saved);
       const superseded = editGeneration.current !== generationAtRequest;
       const foreignResponse = saved.draftId !== scope.draftId;
+      if (foreignResponse) {
+        // The response does not describe the draft that was saved, so nothing about these answers is confirmed:
+        // no success notice, no navigation, and no version handed to a later source operation.
+        setError(
+          "The server's response did not describe this setup, so this save was not confirmed and your answers are still on this screen. Save again before continuing.",
+        );
+        return false;
+      }
       // Answers typed while this save was in flight are newer than the response. Adopt the saved draft and
       // its verdict, but never replace what the creator is currently editing with what they had already
       // changed; the outstanding edit keeps readiness unavailable until they save again.
       if (adopted && !superseded) setValues(valuesFromDraft(saved));
       if (adopted) setCurrentStep(saved.currentStep);
-      if (exitAfterSave && (superseded || foreignResponse)) {
-        // Leaving now would abandon newer answers, or a response that does not even describe this draft, on a
-        // confirmation that only ever covered the older ones.
+      if (exitAfterSave && superseded) {
+        // Leaving now would abandon newer answers on a confirmation that only ever covered the older ones.
         setError(
-          superseded
-            ? "Save and exit kept this setup open: answers changed while the save was in flight are newer than what the server committed. Your newer answers are still unsaved — save again to commit them and leave."
-            : "Save and exit kept this setup open: the response did not describe this draft, so its answers were not treated as saved. Recheck this setup, then save again to leave.",
+          "Save and exit kept this setup open: answers changed while the save was in flight are newer than what the server committed. Your newer answers are still unsaved — save again to commit them and leave.",
         );
         return saved;
       }
@@ -1663,9 +1680,9 @@ export default function ProjectSetupWalkthrough({
                   </fieldset>
                   {catalogue.verification.length > 0 && (
                     <div className="setupVerificationState">
-                      {/* The selected capability, the saved artifacts and the effective interpretation are
-                          three different facts, and an invalid configuration is named rather than described
-                          as if it were a valid one. */}
+                      {/* The current selection, the last saved answer and the server's interpretation of
+                          that saved answer are three different facts. A verdict is never presented as the
+                          meaning of an unsaved edit, and an unsaved choice is never labelled as saved. */}
                       <dl className="setupVerificationFacts">
                         <div>
                           <dt>Capability</dt>
@@ -1673,17 +1690,95 @@ export default function ProjectSetupWalkthrough({
                             {hasVerificationCapability(step)
                               ? "Verification enabled"
                               : "Verification disabled"}
+                            {!levelStepIsSaved(step) && " (unsaved change)"}
                           </dd>
                         </div>
                         <div>
-                          <dt>Saved artifacts</dt>
-                          <dd>{savedArtifactsLabel(step)}</dd>
+                          <dt>Last saved artifacts</dt>
+                          <dd>
+                            {(() => {
+                              const savedStep = savedStepForLevel(step.catalogueEntry);
+                              return savedStep ? savedArtifactsLabel(savedStep) : "not saved yet";
+                            })()}
+                          </dd>
                         </div>
+                        {!levelStepIsSaved(step) && (
+                          <div>
+                            <dt>Current selection</dt>
+                            <dd>{savedArtifactsLabel(step)} — not saved yet</dd>
+                          </div>
+                        )}
                         <div>
                           <dt>Effective</dt>
-                          <dd>{effectiveArtifactsLabel(step, readinessStepForLevel(step.catalogueEntry))}</dd>
+                          <dd>
+                            {readinessStepForLevel(step.catalogueEntry)
+                              ? effectiveArtifactsLabel(
+                                  savedStepForLevel(step.catalogueEntry) ?? step,
+                                  readinessStepForLevel(step.catalogueEntry),
+                                )
+                              : "not checked yet"}
+                          </dd>
                         </div>
                       </dl>
+                      {hasVerificationCapability(step) && catalogue.id !== "System" && (
+                        <label className="setupLadderProfile">
+                          Verification profile
+                          <select
+                            value={profileSelection(step)}
+                            onChange={(event) =>
+                              updateStep({
+                                enabledArtifactKinds:
+                                  event.target.value === "Case+Procedure"
+                                    ? ["Case", "Procedure"]
+                                    : event.target.value === "Case"
+                                      ? ["Case"]
+                                      : [],
+                              })
+                            }
+                          >
+                            <option value="">Choose a verification profile…</option>
+                            <option value="Case">Case-only</option>
+                            <option value="Case+Procedure">Case + Procedure</option>
+                          </select>
+                        </label>
+                      )}
+                      {hasVerificationCapability(step) &&
+                        rawProfileEntries(step) !== undefined &&
+                        compatibleRememberedProfile(step, "System") === undefined &&
+                        catalogue.id === "System" && (
+                          <button
+                            type="button"
+                            className="setupLadderProfileRepair"
+                            onClick={() => updateStep({ enabledArtifactKinds: ["Procedure"] })}
+                          >
+                            Use the maintained System profile (Procedure)
+                          </button>
+                        )}
+                    </div>
+                  )}
+                  {/* Diagnostics and repairs get their own full-width region so long findings stay readable
+                      and the repair controls are never squeezed into a control column. */}
+                  {(catalogue.verification.length > 0 || findingsForLevel(step.catalogueEntry).length > 0) && (
+                    <div className="setupLadderDiagnostics">
+                      {/* Qualifiers live in the wide region: the readings column stays short and legible. */}
+                      {readinessStepForLevel(step.catalogueEntry) &&
+                        savedStepForLevel(step.catalogueEntry) &&
+                        !rawProfileIsExactSupportedProfile(
+                          savedStepForLevel(step.catalogueEntry)!,
+                          catalogue.id,
+                        ) && (
+                          <p className="setupFieldHint">
+                            Effective is the server's reading of the saved profile, and that saved profile
+                            is not one of this level's supported choices — repair the level or choose a
+                            supported profile before saving.
+                          </p>
+                        )}
+                      {readinessStepForLevel(step.catalogueEntry) && !levelStepIsSaved(step) && (
+                        <p className="setupFieldHint">
+                          Effective describes the last saved check. Save your current selection so the
+                          server can re-check it.
+                        </p>
+                      )}
                       {disabledVerificationWithArtifacts(step) && (
                         <>
                           <p className="setupFieldError" role="alert">
@@ -1691,7 +1786,7 @@ export default function ProjectSetupWalkthrough({
                             profile still enables {boundedTokenList(savedArtifactTokens(step) ?? [])}. This
                             configuration cannot be created until it is repaired.
                           </p>
-                          <div className="setupRowActions">
+                          <div className="setupLadderRepairs">
                             <button
                               type="button"
                               onClick={() =>
@@ -1716,17 +1811,6 @@ export default function ProjectSetupWalkthrough({
                           supported profile for this level, or repair the level deliberately before saving.
                         </p>
                       )}
-                      {hasVerificationCapability(step) &&
-                        rawProfileEntries(step) !== undefined &&
-                        compatibleRememberedProfile(step, "System") === undefined &&
-                        catalogue.id === "System" && (
-                          <button
-                            type="button"
-                            onClick={() => updateStep({ enabledArtifactKinds: ["Procedure"] })}
-                          >
-                            Use the maintained System profile (Procedure)
-                          </button>
-                        )}
                       {rawProfileEntries(step) === undefined && (
                         <p className="setupFieldHint">
                           No verification profile is saved for this level. The maintained interpretation
@@ -1743,57 +1827,33 @@ export default function ProjectSetupWalkthrough({
                           is restored, otherwise you are asked for one.
                         </p>
                       )}
-                      {hasVerificationCapability(step) && catalogue.id !== "System" && (
-                        <>
-                          <label>
-                            Verification profile
-                            <select
-                              value={profileSelection(step)}
-                              onChange={(event) =>
-                                updateStep({
-                                  enabledArtifactKinds:
-                                    event.target.value === "Case+Procedure"
-                                      ? ["Case", "Procedure"]
-                                      : event.target.value === "Case"
-                                        ? ["Case"]
-                                        : [],
-                                })
-                              }
-                            >
-                              <option value="">Choose a verification profile…</option>
-                              <option value="Case">Case-only</option>
-                              <option value="Case+Procedure">Case + Procedure</option>
-                            </select>
-                          </label>
-                        </>
-                      )}
                       {!hasVerificationCapability(step) && artifactProfileIsMalformed(step) && (
                         <p className="setupFieldError" role="alert">
                           The saved verification profile for this level is not a list of artifact kinds, so
                           it cannot be kept as a valid choice. Repair this level before finalizing.
                         </p>
                       )}
-                    </div>
-                  )}
-                  {findingsForLevel(step.catalogueEntry).length > 0 && (
-                    <>
-                      {hasUnsavedChanges && (
-                        <p className="setupFieldHint">
-                          From the last saved check — save your changes so the server can re-check the
-                          answers you have edited.
-                        </p>
+                      {findingsForLevel(step.catalogueEntry).length > 0 && (
+                        <>
+                          {hasUnsavedChanges && (
+                            <p className="setupFieldHint">
+                              From the last saved check — save your changes so the server can re-check the
+                              answers you have edited.
+                            </p>
+                          )}
+                          {findingsForLevel(step.catalogueEntry).map((finding, findingIndex) => (
+                            <p
+                              className="setupFieldError"
+                              role="alert"
+                              key={`${finding.code}-${finding.token ?? ""}-${findingIndex}`}
+                            >
+                              {finding.level ? `${levelLabel(finding.level)} — ` : ""}
+                              {finding.message}
+                            </p>
+                          ))}
+                        </>
                       )}
-                      {findingsForLevel(step.catalogueEntry).map((finding, findingIndex) => (
-                        <p
-                          className="setupFieldError"
-                          role="alert"
-                          key={`${finding.code}-${finding.token ?? ""}-${findingIndex}`}
-                        >
-                          {finding.level ? `${levelLabel(finding.level)} — ` : ""}
-                          {finding.message}
-                        </p>
-                      ))}
-                    </>
+                    </div>
                   )}
                   <div className="setupRowActions">
                     <button
@@ -2118,12 +2178,20 @@ export default function ProjectSetupWalkthrough({
                 "Not provided"
               ) : (
                 <ul className="setupLadderSummary">
-                  {values.ladder.steps.map((step) => (
-                    <li key={step.catalogueEntry}>
-                      <strong>{levelLabel(step.catalogueEntry)}</strong> · {capabilitySummary(step)} ·{" "}
-                      {verificationSummary(step, readinessStepForLevel(step.catalogueEntry))}
-                    </li>
-                  ))}
+                  {values.ladder.steps.map((step) => {
+                    // The summary describes the last saved configuration — the one the server has judged —
+                    // and says so when the creator's current answers differ from it.
+                    const savedStep = savedStepForLevel(step.catalogueEntry) ?? step;
+                    const unsaved = !levelStepIsSaved(step);
+                    return (
+                      <li key={step.catalogueEntry}>
+                        <strong>{levelLabel(step.catalogueEntry)}</strong> ·{" "}
+                        {capabilitySummary(savedStep)} ·{" "}
+                        {verificationSummary(savedStep, readinessStepForLevel(savedStep.catalogueEntry))}
+                        {unsaved && " · your current answers for this level are not saved yet"}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </dd>

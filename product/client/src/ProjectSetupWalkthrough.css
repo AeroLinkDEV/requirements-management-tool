@@ -246,7 +246,7 @@
 .setupLadderRows > li {
   display: grid;
   grid-template-columns: 28px minmax(170px, 1fr) minmax(260px, 1.6fr) minmax(160px, 0.8fr) auto;
-  align-items: end;
+  align-items: start;
   gap: 13px;
   border: 1px solid #dde6eb;
   border-radius: 8px;
@@ -293,6 +293,57 @@
   min-width: 0;
   font-size: 11px;
 }
+.setupLadderProfile {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.setupLadderProfile select {
+  width: 100%;
+  max-width: 240px;
+}
+.setupLadderProfileRepair {
+  justify-self: start;
+  border: 1px solid #bed0db;
+  border-radius: 6px;
+  background: white;
+  color: #236b9f;
+  padding: 6px 8px;
+  font: 650 11px var(--font-body);
+  cursor: pointer;
+}
+.setupLadderProfileRepair:hover {
+  background: #edf7fa;
+}
+/* Diagnostics and repairs own a full-width row of their own: readings, findings and repair controls can no
+   longer be auto-placed into a narrow control column, and long findings stay readable. */
+.setupLadderDiagnostics {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.setupLadderDiagnostics > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.setupLadderRepairs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.setupLadderRepairs button {
+  border: 1px solid #bed0db;
+  border-radius: 6px;
+  background: white;
+  color: #236b9f;
+  padding: 7px 10px;
+  font: 650 11px var(--font-body);
+  cursor: pointer;
+}
+.setupLadderRepairs button:hover {
+  background: #edf7fa;
+}
 .setupVerificationFacts {
   display: grid;
   gap: 3px;
@@ -300,7 +351,7 @@
 }
 .setupVerificationFacts > div {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-columns: 104px minmax(0, 1fr);
   gap: 6px;
 }
 .setupVerificationFacts dt {
@@ -594,6 +645,7 @@
     grid-template-columns: 28px minmax(170px, 1fr) minmax(240px, 1.4fr);
   }
   .setupLadderRows > li > label:last-of-type,
+  .setupVerificationState,
   .setupRowActions {
     grid-column: 2 / -1;
   }
@@ -625,6 +677,7 @@
   .setupLadderRows > li > label,
   .setupLadderRows > li > fieldset,
   .setupLadderRows > li > label:last-of-type,
+  .setupVerificationState,
   .setupRowActions {
     grid-column: 2;
   }
