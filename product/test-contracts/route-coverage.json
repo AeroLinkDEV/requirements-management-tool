@@ -1845,6 +1845,7 @@
       "path": "/api/project-setups/{draftId:guid}/source/upload",
       "file": "ProjectSetupSourceEndpoints.cs",
       "coveredBy": [
+        "ProjectSetupDiscardApiTests",
         "ProjectSetupInceptionApiTests",
         "ProjectSetupKestrelQualificationTests"
       ]
