@@ -98,7 +98,7 @@ public static class ProjectSetupEndpoints
             catch (ProjectSetupAccessException) { return Results.Forbid(); }
             catch (ProjectSetupNotFoundException) { return Results.NotFound(); }
             catch (ProjectSetupConflictException ex) { return Results.Conflict(new { code = "finalization_conflict", error = ex.Message }); }
-        catch (ProjectSetupInvalidException ex) { return Results.BadRequest(new { code = "cannot_finalize", error = ex.Message, findings = ex.Findings }); }
+            catch (ProjectSetupInvalidException ex) { return Results.BadRequest(new { code = "cannot_finalize", error = ex.Message, findings = ex.Findings }); }
             catch (DomainException ex) { return Results.BadRequest(new { code = "cannot_finalize", error = ex.Message }); }
         });
     }

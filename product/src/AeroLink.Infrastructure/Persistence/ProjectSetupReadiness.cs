@@ -13,7 +13,8 @@ public sealed record ProjectSetupReadinessStep(string Level, int Capabilities, I
 public sealed record ProjectSetupReadinessReview(IReadOnlyList<string> ApplicableSubjects,
     IReadOnlyList<string> AcceptedSubjects, IReadOnlyList<string> MissingSubjects,
     IReadOnlyList<string> UnexpectedSubjects, IReadOnlyList<string> DuplicateSubjects, bool Accepted,
-    bool DefinitionConcrete, bool AcceptanceMatchesConfiguration, bool Covers);
+    bool DefinitionConcrete, bool AcceptanceMatchesConfiguration, bool Covers,
+    bool DefinitionValid, IReadOnlyList<LadderFinding> DefinitionFindings);
 
 /// <summary>
 /// The authoritative, side-effect-free verdict for one saved setup configuration.
@@ -42,6 +43,13 @@ public static class ProjectSetupReadiness
         var ladderValid = findings.Count == 0;
 
         var definition = ProjectSetupReviewRules.InspectDefinition(draft.ReviewRulesJson);
+        // Coverage is necessary but not sufficient: a definition whose subjects match while a rule is
+        // missing its Approval stage (or demands an authority the workflow refuses) is refused by the final
+        // gate, so it cannot be reported as ready here.
+        var definitionFindings = definition.HasRulesArray
+            ? ProjectSetupReviewRules.InspectRules(draft.ReviewRulesJson)
+            : (IReadOnlyList<LadderFinding>)[];
+        var definitionValid = definition.HasRulesArray && definitionFindings.Count == 0;
         var applicable = ProjectSetupReviewRules.ApplicableSubjects(steps, LegacyLadderPolicy.Instance)
             .Select(x => x.ToString()).ToArray();
         var accepted = ProjectSetupReviewRules.SubjectsOf(draft.ReviewRulesJson);
@@ -62,8 +70,8 @@ public static class ProjectSetupReadiness
                 unexpected.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
                 duplicates.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
                 draft.ReviewRulesAccepted, definition.HasRulesArray,
-                AcceptanceMatches(draft), covers),
-            ladderValid && covers && draft.ReviewRulesAccepted && definition.HasRulesArray
+                AcceptanceMatches(draft), covers, definitionValid, definitionFindings),
+            ladderValid && covers && definitionValid && draft.ReviewRulesAccepted
                 && AcceptanceMatches(draft));
     }
 
@@ -116,4 +124,4 @@ public static class ProjectSetupReadiness
 }
 
 /// <summary>What the persisted review definition actually contains, read without throwing.</summary>
-public sealed record ReviewDefinitionReading(bool HasRulesArray, IReadOnlyList<string> Subjects);
+public sealed record ReviewDefinitionReading(bool HasRulesArray, IReadOnlyList<string> Subjects, int RuleCount = 0);

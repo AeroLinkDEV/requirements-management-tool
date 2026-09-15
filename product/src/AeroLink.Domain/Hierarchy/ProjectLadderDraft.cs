@@ -33,11 +33,17 @@ public sealed record LadderRelationshipDraft(string Parent, string Child);
 /// <summary>
 /// One machine-readable problem with a supplied ladder, identified by code and by the level and field it
 /// belongs to. The browser is expected to act on <see cref="Code"/>/<see cref="Level"/>/<see cref="Field"/>
-/// and to present <see cref="Message"/>; it must never parse the message to discover the subject.
+/// and to present <see cref="Message"/>; it must never parse the message to discover the subject. A review-rule
+/// finding names the affected <see cref="Subject"/> and, where one stage is at fault, its
+/// <see cref="StageIndex"/> instead of a ladder level.
 /// </summary>
-public sealed record LadderFinding(string Code, string? Level, string? Field, string Message, string? Token = null)
+public sealed record LadderFinding(string Code, string? Level, string? Field, string Message, string? Token = null,
+    string? Subject = null, int? StageIndex = null)
 {
     public static LadderFinding Ladder(string code, string message) => new(code, null, "ladder", message);
+
+    public static LadderFinding Review(string code, string? subject, int? stageIndex, string message,
+        string? token = null) => new(code, null, "reviewRules", message, token, subject, stageIndex);
 }
 
 /// <summary>Canonicalizes and hashes an edited ladder without including database-generated identities.</summary>
@@ -127,6 +133,18 @@ public static class ProjectLadderSnapshot
 public static class ProjectLadderDraftValidator
 {
     /// <summary>
+    /// How much of an unrecognized saved token may be echoed back in a diagnostic. A stored profile is the
+    /// creator's own input and stays untouched, but a message or structured finding must not repeat unlimited
+    /// content, so the quoted token is bounded.
+    /// </summary>
+    public const int MaxDiagnosticTokenLength = 64;
+
+    /// <summary>The bounded form of a token used in findings. The stored value itself is never changed.</summary>
+    public static string DiagnosticToken(string token) => token.Length <= MaxDiagnosticTokenLength
+        ? token
+        : string.Concat(token.AsSpan(0, MaxDiagnosticTokenLength), "…");
+
+    /// <summary>
     /// Diagnoses a supplied ladder without throwing, so a save, a resume, a readiness claim and the final
     /// gate can all explain the same input the same way. <see cref="Validate"/> is the throwing view of
     /// exactly these findings: the first finding is the message it raises, in the same order as before.
@@ -173,10 +191,13 @@ public static class ProjectLadderDraftValidator
             // An unrecognized token is reported as its own content problem. The profile is then still
             // judged on the kinds that were understood, so a contradictory mask is not hidden behind it.
             foreach (var token in step.UnrecognizedArtifactKinds ?? [])
+            {
+                var described = DiagnosticToken(token);
                 findings.Add(new LadderFinding("artifact_kind_unrecognized", level.ToString(),
                     "enabledArtifactKinds",
-                    $"The {level} verification profile contains an unrecognized artifact kind '{token}'.",
-                    token));
+                    $"The {level} verification profile contains an unrecognized artifact kind '{described}'.",
+                    described));
+            }
 
             var hasVerification = step.Capabilities.HasFlag(LevelCapabilities.HasVerification);
             var kinds = step.EffectiveKinds(definition);

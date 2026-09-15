@@ -537,29 +537,41 @@ public sealed class ProjectSetupService(
         if (parsed.RootElement.ValueKind != JsonValueKind.Object || !parsed.RootElement.EnumerateObject().Any())
             throw new ProjectSetupInvalidException("Review and approval rules must retain a concrete accepted definition.");
 
-        var supplied = Deserialize<ReviewRulesWire>(rulesJson, "review rules");
-        if (supplied.Rules is null)
-            throw new ProjectSetupInvalidException("The reviewed rules must contain a typed rules array.");
+        // Definition semantics come from the same authority the readiness verdict uses. A configuration the
+        // verdict reported as ready therefore cannot be refused here for a reason the verdict never saw, and
+        // a refusal names the affected rule and stage instead of only the payload.
+        var definitionFindings = ProjectSetupReviewRules.InspectRules(rulesJson);
+        var definition = ProjectSetupReviewRules.InspectDefinition(rulesJson);
+        if (!definition.HasRulesArray)
+            throw new ProjectSetupInvalidException("The reviewed rules must contain a typed rules array.",
+                definitionFindings);
         var applicable = ApplicableSubjects(ladder);
-        if (supplied.Rules.Count == 0)
+        if (definition.RuleCount == 0)
         {
             if (applicable.Count != 0)
                 throw new ProjectSetupInvalidException("The reviewed rules must cover each applicable ladder subject.");
             return; // A Customer-only/non-verification ladder truthfully has no review workflows to offer.
         }
-        var suppliedSubjects = supplied.Rules.Select(x => x.Subject).ToArray();
-        if (suppliedSubjects.Distinct().Count() != suppliedSubjects.Length || !applicable.SetEquals(suppliedSubjects))
+        // Subject names are compared the way the typed read resolves them, case-insensitively, so a
+        // definition the wire contract accepts is not refused here for its letter case.
+        var suppliedSubjects = definition.Subjects;
+        var applicableNames = applicable.Select(x => x.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (suppliedSubjects.Distinct(StringComparer.OrdinalIgnoreCase).Count() != suppliedSubjects.Count
+            || !applicableNames.SetEquals(suppliedSubjects))
             throw new ProjectSetupInvalidException("Review rules must cover each applicable ladder subject exactly once.");
+        if (definitionFindings.Count > 0)
+            throw new ProjectSetupInvalidException(definitionFindings[0].Message, definitionFindings);
+
+        // Every rule and stage is now known to be readable by the workflow authority, so the typed read is
+        // only the materialization step.
+        var supplied = Deserialize<ReviewRulesWire>(rulesJson, "review rules");
+        if (supplied.Rules is null)
+            throw new ProjectSetupInvalidException("The reviewed rules must contain a typed rules array.");
         foreach (var suppliedRule in supplied.Rules)
         {
-            if (suppliedRule.Stages is null || suppliedRule.Stages.Count == 0)
-                throw new ProjectSetupInvalidException($"Review rule {suppliedRule.Subject} requires a stage.");
-            if (!suppliedRule.Stages.Any(x => x.Kind == ReviewStageKind.Review)
-                || !suppliedRule.Stages.Any(x => x.Kind == ReviewStageKind.Approval))
-                throw new ProjectSetupInvalidException($"Review rule {suppliedRule.Subject} requires explicit Review and Approval stages.");
             var workflow = new ReviewWorkflow(projectId, suppliedRule.Name ?? suppliedRule.Subject.ToString(),
                 suppliedRule.Subject, ReviewMode.Sequential,
-                suppliedRule.Stages.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole, x.Kind,
+                suppliedRule.Stages!.Select(x => new ReviewWorkflowStageDraft(x.Name, x.RequiredRole, x.Kind,
                     x.AuthorityKind)).ToArray(), actor, now);
             workflow.Activate(actor, now);
             db.ReviewWorkflows.Add(workflow);
