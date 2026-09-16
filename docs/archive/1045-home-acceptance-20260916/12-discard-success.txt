@@ -1,0 +1,33 @@
+Browser tab: 80896795, Title: "AeroLink", URL: "http://127.0.0.1:5080/projects".
+0 AXWebArea AeroLink, URL: 127.0.0.1:5080/projects
+	1 container root
+		2 container
+			3 text AeroLink
+			4 container Instance: HOME CANONICAL (HomeCanonical) Database: aerolink Source: b243a8bd Mode: HOME-PRODUCTION Current main; checked 2m ago Last check: 2026-09-16T13:00:06.429572+00:00 Last observed remote main: b243a8bd998e472046fd67b150a7f46fd2a2a814
+				5 text HOME Current main b243a8bd checked 2m ago
+			6 container AeroLink Administrator
+				7 text AA
+			8 text AeroLink Administrator Administrator
+			9 button Sign out
+		10 container
+			11 text AUTHORIZED PROJECTS
+			12 heading Projects, Value: 1
+				13 text Projects
+			14 text Select a project to continue.
+			15 container Authorized projects
+				16 link Description: Open Configured Ladder Showcase, Value: 127.0.0.1:5080/projects/0bec142a-4cc7-42c5-a211-8f09fc8c4d83/builds
+				17 link Description: Open DOORS Import Practice, Value: 127.0.0.1:5080/projects/f11f1956-041f-4429-9e36-7e8c0171d65a/builds
+				18 link Description: Open FMS Product Development, Value: 127.0.0.1:5080/projects/5e013f8f-8077-4b54-9922-4499ce1c3968/builds
+				19 link Description: Open Next Gen GPS, Value: 127.0.0.1:5080/projects/b93f52b6-cdb4-41b9-bda6-bf079fedc74f/builds
+				20 container Setup drafts
+					21 heading Setup drafts, Value: 2, ID: setup-drafts-heading
+						22 text Setup drafts
+					23 text Saved project creation work remains recoverable until it is finalized.
+					24 button Create New Project
+					36 text Discarded the unfinished setup “Acceptance 1045 - 2026-09-16”. No Project, build or controlled record was deleted.
+					32 container
+						33 text Untitled Project Software product not provided Step Ladder · Saved 9/16/2026, 8:41:31 AM
+						34 button Resume setup
+						35 button Discard setup
+
+The focused UI element is 0 AXWebArea AeroLink, URL: 127.0.0.1:5080/projects

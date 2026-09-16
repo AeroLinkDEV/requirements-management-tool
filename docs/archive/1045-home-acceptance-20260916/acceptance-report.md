@@ -40,7 +40,36 @@ Observed outcomes:
 5. Updating the applicable rules and renewing acceptance restores readiness: System Off, High-Level Case-only, Low-Level Case + Procedure. This confirms System and software procedures are independent.
 6. Save and exit preserves the test setup. The named discard confirmation identifies this setup and explains its scope. Cancel followed by reload leaves it present and unchanged.
 
-Final discard and stale-page disposition: pending action-time owner confirmation.
+## Final discard acceptance - completed after explicit owner approval
+
+The owner replied **"I approve"** to the named discard confirmation. Only the agent-created setup above was discarded.
+
+- The Projects list reported: **Discarded the unfinished setup "Acceptance 1045 - 2026-09-16". No Project, build or controlled record was deleted.** The test card disappeared.
+- On the page opened before discard, Save and exit was refused with **This setup was discarded. It can no longer be saved or finalized.** It did not navigate away or report a successful save.
+- Clicking Create Project on that stale page resolved to the terminal **This setup was discarded** screen, with no editing or creation controls. Reloading retained that terminal state.
+- Reloading Projects and then signing out and signing in again still showed no test setup or test project. The unrelated Untitled Project draft retained its prior saved timestamp (September 16, 8:41:31 AM).
+- Next Gen GPS still showed exactly one build, 0.01 / SW-00.01 / In Work.
+- Discard is logical abandonment. The test draft's retained historical row is not claimed to have been physically purged.
+
+Browser screenshot capture timed out for the final discard and stale-save views. Their actual accessibility-tree observations are retained in files 12-16; they are not presented as new screenshots. The seven earlier HOME screenshots remain available and unchanged.
+
+**Disposition: HOME acceptance passed within the scope described here; closeout of #1045 is warranted.**
+
+## Whole-issue criteria disposition
+
+| Criteria | Evidence and disposition |
+| --- | --- |
+| I01-I03: coherent profiles, normalization, supported repair | Independently reviewed #1049 regressions and real-server owner-shape repair; live System toggle/save/reload and owner's effective configuration. Accepted. |
+| I04-I06: rules, readiness and final summary | Retained implementation review plus live stale acceptance blocking and renewed acceptance/summary. Accepted. |
+| I07-I08: finalization outcomes and recovery | Retained exact-head review and protected real-server failure/lost-response/lifecycle regression qualification; no fault injection on HOME. Accepted. |
+| I09: native/external baseline paths | Retained real captured native baseline repair/invalidation/re-accept/materialization qualification and external source regressions. Not re-run on HOME. Accepted. |
+| I10: atomicity and effective result | Retained transaction/provider qualification plus actual completed owner identities, effective ladder, authorized discovery and explicit build selection. Accepted. |
+| I11: evidence separation | Prior red-first/disposable/API/provider evidence remains separately attributed. Live owner completion was already recorded; no fresh repair/create replay is claimed. Accepted. |
+| I12: independent review and protected delivery | #1049 and #1056 independently reviewed and merged through protected candidate gates; installed b243a8bd verified. Accepted. |
+| Owner follow-up: concise System feedback | Independently reviewed #1056, seven retained HOME screenshots and live normal toggle observations. Accepted. |
+| Owner follow-up: discard unfinished setup | Retained authorization/audit/provider-race qualification plus this live named cancel/discard, stale save/finalize refusal, reload and new-sign-in proof. Accepted. |
+
+No new implementation change was made during acceptance. #1054 remains separate and open.
 
 ## Evidence boundaries
 

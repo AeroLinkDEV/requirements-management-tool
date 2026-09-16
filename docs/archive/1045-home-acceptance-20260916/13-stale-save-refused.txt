@@ -1,0 +1,102 @@
+Browser tab: 80896801, Title: "AeroLink", URL: "http://127.0.0.1:5080/projects/setup/318e6333-57c1-43f4-98f8-9c25f901be6b".
+0 AXWebArea AeroLink, URL: 127.0.0.1:5080/projects/setup/318e6333-57c1-43f4-98f8-9c25f901be6b
+	1 container root
+		2 container
+			3 text AeroLink
+			4 container Instance: HOME CANONICAL (HomeCanonical) Database: aerolink Source: b243a8bd Mode: HOME-PRODUCTION Current main; checked 2m ago Last check: 2026-09-16T13:00:06.429572+00:00 Last observed remote main: b243a8bd998e472046fd67b150a7f46fd2a2a814
+				5 text HOME Current main b243a8bd checked 2m ago
+			6 container AeroLink Administrator
+				7 text AA
+			8 text AeroLink Administrator Administrator
+			9 button Sign out
+		10 container
+			11 container Breadcrumb
+				12 button Projects
+				13 text New Project
+			14 text PROJECT SETUP · RECOVERABLE DRAFT
+			15 heading Create New Project, Value: 1
+				16 text Create New Project
+			17 text Save progress at every step. This draft remains separate from a usable Project until the server accepts finalization.
+			18 button Save and exit
+			98 text This setup was discarded. It can no longer be saved or finalized.
+			19 container Project setup steps
+				20 content list
+					21 button 1. Project details Saved answer
+						22 text 1
+						23 text . 
+						24 text Project details
+						25 text Saved answer
+					26 button 2. Starting point Saved answer
+						27 text 2
+						28 text . 
+						29 text Starting point
+						30 text Saved answer
+					31 button 3. First build Saved answer
+						32 text 3
+						33 text . 
+						34 text First build
+						35 text Saved answer
+					36 button 4. Requirement ladder Saved answer
+						37 text 4
+						38 text . 
+						39 text Requirement ladder
+						40 text Saved answer
+					41 button 5. Review rules Saved answer
+						42 text 5
+						43 text . 
+						44 text Review rules
+						45 text Saved answer
+					46 button 6. Repository Saved answer
+						47 text 6
+						48 text . 
+						49 text Repository
+						50 text Saved answer
+					51 button 7. Review and finish Current
+						52 text 7
+						53 text . 
+						54 text Review and finish
+						55 text Current
+				56 text Saved 9/16/2026, 8:51:40 AM
+			57 container
+				58 heading Review and finish, Value: 2
+					59 text Review and finish
+				60 text Check the durable answers before saving or finalizing this setup.
+				61 definition list
+					62 container Project
+						63 text Project
+					64 container
+						65 text Acceptance 1045 - 2026-09-16  · Disposable setup validation
+					66 container Starting point
+						67 text Starting point
+					68 container
+						69 text Fresh project  · no inherited categories
+					70 container First build
+						71 text First build
+					72 container
+						73 text 0.01  · SW-00.01
+					74 container Requirement ladder
+						75 text Requirement ladder
+					76 content list
+						77 container
+							78 AXListMarker • 
+							79 text System  · Change control, Requirements document  · Verification disabled — no verification artifacts are enabled.
+						80 container
+							81 AXListMarker • 
+							82 text High-Level software  · Change control, Verification, Requirements document  · Verification enabled · Case
+						83 container
+							84 AXListMarker • 
+							85 text Low-Level software  · Change control, Verification, Requirements document, Code traceability  · Verification enabled · Case + Procedure
+					86 container Rules
+						87 text Rules
+					88 text Explicitly accepted · 5 server-supplied rules
+					89 container Repository
+						90 text Repository
+					91 text Configure later · Pending
+				92 text Fresh setup is ready for the server's finalization gate. The resulting build will be In Work.
+				93 button Create Project
+			94 container
+				95 button Back
+				96 text Step  7  of  7
+				97 button (disabled) Save review
+
+The focused UI element is 0 AXWebArea AeroLink, URL: 127.0.0.1:5080/projects/setup/318e6333-57c1-43f4-98f8-9c25f901be6b

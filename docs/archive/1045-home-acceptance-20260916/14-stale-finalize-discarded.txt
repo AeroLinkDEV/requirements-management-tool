@@ -1,0 +1,18 @@
+Browser tab: 80896801, Title: "AeroLink", URL: "http://127.0.0.1:5080/projects/setup/318e6333-57c1-43f4-98f8-9c25f901be6b".
+0 AXWebArea AeroLink, URL: 127.0.0.1:5080/projects/setup/318e6333-57c1-43f4-98f8-9c25f901be6b
+	1 container root
+		2 container
+			3 text AeroLink
+			4 container Instance: HOME CANONICAL (HomeCanonical) Database: aerolink Source: b243a8bd Mode: HOME-PRODUCTION Current main; checked 3m ago Last check: 2026-09-16T13:00:06.429572+00:00 Last observed remote main: b243a8bd998e472046fd67b150a7f46fd2a2a814
+				5 text HOME Current main b243a8bd checked 3m ago
+			6 container AeroLink Administrator
+				7 text AA
+			8 text AeroLink Administrator Administrator
+			9 button Sign out
+		10 container
+			11 heading This setup was discarded, Value: 1
+				12 text This setup was discarded
+			13 text The unfinished setup you opened was discarded, so its saved answers are no longer part of the saved setups and cannot be saved or finalized. No Project, build or controlled record was deleted. Start a new Project when you are ready.
+			14 button Back to Projects
+
+The focused UI element is 0 AXWebArea AeroLink, URL: 127.0.0.1:5080/projects/setup/318e6333-57c1-43f4-98f8-9c25f901be6b
