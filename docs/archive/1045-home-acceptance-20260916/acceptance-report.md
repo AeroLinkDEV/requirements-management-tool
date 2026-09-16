@@ -59,8 +59,9 @@ Browser screenshot capture timed out for the final discard and stale-save views.
 
 | Criteria | Evidence and disposition |
 | --- | --- |
-| I01-I03: coherent profiles, normalization, supported repair | Independently reviewed #1049 regressions and real-server owner-shape repair; live System toggle/save/reload and owner's effective configuration. Accepted. |
-| I04-I06: rules, readiness and final summary | Retained implementation review plus live stale acceptance blocking and renewed acceptance/summary. Accepted. |
+| I01-I02: coherent profiles and normalization | Independently reviewed #1049 regressions; live System toggle/save/reload and owner's effective configuration. Accepted. |
+| I03-I05: readiness, rules and final summary | Retained implementation review plus live stale acceptance blocking and renewed acceptance/summary. Accepted. |
+| I06: supported legacy repair | Independently reviewed real-server owner-shape repair preserving disabled intent and unrelated answers. The owner result is completed; that repair was not replayed on HOME. Accepted. |
 | I07-I08: finalization outcomes and recovery | Retained exact-head review and protected real-server failure/lost-response/lifecycle regression qualification; no fault injection on HOME. Accepted. |
 | I09: native/external baseline paths | Retained real captured native baseline repair/invalidation/re-accept/materialization qualification and external source regressions. Not re-run on HOME. Accepted. |
 | I10: atomicity and effective result | Retained transaction/provider qualification plus actual completed owner identities, effective ladder, authorized discovery and explicit build selection. Accepted. |
