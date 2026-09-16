@@ -1,0 +1,156 @@
+Browser tab: 80896804, Title: "AeroLink", URL: "http://127.0.0.1:5080/projects/b93f52b6-cdb4-41b9-bda6-bf079fedc74f/configuration".
+0 AXWebArea AeroLink, URL: 127.0.0.1:5080/projects/b93f52b6-cdb4-41b9-bda6-bf079fedc74f/configuration
+	1 container root
+		2 container
+			3 text AeroLink
+			4 container Instance: HOME CANONICAL (HomeCanonical) Database: aerolink Source: b243a8bd Mode: HOME-PRODUCTION Current main; checked 23m ago Last check: 2026-09-16T12:30:05.6636923+00:00 Last observed remote main: b243a8bd998e472046fd67b150a7f46fd2a2a814
+				5 text HOME Current main b243a8bd checked 23m ago
+			6 container AeroLink Administrator
+				7 text AA
+			8 text AeroLink Administrator Administrator
+			9 button Sign out
+		10 container
+			11 container Breadcrumb
+				12 button Software Builds
+				13 text Project configuration
+			14 container
+				15 text PROJECT CONFIGURATION /  NEXT GEN GPS
+			16 heading Project configuration, Value: 1
+				17 text Project configuration
+			18 text Author the project-owned requirement ladder, review its evidence, and see exactly why activation is or is not ready.
+			19 button ← Software Builds
+			20 container Configuration sections
+				21 button Requirement ladder Active
+					22 text Requirement ladder
+					23 text Active
+				24 button Assurance policy Declared posture and deviations
+					25 text Assurance policy
+					26 text Declared posture and deviations
+				27 button History 1 attributed edits
+					28 text History
+					29 container
+						30 text 1  attributed edits
+				31 button Activation readiness Ready
+					32 text Activation readiness
+					33 text Ready
+				34 button Approval configuration Nested project policy
+					35 text Approval configuration
+					36 text Nested project policy
+				37 button Verification methods 4 permitted
+					38 text Verification methods
+					39 text 4 permitted
+				40 button Repository setup Connection and verification
+					41 text Repository setup
+					42 text Connection and verification
+				43 button Source provenance Inherited source facts
+					44 text Source provenance
+					45 text Inherited source facts
+			46 heading Requirement ladder, Value: 2
+				47 text Requirement ladder
+			48 container
+				49 text Version  2  ·  NonDefault  ·  Active .  This is the effective runtime ladder; an empty project may still make a structural correction.
+			50 text Saved
+			51 content list
+				52 container
+					53 text 1 Level
+					54 pop up button (collapsed, settable) Level, Value: System, Secondary Actions: Expand
+						55 menu
+							56 (selected) System
+							57 High-Level software
+							58 Low-Level software
+							59 Customer
+							60 Interface
+					61 container Capabilities
+						62 text Capabilities
+						63 checkbox (settable, integer) Description: Change control, Value: 1
+						64 checkbox (settable, integer) Description: Verification, Value: 0
+						65 checkbox (settable, integer) Description: Requirements document, Value: 1
+						66 checkbox (disabled, settable, integer) Description: Code traceability, Value: 0
+					67 text Procedure profile (System)
+					68 button (disabled) ↑
+					69 button ↓
+					70 button Remove
+				71 container
+					72 text 2 Level
+					73 pop up button (collapsed, settable) Level, Value: High-Level software, Secondary Actions: Expand
+						74 menu
+							75 System
+							76 (selected) High-Level software
+							77 Low-Level software
+							78 Customer
+							79 Interface
+					80 container Capabilities
+						81 text Capabilities
+						82 checkbox (settable, integer) Description: Change control, Value: 1
+						83 checkbox (settable, integer) Description: Verification, Value: 1
+						84 checkbox (settable, integer) Description: Requirements document, Value: 1
+						85 checkbox (disabled, settable, integer) Description: Code traceability, Value: 0
+					86 container Verification profile
+						87 text Verification profile
+						88 pop up button (collapsed, settable) Description: High-Level software verification profile, Value: Case + Procedure, Secondary Actions: Expand
+							89 menu
+								90 Case-only
+								91 (selected) Case + Procedure
+						92 text Choose Case-only or Case + Procedure.
+					93 button ↑
+					94 button ↓
+					95 button Remove
+				96 container
+					97 text 3 Level
+					98 pop up button (collapsed, settable) Level, Value: Low-Level software, Secondary Actions: Expand
+						99 menu
+							100 System
+							101 High-Level software
+							102 (selected) Low-Level software
+							103 Customer
+							104 Interface
+					105 container Capabilities
+						106 text Capabilities
+						107 checkbox (settable, integer) Description: Change control, Value: 1
+						108 checkbox (settable, integer) Description: Verification, Value: 1
+						109 checkbox (settable, integer) Description: Requirements document, Value: 1
+						110 checkbox (settable, integer) Description: Code traceability, Value: 1
+					111 container Verification profile
+						112 text Verification profile
+						113 pop up button (collapsed, settable) Description: Low-Level software verification profile, Value: Case + Procedure, Secondary Actions: Expand
+							114 menu
+								115 Case-only
+								116 (selected) Case + Procedure
+						117 text Choose Case-only or Case + Procedure.
+					118 button ↑
+					119 button (disabled) ↓
+					120 button Remove
+			121 button Add level
+			122 container
+				123 text Reason
+				124 text field (settable) Reason
+			125 button (disabled) Save effective correction
+			126 heading Allowed upstream relationships, Value: 3
+				127 text Allowed upstream relationships
+			128 pop up button (collapsed, settable) Value: System, Secondary Actions: Expand
+				129 menu
+					130 (selected) System
+					131 High-Level software
+					132 Low-Level software
+			133 text →
+			134 pop up button (collapsed, settable) Value: High-Level software, Secondary Actions: Expand
+				135 menu
+					136 System
+					137 (selected) High-Level software
+					138 Low-Level software
+			139 button Remove
+			140 pop up button (collapsed, settable) Value: High-Level software, Secondary Actions: Expand
+				141 menu
+					142 System
+					143 (selected) High-Level software
+					144 Low-Level software
+			145 text →
+			146 pop up button (collapsed, settable) Value: Low-Level software, Secondary Actions: Expand
+				147 menu
+					148 System
+					149 High-Level software
+					150 (selected) Low-Level software
+			151 button Remove
+			152 button Add relationship
+
+The focused UI element is 0 AXWebArea AeroLink, URL: 127.0.0.1:5080/projects/b93f52b6-cdb4-41b9-bda6-bf079fedc74f/configuration

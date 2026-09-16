@@ -1,0 +1,503 @@
+Browser tab: 80896795, Title: "AeroLink", URL: "http://127.0.0.1:5080/projects/setup/318e6333-57c1-43f4-98f8-9c25f901be6b".
+1 AXWebArea AeroLink, URL: 127.0.0.1:5080/projects/setup/318e6333-57c1-43f4-98f8-9c25f901be6b
+	2 container root
+		3 container
+			4 text AeroLink
+			5 container Instance: HOME CANONICAL (HomeCanonical) Database: aerolink Source: b243a8bd Mode: HOME-PRODUCTION Current main; checked 20m ago Last check: 2026-09-16T12:30:05.6636923+00:00 Last observed remote main: b243a8bd998e472046fd67b150a7f46fd2a2a814
+				6 text HOME Current main b243a8bd checked 20m ago
+			7 container AeroLink Administrator
+				8 text AA
+			9 text AeroLink Administrator Administrator
+			10 button Sign out
+		11 container
+			12 container Breadcrumb
+				13 button Projects
+				14 text New Project
+			15 text PROJECT SETUP · RECOVERABLE DRAFT
+			16 heading Create New Project, Value: 1
+				17 text Create New Project
+			18 text Save progress at every step. This draft remains separate from a usable Project until the server accepts finalization.
+			19 button Save and exit
+			157 text Saved on the server. You can resume this setup after signing out or restarting.
+			20 container Project setup steps
+				21 content list
+					22 button 1. Project details Saved answer
+						23 text 1
+						158 text . 
+						159 text Project details
+						26 text Saved answer
+					27 button 2. Starting point Saved answer
+						28 text 2
+						160 text . 
+						161 text Starting point
+						31 text Saved answer
+					32 button 3. First build Saved answer
+						33 text 3
+						162 text . 
+						163 text First build
+						36 text Saved answer
+					37 button 4. Requirement ladder Saved answer
+						38 text 4
+						164 text . 
+						165 text Requirement ladder
+						41 text Saved answer
+					42 button 5. Review rules Current
+						43 text 5
+						166 text . 
+						167 text Review rules
+						46 text Current
+					47 button 6. Repository Not reviewed
+						48 text 6
+						168 text . 
+						169 text Repository
+						51 text Not reviewed
+					52 button 7. Review and finish Not reviewed
+						53 text 7
+						170 text . 
+						171 text Review and finish
+						56 text Not reviewed
+				57 text Saved 9/16/2026, 8:50:15 AM
+			58 container
+				59 heading Review and approval rules, Value: 2
+					60 text Review and approval rules
+				61 text The server supplies the maintained ladder-appropriate standard. Review each stage, adjust its name, signature meaning, or supported project authority, then explicitly accept the resulting definition. No people are assigned automatically.
+				172 text The saved ladder has a newer review standard
+				173 text The server recalculated required subjects from the ladder you saved. This draft still shows the prior definition, so finalization will remain blocked until the current standard is applied and accepted again.
+				174 container
+					175 text Subjects no longer required: High-level software test procedures .
+				176 text Using the current standard replaces this draft's existing rule definition, including any custom edits. Other setup answers remain unchanged.
+				177 button Use rules for this ladder
+				178 text These are the concrete rules returned by the server for this ladder. Stage names and authority selections are saved as part of the accepted configuration. The saved rules do not cover this ladder exactly  and subjects this ladder no longer requires are still present (High-level software test procedures) . Apply the current standard for this ladder and accept it again.
+				179 container
+					180 text System change requests System Rule name
+					181 text field (settable) Description: Rule name 1, Value: System requirements
+				182 content list
+					183 container
+						184 text 1 Stage name
+						185 text field (settable) Description: System stage name 1, Value: Engineering review
+						186 text Signature meaning
+						187 pop up button (collapsed, settable) Description: System signature meaning 1, Value: Review, Secondary Actions: Expand
+							188 menu
+								189 (selected) Review
+								190 Approval
+						191 text Required project authority
+						192 pop up button (collapsed, settable) Description: System project authority 1, Value: System Engineer, Secondary Actions: Expand
+							193 menu
+								194 Choose authority…
+								195 container Base project roles
+									196 (selected) System Engineer
+									197 Software Engineer
+									198 System Test Engineer
+									199 Software Test Engineer
+									200 Project Engineer
+									201 Program Manager
+									202 Engineering Manager
+									203 Configuration Manager
+									204 Software Quality Assurance
+									205 Airworthiness
+								206 container Project Leadership
+									207 Project Engineer — leadership position
+									208 Program Manager — leadership position
+									209 Engineering Manager — leadership position
+									210 Configuration Manager — leadership position
+									211 System Engineering Lead — leadership position
+									212 Software Engineering Lead — leadership position
+									213 System Test Lead — leadership position
+									214 Software Test Lead — leadership position
+						215 button Remove
+					216 container
+						217 text 2 Stage name
+						218 text field (settable) Description: System stage name 2, Value: Project acceptance
+						219 text Signature meaning
+						220 pop up button (collapsed, settable) Description: System signature meaning 2, Value: Approval, Secondary Actions: Expand
+							221 menu
+								222 Review
+								223 (selected) Approval
+						224 text Required project authority
+						225 pop up button (collapsed, settable) Description: System project authority 2, Value: Project Engineer — leadership position, Secondary Actions: Expand
+							226 menu
+								227 Choose authority…
+								228 container Base project roles
+									229 System Engineer
+									230 Software Engineer
+									231 System Test Engineer
+									232 Software Test Engineer
+									233 Project Engineer
+									234 Program Manager
+									235 Engineering Manager
+									236 Configuration Manager
+									237 Software Quality Assurance
+									238 Airworthiness
+								239 container Project Leadership
+									240 (selected) Project Engineer — leadership position
+									241 Program Manager — leadership position
+									242 Engineering Manager — leadership position
+									243 Configuration Manager — leadership position
+									244 System Engineering Lead — leadership position
+									245 Software Engineering Lead — leadership position
+									246 System Test Lead — leadership position
+									247 Software Test Lead — leadership position
+						248 button Remove
+				249 button Add stage
+				250 container
+					251 text Software change requests Software Rule name
+					252 text field (settable) Description: Rule name 2, Value: Software requirements
+				253 content list
+					254 container
+						255 text 1 Stage name
+						256 text field (settable) Description: Software stage name 1, Value: Engineering review
+						257 text Signature meaning
+						258 pop up button (collapsed, settable) Description: Software signature meaning 1, Value: Review, Secondary Actions: Expand
+							259 menu
+								260 (selected) Review
+								261 Approval
+						262 text Required project authority
+						263 pop up button (collapsed, settable) Description: Software project authority 1, Value: Software Engineer, Secondary Actions: Expand
+							264 menu
+								265 Choose authority…
+								266 container Base project roles
+									267 System Engineer
+									268 (selected) Software Engineer
+									269 System Test Engineer
+									270 Software Test Engineer
+									271 Project Engineer
+									272 Program Manager
+									273 Engineering Manager
+									274 Configuration Manager
+									275 Software Quality Assurance
+									276 Airworthiness
+								277 container Project Leadership
+									278 Project Engineer — leadership position
+									279 Program Manager — leadership position
+									280 Engineering Manager — leadership position
+									281 Configuration Manager — leadership position
+									282 System Engineering Lead — leadership position
+									283 Software Engineering Lead — leadership position
+									284 System Test Lead — leadership position
+									285 Software Test Lead — leadership position
+						286 button Remove
+					287 container
+						288 text 2 Stage name
+						289 text field (settable) Description: Software stage name 2, Value: Project acceptance
+						290 text Signature meaning
+						291 pop up button (collapsed, settable) Description: Software signature meaning 2, Value: Approval, Secondary Actions: Expand
+							292 menu
+								293 Review
+								294 (selected) Approval
+						295 text Required project authority
+						296 pop up button (collapsed, settable) Description: Software project authority 2, Value: Project Engineer — leadership position, Secondary Actions: Expand
+							297 menu
+								298 Choose authority…
+								299 container Base project roles
+									300 System Engineer
+									301 Software Engineer
+									302 System Test Engineer
+									303 Software Test Engineer
+									304 Project Engineer
+									305 Program Manager
+									306 Engineering Manager
+									307 Configuration Manager
+									308 Software Quality Assurance
+									309 Airworthiness
+								310 container Project Leadership
+									311 (selected) Project Engineer — leadership position
+									312 Program Manager — leadership position
+									313 Engineering Manager — leadership position
+									314 Configuration Manager — leadership position
+									315 System Engineering Lead — leadership position
+									316 Software Engineering Lead — leadership position
+									317 System Test Lead — leadership position
+									318 Software Test Lead — leadership position
+						319 button Remove
+				320 button Add stage
+				321 container
+					322 text High-level software test cases HighLevelSoftwareCase Rule name
+					323 text field (settable) Description: Rule name 3, Value: High-level software test cases
+				324 content list
+					325 container
+						326 text 1 Stage name
+						327 text field (settable) Description: HighLevelSoftwareCase stage name 1, Value: Engineering review
+						328 text Signature meaning
+						329 pop up button (collapsed, settable) Description: HighLevelSoftwareCase signature meaning 1, Value: Review, Secondary Actions: Expand
+							330 menu
+								331 (selected) Review
+								332 Approval
+						333 text Required project authority
+						334 pop up button (collapsed, settable) Description: HighLevelSoftwareCase project authority 1, Value: Software Test Engineer, Secondary Actions: Expand
+							335 menu
+								336 Choose authority…
+								337 container Base project roles
+									338 System Engineer
+									339 Software Engineer
+									340 System Test Engineer
+									341 (selected) Software Test Engineer
+									342 Project Engineer
+									343 Program Manager
+									344 Engineering Manager
+									345 Configuration Manager
+									346 Software Quality Assurance
+									347 Airworthiness
+								348 container Project Leadership
+									349 Project Engineer — leadership position
+									350 Program Manager — leadership position
+									351 Engineering Manager — leadership position
+									352 Configuration Manager — leadership position
+									353 System Engineering Lead — leadership position
+									354 Software Engineering Lead — leadership position
+									355 System Test Lead — leadership position
+									356 Software Test Lead — leadership position
+						357 button Remove
+					358 container
+						359 text 2 Stage name
+						360 text field (settable) Description: HighLevelSoftwareCase stage name 2, Value: Project acceptance
+						361 text Signature meaning
+						362 pop up button (collapsed, settable) Description: HighLevelSoftwareCase signature meaning 2, Value: Approval, Secondary Actions: Expand
+							363 menu
+								364 Review
+								365 (selected) Approval
+						366 text Required project authority
+						367 pop up button (collapsed, settable) Description: HighLevelSoftwareCase project authority 2, Value: Project Engineer — leadership position, Secondary Actions: Expand
+							368 menu
+								369 Choose authority…
+								370 container Base project roles
+									371 System Engineer
+									372 Software Engineer
+									373 System Test Engineer
+									374 Software Test Engineer
+									375 Project Engineer
+									376 Program Manager
+									377 Engineering Manager
+									378 Configuration Manager
+									379 Software Quality Assurance
+									380 Airworthiness
+								381 container Project Leadership
+									382 (selected) Project Engineer — leadership position
+									383 Program Manager — leadership position
+									384 Engineering Manager — leadership position
+									385 Configuration Manager — leadership position
+									386 System Engineering Lead — leadership position
+									387 Software Engineering Lead — leadership position
+									388 System Test Lead — leadership position
+									389 Software Test Lead — leadership position
+						390 button Remove
+				391 button Add stage
+				392 container
+					393 text High-level software test procedures HighLevelSoftwareProcedure Rule name
+					394 text field (settable) Description: Rule name 4, Value: High-level software test procedures
+				395 content list
+					396 container
+						397 text 1 Stage name
+						398 text field (settable) Description: HighLevelSoftwareProcedure stage name 1, Value: Engineering review
+						399 text Signature meaning
+						400 pop up button (collapsed, settable) Description: HighLevelSoftwareProcedure signature meaning 1, Value: Review, Secondary Actions: Expand
+							401 menu
+								402 (selected) Review
+								403 Approval
+						404 text Required project authority
+						405 pop up button (collapsed, settable) Description: HighLevelSoftwareProcedure project authority 1, Value: Software Test Engineer, Secondary Actions: Expand
+							406 menu
+								407 Choose authority…
+								408 container Base project roles
+									409 System Engineer
+									410 Software Engineer
+									411 System Test Engineer
+									412 (selected) Software Test Engineer
+									413 Project Engineer
+									414 Program Manager
+									415 Engineering Manager
+									416 Configuration Manager
+									417 Software Quality Assurance
+									418 Airworthiness
+								419 container Project Leadership
+									420 Project Engineer — leadership position
+									421 Program Manager — leadership position
+									422 Engineering Manager — leadership position
+									423 Configuration Manager — leadership position
+									424 System Engineering Lead — leadership position
+									425 Software Engineering Lead — leadership position
+									426 System Test Lead — leadership position
+									427 Software Test Lead — leadership position
+						428 button Remove
+					429 container
+						430 text 2 Stage name
+						431 text field (settable) Description: HighLevelSoftwareProcedure stage name 2, Value: Project acceptance
+						432 text Signature meaning
+						433 pop up button (collapsed, settable) Description: HighLevelSoftwareProcedure signature meaning 2, Value: Approval, Secondary Actions: Expand
+							434 menu
+								435 Review
+								436 (selected) Approval
+						437 text Required project authority
+						438 pop up button (collapsed, settable) Description: HighLevelSoftwareProcedure project authority 2, Value: Project Engineer — leadership position, Secondary Actions: Expand
+							439 menu
+								440 Choose authority…
+								441 container Base project roles
+									442 System Engineer
+									443 Software Engineer
+									444 System Test Engineer
+									445 Software Test Engineer
+									446 Project Engineer
+									447 Program Manager
+									448 Engineering Manager
+									449 Configuration Manager
+									450 Software Quality Assurance
+									451 Airworthiness
+								452 container Project Leadership
+									453 (selected) Project Engineer — leadership position
+									454 Program Manager — leadership position
+									455 Engineering Manager — leadership position
+									456 Configuration Manager — leadership position
+									457 System Engineering Lead — leadership position
+									458 Software Engineering Lead — leadership position
+									459 System Test Lead — leadership position
+									460 Software Test Lead — leadership position
+						461 button Remove
+				462 button Add stage
+				463 container
+					464 text Low-level software test cases LowLevelSoftwareCase Rule name
+					465 text field (settable) Description: Rule name 5, Value: Low-level software test cases
+				466 content list
+					467 container
+						468 text 1 Stage name
+						469 text field (settable) Description: LowLevelSoftwareCase stage name 1, Value: Engineering review
+						470 text Signature meaning
+						471 pop up button (collapsed, settable) Description: LowLevelSoftwareCase signature meaning 1, Value: Review, Secondary Actions: Expand
+							472 menu
+								473 (selected) Review
+								474 Approval
+						475 text Required project authority
+						476 pop up button (collapsed, settable) Description: LowLevelSoftwareCase project authority 1, Value: Software Test Engineer, Secondary Actions: Expand
+							477 menu
+								478 Choose authority…
+								479 container Base project roles
+									480 System Engineer
+									481 Software Engineer
+									482 System Test Engineer
+									483 (selected) Software Test Engineer
+									484 Project Engineer
+									485 Program Manager
+									486 Engineering Manager
+									487 Configuration Manager
+									488 Software Quality Assurance
+									489 Airworthiness
+								490 container Project Leadership
+									491 Project Engineer — leadership position
+									492 Program Manager — leadership position
+									493 Engineering Manager — leadership position
+									494 Configuration Manager — leadership position
+									495 System Engineering Lead — leadership position
+									496 Software Engineering Lead — leadership position
+									497 System Test Lead — leadership position
+									498 Software Test Lead — leadership position
+						499 button Remove
+					500 container
+						501 text 2 Stage name
+						502 text field (settable) Description: LowLevelSoftwareCase stage name 2, Value: Project acceptance
+						503 text Signature meaning
+						504 pop up button (collapsed, settable) Description: LowLevelSoftwareCase signature meaning 2, Value: Approval, Secondary Actions: Expand
+							505 menu
+								506 Review
+								507 (selected) Approval
+						508 text Required project authority
+						509 pop up button (collapsed, settable) Description: LowLevelSoftwareCase project authority 2, Value: Project Engineer — leadership position, Secondary Actions: Expand
+							510 menu
+								511 Choose authority…
+								512 container Base project roles
+									513 System Engineer
+									514 Software Engineer
+									515 System Test Engineer
+									516 Software Test Engineer
+									517 Project Engineer
+									518 Program Manager
+									519 Engineering Manager
+									520 Configuration Manager
+									521 Software Quality Assurance
+									522 Airworthiness
+								523 container Project Leadership
+									524 (selected) Project Engineer — leadership position
+									525 Program Manager — leadership position
+									526 Engineering Manager — leadership position
+									527 Configuration Manager — leadership position
+									528 System Engineering Lead — leadership position
+									529 Software Engineering Lead — leadership position
+									530 System Test Lead — leadership position
+									531 Software Test Lead — leadership position
+						532 button Remove
+				533 button Add stage
+				534 container
+					535 text Low-level software test procedures LowLevelSoftwareProcedure Rule name
+					536 text field (settable) Description: Rule name 6, Value: Low-level software test procedures
+				537 content list
+					538 container
+						539 text 1 Stage name
+						540 text field (settable) Description: LowLevelSoftwareProcedure stage name 1, Value: Engineering review
+						541 text Signature meaning
+						542 pop up button (collapsed, settable) Description: LowLevelSoftwareProcedure signature meaning 1, Value: Review, Secondary Actions: Expand
+							543 menu
+								544 (selected) Review
+								545 Approval
+						546 text Required project authority
+						547 pop up button (collapsed, settable) Description: LowLevelSoftwareProcedure project authority 1, Value: Software Test Engineer, Secondary Actions: Expand
+							548 menu
+								549 Choose authority…
+								550 container Base project roles
+									551 System Engineer
+									552 Software Engineer
+									553 System Test Engineer
+									554 (selected) Software Test Engineer
+									555 Project Engineer
+									556 Program Manager
+									557 Engineering Manager
+									558 Configuration Manager
+									559 Software Quality Assurance
+									560 Airworthiness
+								561 container Project Leadership
+									562 Project Engineer — leadership position
+									563 Program Manager — leadership position
+									564 Engineering Manager — leadership position
+									565 Configuration Manager — leadership position
+									566 System Engineering Lead — leadership position
+									567 Software Engineering Lead — leadership position
+									568 System Test Lead — leadership position
+									569 Software Test Lead — leadership position
+						570 button Remove
+					571 container
+						572 text 2 Stage name
+						573 text field (settable) Description: LowLevelSoftwareProcedure stage name 2, Value: Project acceptance
+						574 text Signature meaning
+						575 pop up button (collapsed, settable) Description: LowLevelSoftwareProcedure signature meaning 2, Value: Approval, Secondary Actions: Expand
+							576 menu
+								577 Review
+								578 (selected) Approval
+						579 text Required project authority
+						580 pop up button (collapsed, settable) Description: LowLevelSoftwareProcedure project authority 2, Value: Project Engineer — leadership position, Secondary Actions: Expand
+							581 menu
+								582 Choose authority…
+								583 container Base project roles
+									584 System Engineer
+									585 Software Engineer
+									586 System Test Engineer
+									587 Software Test Engineer
+									588 Project Engineer
+									589 Program Manager
+									590 Engineering Manager
+									591 Configuration Manager
+									592 Software Quality Assurance
+									593 Airworthiness
+								594 container Project Leadership
+									595 (selected) Project Engineer — leadership position
+									596 Program Manager — leadership position
+									597 Engineering Manager — leadership position
+									598 Configuration Manager — leadership position
+									599 System Engineering Lead — leadership position
+									600 Software Engineering Lead — leadership position
+									601 System Test Lead — leadership position
+									602 Software Test Lead — leadership position
+						603 button Remove
+				604 button Add stage
+				605 checkbox (settable, integer) Description: I reviewed and explicitly accept these concrete Review and Approval rules for this ladder., Value: 0
+			153 container
+				154 button Back
+				155 text Step  5  of  7
+				156 button Continue
+
+The focused UI element is 1 AXWebArea AeroLink, URL: 127.0.0.1:5080/projects/setup/318e6333-57c1-43f4-98f8-9c25f901be6b

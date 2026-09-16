@@ -1,0 +1,25 @@
+{
+  "service": "AeroLink API",
+  "sourceSha": "b243a8bd998e472046fd67b150a7f46fd2a2a814",
+  "sourceShortSha": "b243a8bd",
+  "sourceIdentity": "b243a8bd998e472046fd67b150a7f46fd2a2a814",
+  "mode": "HOME-PRODUCTION",
+  "mainCurrency": {
+    "state": "Current",
+    "checkedAtUtc": "2026-09-16T08:30:05.6636923-04:00",
+    "remoteSha": "b243a8bd998e472046fd67b150a7f46fd2a2a814"
+  },
+  "instance": {
+    "id": "bb1ea304-36d7-4176-9b27-4eb7d3e1000d",
+    "label": "HOME CANONICAL",
+    "classification": "HomeCanonical",
+    "snapshot": null
+  },
+  "database": {
+    "name": "aerolink"
+  },
+  "schema": {
+    "latestAppliedMigration": "20260914021555_AddCodeTraceabilityRepositoryVerificationFacts"
+  },
+  "startedAtUtc": "2026-09-15T18:31:45.1487162-04:00"
+}

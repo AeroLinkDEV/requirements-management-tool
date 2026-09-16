@@ -1,0 +1,102 @@
+Browser tab: 80896795, Title: "AeroLink", URL: "http://127.0.0.1:5080/projects/setup/318e6333-57c1-43f4-98f8-9c25f901be6b".
+1 AXWebArea AeroLink, URL: 127.0.0.1:5080/projects/setup/318e6333-57c1-43f4-98f8-9c25f901be6b
+	2 container root
+		3 container
+			4 text AeroLink
+			5 container Instance: HOME CANONICAL (HomeCanonical) Database: aerolink Source: b243a8bd Mode: HOME-PRODUCTION Current main; checked 21m ago Last check: 2026-09-16T12:30:05.6636923+00:00 Last observed remote main: b243a8bd998e472046fd67b150a7f46fd2a2a814
+				6 text HOME Current main b243a8bd checked 21m ago
+			7 container AeroLink Administrator
+				8 text AA
+			9 text AeroLink Administrator Administrator
+			10 button Sign out
+		11 container
+			12 container Breadcrumb
+				13 button Projects
+				14 text New Project
+			15 text PROJECT SETUP · RECOVERABLE DRAFT
+			16 heading Create New Project, Value: 1
+				17 text Create New Project
+			18 text Save progress at every step. This draft remains separate from a usable Project until the server accepts finalization.
+			19 button Save and exit
+			172 text Saved on the server. You can resume this setup after signing out or restarting.
+			20 container Project setup steps
+				21 content list
+					22 button 1. Project details Saved answer
+						23 text 1
+						158 text . 
+						159 text Project details
+						26 text Saved answer
+					27 button 2. Starting point Saved answer
+						28 text 2
+						160 text . 
+						161 text Starting point
+						31 text Saved answer
+					32 button 3. First build Saved answer
+						33 text 3
+						162 text . 
+						163 text First build
+						36 text Saved answer
+					37 button 4. Requirement ladder Saved answer
+						38 text 4
+						164 text . 
+						165 text Requirement ladder
+						41 text Saved answer
+					42 button 5. Review rules Saved answer
+						43 text 5
+						166 text . 
+						167 text Review rules
+						46 text Saved answer
+					47 button 6. Repository Saved answer
+						48 text 6
+						168 text . 
+						169 text Repository
+						51 text Saved answer
+					52 button 7. Review and finish Current
+						53 text 7
+						170 text . 
+						171 text Review and finish
+						56 text Current
+				57 text Saved 9/16/2026, 8:51:30 AM
+			58 container
+				59 heading Review and finish, Value: 2
+					60 text Review and finish
+				61 text Check the durable answers before saving or finalizing this setup.
+				173 definition list
+					174 container Project
+						175 text Project
+					176 container
+						177 text Acceptance 1045 - 2026-09-16  · Disposable setup validation
+					178 container Starting point
+						179 text Starting point
+					180 container
+						181 text Fresh project  · no inherited categories
+					182 container First build
+						183 text First build
+					184 container
+						185 text 0.01  · SW-00.01
+					186 container Requirement ladder
+						187 text Requirement ladder
+					188 content list
+						189 container
+							190 AXListMarker • 
+							191 text System  · Change control, Requirements document  · Verification disabled — no verification artifacts are enabled.
+						192 container
+							193 AXListMarker • 
+							194 text High-Level software  · Change control, Verification, Requirements document  · Verification enabled · Case
+						195 container
+							196 AXListMarker • 
+							197 text Low-Level software  · Change control, Verification, Requirements document, Code traceability  · Verification enabled · Case + Procedure
+					198 container Rules
+						199 text Rules
+					200 text Explicitly accepted · 5 server-supplied rules
+					201 container Repository
+						202 text Repository
+					203 text Configure later · Pending
+				204 text Fresh setup is ready for the server's finalization gate. The resulting build will be In Work.
+				205 button Create Project
+			153 container
+				154 button Back
+				155 text Step  7  of  7
+				156 button (disabled) Save review
+
+The focused UI element is 1 AXWebArea AeroLink, URL: 127.0.0.1:5080/projects/setup/318e6333-57c1-43f4-98f8-9c25f901be6b
