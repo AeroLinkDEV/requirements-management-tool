@@ -1227,6 +1227,7 @@ function Invoke-AeroLinkTransitionChain {
     New-Item -ItemType Directory -Path $attemptRoot, $paths.Spool, $paths.Logs -Force | Out-Null
     $startedAt = Get-Date
     $script:published = $false
+    $finalizedByCatch = $false
     $emit = {
         param([Collections.IDictionary]$Value, [int]$ExitCode)
         $Value['attemptId'] = $AttemptId; $Value['caller'] = $Caller; $Value['outerPid'] = $PID; $Value['exitCode'] = $ExitCode
@@ -1315,6 +1316,9 @@ function Invoke-AeroLinkTransitionChain {
             if ($reason -eq 'ChainExited') { Invoke-AeroLinkAuthorityPump -Spool $paths.Spool -AttemptId $AttemptId -Witness $witness -Qualification $Qualification -QualificationProbe:$QualificationProbe -DieAt $AuthorityDieAt }
         }
 
+        # Contract seam: a host error raised while the attempt's own work has ended but its job has NOT yet been
+        # collected - the one place where the catch's cleanup is the only thing that can produce containment proof.
+        if ($Faults['OuterHostErrorAt'] -eq 'AfterChain') { throw 'injected: a host error before the job was collected' }
         $proven = Complete-AeroLinkTransitionJob -Job $job -AttemptRoot $attemptRoot -AttemptId $AttemptId
         $job = $null
         foreach ($tail in $tails) { try { foreach ($line in @($tail.Flush())) { Write-Host "$($tail.Prefix)$line" } } catch { } }
@@ -1350,6 +1354,8 @@ function Invoke-AeroLinkTransitionChain {
         $blocking = @($launches | Where-Object { $_.blocking }).Count -gt 0
         $failures = [System.Collections.Generic.List[string]]::new()
         $add = { param([string]$Code) if ($Code -and -not $failures.Contains($Code)) { $failures.Add($Code) } }
+        # Contract seam: a host error raised where the outer is verifying what it was told, not where a child failed.
+        if ($Faults['OuterHostErrorAt'] -eq 'Verification') { throw 'injected: a host error during required-role verification' }
 
         # (a) Every REQUIRED role, verified by the outer - never taken from a child's word. A role is restored by a
         # launch this attempt registered and that is ready NOW, or (when no launch was required) by the exact
@@ -1360,7 +1366,11 @@ function Invoke-AeroLinkTransitionChain {
             $mine = @($launches | Where-Object { $_.role -eq $role })
             $restored = $false; $evidence = ''
             $outerReadiness = Get-AeroLinkProperty $required 'readiness' $null
-            if ($outerReadiness -is [scriptblock]) { try { $outerReadiness = & $outerReadiness } catch { $outerReadiness = $null; $evidence = "the required readiness could not be computed: $($_.Exception.Message)" } }
+            # A scriptblock requirement is MODULE-BOUND and takes the requirement itself as its parameter: the
+            # caller builds it in the remote-demo module, and this chain executes it from here, where that module's
+            # own commands are not visible. Passing the requirement object is what keeps the callback free of
+            # captured locals (a closure would lose the module's command scope entirely).
+            if ($outerReadiness -is [scriptblock]) { try { $outerReadiness = & $outerReadiness $required } catch { $outerReadiness = $null; $evidence = "the required readiness could not be computed: $($_.Exception.Message)" } }
             $succeeded = @($mine | Where-Object { $_.outcome -eq 'Succeeded' -and $_.currentHealth -eq 'Running' })
             if ($succeeded.Count) {
                 $check = Test-AeroLinkRestorationDischarge -Spool $paths.Spool -RequestId ([string]$succeeded[-1].requestId)
@@ -1373,7 +1383,7 @@ function Invoke-AeroLinkTransitionChain {
                 }
             }
             elseif (-not [bool](Get-AeroLinkProperty $required 'launchRequired' $false) -and (Get-AeroLinkProperty $required 'discover' $null)) {
-                $discovered = & $required.discover
+                $discovered = & $required.discover $required
                 if ($discovered -and $discovered.ProcessId -and $outerReadiness) {
                     $check = Test-AeroLinkRoleReadiness -Readiness $outerReadiness -ProcessId ([int]$discovered.ProcessId)
                     $restored = $check.Ready; $evidence = "existing instance: $($check.Evidence)"
@@ -1450,23 +1460,72 @@ function Invoke-AeroLinkTransitionChain {
         return $result
     }
     catch {
-        $message = $_.Exception.Message
-        try { [IO.File]::AppendAllText((Join-Path $attemptRoot 'outer-error.log'), ($_ | Out-String) + $_.ScriptStackTrace + "`r`n") } catch { }
+        $primary = $_
+        $message = $primary.Exception.Message
+        try { [IO.File]::AppendAllText((Join-Path $attemptRoot 'outer-error.log'), ($primary | Out-String) + $primary.ScriptStackTrace + "`r`n") } catch { }
         $previous = (Read-AeroLinkJsonRecord -Path $paths.Outcome).Value
         if ($script:published -and $previous) {
-            # Published, then finalization failed: the durable result must not keep claiming a decision this outer will not return.
-            return & $emit ([ordered]@{ decision = 'HostError'; stage = 'finalization'; detail = $message; publishedDecision = [string](Get-AeroLinkProperty $previous 'decision' '')
+            # Published, then finalization failed: the durable result must not keep claiming a decision this outer
+            # will not return. The verdicts that were already established (cleanup proof, admission decision, the
+            # durable obligation and the attempts taken) are carried forward unchanged - they were computed from
+            # evidence that this failure did not invalidate - and the primary error is preserved in 'detail'.
+            return & $emit ([ordered]@{ decision = 'HostError'; stage = 'finalization'; detail = "finalization failed after the attempt result was published: $message"; primaryError = $message
+                    publishedDecision = [string](Get-AeroLinkProperty $previous 'decision' '')
                     mutationStarted = [bool](Get-AeroLinkProperty $previous 'mutationStarted' $false); restorationRequired = [bool](Get-AeroLinkProperty $previous 'restorationRequired' $true)
-                    recovery = (Get-AeroLinkProperty $previous 'recovery' $null); cleanup = (Get-AeroLinkProperty $previous 'cleanup' $null); published = $previous }) 1
+                    recovery = (Get-AeroLinkProperty $previous 'recovery' $null); cleanup = (Get-AeroLinkProperty $previous 'cleanup' $null)
+                    operation = (Get-AeroLinkProperty $previous 'operation' $null); launches = (Get-AeroLinkProperty $previous 'launches' $null)
+                    published = $previous }) 1
         }
-        return & $emit ([ordered]@{ decision = 'HostError'; stage = 'host'; detail = $message; mutationStarted = (Test-Path -LiteralPath $paths.DelegateAccepted); restorationRequired = (Test-Path -LiteralPath $paths.DelegateAccepted) }) 1
+        # ---- A host error BEFORE any result was published. Finish the attempt's cleanup HERE, then publish the
+        # same attempt-bound evidence a normal completion carries. A host error must neither suppress safely
+        # admissible recovery (a proven-quiescent attempt with resolved launches) nor authorize recovery on an
+        # attempt whose termination is Unknown: admissibility comes only from the durable records, after cleanup.
+        $cleanupErrors = [System.Collections.Generic.List[string]]::new()
+        $containment = $null
+        $finalizedByCatch = $true
+        if ($job) {
+            try {
+                # Contract seam: a cleanup that cannot complete must be RECORDED, never retried behind the
+                # published verdict (the finally closes the handle without claiming a new observation).
+                if ($Faults['OuterCleanupFault']) { throw 'injected: the outer could not complete the transition job' }
+                $containment = [bool](Complete-AeroLinkTransitionJob -Job $job -AttemptRoot $attemptRoot -AttemptId $AttemptId); $job = $null
+            }
+            catch { $cleanupErrors.Add("the transition job could not be completed: $($_.Exception.Message)") }
+        }
+        if ($witness) { try { Stop-AeroLinkTransitionWitness -Witness $witness; $witness = $null } catch { $cleanupErrors.Add("the completion witness could not be released: $($_.Exception.Message)") } }
+        if ($delegate) { try { $K::Close($delegate); $delegate = $null } catch { $cleanupErrors.Add("the delegate handle could not be closed: $($_.Exception.Message)") } }
+        $receipt = Read-AeroLinkJsonRecord -Path $paths.Receipt
+        if ($null -eq $containment -and $receipt.Class -eq 'Valid') { $containment = [bool](Get-AeroLinkProperty $receipt.Value 'containmentProven' $false) }
+        if ($null -eq $containment) { $containment = $false }
+        $mutationStarted = (Test-Path -LiteralPath $paths.DelegateAccepted)
+        $self = $null
+        try { $self = Test-AeroLinkAttemptResolved -AttemptRoot $attemptRoot -AttemptId $AttemptId }
+        catch { $cleanupErrors.Add("admission evidence could not be computed: $($_.Exception.Message)") }
+        # Always an array: under StrictMode a single-element pipeline result is a scalar, and `.Count` on a
+        # scalar is itself an error in Windows PowerShell 5.1.
+        $problems = @()
+        if ($self) { $problems = @($self.Problems) }
+        if ($problems.Count -eq 0 -and -not ($self -and $self.Resolved)) { $problems = @('the attempt could not be proven resolved after the host error') }
+        if ($cleanupErrors.Count) { $problems = @($problems) + @($cleanupErrors) }
+        return & $emit ([ordered]@{ decision = 'HostError'; stage = 'host'; detail = $message; primaryError = $message; cleanupErrors = @($cleanupErrors)
+                # Mutation began and no verdict about the required roles was ever reached, so the obligation is
+                # retained - a host error here cannot assert that any role is restored. Recovery still has to earn
+                # admissibility from the durable records above; this flag only says what is owed, not what is safe.
+                mutationStarted = $mutationStarted; restorationRequired = $mutationStarted
+                cleanup = [ordered]@{ transitionContainmentProven = $containment; receiptClass = $receipt.Class
+                    collected = @(Get-AeroLinkProperty $receipt.Value 'discoveredBeforeTermination' @()); errors = @($cleanupErrors) }
+                recovery = [ordered]@{ admissible = [bool]($self -and $self.Resolved); quiescence = $(if ($self) { $self.Quiescence } else { 'Unknown' }); problems = @($problems) }
+                attempts = @([ordered]@{ attemptId = $AttemptId; decision = 'HostError'; stage = 'host' }) }) 1
     }
     finally {
         # A host error while this outer is still alive: it completes the job itself - terminate, observe zero through
         # its held handle, publish the receipt - so the next admission has proof rather than a witness-only answer.
-        if ($job) {
+        # When the catch already attempted that completion, the finally only closes the handle: a second attempt
+        # must not publish a receipt behind a verdict that was already saying containment was not proven.
+        if ($job -and -not $finalizedByCatch) {
             try { $null = Complete-AeroLinkTransitionJob -Job $job -AttemptRoot $attemptRoot -AttemptId $AttemptId } catch { }
         }
+        elseif ($job) { try { $K::CloseHandleChecked($job.Handle) } catch { } }
         if ($witness) { try { Stop-AeroLinkTransitionWitness -Witness $witness } catch { } }
         if ($delegate) { $K::Close($delegate) }
         $script:published = $false

@@ -20,6 +20,30 @@ $postgresPort = (Get-AeroLinkServiceEndpoints).PostgresPort
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
 
+# The helper is a separate process whose stderr the remote-demo launcher retains; a bare
+# "You cannot call a method on a null-valued expression" (with no expression and no stack) is not
+# diagnosable evidence. Record the phase, the full exception, the invocation and the PowerShell
+# stack in the installation's own log before the error continues to the caller.
+$script:helperPhase = 'startup'
+$helperDiagnosticLog = Join-Path $logs 'postgres-helper.error.log'
+trap {
+    try {
+        $lines = @(
+            "$(Get-Date -Format o) Start-Postgres.ps1 failed during phase '$script:helperPhase'",
+            "Message:    $($_.Exception.Message)",
+            "Exception:  $($_.Exception.GetType().FullName)",
+            "Category:   $($_.CategoryInfo.Category)/$($_.FullyQualifiedErrorId)",
+            "Invocation: $($_.InvocationInfo.MyCommand) :: $($_.InvocationInfo.PositionMessage)",
+            "Target:     $($_.TargetObject)",
+            "Stack:      $($_.ScriptStackTrace)"
+        )
+        if ($_.Exception.InnerException) { $lines += "Inner:      $($_.Exception.InnerException.GetType().FullName): $($_.Exception.InnerException.Message)" }
+        [IO.File]::AppendAllText($helperDiagnosticLog, (($lines -join "`r`n") + "`r`n"))
+    }
+    catch { }
+    throw
+}
+
 function Test-AeroLinkPostgresAccepting {
     <#
       .SYNOPSIS True only when pg_isready succeeds AND, when -RequireQuery is set,
@@ -64,6 +88,7 @@ function Test-AeroLinkPostgresInstalled {
 }
 
 # Fast path: already genuinely query-ready.
+$script:helperPhase = 'already-ready probe'
 if (Test-AeroLinkPostgresAccepting -RequireQuery) {
     Write-Host "PostgreSQL is already accepting connections and answering real queries on 127.0.0.1:$postgresPort."
     exit 0
@@ -76,6 +101,7 @@ if (-not (Test-AeroLinkPostgresInstalled)) {
 # First-time install only: a missing data directory is created once. The canonical
 # cluster already exists and is never reinitialized by this script.
 if (-not (Test-Path (Join-Path $data 'PG_VERSION'))) {
+    $script:helperPhase = 'initdb'
     $initRun = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $bin 'initdb.exe') `
         -ArgumentList @('-D', $data, '-U', 'postgres', '-A', 'trust', '--encoding=UTF8', '--no-locale') `
         -StandardOutput (Join-Path $logs 'postgres-initdb.stdout.log') `
@@ -88,6 +114,7 @@ if (-not (Test-Path (Join-Path $data 'PG_VERSION'))) {
 # a recorded process that is no longer running or is the recognized local postmaster.
 $pidFile = Join-Path $data 'postmaster.pid'
 if (Test-Path $pidFile) {
+    $script:helperPhase = 'stale postmaster.pid handling'
     $recordedPid = [int](Get-Content $pidFile -TotalCount 1)
     $owner = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
     if ($owner -and $owner.ProcessName -like 'postgres*') {
@@ -122,14 +149,17 @@ if (Test-Path $pidFile) {
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransitionAuthority.psm1') -DisableNameChecking
 $transitionHandoff = Get-AeroLinkTransitionHandoffFromEnvironment
 if ($transitionHandoff) {
+    $script:helperPhase = 'launch request: postgres'
     $launch = Request-AeroLinkServiceLaunch -Handoff $transitionHandoff -Role postgres -FilePath (Join-Path $bin 'postgres.exe') `
         -Arguments ('-D "' + $data + '" -p ' + $postgresPort + ' -h 127.0.0.1') -StandardOutput $log -StandardError $log -RestrictAdministrators `
         -Readiness @{ kind = 'postgres'; dataDirectory = $data; port = $postgresPort; binDir = $bin } -ReadinessTimeoutSeconds $WaitSeconds
     if ([string]$launch.outcome -ne 'Succeeded' -or -not $launch.restored) {
         throw "PostgreSQL could not be started by the transition authority ($($launch.outcome)/$($launch.currentHealth)): $($launch.detail)"
     }
+    $script:helperPhase = 'post-launch readiness'
 }
 else {
+    $script:helperPhase = 'pg_ctl start'
     # Start the postmaster through the bounded runner. File redirection means the
     # postmaster inherits file handles, never the scheduled task's stdio pipes, so the
     # parent cannot block waiting on the server's lifetime.
@@ -148,6 +178,7 @@ else {
 $deadline = (Get-Date).AddSeconds($WaitSeconds)
 $ready = $false
 while ((Get-Date) -lt $deadline) {
+    $script:helperPhase = 'readiness/database wait'
     if (Test-AeroLinkPostgresAccepting) {
         if (-not (Test-AeroLinkDatabaseExists)) {
             $createRun = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $bin 'createdb.exe') `

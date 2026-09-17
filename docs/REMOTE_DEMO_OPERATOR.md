@@ -152,6 +152,35 @@ protected endpoint.
 `Status` inspects both tasks; `Remove` deletes both; `Preview` prints the exact recovery
 XML that would be installed, and the source it resolved, without creating anything.
 
+### Launch-context qualification (required before a transition may stop anything)
+
+A scheduled recovery or reconcile pass now refuses **before it stops anything** unless its own launch context
+has been qualified for the exact definition it runs under. The qualifier is
+`product\scripts\Invoke-AeroLinkLaunchContextQualification.ps1`; run it from an elevated Windows PowerShell,
+against the installed task, in a disposable installation first:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File <source>\product\scripts\Invoke-AeroLinkLaunchContextQualification.ps1 `
+    -InstallationRoot <disposable installation> -TaskName AeroLinkRemoteDemoRecovery
+```
+
+It registers a trigger-less **twin** of that definition, drives a normal completion, an explicit task stop and a
+run that outlives the definition's hard time limit (in each case with a transient mutator active inside the
+attempt), proves the preserved probe survived every path, unregisters the twin and proves every probe stopped,
+and only then writes the qualification record beside its integrity hash. The summary it prints names the verdict
+and the evidence path; `Incompatible`, `ExperimentFailed`, `Incomplete`, `Unqualifiable` and `CleanupFailed` all
+withhold a usable record.
+
+Supported entry points for a transition are the installed tasks (attested through the Task Scheduler API) and an
+operator console started as `explorer.exe > cmd.exe`. **A transition started from a PowerShell prompt or Windows
+Terminal is unidentified and refused before teardown; use the repository's `.bat` launchers or the installed
+tasks.** Launcher paths are unchanged.
+
+RestartOnFailure is not a recovery mechanism here: measured on the current host in a disposable installation
+(InteractiveToken, one nonzero-exit case and one hard-time-limit case over 5.5 minutes), Task Scheduler did
+**not** re-run either ending. Recovery after an interrupted transition comes from the next trigger or the next
+on-demand run, gated by the admission rules that require the previous attempt to be proven quiescent.
+
 ## Qualification evidence
 
 Deterministic regression coverage lives in

@@ -410,8 +410,183 @@ Invoke-AeroLinkAuthorityPump -Spool $paths.Spool -AttemptId 'A1' -Witness $witne
         finally { $env:AEROLINK_QUALIFICATION_TUNNEL_IMAGE = $previousImage[0]; $env:AEROLINK_INSTALLATION_ROOT = $previousImage[1] }
     }
     finally { Stop-AeroLinkTransitionWitness -Witness $witness }
+
+    # ---------------------------------------------------------------------------------------------------------
+    # T18/T19 (TA-1): the REAL remote-demo required-role callbacks are evaluated BY THE CHAIN.
+    #
+    # `.GetNewClosure()` re-binds a scriptblock to a fresh dynamic module whose command resolution does not
+    # include the remote-demo module, so `Get-AeroLinkPortOwner` and the other helpers were not found and a
+    # required-role verification became HostError/CommandNotFound (found in disposable integration). These
+    # contracts build the requirement with the REAL factory and run it through the REAL chain against an
+    # already-running role that proves the source identity now on disk, then require an identity mismatch to be
+    # a role verdict - never a host error, and never a terminal success.
+    # ---------------------------------------------------------------------------------------------------------
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force -DisableNameChecking
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -Force -DisableNameChecking
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force -DisableNameChecking
+
+    $t18Source = Join-Path $root 't18-source'
+    $apiDirectory = Join-Path $t18Source 'product\src\AeroLink.Api'
+    New-Item -ItemType Directory -Path $apiDirectory -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $t18Source 'README.md') -Value 'stand-in source for the required-role callback contracts' -Encoding ASCII
+    # The stand-in API must satisfy the product's own ownership rule for a fragment ending in 'AeroLink.Api':
+    # the IMAGE has to be an AeroLink.Api.exe living under the checkout's API directory (a foreign interpreter
+    # quoting that directory is correctly refused). Windows PowerShell 5.1 can emit that apphost with Add-Type;
+    # PowerShell 7 cannot emit an apphost, so the positive-discovery half runs on the desktop host and the
+    # callback-resolution half (the actual TA-1 regression) runs on both.
+    $standInHost = $null
+    $standInDirectory = Join-Path $apiDirectory 'bin\Debug\net10.0'
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        New-Item -ItemType Directory -Path $standInDirectory -Force | Out-Null
+        $standInHost = Join-Path $standInDirectory 'AeroLink.Api.exe'
+        if (-not (Test-Path -LiteralPath $standInHost)) {
+            Add-Type -OutputAssembly $standInHost -OutputType ConsoleApplication -TypeDefinition @'
+using System; using System.Net; using System.Net.Sockets; using System.Text;
+public static class Program {
+    public static int Main(string[] args) {
+        int port = int.Parse(Environment.GetEnvironmentVariable("AL1055_STANDIN_PORT") ?? "0");
+        string identity = Environment.GetEnvironmentVariable("AL1055_STANDIN_SOURCE") ?? "";
+        string instance = Environment.GetEnvironmentVariable("AL1055_STANDIN_INSTANCE") ?? "";
+        TcpListener listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+        while (true) {
+            using (TcpClient c = listener.AcceptTcpClient()) {
+                NetworkStream s = c.GetStream();
+                byte[] buffer = new byte[8192];
+                try { s.Read(buffer, 0, buffer.Length); } catch { }
+                string request = Encoding.ASCII.GetString(buffer);
+                string body = request.Contains("/health/ready") ? "{\"status\":\"ready\",\"database\":\"connected\"}"
+                    : (request.Contains("/health/identity") ? "{\"mode\":\"HOME-PRODUCTION\",\"sourceIdentity\":\"" + identity + "\",\"instance\":{\"id\":\"" + instance + "\",\"classification\":\"HomeCanonical\"}}" : "{}");
+                byte[] bytes = Encoding.UTF8.GetBytes(body);
+                byte[] head = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + bytes.Length + "\r\nConnection: close\r\n\r\n");
+                s.Write(head, 0, head.Length); s.Write(bytes, 0, bytes.Length); s.Flush();
+            }
+        }
+    }
 }
-catch { $failures.Add("Suite error: $($_.Exception.Message) @ $($_.InvocationInfo.PositionMessage)") }
+'@
+        }
+        Check (Test-Path -LiteralPath $standInHost) 'T18: the stand-in apphost was built inside the API directory.'
+    }
+    $gitQuiet = {
+        param([string[]]$GitArguments)
+        $previous = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+        try { & git -C $t18Source -c core.autocrlf=false -c core.safecrlf=false @GitArguments *> $null } finally { $ErrorActionPreference = $previous }
+    }
+    & $gitQuiet @('init', '-q')
+    & $gitQuiet @('-c', 'user.email=int@al1055.invalid', '-c', 'user.name=al1055 int', 'add', '-A')
+    & $gitQuiet @('-c', 'user.email=int@al1055.invalid', '-c', 'user.name=al1055 int', 'commit', '-q', '-m', 'stand-in source')
+    $t18Identity = [string](Get-AeroLinkSourceFingerprint -RepositoryRoot $t18Source).Identity
+    Check ([bool]$t18Identity) 'T18: the stand-in checkout has a source identity.'
+
+    # A disposable qualification installation: the product endpoints may move ONLY here.
+    $portProbe = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
+    $portProbe.Start(); $t18ApiPort = ([Net.IPEndPoint]$portProbe.LocalEndpoint).Port; $portProbe.Stop()
+    $portProbe = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
+    $portProbe.Start(); $t18PgPort = ([Net.IPEndPoint]$portProbe.LocalEndpoint).Port; $portProbe.Stop()
+    $t18Installation = Join-Path $root 't18-inst'
+    New-Item -ItemType Directory -Path $t18Installation -Force | Out-Null
+    $t18InstanceId = [guid]::NewGuid().ToString()
+    (@{ instanceId = $t18InstanceId; classification = 'HomeCanonical'; label = 'HOME CANONICAL' } | ConvertTo-Json) |
+        Set-Content -LiteralPath (Join-Path $t18Installation 'instance.json') -Encoding UTF8
+
+    $savedEndpoints = @{ Root = $env:AEROLINK_INSTALLATION_ROOT; Api = $env:AEROLINK_QUALIFICATION_API_PORT; Pg = $env:AEROLINK_QUALIFICATION_POSTGRES_PORT; Source = $env:AL1055_STANDIN_SOURCE; Instance = $env:AL1055_STANDIN_INSTANCE; Port = $env:AL1055_STANDIN_PORT }
+    function Start-StandInApi([string]$ServedIdentity) {
+        $env:AL1055_STANDIN_SOURCE = $ServedIdentity
+        $env:AL1055_STANDIN_INSTANCE = $script:t18InstanceId
+        $env:AL1055_STANDIN_PORT = [string]$script:t18ApiPort
+        $process = Start-Process -FilePath $script:standInHost -WindowStyle Hidden -PassThru
+        Own $process.Id
+        for ($i = 0; $i -lt 150; $i++) {
+            if (@(Get-NetTCPConnection -State Listen -LocalPort $script:t18ApiPort -ErrorAction SilentlyContinue).Count) { return $process }
+            Start-Sleep -Milliseconds 100
+        }
+        throw 'the stand-in API never began listening'
+    }
+    try {
+        $env:AEROLINK_INSTALLATION_ROOT = $t18Installation
+        $env:AEROLINK_QUALIFICATION_API_PORT = [string]$t18ApiPort
+        $env:AEROLINK_QUALIFICATION_POSTGRES_PORT = [string]$t18PgPort
+        $topology = [pscustomobject]@{ TunnelRunning = $false; RuntimeRunning = $true }
+        $realRoles = @(Get-AeroLinkHomeTransitionRequiredRoles -SourceRoot $t18Source -InstallationRoot $t18Installation -Config $null -Policy KeepReady -Topology $topology)
+        $apiRequirement = @($realRoles | Where-Object { $_.role -eq 'api' })
+        Check ($apiRequirement.Count -eq 1) "T18: the real role factory produces an api requirement (got $($realRoles.Count) requirement(s))."
+        if ($apiRequirement.Count -eq 1) {
+            # (a) Executed here from a scope that is NOT the remote-demo module: the same shape the chain uses.
+            $callbackReadiness = & $apiRequirement[0].readiness $apiRequirement[0]
+            Check ([string]$callbackReadiness.expectedSourceIdentity -eq $t18Identity) "T18: the api readiness callback binds the identity on disk NOW ($($callbackReadiness.expectedSourceIdentity))."
+            $callbackDiscovery = & $apiRequirement[0].discover $apiRequirement[0]
+            Check ($null -eq $callbackDiscovery) 'T18: with nothing listening, the real discovery callback answers "no instance" instead of failing to resolve its commands.'
+
+            # (b) Through the real chain with nothing running: a ROLE verdict, never HostError/CommandNotFound.
+            $t18 = Invoke-TestChain -Name 't18-inst' -Roles @($apiRequirement[0])
+            Check ($t18.Decision -ne 'HostError') "T18: the real callbacks do not turn a required-role verification into a HostError (got $($t18.Decision): $($t18.Detail))."
+            Check (@($t18.Outcome.failures) -match 'RoleNotRestored:api').Count -ge 1 'T18: the chain reports the api role as not restored.'
+            $t18Role = @($t18.Outcome.operation.roles)[0]
+            Check (-not [bool]$t18Role.restored -and [string]$t18Role.evidence -match 'no existing instance') "T18: the outer records its own verdict with the discovery evidence (evidence: $($t18Role.evidence))."
+
+            # (c) Desktop host only: a real running role image under the checkout's API directory.
+            if ($standInHost) {
+                $standInApi = Start-StandInApi $t18Identity
+                $standInDiscovery = & $apiRequirement[0].discover $apiRequirement[0]
+                Check ($standInDiscovery -and [int]$standInDiscovery.ProcessId -eq $standInApi.Id) "T18: the real discovery callback finds the running instance by checkout ownership (got pid $($standInDiscovery.ProcessId), expected $($standInApi.Id))."
+                $t18b = Invoke-TestChain -Name 't18b-inst' -Roles @($apiRequirement[0])
+                Check ($t18b.Decision -eq 'Completed' -and $t18b.ExitCode -eq 0) "T18: an already-running role verified through the real callbacks completes (got $($t18b.Decision)/$($t18b.ExitCode): $($t18b.Detail))."
+                $t18bRole = @($t18b.Outcome.operation.roles)[0]
+                Check ([bool]$t18bRole.restored) "T18: the outer records the api role restored from its OWN verification (evidence: $($t18bRole.evidence))."
+                Check ([string]$t18bRole.evidence -match 'HOME-PRODUCTION') "T18: the outer verification proves the runtime mode (evidence: $($t18bRole.evidence))."
+
+                # Negative control: the same chain, but the running role reports a source that is not on disk.
+                Stop-Process -Id $standInApi.Id -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Milliseconds 800
+                $null = Start-StandInApi 'stale-source-0000000000000000000000000000000000000000'
+                $t19 = Invoke-TestChain -Name 't19-inst' -Roles @($apiRequirement[0])
+                Check ($t19.Decision -ne 'Completed' -and $t19.Decision -ne 'HostError' -and $t19.ExitCode -ne 0) "T19: an identity mismatch is never HostError or success (got $($t19.Decision)/$($t19.ExitCode): $($t19.Detail))."
+                Check (@($t19.Outcome.failures) -match 'RoleNotRestored:api').Count -ge 1 'T19: the failure names the api role, not the host.'
+                Check (@($t19.Outcome.roleFailures) -match 'RoleNotRestored:api').Count -ge 1 'T19: the api failure is classified as a ROLE failure.'
+                Check (@($t19.Outcome.operation.roles)[0].evidence -match 'stale-source') "T19: the outer's own verification names the wrong source it found (evidence: $(@($t19.Outcome.operation.roles)[0].evidence))."
+                Check ($t19.RestorationRequired) 'T19: the obligation is retained when the role cannot be verified.'
+            }
+        }
+    }
+    finally {
+        $env:AEROLINK_INSTALLATION_ROOT = $savedEndpoints.Root
+        $env:AEROLINK_QUALIFICATION_API_PORT = $savedEndpoints.Api
+        $env:AEROLINK_QUALIFICATION_POSTGRES_PORT = $savedEndpoints.Pg
+        $env:AL1055_STANDIN_SOURCE = $savedEndpoints.Source
+        $env:AL1055_STANDIN_INSTANCE = $savedEndpoints.Instance
+        $env:AL1055_STANDIN_PORT = $savedEndpoints.Port
+    }
+
+    # ---------------------------------------------------------------------------------------------------------
+    # T20 (TA-3): a HostError carries trustworthy, attempt-bound cleanup and admission evidence.
+    #
+    # The outer used to publish HostError with neither, so the caller could not tell a safely recoverable failure
+    # from an unproven one - and the recorded integration run said only "Recovery was not admitted ()". Two
+    # contracts: a host error whose cleanup can complete must still be recoverable; a host error whose containment
+    # cannot be proven must retain the obligation with admissible=false.
+    # ---------------------------------------------------------------------------------------------------------
+    $t20 = Invoke-TestChain -Name 't20' -Faults @{ OuterHostErrorAt = 'Verification' }
+    Check ($t20.Decision -eq 'HostError' -and $t20.ExitCode -eq 1) "T20: a host error during verification is HostError/1 (got $($t20.Decision)/$($t20.ExitCode))."
+    Check ($t20.Outcome.stage -eq 'host' -and [string]$t20.Outcome.primaryError -match 'injected: a host error') 'T20: the primary error is preserved.'
+    Check ([bool]$t20.Outcome.cleanup.transitionContainmentProven) 'T20: the host error carries the containment proof its own cleanup established.'
+    Check ([bool]$t20.Outcome.recovery.admissible) "T20: a host error whose attempt is proven quiescent is admissible for recovery (got $($t20.Outcome.recovery.admissible): $(@($t20.Outcome.recovery.problems) -join '; '))."
+    Check ([bool]$t20.Outcome.mutationStarted -and [bool]$t20.Outcome.restorationRequired) 'T20: the host error records that mutation began and the obligation is retained.'
+    Check (@($t20.Outcome.cleanup.errors).Count -eq 0) 'T20: a cleanup that completed records no cleanup error.'
+
+    $t20b = Invoke-TestChain -Name 't20b' -Faults @{ OuterHostErrorAt = 'AfterChain'; OuterCleanupFault = $true; WorkerSeconds = 120 }
+    if ($t20b.PSObject.Properties['WorkerPid']) { Own $t20b.WorkerPid }
+    Check ($t20b.Decision -eq 'HostError' -and $t20b.ExitCode -eq 1) "T20b: a host error with a failed cleanup is still HostError/1 (got $($t20b.Decision))."
+    Check (-not [bool]$t20b.Outcome.cleanup.transitionContainmentProven) 'T20b: containment that could not be observed is reported unproven.'
+    Check (@($t20b.Outcome.cleanup.errors).Count -ge 1) 'T20b: the cleanup failure is recorded, not swallowed.'
+    Check (-not [bool]$t20b.Outcome.recovery.admissible) 'T20b: unknown termination must NOT authorize recovery.'
+    Check ((@($t20b.Outcome.recovery.problems) -join ' ') -match 'NotQuiescent|Quiescence|quiescen') "T20b: the admission problems name the quiescence state that blocked it (got '$(@($t20b.Outcome.recovery.problems) -join '; ')')."
+    Check ([bool]$t20b.Outcome.restorationRequired) 'T20b: the obligation is retained when termination is unproven.'
+    $t20bAdmission = Test-AeroLinkInstallationAdmission -InstallationRoot (Join-Path $root 't20b')
+    Check (-not $t20bAdmission.Admitted) "T20b: the next attempt is not admitted on an unproven attempt (got '$($t20bAdmission.Detail)')."
+    Check ($t20bAdmission.Detail -match 'NotQuiescent|TerminationUnconfirmed|Unknown') "T20b: the refusal names the unproven state, never absence (got '$($t20bAdmission.Detail)')."
+}
+catch { $failures.Add("Suite error: $($_.Exception.Message) @ $($_.InvocationInfo.PositionMessage) :: $($_.ScriptStackTrace)") }
 finally {
     $K2 = [AeroLink.TransitionV1.Kernel]
     foreach ($identity in $owned) {

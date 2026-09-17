@@ -62,8 +62,10 @@ function Get-ActorRoleResults {
     $results = @()
     foreach ($required in $roles) {
         $readiness = $required.readiness
-        if ($readiness -is [scriptblock]) { $readiness = & $readiness }
-        $found = & $required.discover
+        # Module-bound, parameterized callbacks (see Get-AeroLinkHomeTransitionRequiredRoles): the requirement
+        # object is the parameter, so the callback needs no captured locals and keeps the module's command scope.
+        if ($readiness -is [scriptblock]) { $readiness = & $readiness $required }
+        $found = & $required.discover $required
         $check = if ($found -and $found.ProcessId) { Test-AeroLinkRoleReadiness -Readiness $readiness -ProcessId ([int]$found.ProcessId) } else { [pscustomobject]@{ Ready = $false; Evidence = 'no running instance was found' } }
         $results += [ordered]@{ role = [string]$required.role; restored = [bool]$check.Ready; processId = $(if ($found) { [int]$found.ProcessId } else { 0 }); evidence = [string]$check.Evidence }
     }
@@ -179,6 +181,27 @@ try {
                         -Readiness @{ kind = 'marker' } -ReadinessTimeoutSeconds 60 -StandardOutput (Join-Path $probeDirectory 'probe.stdout.log') -StandardError (Join-Path $probeDirectory 'probe.stderr.log')
                     if ([string]$response.outcome -ne 'Succeeded' -or -not $response.restored) { $failures += "RoleNotRestored:qualification-probe:$($response.outcome)/$($response.currentHealth)" }
                     $detail = [string]$response.detail
+                    # Qualification seam (never set by the product): hold a TRANSIENT MUTATOR inside the attempt
+                    # job, so a task stop or the definition's own hard limit lands while the transition is
+                    # actively mutating - not after it has already completed. The preserved probe's identity and
+                    # the mutator's are published together for the driver, which cannot see inside the job: the
+                    # driver has to be able to prove the probe SURVIVED an ending that leaves no outcome here.
+                    $mutatorSeconds = [int](Get-AeroLinkProperty (Get-AeroLinkProperty $handoff 'faults' $null) 'DelegateMutatorSeconds' 0)
+                    if ($mutatorSeconds -gt 0) {
+                        $mutator = Start-Process -FilePath $env:ComSpec -ArgumentList ('/c ping -n ' + ($mutatorSeconds + 2) + ' 127.0.0.1 > nul') -WindowStyle Hidden -PassThru
+                        $mutatorIdentity = Get-AeroLinkProcessIdentityRecord -ProcessId $mutator.Id
+                        $activePath = [string](Get-AeroLinkProperty $plan 'activeRecordPath' '')
+                        if ($activePath) {
+                            $jobName = ''
+                            foreach ($entry in @((Read-AeroLinkTransitionEvents -Path (Join-Path $attemptRoot 'transition-job.jsonl')).Events)) { if ($entry.type -in @('Intended', 'Created')) { $jobName = [string]$entry.jobName } }
+                            Publish-AeroLinkJsonAtomic -Path $activePath -Value ([ordered]@{ runId = [string](Get-AeroLinkProperty $plan 'runId' ''); attemptId = [string]$handoff.attemptId
+                                    operation = [string]$plan.operation; jobName = $jobName; activeAt = (Get-Date).ToUniversalTime().ToString('o')
+                                    probe = [ordered]@{ processId = [int]$response.processId; startedAt = [string]$response.startedAt; image = [string]$response.image }
+                                    mutator = [ordered]@{ processId = $mutator.Id; startedAt = $mutatorIdentity.StartedAtUtc; image = $mutatorIdentity.ImagePath }
+                                    at = (Get-Date).ToUniversalTime().ToString('o') })
+                        }
+                        $null = $mutator.WaitForExit()
+                    }
                 }
                 'Restore' {
                     $restoreConfig = if ($config) { $config } else { Get-RuntimeOnlyConfig -SourceRoot ([string]$plan.sourceRoot) }

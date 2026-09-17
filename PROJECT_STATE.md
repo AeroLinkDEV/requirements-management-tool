@@ -1,6 +1,6 @@
 # AeroLink project state — start here
 
-**Last materially reconciled: 2026-09-04.**
+**Last materially reconciled: 2026-09-17.**
 
 **Product checkpoint used for this snapshot:** the #816 Slice 7 authority-provenance and integrated-acceptance completion, built on protected `main` at `14fdffc7c7f70fb9960f198c50f0913dc34b11f7`. That is a checkpoint, not a promise that live `main` will not move. Always refresh GitHub before starting work.
 
@@ -407,12 +407,20 @@ observation is Unverified. Browser status refreshes cannot fetch Git or trigger 
 reconciler retains its 30-minute schedule and explicit remote-demo Start reconciles before READY.
 
 HOME production transitions preserve the prior protected-tunnel ON/OFF state under the initiating policy.
-Exact runtime reuse skips rebuild and PostgreSQL startup. A shared installation lease coordinates manual and
-scheduled controllers through fresh-process continuation; an owed origin is supplied before API startup and
-attributed to the new listener before protected-tunnel restoration. Incomplete restoration is a failed
-transition even if local service remains available. Managed process creators establish account-SID Windows
-access across S4U and interactive logons, and stops verify executable and process start identity. Legacy
-installations have an explicitly approved one-time elevated setup; ordinary subsequent operation is non-admin.
+Exact runtime reuse skips rebuild and PostgreSQL startup. A transition is carried by **one outer authority** -
+the caller's own process - which qualifies its launch context before touching anything, admits the attempt only
+when every prior attempt is proven quiescent, contains delegate work in one kill-on-close job with a completion
+witness, and obtains each surviving service (PostgreSQL, API, tunnel) by launch request with an explicit stdio
+handle list. The outer re-verifies every required role against the exact registered instance and reconciles the
+delegate's real exit status before it reports success; the shared installation lease is released last. An owed
+origin is supplied before API startup and attributed to the new listener before protected-tunnel restoration.
+Incomplete restoration is a failed transition even if local service remains available, and recovery runs only
+when the failed attempt is proven quiescent. A scheduled transition refuses before teardown unless its exact
+launch context is qualified; the supported entry points are the installed tasks and the repository `.bat`
+launchers, while an unidentified PowerShell/Terminal launch is refused (see OPERATIONS.md). Managed process
+creators establish account-SID Windows access across S4U and interactive logons, and stops verify executable and
+process start identity. Legacy installations have an explicitly approved one-time elevated setup; ordinary
+subsequent operation is non-admin.
 
 Database upgrade posture is answered before a web server starts, by a maintenance mode of the application
 host that reuses the same migration authorities startup runs. A deterministic upgrade is backed up and

@@ -2316,6 +2316,21 @@ function Get-AeroLinkHomeTransitionRequiredRoles {
         only if it was up). PostgreSQL is required wherever the API is. Each role carries how the outer finds the
         running instance and the readiness that instance must prove NOW - evaluated after the attempt, so the API is
         checked against the source identity actually on disk at that moment.
+
+        THE CALLBACK CONTRACT (a defect found in integration). The outer evaluates `discover` and a scriptblock
+        `readiness` from INSIDE AeroLinkTransitionAuthority.psm1, not from this module. Two rules follow, and both
+        are load-bearing:
+
+          1. They must be plain, module-bound scriptblocks. `.GetNewClosure()` re-binds a scriptblock to a fresh
+             dynamic module whose command resolution does not include this module's own commands, so
+             `Get-AeroLinkPortOwner` and the other helpers are not found - and a required-role verification
+             becomes a HostError instead of a truthful restoration verdict.
+          2. They must not close over this function's locals. A plain scriptblock that is not a closure resolves
+             variables in its own module scope, where those locals do not exist. Everything a callback needs
+             travels on the requirement object handed to it as its single parameter.
+
+        Both callbacks are invoked as `& $Requirement.discover $Requirement` (and the same for `readiness`), so the
+        contract suite can execute the real callbacks through the real chain.
     #>
     [CmdletBinding()]
     param(
@@ -2333,25 +2348,33 @@ function Get-AeroLinkHomeTransitionRequiredRoles {
     $installation = Get-AeroLinkInstallationPaths -ProductRoot (Join-Path $SourceRoot 'product') -InstallationRoot $InstallationRoot
     $postgresReadiness = @{ kind = 'postgres'; dataDirectory = $installation.PostgresData; port = (Get-AeroLinkServiceEndpoints).PostgresPort; binDir = $installation.PostgresBin }
     $roles += [pscustomobject]@{ role = 'postgres'; launchRequired = $false; readiness = $postgresReadiness
-        discover = { $instance = Get-AeroLinkPostgresInstance -DataDirectory $postgresReadiness.dataDirectory; if ($instance.Class -eq 'Valid') { [pscustomobject]@{ ProcessId = $instance.ProcessId } } }.GetNewClosure() }
-    $apiDirectory = Join-Path $SourceRoot 'product\src\AeroLink.Api'
-    $productRoot = Join-Path $SourceRoot 'product'
-    $roles += [pscustomobject]@{ role = 'api'; launchRequired = $false
-        readiness = {
-            $instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode HomeCanonical
-            @{ kind = 'api'; port = (Get-AeroLinkServiceEndpoints).ApiPort; baseUri = (Get-AeroLinkServiceEndpoints).ApiBaseUri; expectedMode = 'HOME-PRODUCTION'
-                expectedSourceIdentity = [string](Get-AeroLinkSourceFingerprint -RepositoryRoot $SourceRoot).Identity
-                expectedInstanceId = [string]$instance.InstanceId; expectedClassification = [string]$instance.Classification }
-        }.GetNewClosure()
         discover = {
+            param($Requirement)
+            $instance = Get-AeroLinkPostgresInstance -DataDirectory $Requirement.readiness.dataDirectory
+            if ($instance.Class -eq 'Valid') { [pscustomobject]@{ ProcessId = $instance.ProcessId } }
+        } }
+    $roles += [pscustomobject]@{ role = 'api'; launchRequired = $false; sourceRoot = $SourceRoot; installationRoot = $InstallationRoot
+        readiness = {
+            param($Requirement)
+            $instance = Get-AeroLinkInstanceConfig -ProductRoot (Join-Path $Requirement.sourceRoot 'product') -Mode HomeCanonical
+            @{ kind = 'api'; port = (Get-AeroLinkServiceEndpoints).ApiPort; baseUri = (Get-AeroLinkServiceEndpoints).ApiBaseUri; expectedMode = 'HOME-PRODUCTION'
+                expectedSourceIdentity = [string](Get-AeroLinkSourceFingerprint -RepositoryRoot $Requirement.sourceRoot).Identity
+                expectedInstanceId = [string]$instance.InstanceId; expectedClassification = [string]$instance.Classification }
+        }
+        discover = {
+            param($Requirement)
+            $apiDirectory = Join-Path $Requirement.sourceRoot 'product\src\AeroLink.Api'
             $owner = Get-AeroLinkPortOwner -Port (Get-AeroLinkServiceEndpoints).ApiPort
             if ($owner.Found -and -not $owner.Ambiguous -and $owner.Attributable -and
                 (Test-AeroLinkProcessOwnership -CommandLine $owner.CommandLine -ExecutablePath $owner.ExecutablePath -OwnershipFragments @($apiDirectory))) { [pscustomobject]@{ ProcessId = $owner.ProcessId } }
-        }.GetNewClosure() }
+        } }
     if ($tunnelRequired) {
-        $demo = $Config
-        $roles += [pscustomobject]@{ role = 'tunnel'; launchRequired = $false; readiness = @{ kind = 'tunnel'; publicUrl = $demo.PublicUrl }
-            discover = { $tunnels = Get-AeroLinkRemoteDemoNgrokProcess -Config $demo; if (@($tunnels.Owned).Count -eq 1 -and -not @($tunnels.Mismatched).Count) { [pscustomobject]@{ ProcessId = [int]$tunnels.Owned[0].ProcessId } } }.GetNewClosure() }
+        $roles += [pscustomobject]@{ role = 'tunnel'; launchRequired = $false; config = $Config; readiness = @{ kind = 'tunnel'; publicUrl = $Config.PublicUrl }
+            discover = {
+                param($Requirement)
+                $tunnels = Get-AeroLinkRemoteDemoNgrokProcess -Config $Requirement.config
+                if (@($tunnels.Owned).Count -eq 1 -and -not @($tunnels.Mismatched).Count) { [pscustomobject]@{ ProcessId = [int]$tunnels.Owned[0].ProcessId } }
+            } }
     }
     return $roles
 }
