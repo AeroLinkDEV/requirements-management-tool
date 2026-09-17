@@ -35,38 +35,111 @@ function Get-AeroLinkEvidenceRoot {
     return [IO.Path]::GetFullPath($root)
 }
 
-function Get-AeroLinkControlledStoragePresence {
+function Get-AeroLinkEvidenceSqlText {
     <#
-      Which controlled-storage objects exist in this database, answered from the catalogue before any table is
-      queried. A genuine first start has no AeroLink schema at all; a database with an applied migration history
-      and a missing storage table is an anomaly. Callers decide what an absent object means, and every answer
-      that is not the expected three flags fails closed.
+      One normalized string for captured SQL output. An empty pipeline/function result is the case that produced
+      InvokeMethodOnNull in the #1055 first-start crash: it is neither a literal $null (which casts to '') nor a
+      value a caller may pass to a string method. Absent output becomes '' here, and every caller validates it.
     #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329,
+        [Parameter(Mandatory)][string]$Sql,[string[]]$OutputArguments=@())
+    $raw = Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $Sql -OutputArguments $OutputArguments
+    if ($null -eq $raw) { return '' }
+    $lines = @(@($raw) | ForEach-Object { if ($null -eq $_) { '' } else { [string]$_ } })
+    if ($lines.Count -eq 0) { return '' }
+    return ($lines -join "`n")
+}
+
+$script:ManagedStorageMigrationId = '20260812172807_AddManagedDocumentAtomicStorage'
+
+function Get-AeroLinkDatabaseSchemaState {
+    <#
+      .SYNOPSIS Classify what schema this database actually has, fail-closed, from one catalogue probe.
+      .DESCRIPTION
+        Presence of a migration-history TABLE is not presence of applied migrations, and three absent relations
+        do not prove an empty database. This asks, in one read-only query: does the history table exist and how
+        many migrations does it record; does the application root table (programs) exist; do the managed-document
+        storage tables exist; and does the history contain the migration that introduced them.
+
+        States:
+          Fresh           no migration history and no application relations - a genuine first start
+          FreshSchema     history exists with zero applied migrations and no application relations
+          PreStorage      history with applied migrations, programs present, storage migration not yet applied
+          Supported       history with applied migrations, programs and both storage tables present
+          PartialOrCorrupt any other combination (relations without history, history without its tables, ...)
+
+        An answer that is absent, malformed, non-binary or unreadable throws a named failure. Callers must not
+        treat a query failure, a partial schema, or an unknown state as an empty database.
+    #>
+    [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
     $sql = @'
-SELECT (to_regclass('public.managed_document_storage_operations') IS NOT NULL)::int::text || ',' || (to_regclass('public.controlled_attachments') IS NOT NULL)::int::text || ',' || (to_regclass('public."__EFMigrationsHistory"') IS NOT NULL)::int::text
+SELECT
+ (CASE WHEN to_regclass('public."__EFMigrationsHistory"') IS NULL THEN '0' ELSE '1' END) || ',' ||
+ (CASE WHEN to_regclass('public."__EFMigrationsHistory"') IS NULL THEN '0' ELSE (SELECT count(*)::text FROM "__EFMigrationsHistory") END) || ',' ||
+ (CASE WHEN to_regclass('public.programs') IS NULL THEN '0' ELSE '1' END) || ',' ||
+ (CASE WHEN to_regclass('public.managed_document_storage_operations') IS NULL THEN '0' ELSE '1' END) || ',' ||
+ (CASE WHEN to_regclass('public.controlled_attachments') IS NULL THEN '0' ELSE '1' END) || ',' ||
+ (CASE WHEN to_regclass('public."__EFMigrationsHistory"') IS NULL THEN '0' ELSE (SELECT count(*)::text FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260812172807_AddManagedDocumentAtomicStorage') END)
 '@
-    $raw = ([string](Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $sql -OutputArguments @('-tA'))).Trim()
-    if ($raw -notmatch '^\d+,\d+,\d+$') { throw "Could not inspect the controlled-storage schema of database '$Database'." }
-    $parts = $raw.Split(',')
-    return [pscustomobject]@{ ManagedDocumentStorage = ($parts[0] -eq '1'); Attachments = ($parts[1] -eq '1'); MigrationHistory = ($parts[2] -eq '1') }
+    $text = (Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $sql -OutputArguments @('-tA')).Trim()
+    if ($text -notmatch '^[01],[0-9]+,[01],[01],[01],[0-9]+$') {
+        throw "The schema of database '$Database' could not be classified: the catalogue probe answered '$text'."
+    }
+    $parts = $text.Split(',')
+    $historyPresent = $parts[0] -eq '1'
+    $historyCount = [int]$parts[1]
+    $programPresent = $parts[2] -eq '1'
+    $storagePresent = $parts[3] -eq '1'
+    $attachmentsPresent = $parts[4] -eq '1'
+    $storageMigrationApplied = [int]$parts[5] -gt 0
+    $anyRelation = $programPresent -or $storagePresent -or $attachmentsPresent
+    $state = 'PartialOrCorrupt'; $detail = ''
+    if (-not $historyPresent) {
+        if (-not $anyRelation) { $state = 'Fresh'; $detail = 'no migration history and no application relations' }
+        else { $detail = 'application relations exist without a migration history' }
+    }
+    elseif ($historyCount -eq 0) {
+        if (-not $anyRelation) { $state = 'FreshSchema'; $detail = 'a migration history exists with no applied migration and no application relations' }
+        else { $detail = 'a migration history exists with no applied migration but application relations are present' }
+    }
+    elseif (-not $programPresent) {
+        $detail = "the migration history records $historyCount applied migration(s) but the application root table (programs) is absent"
+    }
+    elseif (-not $storageMigrationApplied) {
+        $state = 'PreStorage'; $detail = "the migration history records $historyCount applied migration(s) and predates the managed-document storage migration; storage tables are not expected yet"
+    }
+    elseif ($storagePresent -and $attachmentsPresent) {
+        $state = 'Supported'; $detail = "the migration history records $historyCount applied migration(s) including the managed-document storage migration"
+    }
+    else {
+        $detail = "the migration history includes the managed-document storage migration but its tables are not both present (storage=$storagePresent attachments=$attachmentsPresent)"
+    }
+    return [pscustomobject]@{ State = $state; Detail = $detail; HistoryPresent = $historyPresent; HistoryCount = $historyCount
+        ProgramPresent = $programPresent; StoragePresent = $storagePresent; AttachmentsPresent = $attachmentsPresent
+        StorageMigrationApplied = $storageMigrationApplied }
 }
 
 function Get-AeroLinkAttachmentInventory {
     param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
-    # A database with no applied schema has no controlled attachments yet, and the verified backup of a first
-    # start must not query a table that does not exist (#1055). A database WITH a migration history but no
-    # attachment table is still an anomaly and still fails closed.
-    $presence = Get-AeroLinkControlledStoragePresence -Psql $Psql -Database $Database -Port $Port
-    if (-not $presence.Attachments) {
-        if (-not $presence.MigrationHistory) {
-            Write-Host "No AeroLink schema has been applied to '$Database' yet (first start): there are no controlled attachments to inventory."
-            return @()
-        }
-        throw "The controlled-attachment table is missing from '$Database' even though it has an applied migration history."
+    # A database with no applied schema, or one that predates the managed-document storage migration, has no
+    # controlled attachments to inventory; the verified backup of a first start must not query a table that does
+    # not exist yet (#1055). Anything partial, malformed or unknown fails closed in the classifier.
+    $schema = Get-AeroLinkDatabaseSchemaState -Psql $Psql -Database $Database -Port $Port
+    if ($schema.State -in @('Fresh','FreshSchema')) {
+        Write-Host "No AeroLink schema has been applied to '$Database' yet (first start): there are no controlled attachments to inventory."
+        return @()
+    }
+    if ($schema.State -eq 'PreStorage') {
+        Write-Host "Database '$Database' predates the managed-document storage migration: there are no controlled attachments to inventory before the upgrade."
+        return @()
+    }
+    if ($schema.State -ne 'Supported') {
+        throw "The controlled-attachment inventory refused database '$Database': $($schema.Detail)."
     }
     $sql = 'COPY (SELECT "Id", "StorageKey", "Size", lower("Sha256") AS "Sha256", "ArtifactType", "ArtifactId", "RevisionId" FROM controlled_attachments ORDER BY "StorageKey", "Id") TO STDOUT WITH (FORMAT CSV, HEADER TRUE)'
-    $csv = Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $sql
+    $csv = Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $sql
     return @($csv | ConvertFrom-Csv)
 }
 
@@ -94,19 +167,21 @@ function Test-AeroLinkAttachmentInventory {
 
 function Assert-AeroLinkStorageLifecycleHealthy {
     param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
-    # A database that has never had the AeroLink schema applied - a genuine first start - legitimately has none
-    # of the controlled-document tables, so there is nothing that could be unhealthy. Measured in the #1055 INT
-    # first start: the launcher's verified-backup step refused an empty cluster, and the whole first Start
-    # failed ("Could not query controlled storage") before the schema it was about to create existed. Ask the
-    # catalogue first; a database WITH an applied migration history but a missing storage table is still an
-    # anomaly and still fails closed, as does any query that does not answer.
-    $presence = Get-AeroLinkControlledStoragePresence -Psql $Psql -Database $Database -Port $Port
-    if (-not $presence.ManagedDocumentStorage) {
-        if (-not $presence.MigrationHistory) {
-            Write-Host "No AeroLink schema has been applied to '$Database' yet (first start): there is no controlled-document storage to verify."
-            return
-        }
-        throw "The managed-document storage tables are missing from '$Database' even though it has an applied migration history."
+    # A database that has never had the AeroLink schema applied - a genuine first start - has no controlled
+    # storage to verify; so does a supported older schema that predates the storage migration. Measured in the
+    # #1055 INT first start: the launcher's verified-backup step refused an empty cluster before the schema it
+    # was about to create existed. Everything partial, malformed or unreadable fails closed in the classifier.
+    $schema = Get-AeroLinkDatabaseSchemaState -Psql $Psql -Database $Database -Port $Port
+    if ($schema.State -in @('Fresh','FreshSchema')) {
+        Write-Host "No AeroLink schema has been applied to '$Database' yet (first start): there is no controlled-document storage to verify."
+        return
+    }
+    if ($schema.State -eq 'PreStorage') {
+        Write-Host "Database '$Database' predates the managed-document storage migration: storage health is inapplicable before the upgrade."
+        return
+    }
+    if ($schema.State -ne 'Supported') {
+        throw "The controlled-document storage check refused database '$Database': $($schema.Detail)."
     }
     $sql = @'
 SELECT
@@ -114,10 +189,7 @@ SELECT
  (SELECT count(*) FROM managed_document_revisions WHERE ("ReleaseCandidateDocxAttachmentId" IS NULL) <> ("ReleaseCandidatePdfAttachmentId" IS NULL)) AS partial_candidates,
  (SELECT count(*) FROM managed_document_revisions WHERE "State" = 'Released' AND (("ReleasedDocxAttachmentId" IS NULL) OR ("ReleasedPdfAttachmentId" IS NULL))) AS incomplete_releases;
 '@
-    $raw = Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $sql -OutputArguments @('-tA', '-F', ',')
-    # ([string]$null) is $null in Windows PowerShell 5.1; an empty answer must be a named contract failure,
-    # never InvokeMethodOnNull (#1055 TA-2 class).
-    $value = if ($null -eq $raw) { '' } else { ([string]$raw).Trim() }
+    $value = (Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $sql -OutputArguments @('-tA', '-F', ',')).Trim()
     if ($value -notmatch '^\d+,\d+,\d+$') { throw "Could not evaluate managed-document storage health in database '$Database'." }
     $parts = $value.Split(','); if ([int]$parts[0] -ne 0 -or [int]$parts[1] -ne 0 -or [int]$parts[2] -ne 0) { throw "Managed-document storage is not backup/restore ready: pending=$($parts[0]), partialCandidates=$($parts[1]), incompleteReleases=$($parts[2])." }
 }
@@ -132,4 +204,4 @@ function Copy-AeroLinkEvidenceTree {
     $global:LASTEXITCODE=0
 }
 
-Export-ModuleMember -Function Get-AeroLinkEvidenceRoot,Get-AeroLinkAttachmentInventory,Test-AeroLinkAttachmentInventory,Assert-AeroLinkStorageLifecycleHealthy,Copy-AeroLinkEvidenceTree
+Export-ModuleMember -Function Get-AeroLinkEvidenceRoot,Get-AeroLinkDatabaseSchemaState,Get-AeroLinkEvidenceSqlText,Get-AeroLinkAttachmentInventory,Test-AeroLinkAttachmentInventory,Assert-AeroLinkStorageLifecycleHealthy,Copy-AeroLinkEvidenceTree

@@ -2,47 +2,16 @@
 param(
     # How long to keep waiting for PostgreSQL to finish normal crash recovery and
     # become genuinely query-ready after the postmaster is launched.
-    [int]$WaitSeconds = 300
+    [int]$WaitSeconds = 300,
+    # Test seam. Dot-sourced with -TestOnly, this file defines its helper functions and returns before any
+    # installation resolution, directory creation, module side effect or process work. The deterministic
+    # contract suite uses it to exercise the database-existence probe and the stale postmaster.pid handling
+    # without a cluster; production callers never pass it.
+    [switch]$TestOnly
 )
 
 $ErrorActionPreference = 'Stop'
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-# Persistent paths come from the installation authority, not from this checkout's own folder. A dedicated
-# production source checkout points at the canonical HOME installation, and must start THAT cluster rather
-# than initdb an empty second one beside its own source (#881).
-Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
-$installation = Get-AeroLinkInstallationPaths -ProductRoot $root
-$bin = $installation.PostgresBin
-$data = $installation.PostgresData
-$log = $installation.PostgresLog
-$logs = $installation.Logs
-$postgresPort = (Get-AeroLinkServiceEndpoints).PostgresPort
-New-Item -ItemType Directory -Path $logs -Force | Out-Null
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
-
-# The helper is a separate process whose stderr the remote-demo launcher retains; a bare
-# "You cannot call a method on a null-valued expression" (with no expression and no stack) is not
-# diagnosable evidence. Record the phase, the full exception, the invocation and the PowerShell
-# stack in the installation's own log before the error continues to the caller.
-$script:helperPhase = 'startup'
-$helperDiagnosticLog = Join-Path $logs 'postgres-helper.error.log'
-trap {
-    try {
-        $lines = @(
-            "$(Get-Date -Format o) Start-Postgres.ps1 failed during phase '$script:helperPhase'",
-            "Message:    $($_.Exception.Message)",
-            "Exception:  $($_.Exception.GetType().FullName)",
-            "Category:   $($_.CategoryInfo.Category)/$($_.FullyQualifiedErrorId)",
-            "Invocation: $($_.InvocationInfo.MyCommand) :: $($_.InvocationInfo.PositionMessage)",
-            "Target:     $($_.TargetObject)",
-            "Stack:      $($_.ScriptStackTrace)"
-        )
-        if ($_.Exception.InnerException) { $lines += "Inner:      $($_.Exception.InnerException.GetType().FullName): $($_.Exception.InnerException.Message)" }
-        [IO.File]::AppendAllText($helperDiagnosticLog, (($lines -join "`r`n") + "`r`n"))
-    }
-    catch { }
-    throw
-}
 
 function Test-AeroLinkPostgresAccepting {
     <#
@@ -73,14 +42,14 @@ function Test-AeroLinkPostgresAccepting {
 }
 
 function Test-AeroLinkDatabaseExists {
+    # The database legitimately does not exist yet on a first start: psql exits 0 with no rows. The empty
+    # answer must be a false result, never InvokeMethodOnNull (#1055 TA-2; see Get-AeroLinkNativeOutputLine).
     $existsRun = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $bin 'psql.exe') `
         -ArgumentList @('-X', '-h', '127.0.0.1', '-p', "$postgresPort", '-U', 'postgres', '-d', 'postgres', '-tA', '-q', '-c', "SELECT 1 FROM pg_database WHERE datname='aerolink'") `
         -StandardOutput (Join-Path $logs 'postgres-dbexists.stdout.log') `
         -StandardError (Join-Path $logs 'postgres-dbexists.stderr.log') `
         -TimeoutSeconds 30 -StepName 'postgres database existence' -CaptureOutput
     if ($existsRun.ExitCode -ne 0) { return $false }
-    # The database legitimately does not exist yet on a first start: psql exits 0 with no rows.
-    # ([string]$null) is $null in Windows PowerShell 5.1, so the value must be tested, not cast (#1055 TA-2).
     $value = Get-AeroLinkNativeOutputLine $existsRun.StdOutText
     return ($null -ne $value) -and ([string]$value).Trim() -eq '1'
 }
@@ -88,6 +57,130 @@ function Test-AeroLinkDatabaseExists {
 function Test-AeroLinkPostgresInstalled {
     $catalogue = $installation.PostgresCatalogue
     return (Test-Path (Join-Path $bin 'postgres.exe')) -and (Test-Path $catalogue)
+}
+
+function Get-AeroLinkFileFirstLineIfPresent {
+    <#
+      .SYNOPSIS The first line of a file, or $null when the file has vanished by the time it is read.
+      .DESCRIPTION
+        A postmaster shutting down removes postmaster.pid as it exits, so "the file existed a moment ago" is
+        not a promise it can be read now. Only a vanished file is tolerated; every other read error (a
+        directory, a locked or unreadable file) still propagates and fails closed.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    try { return (Get-Content -LiteralPath $Path -TotalCount 1 -ErrorAction Stop) }
+    catch [System.Management.Automation.ItemNotFoundException] { return $null }
+}
+
+function Remove-AeroLinkFileIfPresent {
+    <#
+      .SYNOPSIS Removes a file, tolerating only "it is already gone". Other failures still throw.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    try { Remove-Item -LiteralPath $Path -Force -ErrorAction Stop }
+    catch [System.Management.Automation.ItemNotFoundException] { }
+}
+
+function Clear-AeroLinkStalePostmasterPid {
+    <#
+      .SYNOPSIS Handles postmaster.pid left behind by an unclean shutdown, fail-closed and race-tolerant.
+      .DESCRIPTION
+        The existence test, the read and the removal are three different moments: a postmaster that is shutting
+        down deletes this file as it exits, which is exactly what killed the #1055 INT recovery helper
+        (PathNotFound between Test-Path and Remove-Item). A vanished file therefore means "no stale pid file";
+        a file that exists and cannot be understood is still an anomaly, and a recorded live process is only
+        ever stopped when its image is this repository's own postgres.exe.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Bin,
+        [Parameter(Mandatory)][string]$Data,
+        [Parameter(Mandatory)][string]$Logs,
+        [int]$ReleaseWaitSeconds = 60
+    )
+    $pidFile = Join-Path $Data 'postmaster.pid'
+    if (-not (Test-Path -LiteralPath $pidFile)) { return }
+    $firstLine = Get-AeroLinkFileFirstLineIfPresent -Path $pidFile
+    $recordedPid = if ($null -eq $firstLine) { $null } else { [int]$firstLine }
+    if ($null -eq $recordedPid) {
+        Write-Host 'The PostgreSQL PID file was removed by a postmaster that finished shutting down while this helper looked at it.'
+    }
+    else {
+        $owner = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
+        $ownerPath = $null
+        if ($owner) { try { $ownerPath = $owner.Path } catch { $ownerPath = $null } }
+        if ($owner -and -not $ownerPath) {
+            # It exited between the lookup and the image read: re-read before treating it as an intruder.
+            $owner = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
+        }
+        if ($owner) {
+            $expectedPostgres = [IO.Path]::GetFullPath((Join-Path $Bin 'postgres.exe'))
+            if (-not $ownerPath -or [IO.Path]::GetFullPath($ownerPath) -ne $expectedPostgres) {
+                throw "The local PostgreSQL PID file refers to an unexpected process at '$ownerPath'. Refusing to touch it."
+            }
+            Write-Host "PostgreSQL process $recordedPid is running but not accepting connections. Performing a controlled restart." -ForegroundColor Yellow
+            $stopRun = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $Bin 'pg_ctl.exe') `
+                -ArgumentList @('-D', $Data, '-m', 'fast', '-w', '-t', '20', 'stop') `
+                -StandardOutput (Join-Path $Logs 'postgres-stop.stdout.log') `
+                -StandardError (Join-Path $Logs 'postgres-stop.stderr.log') `
+                -TimeoutSeconds 60 -StepName 'pg_ctl fast stop'
+            if ($stopRun.ExitCode -ne 0) {
+                Write-Host 'Controlled PostgreSQL shutdown did not complete; stopping the recognized local postmaster.' -ForegroundColor Yellow
+                Stop-Process -Id $recordedPid -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 2
+            }
+            $owner = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
+            if ($owner) { throw "Local PostgreSQL process $recordedPid could not be stopped safely. Restart Windows and try again." }
+        }
+        # The recorded PID is not a live repository postmaster (for example after a reboot): the file is stale
+        # and pg_ctl will refuse to start over it.
+        Remove-AeroLinkFileIfPresent -Path $pidFile
+        Write-Host "Removed stale PostgreSQL PID file from process $recordedPid."
+    }
+    # The next postmaster cannot own the data directory until the previous one has released it, and postgres
+    # removes this file as it exits - so its absence is the release signal. A bounded synchronization wait, not
+    # a longer readiness window.
+    $releaseDeadline = (Get-Date).AddSeconds($ReleaseWaitSeconds)
+    while ((Get-Date) -lt $releaseDeadline -and (Test-Path -LiteralPath $pidFile)) { Start-Sleep -Milliseconds 250 }
+    if (Test-Path -LiteralPath $pidFile) { throw "Another PostgreSQL postmaster still owns '$Data' (postmaster.pid remains after $ReleaseWaitSeconds seconds). No service was started." }
+}
+
+if ($TestOnly) { return }
+
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+# Persistent paths come from the installation authority, not from this checkout's own folder. A dedicated
+# production source checkout points at the canonical HOME installation, and must start THAT cluster rather
+# than initdb an empty second one beside its own source (#881).
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+$installation = Get-AeroLinkInstallationPaths -ProductRoot $root
+$bin = $installation.PostgresBin
+$data = $installation.PostgresData
+$log = $installation.PostgresLog
+$logs = $installation.Logs
+$postgresPort = (Get-AeroLinkServiceEndpoints).PostgresPort
+New-Item -ItemType Directory -Path $logs -Force | Out-Null
+
+# The helper is a separate process whose stderr the remote-demo launcher retains; a bare
+# "You cannot call a method on a null-valued expression" (with no expression and no stack) is not
+# diagnosable evidence. Record the phase, the full exception, the invocation and the PowerShell
+# stack in the installation's own log before the error continues to the caller.
+$script:helperPhase = 'startup'
+$helperDiagnosticLog = Join-Path $logs 'postgres-helper.error.log'
+trap {
+    try {
+        $lines = @(
+            "$(Get-Date -Format o) Start-Postgres.ps1 failed during phase '$script:helperPhase'",
+            "Message:    $($_.Exception.Message)",
+            "Exception:  $($_.Exception.GetType().FullName)",
+            "Category:   $($_.CategoryInfo.Category)/$($_.FullyQualifiedErrorId)",
+            "Invocation: $($_.InvocationInfo.MyCommand) :: $($_.InvocationInfo.PositionMessage)",
+            "Target:     $($_.TargetObject)",
+            "Stack:      $($_.ScriptStackTrace)"
+        )
+        if ($_.Exception.InnerException) { $lines += "Inner:      $($_.Exception.InnerException.GetType().FullName): $($_.Exception.InnerException.Message)" }
+        [IO.File]::AppendAllText($helperDiagnosticLog, (($lines -join "`r`n") + "`r`n"))
+    }
+    catch { }
+    throw
 }
 
 # Fast path: already genuinely query-ready.
@@ -115,60 +208,8 @@ if (-not (Test-Path (Join-Path $data 'PG_VERSION'))) {
 
 # Recover from a stale postmaster.pid left by an unclean shutdown/reboot, only for
 # a recorded process that is no longer running or is the recognized local postmaster.
-$pidFile = Join-Path $data 'postmaster.pid'
-if (Test-Path -LiteralPath $pidFile) {
-    $script:helperPhase = 'stale postmaster.pid handling'
-    # The existence test, the read and the removal are three different moments. A postmaster that is shutting
-    # down deletes this file as it exits - measured in the #1055 INT recovery attempt, where the file vanished
-    # between Test-Path and Remove-Item and the helper died with PathNotFound instead of starting the service.
-    # A vanished file therefore means "no stale pid file"; only a file that exists and cannot be understood is
-    # an anomaly. The fail-closed rule for a genuinely foreign live process is preserved below.
-    $recordedPid = $null
-    try { $recordedPid = [int](Get-Content -LiteralPath $pidFile -TotalCount 1 -ErrorAction Stop) }
-    catch [System.Management.Automation.ItemNotFoundException] { $recordedPid = $null }
-    if ($null -eq $recordedPid) {
-        Write-Host 'The PostgreSQL PID file was removed by a postmaster that finished shutting down while this helper looked at it.'
-    }
-    else {
-        $owner = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
-        $ownerPath = $null
-        if ($owner) { try { $ownerPath = $owner.Path } catch { $ownerPath = $null } }
-        if ($owner -and -not $ownerPath) {
-            # It exited between the lookup and the image read: re-read before treating it as an intruder.
-            $owner = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
-        }
-        if ($owner) {
-            $expectedPostgres = [IO.Path]::GetFullPath((Join-Path $bin 'postgres.exe'))
-            if (-not $ownerPath -or [IO.Path]::GetFullPath($ownerPath) -ne $expectedPostgres) {
-                throw "The local PostgreSQL PID file refers to an unexpected process at '$ownerPath'. Refusing to touch it."
-            }
-            Write-Host "PostgreSQL process $recordedPid is running but not accepting connections. Performing a controlled restart." -ForegroundColor Yellow
-            $stopRun = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $bin 'pg_ctl.exe') `
-                -ArgumentList @('-D', $data, '-m', 'fast', '-w', '-t', '20', 'stop') `
-                -StandardOutput (Join-Path $logs 'postgres-stop.stdout.log') `
-                -StandardError (Join-Path $logs 'postgres-stop.stderr.log') `
-                -TimeoutSeconds 60 -StepName 'pg_ctl fast stop'
-            if ($stopRun.ExitCode -ne 0) {
-                Write-Host 'Controlled PostgreSQL shutdown did not complete; stopping the recognized local postmaster.' -ForegroundColor Yellow
-                Stop-Process -Id $recordedPid -Force -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 2
-            }
-            $owner = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
-            if ($owner) { throw "Local PostgreSQL process $recordedPid could not be stopped safely. Restart Windows and try again." }
-        }
-        # The recorded PID is not a live repository postmaster (for example after a
-        # reboot): the file is stale and pg_ctl will refuse to start over it.
-        try { Remove-Item -LiteralPath $pidFile -Force -ErrorAction Stop }
-        catch [System.Management.Automation.ItemNotFoundException] { }
-        Write-Host "Removed stale PostgreSQL PID file from process $recordedPid."
-    }
-    # The next postmaster cannot own the data directory until the previous one has released it, and postgres
-    # removes this file as it exits - so its absence is the release signal. Wait for that, bounded and named;
-    # this is a synchronization wait, not a longer readiness window.
-    $releaseDeadline = (Get-Date).AddSeconds(60)
-    while ((Get-Date) -lt $releaseDeadline -and (Test-Path -LiteralPath $pidFile)) { Start-Sleep -Milliseconds 250 }
-    if (Test-Path -LiteralPath $pidFile) { throw "Another PostgreSQL postmaster still owns '$data' (postmaster.pid remains after 60 seconds). No service was started." }
-}
+$script:helperPhase = 'stale postmaster.pid handling'
+Clear-AeroLinkStalePostmasterPid -Bin $bin -Data $data -Logs $logs
 
 # Inside a HOME transition the postmaster is a PRESERVED service. Everything this script runs is contained in the
 # transition's job and collected with it, so the postmaster is obtained by launch request from the outer authority:

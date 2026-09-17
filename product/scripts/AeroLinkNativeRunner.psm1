@@ -189,13 +189,16 @@ function Get-AeroLinkNativeOutputLine {
       .DESCRIPTION
         A successful query commonly answers with no rows (for example `SELECT 1 FROM pg_database
         WHERE datname='aerolink'` before the database exists). Splitting that empty output yields
-        nothing, and in Windows PowerShell 5.1 a cast of $null to [string] is still $null - so the
-        common `([string]$value).Trim()` idiom throws "You cannot call a method on a null-valued
-        expression" exactly when the honest answer is "no row". The #1055 INT first-start crash
-        (InvokeMethodOnNull in Test-AeroLinkDatabaseExists) was this line. Callers receive $null and
-        decide what an empty answer means; it is never 1.
+        nothing, so the pipeline result is empty, and `([string]$value).Trim()` on an empty
+        pipeline/function result throws "You cannot call a method on a null-valued expression" on both
+        Windows PowerShell 5.1 and PowerShell 7 (a literal $null casts to '', an empty pipeline result
+        does not). The #1055 INT first-start crash - InvokeMethodOnNull in Test-AeroLinkDatabaseExists
+        and in the catalogue probe - was this shape. Callers receive $null and decide what an empty
+        answer means; it is never 1.
     #>
-    param([AllowNull()][string]$Text)
+    param([AllowNull()]$Text)
+    if ($null -eq $Text) { return $null }
+    $Text = [string]$Text
     if ([string]::IsNullOrEmpty($Text)) { return $null }
     return (@($Text -split "`r?`n" | Where-Object { $_ -ne '' }) | Select-Object -Last 1)
 }

@@ -86,11 +86,11 @@ try {
     $unsafe = @($inventory | ForEach-Object { $_.PSObject.Copy() }); $unsafe[0].StorageKey = '../escape.docx'
     Expect-Failure { Test-AeroLinkAttachmentInventory -Inventory $unsafe -EvidenceRoot $root } 'Unsafe attachment storage key'
 
-    # --- Assert-AeroLinkStorageLifecycleHealthy: fresh schema, anomaly, unhealthy, empty (#1055 first start) ---
-    # A database with no applied schema has no controlled-document storage to verify, and the verified-backup
-    # step of a first start must not fail there. A database WITH an applied migration history but a missing
-    # storage table is still an anomaly, unhealthy storage still refuses, and an empty answer is a named
-    # contract failure rather than InvokeMethodOnNull (a [string] cast of $null is $null on 5.1).
+    # --- Database schema classification and the storage readers (#1055 first start, TA-2) ---
+    # Presence of a migration-history TABLE is not presence of applied migrations, and three absent relations do
+    # not prove an empty database. The classifier answers with one catalogue probe; the readers accept a genuine
+    # fresh schema or a supported pre-storage schema, verify a supported/current schema, and fail closed on
+    # partial, malformed or absent answers. The exact SQL boundary is the only thing stubbed.
     $stubPsql = Join-Path $copyRoot 'stub-psql.ps1'
     $stubText = @'
 $sqlPath = $null
@@ -98,10 +98,15 @@ for ($i = 0; $i -lt $args.Count; $i++) { if ($args[$i] -eq '-f') { $sqlPath = $a
 $sql = if ($sqlPath) { Get-Content -LiteralPath $sqlPath -Raw } else { '' }
 if ($sql -match 'to_regclass') {
     switch ($env:AL_EVIDENCE_STUB) {
-        'fresh' { '0,0,0'; exit 0 }
-        'missing-table' { '0,1,1'; exit 0 }
-        'missing-attachments' { '1,0,1'; exit 0 }
-        default { '1,1,1'; exit 0 }
+        'fresh' { '0,0,0,0,0,0'; exit 0 }
+        'fresh-schema' { '1,0,0,0,0,0'; exit 0 }
+        'prestorage' { '1,5,1,0,0,0'; exit 0 }
+        'partial-missing-storage' { '1,152,1,0,1,1'; exit 0 }
+        'partial-no-history' { '0,0,1,0,0,0'; exit 0 }
+        'partial-no-program' { '1,152,0,1,1,1'; exit 0 }
+        'malformed' { '2,2,2,2,2,2'; exit 0 }
+        'empty-classification' { exit 0 }
+        default { '1,152,1,1,1,1'; exit 0 }
     }
 }
 if ($sql -match 'COPY \(') {
@@ -113,38 +118,75 @@ if ($sql -match 'COPY \(') {
 if ($sql -match 'managed_document_storage_operations') {
     switch ($env:AL_EVIDENCE_STUB) {
         'unhealthy' { '1,0,0'; exit 0 }
-        'empty' { exit 0 }
+        'empty-health' { exit 0 }
         default { '0,0,0'; exit 0 }
     }
 }
 exit 0
 '@
     [IO.File]::WriteAllText($stubPsql, $stubText, (New-Object Text.UTF8Encoding($false)))
-    $markerFresh = Join-Path $copyRoot 'attachment-query-fresh.marker'
-    $markerSchema = Join-Path $copyRoot 'attachment-query-schema.marker'
+
+    # Classification itself: each state is named from the catalogue answer, and partial/malformed/absent answers
+    # are Unknown-or-throwing rather than being folded into "fresh".
     $env:AL_EVIDENCE_STUB = 'fresh'
-    Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999
+    $state = Get-AeroLinkDatabaseSchemaState -Psql $stubPsql -Database 'stub' -Port 55999
+    if ($state.State -ne 'Fresh') { throw "A catalogue answer with no history and no relations must classify as Fresh, got '$($state.State)'." }
+    $env:AL_EVIDENCE_STUB = 'fresh-schema'
+    $state = Get-AeroLinkDatabaseSchemaState -Psql $stubPsql -Database 'stub' -Port 55999
+    if ($state.State -ne 'FreshSchema') { throw "A zero-migration history with no relations must classify as FreshSchema, got '$($state.State)'." }
+    $env:AL_EVIDENCE_STUB = 'prestorage'
+    $state = Get-AeroLinkDatabaseSchemaState -Psql $stubPsql -Database 'stub' -Port 55999
+    if ($state.State -ne 'PreStorage') { throw "A supported older schema must classify as PreStorage, got '$($state.State)'." }
+    $env:AL_EVIDENCE_STUB = 'partial-no-history'
+    $state = Get-AeroLinkDatabaseSchemaState -Psql $stubPsql -Database 'stub' -Port 55999
+    if ($state.State -ne 'PartialOrCorrupt') { throw "Relations without a migration history must classify as PartialOrCorrupt, got '$($state.State)'." }
+    $env:AL_EVIDENCE_STUB = 'partial-no-program'
+    $state = Get-AeroLinkDatabaseSchemaState -Psql $stubPsql -Database 'stub' -Port 55999
+    if ($state.State -ne 'PartialOrCorrupt') { throw "A migration history without the application root table must classify as PartialOrCorrupt, got '$($state.State)'." }
+    $env:AL_EVIDENCE_STUB = 'partial-missing-storage'
+    $state = Get-AeroLinkDatabaseSchemaState -Psql $stubPsql -Database 'stub' -Port 55999
+    if ($state.State -ne 'PartialOrCorrupt') { throw "A storage migration applied without its tables must classify as PartialOrCorrupt, got '$($state.State)'." }
+    $env:AL_EVIDENCE_STUB = 'malformed'
+    Expect-Failure { Get-AeroLinkDatabaseSchemaState -Psql $stubPsql -Database 'stub' -Port 55999 } 'could not be classified'
+    $env:AL_EVIDENCE_STUB = 'empty-classification'
+    Expect-Failure { Get-AeroLinkDatabaseSchemaState -Psql $stubPsql -Database 'stub' -Port 55999 } 'could not be classified'
+
+    $markerFresh = Join-Path $copyRoot 'storage-query-fresh.marker'
+    $markerSupported = Join-Path $copyRoot 'storage-query-supported.marker'
+    $env:AL_EVIDENCE_STUB = 'fresh'
     $env:AL_EVIDENCE_MARKER = $markerFresh
-    $freshInventory = @(Get-AeroLinkAttachmentInventory -Psql $stubPsql -Database 'stub' -Port 55999)
-    if ($freshInventory.Count -ne 0) { throw "A schema-less database must inventory as zero attachments, got $($freshInventory.Count)." }
-    if (Test-Path -LiteralPath $markerFresh) { throw 'The attachment inventory must not query controlled_attachments before the schema exists.' }
-    Remove-Item Env:\AL_EVIDENCE_MARKER -ErrorAction SilentlyContinue
-    $env:AL_EVIDENCE_STUB = 'healthy'
     Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999
-    $env:AL_EVIDENCE_MARKER = $markerSchema
-    $schemaInventory = @(Get-AeroLinkAttachmentInventory -Psql $stubPsql -Database 'stub' -Port 55999)
-    if ($schemaInventory.Count -ne 1) { throw "A database with the schema applied must inventory its controlled attachments, got $($schemaInventory.Count)." }
-    if (-not (Test-Path -LiteralPath $markerSchema)) { throw 'The attachment inventory must query controlled_attachments once the schema exists.' }
+    $freshInventory = @(Get-AeroLinkAttachmentInventory -Psql $stubPsql -Database 'stub' -Port 55999)
+    if ($freshInventory.Count -ne 0) { throw "A fresh database must inventory as zero attachments, got $($freshInventory.Count)." }
+    if (Test-Path -LiteralPath $markerFresh) { throw 'A fresh database must not query the storage tables or health columns at all.' }
+    $env:AL_EVIDENCE_STUB = 'prestorage'
+    Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999
+    $prestorageInventory = @(Get-AeroLinkAttachmentInventory -Psql $stubPsql -Database 'stub' -Port 55999)
+    if ($prestorageInventory.Count -ne 0) { throw "A pre-storage schema must inventory as zero attachments before the upgrade, got $($prestorageInventory.Count)." }
+    if (Test-Path -LiteralPath $markerFresh) { throw 'A pre-storage schema must not query storage tables that do not exist yet.' }
     Remove-Item Env:\AL_EVIDENCE_MARKER -ErrorAction SilentlyContinue
-    $env:AL_EVIDENCE_STUB = 'missing-table'
-    Expect-Failure { Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999 } 'missing'
-    $env:AL_EVIDENCE_STUB = 'missing-attachments'
-    Expect-Failure { Get-AeroLinkAttachmentInventory -Psql $stubPsql -Database 'stub' -Port 55999 } 'missing'
+    $env:AL_EVIDENCE_STUB = 'supported'
+    $env:AL_EVIDENCE_MARKER = $markerSupported
+    Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999
+    $supportedInventory = @(Get-AeroLinkAttachmentInventory -Psql $stubPsql -Database 'stub' -Port 55999)
+    if ($supportedInventory.Count -ne 1) { throw "A supported schema must inventory its controlled attachments, got $($supportedInventory.Count)." }
+    if (-not (Test-Path -LiteralPath $markerSupported)) { throw 'A supported schema must query the storage tables.' }
+    Remove-Item Env:\AL_EVIDENCE_MARKER -ErrorAction SilentlyContinue
+    $env:AL_EVIDENCE_STUB = 'partial-missing-storage'
+    Expect-Failure { Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999 } 'refused'
+    Expect-Failure { Get-AeroLinkAttachmentInventory -Psql $stubPsql -Database 'stub' -Port 55999 } 'refused'
+    $env:AL_EVIDENCE_STUB = 'partial-no-history'
+    Expect-Failure { Get-AeroLinkAttachmentInventory -Psql $stubPsql -Database 'stub' -Port 55999 } 'refused'
+    $env:AL_EVIDENCE_STUB = 'malformed'
+    Expect-Failure { Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999 } 'could not be classified'
+    $env:AL_EVIDENCE_STUB = 'empty-classification'
+    Expect-Failure { Get-AeroLinkAttachmentInventory -Psql $stubPsql -Database 'stub' -Port 55999 } 'could not be classified'
     $env:AL_EVIDENCE_STUB = 'unhealthy'
     Expect-Failure { Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999 } 'not backup/restore ready'
-    $env:AL_EVIDENCE_STUB = 'empty'
+    $env:AL_EVIDENCE_STUB = 'empty-health'
     Expect-Failure { Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999 } 'Could not evaluate managed-document storage health'
     Remove-Item Env:\AL_EVIDENCE_STUB -ErrorAction SilentlyContinue
+    Remove-Item Env:\AL_EVIDENCE_MARKER -ErrorAction SilentlyContinue
 
     $env:Evidence__Root = $root
     if ((Get-AeroLinkEvidenceRoot -ProductRoot $productRoot) -ne [IO.Path]::GetFullPath($root)) { throw 'Evidence__Root did not take precedence.' }
