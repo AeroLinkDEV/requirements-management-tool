@@ -173,13 +173,16 @@ function Get-TwinInstance {
 function Get-TwinInfo([datetime]$Since) {
     <# Task result bound to THIS run: no tolerance window, and Unknown is never absence. #>
     $last = $null
+    # Task Scheduler records LastRunTime with one-second resolution, so the comparison floor is the run's own
+    # start truncated to the second - not a tolerance window that could accept the previous instance's result.
+    $floor = [datetime]::new($Since.Year, $Since.Month, $Since.Day, $Since.Hour, $Since.Minute, $Since.Second, $Since.Kind)
     for ($i = 0; $i -lt 20; $i++) {
         try { $last = Get-ScheduledTask -TaskName $twin -ErrorAction Stop | Get-ScheduledTaskInfo }
         catch { return [pscustomobject]@{ Class = 'Unknown'; Detail = $_.Exception.Message; Info = $null } }
-        if ($last.LastRunTime -and $last.LastRunTime -ge $Since) { return [pscustomobject]@{ Class = 'Valid'; Detail = ''; Info = $last } }
+        if ($last.LastRunTime -and $last.LastRunTime -ge $floor) { return [pscustomobject]@{ Class = 'Valid'; Detail = ''; Info = $last } }
         Start-Sleep -Milliseconds 500
     }
-    return [pscustomobject]@{ Class = 'Stale'; Detail = "the scheduler still reports LastRunTime '$($last.LastRunTime)' before this run began at $Since"; Info = $last }
+    return [pscustomobject]@{ Class = 'Stale'; Detail = "the scheduler still reports LastRunTime '$($last.LastRunTime)' before this run began at $floor"; Info = $last }
 }
 
 function Wait-RunRecord([string]$Id, [int]$Seconds) {
