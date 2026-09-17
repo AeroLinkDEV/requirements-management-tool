@@ -240,6 +240,19 @@ function Invoke-TwinRun {
         [int]$LimitSeconds = 0, [int]$RecordTimeoutSeconds = 600, [int]$MutatorSeconds = 0, [int]$ChainDeadlineSeconds = 300)
     $id = "$twin-$Name"
     Set-TwinArguments $id $HoldSeconds $MutatorSeconds $ChainDeadlineSeconds
+    # A task instance whose ACTION was terminated can leave the TASK itself Running for as long as a surviving
+    # child holds its job, and MultipleInstancesPolicy = IgnoreNew then makes the next Start-ScheduledTask a
+    # no-op: measured in the first full qualification, where run3's instance appeared five minutes after its
+    # start call, after the driver's active-mutation wait had already expired. Unregister and re-register the
+    # twin for every run so each start creates a fresh instance, then require the instance to exist BEFORE
+    # waiting for that run's active-mutation record.
+    $previous = Get-ScheduledTask -TaskName $twin -ErrorAction SilentlyContinue
+    if ($previous) {
+        if ($previous.State -eq 'Running') { try { Stop-ScheduledTask -TaskName $twin -ErrorAction Stop } catch { } }
+        try { Unregister-ScheduledTask -TaskName $twin -Confirm:$false -ErrorAction Stop }
+        catch { $cleanupErrors.Add("the previous twin instance could not be unregistered before $Name: $($_.Exception.Message)") }
+    }
+    Register-ScheduledTask -TaskName $twin -Xml $document.OuterXml -Force -ErrorAction Stop | Out-Null
     $since = Get-Date
     Start-ScheduledTask -TaskName $twin
     $instance = $null
