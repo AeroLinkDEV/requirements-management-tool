@@ -109,276 +109,73 @@ switch ($Action) {
         exit 0
     }
     'Update' {
-        # Delegate before mutating, for the same reason production itself delegates.
+        # One mutating path for the dedicated production source, run by THIS process as the outer authority of a
+        # HOME transition (#1041, #1043, #1053). Nothing is stopped, advanced or restarted in this process: the
+        # delegate actor does that inside the attempt's job, from the verified dedicated source, and this process
+        # verifies what it left running.
         #
-        # This BAT runs the script from whichever checkout contains it, and in the supported architecture that
-        # checkout is explicitly allowed to be a dirty feature branch under agent development. Update then
-        # stops, advances and restarts canonical HOME production using THOSE bytes - unmerged development code
-        # controlling the canonical transition, which is precisely the coupling #881 exists to remove. The
-        # verified dedicated source is the control plane for a mutating operation on it.
-        #
-        # Preview, Install and Status stay development-side: Install has to run somewhere before a dedicated
-        # source exists, and the read-only actions change nothing.
-        # Both handoffs in this action - the delegation just below and the post-advance continuation later -
-        # need the owned, bounded child runner and the shared transition budgets. Imported here rather than at
-        # the top of the script so the read-only actions keep their current load behaviour.
-        Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
+        # The dedicated source is still the control plane for a mutation of it (#881): when this BAT runs from any
+        # other checkout, the delegate actor is the DEDICATED source's own, and it refuses unless it proves it runs
+        # exactly the source the handoff names. Preview, Install and Status stay development-side.
         Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
-        $delegation = $null
-        try { $delegation = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $repositoryRoot }
-        catch { throw }
-        if ($delegation.DelegateTo -and $env:AEROLINK_PRODUCTION_SOURCE_DELEGATED -ne '1') {
-            $delegateScript = Join-Path $delegation.DelegateTo 'product\scripts\Configure-AeroLinkProductionSource.ps1'
-            if (-not (Test-Path -LiteralPath $delegateScript -PathType Leaf)) {
-                throw "The configured production source has no configuration script at $delegateScript. Nothing was changed."
+        Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -Force
+
+        # A continuation handed to this process by a PRE-#1055 parent (the legacy environment contract). That parent
+        # advanced the source and holds the lease; this process only restores what it stopped, exactly as before.
+        if ($env:AEROLINK_PRODUCTION_SOURCE_HANDOFF) {
+            $config = Get-AeroLinkProductionSourceConfig
+            $owed = ($env:AEROLINK_RUNTIME_OWED -eq $config.SourceRoot)
+            $alreadyAdvanced = ($env:AEROLINK_SOURCE_ALREADY_ADVANCED -eq $config.SourceRoot)
+            $env:AEROLINK_RUNTIME_OWED = $null
+            $env:AEROLINK_SOURCE_ALREADY_ADVANCED = $null
+            if ($owed) {
+                $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName
+                if (-not $onDisk.Canonical) { throw "The production runtime was stopped for this update, and the revision now on disk is not canonical: $($onDisk.Reason) AeroLink was NOT restarted." }
+                & (Join-Path $config.SourceRoot 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser
             }
-            Write-Host 'This checkout is not the dedicated production source.' -ForegroundColor Yellow
-            Write-Host "      Running the update from: $($delegation.DelegateTo)" -ForegroundColor Cyan
-            $previousDelegated = $env:AEROLINK_PRODUCTION_SOURCE_DELEGATED
-            $delegated = $null
-            try {
-                $env:AEROLINK_PRODUCTION_SOURCE_DELEGATED = '1'
-                # Same defect as the post-advance continuation below (#1053): the delegated Update restores
-                # the API and tunnel, those survivors inherit this call's redirected output handle, and a
-                # native `&` then waits on EOF rather than on the child. The delegate holds no lease of its
-                # own, but the operator's command hangs after the work has already succeeded.
-                $delegatedLogs = Join-Path ([IO.Path]::GetTempPath()) 'aerolink-delegated-update'
-                $delegated = Invoke-AeroLinkOwnedTransitionScript -ScriptPath $delegateScript -ArgumentList @('-Action', 'Update') `
-                    -StandardOutput (Join-Path $delegatedLogs 'delegated-update.stdout.log') `
-                    -StandardError (Join-Path $delegatedLogs 'delegated-update.stderr.log') `
-                    -TimeoutSeconds (Get-AeroLinkTransitionBudget).DelegatedUpdateSeconds `
-                    -StepName 'delegated update' -StreamToHost
-            }
-            finally { $env:AEROLINK_PRODUCTION_SOURCE_DELEGATED = $previousDelegated }
-            # Nothing was stopped in THIS process, so there is no restart obligation to discharge here; the
-            # delegate owns its own. What must not happen is reporting success for an update that timed out
-            # or whose result could not be read.
-            if ($delegated.Outcome -ne 'Completed') {
-                Write-Host $delegated.Detail -ForegroundColor Yellow
-                throw "The delegated update did not complete ($($delegated.Outcome)). Nothing was changed by this process."
-            }
-            exit $delegated.ExitCode
+            exit ($(if ($alreadyAdvanced) { 0 } else { 1 }))
         }
-        if ($delegation.DelegateTo) {
-            throw "Delegation did not reach the dedicated production source: $($delegation.Reason) Nothing was changed."
+        if (-not $transitionLease.Owner) {
+            throw 'This Update was started by another transition that already holds the HOME transition lease. Run Update from the dedicated production source or from an up-to-date checkout; nothing was changed.'
         }
 
-        # Through the same inspect / stop / advance / restart controller as the timed pass, not a bare
-        # fast-forward.
-        #
-        # This action is documented, an operator can run it at any time, and it used to fetch and fast-forward
-        # immediately - so running it while production or the remote demo was live rewrote the working tree
-        # underneath them. That is the same defect the scheduled reconciliation was corrected for; having one
-        # controller and one exception to it is not having a controller.
+        $delegation = Assert-AeroLinkRunningFromProductionSource -RepositoryRoot $repositoryRoot
         $config = Get-AeroLinkProductionSourceConfig
-        Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
-        # Absent is not unreadable. A missing configuration means this machine has no remote demo; one that
-        # exists and will not parse may still have a live tunnel behind it, and treating that as "no tunnel"
-        # advances the source while the public endpoint keeps forwarding to a replaced runtime.
+        $delegateSourceRoot = if ($delegation.DelegateTo) { [string]$delegation.DelegateTo } else { $repositoryRoot }
+        if (-not (Test-Path -LiteralPath (Join-Path $delegateSourceRoot 'product\scripts\Invoke-AeroLinkTransitionActor.ps1') -PathType Leaf)) {
+            throw "The dedicated production source at $delegateSourceRoot predates contained HOME transitions, so it cannot run this Update. Its scheduled reconciliation advances it; nothing was changed."
+        }
+        if ($delegation.DelegateTo) {
+            Write-Host 'This checkout is not the dedicated production source.' -ForegroundColor Yellow
+            Write-Host "      The update runs from: $delegateSourceRoot" -ForegroundColor Cyan
+        }
+
+        # Absent is not unreadable. A missing configuration means this machine has no remote demo; one that exists and
+        # will not parse may still have a live tunnel behind it.
         $demoConfig = $null
         $demoConfigPath = Get-AeroLinkRemoteDemoConfigPath
         if (Test-Path -LiteralPath $demoConfigPath -PathType Leaf) {
             try { $demoConfig = Get-AeroLinkRemoteDemoConfig -ConfigPath $demoConfigPath }
             catch { throw "This machine has a remote-demo configuration at $demoConfigPath that could not be read ($($_.Exception.Message)). A tunnel started while it was valid may still be publishing port 5080, so the production source was NOT advanced and nothing was stopped." }
         }
-        if ($demoConfig) {
-            # -PreserveServiceState: this is an operator command, not the recovery timer. The scheduled pass
-            # is deliberately keep-ready - having the demo up is its job - but a configuration file outlives
-            # a demo somebody deliberately stopped, so an update that ended by starting the tunnel would
-            # publish a public endpoint on the strength of a file existing. Restore what was running.
-            $result = Invoke-AeroLinkProductionSourceReconciliation -Config $demoConfig -PreserveServiceState
-            $result | Format-List
-            exit ($(if ($result.Action -in 'Updated', 'AlreadyCurrent', 'CachedCanonical') { 0 } else { 1 }))
+
+        # Decide with a fetch (remote-tracking refs only). Nothing to do is not a transition.
+        Assert-AeroLinkDedicatedProductionSource -SourceRoot $config.SourceRoot | Out-Null
+        $inspect = Update-AeroLinkProductionSource -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName -FetchTimeoutSeconds $config.FetchTimeoutSeconds -InspectOnly
+        if (-not $inspect.Canonical -or $inspect.Action -ne 'UpdateAvailable') {
+            $inspect | Format-List
+            exit ($(if ($inspect.Canonical) { 0 } else { 1 }))
         }
 
-        # No remote-demo configuration on this machine, so there is no tunnel and no supervised runtime to
-        # coordinate with. Still two-phase: decide with a fetch, stop anything of ours executing out of the
-        # tree, then advance.
-        Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -Force
-        $inspect = Update-AeroLinkProductionSource -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName `
-            -FetchTimeoutSeconds $config.FetchTimeoutSeconds -InspectOnly
-        # What was ACTUALLY running, from the stop's own result rather than from the fact that a stop was
-        # attempted. Assuming a runtime was there meant a refused advance could START production that had not
-        # been running before this command was invoked - the opposite of preserving prior state.
-        # An obligation inherited from the process that handed off to us: it stopped a runtime, advanced the
-        # source, and handed the duty to restart it to this fresh process running the updated code. Bound to
-        # the source root and cleared on read, so it is one-shot and local.
-        $stoppedTheRuntime = ($env:AEROLINK_RUNTIME_OWED -eq $config.SourceRoot)
-        $env:AEROLINK_RUNTIME_OWED = $null
-        # Did the update already happen, in the process that handed off to us? Our own inspection will say
-        # AlreadyCurrent and be right, and without this the continuation reported the update as not having
-        # happened - and exited 1 - immediately after completing it.
-        $sourceAlreadyAdvanced = ($env:AEROLINK_SOURCE_ALREADY_ADVANCED -eq $config.SourceRoot)
-        $env:AEROLINK_SOURCE_ALREADY_ADVANCED = $null
-        if ($inspect.Canonical -and $inspect.Action -eq 'UpdateAvailable') {
-            Write-Host "      Stopping the production runtime before advancing to $($inspect.TargetSha)..." -ForegroundColor Yellow
-            $apiDirectory = Join-Path $config.SourceRoot 'product\src\AeroLink.Api'
-            $stopResult = Stop-AeroLinkOwnedListener -Port 5080 -OwnershipFragments @($apiDirectory)
-            # -or, not =: an obligation inherited from the process that handed off to us is not cancelled by
-            # this process finding nothing left to stop. It already stopped it.
-            $stoppedTheRuntime = $stoppedTheRuntime -or [bool]$stopResult.Stopped
-            if (-not $stoppedTheRuntime) { Write-Host '      No AeroLink-owned runtime was on 5080; none will be started by this command.' -ForegroundColor DarkGray }
-            # Everything after the stop is inside the compensation boundary, the same as the scheduled pass
-            # and the production bootstrap. This is a documented operator action; once it has taken a running
-            # service down, a refused or failed advance must not leave it down to report that nothing
-            # happened.
-            try {
-                $result = Update-AeroLinkProductionSource -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName `
-                    -FetchTimeoutSeconds $config.FetchTimeoutSeconds -AdvanceToSha $inspect.TargetSha
-            }
-            catch {
-                $result = [pscustomobject]@{
-                    Action = 'Refused'; Canonical = $false; HeadSha = $inspect.HeadSha; TargetSha = $inspect.TargetSha
-                    RemoteReachable = $true; Reason = "The fast-forward failed and nothing was changed: $($_.Exception.Message)"
-                }
-            }
-        }
-        else { $result = $inspect }
-        $result | Format-List
-
-        # The control plane is part of what an update replaces, here too.
-        #
-        # This script has already loaded itself and its modules; a successful advance may have replaced any of
-        # them, and everything below - posture re-check, restart, reporting - would then run on bytes the
-        # update superseded. Hand the rest to a fresh process from the updated source, exactly as the
-        # production launcher's re-entry and the remote-demo handoff do. AEROLINK_PRODUCTION_SOURCE_HANDOFF is
-        # bound to the source root and consumed by the child, so it is one-shot and cannot recurse.
-        # The guard is bound to the source root AND the revision handed off. Bound to the root alone, a fresh
-        # child that legitimately advanced again - main moving while it ran - would find the guard set and skip
-        # the handoff it now needed, leaving generation N code over generation N+1 files.
-        if ($result.Action -eq 'Updated' -and $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF -ne "$($config.SourceRoot)|$($result.HeadSha)") {
-            $updatedScript = Join-Path $config.SourceRoot 'product\scripts\Configure-AeroLinkProductionSource.ps1'
-            if (-not (Test-Path -LiteralPath $updatedScript -PathType Leaf)) {
-                # A post-advance continuation failure with a runtime obligation already incurred, and it used
-                # to be the one such failure that discharged nothing: it threw before reaching the child-exit
-                # compensation, leaving the source current and the runtime knowingly down.
-                if ($stoppedTheRuntime) {
-                    Write-Host 'THE UPDATED TREE HAS NO CONFIGURATION SCRIPT' -ForegroundColor Yellow
-                    Write-Host 'The source was advanced. Restoring the production runtime that was stopped for it...' -ForegroundColor Yellow
-                    $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName
-                    if ($onDisk.Canonical) {
-                        & (Join-Path $config.SourceRoot 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser
-                        throw "The source was advanced but the updated tree has no configuration script at $updatedScript. Production was restarted on main @ $($onDisk.Posture.ShortSha); the update's continuation did not run."
-                    }
-                    throw "The source was advanced but the updated tree has no configuration script at $updatedScript, and the revision on disk is not canonical: $($onDisk.Reason) The runtime was stopped and has NOT been restarted."
-                }
-                throw "The source was advanced but the updated tree has no configuration script at $updatedScript. Nothing was running here, so nothing was left down."
-            }
-            Write-Host 'The source advanced; completing the update from the new revision...' -ForegroundColor Cyan
-            $previousHandoff = $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF
-            $previousOwed = $env:AEROLINK_RUNTIME_OWED
-            $previousAdvanced = $env:AEROLINK_SOURCE_ALREADY_ADVANCED
-            # Starts at 1 so that anything which prevents a positive, readable success is treated as failure
-            # by the compensation below. That default is necessary but NOT sufficient on its own: an
-            # exception thrown here would propagate straight past the compensation, leaving the source
-            # current and the runtime down with nobody owning the restart. So every failure is caught and
-            # converted into a non-zero $childExit rather than allowed to escape.
-            $childExit = 1
-            $continuation = $null
-            $continuationFailure = $null
-            try {
-                $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF = "$($config.SourceRoot)|$($result.HeadSha)"
-                # The obligation crosses the process boundary: the child must know a runtime was taken down,
-                # or the transition ends with production stopped and nothing owning the duty to restart it.
-                if ($stoppedTheRuntime) { $env:AEROLINK_RUNTIME_OWED = $config.SourceRoot }
-                # And it must know the update ALREADY HAPPENED, in this parent. Its own inspection will see
-                # AlreadyCurrent - correctly - and without this it reported "THE SOURCE UPDATE DID NOT HAPPEN"
-                # and exited 1 after successfully completing the very update it was continuing.
-                $env:AEROLINK_SOURCE_ALREADY_ADVANCED = $config.SourceRoot
-                # Owned, file-redirected and waited on the process object (#1053). The continuation restores
-                # the API and tunnel and leaves them running by design; under a native `&` those survivors
-                # inherited this process's redirected output handle, so the wait ended on stdout EOF rather
-                # than on the child, and this wrapper sat holding the HOME transition lease long after the
-                # transition had succeeded.
-                $continuationLogs = Join-Path ([IO.Path]::GetTempPath()) 'aerolink-source-continuation'
-                $continuation = Invoke-AeroLinkOwnedTransitionScript -ScriptPath $updatedScript -ArgumentList @('-Action', 'Update') `
-                    -StandardOutput (Join-Path $continuationLogs 'continuation.stdout.log') `
-                    -StandardError (Join-Path $continuationLogs 'continuation.stderr.log') `
-                    -TimeoutSeconds (Get-AeroLinkTransitionBudget).PostAdvanceContinuationSeconds `
-                    -StepName 'source continuation' -StreamToHost
-                if ($continuation.Outcome -eq 'Completed') { $childExit = $continuation.ExitCode }
-                else { $continuationFailure = $continuation.Detail }
-            }
-            catch {
-                $childExit = 1
-                $continuationFailure = $_.Exception.Message
-            }
-            finally {
-                $env:AEROLINK_PRODUCTION_SOURCE_HANDOFF = $previousHandoff
-                $env:AEROLINK_RUNTIME_OWED = $previousOwed
-                $env:AEROLINK_SOURCE_ALREADY_ADVANCED = $previousAdvanced
-            }
-            if ($continuationFailure) { Write-Host "      $continuationFailure" -ForegroundColor Yellow }
-
-            # Recovery is permitted only when this attempt's transition work is PROVEN stopped.
-            #
-            # Two distinct unsafe shapes, and the second one was initially missed. The runner can report a
-            # timeout or a post-launch fault whose cleanup was not proven - and it can also fail so early
-            # that $continuation is still $null, which is precisely the case where nothing is known about the
-            # child at all. Treating "no result" as safe would restart production over a live continuation,
-            # so an unknown cleanup state is never permission to restart.
-            $recoveryUnsafe = $false
-            $unsafeDetail = ''
-            if ($null -eq $continuation) {
-                $recoveryUnsafe = $true
-                $unsafeDetail = "The continuation produced no result ($continuationFailure), so nothing is known about whether it stopped."
-            }
-            elseif ($continuation.Outcome -ne 'Completed' -and -not $continuation.CleanupProven) {
-                $recoveryUnsafe = $true
-                $unsafeDetail = $continuation.Detail
-            }
-            if ($recoveryUnsafe) {
-                throw ("The source was advanced to $($result.HeadSha), but the continuation did not finish and its shutdown could NOT be proven. " +
-                    "Transition work may still be running, so production was NOT restarted here and the restoration obligation is retained. $unsafeDetail")
-            }
-
-            # The obligation is retained until the child positively discharges it. Exiting on the child's
-            # status meant a child that failed before restarting left the source current, the runtime down,
-            # and nobody owning the duty to bring it back - and a later pass would see nothing to do.
-            if ($childExit -ne 0 -and $stoppedTheRuntime) {
-                Write-Host 'THE UPDATE COMPLETED BUT THE CONTINUATION DID NOT' -ForegroundColor Yellow
-                Write-Host 'The source was advanced. Restoring the production runtime that was stopped for it...' -ForegroundColor Yellow
-                $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName
-                if (-not $onDisk.Canonical) {
-                    throw "The source was advanced but the continuation failed, and the revision on disk is not canonical: $($onDisk.Reason) The production runtime is NOT running."
-                }
-                & (Join-Path $config.SourceRoot 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser
-                Write-Host "Production was restored on main @ $($onDisk.Posture.ShortSha), but the update's continuation reported failure." -ForegroundColor Yellow
-            }
-            exit $childExit
-        }
-
-        # Restore exactly what was running, and only what was running.
-        #
-        # Both halves matter. A runtime that WAS up is owed a restart whether the advance succeeded or was
-        # refused - this action is the same inspect / stop / advance / RESTART controller as the timed pass,
-        # and telling the operator to go and start it again by hand is not that. A runtime that was NOT up
-        # must not be created: an update command that leaves a production API listening because it was invoked
-        # is a surprise, not a service.
-        # The operation as a whole succeeded if the source advanced HERE or in the process that handed off to
-        # us. Reporting only on this process's own inspection made a continuation announce "the update did not
-        # happen" and exit 1 straight after completing the update it existed to finish - which outer
-        # automation would read as a failed update that in fact succeeded.
-        $updateHappened = ($result.Action -eq 'Updated') -or $sourceAlreadyAdvanced
-        if ($stoppedTheRuntime) {
-            if (-not $updateHappened) {
-                Write-Host 'THE SOURCE UPDATE DID NOT HAPPEN' -ForegroundColor Yellow
-                Write-Host $result.Reason -ForegroundColor Yellow
-            }
-            $onDisk = Get-AeroLinkProductionSourcePosture -SourceRoot $config.SourceRoot -RemoteName $config.RemoteName
-            if (-not $onDisk.Canonical) {
-                throw "The production runtime was stopped for this update, and the revision now on disk is not canonical: $($onDisk.Reason) AeroLink was NOT restarted."
-            }
-            Write-Host "Restarting production on main @ $($onDisk.Posture.ShortSha)..." -ForegroundColor Cyan
-            & (Join-Path $config.SourceRoot 'product\scripts\Start-AeroLinkProduction.ps1') -DoNotOpenBrowser
-            if ($updateHappened) { Write-Host 'The production source update is complete and production is running on it.' -ForegroundColor Green }
-            exit ($(if ($updateHappened) { 0 } else { 1 }))
-        }
-        if ($updateHappened) {
-            Write-Host 'The production source was advanced. Nothing was running here, so nothing was started.' -ForegroundColor Green
-            Write-Host 'Start it with START_AEROLINK_PRODUCTION.bat when you want it.' -ForegroundColor DarkGray
-        }
-        exit ($(if ($updateHappened -or $result.Canonical) { 0 } else { 1 }))
+        # -Preserve: an operator update restores exactly what was running, and creates nothing that was not.
+        $operation = if ($demoConfig) { 'Update' } else { 'RuntimeUpdate' }
+        $transition = Invoke-AeroLinkHomeTransitionOuter -InstallationRoot $InstallationRoot -Lease $transitionLease -Operation $operation `
+            -SourceRoot $config.SourceRoot -DelegateSourceRoot $delegateSourceRoot -Config $demoConfig -Policy Preserve -StreamToHost `
+            -AttemptDeadlineSeconds (Get-AeroLinkTransitionBudget).ContinuationSeconds
+        $transition | Format-List Decision, ExitCode, Restored, RestorationRequired, Detail
+        foreach ($attempt in $transition.Attempts) { Write-Host "      attempt $($attempt.AttemptId): $($attempt.Decision) (exit $($attempt.ExitCode))" -ForegroundColor DarkGray }
+        if ($transition.Decision -eq 'Completed') { Write-Host 'The production source update is complete; what was running before is running on it.' -ForegroundColor Green }
+        exit $transition.ExitCode
     }
 }
 

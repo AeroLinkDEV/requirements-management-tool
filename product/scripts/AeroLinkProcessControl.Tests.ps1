@@ -2,6 +2,7 @@
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransitionKernel.psm1') -DisableNameChecking
 $root = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-924-contract-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root | Out-Null
 $failures = [Collections.Generic.List[string]]::new()
@@ -46,34 +47,43 @@ try {
         Start-Sleep -Milliseconds 100
     }
     Check ($helper.HasExited -and $helper.ExitCode -eq 7) 'A real redirected Windows PowerShell helper must retain its non-zero exit code.'
-    $setup = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Initialize-AeroLinkHomeProcessControl.ps1') -Raw
-    $invocation = [regex]::Match($setup, '(?s)    \$launcherPath = Join-Path \$Source.*?finally \{ \$launcher.Dispose\(\) \}')
-    if (-not $invocation.Success) { throw 'First-deployment native invocation was not found.' }
-    foreach ($expectedCode in @(0, 7)) {
-        Set-Content -LiteralPath (Join-Path $helperScripts 'Start-AeroLinkProduction.ps1') -Value ('[Console]::Error.WriteLine("native notice"); exit ' + $expectedCode) -Encoding UTF8
-        $Source = $root
-        $Log = Join-Path $root "deployment-stderr-$expectedCode.log"
-        $code = -1
-        . ([scriptblock]::Create($invocation.Value))
-        Check ($code -eq $expectedCode) 'First-deployment stderr must preserve both successful and failed native exit codes.'
-        Check ($ErrorActionPreference -eq 'Stop') 'First-deployment invocation must restore terminating error handling.'
-        Check ((Get-Content -LiteralPath "$Log.stderr" -Raw) -match 'native notice') 'Native stderr must remain in the deployment log.'
-    }
-    $survivor = $null
-    try {
-        @'
+    # The brokered first deployment is judged by ONE invocation's bound result AND its task result (#1053, F2/F3).
+    $deploymentDirectory = Join-Path $root 'first-deployment'
+    New-Item -ItemType Directory -Path $deploymentDirectory -Force | Out-Null
+    $requestId = [guid]::NewGuid().ToString('N')
+    $resultPath = Join-Path $deploymentDirectory "$requestId.result.json"
+    $writeResult = { param($Value) Publish-AeroLinkJsonAtomic -Path $resultPath -Value $Value }
+    Check ((Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $false -LastTaskResult 0).Unknown) 'A deployment task that has not ended is Unknown.'
+    Check ((Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $true -LastTaskResult 0).Unknown) 'An ended task with no result for this request is Unknown, never success.'
+    & $writeResult ([ordered]@{ requestId = 'another-request'; decision = 'Completed'; exitCode = 0 })
+    Check ((Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $true -LastTaskResult 0).Unknown) 'A result bound to another request cannot stand in for this one.'
+    & $writeResult ([ordered]@{ requestId = $requestId; decision = 'Completed'; exitCode = 0 })
+    $stale = Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $true -LastTaskResult 1
+    Check (-not $stale.Succeeded -and -not $stale.Unknown) 'A Completed file with a nonzero task result is a failure.'
+    & $writeResult ([ordered]@{ requestId = $requestId; decision = 'Completed'; exitCode = 24 })
+    Check (-not (Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $true -LastTaskResult 0).Succeeded) 'A Completed decision contradicted by its exit code is a failure.'
+    & $writeResult ([ordered]@{ requestId = $requestId; decision = 'RestorationFailed'; exitCode = 26 })
+    Check (-not (Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $true -LastTaskResult 26).Succeeded) 'A failed transition is a failure.'
+    & $writeResult ([ordered]@{ requestId = $requestId; decision = 'Completed'; exitCode = 0 })
+    Check ((Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $true -LastTaskResult 0).Succeeded) 'Completed, exit 0 and task result 0 for this request is success.'
+
+    # The task action itself: no staged request does nothing; outside the scheduled batch context it refuses and says so.
+    $deployInstallation = Join-Path $root 'deploy-installation'
+    New-Item -ItemType Directory -Path (Join-Path $deployInstallation 'bootstrap\first-deployment') -Force | Out-Null
+    $deployScript = Join-Path $PSScriptRoot 'Invoke-AeroLinkFirstDeployment.ps1'
+    & $powershell -NoProfile -ExecutionPolicy Bypass -File $deployScript -InstallationRoot $deployInstallation | Out-Null
+    Check ($LASTEXITCODE -eq 2) 'The deployment action with no staged request exits 2 and does nothing.'
+    Publish-AeroLinkJsonAtomic -Path (Join-Path $deployInstallation 'bootstrap\first-deployment\request.json') -Value ([ordered]@{ requestId = $requestId; sourceRoot = $root; configurationProfile = $env:LOCALAPPDATA })
+    & $powershell -NoProfile -ExecutionPolicy Bypass -File $deployScript -InstallationRoot $deployInstallation | Out-Null
+    $refusedResult = Read-AeroLinkJsonRecord -Path (Join-Path $deployInstallation "bootstrap\first-deployment\$requestId.result.json")
+    Check ($LASTEXITCODE -eq 1 -and $refusedResult.Class -eq 'Valid' -and $refusedResult.Value.requestId -eq $requestId -and $refusedResult.Value.exitCode -eq 1 -and
+        [string]$refusedResult.Value.detail -match 'scheduled batch') 'Outside the scheduled batch context the deployment action refuses with a result bound to its request.'
+    Check (-not (Test-Path -LiteralPath (Join-Path $deployInstallation 'bootstrap\transitions'))) 'A refused deployment admits no transition attempt.'
+    @'
 $child = Start-Process powershell.exe -ArgumentList '-NoProfile -Command "Start-Sleep -Seconds 30"' -WindowStyle Hidden -PassThru
 $child.Id | Set-Content (Join-Path $PSScriptRoot 'survivor.pid')
 exit 0
 '@ | Set-Content -LiteralPath (Join-Path $helperScripts 'Start-AeroLinkProduction.ps1') -Encoding UTF8
-        $Log = Join-Path $root 'deployment-survivor.log'
-        $timer = [Diagnostics.Stopwatch]::StartNew()
-        . ([scriptblock]::Create($invocation.Value))
-        $survivor = Get-Process -Id ([int](Get-Content (Join-Path $helperScripts 'survivor.pid')))
-        Check ($code -eq 0 -and $timer.Elapsed.TotalSeconds -lt 15 -and -not $survivor.HasExited) 'Setup must complete when its launcher exits while the launched service remains alive.'
-    } finally {
-        if ($survivor) { if (-not $survivor.HasExited) { $survivor.Kill(); $survivor.WaitForExit() }; $survivor.Dispose() }
-    }
     Import-Module (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1') -Force
     $reentrySurvivor = $null
     try {

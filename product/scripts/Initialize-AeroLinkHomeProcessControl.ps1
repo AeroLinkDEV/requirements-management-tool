@@ -75,14 +75,14 @@ try {
     Set-Acl -LiteralPath $leaseDirectory -AclObject $acl
     $lease = Enter-AeroLinkTransition -InstallationRoot $installation.InstallationRoot
 
-    $api = Get-AeroLinkPortOwner -Port 5080
+    $api = Get-AeroLinkPortOwner -Port (Get-AeroLinkServiceEndpoints).ApiPort
     $apiDirectory = Join-Path $configuration.SourceRoot 'product\src\AeroLink.Api'
     if ($api.Found) {
         if ($api.Ambiguous -or -not $api.Attributable -or
             -not (Test-AeroLinkProcessOwnership -CommandLine $api.CommandLine -ExecutablePath $api.ExecutablePath -OwnershipFragments @($apiDirectory))) {
             throw 'The legacy API listener is not owned by the dedicated source. It was not adopted.'
         }
-        $identity = Get-AeroLinkRuntimeIdentity -BaseUri 'http://127.0.0.1:5080'
+        $identity = Get-AeroLinkRuntimeIdentity -BaseUri (Get-AeroLinkServiceEndpoints).ApiBaseUri
         if (-not $identity -or $identity.mode -ne 'HOME-PRODUCTION' -or
             $identity.instance.id -ne $instance.InstanceId -or $identity.instance.classification -ne $instance.Classification) {
             throw 'Legacy runtime mode/instance proof is incomplete. It was not adopted.'
@@ -97,7 +97,7 @@ try {
     # Finish all read-only ownership checks before granting access to either service.
     if ($api.Found) {
         Grant-AeroLinkCreatedProcessAccess -ProcessId $api.ProcessId -StartedAt $api.StartedAt `
-            -ExpectedExecutable $api.ExecutablePath -ExpectedArguments @('--urls', 'http://127.0.0.1:5080')
+            -ExpectedExecutable $api.ExecutablePath -ExpectedArguments @('--urls', (Get-AeroLinkServiceEndpoints).ApiBaseUri)
     }
     if ($ngrok) {
         foreach ($process in $ngrok.Owned) {
@@ -105,74 +105,55 @@ try {
                 -ExpectedExecutable $demoConfig.NgrokExecutable -ExpectedArguments (Get-AeroLinkRemoteDemoNgrokArguments -Config $demoConfig)
         }
     }
-    # A legacy launcher still relies on CIM, which can hide fields even after the account grant. It cannot
-    # safely perform the first transition. This clean approved setup generation uses the same strict source
-    # authority and owned-process controller, then hands the resulting intent to the new Limited launcher.
-    $firstDeploymentIntent = New-AeroLinkProductionObligation -SourceRoot $configuration.SourceRoot -Config $demoConfig -Policy Preserve
-    Save-AeroLinkProductionObligation -Obligation $firstDeploymentIntent
+    # This setup process performs NO teardown and NO advance (#1041, #1043, #1053). The first deployment runs in the
+    # supported scheduled context as the OUTER authority of a contained HOME transition, which qualifies that context
+    # about itself before it touches anything: an unqualified context refuses there, with every service untouched.
     $inspect = Update-AeroLinkProductionSource -SourceRoot $configuration.SourceRoot -InspectOnly
     if (-not $inspect.Canonical) { throw "First-deployment source inspection refused: $($inspect.Reason)" }
-    if ($inspect.Action -eq 'UpdateAvailable') {
-        if ($inspect.TargetSha -ne $posture.RemoteMainSha) { throw 'Approved main moved during setup. Nothing was stopped; obtain setup from the new approved revision.' }
-        Stop-AeroLinkProductionTransition -Obligation $firstDeploymentIntent -Config $demoConfig
-        $advance = Update-AeroLinkProductionSource -SourceRoot $configuration.SourceRoot -AdvanceToSha $inspect.TargetSha
-        if (-not $advance.Canonical -or $advance.Action -ne 'Updated') { throw "First-deployment source advance refused after quiescence: $($advance.Reason). Restoration intent is retained; rerun approved setup." }
-    }
-    # Use the supported scheduled context, not this interactive setup token. LeastPrivilege S4U may still
-    # have an administrator/high-integrity batch token on Windows; native account access was qualified
-    # across that actual boundary. RunLevel is not proof of token filtering.
+    if ($inspect.Action -eq 'UpdateAvailable' -and $inspect.TargetSha -ne $posture.RemoteMainSha) { throw 'Approved main moved during setup. Nothing was stopped; obtain setup from the new approved revision.' }
+
+    # ONE staged request, bound to an id the result must repeat. A result without this id, or a stale task result from
+    # an earlier invocation, can never establish success.
+    $deploymentDirectory = Join-Path $leaseDirectory 'first-deployment'
+    New-Item -ItemType Directory -Path $deploymentDirectory -Force | Out-Null
     $deploymentId = [guid]::NewGuid().ToString('N')
-    $deploymentScript = Join-Path $leaseDirectory "home-deployment-$deploymentId.ps1"
-    $deploymentResult = Join-Path $leaseDirectory "home-deployment-$deploymentId.result"
-    $deploymentLog = Join-Path $leaseDirectory "home-deployment-$deploymentId.log"
-    @'
-param($Module, $Installation, $Source, $Result, $Log, $ConfigurationProfile)
-$ErrorActionPreference = 'Stop'
-$env:LOCALAPPDATA = $ConfigurationProfile
-$lease = $null
-$code = 1
-try {
-    $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    if (-not $principal.IsInRole([Security.Principal.SecurityIdentifier]'S-1-5-3')) { throw 'Deployment helper requires the scheduled batch logon context.' }
-    Import-Module $Module
-    Import-Module (Join-Path (Split-Path $Module) 'AeroLinkProcessControl.psm1')
-    $lease = Enter-AeroLinkTransition -InstallationRoot $Installation
-    # Wait on the launcher process, not a native pipeline whose streams can remain
-    # inherited by the API. Separate stderr is diagnostic; the pinned exit code is authority.
-    $launcherPath = Join-Path $Source 'product\scripts\Start-AeroLinkProduction.ps1'
-    $launcherArguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -DoNotOpenBrowser' -f $launcherPath
-    $launcher = Start-Process -FilePath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') `
-        -ArgumentList $launcherArguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $Log -RedirectStandardError "$Log.stderr"
-    try {
-        $launcherHandle = $launcher.Handle
-        while (-not $launcher.HasExited) { Start-Sleep -Milliseconds 250; $launcher.Refresh() }
-        $code = [AeroLink.ProcessAccess]::ExitCode($launcherHandle)
-    } finally { $launcher.Dispose() }
-} catch { $_ | Out-String | Add-Content -LiteralPath $Log }
-finally {
-    if ($lease) { Exit-AeroLinkTransition $lease }
-    Set-Content -LiteralPath $Result -Value $code
-}
-exit $code
-'@ | Set-Content -LiteralPath $deploymentScript -Encoding UTF8
+    $deploymentResult = Join-Path $deploymentDirectory "$deploymentId.result.json"
+    $request = [ordered]@{ requestId = $deploymentId; setupPid = $PID; approvedSha = $posture.RemoteMainSha; sourceRoot = $configuration.SourceRoot
+        configurationProfile = $env:LOCALAPPDATA; at = (Get-Date).ToUniversalTime().ToString('o') }
+    $requestTemporary = Join-Path $deploymentDirectory ('request.' + $deploymentId + '.tmp')
+    [IO.File]::WriteAllText($requestTemporary, ($request | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $requestTemporary -Destination (Join-Path $deploymentDirectory 'request.json') -Force
+
+    # A stable action: the image, principal and settings are what a launch-context qualification binds, so this
+    # definition is qualified once rather than per checkout path.
+    $deploymentScript = Join-Path $setupRoot 'product\scripts\Invoke-AeroLinkFirstDeployment.ps1'
     $deploymentTask = "AeroLinkHomeFirstDeployment_$deploymentId"
-    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Module "{1}" -Installation "{2}" -Source "{3}" -Result "{4}" -Log "{5}" -ConfigurationProfile "{6}"' -f `
-        $deploymentScript, (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1'), $installation.InstallationRoot, $configuration.SourceRoot, $deploymentResult, $deploymentLog, $env:LOCALAPPDATA
+    $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -InstallationRoot "{1}"' -f $deploymentScript, $installation.InstallationRoot
     $action = New-ScheduledTaskAction -Execute (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -Argument $arguments
     $taskPrincipal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType S4U -RunLevel Limited
-    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 60) -MultipleInstances IgnoreNew
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 135) -MultipleInstances IgnoreNew
     Register-ScheduledTask -TaskName $deploymentTask -Action $action -Principal $taskPrincipal -Settings $settings | Out-Null
     Exit-AeroLinkTransition -Lease $lease
     $lease = $null
+    $startedAt = Get-Date
     Start-ScheduledTask -TaskName $deploymentTask
-    $deadline = (Get-Date).AddMinutes(60)
-    while (-not (Test-Path -LiteralPath $deploymentResult)) {
-        if ((Get-Date) -ge $deadline) { throw "The Limited S4U deployment did not report completion. Inspect $deploymentLog; final readiness is not asserted." }
+
+    # Wait for THIS invocation to end, then reconcile its outcome AND its task result. A Completed file alone is not
+    # success, and neither is a zero LastTaskResult from an earlier run.
+    $deadline = (Get-Date).AddMinutes(140)
+    $ended = $false
+    $info = $null
+    while ((Get-Date) -lt $deadline) {
+        $task = Get-ScheduledTask -TaskName $deploymentTask -ErrorAction Stop
+        $info = $task | Get-ScheduledTaskInfo
+        if ($task.State -ne 'Running' -and $info.LastRunTime -and $info.LastRunTime -ge $startedAt.AddSeconds(-5)) { $ended = $true; break }
         Start-Sleep -Seconds 5
     }
-    $deploymentCode = [int](Get-Content -LiteralPath $deploymentResult -Raw)
-    if ($deploymentCode -ne 0) { throw "The Limited S4U first-deployment transition failed (exit $deploymentCode). Inspect $deploymentLog and $deploymentLog.stderr. Existing task enabled states will be restored." }
+    $verdict = Resolve-AeroLinkFirstDeploymentResult -ResultPath $deploymentResult -RequestId $deploymentId -TaskEnded $ended -LastTaskResult $(if ($info) { $info.LastTaskResult } else { $null })
+    if ($verdict.Unknown) { throw "The first-deployment result is UNKNOWN: $($verdict.Detail). The task was not unregistered while running and deployment will not be repeated; rerunning setup is admitted only after that attempt is proven quiescent. Evidence: $deploymentDirectory" }
+    if (-not $verdict.Succeeded) { throw "The first-deployment transition did not complete: $($verdict.Detail) Existing task enabled states will be restored. Evidence: $deploymentDirectory" }
     Write-Host "HOME first-deployment setup completed from approved source $($posture.HeadSha)."
+    Write-Host $verdict.Detail
     Write-Host 'Subsequent START_AEROLINK_PRODUCTION.bat launches and updates run from ordinary Explorer or PowerShell.'
 }
 finally {

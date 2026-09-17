@@ -122,8 +122,33 @@ function Start-AeroLinkService {
         # Applied to this process before starting the child, which inherits it. Scoped to the run, so nothing
         # here outlives the launcher.
         [hashtable]$Environment,
-        [scriptblock]$OnStarted
+        [scriptblock]$OnStarted,
+        # When this launcher runs inside a HOME transition, the service must outlive the transition's job: it is
+        # obtained by launch request from the outer authority, which proves this readiness against the exact process
+        # before committing it. Ignored outside a transition.
+        [hashtable]$TransitionReadiness,
+        [string]$TransitionRole = 'api',
+        [string[]]$GrantOperatorAccessArguments
     )
+    $transitionHandoff = $null
+    if ($TransitionReadiness) {
+        Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransitionAuthority.psm1') -DisableNameChecking
+        $transitionHandoff = Get-AeroLinkTransitionHandoffFromEnvironment
+    }
+    if ($transitionHandoff) {
+        $arguments = if ($ArgumentList -is [array]) { $ArgumentList -join ' ' } else { [string]$ArgumentList }
+        $grant = @{}
+        if ($GrantOperatorAccessArguments) { $grant['GrantOperatorAccessArguments'] = $GrantOperatorAccessArguments }
+        $launch = Request-AeroLinkServiceLaunch -Handoff $transitionHandoff -Role $TransitionRole -FilePath $FilePath -Arguments $arguments `
+            -WorkingDirectory $WorkingDirectory -StandardOutput $StandardOutput -StandardError $StandardError -Environment $Environment `
+            -Readiness $TransitionReadiness -ReadinessTimeoutSeconds $TimeoutSeconds @grant
+        if ([string]$launch.outcome -ne 'Succeeded' -or -not $launch.restored) {
+            $tail = if (Test-Path $StandardError) { (Get-Content $StandardError -Tail $TailLines) -join [Environment]::NewLine } else { "No $ServiceName error log was produced." }
+            throw "$ServiceName was not started by the transition authority ($($launch.outcome)/$($launch.currentHealth)): $($launch.detail)`n$ServiceName error log:`n$tail"
+        }
+        Wait-HttpEndpoint -Uri $ReadyUri -ServiceName $ServiceName -TimeoutSeconds 30 -SuccessBelow $SuccessBelow
+        return
+    }
     if ($Environment) {
         foreach ($entry in $Environment.GetEnumerator()) {
             [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
