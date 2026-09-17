@@ -116,33 +116,58 @@ if (-not (Test-Path (Join-Path $data 'PG_VERSION'))) {
 # Recover from a stale postmaster.pid left by an unclean shutdown/reboot, only for
 # a recorded process that is no longer running or is the recognized local postmaster.
 $pidFile = Join-Path $data 'postmaster.pid'
-if (Test-Path $pidFile) {
+if (Test-Path -LiteralPath $pidFile) {
     $script:helperPhase = 'stale postmaster.pid handling'
-    $recordedPid = [int](Get-Content $pidFile -TotalCount 1)
-    $owner = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
-    if ($owner -and $owner.ProcessName -like 'postgres*') {
-        $expectedPostgres = [IO.Path]::GetFullPath((Join-Path $bin 'postgres.exe'))
-        if (-not $owner.Path -or [IO.Path]::GetFullPath($owner.Path) -ne $expectedPostgres) {
-            throw "The local PostgreSQL PID file refers to an unexpected process at '$($owner.Path)'. Refusing to touch it."
-        }
-        Write-Host "PostgreSQL process $recordedPid is running but not accepting connections. Performing a controlled restart." -ForegroundColor Yellow
-        $stopRun = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $bin 'pg_ctl.exe') `
-            -ArgumentList @('-D', $data, '-m', 'fast', '-w', '-t', '20', 'stop') `
-            -StandardOutput (Join-Path $logs 'postgres-stop.stdout.log') `
-            -StandardError (Join-Path $logs 'postgres-stop.stderr.log') `
-            -TimeoutSeconds 60 -StepName 'pg_ctl fast stop'
-        if ($stopRun.ExitCode -ne 0) {
-            Write-Host 'Controlled PostgreSQL shutdown did not complete; stopping the recognized local postmaster.' -ForegroundColor Yellow
-            Stop-Process -Id $recordedPid -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 2
-        }
-        $owner = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
-        if ($owner) { throw "Local PostgreSQL process $recordedPid could not be stopped safely. Restart Windows and try again." }
+    # The existence test, the read and the removal are three different moments. A postmaster that is shutting
+    # down deletes this file as it exits - measured in the #1055 INT recovery attempt, where the file vanished
+    # between Test-Path and Remove-Item and the helper died with PathNotFound instead of starting the service.
+    # A vanished file therefore means "no stale pid file"; only a file that exists and cannot be understood is
+    # an anomaly. The fail-closed rule for a genuinely foreign live process is preserved below.
+    $recordedPid = $null
+    try { $recordedPid = [int](Get-Content -LiteralPath $pidFile -TotalCount 1 -ErrorAction Stop) }
+    catch [System.Management.Automation.ItemNotFoundException] { $recordedPid = $null }
+    if ($null -eq $recordedPid) {
+        Write-Host 'The PostgreSQL PID file was removed by a postmaster that finished shutting down while this helper looked at it.'
     }
-    # The recorded PID is not a live repository postmaster (for example after a
-    # reboot): the file is stale and pg_ctl will refuse to start over it.
-    Remove-Item -LiteralPath $pidFile -Force
-    Write-Host "Removed stale PostgreSQL PID file from process $recordedPid."
+    else {
+        $owner = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
+        $ownerPath = $null
+        if ($owner) { try { $ownerPath = $owner.Path } catch { $ownerPath = $null } }
+        if ($owner -and -not $ownerPath) {
+            # It exited between the lookup and the image read: re-read before treating it as an intruder.
+            $owner = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
+        }
+        if ($owner) {
+            $expectedPostgres = [IO.Path]::GetFullPath((Join-Path $bin 'postgres.exe'))
+            if (-not $ownerPath -or [IO.Path]::GetFullPath($ownerPath) -ne $expectedPostgres) {
+                throw "The local PostgreSQL PID file refers to an unexpected process at '$ownerPath'. Refusing to touch it."
+            }
+            Write-Host "PostgreSQL process $recordedPid is running but not accepting connections. Performing a controlled restart." -ForegroundColor Yellow
+            $stopRun = Invoke-AeroLinkNativeCommand -FilePath (Join-Path $bin 'pg_ctl.exe') `
+                -ArgumentList @('-D', $data, '-m', 'fast', '-w', '-t', '20', 'stop') `
+                -StandardOutput (Join-Path $logs 'postgres-stop.stdout.log') `
+                -StandardError (Join-Path $logs 'postgres-stop.stderr.log') `
+                -TimeoutSeconds 60 -StepName 'pg_ctl fast stop'
+            if ($stopRun.ExitCode -ne 0) {
+                Write-Host 'Controlled PostgreSQL shutdown did not complete; stopping the recognized local postmaster.' -ForegroundColor Yellow
+                Stop-Process -Id $recordedPid -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 2
+            }
+            $owner = Get-Process -Id $recordedPid -ErrorAction SilentlyContinue
+            if ($owner) { throw "Local PostgreSQL process $recordedPid could not be stopped safely. Restart Windows and try again." }
+        }
+        # The recorded PID is not a live repository postmaster (for example after a
+        # reboot): the file is stale and pg_ctl will refuse to start over it.
+        try { Remove-Item -LiteralPath $pidFile -Force -ErrorAction Stop }
+        catch [System.Management.Automation.ItemNotFoundException] { }
+        Write-Host "Removed stale PostgreSQL PID file from process $recordedPid."
+    }
+    # The next postmaster cannot own the data directory until the previous one has released it, and postgres
+    # removes this file as it exits - so its absence is the release signal. Wait for that, bounded and named;
+    # this is a synchronization wait, not a longer readiness window.
+    $releaseDeadline = (Get-Date).AddSeconds(60)
+    while ((Get-Date) -lt $releaseDeadline -and (Test-Path -LiteralPath $pidFile)) { Start-Sleep -Milliseconds 250 }
+    if (Test-Path -LiteralPath $pidFile) { throw "Another PostgreSQL postmaster still owns '$data' (postmaster.pid remains after 60 seconds). No service was started." }
 }
 
 # Inside a HOME transition the postmaster is a PRESERVED service. Everything this script runs is contained in the
