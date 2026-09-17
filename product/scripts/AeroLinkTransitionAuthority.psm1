@@ -35,7 +35,10 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1') -DisableNa
 
 $script:HandoffProtocolVersion = 1
 $script:SupportedHandoffProtocols = @(1)
-$script:QualifierVersion = 'aerolink-qualifier-1'
+# Version 2 adds the recovery separation: a placement qualification whose terminating paths could not prove
+# the old attempt's termination is recorded as QualifiedPlacementOnly, never as a full Qualified. A record
+# written by version 1 cannot silently satisfy the new reader.
+$script:QualifierVersion = 'aerolink-qualifier-2'
 $script:RefusalDecisions = @('ProtocolIncompatible', 'SourceVersionMismatch', 'Unreadable', 'LeaseRejected', 'NotADescendant')
 
 # ==================================================================================================================
@@ -1061,27 +1064,40 @@ function Test-AeroLinkLaunchContextQualification {
     foreach ($key in @($context.Descriptor.Keys)) {
         if ([string](Get-AeroLinkProperty $r.descriptor $key '') -ne [string]$context.Descriptor[$key]) { return & $out $false "the qualification record's '$key' does not match this context" }
     }
-    if ([string]$r.verdict -ne 'Qualified') { return & $out $false "this context was qualified as $($r.verdict): $($r.detail)" }
+    if ([string]$r.verdict -notin @('Qualified','QualifiedPlacementOnly')) { return & $out $false "this context was qualified as $($r.verdict): $($r.detail)" }
     foreach ($property in @($r.paths.PSObject.Properties)) {
         $evidence = $property.Value
         if ($evidence.applicable -and -not ($evidence.observed -and $evidence.survived)) { return & $out $false "cleanup path '$($property.Name)' did not preserve the probe" }
     }
-    return & $out $true "the $($context.Descriptor.contextKind) context '$($context.Descriptor.contextName)' was qualified at $($r.at) for this exact descriptor"
+    $recoveryNote = if ([string]$r.verdict -eq 'QualifiedPlacementOnly') { '; placement only - the old attempt''s termination was not proven by the qualification, so admission enforces quiescence itself' } else { '' }
+    return & $out $true "the $($context.Descriptor.contextKind) context '$($context.Descriptor.contextName)' was qualified at $($r.at) for this exact descriptor$recoveryNote"
 }
 
 function Write-AeroLinkLaunchContextQualification {
     <#
       Written ONLY from probe observations. An applicable path whose probe never launched was NOT OBSERVED: that is a
       failed experiment, never evidence of incompatibility, and it takes precedence.
+
+      Placement and recovery are separate facts. A path proves placement when the preserved probe survived the
+      ending that path names. It proves recovery only when the old attempt's termination was ALSO established: the
+      transient mutator was no longer running and the attempt published a containment receipt with quiescence
+      proven. A record whose terminating paths lack that proof is written as QualifiedPlacementOnly - usable for
+      admission, which enforces quiescence itself, but never reported as a full qualification.
     #>
     param([Parameter(Mandatory)][string]$InstallationRoot, [Parameter(Mandatory)]$Descriptor, [Parameter(Mandatory)][string]$DescriptorHash,
-        [Parameter(Mandatory)][Collections.IDictionary]$Paths, [Parameter(Mandatory)][string[]]$RequiredPaths, [string]$Detail = '')
+        [Parameter(Mandatory)][Collections.IDictionary]$Paths, [Parameter(Mandatory)][string[]]$RequiredPaths, [string]$Detail = '',
+        [switch]$RecoveryProven, [string]$RecoveryDetail = '')
     $missing = @($RequiredPaths | Where-Object { -not $Paths.Contains($_) })
     $applicable = @($RequiredPaths | Where-Object { $Paths.Contains($_) -and $Paths[$_].applicable })
     $unobserved = @($applicable | Where-Object { $Paths[$_].observed -ne $true })
     $failed = @($applicable | Where-Object { $unobserved -notcontains $_ -and -not $Paths[$_].survived })
-    $verdict = if ($missing.Count) { 'Incomplete' } elseif ($unobserved.Count) { 'ExperimentFailed' } elseif ($failed.Count) { 'Incompatible' } else { 'Qualified' }
+    if (-not $RecoveryProven -and [string]::IsNullOrWhiteSpace($RecoveryDetail)) {
+        $RecoveryDetail = 'the terminating paths did not establish that the old attempt could no longer act; admission enforces quiescence itself'
+    }
+    $verdict = if ($missing.Count) { 'Incomplete' } elseif ($unobserved.Count) { 'ExperimentFailed' } elseif ($failed.Count) { 'Incompatible' }
+        elseif (-not $RecoveryProven) { 'QualifiedPlacementOnly' } else { 'Qualified' }
     $record = [ordered]@{ qualifierVersion = $script:QualifierVersion; descriptorHash = $DescriptorHash; descriptor = $Descriptor; paths = $Paths; verdict = $verdict
+        recoveryProven = [bool]$RecoveryProven; recoveryDetail = $RecoveryDetail
         detail = $(if ($missing.Count) { "no evidence: $($missing -join ', ')" } elseif ($unobserved.Count) { "experiment failed, placement NOT observed on: $($unobserved -join ', '); rerun qualification" }
             elseif ($failed.Count) { "did not survive: $($failed -join ', ')" } else { $Detail })
         at = (Get-AeroLinkUtcNow) }

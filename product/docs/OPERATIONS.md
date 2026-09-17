@@ -270,6 +270,13 @@ evidence rather than an empty explanation.
 host in a disposable installation (InteractiveToken, two cases over 5.5 minutes): a nonzero action exit and a
 hard time-limit termination were both NOT retried. Recovery after an interrupted transition therefore depends on
 the next trigger or the next on-demand run plus the admission rules above; it is not claimed as automatic.
+Fail-closed safety and eventual recovery are separate facts: after an interruption whose termination could not
+be proven (a task stop or hard limit that kills the completion witness with the task), every following attempt
+refuses with the obligation retained rather than mutating. That is safe, and it means an outage lasts until the
+attempt can be proven quiescent - the boot-time fallback is the only automatic path today, and it is acceptable
+only while no unproven attempt exists. The qualification tool records this distinction explicitly as
+`QualifiedPlacementOnly` versus `Qualified` (see the operator guide); a placement-only record never claims that
+recovery was established.
 
 **Launch-context qualification.** A HOME transition refuses - before anything is stopped - unless its own launch
 context is qualified for an exact descriptor. Qualification is produced by
@@ -377,6 +384,15 @@ copy** through the supported `Restore-AeroLink.ps1` path, applies this build's u
 the copy is then current, proves current AeroLink can actually serve it, and only then upgrades the real
 database. The ordering is the safety property: a failure at any earlier step leaves the persistent database
 and evidence untouched because nothing had reached them.
+
+**A database with no AeroLink schema is supported through that same path.** The pre-migration restore
+deliberately defers current-code validation, so its archive/evidence checks run against a copy that has no
+`programs` table and no managed-document storage yet: those are reported as *not yet present* rather than as a
+missing count, and the storage health/inventory readers classify the schema first - `Fresh` (no migration
+history and no application relations) or `PreStorage` (a supported older schema that predates the
+managed-document storage migration) means there is nothing to verify before the upgrade, while a partial schema,
+a malformed catalogue answer or an empty answer fails closed. The launcher then migrates the clone, proves it
+current and readable, and only then applies the same upgrade to the real database.
 
 **Isolated means the evidence store too.** A maintenance run pointed at a clone by connection string alone
 still resolved the live `Evidence:Root`, and one of the semantic authorities in this upgrade set rewrites

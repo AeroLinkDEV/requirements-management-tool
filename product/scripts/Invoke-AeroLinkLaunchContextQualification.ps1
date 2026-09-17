@@ -32,6 +32,10 @@ param(
     [Parameter(ParameterSetName = 'Probe')][int]$HoldSeconds = 0,
     # Hold a transient mutator INSIDE the attempt for this long, so an interrupt lands during active work.
     [Parameter(ParameterSetName = 'Probe')][int]$MutatorSeconds = 0,
+    # The chain's own budget for THIS experiment. It must cover the intended ending: the default 300 s would
+    # collect the mutator long before a 45/135-minute task limit and leave the shell sleeping, which is not an
+    # observation of the hard limit. The driver computes it per run; production callers keep the default.
+    [Parameter(ParameterSetName = 'Probe')][int]$ChainDeadlineSeconds = 300,
     [Parameter(ParameterSetName = 'Drive', Mandatory)][string]$TaskName,
     [Parameter(ParameterSetName = 'Drive')][string]$TwinNamePrefix = 'AeroLinkContextQualification-',
     [Parameter(ParameterSetName = 'Drive')][int]$EndingTimeoutSeconds = 600
@@ -80,7 +84,7 @@ if ($Probe) {
             -Plan $plan -Faults $faults `
             -DelegateScript (Join-Path $PSScriptRoot 'Invoke-AeroLinkTransitionActor.ps1') -DelegateSourceIdentity $identity `
             -RequiredRoles @([pscustomobject]@{ role = 'qualification-probe'; launchRequired = $true; readiness = @{ kind = 'marker' } }) `
-            -DeadlineSeconds 300 -Qualification $qualification -QualificationProbe
+            -DeadlineSeconds $ChainDeadlineSeconds -Qualification $qualification -QualificationProbe
         $launch = @(@(Get-AeroLinkProperty $chain.Outcome 'launches' @()) | Where-Object { $_.role -eq 'qualification-probe' -and $_.outcome -eq 'Succeeded' })
         $record['decision'] = $chain.Decision
         $record['attemptId'] = $chain.AttemptId
@@ -141,9 +145,10 @@ $descriptor = $null
 $cleanupErrors = [System.Collections.Generic.List[string]]::new()
 $twinRegistered = $false
 
-function Set-TwinArguments([string]$Id, [int]$Hold, [int]$MutatorSeconds = 0) {
+function Set-TwinArguments([string]$Id, [int]$Hold, [int]$MutatorSeconds = 0, [int]$ChainDeadlineSeconds = 300) {
     $probeCall = '-File "' + (Join-Path $PSScriptRoot 'Invoke-AeroLinkLaunchContextQualification.ps1') + '" -Probe -InstallationRoot "' + $InstallationRoot + '" -RunId ' + $Id + ' -HoldSeconds ' + $Hold
     if ($MutatorSeconds -gt 0) { $probeCall += ' -MutatorSeconds ' + $MutatorSeconds }
+    $probeCall += ' -ChainDeadlineSeconds ' + $ChainDeadlineSeconds
     # Everything this definition put AFTER its product script is that product's own arguments and must not be
     # handed to the probe entry: the twin runs the probe INSTEAD of the product. What precedes -File (window
     # style, execution policy, a cmd wrapper that sets the environment) is preserved, and the twin's own output
@@ -216,7 +221,9 @@ function Add-RunEvidence([string]$Name, $Record, [string[]]$PathNames, [hashtabl
         $script:paths[$path] = [ordered]@{ applicable = $true; observed = $observed; survived = $(if ($observed) { [bool]$Survival[$path] } else { $null })
             setupFailure = $(if ($observed) { '' } else { "no probe was launched (record: $(if ($Record) { "$($Record.decision) $(Get-AeroLinkProperty $Record 'error' '')" } else { 'none' }))" })
             run = $Name; lastTaskResult = $(if ($Info -and $Info.Class -eq 'Valid') { $Info.Info.LastTaskResult } else { $null })
-            ending = $(if ($Survival['ending']) { $Survival['ending'] } else { '' }) }
+            ending = $(if ($Survival['ending']) { $Survival['ending'] } else { '' })
+            recoveryProven = $(if ($Survival.ContainsKey('recovery')) { [bool]$Survival['recovery'].Proven } else { $null })
+            recoveryDetail = $(if ($Survival.ContainsKey('recovery')) { [string]$Survival['recovery'].Detail } else { '' }) }
     }
     $script:summary.runs += [ordered]@{ run = $Name; record = $Record; paths = $PathNames; survival = $Survival
         lastTaskResult = $(if ($Info -and $Info.Class -eq 'Valid') { $Info.Info.LastTaskResult } else { $null })
@@ -230,9 +237,9 @@ function Invoke-TwinRun {
       probe survived the ending the path names - an early exit is a failed experiment, never evidence.
     #>
     param([Parameter(Mandatory)][string]$Name, [int]$HoldSeconds, [Parameter(Mandatory)][ValidateSet('Completion', 'DriverStop', 'HardLimit')][string]$Ending,
-        [int]$LimitSeconds = 0, [int]$RecordTimeoutSeconds = 600, [int]$MutatorSeconds = 0)
+        [int]$LimitSeconds = 0, [int]$RecordTimeoutSeconds = 600, [int]$MutatorSeconds = 0, [int]$ChainDeadlineSeconds = 300)
     $id = "$twin-$Name"
-    Set-TwinArguments $id $HoldSeconds $MutatorSeconds
+    Set-TwinArguments $id $HoldSeconds $MutatorSeconds $ChainDeadlineSeconds
     $since = Get-Date
     Start-ScheduledTask -TaskName $twin
     $instance = $null
@@ -244,7 +251,11 @@ function Invoke-TwinRun {
     if ($MutatorSeconds -gt 0) {
         $activePath = Join-Path $runs "$id.active.json"
         $activeDeadline = (Get-Date).AddSeconds(300)
-        while (-not $active -and (Get-Date) -lt $activeDeadline) { $read = Read-AeroLinkJsonRecord -Path $activePath; if ($read.Class -eq 'Valid') { $active = $read.Value }; Start-Sleep -Milliseconds 250 }
+        while (-not $active -and (Get-Date) -lt $activeDeadline) {
+            $read = Read-AeroLinkJsonRecord -Path $activePath
+            if ($read.Class -eq 'Valid') { $active = $read.Value; if (Track-Probe $active) { } }
+            Start-Sleep -Milliseconds 250
+        }
     }
     $record = $null
     $stopIssued = $false
@@ -252,7 +263,7 @@ function Invoke-TwinRun {
     if ($Ending -ne 'HardLimit') { $deadline = (Get-Date).AddSeconds($RecordTimeoutSeconds) }
     $cause = 'StillRunning'
     while ((Get-Date) -lt $deadline) {
-        if (-not $record) { $record = Wait-RunRecord $id 2 }
+        if (-not $record) { $record = Wait-RunRecord $id 2; if ($record) { $null = Track-Probe $record } }
         # The stop must land while the attempt is MUTATING. The active-mutation record (published by the entry
         # itself, with the preserved probe's identity) is the synchronization point; a completed run record is
         # only the fallback for a definition that cannot hold a mutator.
@@ -318,8 +329,31 @@ function Test-EndingMatched($Run, [string]$Expected, [bool]$RequireActive = $fal
     return [pscustomobject]@{ Matched = $true; Detail = "$Expected at $($Run.ElapsedSeconds)s; task result $result" }
 }
 
+function Get-RunRecoveryEvidence($Run) {
+    <#
+      { Proven, Detail }: whether THIS ending left the old attempt provably terminated. Survivor evidence alone
+      never proves recovery. The transient mutator must no longer be running, and the attempt itself must have
+      published a containment receipt whose quiescence is proven - which is exactly what a context whose witness
+      dies with its task cannot produce. Both facts are recorded, and a record that lacks them is written as a
+      placement-only qualification rather than a full one.
+    #>
+    if (-not $Run.Active) { return [pscustomobject]@{ Proven = $false; Detail = 'no active-mutation record was published, so no old mutator was observed' } }
+    $mutator = Get-AeroLinkProperty $Run.Active 'mutator' $null
+    $mutatorPid = [int](Get-AeroLinkProperty $mutator 'processId' 0)
+    if ([string]$Run.MutatorState -eq 'RunningMatch') { return [pscustomobject]@{ Proven = $false; Detail = "the transient mutator pid $mutatorPid was still running after the ending" } }
+    if ([string]$Run.MutatorState -notin @('Gone', 'RunningDifferent')) { return [pscustomobject]@{ Proven = $false; Detail = "the transient mutator pid $mutatorPid could not be classified ($($Run.MutatorState))" } }
+    $evidence = $Run.AttemptEvidence
+    if (-not $evidence) { return [pscustomobject]@{ Proven = $false; Detail = 'the attempt published no completion evidence' } }
+    if ([string]$evidence.receiptClass -ne 'Valid') { return [pscustomobject]@{ Proven = $false; Detail = "the attempt's cleanup receipt is $([string]$evidence.receiptClass.ToLower()): $($evidence.detail)" } }
+    if (-not [bool]$evidence.containmentProven) { return [pscustomobject]@{ Proven = $false; Detail = 'the attempt did not prove containment' } }
+    if ([string]$evidence.quiescence -ne 'Quiescent') { return [pscustomobject]@{ Proven = $false; Detail = "the attempt's quiescence is $($evidence.quiescence)" } }
+    return [pscustomobject]@{ Proven = $true; Detail = "the attempt proved containment and its transient mutator pid $mutatorPid is no longer running" }
+}
+
 $exitCode = 1
 $written = $null
+$recoveryProven = $false
+$recoveryDetail = 'the terminating paths were not observed'
 try {
     # ---- run 1: normal completion ----
     $run1 = Invoke-TwinRun -Name 'run1' -HoldSeconds 0 -Ending Completion -RecordTimeoutSeconds $EndingTimeoutSeconds
@@ -332,24 +366,37 @@ try {
     Stop-TrackedProbes
 
     # ---- run 2: explicit stop while the entry is still running ----
-    $run2 = Invoke-TwinRun -Name 'run2' -HoldSeconds 3600 -Ending DriverStop -RecordTimeoutSeconds $EndingTimeoutSeconds -MutatorSeconds 3600
+    # The chain's deadline must outlast the stop the driver is about to issue; 900 s is far beyond the driver's
+    # synchronization point while staying bounded.
+    $run2 = Invoke-TwinRun -Name 'run2' -HoldSeconds 3600 -Ending DriverStop -RecordTimeoutSeconds $EndingTimeoutSeconds -MutatorSeconds 3600 -ChainDeadlineSeconds 900
     $ending2 = Test-EndingMatched $run2 'DriverStopped' -RequireActive $true
+    $recovery2 = Get-RunRecoveryEvidence $run2
     # An interruption during active mutation leaves no outcome record here: the preserved probe's identity comes
     # from the active-mutation record, and its survival is what the taskStop path claims.
     $observation2 = if ($run2.Record) { $run2.Record } else { $run2.Active }
     $alive2 = Test-ProbeSurvived $observation2
     Add-RunEvidence 'run2' $observation2 @('taskStop') @{ taskStop = ($alive2 -and $ending2.Matched); ending = $ending2.Detail; active = $run2.Active
-        mutatorState = $run2.MutatorState; attempt = $run2.AttemptEvidence } $run2.Info
+        mutatorState = $run2.MutatorState; attempt = $run2.AttemptEvidence; recovery = $recovery2 } $run2.Info
     Stop-TrackedProbes
 
     # ---- run 3: the definition's own hard time limit ----
-    $run3 = Invoke-TwinRun -Name 'run3' -HoldSeconds ([int]$limit.TotalSeconds + 600) -Ending HardLimit -LimitSeconds ([int]$limit.TotalSeconds) -RecordTimeoutSeconds $EndingTimeoutSeconds -MutatorSeconds ([int]$limit.TotalSeconds + 600)
+    # The mutator must still be working when the task's own limit fires, so the chain's budget covers the limit
+    # plus the mutator's margin. Production deadlines are untouched: this is the qualification's own parameter.
+    $run3 = Invoke-TwinRun -Name 'run3' -HoldSeconds ([int]$limit.TotalSeconds + 600) -Ending HardLimit -LimitSeconds ([int]$limit.TotalSeconds) -RecordTimeoutSeconds $EndingTimeoutSeconds -MutatorSeconds ([int]$limit.TotalSeconds + 600) -ChainDeadlineSeconds ([int]$limit.TotalSeconds + 1200)
     $ending3 = Test-EndingMatched $run3 'HardLimitFired' -RequireActive $true
+    $recovery3 = Get-RunRecoveryEvidence $run3
     $observation3 = if ($run3.Record) { $run3.Record } else { $run3.Active }
     $alive3 = Test-ProbeSurvived $observation3
     Add-RunEvidence 'run3' $observation3 @('hardTimeout') @{ hardTimeout = ($alive3 -and $ending3.Matched); ending = $ending3.Detail; active = $run3.Active
-        mutatorState = $run3.MutatorState; attempt = $run3.AttemptEvidence } $run3.Info
+        mutatorState = $run3.MutatorState; attempt = $run3.AttemptEvidence; recovery = $recovery3 } $run3.Info
     Stop-TrackedProbes
+
+    # Placement and recovery are separate gates: both terminating paths must have proven the old attempt's
+    # termination before this record may be written as a full qualification.
+    $recoveryProven = [bool]($recovery2.Proven -and $recovery3.Proven)
+    $recoveryDetail = "taskStop: $($recovery2.Detail); hardTimeout: $($recovery3.Detail)"
+    $summary['recoveryProven'] = $recoveryProven
+    $summary['recoveryDetail'] = $recoveryDetail
 
     if ($descriptors.Count -ne 1 -or -not $descriptor) {
         $summary['verdict'] = 'Unqualifiable'
@@ -390,7 +437,8 @@ finally {
         try {
             $d = [ordered]@{}; foreach ($property in $descriptor.PSObject.Properties) { $d[$property.Name] = $property.Value }
             $written = Write-AeroLinkLaunchContextQualification -InstallationRoot $InstallationRoot -Descriptor $d -DescriptorHash (@($descriptors.Keys)[0]) -Paths $paths `
-                -RequiredPaths @('transientJob', 'wrapperExit', 'taskCompletion', 'taskStop', 'hardTimeout') -Detail "probe survived every applicable path of the twin of $($summary.sourceTask)"
+                -RequiredPaths @('transientJob', 'wrapperExit', 'taskCompletion', 'taskStop', 'hardTimeout') -Detail "probe survived every applicable path of the twin of $($summary.sourceTask)" `
+                -RecoveryProven:$recoveryProven -RecoveryDetail $recoveryDetail
             $summary['verdict'] = $written.verdict
             $summary['detail'] = $written.detail
             $summary['descriptorHash'] = @($descriptors.Keys)[0]

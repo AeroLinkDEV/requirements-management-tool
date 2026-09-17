@@ -196,10 +196,20 @@ try {
     $context = Get-AeroLinkLaunchContextDescriptor -Override $descriptor
     $survived = [ordered]@{ applicable = $true; observed = $true; survived = $true }
     $paths = [ordered]@{ transientJob = $survived; wrapperExit = $survived; taskCompletion = $survived; taskStop = $survived; hardTimeout = $survived }
+    # Surviving paths alone are PLACEMENT evidence. A full qualification also requires the terminating paths to
+    # have established that the old attempt could no longer act (the recovery gate).
     $record = Write-AeroLinkLaunchContextQualification -InstallationRoot $qRoot -Descriptor $descriptor -DescriptorHash $context.DescriptorHash -Paths $paths -RequiredPaths @($paths.Keys)
-    Check ($record.verdict -eq 'Qualified') 'T9: every applicable path observed and survived is Qualified.'
+    Check ($record.verdict -eq 'QualifiedPlacementOnly') 'T9: surviving paths without an established attempt termination are placement-only, never a full qualification.'
+    Check ((-not [bool]$record.recoveryProven) -and [string]$record.recoveryDetail -ne '') 'T9: a placement-only record states the recovery gap explicitly.'
+    $record = Write-AeroLinkLaunchContextQualification -InstallationRoot $qRoot -Descriptor $descriptor -DescriptorHash $context.DescriptorHash -Paths $paths -RequiredPaths @($paths.Keys) -RecoveryProven -RecoveryDetail 'T9 contract'
+    Check ($record.verdict -eq 'Qualified' -and [bool]$record.recoveryProven) 'T9: surviving paths with a proven attempt termination are a full qualification.'
     Check ((Test-AeroLinkLaunchContextQualification -InstallationRoot $qRoot -DescriptorOverride $descriptor).Supported) 'T9: the exact descriptor is Supported.'
     Check (-not (Test-AeroLinkLaunchContextQualification -InstallationRoot $qRoot -DescriptorOverride @{ contextKind = 'Task'; contextName = '\probe'; definitionHash = 'changed' }).Supported) 'T9: a changed definition hash lands on no qualification.'
+    $placementDescriptor = @{ contextKind = 'Task'; contextName = '\probe-placement'; definitionHash = 'abc' }
+    $placementContext = Get-AeroLinkLaunchContextDescriptor -Override $placementDescriptor
+    $null = Write-AeroLinkLaunchContextQualification -InstallationRoot $qRoot -Descriptor $placementDescriptor -DescriptorHash $placementContext.DescriptorHash -Paths $paths -RequiredPaths @($paths.Keys)
+    $placementRead = Test-AeroLinkLaunchContextQualification -InstallationRoot $qRoot -DescriptorOverride $placementDescriptor
+    Check ($placementRead.Supported -and $placementRead.Detail -match 'placement only') 'T9: admission accepts a placement-only record and says recovery was not proven by the qualification.'
     $recordPath = Get-AeroLinkQualificationPath -InstallationRoot $qRoot -DescriptorHash $context.DescriptorHash
     Add-Content -LiteralPath $recordPath -Value ' '
     Check ((Test-AeroLinkLaunchContextQualification -InstallationRoot $qRoot -DescriptorOverride $descriptor).Detail -match 'integrity') 'T9: a record altered after it was written fails its integrity hash.'
@@ -432,15 +442,16 @@ Invoke-AeroLinkAuthorityPump -Spool $paths.Spool -AttemptId 'A1' -Witness $witne
     # The stand-in API must satisfy the product's own ownership rule for a fragment ending in 'AeroLink.Api':
     # the IMAGE has to be an AeroLink.Api.exe living under the checkout's API directory (a foreign interpreter
     # quoting that directory is correctly refused). Windows PowerShell 5.1 can emit that apphost with Add-Type;
-    # PowerShell 7 cannot emit an apphost, so the positive-discovery half runs on the desktop host and the
-    # callback-resolution half (the actual TA-1 regression) runs on both.
+    # The stand-in apphost is compiled with csc.exe directly: PowerShell 7 cannot emit an apphost via Add-Type,
+    # and the positive-discovery and identity-mismatch cases must run on BOTH hosts rather than silently
+    # shrinking the Core run's coverage.
     $standInHost = $null
     $standInDirectory = Join-Path $apiDirectory 'bin\Debug\net10.0'
-    if ($PSVersionTable.PSEdition -eq 'Desktop') {
-        New-Item -ItemType Directory -Path $standInDirectory -Force | Out-Null
-        $standInHost = Join-Path $standInDirectory 'AeroLink.Api.exe'
-        if (-not (Test-Path -LiteralPath $standInHost)) {
-            Add-Type -OutputAssembly $standInHost -OutputType ConsoleApplication -TypeDefinition @'
+    New-Item -ItemType Directory -Path $standInDirectory -Force | Out-Null
+    $standInHost = Join-Path $standInDirectory 'AeroLink.Api.exe'
+    if (-not (Test-Path -LiteralPath $standInHost)) {
+        $standInSource = Join-Path $standInDirectory 'standin-api.cs'
+        [IO.File]::WriteAllText($standInSource, @'
 using System; using System.Net; using System.Net.Sockets; using System.Text;
 public static class Program {
     public static int Main(string[] args) {
@@ -464,10 +475,12 @@ public static class Program {
         }
     }
 }
-'@
-        }
-        Check (Test-Path -LiteralPath $standInHost) 'T18: the stand-in apphost was built inside the API directory.'
+'@, (New-Object Text.UTF8Encoding($false)))
+        $standInCsc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+        if (-not (Test-Path -LiteralPath $standInCsc)) { $standInCsc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
+        & $standInCsc @('/nologo', '/target:exe', ('/out:' + $standInHost), $standInSource) | Out-Null
     }
+    Check (Test-Path -LiteralPath $standInHost) 'T18: the stand-in apphost was built inside the API directory.'
     $gitQuiet = {
         param([string[]]$GitArguments)
         $previous = $ErrorActionPreference; $ErrorActionPreference = 'Continue'

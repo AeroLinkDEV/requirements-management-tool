@@ -171,6 +171,15 @@ and only then writes the qualification record beside its integrity hash. The sum
 and the evidence path; `Incompatible`, `ExperimentFailed`, `Incomplete`, `Unqualifiable` and `CleanupFailed` all
 withhold a usable record.
 
+The record separates **placement** from **recovery**. Placement is what the probe measures: the preserved service
+survived the ending the path names. Recovery is the additional fact that the ending also proved the old attempt
+could no longer act - its transient mutator was no longer running and the attempt published a containment receipt
+with quiescence proven. When every path survived but that termination proof is missing (for example a context
+whose completion witness dies with its task), the record is written as `QualifiedPlacementOnly`, the recovery gap
+is named in `recoveryDetail`, and admission is what enforces quiescence itself. Only when both facts are proven
+is the record a full `Qualified`. A record written by an older qualifier version is never inherited
+silently: the reader refuses any record whose `qualifierVersion` is not the current one.
+
 Supported entry points for a transition are the installed tasks (attested through the Task Scheduler API) and an
 operator console started as `explorer.exe > cmd.exe`. **A transition started from a PowerShell prompt or Windows
 Terminal is unidentified and refused before teardown; use the repository's `.bat` launchers or the installed
