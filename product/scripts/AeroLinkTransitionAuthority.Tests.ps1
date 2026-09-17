@@ -56,6 +56,8 @@ if ($Phase -eq 'Delegate') {
     }
     if (& $fault 'DieWithoutOutcome') { [Environment]::Exit(41) }
     if (& $fault 'Hang') { Start-Sleep -Seconds 600 }
+    Publish-AeroLinkJsonAtomic -Path (Join-Path $paths.Root 'continuation-request.json') -Value ([ordered]@{ sourceIdentity = 'test-source' })
+    if (& $fault 'SkipContinuation') { Publish-AeroLinkJsonAtomic -Path $outcome -Value ([ordered]@{ decision = 'Completed'; failures = [string[]]@(); pid = $PID }); Exit-AeroLinkTransition $lease; exit 0 }
     $c = Start-Process -FilePath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -HandoffFile "' + $HandoffFile + '" -Phase Restore') -WindowStyle Hidden -PassThru
     $null = $c.Handle; $c.WaitForExit()
     $cont = Test-AeroLinkActorOutcome -Path $paths.ContinuationOutcome -Role continuation
@@ -142,6 +144,10 @@ try {
     Check ($t4.Decision -eq 'ChainFailed' -and $t4.ExitCode -eq 24) "T4: a delegate whose exit contradicts its Completed outcome fails the chain (got $($t4.Decision))."
     Check (@($t4.Outcome.failures) -match 'DelegateExitMismatch').Count -gt 0 'T4: the failure names the exit/outcome mismatch.'
     Check (-not $t4.RestorationRequired) 'T4: the role itself was restored, so no restoration is owed.'
+
+    # T4b (X5): a continuation the delegate started but that published nothing is never success.
+    $t4b = Invoke-TestChain -Name 't4b' -Faults @{ SkipContinuation = $true }
+    Check ($t4b.Decision -eq 'ChainFailed' -and (@($t4b.Outcome.failures) -contains 'ContinuationOutcomeMissing')) "T4b: a started continuation with no outcome fails the chain (got $($t4b.Decision): $($t4b.Detail))."
 
     # ---------------------------------------------------------------------------------------------------------
     # T5 (#1053, X2): a delegate that dies leaving transient work: collected, failure reported, recovery admissible.

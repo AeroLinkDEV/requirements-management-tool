@@ -1402,7 +1402,8 @@ function Invoke-AeroLinkTransitionChain {
                 }
                 default { & $add "DelegateOutcome$($delegateCheck.Class): $($delegateCheck.Detail)" }
             }
-            if ($accepted -and [bool](Get-AeroLinkProperty $Plan 'expectContinuation' $true)) {
+            # A continuation outcome is required exactly when the delegate started one (it records the request first).
+            if ($accepted -and (Test-Path -LiteralPath (Join-Path $attemptRoot 'continuation-request.json'))) {
                 switch ($continuationCheck.Class) {
                     'Absent' { & $add 'ContinuationOutcomeMissing' }
                     'Valid' { if ($continuationCheck.Decision -ne 'Completed' -and -not $continuationCheck.Failures.Count) { & $add "Continuation:$($continuationCheck.Decision)" } }
