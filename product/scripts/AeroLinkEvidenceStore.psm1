@@ -35,8 +35,36 @@ function Get-AeroLinkEvidenceRoot {
     return [IO.Path]::GetFullPath($root)
 }
 
+function Get-AeroLinkControlledStoragePresence {
+    <#
+      Which controlled-storage objects exist in this database, answered from the catalogue before any table is
+      queried. A genuine first start has no AeroLink schema at all; a database with an applied migration history
+      and a missing storage table is an anomaly. Callers decide what an absent object means, and every answer
+      that is not the expected three flags fails closed.
+    #>
+    param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
+    $sql = @'
+SELECT (to_regclass('public.managed_document_storage_operations') IS NOT NULL)::int::text || ',' || (to_regclass('public.controlled_attachments') IS NOT NULL)::int::text || ',' || (to_regclass('public."__EFMigrationsHistory"') IS NOT NULL)::int::text
+'@
+    $raw = ([string](Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $sql -OutputArguments @('-tA'))).Trim()
+    if ($raw -notmatch '^\d+,\d+,\d+$') { throw "Could not inspect the controlled-storage schema of database '$Database'." }
+    $parts = $raw.Split(',')
+    return [pscustomobject]@{ ManagedDocumentStorage = ($parts[0] -eq '1'); Attachments = ($parts[1] -eq '1'); MigrationHistory = ($parts[2] -eq '1') }
+}
+
 function Get-AeroLinkAttachmentInventory {
     param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
+    # A database with no applied schema has no controlled attachments yet, and the verified backup of a first
+    # start must not query a table that does not exist (#1055). A database WITH a migration history but no
+    # attachment table is still an anomaly and still fails closed.
+    $presence = Get-AeroLinkControlledStoragePresence -Psql $Psql -Database $Database -Port $Port
+    if (-not $presence.Attachments) {
+        if (-not $presence.MigrationHistory) {
+            Write-Host "No AeroLink schema has been applied to '$Database' yet (first start): there are no controlled attachments to inventory."
+            return @()
+        }
+        throw "The controlled-attachment table is missing from '$Database' even though it has an applied migration history."
+    }
     $sql = 'COPY (SELECT "Id", "StorageKey", "Size", lower("Sha256") AS "Sha256", "ArtifactType", "ArtifactId", "RevisionId" FROM controlled_attachments ORDER BY "StorageKey", "Id") TO STDOUT WITH (FORMAT CSV, HEADER TRUE)'
     $csv = Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $sql
     return @($csv | ConvertFrom-Csv)
@@ -72,14 +100,9 @@ function Assert-AeroLinkStorageLifecycleHealthy {
     # failed ("Could not query controlled storage") before the schema it was about to create existed. Ask the
     # catalogue first; a database WITH an applied migration history but a missing storage table is still an
     # anomaly and still fails closed, as does any query that does not answer.
-    $schemaSql = @'
-SELECT (to_regclass('public.managed_document_storage_operations') IS NOT NULL)::int::text || ',' || (to_regclass('public."__EFMigrationsHistory"') IS NOT NULL)::int::text
-'@
-    $presenceRaw = ([string](Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $schemaSql -OutputArguments @('-tA'))).Trim()
-    if ($presenceRaw -notmatch '^\d+,\d+$') { throw "Could not inspect the controlled-storage schema of database '$Database'." }
-    $presence = $presenceRaw.Split(',')
-    if ($presence[0] -eq '0') {
-        if ($presence[1] -eq '0') {
+    $presence = Get-AeroLinkControlledStoragePresence -Psql $Psql -Database $Database -Port $Port
+    if (-not $presence.ManagedDocumentStorage) {
+        if (-not $presence.MigrationHistory) {
             Write-Host "No AeroLink schema has been applied to '$Database' yet (first start): there is no controlled-document storage to verify."
             return
         }

@@ -98,10 +98,17 @@ for ($i = 0; $i -lt $args.Count; $i++) { if ($args[$i] -eq '-f') { $sqlPath = $a
 $sql = if ($sqlPath) { Get-Content -LiteralPath $sqlPath -Raw } else { '' }
 if ($sql -match 'to_regclass') {
     switch ($env:AL_EVIDENCE_STUB) {
-        'fresh' { '0,0'; exit 0 }
-        'missing-table' { '0,1'; exit 0 }
-        default { '1,1'; exit 0 }
+        'fresh' { '0,0,0'; exit 0 }
+        'missing-table' { '0,1,1'; exit 0 }
+        'missing-attachments' { '1,0,1'; exit 0 }
+        default { '1,1,1'; exit 0 }
     }
+}
+if ($sql -match 'COPY \(') {
+    if ($env:AL_EVIDENCE_MARKER) { [IO.File]::WriteAllText($env:AL_EVIDENCE_MARKER, 'COPY issued') }
+    '"Id","StorageKey","Size","Sha256","ArtifactType","ArtifactId","RevisionId"'
+    '"11111111-1111-1111-1111-111111111111","aa/first.docx","3","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","ManagedDocument","22222222-2222-2222-2222-222222222222","33333333-3333-3333-3333-333333333333"'
+    exit 0
 }
 if ($sql -match 'managed_document_storage_operations') {
     switch ($env:AL_EVIDENCE_STUB) {
@@ -113,12 +120,26 @@ if ($sql -match 'managed_document_storage_operations') {
 exit 0
 '@
     [IO.File]::WriteAllText($stubPsql, $stubText, (New-Object Text.UTF8Encoding($false)))
+    $markerFresh = Join-Path $copyRoot 'attachment-query-fresh.marker'
+    $markerSchema = Join-Path $copyRoot 'attachment-query-schema.marker'
     $env:AL_EVIDENCE_STUB = 'fresh'
     Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999
+    $env:AL_EVIDENCE_MARKER = $markerFresh
+    $freshInventory = @(Get-AeroLinkAttachmentInventory -Psql $stubPsql -Database 'stub' -Port 55999)
+    if ($freshInventory.Count -ne 0) { throw "A schema-less database must inventory as zero attachments, got $($freshInventory.Count)." }
+    if (Test-Path -LiteralPath $markerFresh) { throw 'The attachment inventory must not query controlled_attachments before the schema exists.' }
+    Remove-Item Env:\AL_EVIDENCE_MARKER -ErrorAction SilentlyContinue
     $env:AL_EVIDENCE_STUB = 'healthy'
     Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999
+    $env:AL_EVIDENCE_MARKER = $markerSchema
+    $schemaInventory = @(Get-AeroLinkAttachmentInventory -Psql $stubPsql -Database 'stub' -Port 55999)
+    if ($schemaInventory.Count -ne 1) { throw "A database with the schema applied must inventory its controlled attachments, got $($schemaInventory.Count)." }
+    if (-not (Test-Path -LiteralPath $markerSchema)) { throw 'The attachment inventory must query controlled_attachments once the schema exists.' }
+    Remove-Item Env:\AL_EVIDENCE_MARKER -ErrorAction SilentlyContinue
     $env:AL_EVIDENCE_STUB = 'missing-table'
     Expect-Failure { Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999 } 'missing'
+    $env:AL_EVIDENCE_STUB = 'missing-attachments'
+    Expect-Failure { Get-AeroLinkAttachmentInventory -Psql $stubPsql -Database 'stub' -Port 55999 } 'missing'
     $env:AL_EVIDENCE_STUB = 'unhealthy'
     Expect-Failure { Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999 } 'not backup/restore ready'
     $env:AL_EVIDENCE_STUB = 'empty'
