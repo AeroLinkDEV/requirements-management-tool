@@ -57,7 +57,12 @@ if ($Probe) {
         $record['token'] = Get-AeroLinkTokenFacts
         $record['breakawayPermittedByImmediateJob'] = [bool]$qualification.BreakawayPermittedByImmediateJob
         if (-not $qualification.Context.Valid) { throw "the launch context is unidentified: $($qualification.Context.Reason)" }
-        $lease = Enter-AeroLinkTransition -InstallationRoot $InstallationRoot
+        # Qualifications of several definitions may overlap; a lease held by another probe is waited for, boundedly.
+        $leaseDeadline = (Get-Date).AddSeconds(300)
+        while ($true) {
+            try { $lease = Enter-AeroLinkTransition -InstallationRoot $InstallationRoot; break }
+            catch { if ((Get-Date) -ge $leaseDeadline) { throw }; Start-Sleep -Seconds 3 }
+        }
         if (-not $lease.Owner) { throw 'the qualification probe must own the HOME transition lease' }
         $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
         $identity = [string](Get-AeroLinkSourceFingerprint -RepositoryRoot $repositoryRoot).Identity
