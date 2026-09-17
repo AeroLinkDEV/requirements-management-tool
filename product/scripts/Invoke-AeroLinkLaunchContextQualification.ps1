@@ -149,7 +149,12 @@ function Set-TwinArguments([string]$Id, [int]$Hold, [int]$MutatorSeconds = 0) {
     # style, execution policy, a cmd wrapper that sets the environment) is preserved, and the twin's own output
     # is redirected to the run directory so it can never block on an unread inherited stdio handle.
     $twinLog = Join-Path $runs "$Id.twin.log"
-    $script:argumentsNode.InnerText = $originalArguments.Substring(0, $fileMatch.Index) + $probeCall + ' > "' + $twinLog + '" 2>&1'
+    $rewritten = $originalArguments.Substring(0, $fileMatch.Index) + $probeCall + ' > "' + $twinLog + '" 2>&1'
+    # cmd.exe strips the first and last quote of a `cmd /c "..."` command line. When the definition is wrapped
+    # that way, the rewritten tail must still END in a quote or the closing quote of the redirection target is
+    # the one cmd removes and the whole action fails as a malformed filename (measured).
+    if ($originalArguments -match '/c\s+"' -and $originalArguments.TrimEnd().EndsWith('"')) { $rewritten += '"' }
+    $script:argumentsNode.InnerText = $rewritten
     Register-ScheduledTask -TaskName $twin -Xml $document.OuterXml -Force -ErrorAction Stop | Out-Null
 }
 
