@@ -650,8 +650,9 @@ function Test-AeroLinkRemoteDemoPostgresReady {
                 -ArgumentList @('-X', '-h', $DbHost, '-p', "$DbPort", '-U', $DbUser, '-d', $Db, '-tA', '-q', '-c', 'SELECT 1') `
                 -StandardOutput $Out -StandardError $Err -TimeoutSeconds 30 -StepName 'postgres real query' -CaptureOutput
             if ($result.ExitCode -ne 0) { return $false }
-            $value = ($result.StdOutText -split "`r?`n" | Where-Object { $_ -ne '' } | Select-Object -Last 1)
-            return ([string]$value).Trim() -eq '1'
+            # A missing last line is a failed query answer, not a null-valued method call (#1055 TA-2).
+            $value = Get-AeroLinkNativeOutputLine $result.StdOutText
+            return ($null -ne $value) -and ([string]$value).Trim() -eq '1'
         }
     }
     $readyOk = & $PgIsreadyProbe $PostgresBin $DatabaseHost $DatabasePort $DatabaseUser 'postgres' `

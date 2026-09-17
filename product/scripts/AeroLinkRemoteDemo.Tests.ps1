@@ -231,6 +231,39 @@ try {
 Assert-True ($null -ne $parsedTimestamp) "Operator log timestamp must parse as ISO-8601; got '$timestampText'."
 Assert-True ($logLine -match 'log-format-probe') 'Operator log line must contain the message.'
 
+# --- 9. Postgres query probe: an empty answer is a failed answer, never a crash (#1055 TA-2) ---
+# Measured in the disposable integration world on 2026-09-17: the first start of a cluster whose `aerolink`
+# database does not exist yet ran `SELECT 1 FROM pg_database WHERE datname='aerolink'`, psql exited 0 with no
+# rows, and `([string]$value).Trim()` threw InvokeMethodOnNull - because in Windows PowerShell 5.1 a [string]
+# cast of $null is still $null. The supported start path must answer "false" there and continue to createdb.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
+Assert-True ($null -eq (Get-AeroLinkNativeOutputLine $null)) 'Empty native output must yield $null, not throw.'
+Assert-True ($null -eq (Get-AeroLinkNativeOutputLine '')) 'Blank native output must yield $null.'
+Assert-True ($null -eq (Get-AeroLinkNativeOutputLine "`r`n")) 'Whitespace-only native output must yield $null.'
+Assert-True ((Get-AeroLinkNativeOutputLine "`r`n1`r`n") -eq '1') 'The last non-empty native output line must be returned.'
+Assert-True ((Get-AeroLinkNativeOutputLine "connecting`nrow-a`nrow-b") -eq 'row-b') 'The LAST non-empty line must be returned.'
+
+# The default query probe must observe that empty answer without throwing, and the readiness result must be a
+# truthful Ready=false. Two quiet stubs stand in for the binaries; nothing here starts a PostgreSQL cluster.
+# csc.exe is used directly so the same stub compiles under Windows PowerShell 5.1 and PowerShell 7.
+$stubBin = Join-Path $tempRoot 'stub-pg-bin'
+New-Item -ItemType Directory -Path $stubBin -Force | Out-Null
+$stubAssembly = Join-Path $stubBin 'quiet-probe.exe'
+$stubSource = Join-Path $stubBin 'quiet-probe.cs'
+Set-Content -LiteralPath $stubSource -Value 'public static class AeroLinkQuietProbeStub { public static int Main(string[] args) { return 0; } }' -Encoding ASCII
+$csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+if (-not (Test-Path -LiteralPath $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
+& $csc @('/nologo', '/target:exe', ('/out:' + $stubAssembly), $stubSource) | Out-Null
+Assert-True (Test-Path -LiteralPath $stubAssembly) 'The quiet native probe stub must compile for the readiness contract.'
+Copy-Item -LiteralPath $stubAssembly -Destination (Join-Path $stubBin 'psql.exe') -Force
+Copy-Item -LiteralPath $stubAssembly -Destination (Join-Path $stubBin 'pg_isready.exe') -Force
+$stubConfig = [pscustomobject]@{ LogsPath = (Join-Path $tempRoot 'stub-logs'); AeroLinkRoot = $moduleRoot }
+$stubReadiness = Test-AeroLinkRemoteDemoPostgresReady -Config $stubConfig -PostgresBin $stubBin -DatabasePort 55999 -DatabaseName 'aerolink'
+Assert-True ($stubReadiness.PgIsreadyOk -eq $true) 'The quiet stub pg_isready must be observed as accepting connections.'
+Assert-True ($stubReadiness.QueryOk -eq $false) 'A query that answers with no rows must report QueryOk=false.'
+Assert-True ($stubReadiness.Ready -eq $false) 'A query that answers with no rows must report Ready=false, not throw.'
+Assert-True ($stubReadiness.Detail -match 'SELECT 1') 'The not-ready detail must name the real query, not a listener.'
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     Write-Host "Remote-demo operator regression FAILED ($($failures.Count) failure(s))." -ForegroundColor Red

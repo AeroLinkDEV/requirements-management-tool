@@ -183,4 +183,21 @@ function Invoke-AeroLinkChildScript {
     }
 }
 
-Export-ModuleMember -Function Invoke-AeroLinkNativeCommand, Invoke-AeroLinkChildScript
+function Get-AeroLinkNativeOutputLine {
+    <#
+      .SYNOPSIS The last non-empty line of captured native output, or $null when there is none.
+      .DESCRIPTION
+        A successful query commonly answers with no rows (for example `SELECT 1 FROM pg_database
+        WHERE datname='aerolink'` before the database exists). Splitting that empty output yields
+        nothing, and in Windows PowerShell 5.1 a cast of $null to [string] is still $null - so the
+        common `([string]$value).Trim()` idiom throws "You cannot call a method on a null-valued
+        expression" exactly when the honest answer is "no row". The #1055 INT first-start crash
+        (InvokeMethodOnNull in Test-AeroLinkDatabaseExists) was this line. Callers receive $null and
+        decide what an empty answer means; it is never 1.
+    #>
+    param([AllowNull()][string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return $null }
+    return (@($Text -split "`r?`n" | Where-Object { $_ -ne '' }) | Select-Object -Last 1)
+}
+
+Export-ModuleMember -Function Invoke-AeroLinkNativeCommand, Invoke-AeroLinkChildScript, Get-AeroLinkNativeOutputLine

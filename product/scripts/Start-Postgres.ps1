@@ -67,8 +67,9 @@ function Test-AeroLinkPostgresAccepting {
         -StandardError (Join-Path $logs 'postgres-query.stderr.log') `
         -TimeoutSeconds 30 -StepName 'postgres real query' -CaptureOutput
     if ($queryRun.ExitCode -ne 0) { return $false }
-    $value = ($queryRun.StdOutText -split "`r?`n" | Where-Object { $_ -ne '' } | Select-Object -Last 1)
-    return ([string]$value).Trim() -eq '1'
+    # An empty answer is "not 1", never a null-valued method call (#1055 TA-2).
+    $value = Get-AeroLinkNativeOutputLine $queryRun.StdOutText
+    return ($null -ne $value) -and ([string]$value).Trim() -eq '1'
 }
 
 function Test-AeroLinkDatabaseExists {
@@ -78,8 +79,10 @@ function Test-AeroLinkDatabaseExists {
         -StandardError (Join-Path $logs 'postgres-dbexists.stderr.log') `
         -TimeoutSeconds 30 -StepName 'postgres database existence' -CaptureOutput
     if ($existsRun.ExitCode -ne 0) { return $false }
-    $value = ($existsRun.StdOutText -split "`r?`n" | Where-Object { $_ -ne '' } | Select-Object -Last 1)
-    return ([string]$value).Trim() -eq '1'
+    # The database legitimately does not exist yet on a first start: psql exits 0 with no rows.
+    # ([string]$null) is $null in Windows PowerShell 5.1, so the value must be tested, not cast (#1055 TA-2).
+    $value = Get-AeroLinkNativeOutputLine $existsRun.StdOutText
+    return ($null -ne $value) -and ([string]$value).Trim() -eq '1'
 }
 
 function Test-AeroLinkPostgresInstalled {
