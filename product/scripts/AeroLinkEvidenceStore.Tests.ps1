@@ -86,6 +86,45 @@ try {
     $unsafe = @($inventory | ForEach-Object { $_.PSObject.Copy() }); $unsafe[0].StorageKey = '../escape.docx'
     Expect-Failure { Test-AeroLinkAttachmentInventory -Inventory $unsafe -EvidenceRoot $root } 'Unsafe attachment storage key'
 
+    # --- Assert-AeroLinkStorageLifecycleHealthy: fresh schema, anomaly, unhealthy, empty (#1055 first start) ---
+    # A database with no applied schema has no controlled-document storage to verify, and the verified-backup
+    # step of a first start must not fail there. A database WITH an applied migration history but a missing
+    # storage table is still an anomaly, unhealthy storage still refuses, and an empty answer is a named
+    # contract failure rather than InvokeMethodOnNull (a [string] cast of $null is $null on 5.1).
+    $stubPsql = Join-Path $copyRoot 'stub-psql.ps1'
+    $stubText = @'
+$sqlPath = $null
+for ($i = 0; $i -lt $args.Count; $i++) { if ($args[$i] -eq '-f') { $sqlPath = $args[$i + 1] } }
+$sql = if ($sqlPath) { Get-Content -LiteralPath $sqlPath -Raw } else { '' }
+if ($sql -match 'to_regclass') {
+    switch ($env:AL_EVIDENCE_STUB) {
+        'fresh' { '0,0'; exit 0 }
+        'missing-table' { '0,1'; exit 0 }
+        default { '1,1'; exit 0 }
+    }
+}
+if ($sql -match 'managed_document_storage_operations') {
+    switch ($env:AL_EVIDENCE_STUB) {
+        'unhealthy' { '1,0,0'; exit 0 }
+        'empty' { exit 0 }
+        default { '0,0,0'; exit 0 }
+    }
+}
+exit 0
+'@
+    [IO.File]::WriteAllText($stubPsql, $stubText, (New-Object Text.UTF8Encoding($false)))
+    $env:AL_EVIDENCE_STUB = 'fresh'
+    Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999
+    $env:AL_EVIDENCE_STUB = 'healthy'
+    Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999
+    $env:AL_EVIDENCE_STUB = 'missing-table'
+    Expect-Failure { Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999 } 'missing'
+    $env:AL_EVIDENCE_STUB = 'unhealthy'
+    Expect-Failure { Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999 } 'not backup/restore ready'
+    $env:AL_EVIDENCE_STUB = 'empty'
+    Expect-Failure { Assert-AeroLinkStorageLifecycleHealthy -Psql $stubPsql -Database 'stub' -Port 55999 } 'Could not evaluate managed-document storage health'
+    Remove-Item Env:\AL_EVIDENCE_STUB -ErrorAction SilentlyContinue
+
     $env:Evidence__Root = $root
     if ((Get-AeroLinkEvidenceRoot -ProductRoot $productRoot) -ne [IO.Path]::GetFullPath($root)) { throw 'Evidence__Root did not take precedence.' }
     Remove-Item Env:\Evidence__Root
@@ -96,6 +135,7 @@ try {
 }
 finally {
     Remove-Item Env:\Evidence__Root -ErrorAction SilentlyContinue
+    Remove-Item Env:\AL_EVIDENCE_STUB -ErrorAction SilentlyContinue
     if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
     Remove-LongPathTree $copyRoot
 }

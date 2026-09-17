@@ -66,6 +66,25 @@ function Test-AeroLinkAttachmentInventory {
 
 function Assert-AeroLinkStorageLifecycleHealthy {
     param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
+    # A database that has never had the AeroLink schema applied - a genuine first start - legitimately has none
+    # of the controlled-document tables, so there is nothing that could be unhealthy. Measured in the #1055 INT
+    # first start: the launcher's verified-backup step refused an empty cluster, and the whole first Start
+    # failed ("Could not query controlled storage") before the schema it was about to create existed. Ask the
+    # catalogue first; a database WITH an applied migration history but a missing storage table is still an
+    # anomaly and still fails closed, as does any query that does not answer.
+    $schemaSql = @'
+SELECT (to_regclass('public.managed_document_storage_operations') IS NOT NULL)::int::text || ',' || (to_regclass('public."__EFMigrationsHistory"') IS NOT NULL)::int::text
+'@
+    $presenceRaw = ([string](Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $schemaSql -OutputArguments @('-tA'))).Trim()
+    if ($presenceRaw -notmatch '^\d+,\d+$') { throw "Could not inspect the controlled-storage schema of database '$Database'." }
+    $presence = $presenceRaw.Split(',')
+    if ($presence[0] -eq '0') {
+        if ($presence[1] -eq '0') {
+            Write-Host "No AeroLink schema has been applied to '$Database' yet (first start): there is no controlled-document storage to verify."
+            return
+        }
+        throw "The managed-document storage tables are missing from '$Database' even though it has an applied migration history."
+    }
     $sql = @'
 SELECT
  (SELECT count(*) FROM managed_document_storage_operations WHERE "State" IN ('Pending','RepairRequired')) AS pending,
@@ -73,7 +92,9 @@ SELECT
  (SELECT count(*) FROM managed_document_revisions WHERE "State" = 'Released' AND (("ReleasedDocxAttachmentId" IS NULL) OR ("ReleasedPdfAttachmentId" IS NULL))) AS incomplete_releases;
 '@
     $raw = Invoke-AeroLinkEvidenceSql -Psql $Psql -Database $Database -Port $Port -Sql $sql -OutputArguments @('-tA', '-F', ',')
-    $value = ([string]$raw).Trim()
+    # ([string]$null) is $null in Windows PowerShell 5.1; an empty answer must be a named contract failure,
+    # never InvokeMethodOnNull (#1055 TA-2 class).
+    $value = if ($null -eq $raw) { '' } else { ([string]$raw).Trim() }
     if ($value -notmatch '^\d+,\d+,\d+$') { throw "Could not evaluate managed-document storage health in database '$Database'." }
     $parts = $value.Split(','); if ([int]$parts[0] -ne 0 -or [int]$parts[1] -ne 0 -or [int]$parts[2] -ne 0) { throw "Managed-document storage is not backup/restore ready: pending=$($parts[0]), partialCandidates=$($parts[1]), incompleteReleases=$($parts[2])." }
 }
