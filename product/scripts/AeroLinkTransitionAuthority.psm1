@@ -708,8 +708,12 @@ function Invoke-AeroLinkAuthorityPump {
             if ([string](Get-AeroLinkProperty $readiness 'kind' '') -ne $policy.Kind) { & $refuse "role '$role' requires readiness of kind '$($policy.Kind)'"; continue }
             $launch = Get-AeroLinkProperty $body 'launch' $null
             $filePath = [string](Get-AeroLinkProperty $launch 'filePath' '')
-            if (-not $filePath -or -not [IO.Path]::IsPathRooted($filePath) -or -not [string]::Equals([IO.Path]::GetFileName($filePath), $policy.Image, [StringComparison]::OrdinalIgnoreCase)) {
-                & $refuse "role '$role' may only run $($policy.Image) by absolute path, not '$filePath'"; continue
+            $allowedImage = $policy.Image
+            # A disposable qualification installation beside a live HOME cannot run a second agent named ngrok.exe: the
+            # live one would be a foreign tunnel to it, and a refusal. Only there may the tunnel image be renamed.
+            if ($role -eq 'tunnel' -and $env:AEROLINK_INSTALLATION_ROOT -and $env:AEROLINK_QUALIFICATION_TUNNEL_IMAGE) { $allowedImage = [string]$env:AEROLINK_QUALIFICATION_TUNNEL_IMAGE }
+            if (-not $filePath -or -not [IO.Path]::IsPathRooted($filePath) -or -not [string]::Equals([IO.Path]::GetFileName($filePath), $allowedImage, [StringComparison]::OrdinalIgnoreCase)) {
+                & $refuse "role '$role' may only run $allowedImage by absolute path, not '$filePath'"; continue
             }
             if ($QualificationProbe) {
                 if ($role -ne 'qualification-probe') { & $refuse "a qualification probe pass launches only the probe role, not '$role'"; continue }

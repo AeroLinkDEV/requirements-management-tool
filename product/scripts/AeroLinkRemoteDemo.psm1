@@ -306,7 +306,7 @@ function Get-AeroLinkRemoteDemoNgrokProcess {
     $liveEnumeration = ($null -eq $ProcessInfos)
     if ($null -eq $ProcessInfos) {
         # Injected process lists stay deterministic for the contract suite; only LIVE enumeration can fail.
-        try { $ProcessInfos = @(Get-CimInstance Win32_Process -Filter "Name='ngrok.exe'" -ErrorAction Stop) }
+        try { $ProcessInfos = @(Get-CimInstance Win32_Process -Filter ("Name='" + $(if ([IO.Path]::GetFileName([string]$Config.NgrokExecutable)) { [IO.Path]::GetFileName([string]$Config.NgrokExecutable).Replace("'", "''") } else { 'ngrok.exe' }) + "'") -ErrorAction Stop) }
         catch {
             throw "AeroLink could not enumerate running processes to determine ngrok ownership: $($_.Exception.Message). Nothing was stopped and no conclusion was drawn - an unreadable process table means unknown, never none."
         }

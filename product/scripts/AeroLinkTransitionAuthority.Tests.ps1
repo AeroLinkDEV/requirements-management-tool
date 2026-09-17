@@ -396,6 +396,18 @@ Invoke-AeroLinkAuthorityPump -Spool $paths.Spool -AttemptId 'A1' -Witness $witne
         Invoke-AeroLinkAuthorityPump -Spool $t17Paths.Spool -AttemptId 'A1' -Witness $witness -Qualification $supported
         $bad = Resolve-AeroLinkLaunchRequest -Spool $t17Paths.Spool -RequestId 'bad'
         Check ($bad.Outcome -eq 'Refused' -and $bad.Detail -match 'AeroLink.Api.exe') "T17: an 'api' request for another image is Refused before creation (got $($bad.Outcome): $($bad.Detail))."
+        # The tunnel image may be renamed only for a disposable qualification installation.
+        $previousImage = @($env:AEROLINK_QUALIFICATION_TUNNEL_IMAGE, $env:AEROLINK_INSTALLATION_ROOT)
+        try {
+            $env:AEROLINK_QUALIFICATION_TUNNEL_IMAGE = 'stand-in-edge.exe'; $env:AEROLINK_INSTALLATION_ROOT = $null
+            Publish-AeroLinkJsonAtomic -Path (Join-Path $t17Paths.Spool 'renamed.request.json') -Value ([ordered]@{ requestId = 'renamed'; attemptId = 'A1'; role = 'tunnel'
+                    launch = [ordered]@{ filePath = 'C:\edge\stand-in-edge.exe' }; readiness = @{ kind = 'tunnel'; publicUrl = 'https://x.invalid' }; readinessTimeoutSeconds = 5
+                    expiresAtUtc = (Get-Date).ToUniversalTime().AddMinutes(5).ToString('o') })
+            Invoke-AeroLinkAuthorityPump -Spool $t17Paths.Spool -AttemptId 'A1' -Witness $witness -Qualification $supported
+            $renamed = Resolve-AeroLinkLaunchRequest -Spool $t17Paths.Spool -RequestId 'renamed'
+            Check ($renamed.Outcome -eq 'Refused' -and $renamed.Detail -match 'ngrok.exe') "T17: a renamed tunnel image outside a disposable installation is Refused (got $($renamed.Outcome): $($renamed.Detail))."
+        }
+        finally { $env:AEROLINK_QUALIFICATION_TUNNEL_IMAGE = $previousImage[0]; $env:AEROLINK_INSTALLATION_ROOT = $previousImage[1] }
     }
     finally { Stop-AeroLinkTransitionWitness -Witness $witness }
 }
