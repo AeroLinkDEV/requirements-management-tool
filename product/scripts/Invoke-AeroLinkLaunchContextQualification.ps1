@@ -139,6 +139,7 @@ $summary = [ordered]@{ tool = 'aerolink-context-qualification'; sourceTask = ($s
     sourceDefinitionHash = (Get-AeroLinkSha256Text (Get-AeroLinkTaskDefinitionCanonical -Xml $sourceXml)); exportedXmlSha256 = (Get-AeroLinkSha256Text $sourceXml)
     executionTimeLimit = $(if ($limit) { $limit.ToString() } else { 'none' }); runs = @(); startedAt = (Get-Date).ToUniversalTime().ToString('o') }
 $probes = [System.Collections.Generic.List[object]]::new()
+$instanceEngines = [System.Collections.Generic.List[int]]::new()
 $paths = [ordered]@{}
 $descriptors = @{}
 $descriptor = $null
@@ -214,6 +215,49 @@ function Stop-TrackedProbes {
         if ($K::Classify($identity.ProcessId, $identity.StartedAtUtc, $identity.ImagePath) -eq 'RunningMatch') { Stop-Process -Id $identity.ProcessId -Force -ErrorAction SilentlyContinue }
     }
 }
+
+function Stop-TwinInstanceTrees {
+    <#
+      The twin's own action processes are this tool's disposable processes: a probe entry that has published its
+      record then sleeps inside the task action, and a terminated ACTION can leave those processes running even
+      after the task is unregistered (measured in the first full qualification, where two run entries were still
+      alive minutes later and held the installation lease). Stop exactly the trees whose recorded engine pid
+      this tool observed, bounded, and report anything that remains. Nothing is selected by command line.
+    #>
+    $remaining = New-Object System.Collections.Generic.List[object]
+    if (-not $script:instanceEngines.Count) { return @($remaining) }
+    $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $byId = @{}
+    foreach ($p in $all) { $byId[[int]$p.ProcessId] = $p }
+    $owned = @()
+    foreach ($engine in @($script:instanceEngines)) {
+        foreach ($p in $all) {
+            $cursor = $p; $depth = 0; $walked = @()
+            while ($cursor -and $depth -lt 12) {
+                if ([int]$cursor.ProcessId -eq [int]$engine) { $owned += $p; break }
+                $walked += [int]$cursor.ProcessId
+                $parentId = 0
+                try { $parentId = [int]$cursor.ParentProcessId } catch { $parentId = 0 }
+                if ($parentId -gt 0 -and $byId.ContainsKey($parentId) -and ($walked -notcontains $parentId)) { $cursor = $byId[$parentId] } else { $cursor = $null }
+                $depth++
+            }
+        }
+    }
+    foreach ($p in @($owned | Sort-Object -Property @{ Expression = { [int]$_.ProcessId } } -Descending)) {
+        try { Stop-Process -Id ([int]$p.ProcessId) -Force -ErrorAction Stop } catch { }
+    }
+    $deadline = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $deadline) {
+        $alive = @($owned | Where-Object { Get-Process -Id ([int]$_.ProcessId) -ErrorAction SilentlyContinue })
+        if (-not $alive.Count) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    foreach ($p in $owned) {
+        $still = Get-Process -Id ([int]$p.ProcessId) -ErrorAction SilentlyContinue
+        if ($still) { $remaining.Add([ordered]@{ processId = [int]$p.ProcessId; name = $still.ProcessName }) }
+    }
+    return @($remaining)
+}
 function Add-RunEvidence([string]$Name, $Record, [string[]]$PathNames, [hashtable]$Survival, $Info) {
     $observed = [bool]($Record -and (Get-AeroLinkProperty $Record 'probe' $null))
     if ($Record -and (Get-AeroLinkProperty $Record 'descriptorHash' '')) { $script:descriptors[[string]$Record.descriptorHash] = $true; $script:descriptor = $Record.descriptor }
@@ -250,7 +294,7 @@ function Invoke-TwinRun {
     if ($previous) {
         if ($previous.State -eq 'Running') { try { Stop-ScheduledTask -TaskName $twin -ErrorAction Stop } catch { } }
         try { Unregister-ScheduledTask -TaskName $twin -Confirm:$false -ErrorAction Stop }
-        catch { $cleanupErrors.Add("the previous twin instance could not be unregistered before $Name: $($_.Exception.Message)") }
+        catch { $cleanupErrors.Add("the previous twin instance could not be unregistered before ${Name}: $($_.Exception.Message)") }
     }
     Register-ScheduledTask -TaskName $twin -Xml $document.OuterXml -Force -ErrorAction Stop | Out-Null
     $since = Get-Date
@@ -258,6 +302,7 @@ function Invoke-TwinRun {
     $instance = $null
     $appear = (Get-Date).AddSeconds(60)
     while (-not $instance -and (Get-Date) -lt $appear) { $instance = Get-TwinInstance; if (-not $instance) { Start-Sleep -Milliseconds 500 } }
+    if ($instance) { $script:instanceEngines.Add([int]$instance.EnginePid) }
     # The synchronization point for an interrupt-during-mutation run: wait until the attempt has PUBLISHED its
     # live mutator identity, so the ending this run causes cannot land after the transition already finished.
     $active = $null
@@ -430,6 +475,9 @@ finally {
         try { Unregister-ScheduledTask -TaskName $twin -Confirm:$false -ErrorAction Stop }
         catch { $cleanupErrors.Add("the twin task could not be unregistered: $($_.Exception.Message)") }
     }
+    # The twin's own action trees are this tool's disposable processes; a probe entry that published its record
+    # sleeps on as a live action process. Stop exactly those trees and fail the qualification if any survives.
+    foreach ($left in @(Stop-TwinInstanceTrees)) { $cleanupErrors.Add("a twin action process (pid $($left.processId) $($left.name)) survived the twin's endings") }
     Start-Sleep -Seconds 1
     try {
         $remaining = Get-ScheduledTask -TaskName $twin -ErrorAction Stop
