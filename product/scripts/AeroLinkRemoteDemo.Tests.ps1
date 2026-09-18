@@ -285,6 +285,32 @@ Assert-True ($stubReadiness.QueryOk -eq $false) 'A query that answers with no ro
 Assert-True ($stubReadiness.Ready -eq $false) 'A query that answers with no rows must report Ready=false, not throw.'
 Assert-True ($stubReadiness.Detail -match 'SELECT 1') 'The not-ready detail must name the real query, not a listener.'
 
+# ---------------------------------------------------------------------------------------------------------
+# The remote-demo log is SHARED while a transition runs: the outer tails it while the delegate and the
+# continuation each write it. Measured in #1055 S4 ON: `Add-Content` (FileShare.Read) made a concurrent append
+# fail with "being used by another process", which failed an attempt whose services were already restored.
+# The writer must append through a shared handle, retrying within a bound, without dropping the line.
+# ---------------------------------------------------------------------------------------------------------
+$sharedLogConfig = [pscustomobject]@{ LogsPath = (Join-Path $tempRoot 'shared-log') }
+New-Item -ItemType Directory -Path $sharedLogConfig.LogsPath -Force | Out-Null
+$sharedLogPath = Join-Path $sharedLogConfig.LogsPath 'remote-demo.log'
+$sharedLine = "shared-append-probe $(Get-Date -Format o)"
+$otherWriter = [IO.File]::Open($sharedLogPath, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+try {
+    Write-AeroLinkRemoteDemoLog -Config $sharedLogConfig -Message $sharedLine
+}
+finally { $otherWriter.Dispose() }
+$sharedText = Get-Content -LiteralPath $sharedLogPath -Raw
+Assert-True ($sharedText -match [regex]::Escape($sharedLine)) 'A shared writer must not prevent a remote-demo log line from landing.'
+# Negative control: the previous implementation (Add-Content, FileShare.Read) fails against the same holder, so
+# the assertion above is meaningful rather than vacuous.
+$reader = [IO.File]::Open($sharedLogPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+$addContentFailed = $false
+try { Add-Content -LiteralPath $sharedLogPath -Value 'legacy-append' -Encoding UTF8 -ErrorAction Stop }
+catch { $addContentFailed = $true }
+finally { $reader.Dispose() }
+Assert-True $addContentFailed 'The negative control must show Add-Content failing while another handle denies write sharing.'
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     Write-Host "Remote-demo operator regression FAILED ($($failures.Count) failure(s))." -ForegroundColor Red

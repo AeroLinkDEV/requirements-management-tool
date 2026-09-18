@@ -602,7 +602,28 @@ function Write-AeroLinkRemoteDemoLog {
     if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
     $context = if ($Run) { "$($Run.CorrelationId) [$($Run.Invocation)]" } else { 'manual' }
     $line = "$((Get-Date).ToUniversalTime().ToString('o')) [$context] $Message"
-    Add-Content -LiteralPath (Join-Path $logDirectory 'remote-demo.log') -Value $line -Encoding UTF8
+    # This log is SHARED. The transition outer tails it while the delegate and the continuation each write it,
+    # so two writers can be appending at the same moment. `Add-Content` opens with FileShare.Read, which denies
+    # every other writer: measured in #1055 S4 ON as "The process cannot access the file ... because it is being
+    # used by another process", which failed an attempt whose services were already restored. Append through a
+    # shared handle instead, retrying a sharing violation within a bound, exactly as the transition kernel's
+    # event writer does - and never silently drop the line.
+    $path = Join-Path $logDirectory 'remote-demo.log'
+    $bytes = [Text.Encoding]::UTF8.GetBytes($line + "`r`n")
+    $deadline = (Get-Date).AddSeconds(10)
+    $delay = 5
+    while ($true) {
+        $stream = $null
+        try { $stream = [IO.File]::Open($path, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete) }
+        catch [IO.IOException] {
+            if ((Get-Date) -ge $deadline) { throw "The remote-demo log '$path' stayed locked by another process for 10 s; the line was NOT written: $($_.Exception.Message)" }
+            Start-Sleep -Milliseconds $delay
+            $delay = [Math]::Min($delay * 2, 200)
+            continue
+        }
+        try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+        break
+    }
 }
 
 function Get-AeroLinkRemoteDemoPostgresBin {
