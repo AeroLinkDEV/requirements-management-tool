@@ -123,6 +123,7 @@ New-Item -ItemType Directory -Path $logs -Force | Out-Null
 # Prerequisites first, before anything that takes minutes, so a missing SDK is reported in seconds rather than
 # after an npm install and a two-minute wait on a health endpoint that could never answer.
 Write-Host '[0/4] Checking prerequisites...' -ForegroundColor Cyan
+if (-not (Get-Command Resolve-AeroLinkDotnet -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1') }
 $dotnet = Resolve-AeroLinkDotnet
 Assert-AeroLinkNode
 Write-Host "      .NET SDK: $dotnet" -ForegroundColor Green

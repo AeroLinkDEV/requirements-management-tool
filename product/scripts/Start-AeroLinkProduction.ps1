@@ -327,6 +327,12 @@ else {
     # An exact ready runtime needs neither build tools nor PostgreSQL startup. Only a new runtime enters
     # the prerequisite/upgrade path; ordinary repeated Start must leave the existing stack undisturbed.
     Write-Host '[0/4] Checking prerequisites...' -ForegroundColor Cyan
+    # The prerequisite helpers are dot-sourced at the top of this launcher, but a launcher that was re-entered
+    # after its own source changed (#1055 S4 OFF: the continuation restored the runtime, the source fast-forward
+    # landed underneath the running process, and the resolver was absent at this call site) can reach this line
+    # with an incomplete session. Re-establish the dependency from THIS script's own directory instead of
+    # failing a transition whose services are already restored.
+    if (-not (Get-Command Resolve-AeroLinkDotnet -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1') }
     $dotnet = Resolve-AeroLinkDotnet
     Assert-AeroLinkNode
     Write-Host "      .NET SDK: $dotnet" -ForegroundColor Green

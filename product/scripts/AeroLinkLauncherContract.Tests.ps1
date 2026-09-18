@@ -121,6 +121,47 @@ Assert-True ([bool](Get-Command Get-AeroLinkInstallationPaths -ErrorAction Silen
 Assert-True ([bool](Get-Command Get-AeroLinkBootstrapScriptArguments -ErrorAction SilentlyContinue)) `
     'Importing AeroLinkProductionSource must not remove caller-visible AeroLinkBootstrap commands.'
 
+# ---------------------------------------------------------------------------------------------------------
+# The launcher prerequisite boundary (#1055, S4 OFF). Measured: a launcher re-entered after its own source
+# advanced reached "[0/4] Checking prerequisites..." with NO resolver in the session, so
+# `Resolve-AeroLinkDotnet` was "not recognized" and an otherwise-successful runtime restoration was reported
+# as a failed transition. Both launchers must re-establish the prerequisite helpers from their own directory
+# immediately before the call, and that guard is executed here in a fresh process on THIS host, with a negative
+# control proving the unguarded call is exactly the measured failure.
+# ---------------------------------------------------------------------------------------------------------
+$prerequisiteGuard = "if (-not (Get-Command Resolve-AeroLinkDotnet -ErrorAction SilentlyContinue)) { . (Join-Path `$PSScriptRoot 'AeroLinkPrerequisites.ps1') }"
+foreach ($launcherName in @('Start-AeroLinkProduction.ps1', 'Start-AeroLink.ps1')) {
+    $launcherText = Get-Content -LiteralPath (Join-Path $scriptsRoot $launcherName) -Raw
+    $guardAt = $launcherText.IndexOf($prerequisiteGuard)
+    $callAt = $launcherText.IndexOf('$dotnet = Resolve-AeroLinkDotnet')
+    Assert-True ($guardAt -ge 0) "$launcherName does not re-establish AeroLinkPrerequisites before resolving dotnet."
+    Assert-True ($callAt -gt $guardAt) "$launcherName must place the prerequisite guard immediately before the resolver call."
+}
+$boundaryProbe = Join-Path ([IO.Path]::GetTempPath()) ('al1055-prereq-probe-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.ps1')
+[IO.File]::WriteAllText($boundaryProbe, @'
+param([string]$Scripts, [string]$Guard)
+$ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $Scripts 'AeroLinkRemoteDemo.psm1') -Force
+Remove-Item function:Resolve-AeroLinkDotnet -ErrorAction SilentlyContinue
+$negative = $false
+try { $null = Resolve-AeroLinkDotnet } catch { $negative = $_.Exception.Message -like '*not recognized*' }
+$guardOk = $false
+try { Invoke-Expression $Guard; $guardOk = [bool](Get-Command Resolve-AeroLinkDotnet -ErrorAction SilentlyContinue) } catch { }
+if (-not $negative) { 'NEGATIVE-CONTROL-MISSING' } elseif (-not $guardOk) { 'GUARD-FAILED' } else { 'OK' }
+'@, (New-Object Text.UTF8Encoding($false)))
+try {
+    $guardForProbe = $prerequisiteGuard.Replace('$PSScriptRoot', ("'" + $scriptsRoot + "'"))
+    foreach ($hostInfo in @(
+        [pscustomobject]@{ name = 'Windows PowerShell'; exe = (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') },
+        [pscustomobject]@{ name = 'PowerShell 7'; exe = 'pwsh.exe' }
+    )) {
+        $probeOut = & $hostInfo.exe -NoProfile -ExecutionPolicy Bypass -File $boundaryProbe -Scripts $scriptsRoot -Guard $guardForProbe 2>&1
+        $verdict = (@($probeOut) | ForEach-Object { "$_" } | Where-Object { $_ -in @('OK', 'GUARD-FAILED', 'NEGATIVE-CONTROL-MISSING') } | Select-Object -Last 1)
+        Assert-True ($verdict -eq 'OK') "The prerequisite guard did not restore the resolver under $($hostInfo.name) (verdict: $verdict)."
+    }
+}
+finally { Remove-Item -LiteralPath $boundaryProbe -Force -ErrorAction SilentlyContinue }
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     Write-Host "Root launcher contract FAILED ($($failures.Count) failure(s))." -ForegroundColor Red
