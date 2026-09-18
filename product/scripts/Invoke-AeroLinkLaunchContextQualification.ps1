@@ -328,7 +328,8 @@ function Invoke-TwinRun {
         catch { $cleanupErrors.Add("the previous twin instance could not be unregistered before ${Name}: $($_.Exception.Message)") }
     }
     Register-ScheduledTask -TaskName $twin -Xml $document.OuterXml -Force -ErrorAction Stop | Out-Null
-    if (-not (Test-LeaseFree -Seconds 120)) { $cleanupErrors.Add("${Name}: the installation lease was still held when the run was about to start") }
+    try { if (-not (Test-LeaseFree -Seconds 120)) { $cleanupErrors.Add("${Name}: the installation lease was still held when the run was about to start") } }
+    catch { $cleanupErrors.Add("${Name}: the lease check threw: $($_.Exception.Message)") }
     $since = Get-Date
     Start-ScheduledTask -TaskName $twin
     $instance = $null
@@ -454,7 +455,7 @@ try {
         wrapperExit = ($alive1 -and $ending1.Matched); taskCompletion = ($alive1 -and $ending1.Matched)
         ending = $ending1.Detail } $run1.Info
     Stop-TrackedProbes
-    Complete-TwinRun -Name 'run1' -Run $run1
+    try { Complete-TwinRun -Name 'run1' -Run $run1 } catch { $cleanupErrors.Add("run1 tree cleanup threw: $($_.Exception.Message)") }
 
     # ---- run 2: explicit stop while the entry is still running ----
     # The chain's deadline must outlast the stop the driver is about to issue; 900 s is far beyond the driver's
@@ -469,7 +470,7 @@ try {
     Add-RunEvidence 'run2' $observation2 @('taskStop') @{ taskStop = ($alive2 -and $ending2.Matched); ending = $ending2.Detail; active = $run2.Active
         mutatorState = $run2.MutatorState; attempt = $run2.AttemptEvidence; recovery = $recovery2 } $run2.Info
     Stop-TrackedProbes
-    Complete-TwinRun -Name 'run2' -Run $run2
+    try { Complete-TwinRun -Name 'run2' -Run $run2 } catch { $cleanupErrors.Add("run2 tree cleanup threw: $($_.Exception.Message)") }
 
     # ---- run 3: the definition's own hard time limit ----
     # The mutator must still be working when the task's own limit fires, so the chain's budget covers the limit
@@ -482,7 +483,7 @@ try {
     Add-RunEvidence 'run3' $observation3 @('hardTimeout') @{ hardTimeout = ($alive3 -and $ending3.Matched); ending = $ending3.Detail; active = $run3.Active
         mutatorState = $run3.MutatorState; attempt = $run3.AttemptEvidence; recovery = $recovery3 } $run3.Info
     Stop-TrackedProbes
-    Complete-TwinRun -Name 'run3' -Run $run3
+    try { Complete-TwinRun -Name 'run3' -Run $run3 } catch { $cleanupErrors.Add("run3 tree cleanup threw: $($_.Exception.Message)") }
 
     # Placement and recovery are separate gates: both terminating paths must have proven the old attempt's
     # termination before this record may be written as a full qualification.
@@ -512,7 +513,8 @@ finally {
     }
     # The twin's own action trees are this tool's disposable processes; a probe entry that published its record
     # sleeps on as a live action process. Stop exactly those trees and fail the qualification if any survives.
-    foreach ($left in @(Stop-TwinInstanceTrees)) { $cleanupErrors.Add("a twin action process (pid $($left.processId) $($left.name)) survived the twin's endings") }
+    try { foreach ($left in @(Stop-TwinInstanceTrees)) { $cleanupErrors.Add("a twin action process (pid $($left.processId) $($left.name)) survived the twin's endings") } }
+    catch { $cleanupErrors.Add("the twin tree cleanup threw: $($_.Exception.Message)") }
     Start-Sleep -Seconds 1
     try {
         $remaining = Get-ScheduledTask -TaskName $twin -ErrorAction Stop
