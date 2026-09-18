@@ -21,6 +21,9 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkUpgrade.psm1') -Force
+# See Start-AeroLinkProduction.ps1: the body's helpers must be true at the point of use, after every import.
+. (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
+. (Join-Path $PSScriptRoot 'AeroLinkLaunch.ps1')
 
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path
@@ -123,7 +126,6 @@ New-Item -ItemType Directory -Path $logs -Force | Out-Null
 # Prerequisites first, before anything that takes minutes, so a missing SDK is reported in seconds rather than
 # after an npm install and a two-minute wait on a health endpoint that could never answer.
 Write-Host '[0/4] Checking prerequisites...' -ForegroundColor Cyan
-if (-not (Get-Command Resolve-AeroLinkDotnet -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1') }
 $dotnet = Resolve-AeroLinkDotnet
 Assert-AeroLinkNode
 Write-Host "      .NET SDK: $dotnet" -ForegroundColor Green

@@ -129,28 +129,54 @@ Assert-True ([bool](Get-Command Get-AeroLinkBootstrapScriptArguments -ErrorActio
 # immediately before the call, and that guard is executed here in a fresh process on THIS host, with a negative
 # control proving the unguarded call is exactly the measured failure.
 # ---------------------------------------------------------------------------------------------------------
-$prerequisiteGuard = "if (-not (Get-Command Resolve-AeroLinkDotnet -ErrorAction SilentlyContinue)) { . (Join-Path `$PSScriptRoot 'AeroLinkPrerequisites.ps1') }"
+$reestablishment = @(
+    ". (Join-Path `$PSScriptRoot 'AeroLinkPrerequisites.ps1')",
+    ". (Join-Path `$PSScriptRoot 'AeroLinkLaunch.ps1')"
+)
 foreach ($launcherName in @('Start-AeroLinkProduction.ps1', 'Start-AeroLink.ps1')) {
     $launcherText = Get-Content -LiteralPath (Join-Path $scriptsRoot $launcherName) -Raw
-    $guardAt = $launcherText.IndexOf($prerequisiteGuard)
+    # The LAST occurrence: the top-of-file dot-sources are the first, the post-import re-establishment is the one
+    # the body depends on.
+    $reestablishAt = $launcherText.LastIndexOf($reestablishment[0])
+    $launchAt = $launcherText.LastIndexOf($reestablishment[1])
     $callAt = $launcherText.IndexOf('$dotnet = Resolve-AeroLinkDotnet')
-    Assert-True ($guardAt -ge 0) "$launcherName does not re-establish AeroLinkPrerequisites before resolving dotnet."
-    Assert-True ($callAt -gt $guardAt) "$launcherName must place the prerequisite guard immediately before the resolver call."
+    # ...and in particular after the LAST import that precedes the body's prerequisite step, which is the
+    # boundary the measured failure crossed.
+    $importsBeforeCall = if ($callAt -gt 0) { [regex]::Matches($launcherText.Substring(0, $callAt), 'Import-Module ') } else { @() }
+    $lastImportAt = if ($importsBeforeCall.Count) { $importsBeforeCall[$importsBeforeCall.Count - 1].Index } else { -1 }
+    Assert-True ($reestablishAt -ge 0 -and $launchAt -gt $reestablishAt) "$launcherName must re-establish AeroLinkPrerequisites and AeroLinkLaunch before its body."
+    Assert-True ($reestablishAt -gt $lastImportAt) "$launcherName must re-establish the helpers AFTER the last Import-Module that precedes the prerequisite step, not only at the top."
+    Assert-True ($callAt -gt $reestablishAt) "$launcherName must re-establish the helpers before resolving dotnet."
 }
 $boundaryProbe = Join-Path ([IO.Path]::GetTempPath()) ('al1055-prereq-probe-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.ps1')
 [IO.File]::WriteAllText($boundaryProbe, @'
 param([string]$Scripts, [string]$Guard)
 $ErrorActionPreference = 'Stop'
+# The launcher's own structure: helpers dot-sourced at the top, then its Import-Module sequence.
+. (Join-Path $Scripts 'AeroLinkPrerequisites.ps1')
+. (Join-Path $Scripts 'AeroLinkLaunch.ps1')
+Import-Module (Join-Path $Scripts 'AeroLinkBootstrap.psm1') -Force
+Import-Module (Join-Path $Scripts 'AeroLinkInstallation.psm1') -Force
+Import-Module (Join-Path $Scripts 'AeroLinkRuntimeIdentity.psm1') -Force
+Import-Module (Join-Path $Scripts 'AeroLinkUpgrade.psm1') -Force
+Import-Module (Join-Path $Scripts 'AeroLinkTransition.psm1')
 Import-Module (Join-Path $Scripts 'AeroLinkRemoteDemo.psm1') -Force
-Remove-Item function:Resolve-AeroLinkDotnet -ErrorAction SilentlyContinue
+Import-Module (Join-Path $Scripts 'AeroLinkProcessControl.psm1')
+# The measured failure: the body reached its prerequisite step with the helpers absent from the session.
+Remove-Item function:Resolve-AeroLinkDotnet, function:Assert-AeroLinkNode, function:Assert-AeroLinkPostgres -ErrorAction SilentlyContinue
 $negative = $false
-try { $null = Resolve-AeroLinkDotnet } catch { $negative = $_.Exception.Message -like '*not recognized*' }
+try { $null = Assert-AeroLinkPostgres -ProductRoot $Scripts } catch { $negative = $_.Exception.Message -like '*not recognized*' }
 $guardOk = $false
-try { Invoke-Expression $Guard; $guardOk = [bool](Get-Command Resolve-AeroLinkDotnet -ErrorAction SilentlyContinue) } catch { }
+try {
+    Invoke-Expression $Guard
+    $guardOk = [bool](Get-Command Resolve-AeroLinkDotnet -ErrorAction SilentlyContinue) -and
+               [bool](Get-Command Assert-AeroLinkNode -ErrorAction SilentlyContinue) -and
+               [bool](Get-Command Assert-AeroLinkPostgres -ErrorAction SilentlyContinue)
+} catch { }
 if (-not $negative) { 'NEGATIVE-CONTROL-MISSING' } elseif (-not $guardOk) { 'GUARD-FAILED' } else { 'OK' }
 '@, (New-Object Text.UTF8Encoding($false)))
 try {
-    $guardForProbe = $prerequisiteGuard.Replace('$PSScriptRoot', ("'" + $scriptsRoot + "'"))
+    $guardForProbe = ($reestablishment -join "`r`n").Replace('$PSScriptRoot', ("'" + $scriptsRoot + "'"))
     foreach ($hostInfo in @(
         [pscustomobject]@{ name = 'Windows PowerShell'; exe = (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') },
         [pscustomobject]@{ name = 'PowerShell 7'; exe = 'pwsh.exe' }

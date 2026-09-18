@@ -127,6 +127,15 @@ was started and nothing was changed.
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1')
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1')
+
+# Re-establish the launcher helpers immediately before the body that calls them. They are dot-sourced at the top
+# of this file, but a launcher reached through the source-update / re-entry path can run its body with an
+# incomplete session: measured in #1055 S4 OFF, `Resolve-AeroLinkDotnet` (AeroLinkPrerequisites) and then
+# `Assert-AeroLinkPostgres` (AeroLinkLaunch) were "not recognized" AFTER the runtime had already been restored,
+# turning a successful restoration into a reported ChainFailed. Dot-sourcing them here, after every
+# Import-Module, is idempotent and makes the body's dependencies true at the point of use.
+. (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
+. (Join-Path $PSScriptRoot 'AeroLinkLaunch.ps1')
 $lease = Enter-AeroLinkTransition -InstallationRoot $installation.InstallationRoot
 $previousObligation = $env:AEROLINK_PRODUCTION_OBLIGATION
 $obligation = $null
@@ -327,12 +336,6 @@ else {
     # An exact ready runtime needs neither build tools nor PostgreSQL startup. Only a new runtime enters
     # the prerequisite/upgrade path; ordinary repeated Start must leave the existing stack undisturbed.
     Write-Host '[0/4] Checking prerequisites...' -ForegroundColor Cyan
-    # The prerequisite helpers are dot-sourced at the top of this launcher, but a launcher that was re-entered
-    # after its own source changed (#1055 S4 OFF: the continuation restored the runtime, the source fast-forward
-    # landed underneath the running process, and the resolver was absent at this call site) can reach this line
-    # with an incomplete session. Re-establish the dependency from THIS script's own directory instead of
-    # failing a transition whose services are already restored.
-    if (-not (Get-Command Resolve-AeroLinkDotnet -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1') }
     $dotnet = Resolve-AeroLinkDotnet
     Assert-AeroLinkNode
     Write-Host "      .NET SDK: $dotnet" -ForegroundColor Green
