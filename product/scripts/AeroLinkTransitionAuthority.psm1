@@ -1058,7 +1058,7 @@ function Test-AeroLinkLaunchContextQualification {
     if ($record.Class -eq 'Absent') { return & $out $false "the $($context.Descriptor.contextKind) context '$($context.Descriptor.contextName)' is not qualified for this exact descriptor ($($context.DescriptorHash.Substring(0, 12)))" }
     if ($record.Class -ne 'Valid') { return & $out $false "the qualification record is $($record.Class.ToLower())" }
     $sidecar = "$path.sha256"
-    if (-not (Test-Path -LiteralPath $sidecar) -or ([IO.File]::ReadAllText($sidecar).Trim() -ne (Get-AeroLinkSha256File $path))) { return & $out $false 'the qualification record fails its integrity hash' }
+    if (-not [IO.File]::Exists((ConvertTo-AeroLinkKernelIoPath $sidecar)) -or ([IO.File]::ReadAllText((ConvertTo-AeroLinkKernelIoPath $sidecar)).Trim() -ne (Get-AeroLinkSha256File $path))) { return & $out $false 'the qualification record fails its integrity hash' }
     $r = $record.Value
     if ([string]$r.qualifierVersion -ne $script:QualifierVersion) { return & $out $false "the qualification was made by '$($r.qualifierVersion)', not '$($script:QualifierVersion)'" }
     foreach ($key in @($context.Descriptor.Keys)) {
@@ -1103,7 +1103,7 @@ function Write-AeroLinkLaunchContextQualification {
         at = (Get-AeroLinkUtcNow) }
     $path = Get-AeroLinkQualificationPath -InstallationRoot $InstallationRoot -DescriptorHash $DescriptorHash
     Publish-AeroLinkJsonAtomic -Path $path -Value $record
-    [IO.File]::WriteAllText("$path.sha256", (Get-AeroLinkSha256File $path))
+    [IO.File]::WriteAllText((ConvertTo-AeroLinkKernelIoPath "$path.sha256"), (Get-AeroLinkSha256File $path))
     return [pscustomobject]$record
 }
 
@@ -1484,7 +1484,7 @@ function Invoke-AeroLinkTransitionChain {
     catch {
         $primary = $_
         $message = $primary.Exception.Message
-        try { [IO.File]::AppendAllText((Join-Path $attemptRoot 'outer-error.log'), ($primary | Out-String) + $primary.ScriptStackTrace + "`r`n") } catch { }
+        try { [IO.File]::AppendAllText((ConvertTo-AeroLinkKernelIoPath (Join-Path $attemptRoot 'outer-error.log')), ($primary | Out-String) + $primary.ScriptStackTrace + "`r`n") } catch { }
         $previous = (Read-AeroLinkJsonRecord -Path $paths.Outcome).Value
         if ($script:published -and $previous) {
             # Published, then finalization failed: the durable result must not keep claiming a decision this outer

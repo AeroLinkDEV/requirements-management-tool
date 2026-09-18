@@ -586,14 +586,37 @@ function Get-AeroLinkProperty {
     return $Default
 }
 
+function ConvertTo-AeroLinkKernelIoPath {
+    <#
+      The form of a path that System.IO can actually open, whatever its length.
+
+      Windows PowerShell runs on .NET Framework, which refuses ANY path longer than MAX_PATH (260 characters)
+      unless it is given the extended-length form. A deep installation root - or a probe state root such as the
+      per-definition experiment roots the launch-context qualification owns - otherwise fails EVERY evidence write
+      with a misleading 'Could not find a part of the path' on the temporary name, which is exactly what turned a
+      qualification into Unqualifiable during the #1055 revised Checkpoint 1 run. GetFullPath has already
+      normalised this path, so the prefix only disables the legacy length check; it never changes the target.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    $full = [IO.Path]::GetFullPath($Path)
+    if ([IO.Path]::DirectorySeparatorChar -ne '\' -or $full.StartsWith('\\?\')) { return $full }
+    if ($full.StartsWith('\\')) { return '\\?\UNC\' + $full.Substring(2) }
+    return '\\?\' + $full
+}
+
 function Publish-AeroLinkJsonAtomic {
     <# Temp + rename: a reader sees the whole record or no record. #>
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Value)
-    $directory = Split-Path -Parent $Path
-    if ($directory -and -not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+    $ioPath = ConvertTo-AeroLinkKernelIoPath $Path
+    $ioDirectory = [IO.Path]::GetDirectoryName($ioPath)
+    if ($ioDirectory -and -not [IO.Directory]::Exists($ioDirectory)) { [void][IO.Directory]::CreateDirectory($ioDirectory) }
     $temporary = $Path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
-    [IO.File]::WriteAllText($temporary, ($Value | ConvertTo-Json -Depth 12), (New-Object Text.UTF8Encoding($false)))
-    Move-Item -LiteralPath $temporary -Destination $Path -Force
+    $ioTemporary = ConvertTo-AeroLinkKernelIoPath $temporary
+    [IO.File]::WriteAllText($ioTemporary, ($Value | ConvertTo-Json -Depth 12), (New-Object Text.UTF8Encoding($false)))
+    # Same replacement semantics as Move-Item -Force (which also removes the destination first), so a reader never
+    # sees a half-written record and the previous record is never left behind.
+    if ([IO.File]::Exists($ioPath)) { [IO.File]::Delete($ioPath) }
+    [IO.File]::Move($ioTemporary, $ioPath)
 }
 
 function New-AeroLinkExclusiveRecord {
@@ -603,13 +626,14 @@ function New-AeroLinkExclusiveRecord {
     #>
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Value)
     $temporary = $Path + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
-    [IO.File]::WriteAllText($temporary, ($Value | ConvertTo-Json -Depth 12 -Compress), (New-Object Text.UTF8Encoding($false)))
+    $ioTemporary = ConvertTo-AeroLinkKernelIoPath $temporary
+    [IO.File]::WriteAllText($ioTemporary, ($Value | ConvertTo-Json -Depth 12 -Compress), (New-Object Text.UTF8Encoding($false)))
     try {
-        [IO.File]::Move($temporary, $Path)
+        [IO.File]::Move($ioTemporary, (ConvertTo-AeroLinkKernelIoPath $Path))
         return [pscustomobject]@{ Won = $true; Existing = $null; Class = 'Created' }
     }
     catch {
-        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        try { [IO.File]::Delete($ioTemporary) } catch { }
         $read = Read-AeroLinkJsonRecord -Path $Path
         return [pscustomobject]@{ Won = $false; Existing = $read.Value; Class = $read.Class }
     }
@@ -618,10 +642,11 @@ function New-AeroLinkExclusiveRecord {
 function Read-AeroLinkJsonRecord {
     <# Class: Absent | Valid | Malformed | Unreadable #>
     param([Parameter(Mandatory)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return [pscustomobject]@{ Class = 'Absent'; Value = $null; Detail = 'absent' } }
+    $ioPath = ConvertTo-AeroLinkKernelIoPath $Path
+    if (-not [IO.File]::Exists($ioPath)) { return [pscustomobject]@{ Class = 'Absent'; Value = $null; Detail = 'absent' } }
     $text = $null
     try {
-        $fs = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+        $fs = [IO.File]::Open($ioPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
         try { $text = (New-Object IO.StreamReader($fs, [Text.Encoding]::UTF8)).ReadToEnd() } finally { $fs.Dispose() }
     }
     catch { return [pscustomobject]@{ Class = 'Unreadable'; Value = $null; Detail = $_.Exception.Message } }
@@ -643,15 +668,16 @@ function Write-AeroLinkTransitionEvent {
       'EvidenceWriteContention:' / 'EvidenceWriteFailed:'. Nothing is dropped silently: the caller fails its operation.
     #>
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Record, [int]$ContentionTimeoutMs = 10000)
-    $directory = Split-Path -Parent $Path
-    if ($directory -and -not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
+    $ioPath = ConvertTo-AeroLinkKernelIoPath $Path
+    $ioDirectory = [IO.Path]::GetDirectoryName($ioPath)
+    if ($ioDirectory -and -not [IO.Directory]::Exists($ioDirectory)) { [void][IO.Directory]::CreateDirectory($ioDirectory) }
     $bytes = [Text.Encoding]::UTF8.GetBytes((($Record | ConvertTo-Json -Depth 12 -Compress) + "`n"))
     $clock = [Diagnostics.Stopwatch]::StartNew()
     $attempts = 0; $delay = 5
     $stream = $null
     while ($null -eq $stream) {
         $attempts++
-        try { $stream = [IO.File]::Open($Path, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::Read) }
+        try { $stream = [IO.File]::Open($ioPath, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::Read) }
         catch {
             $exception = $_.Exception
             while ($exception -and -not ($exception -is [IO.IOException]) -and $exception.InnerException) { $exception = $exception.InnerException }
@@ -676,10 +702,11 @@ function Read-AeroLinkTransitionEvents {
       happened, so callers must treat its subject as Unknown.
     #>
     param([Parameter(Mandatory)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return [pscustomobject]@{ Class = 'Absent'; Events = @(); TornTail = $false; Detail = 'absent' } }
+    $ioPath = ConvertTo-AeroLinkKernelIoPath $Path
+    if (-not [IO.File]::Exists($ioPath)) { return [pscustomobject]@{ Class = 'Absent'; Events = @(); TornTail = $false; Detail = 'absent' } }
     $text = $null
     try {
-        $fs = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        $fs = [IO.File]::Open($ioPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
         try { $text = (New-Object IO.StreamReader($fs, [Text.Encoding]::UTF8)).ReadToEnd() } finally { $fs.Dispose() }
     }
     catch { return [pscustomobject]@{ Class = 'Unreadable'; Events = @(); TornTail = $false; Detail = $_.Exception.Message } }
@@ -705,7 +732,10 @@ function Enter-AeroLinkTransitionLock {
     #>
     param([Parameter(Mandatory)][string]$Path)
     try {
-        $stream = [IO.File]::Open($Path, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $ioPath = ConvertTo-AeroLinkKernelIoPath $Path
+        $ioDirectory = [IO.Path]::GetDirectoryName($ioPath)
+        if ($ioDirectory -and -not [IO.Directory]::Exists($ioDirectory)) { [void][IO.Directory]::CreateDirectory($ioDirectory) }
+        $stream = [IO.File]::Open($ioPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
         return [pscustomobject]@{ State = 'Held'; Stream = $stream; Detail = 'held' }
     }
     catch [System.IO.IOException] {
@@ -737,7 +767,7 @@ function Get-AeroLinkSha256Text([string]$Text) {
 
 function Get-AeroLinkSha256File([string]$Path) {
     $sha = [Security.Cryptography.SHA256]::Create()
-    $fs = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $fs = [IO.File]::Open((ConvertTo-AeroLinkKernelIoPath $Path), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
     try { return ([BitConverter]::ToString($sha.ComputeHash($fs)) -replace '-', '') } finally { $fs.Dispose(); $sha.Dispose() }
 }
 
@@ -770,6 +800,6 @@ function Get-AeroLinkTokenFacts {
 }
 
 Export-ModuleMember -Function Get-AeroLinkTransitionKernelSourceHash, Get-AeroLinkProcessIdentityRecord, ConvertTo-AeroLinkUtcIso, `
-    ConvertTo-AeroLinkUtcDate, Test-AeroLinkIntegral, Get-AeroLinkProperty, Publish-AeroLinkJsonAtomic, New-AeroLinkExclusiveRecord, `
+    ConvertTo-AeroLinkUtcDate, ConvertTo-AeroLinkKernelIoPath, Test-AeroLinkIntegral, Get-AeroLinkProperty, Publish-AeroLinkJsonAtomic, New-AeroLinkExclusiveRecord, `
     Read-AeroLinkJsonRecord, Write-AeroLinkTransitionEvent, Read-AeroLinkTransitionEvents, Enter-AeroLinkTransitionLock, `
     Test-AeroLinkLockHolderAlive, Get-AeroLinkBootTimeUtc, Get-AeroLinkSha256Text, Get-AeroLinkSha256File, Get-AeroLinkTokenFacts
