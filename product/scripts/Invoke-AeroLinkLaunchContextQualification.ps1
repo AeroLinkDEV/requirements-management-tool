@@ -223,14 +223,19 @@ function Stop-TwinInstanceTrees {
       after the task is unregistered (measured in the first full qualification, where two run entries were still
       alive minutes later and held the installation lease). Stop exactly the trees whose recorded engine pid
       this tool observed, bounded, and report anything that remains. Nothing is selected by command line.
+      -Engines narrows the stop to one run's tree, which is what the driver does between runs: a terminated
+      action can leave its outer alive (that survival is the placement property), and that outer holds the
+      installation lease until its chain ends - while the NEXT run's probe must acquire it.
     #>
+    param([int[]]$Engines = @())
     $remaining = New-Object System.Collections.Generic.List[object]
-    if (-not $script:instanceEngines.Count) { return @($remaining) }
+    $targets = if ($Engines.Count) { @($Engines) } else { @($script:instanceEngines) }
+    if (-not $targets.Count) { return @($remaining) }
     $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
     $byId = @{}
     foreach ($p in $all) { $byId[[int]$p.ProcessId] = $p }
     $owned = @()
-    foreach ($engine in @($script:instanceEngines)) {
+    foreach ($engine in @($targets)) {
         foreach ($p in $all) {
             $cursor = $p; $depth = 0; $walked = @()
             while ($cursor -and $depth -lt 12) {
@@ -257,6 +262,32 @@ function Stop-TwinInstanceTrees {
         if ($still) { $remaining.Add([ordered]@{ processId = [int]$p.ProcessId; name = $still.ProcessName }) }
     }
     return @($remaining)
+}
+
+function Test-LeaseFree {
+    <# Bounded: is the installation lease acquirable right now? #>
+    param([int]$Seconds = 120)
+    $path = Join-Path (Join-Path $InstallationRoot 'bootstrap') 'home-transition.lock'
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Test-Path -LiteralPath $path)) { return $true }
+        try { $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None); $stream.Dispose(); return $true }
+        catch { Start-Sleep -Milliseconds 500 }
+    }
+    return $false
+}
+
+function Complete-TwinRun {
+    <#
+      Ends one run's containment: the preserved probes were already stopped by the caller, and the twin's own
+      action tree is stopped here, bounded, before the next run needs the installation lease. Anything that
+      survives is a cleanup error, and a cleanup error withholds the qualification record.
+    #>
+    param([Parameter(Mandatory)][string]$Name, $Run)
+    if (-not $Run -or -not $Run.Instance) { return }
+    foreach ($left in @(Stop-TwinInstanceTrees -Engines @([int]$Run.Instance.EnginePid))) {
+        $cleanupErrors.Add("${Name}: a twin action process (pid $($left.processId) $($left.name)) survived its ending")
+    }
 }
 function Add-RunEvidence([string]$Name, $Record, [string[]]$PathNames, [hashtable]$Survival, $Info) {
     $observed = [bool]($Record -and (Get-AeroLinkProperty $Record 'probe' $null))
@@ -297,6 +328,7 @@ function Invoke-TwinRun {
         catch { $cleanupErrors.Add("the previous twin instance could not be unregistered before ${Name}: $($_.Exception.Message)") }
     }
     Register-ScheduledTask -TaskName $twin -Xml $document.OuterXml -Force -ErrorAction Stop | Out-Null
+    if (-not (Test-LeaseFree -Seconds 120)) { $cleanupErrors.Add("${Name}: the installation lease was still held when the run was about to start") }
     $since = Get-Date
     Start-ScheduledTask -TaskName $twin
     $instance = $null
@@ -422,6 +454,7 @@ try {
         wrapperExit = ($alive1 -and $ending1.Matched); taskCompletion = ($alive1 -and $ending1.Matched)
         ending = $ending1.Detail } $run1.Info
     Stop-TrackedProbes
+    Complete-TwinRun -Name 'run1' -Run $run1
 
     # ---- run 2: explicit stop while the entry is still running ----
     # The chain's deadline must outlast the stop the driver is about to issue; 900 s is far beyond the driver's
@@ -436,6 +469,7 @@ try {
     Add-RunEvidence 'run2' $observation2 @('taskStop') @{ taskStop = ($alive2 -and $ending2.Matched); ending = $ending2.Detail; active = $run2.Active
         mutatorState = $run2.MutatorState; attempt = $run2.AttemptEvidence; recovery = $recovery2 } $run2.Info
     Stop-TrackedProbes
+    Complete-TwinRun -Name 'run2' -Run $run2
 
     # ---- run 3: the definition's own hard time limit ----
     # The mutator must still be working when the task's own limit fires, so the chain's budget covers the limit
@@ -448,6 +482,7 @@ try {
     Add-RunEvidence 'run3' $observation3 @('hardTimeout') @{ hardTimeout = ($alive3 -and $ending3.Matched); ending = $ending3.Detail; active = $run3.Active
         mutatorState = $run3.MutatorState; attempt = $run3.AttemptEvidence; recovery = $recovery3 } $run3.Info
     Stop-TrackedProbes
+    Complete-TwinRun -Name 'run3' -Run $run3
 
     # Placement and recovery are separate gates: both terminating paths must have proven the old attempt's
     # termination before this record may be written as a full qualification.
