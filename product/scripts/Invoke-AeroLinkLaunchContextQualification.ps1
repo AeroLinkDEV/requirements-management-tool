@@ -500,12 +500,14 @@ function Invoke-TwinRun {
     if ($record) { $null = Track-Probe $record }
     elseif ($active) { $null = Track-Probe $active }
     $mutatorState = ''
+    $mutatorAliveAfterEnding = $false
     $attemptEvidence = $null
     if ($active) {
         $mutator = Get-AeroLinkProperty $active 'mutator' $null
         $mutatorPid = [int](Get-AeroLinkProperty $mutator 'processId' 0)
         if ($mutatorPid -gt 0) {
             $mutatorState = $K::Classify($mutatorPid, (ConvertTo-AeroLinkUtcIso (Get-AeroLinkProperty $mutator 'startedAt' '')), [string](Get-AeroLinkProperty $mutator 'image' ''))
+            $mutatorAliveAfterEnding = ($mutatorState -eq 'RunningMatch')
         }
         # The attempt's own completion evidence, if any: did the old attempt prove its mutator terminated?
         $attemptId = [string](Get-AeroLinkProperty $active 'attemptId' '')
@@ -520,7 +522,7 @@ function Invoke-TwinRun {
     return [pscustomobject]@{ Run = $Name; RunId = $id; Instance = $instance; Record = $record; Info = $info; Cause = $cause; Active = $active
         MutatorState = $mutatorState; AttemptEvidence = $attemptEvidence
         ElapsedSeconds = [int]((Get-Date) - $since).TotalSeconds; Since = $since; StopIssued = $stopIssued
-        EndedAt = $endedAt; LastMutatorAliveAt = $lastMutatorAliveAt }
+        EndedAt = $endedAt; LastMutatorAliveAt = $lastMutatorAliveAt; MutatorAliveAfterEnding = $mutatorAliveAfterEnding }
 }
 
 function Test-EndingMatched($Run, [string]$Expected, [bool]$RequireActive = $false) {
@@ -530,10 +532,14 @@ function Test-EndingMatched($Run, [string]$Expected, [bool]$RequireActive = $fal
     if ($RequireActive) {
         if (-not $Run.Active) { return [pscustomobject]@{ Matched = $false; Detail = 'the ending did not land on an active mutator: no active-mutation record was published' } }
         # A historical active record is not evidence. The mutator it names must have been observed RUNNING
-        # immediately before this ending (Astra R2-2: a stale Active plus MutatorState=Gone was accepted before).
-        if (-not $Run.LastMutatorAliveAt) { return [pscustomobject]@{ Matched = $false; Detail = 'the active-mutation record is stale: its mutator was never observed running while this instance ran' } }
-        $gap = ($Run.EndedAt - $Run.LastMutatorAliveAt).TotalSeconds
-        if ($gap -gt 5) { return [pscustomobject]@{ Matched = $false; Detail = "the mutator was last observed running $([int]$gap)s before the ending, so the ending did not land on active mutation" } }
+        # immediately before this ending, or still running at the first observation after it - the latter is the
+        # stronger, race-free proof and the only one available when a task stop lands within the poll interval
+        # (Astra R2-2: a stale Active plus MutatorState=Gone must still fail).
+        if (-not $Run.LastMutatorAliveAt -and -not $Run.MutatorAliveAfterEnding) { return [pscustomobject]@{ Matched = $false; Detail = 'the active-mutation record is stale: its mutator was never observed running while this instance ran' } }
+        if ($Run.LastMutatorAliveAt) {
+            $gap = ($Run.EndedAt - $Run.LastMutatorAliveAt).TotalSeconds
+            if ($gap -gt 5) { return [pscustomobject]@{ Matched = $false; Detail = "the mutator was last observed running $([int]$gap)s before the ending, so the ending did not land on active mutation" } }
+        }
         $activeAttestation = Get-AeroLinkProperty (Get-AeroLinkProperty $Run.Active 'qualification' $null) 'attestation' $null
         $activeInstance = [string](Get-AeroLinkProperty $activeAttestation 'instance' '')
         if ($activeInstance -and $activeInstance -ne $Run.Instance.InstanceGuid) { return [pscustomobject]@{ Matched = $false; Detail = "the active record belongs to instance $activeInstance, not $($Run.Instance.InstanceGuid)" } }
