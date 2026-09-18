@@ -84,7 +84,9 @@ if ($Probe) {
         if ($MutatorSeconds -gt 0) {
             $faults['DelegateMutatorSeconds'] = $MutatorSeconds
             $plan['runId'] = $RunId
-            $plan['activeRecordPath'] = Join-Path $probeRuns "$RunId.active.json"
+            # Inside the PROBE this script's own state root IS the probe root, so the active record lives under
+            # its own $runs; $probeRuns is a driver-side variable and is not defined here.
+            $plan['activeRecordPath'] = Join-Path $runs "$RunId.active.json"
         }
         $chain = Invoke-AeroLinkTransitionChain -InstallationRoot $InstallationRoot -Lease $lease -Caller QualificationProbe `
             -Plan $plan -Faults $faults `
