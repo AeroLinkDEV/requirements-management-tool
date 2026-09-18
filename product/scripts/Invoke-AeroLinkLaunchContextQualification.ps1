@@ -228,7 +228,9 @@ function Stop-TwinInstanceTrees {
       installation lease until its chain ends - while the NEXT run's probe must acquire it.
     #>
     param([int[]]$Engines = @())
-    $remaining = New-Object System.Collections.Generic.List[object]
+    # ::new(), not New-Object: a New-Object generic list cannot be passed to @() on either host
+    # ("Argument types do not match"), which is what aborted the previous qualification's cleanup.
+    $remaining = [System.Collections.Generic.List[object]]::new()
     $targets = if ($Engines.Count) { @($Engines) } else { @($script:instanceEngines) }
     if (-not $targets.Count) { return @($remaining) }
     $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
