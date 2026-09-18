@@ -634,7 +634,11 @@ finally {
         $summary['verdict'] = 'CleanupFailed'
         $summary['detail'] = "no qualification record was written: $(@($cleanupErrors) -join '; ')"
     }
-    if ($summary['verdict'] -eq 'Qualified') { $exitCode = 0 }
+    # A written record is a completed qualification, whatever the recovery gate found: Qualified means both
+    # placement and recovery were proven, QualifiedPlacementOnly means the record is usable at admission (which
+    # enforces quiescence itself) and names the recovery gap. Anything else (no record, cleanup failure,
+    # unobserved path) exits nonzero.
+    if ($summary['verdict'] -in @('Qualified', 'QualifiedPlacementOnly')) { $exitCode = 0 }
     $summary['finishedAt'] = (Get-Date).ToUniversalTime().ToString('o')
     Publish-AeroLinkJsonAtomic -Path $summaryPath -Value $summary
     Write-Host "Launch-context qualification of $($summary.sourceTask): $($summary.verdict). $($summary['detail'])"
