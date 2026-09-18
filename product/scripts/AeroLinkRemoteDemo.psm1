@@ -602,21 +602,29 @@ function Write-AeroLinkRemoteDemoLog {
     if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
     $context = if ($Run) { "$($Run.CorrelationId) [$($Run.Invocation)]" } else { 'manual' }
     $line = "$((Get-Date).ToUniversalTime().ToString('o')) [$context] $Message"
-    # This log is SHARED. The transition outer tails it while the delegate and the continuation each write it,
-    # so two writers can be appending at the same moment. `Add-Content` opens with FileShare.Read, which denies
-    # every other writer: measured in #1055 S4 ON as "The process cannot access the file ... because it is being
-    # used by another process", which failed an attempt whose services were already restored. Append through a
-    # shared handle instead, retrying a sharing violation within a bound, exactly as the transition kernel's
-    # event writer does - and never silently drop the line.
+    # This log is SHARED: the transition outer tails it while the delegate and the continuation each write it.
+    # Two facts have to hold together, and each was measured:
+    #   * `Add-Content` (the previous implementation) opens with FileShare.Read, which denies other writers, so a
+    #     concurrent append failed hard with "being used by another process" and failed a transition whose
+    #     services were already restored (#1055 S4 ON).
+    #   * Simply sharing widely (FileShare.ReadWrite | Delete) is NOT enough: two handles opened for append
+    #     before either writes both start at the same end offset, and the second write overwrites the first.
+    #     Astra reproduced that exact interleaving with the previous implementation's IO sequence; both writes
+    #     returned success and only one line survived.
+    # The protocol below serialises writers with a bounded retry instead of sharing the write open: the handle is
+    # opened FileShare.Read, which still lets the tail reader in (its open requests ReadWrite|Delete sharing, so
+    # the existing reader's access is Write-compatible) while denying every other WRITER until this one flushes
+    # and disposes. A writer that cannot get in within the bound refuses with a named error; a line is never
+    # silently dropped or overwritten.
     $path = Join-Path $logDirectory 'remote-demo.log'
     $bytes = [Text.Encoding]::UTF8.GetBytes($line + "`r`n")
     $deadline = (Get-Date).AddSeconds(10)
     $delay = 5
     while ($true) {
         $stream = $null
-        try { $stream = [IO.File]::Open($path, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete) }
+        try { $stream = [IO.File]::Open($path, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::Read) }
         catch [IO.IOException] {
-            if ((Get-Date) -ge $deadline) { throw "The remote-demo log '$path' stayed locked by another process for 10 s; the line was NOT written: $($_.Exception.Message)" }
+            if ((Get-Date) -ge $deadline) { throw "The remote-demo log '$path' stayed locked by another writer for 10 s; the line was NOT written, and no other line was overwritten: $($_.Exception.Message)" }
             Start-Sleep -Milliseconds $delay
             $delay = [Math]::Min($delay * 2, 200)
             continue
