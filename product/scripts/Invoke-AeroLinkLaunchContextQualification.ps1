@@ -140,6 +140,7 @@ $summary = [ordered]@{ tool = 'aerolink-context-qualification'; sourceTask = ($s
     executionTimeLimit = $(if ($limit) { $limit.ToString() } else { 'none' }); runs = @(); startedAt = (Get-Date).ToUniversalTime().ToString('o') }
 $probes = [System.Collections.Generic.List[object]]::new()
 $instanceEngines = [System.Collections.Generic.List[int]]::new()
+$observedIdentities = [System.Collections.Generic.List[object]]::new()
 $paths = [ordered]@{}
 $descriptors = @{}
 $descriptor = $null
@@ -279,6 +280,65 @@ function Test-LeaseFree {
     return $false
 }
 
+function Get-TwinTreeIdentities {
+    <#
+      Snapshot the descendants of one twin instance while its tree is still intact. A terminated action can
+      orphan the processes it started (the cmd wrapper exits, a surviving probe entry keeps running), so the
+      parent chain cannot be relied on later - the identity (pid + creation time) is what this tool owns, and
+      it is recorded here, at the moment it is observed, exactly like the probe identities.
+    #>
+    param([int]$EnginePid, [int]$MaxDepth = 12)
+    $found = [System.Collections.Generic.List[object]]::new()
+    if ($EnginePid -le 0) { return $found.ToArray() }
+    $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    if ($all.Count -gt 500) { $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue) }
+    $byId = @{}
+    foreach ($p in $all) { $byId[[int]$p.ProcessId] = $p }
+    foreach ($p in $all) {
+        $cursor = $p; $depth = 0; $walked = @()
+        while ($cursor -and $depth -lt $MaxDepth) {
+            if ([int]$cursor.ProcessId -eq $EnginePid) {
+                $found.Add([ordered]@{ processId = [int]$p.ProcessId; name = [string]$p.Name; created = [string]$p.CreationDate })
+                break
+            }
+            $walked += [int]$cursor.ProcessId
+            $parentId = 0
+            try { $parentId = [int]$cursor.ParentProcessId } catch { $parentId = 0 }
+            if ($parentId -gt 0 -and $byId.ContainsKey($parentId) -and ($walked -notcontains $parentId)) { $cursor = $byId[$parentId] } else { $cursor = $null }
+            $depth++
+        }
+    }
+    return $found.ToArray()
+}
+
+function Stop-RecordedIdentities {
+    <# Stop exactly these recorded identities, bounded; a pid whose creation time differs is not ours and is
+       reported, not stopped. Returns what remains. #>
+    param($Identities)
+    $remaining = [System.Collections.Generic.List[object]]::new()
+    $targets = @($Identities)
+    if (-not $targets.Count) { return $remaining.ToArray() }
+    $stopped = 0
+    foreach ($identity in $targets) {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$identity.processId)" -ErrorAction SilentlyContinue
+        if (-not $proc) { continue }
+        if ([string]$proc.CreationDate -ne [string]$identity.created) { continue }
+        try { Stop-Process -Id ([int]$identity.processId) -Force -ErrorAction Stop; $stopped++ } catch { }
+    }
+    $deadline = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $deadline) {
+        $alive = @($targets | Where-Object { Get-Process -Id ([int]$_.processId) -ErrorAction SilentlyContinue })
+        if (-not $alive.Count) { break }
+        Start-Sleep -Milliseconds 250
+    }
+    foreach ($identity in $targets) {
+        $still = Get-Process -Id ([int]$identity.processId) -ErrorAction SilentlyContinue
+        if ($still) { $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = $still.ProcessName }) }
+    }
+    if ($stopped) { Write-Verbose "stopped $stopped recorded twin process(es)" }
+    return $remaining.ToArray()
+}
+
 function Complete-TwinRun {
     <#
       Ends one run's containment: the preserved probes were already stopped by the caller, and the twin's own
@@ -330,7 +390,7 @@ function Invoke-TwinRun {
         catch { $cleanupErrors.Add("the previous twin instance could not be unregistered before ${Name}: $($_.Exception.Message)") }
     }
     Register-ScheduledTask -TaskName $twin -Xml $document.OuterXml -Force -ErrorAction Stop | Out-Null
-    try { if (-not (Test-LeaseFree -Seconds 120)) { $cleanupErrors.Add("${Name}: the installation lease was still held when the run was about to start") } }
+    try { if (-not (Test-LeaseFree -Seconds 300)) { $cleanupErrors.Add("${Name}: the installation lease was still held when the run was about to start") } }
     catch { $cleanupErrors.Add("${Name}: the lease check threw: $($_.Exception.Message)") }
     $since = Get-Date
     Start-ScheduledTask -TaskName $twin
@@ -338,6 +398,11 @@ function Invoke-TwinRun {
     $appear = (Get-Date).AddSeconds(60)
     while (-not $instance -and (Get-Date) -lt $appear) { $instance = Get-TwinInstance; if (-not $instance) { Start-Sleep -Milliseconds 500 } }
     if ($instance) { $script:instanceEngines.Add([int]$instance.EnginePid) }
+    # Record the instance's own tree by IDENTITY now, while the chain is intact: a terminated action can orphan
+    # these processes, and the final cleanup must be able to stop them without a parent chain.
+    if ($instance) {
+        foreach ($identity in @(Get-TwinTreeIdentities -EnginePid ([int]$instance.EnginePid))) { $script:observedIdentities.Add($identity) }
+    }
     # The synchronization point for an interrupt-during-mutation run: wait until the attempt has PUBLISHED its
     # live mutator identity, so the ending this run causes cannot land after the transition already finished.
     $active = $null
@@ -460,9 +525,11 @@ try {
     try { Complete-TwinRun -Name 'run1' -Run $run1 } catch { $cleanupErrors.Add("run1 tree cleanup threw: $($_.Exception.Message)") }
 
     # ---- run 2: explicit stop while the entry is still running ----
-    # The chain's deadline must outlast the stop the driver is about to issue; 900 s is far beyond the driver's
-    # synchronization point while staying bounded.
-    $run2 = Invoke-TwinRun -Name 'run2' -HoldSeconds 3600 -Ending DriverStop -RecordTimeoutSeconds $EndingTimeoutSeconds -MutatorSeconds 3600 -ChainDeadlineSeconds 900
+    # The chain's deadline must outlast the stop the driver is about to issue, and it must also END soon after:
+    # the surviving outer holds the installation lease until its chain finishes, and the next run cannot start
+    # until that lease is released. 180 s is bounded, well past the driver's synchronization point, and short
+    # enough that the run's attempt resolves (witness receipt) before run3.
+    $run2 = Invoke-TwinRun -Name 'run2' -HoldSeconds 3600 -Ending DriverStop -RecordTimeoutSeconds $EndingTimeoutSeconds -MutatorSeconds 3600 -ChainDeadlineSeconds 180
     $ending2 = Test-EndingMatched $run2 'DriverStopped' -RequireActive $true
     $recovery2 = Get-RunRecoveryEvidence $run2
     # An interruption during active mutation leaves no outcome record here: the preserved probe's identity comes
@@ -517,6 +584,9 @@ finally {
     # sleeps on as a live action process. Stop exactly those trees and fail the qualification if any survives.
     try { foreach ($left in @(Stop-TwinInstanceTrees)) { $cleanupErrors.Add("a twin action process (pid $($left.processId) $($left.name)) survived the twin's endings") } }
     catch { $cleanupErrors.Add("the twin tree cleanup threw: $($_.Exception.Message)") }
+    # The recorded identities are what this tool owns even after the parent chain is gone.
+    try { foreach ($left in @(Stop-RecordedIdentities -Identities $script:observedIdentities)) { $cleanupErrors.Add("a recorded twin process (pid $($left.processId) $($left.name)) survived cleanup") } }
+    catch { $cleanupErrors.Add("the recorded-identity cleanup threw: $($_.Exception.Message)") }
     Start-Sleep -Seconds 1
     try {
         $remaining = Get-ScheduledTask -TaskName $twin -ErrorAction Stop
