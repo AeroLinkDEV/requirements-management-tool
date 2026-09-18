@@ -98,15 +98,22 @@ for ($i = 0; $i -lt $args.Count; $i++) { if ($args[$i] -eq '-f') { $sqlPath = $a
 $sql = if ($sqlPath) { Get-Content -LiteralPath $sqlPath -Raw } else { '' }
 if ($sql -match 'to_regclass') {
     switch ($env:AL_EVIDENCE_STUB) {
-        'fresh' { '0,0,0,0,0,0'; exit 0 }
-        'fresh-schema' { '1,0,0,0,0,0'; exit 0 }
-        'prestorage' { '1,5,1,0,0,0'; exit 0 }
-        'partial-missing-storage' { '1,152,1,0,1,1'; exit 0 }
-        'partial-no-history' { '0,0,1,0,0,0'; exit 0 }
-        'partial-no-program' { '1,152,0,1,1,1'; exit 0 }
-        'malformed' { '2,2,2,2,2,2'; exit 0 }
+        'fresh' { '0,0,0,0'; exit 0 }
+        'fresh-schema' { '1,0,0,0'; exit 0 }
+        'prestorage' { '1,1,0,0'; exit 0 }
+        'partial-missing-storage' { '1,1,0,1'; exit 0 }
+        'partial-no-history' { '0,1,0,0'; exit 0 }
+        'partial-no-program' { '1,0,1,1'; exit 0 }
+        'malformed' { '2,2,2,2'; exit 0 }
         'empty-classification' { exit 0 }
-        default { '1,152,1,1,1,1'; exit 0 }
+        default { '1,1,1,1'; exit 0 }
+    }
+}
+if ($sql -match 'FROM "__EFMigrationsHistory"') {
+    switch ($env:AL_EVIDENCE_STUB) {
+        'fresh-schema' { '0,0'; exit 0 }
+        'prestorage' { '5,0'; exit 0 }
+        default { '152,1'; exit 0 }
     }
 }
 if ($sql -match 'COPY \(') {

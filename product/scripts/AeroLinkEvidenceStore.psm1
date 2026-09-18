@@ -74,26 +74,40 @@ function Get-AeroLinkDatabaseSchemaState {
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Psql,[Parameter(Mandatory)][string]$Database,[int]$Port=54329)
-    $sql = @'
+    # Two probes, deliberately. PostgreSQL resolves table references when a statement is analysed, so a
+    # CASE-guarded `SELECT count(*) FROM "__EFMigrationsHistory"` fails on a database where that table does not
+    # exist yet - which is exactly the first-start case. Probe 1 asks the catalogue only; probe 2 runs the
+    # counts only when the history table exists.
+    $presenceSql = @'
 SELECT
  (CASE WHEN to_regclass('public."__EFMigrationsHistory"') IS NULL THEN '0' ELSE '1' END) || ',' ||
- (CASE WHEN to_regclass('public."__EFMigrationsHistory"') IS NULL THEN '0' ELSE (SELECT count(*)::text FROM "__EFMigrationsHistory") END) || ',' ||
  (CASE WHEN to_regclass('public.programs') IS NULL THEN '0' ELSE '1' END) || ',' ||
  (CASE WHEN to_regclass('public.managed_document_storage_operations') IS NULL THEN '0' ELSE '1' END) || ',' ||
- (CASE WHEN to_regclass('public.controlled_attachments') IS NULL THEN '0' ELSE '1' END) || ',' ||
- (CASE WHEN to_regclass('public."__EFMigrationsHistory"') IS NULL THEN '0' ELSE (SELECT count(*)::text FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260812172807_AddManagedDocumentAtomicStorage') END)
+ (CASE WHEN to_regclass('public.controlled_attachments') IS NULL THEN '0' ELSE '1' END)
 '@
-    $text = (Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $sql -OutputArguments @('-tA')).Trim()
-    if ($text -notmatch '^[01],[0-9]+,[01],[01],[01],[0-9]+$') {
-        throw "The schema of database '$Database' could not be classified: the catalogue probe answered '$text'."
+    $presenceText = (Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $presenceSql -OutputArguments @('-tA')).Trim()
+    if ($presenceText -notmatch '^[01],[01],[01],[01]$') {
+        throw "The schema of database '$Database' could not be classified: the catalogue probe answered '$presenceText'."
     }
-    $parts = $text.Split(',')
-    $historyPresent = $parts[0] -eq '1'
-    $historyCount = [int]$parts[1]
-    $programPresent = $parts[2] -eq '1'
-    $storagePresent = $parts[3] -eq '1'
-    $attachmentsPresent = $parts[4] -eq '1'
-    $storageMigrationApplied = [int]$parts[5] -gt 0
+    $presence = $presenceText.Split(',')
+    $historyPresent = $presence[0] -eq '1'
+    $programPresent = $presence[1] -eq '1'
+    $storagePresent = $presence[2] -eq '1'
+    $attachmentsPresent = $presence[3] -eq '1'
+    $historyCount = 0
+    $storageMigrationApplied = $false
+    if ($historyPresent) {
+        $countSql = @'
+SELECT (SELECT count(*)::text FROM "__EFMigrationsHistory") || ',' || (SELECT count(*)::text FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260812172807_AddManagedDocumentAtomicStorage')
+'@
+        $countText = (Get-AeroLinkEvidenceSqlText -Psql $Psql -Database $Database -Port $Port -Sql $countSql -OutputArguments @('-tA')).Trim()
+        if ($countText -notmatch '^[0-9]+,[0-9]+$') {
+            throw "The schema of database '$Database' could not be classified: the migration-history probe answered '$countText'."
+        }
+        $countParts = $countText.Split(',')
+        $historyCount = [int]$countParts[0]
+        $storageMigrationApplied = [int]$countParts[1] -gt 0
+    }
     $anyRelation = $programPresent -or $storagePresent -or $attachmentsPresent
     $state = 'PartialOrCorrupt'; $detail = ''
     if (-not $historyPresent) {
