@@ -38,7 +38,13 @@ param(
     [Parameter(ParameterSetName = 'Probe')][int]$ChainDeadlineSeconds = 300,
     [Parameter(ParameterSetName = 'Drive', Mandatory)][string]$TaskName,
     [Parameter(ParameterSetName = 'Drive')][string]$TwinNamePrefix = 'AeroLinkContextQualification-',
-    [Parameter(ParameterSetName = 'Drive')][int]$EndingTimeoutSeconds = 600
+    [Parameter(ParameterSetName = 'Drive')][int]$EndingTimeoutSeconds = 600,
+    # Where the EXPERIMENTS keep their durable state. The default is a disposable sibling root inside the
+    # installation being qualified: a terminating experiment can leave an attempt whose termination cannot be
+    # proven (the witness dies with its task), and admission - correctly - refuses every later transition while
+    # such an attempt exists. Running the experiments in their own state root keeps that refusal out of the
+    # installation the record is FOR, while the probe still measures the real context and the real kernel.
+    [Parameter(ParameterSetName = 'Drive')][string]$ProbeStateRoot = ''
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransitionKernel.psm1') -DisableNameChecking
@@ -78,7 +84,7 @@ if ($Probe) {
         if ($MutatorSeconds -gt 0) {
             $faults['DelegateMutatorSeconds'] = $MutatorSeconds
             $plan['runId'] = $RunId
-            $plan['activeRecordPath'] = Join-Path $runs "$RunId.active.json"
+            $plan['activeRecordPath'] = Join-Path $probeRuns "$RunId.active.json"
         }
         $chain = Invoke-AeroLinkTransitionChain -InstallationRoot $InstallationRoot -Lease $lease -Caller QualificationProbe `
             -Plan $plan -Faults $faults `
@@ -109,6 +115,11 @@ if ($Probe) {
 # every probe this driver ever saw is proven gone; a cleanup or query failure withholds the record instead of
 # leaving a consumable Qualified beside a nonzero exit.
 $K = [AeroLink.TransitionV1.Kernel]
+if ([string]::IsNullOrWhiteSpace($ProbeStateRoot)) { $ProbeStateRoot = Join-Path $InstallationRoot 'qualification-probe-state' }
+$ProbeStateRoot = [IO.Path]::GetFullPath($ProbeStateRoot).TrimEnd('\')
+New-Item -ItemType Directory -Path $ProbeStateRoot -Force | Out-Null
+$probeRuns = Join-Path (Get-AeroLinkTransitionStateRoot -InstallationRoot $ProbeStateRoot) 'qualification-runs'
+New-Item -ItemType Directory -Path $probeRuns -Force | Out-Null
 $source = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 $sourceXml = Export-ScheduledTask -TaskName $source.TaskName -TaskPath $source.TaskPath
 $document = New-Object Xml.XmlDocument
@@ -138,6 +149,7 @@ $summaryPath = Join-Path $runs "$twin.summary.json"
 $summary = [ordered]@{ tool = 'aerolink-context-qualification'; sourceTask = ($source.TaskPath + $source.TaskName); twin = $twin
     sourceDefinitionHash = (Get-AeroLinkSha256Text (Get-AeroLinkTaskDefinitionCanonical -Xml $sourceXml)); exportedXmlSha256 = (Get-AeroLinkSha256Text $sourceXml)
     executionTimeLimit = $(if ($limit) { $limit.ToString() } else { 'none' }); runs = @(); startedAt = (Get-Date).ToUniversalTime().ToString('o') }
+$summary['probeStateRoot'] = $ProbeStateRoot
 $probes = [System.Collections.Generic.List[object]]::new()
 $instanceEngines = [System.Collections.Generic.List[int]]::new()
 $observedIdentities = [System.Collections.Generic.List[object]]::new()
@@ -148,7 +160,7 @@ $cleanupErrors = [System.Collections.Generic.List[string]]::new()
 $twinRegistered = $false
 
 function Set-TwinArguments([string]$Id, [int]$Hold, [int]$MutatorSeconds = 0, [int]$ChainDeadlineSeconds = 300) {
-    $probeCall = '-File "' + (Join-Path $PSScriptRoot 'Invoke-AeroLinkLaunchContextQualification.ps1') + '" -Probe -InstallationRoot "' + $InstallationRoot + '" -RunId ' + $Id + ' -HoldSeconds ' + $Hold
+    $probeCall = '-File "' + (Join-Path $PSScriptRoot 'Invoke-AeroLinkLaunchContextQualification.ps1') + '" -Probe -InstallationRoot "' + $ProbeStateRoot + '" -RunId ' + $Id + ' -HoldSeconds ' + $Hold
     if ($MutatorSeconds -gt 0) { $probeCall += ' -MutatorSeconds ' + $MutatorSeconds }
     $probeCall += ' -ChainDeadlineSeconds ' + $ChainDeadlineSeconds
     # Everything this definition put AFTER its product script is that product's own arguments and must not be
@@ -193,7 +205,7 @@ function Get-TwinInfo([datetime]$Since) {
 }
 
 function Wait-RunRecord([string]$Id, [int]$Seconds) {
-    $path = Join-Path $runs "$Id.json"
+    $path = Join-Path $probeRuns "$Id.json"
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) { $read = Read-AeroLinkJsonRecord -Path $path; if ($read.Class -eq 'Valid') { return $read.Value }; Start-Sleep -Seconds 1 }
     return $null
@@ -407,7 +419,7 @@ function Invoke-TwinRun {
     # live mutator identity, so the ending this run causes cannot land after the transition already finished.
     $active = $null
     if ($MutatorSeconds -gt 0) {
-        $activePath = Join-Path $runs "$id.active.json"
+        $activePath = Join-Path $probeRuns "$id.active.json"
         $activeDeadline = (Get-Date).AddSeconds(300)
         while (-not $active -and (Get-Date) -lt $activeDeadline) {
             $read = Read-AeroLinkJsonRecord -Path $activePath
@@ -458,7 +470,7 @@ function Invoke-TwinRun {
         # The attempt's own completion evidence, if any: did the old attempt prove its mutator terminated?
         $attemptId = [string](Get-AeroLinkProperty $active 'attemptId' '')
         if ($attemptId) {
-            $attemptRoot = Join-Path (Get-AeroLinkTransitionStateRoot -InstallationRoot $InstallationRoot) $attemptId
+            $attemptRoot = Join-Path (Get-AeroLinkTransitionStateRoot -InstallationRoot $ProbeStateRoot) $attemptId
             $receipt = Test-AeroLinkCleanupReceipt -Path (Join-Path $attemptRoot 'cleanup.json') -AttemptId $attemptId
             $attemptEvidence = [ordered]@{ attemptId = $attemptId; receiptClass = $receipt.Class; containmentProven = [bool](Get-AeroLinkProperty $receipt.Receipt 'containmentProven' $false)
                 observedBy = [string](Get-AeroLinkProperty $receipt.Receipt 'observedBy' ''); detail = $receipt.Reason
