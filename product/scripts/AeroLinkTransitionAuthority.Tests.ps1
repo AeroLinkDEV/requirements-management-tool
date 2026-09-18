@@ -651,6 +651,26 @@ finally {
         Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+# ---------------------------------------------------------------------------------------------------------
+# T22: pid reuse must be refuted from the system's own view, not left Unknown forever.
+# Measured in #1055: a recorded API pid was later held by svchost.exe, the kernel classifier could not open it
+# (Unknown:access-denied), and admission refused every later attempt with no supported way to clear it. The
+# fallback must report "different" only on positive evidence and must keep the correct identity as "no evidence".
+# ---------------------------------------------------------------------------------------------------------
+$selfProcess = Get-Process -Id $PID
+$selfImage = [string]$selfProcess.Path
+$selfStarted = $selfProcess.StartTime.ToUniversalTime()
+$trueReuse = Get-AeroLinkPidReuseEvidence -ProcessId $PID -StartedAt $selfStarted -Image $selfImage
+Check (-not $trueReuse.Different) "T22: the live process's own identity must not be reported as reused (got '$($trueReuse.Detail)')."
+$wrongImage = Get-AeroLinkPidReuseEvidence -ProcessId $PID -StartedAt $selfStarted -Image (Join-Path $env:WINDIR 'System32\svchost.exe')
+Check ($wrongImage.Different) 'T22: a pid held by a different image must be refuted as reused.'
+$wrongTime = Get-AeroLinkPidReuseEvidence -ProcessId $PID -StartedAt $selfStarted.AddHours(-5) -Image $selfImage
+Check ($wrongTime.Different) 'T22: a pid whose holder started hours later must be refuted as reused.'
+$unknown = Get-AeroLinkPidReuseEvidence -ProcessId 0 -StartedAt $selfStarted -Image $selfImage
+Check (-not $unknown.Different) 'T22: absent/unreadable evidence must never be reported as reuse.'
+$healthReuse = Get-AeroLinkHealthOfIdentity -ProcessId $PID -StartedAt $selfStarted -Image (Join-Path $env:WINDIR 'System32\svchost.exe')
+Check ($healthReuse[0] -eq 'Running' -or $healthReuse[0] -eq 'ProvenStopped') "T22: identity health must stay a defined verdict (got '$($healthReuse[0])')."
+
 if ($failures.Count -gt 0) {
     foreach ($failure in $failures) { Write-Host "FAIL: $failure" -ForegroundColor Red }
     Write-Host "Transition authority contracts FAILED ($($failures.Count) failure(s), $passed passed). Evidence: $root" -ForegroundColor Red

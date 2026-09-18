@@ -401,6 +401,43 @@ function New-AeroLinkLaunchResponse {
         detail = $Resolution.Detail; at = (Get-AeroLinkUtcNow) }
 }
 
+
+function Get-AeroLinkPidReuseEvidence {
+    <#
+      Positive evidence that a pid is held by a DIFFERENT process than the one recorded.
+
+      Why this exists: the kernel classifier opens the pid with a handle-based API, so a pid reused by a process
+      this user cannot open (a system process) comes back Unknown. That made a resolved launch permanently
+      unresolved: measured in #1055, the recorded API pid was later held by svchost.exe, admission refused every
+      new attempt with "Unknown:access-denied", and no supported call could clear it.
+
+      Win32_Process does not need that handle: it exposes the current holder's name and creation time. Either one
+      differing from the recorded identity proves the recorded process is gone. Absence of readable evidence is
+      NEVER reported as "different" - the caller keeps Unknown and admission keeps refusing.
+    #>
+    param([int]$ProcessId, [AllowNull()]$StartedAt, [AllowNull()]$Image)
+    if ($ProcessId -le 0) { return [pscustomobject]@{ Different = $false; Detail = '' } }
+    $current = $null
+    try { $current = Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId" -ErrorAction Stop }
+    catch { return [pscustomobject]@{ Different = $false; Detail = "the current holder could not be read: $($_.Exception.Message)" } }
+    if (-not $current) { return [pscustomobject]@{ Different = $true; Detail = 'the pid no longer exists' } }
+    $detail = [System.Collections.Generic.List[string]]::new()
+    if ($Image) {
+        $recordedLeaf = [IO.Path]::GetFileName([string]$Image)
+        $currentLeaf = [string]$current.Name
+        if ($recordedLeaf -and $currentLeaf -and $recordedLeaf -ine $currentLeaf) { $detail.Add("the pid is now '$currentLeaf', not '$recordedLeaf'") }
+    }
+    if ($StartedAt) {
+        try {
+            $recordedStart = ([DateTimeOffset](ConvertTo-AeroLinkUtcDate $StartedAt)).UtcDateTime
+            $currentStart = ([DateTime]$current.CreationDate).ToUniversalTime()
+            if ([Math]::Abs(($currentStart - $recordedStart).TotalSeconds) -gt 2) { $detail.Add("its start time is $($currentStart.ToString('o')), recorded $($recordedStart.ToString('o'))") }
+        }
+        catch { }
+    }
+    return [pscustomobject]@{ Different = ($detail.Count -gt 0); Detail = ($detail -join '; ') }
+}
+
 function Get-AeroLinkHealthOfIdentity {
     param([int]$ProcessId, [AllowNull()]$StartedAt, [AllowNull()]$Image)
     $state = [AeroLink.TransitionV1.Kernel]::Classify($ProcessId, (ConvertTo-AeroLinkUtcIso $StartedAt), [string]$Image)
@@ -408,7 +445,12 @@ function Get-AeroLinkHealthOfIdentity {
         'RunningMatch' { return @('Running', "pid $ProcessId is running with its recorded identity") }
         'Gone' { return @('ProvenStopped', "pid $ProcessId is proven stopped") }
         'RunningDifferent' { return @('ProvenStopped', "pid $ProcessId now belongs to a different process; the recorded one is gone") }
-        default { return @('Unknown', "pid $ProcessId could not be classified ($state)") }
+        default {
+            # The pid could not be opened (typically a system process now holds the number). Refute the recorded
+            # identity from the system's own view when that is possible; otherwise stay Unknown.
+            $reuse = Get-AeroLinkPidReuseEvidence -ProcessId $ProcessId -StartedAt $StartedAt -Image $Image
+            if ($reuse.Different) { return @('ProvenStopped', "pid $ProcessId now belongs to a different process; the recorded one is gone ($($reuse.Detail))") }
+            return @('Unknown', "pid $ProcessId could not be classified ($state)") }
     }
 }
 
@@ -1654,4 +1696,4 @@ Export-ModuleMember -Function Get-AeroLinkTransitionStateRoot, Get-AeroLinkAttem
     Get-AeroLinkLaunchContextDescriptor, Get-AeroLinkTaskDefinitionCanonical, Test-AeroLinkLaunchContextQualification, `
     Write-AeroLinkLaunchContextQualification, Get-AeroLinkQualificationPath, `
     Read-AeroLinkTransitionHandoff, Test-AeroLinkRoleFailureCode, Test-AeroLinkActorOutcome, Test-AeroLinkActorExitMatchesOutcome, `
-    Invoke-AeroLinkTransitionChain, New-AeroLinkLogBinding, New-AeroLinkGenerationTail
+    Invoke-AeroLinkTransitionChain, New-AeroLinkLogBinding, New-AeroLinkGenerationTail, Get-AeroLinkHealthOfIdentity, Get-AeroLinkPidReuseEvidence
