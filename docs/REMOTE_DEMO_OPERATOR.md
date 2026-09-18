@@ -180,6 +180,12 @@ is named in `recoveryDetail`, and admission is what enforces quiescence itself. 
 is the record a full `Qualified`. A record written by an older qualifier version is never inherited
 silently: the reader refuses any record whose `qualifierVersion` is not the current one.
 
+The experiments keep their own durable state in a disposable sibling root (`<installation>\qualification-probe-state`
+by default, named in the summary) while the record is written for the real installation. That separation matters:
+a terminating experiment can leave an attempt whose termination cannot be proven, and admission - correctly -
+refuses every later transition of the installation that holds such an attempt. Qualifying a context must not
+block the installation it certifies.
+
 Supported entry points for a transition are the installed tasks (attested through the Task Scheduler API) and an
 operator console started as `explorer.exe > cmd.exe`. **A transition started from a PowerShell prompt or Windows
 Terminal is unidentified and refused before teardown; use the repository's `.bat` launchers or the installed

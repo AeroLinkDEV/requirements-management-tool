@@ -294,6 +294,12 @@ before teardown. That is a deliberate behaviour change: the supported remedy is 
 `.bat` launchers (which run through that cmd context) or the installed tasks, and to qualify any other context
 explicitly. Existing launcher paths are unchanged.
 
+The qualifier runs its three experiments against a disposable state root
+(`<installation>\qualification-probe-state`, recorded in its summary) and writes the record for the real
+installation. A terminating experiment can leave an attempt whose termination the witness cannot prove, and
+admission refuses every later transition of an installation that holds such an attempt - so the experiments must
+not run inside the state of the installation they certify.
+
 The qualification descriptor binds **placement**, not script bytes: the context kind and chain, the task
 definition's principal, settings and action *image* (not its arguments, triggers or URI), the native placement
 code hash and protocol, the host image, the principal SID, logon type, session class, the actual token
