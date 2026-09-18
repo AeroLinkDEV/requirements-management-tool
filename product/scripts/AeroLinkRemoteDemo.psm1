@@ -381,9 +381,19 @@ function Test-AeroLinkRemoteDemoPublicProtection {
                 -UseBasicParsing -TimeoutSec 20 -MaximumRedirection 0
         }
     }
+    # A disposable qualification installation (AEROLINK_INSTALLATION_ROOT set) may name a loopback stand-in edge
+    # in AEROLINK_QUALIFICATION_PROTECTION_PROBE - the same override the authority's tunnel readiness uses,
+    # because pointing a second agent at the real public URL would take the HOME endpoint over. Without this,
+    # a disposable first start could build and start the API and the tunnel and still fail the protection gate
+    # against a placeholder public URL that resolves nowhere (measured in the #1055 INT first start). The
+    # override is ignored for every normal installation.
+    $protectionTarget = $Config.PublicUrl
+    if ($env:AEROLINK_INSTALLATION_ROOT -and $env:AEROLINK_QUALIFICATION_PROTECTION_PROBE -and ([uri]$env:AEROLINK_QUALIFICATION_PROTECTION_PROBE).IsLoopback) {
+        $protectionTarget = $env:AEROLINK_QUALIFICATION_PROTECTION_PROBE
+    }
 
     try {
-        $response = & $ProbeScriptBlock $Config.PublicUrl
+        $response = & $ProbeScriptBlock $protectionTarget
         $status = [int]$response.StatusCode
         return [pscustomobject]@{
             Protected = $false

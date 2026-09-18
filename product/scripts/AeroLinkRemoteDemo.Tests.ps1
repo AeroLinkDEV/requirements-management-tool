@@ -186,6 +186,27 @@ $stubUnreachable = { param($PublicUrl) throw 'network down' }
 $probe = Test-AeroLinkRemoteDemoPublicProtection -Config $config -ProbeScriptBlock $stubUnreachable
 Assert-True ($probe.Protected -eq $false -and $null -eq $probe.StatusCode) 'Unreachable endpoint must not be classified as protected.'
 
+# A disposable qualification installation may point the protection probe at a loopback stand-in edge (the same
+# override the authority's tunnel readiness uses); anything else, including a non-loopback override, is ignored.
+$savedProtectionEnv = @{ Root = $env:AEROLINK_INSTALLATION_ROOT; Probe = $env:AEROLINK_QUALIFICATION_PROTECTION_PROBE }
+try {
+    $env:AEROLINK_INSTALLATION_ROOT = 'C:\disposable-installation'
+    $env:AEROLINK_QUALIFICATION_PROTECTION_PROBE = 'http://127.0.0.1:5197/'
+    $script:capturedProtectionTarget = $null
+    $captureLoopback = { param($PublicUrl) $script:capturedProtectionTarget = $PublicUrl; [pscustomobject]@{ StatusCode = 200 } }
+    $null = Test-AeroLinkRemoteDemoPublicProtection -Config $config -ProbeScriptBlock $captureLoopback
+    Assert-True ($script:capturedProtectionTarget -eq 'http://127.0.0.1:5197/') 'A disposable installation must probe the loopback stand-in edge it names.'
+    $env:AEROLINK_QUALIFICATION_PROTECTION_PROBE = 'https://example.com/'
+    $script:capturedProtectionTarget = $null
+    $captureRemote = { param($PublicUrl) $script:capturedProtectionTarget = $PublicUrl; [pscustomobject]@{ StatusCode = 200 } }
+    $null = Test-AeroLinkRemoteDemoPublicProtection -Config $config -ProbeScriptBlock $captureRemote
+    Assert-True ($script:capturedProtectionTarget -eq 'https://example.ngrok-free.dev') 'A non-loopback protection override must be ignored.'
+}
+finally {
+    if ($null -eq $savedProtectionEnv.Root) { Remove-Item Env:\AEROLINK_INSTALLATION_ROOT -ErrorAction SilentlyContinue } else { $env:AEROLINK_INSTALLATION_ROOT = $savedProtectionEnv.Root }
+    if ($null -eq $savedProtectionEnv.Probe) { Remove-Item Env:\AEROLINK_QUALIFICATION_PROTECTION_PROBE -ErrorAction SilentlyContinue } else { $env:AEROLINK_QUALIFICATION_PROTECTION_PROBE = $savedProtectionEnv.Probe }
+}
+
 # --- 7. Scheduled-task XML contains no secrets ---
 $taskConfig = [pscustomobject]@{
     AeroLinkRoot = $moduleRoot
