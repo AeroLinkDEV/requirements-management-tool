@@ -25,6 +25,14 @@ param(
     [Parameter(Mandatory)][ValidateSet('Delegate', 'Restore')][string]$Phase
 )
 $ErrorActionPreference = 'Stop'
+# Build helpers must not outlive the delegate. MSBuild node reuse and the Roslyn compiler server keep processes
+# alive after a build finishes, inside the transition job; the outer correctly treats a descendant that outlives
+# the delegate as uncontained mutation and fails the transition (measured in the #1055 INT first start:
+# DescendantsOutlivedDelegate after the API was serving and the tunnel was verified protected). Every build the
+# contained work runs - the launcher's API build, the maintenance host, the client build - inherits these.
+$env:MSBUILDDISABLENODEREUSE = '1'
+$env:DOTNET_CLI_USE_MSBUILD_SERVER = '0'
+$env:UseSharedCompilation = 'false'
 $attemptRoot = Split-Path -Parent $HandoffFile
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $role = if ($Phase -eq 'Delegate') { 'delegate' } else { 'continuation' }
