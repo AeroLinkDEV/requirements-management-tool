@@ -598,6 +598,41 @@ public static class Program {
     $t20bAdmission = Test-AeroLinkInstallationAdmission -InstallationRoot (Join-Path $root 't20b')
     Check (-not $t20bAdmission.Admitted) "T20b: the next attempt is not admitted on an unproven attempt (got '$($t20bAdmission.Detail)')."
     Check ($t20bAdmission.Detail -match 'NotQuiescent|TerminationUnconfirmed|Unknown') "T20b: the refusal names the unproven state, never absence (got '$($t20bAdmission.Detail)')."
+
+    # ---------------------------------------------------------------------------------------------------------
+    # T21 (Astra R2-2): the qualifier's ending gate requires CURRENT activity, and every run must contribute
+    # the descriptor of the context it measured. The gate function is extracted from the real script, as the
+    # review did, so the contract is about the shipped text.
+    # ---------------------------------------------------------------------------------------------------------
+    $qualifierSource = Join-Path $PSScriptRoot 'Invoke-AeroLinkLaunchContextQualification.ps1'
+    $qualifierTokens = $null; $qualifierErrors = $null
+    $qualifierAst = [System.Management.Automation.Language.Parser]::ParseFile($qualifierSource, [ref]$qualifierTokens, [ref]$qualifierErrors)
+    foreach ($functionName in @('Test-EndingMatched', 'Get-TwinObservationDescriptorHash')) {
+        $node = $qualifierAst.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq $functionName }, $true)
+        if (-not $node) { throw "T21: the qualifier no longer defines $functionName." }
+        . ([scriptblock]::Create($node.Extent.Text))
+    }
+    $limit = [TimeSpan]::FromMinutes(20)   # the qualifier's own definition limit, used by the ending gate
+    $t21Instance = [pscustomobject]@{ InstanceGuid = '{11111111-1111-1111-1111-111111111111}'; EnginePid = 4321 }
+    $t21Info = [pscustomobject]@{ Class = 'Valid'; Detail = ''; Info = [pscustomobject]@{ LastTaskResult = 267014 } }
+    $t21Active = [ordered]@{ attemptId = 't21'; mutator = [ordered]@{ processId = 999999; startedAt = '2026-01-01T00:00:00Z'; image = 'cmd.exe' } }
+    $t21Stale = [pscustomobject]@{ Instance = $t21Instance; Cause = 'DriverStopped'; Active = $t21Active; Info = $t21Info; Record = $null
+        ElapsedSeconds = 5; LastMutatorAliveAt = $null; EndedAt = (Get-Date) }
+    Check (-not (Test-EndingMatched $t21Stale 'DriverStopped' $true).Matched) 'T21: a stale active record whose mutator was never observed running must not satisfy RequireActive.'
+    $t21Alive = [pscustomobject]@{ Instance = $t21Instance; Cause = 'DriverStopped'; Active = $t21Active; Info = $t21Info; Record = $null
+        ElapsedSeconds = 5; LastMutatorAliveAt = (Get-Date); EndedAt = (Get-Date) }
+    Check ((Test-EndingMatched $t21Alive 'DriverStopped' $true).Matched) 'T21: an active record whose mutator was observed running at the ending satisfies RequireActive.'
+    $t21Gone = [pscustomobject]@{ Instance = $t21Instance; Cause = 'DriverStopped'; Active = $t21Active; Info = $t21Info; Record = $null
+        ElapsedSeconds = 60; LastMutatorAliveAt = (Get-Date).AddSeconds(-30); EndedAt = (Get-Date) }
+    Check (-not (Test-EndingMatched $t21Gone 'DriverStopped' $true).Matched) 'T21: a mutator last seen 30 s before the ending must not count as active at it.'
+    $t21Other = [ordered]@{ attemptId = 't21'; mutator = $t21Active.mutator
+        qualification = [ordered]@{ descriptorHash = 'ABC'; attestation = [ordered]@{ instance = '{22222222-2222-2222-2222-222222222222}' } } }
+    $t21Mismatch = [pscustomobject]@{ Instance = $t21Instance; Cause = 'DriverStopped'; Active = $t21Other; Info = $t21Info; Record = $null
+        ElapsedSeconds = 5; LastMutatorAliveAt = (Get-Date); EndedAt = (Get-Date) }
+    Check (-not (Test-EndingMatched $t21Mismatch 'DriverStopped' $true).Matched) 'T21: an active record attested to another task instance must not be accepted.'
+    Check ((Get-TwinObservationDescriptorHash $t21Other) -eq 'ABC') 'T21: an active record must contribute the descriptor of the context it measured.'
+    Check ((Get-TwinObservationDescriptorHash ([ordered]@{ descriptorHash = 'DIRECT' })) -eq 'DIRECT') 'T21: a completed record contributes its own descriptor hash.'
+    Check ((Get-TwinObservationDescriptorHash ([ordered]@{ probe = 1 })) -eq '') 'T21: an observation with no descriptor hash reports none, so the three-run check cannot pass on one run.'
 }
 catch { $failures.Add("Suite error: $($_.Exception.Message) @ $($_.InvocationInfo.PositionMessage) :: $($_.ScriptStackTrace)") }
 finally {

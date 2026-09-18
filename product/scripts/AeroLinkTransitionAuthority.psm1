@@ -1277,6 +1277,12 @@ function Invoke-AeroLinkTransitionChain {
         $outerIdentity = Get-AeroLinkProcessIdentityRecord -ProcessId $PID
         Publish-AeroLinkJsonAtomic -Path $paths.Handoff -Value ([ordered]@{ protocolVersion = $ProtocolVersion; attemptId = $AttemptId; attemptRoot = $attemptRoot; caller = $Caller
                 installationRoot = $InstallationRoot; spool = $paths.Spool; logs = $paths.Logs; plan = $Plan; faults = $Faults
+                # The context this attempt runs in, carried to the actor so a TERMINATING experiment can still
+                # publish what it measured (Astra R2-2): without it, the actor's active record had no descriptor,
+                # token or instance attestation, and the qualification's descriptor check could pass using only
+                # the run that happened to complete.
+                qualification = [ordered]@{ descriptorHash = [string]$Qualification.DescriptorHash; descriptor = $Qualification.Descriptor
+                    attestation = (Get-AeroLinkProperty $Qualification.Context 'Attestation' $null); token = (Get-AeroLinkProperty $Qualification.Context 'Token' $null) }
                 delegate = [ordered]@{ script = $DelegateScript; sourceIdentity = $DelegateSourceIdentity }
                 requiredRoles = @($RequiredRoles | ForEach-Object { [string]$_.role })
                 outerPid = $PID; outerStartedAt = $outerIdentity.StartedAtUtc; deadlineUtc = $deadline.ToUniversalTime().ToString('o'); at = (Get-AeroLinkUtcNow) })

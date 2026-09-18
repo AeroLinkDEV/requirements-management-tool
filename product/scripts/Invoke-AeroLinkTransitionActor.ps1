@@ -204,6 +204,10 @@ try {
                             foreach ($entry in @((Read-AeroLinkTransitionEvents -Path (Join-Path $attemptRoot 'transition-job.jsonl')).Events)) { if ($entry.type -in @('Intended', 'Created')) { $jobName = [string]$entry.jobName } }
                             Publish-AeroLinkJsonAtomic -Path $activePath -Value ([ordered]@{ runId = [string](Get-AeroLinkProperty $plan 'runId' ''); attemptId = [string]$handoff.attemptId
                                     operation = [string]$plan.operation; jobName = $jobName; activeAt = (Get-Date).ToUniversalTime().ToString('o')
+                                    # The context this attempt runs in, carried from the outer's qualification so a
+                                    # run that never publishes a completed record still contributes its descriptor,
+                                    # token and task-instance attestation to the qualification's evidence.
+                                    qualification = (Get-AeroLinkProperty $handoff 'qualification' $null)
                                     probe = [ordered]@{ processId = [int]$response.processId; startedAt = [string]$response.startedAt; image = [string]$response.image }
                                     mutator = [ordered]@{ processId = $mutator.Id; startedAt = $mutatorIdentity.StartedAtUtc; image = $mutatorIdentity.ImagePath }
                                     at = (Get-Date).ToUniversalTime().ToString('o') })

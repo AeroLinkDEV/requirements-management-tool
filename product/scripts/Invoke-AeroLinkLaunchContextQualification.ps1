@@ -157,6 +157,7 @@ $instanceEngines = [System.Collections.Generic.List[int]]::new()
 $observedIdentities = [System.Collections.Generic.List[object]]::new()
 $paths = [ordered]@{}
 $descriptors = @{}
+$runDescriptors = [ordered]@{}
 $descriptor = $null
 $cleanupErrors = [System.Collections.Generic.List[string]]::new()
 $twinRegistered = $false
@@ -284,7 +285,10 @@ function Stop-TwinInstanceTrees {
 function Test-LeaseFree {
     <# Bounded: is the installation lease acquirable right now? #>
     param([int]$Seconds = 120)
-    $path = Join-Path (Join-Path $InstallationRoot 'bootstrap') 'home-transition.lock'
+    # The EXPERIMENTS' lease lives under the probe state root, not under the installation that receives the
+    # qualification record (Astra R2-3): waiting on the receiving installation's lock would report a free lease
+    # while the experiment root was still held.
+    $path = Join-Path (Join-Path $ProbeStateRoot 'bootstrap') 'home-transition.lock'
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
         if (-not (Test-Path -LiteralPath $path)) { return $true }
@@ -304,8 +308,9 @@ function Get-TwinTreeIdentities {
     param([int]$EnginePid, [int]$MaxDepth = 12)
     $found = [System.Collections.Generic.List[object]]::new()
     if ($EnginePid -le 0) { return $found.ToArray() }
-    $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
-    if ($all.Count -gt 500) { $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue) }
+    # A query failure must not become "nothing to stop": the caller records the thrown error as a cleanup
+    # failure, and a cleanup failure withholds the record.
+    $all = @(Get-CimInstance Win32_Process -ErrorAction Stop)
     $byId = @{}
     foreach ($p in $all) { $byId[[int]$p.ProcessId] = $p }
     foreach ($p in $all) {
@@ -365,9 +370,29 @@ function Complete-TwinRun {
         $cleanupErrors.Add("${Name}: a twin action process (pid $($left.processId) $($left.name)) survived its ending")
     }
 }
+function Get-TwinObservationDescriptorHash($Record) {
+    <# The descriptor a run actually measured: a completed record carries it at the top level, a terminating
+       run's active record carries it under 'qualification' (published by the actor from the outer's handoff). #>
+    $direct = [string](Get-AeroLinkProperty $Record 'descriptorHash' '')
+    if ($direct) { return $direct }
+    return [string](Get-AeroLinkProperty (Get-AeroLinkProperty $Record 'qualification' $null) 'descriptorHash' '')
+}
+function Get-TwinObservationDescriptor($Record) {
+    $direct = Get-AeroLinkProperty $Record 'descriptor' $null
+    if ($direct) { return $direct }
+    return (Get-AeroLinkProperty (Get-AeroLinkProperty $Record 'qualification' $null) 'descriptor' $null)
+}
 function Add-RunEvidence([string]$Name, $Record, [string[]]$PathNames, [hashtable]$Survival, $Info) {
     $observed = [bool]($Record -and (Get-AeroLinkProperty $Record 'probe' $null))
-    if ($Record -and (Get-AeroLinkProperty $Record 'descriptorHash' '')) { $script:descriptors[[string]$Record.descriptorHash] = $true; $script:descriptor = $Record.descriptor }
+    # EVERY run must contribute the descriptor of the context it measured - a run that never completed must
+    # still show it measured the same context (Astra R2-2: one run's descriptor must not stand in for three).
+    $runHash = if ($Record) { Get-TwinObservationDescriptorHash $Record } else { '' }
+    $script:runDescriptors[$Name] = $runHash
+    if ($runHash) {
+        $script:descriptors[$runHash] = $true
+        $runDescriptor = Get-TwinObservationDescriptor $Record
+        if ($runDescriptor) { $script:descriptor = $runDescriptor }
+    }
     foreach ($path in $PathNames) {
         $script:paths[$path] = [ordered]@{ applicable = $true; observed = $observed; survived = $(if ($observed) { [bool]$Survival[$path] } else { $null })
             setupFailure = $(if ($observed) { '' } else { "no probe was launched (record: $(if ($Record) { "$($Record.decision) $(Get-AeroLinkProperty $Record 'error' '')" } else { 'none' }))" })
@@ -431,6 +456,12 @@ function Invoke-TwinRun {
     }
     $record = $null
     $stopIssued = $false
+    # Current-activity tracking (Astra R2-2): the active record alone is historical. The mutator must be
+    # observed RUNNING immediately before the ending this run causes, so a stale active record whose mutator is
+    # long gone cannot satisfy RequireActive.
+    $mutatorIdentity = if ($active) { Get-AeroLinkProperty $active 'mutator' $null } else { $null }
+    $lastMutatorAliveAt = $null
+    $endedAt = $null
     $deadline = $since.AddSeconds($LimitSeconds + $RecordTimeoutSeconds)
     if ($Ending -ne 'HardLimit') { $deadline = (Get-Date).AddSeconds($RecordTimeoutSeconds) }
     $cause = 'StillRunning'
@@ -443,6 +474,7 @@ function Invoke-TwinRun {
         $current = Get-TwinInstance
         if ($current -and -not $instance) { $instance = $current }
         if ($instance -and -not $current) {
+            $endedAt = Get-Date
             $elapsed = ((Get-Date) - $since).TotalSeconds
             $cause = switch ($Ending) {
                 'Completion' { 'SelfEnded' }
@@ -450,6 +482,12 @@ function Invoke-TwinRun {
                 'HardLimit' { if ($LimitSeconds -gt 0 -and $elapsed -ge ($LimitSeconds - 20)) { 'HardLimitFired' } else { 'EndedEarly' } }
             }
             break
+        }
+        if ($mutatorIdentity) {
+            $mutatorPid = [int](Get-AeroLinkProperty $mutatorIdentity 'processId' 0)
+            if ($mutatorPid -gt 0 -and $K::Classify($mutatorPid, (ConvertTo-AeroLinkUtcIso (Get-AeroLinkProperty $mutatorIdentity 'startedAt' '')), [string](Get-AeroLinkProperty $mutatorIdentity 'image' '')) -eq 'RunningMatch') {
+                $lastMutatorAliveAt = Get-Date
+            }
         }
         Start-Sleep -Milliseconds 500
     }
@@ -481,14 +519,25 @@ function Invoke-TwinRun {
     }
     return [pscustomobject]@{ Run = $Name; RunId = $id; Instance = $instance; Record = $record; Info = $info; Cause = $cause; Active = $active
         MutatorState = $mutatorState; AttemptEvidence = $attemptEvidence
-        ElapsedSeconds = [int]((Get-Date) - $since).TotalSeconds; Since = $since; StopIssued = $stopIssued }
+        ElapsedSeconds = [int]((Get-Date) - $since).TotalSeconds; Since = $since; StopIssued = $stopIssued
+        EndedAt = $endedAt; LastMutatorAliveAt = $lastMutatorAliveAt }
 }
 
 function Test-EndingMatched($Run, [string]$Expected, [bool]$RequireActive = $false) {
     <# { Matched, Detail }: the observed ending, the instance it belongs to, and the scheduler result. #>
     if (-not $Run.Instance) { return [pscustomobject]@{ Matched = $false; Detail = 'the task instance was never observed running' } }
     if ($Run.Cause -ne $Expected) { return [pscustomobject]@{ Matched = $false; Detail = "the run ended as $($Run.Cause), not $Expected" } }
-    if ($RequireActive -and -not $Run.Active) { return [pscustomobject]@{ Matched = $false; Detail = 'the ending did not land on an active mutator: no active-mutation record was published' } }
+    if ($RequireActive) {
+        if (-not $Run.Active) { return [pscustomobject]@{ Matched = $false; Detail = 'the ending did not land on an active mutator: no active-mutation record was published' } }
+        # A historical active record is not evidence. The mutator it names must have been observed RUNNING
+        # immediately before this ending (Astra R2-2: a stale Active plus MutatorState=Gone was accepted before).
+        if (-not $Run.LastMutatorAliveAt) { return [pscustomobject]@{ Matched = $false; Detail = 'the active-mutation record is stale: its mutator was never observed running while this instance ran' } }
+        $gap = ($Run.EndedAt - $Run.LastMutatorAliveAt).TotalSeconds
+        if ($gap -gt 5) { return [pscustomobject]@{ Matched = $false; Detail = "the mutator was last observed running $([int]$gap)s before the ending, so the ending did not land on active mutation" } }
+        $activeAttestation = Get-AeroLinkProperty (Get-AeroLinkProperty $Run.Active 'qualification' $null) 'attestation' $null
+        $activeInstance = [string](Get-AeroLinkProperty $activeAttestation 'instance' '')
+        if ($activeInstance -and $activeInstance -ne $Run.Instance.InstanceGuid) { return [pscustomobject]@{ Matched = $false; Detail = "the active record belongs to instance $activeInstance, not $($Run.Instance.InstanceGuid)" } }
+    }
     if ($Run.Info.Class -ne 'Valid') { return [pscustomobject]@{ Matched = $false; Detail = "the scheduler result is $($Run.Info.Class.ToLower()): $($Run.Info.Detail)" } }
     $result = [int]$Run.Info.Info.LastTaskResult
     if ($Expected -eq 'SelfEnded' -and $result -ne 0) { return [pscustomobject]@{ Matched = $false; Detail = "a self-ended run reported task result $result, not 0" } }
@@ -575,9 +624,13 @@ try {
     $summary['recoveryProven'] = $recoveryProven
     $summary['recoveryDetail'] = $recoveryDetail
 
-    if ($descriptors.Count -ne 1 -or -not $descriptor) {
+    $missingDescriptorRuns = @($runDescriptors.Keys | Where-Object { -not $runDescriptors[$_] })
+    $summary['runDescriptorHashes'] = $runDescriptors
+    if ($descriptors.Count -ne 1 -or -not $descriptor -or $missingDescriptorRuns.Count -or $runDescriptors.Count -ne 3) {
         $summary['verdict'] = 'Unqualifiable'
-        $summary['detail'] = "the probe runs reported $($descriptors.Count) distinct descriptors; nothing was written"
+        $summary['detail'] = if ($missingDescriptorRuns.Count -or $runDescriptors.Count -ne 3) {
+            "these probe runs published no descriptor of the context they measured, so three identical contexts cannot be claimed: $(@($missingDescriptorRuns | Sort-Object) -join ', '); nothing was written"
+        } else { "the probe runs reported $($descriptors.Count) distinct descriptors; nothing was written" }
     }
     else { $summary['verdict'] = 'PendingCleanup' }
 }
