@@ -5,6 +5,24 @@ namespace AeroLink.Domain.Tests;
 
 public sealed class CodeEvidenceRecordsTests
 {
+    [Fact]
+    public void Context_targets_use_actual_revision_proposal_and_snapshot_identities()
+    {
+        var changeId = Guid.NewGuid();
+        var change = CodeRelationshipTarget.ForChangeRequestRevision(changeId, 2, "LLRCR-000001.02");
+        Assert.Equal(changeId, change.ExactIdentityId);
+        Assert.Null(change.OwningIdentityId);
+        var proposal = CodeRelationshipTarget.ForRequirementProposal(Guid.NewGuid(), changeId, "Proposed LLR-000001.03");
+        Assert.Equal(changeId, proposal.OwningIdentityId);
+        Assert.Null(proposal.RevisionNumber);
+        Assert.Throws<DomainException>(() => CodeRelationshipTarget.ForRequirementProposal(Guid.NewGuid(), Guid.Empty, "Proposal"));
+        var reportId = Guid.NewGuid();
+        var first = CodeRelationshipTarget.ForProblemReportSnapshot(Guid.NewGuid(), reportId, 2, "PR-000001.02 snapshot");
+        var later = CodeRelationshipTarget.ForProblemReportSnapshot(Guid.NewGuid(), reportId, 2, "PR-000001.02 later snapshot");
+        Assert.Equal(first.OwningIdentityId, later.OwningIdentityId);
+        Assert.NotEqual(first.StableIdentity, later.StableIdentity);
+    }
+
     private static readonly Guid ProjectId = Guid.NewGuid();
     private static readonly Guid ReleaseId = Guid.NewGuid();
     private static readonly Guid RequirementRevisionId = Guid.NewGuid();
@@ -150,11 +168,11 @@ public sealed class CodeEvidenceRecordsTests
     [Fact]
     public void Exact_identity_and_ranges_are_validated()
     {
-        var target = CodeRelationshipTarget.ForProblemReportRevision(Guid.NewGuid(), Guid.NewGuid(), 2, "PR-002.02");
+        var target = CodeRelationshipTarget.ForProblemReportSnapshot(Guid.NewGuid(), Guid.NewGuid(), 2, "PR-002.02");
         Assert.Equal(CodeRelationshipTargetKind.ProblemReportRevision, target.Kind);
         Assert.Throws<DomainException>(() => CodeRelationshipTarget.ForRequirementRevision(Guid.Empty, RequirementArtifactId, 1, "LLR"));
         Assert.Throws<DomainException>(() => CodeRelationshipTarget.ForRequirementRevision(RequirementRevisionId, RequirementArtifactId, -1, "LLR"));
-        Assert.Throws<DomainException>(() => CodeRelationshipTarget.ForRequirementProposal(Guid.NewGuid(), null, " "));
+        Assert.Throws<DomainException>(() => CodeRelationshipTarget.ForRequirementProposal(Guid.NewGuid(), Guid.NewGuid(), " "));
 
         var source = new GitLabSourceSnapshot(ProjectId, Guid.NewGuid(), "https://gitlab.example.com", 10,
             "aerolink/demo", Sha, "main", "alice", Now, 1);

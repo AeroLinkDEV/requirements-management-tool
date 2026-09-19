@@ -101,7 +101,7 @@ public sealed class CurrentCodeEvidenceProjectionTests
         var selection = new GitLabSourceSelectionEvent(f.Project.Id, f.Release.Id, source.Id, 0, "tester", f.Now);
         f.Db.AddRange(source, selection,
             new GitLabCurrentSourceSelection(f.Project.Id, f.Release.Id, source.Id, selection.Id, "tester", f.Now));
-        var set = f.AcceptFile(source, selection, CodeRelationshipTarget.ForRequirementProposal(Guid.NewGuid(), null, "Proposed requirement"));
+        var set = f.AcceptFile(source, selection, CodeRelationshipTarget.ForRequirementProposal(Guid.NewGuid(), Guid.NewGuid(), "Proposed requirement"));
         f.Db.Add(new CodeEvidenceCurrentSelector(f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id, set.Id, "tester", f.Now));
         await f.Db.SaveChangesAsync();
         Assert.Equal(CurrentCodeEvidenceState.InvalidIdentity, (await f.CurrentAsync()).State);

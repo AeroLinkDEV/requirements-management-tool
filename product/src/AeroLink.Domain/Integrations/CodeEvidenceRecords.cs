@@ -8,6 +8,7 @@ public enum CodeRelationshipTargetKind
 {
     RequirementRevision,
     ChangeRequestRevision,
+    // Persisted name retained for compatibility; exact identity is an immutable ProblemReportRevision snapshot row.
     ProblemReportRevision,
     RequirementProposal,
 }
@@ -258,13 +259,14 @@ public sealed record CodeRelationshipTarget(
     public static CodeRelationshipTarget ForRequirementRevision(Guid revisionId, Guid artifactId, int revision, string displaySnapshot) =>
         Create(CodeRelationshipTargetKind.RequirementRevision, revisionId, artifactId, revision, displaySnapshot);
 
-    public static CodeRelationshipTarget ForChangeRequestRevision(Guid revisionId, Guid changeRequestId, int revision, string displaySnapshot) =>
-        Create(CodeRelationshipTargetKind.ChangeRequestRevision, revisionId, changeRequestId, revision, displaySnapshot);
+    public static CodeRelationshipTarget ForChangeRequestRevision(Guid revisionId, int revision, string displaySnapshot) =>
+        Create(CodeRelationshipTargetKind.ChangeRequestRevision, revisionId, null, revision, displaySnapshot);
 
-    public static CodeRelationshipTarget ForProblemReportRevision(Guid revisionId, Guid problemReportId, int revision, string displaySnapshot) =>
-        Create(CodeRelationshipTargetKind.ProblemReportRevision, revisionId, problemReportId, revision, displaySnapshot);
+    /// <summary>Pins one immutable lifecycle snapshot, not a changing latest event for a report/revision pair.</summary>
+    public static CodeRelationshipTarget ForProblemReportSnapshot(Guid snapshotId, Guid problemReportId, int revision, string displaySnapshot) =>
+        Create(CodeRelationshipTargetKind.ProblemReportRevision, snapshotId, problemReportId, revision, displaySnapshot);
 
-    public static CodeRelationshipTarget ForRequirementProposal(Guid proposalId, Guid? changeRequestId, string displaySnapshot) =>
+    public static CodeRelationshipTarget ForRequirementProposal(Guid proposalId, Guid changeRequestId, string displaySnapshot) =>
         Create(CodeRelationshipTargetKind.RequirementProposal, proposalId, changeRequestId, null, displaySnapshot);
 
     private static CodeRelationshipTarget Create(CodeRelationshipTargetKind kind, Guid exactIdentityId, Guid? ownerId,
