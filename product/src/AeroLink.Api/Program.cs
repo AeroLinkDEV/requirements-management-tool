@@ -397,6 +397,7 @@ app.MapProjectSetupSourceEndpoints();
 app.MapProjectRepositoryEndpoints();
 app.MapGitLabMetadataEndpoints();
 app.MapGitLabSourceEndpoints();
+app.MapCodeTargetEndpoints();
 app.MapTeamWorkEndpoints();
 app.MapProjectConfigurationEndpoints();
 app.MapAssurancePolicyEndpoints();

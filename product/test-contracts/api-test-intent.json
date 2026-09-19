@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 963,
-    "cases": 1086,
-    "classes": 151,
-    "hostedTests": 914,
-    "hostedCases": 1015,
+    "tests": 965,
+    "cases": 1091,
+    "classes": 152,
+    "hostedTests": 916,
+    "hostedCases": 1020,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 15,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 593,
-      "cases": 667,
+      "tests": 595,
+      "cases": 672,
       "unknownCases": 0,
-      "classes": 118
+      "classes": 119
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -4057,6 +4057,42 @@
       }
     },
     {
+      "cls": "CodeTargetApiTests",
+      "test": "Paged_targets_preserve_exact_project_owned_identity",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 4,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 14,
+        "end": 53
+      }
+    },
+    {
+      "cls": "CodeTargetApiTests",
+      "test": "Target_discovery_rejects_foreign_context_and_unbounded_filters",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 55,
+        "end": 71
+      }
+    },
+    {
       "cls": "CodeTraceabilityApiTests",
       "test": "Code_gate_is_build_scoped_and_accepts_a_justified_no_code_decision_for_active_work",
       "kind": "Fact",
@@ -5337,7 +5373,7 @@
       ],
       "sourceLines": {
         "start": 38,
-        "end": 91
+        "end": 94
       }
     },
     {
@@ -5354,8 +5390,8 @@
         "host-customization"
       ],
       "sourceLines": {
-        "start": 145,
-        "end": 161
+        "start": 148,
+        "end": 164
       }
     },
     {
@@ -5372,8 +5408,8 @@
         "host-customization"
       ],
       "sourceLines": {
-        "start": 93,
-        "end": 143
+        "start": 96,
+        "end": 146
       }
     },
     {
