@@ -47,7 +47,6 @@ public sealed partial class FmsShowcaseSeeder
         var executions = await db.TestExecutions.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
         var problems = await db.ProblemReports.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
         var documents = await db.ControlledDocuments.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
-        var code = await db.CodeTraceabilityRecords.AsNoTracking().Where(x => x.ProjectId == projectId).ToListAsync(ct);
         var families = policy.Definitions.Where(x => x.VerificationProfile is not null)
             .SelectMany(x => x.VerificationProfile!.Definitions.Select(d => new { x.Level, d.Key })).ToList();
         var artifactById = artifacts.ToDictionary(x => x.Id);
@@ -199,7 +198,11 @@ public sealed partial class FmsShowcaseSeeder
             rows.Add(Summarize("Controlled documents", "Controlled publications", "Publication release",
                 documents.Where(x => x.ReleaseId == release.Id).Select(x => new ShowcaseInventoryExample(x.Id, $"{x.DocumentNumber}.{x.Revision:D2}", x.Type.ToString(), null))));
             rows.Add(Summarize("Code traceability", "Code traceability", "Recorded release; exact requirement revision",
-                code.Where(x => x.ReleaseId == release.Id).Select(x => new ShowcaseInventoryExample(x.Id, x.RequirementRevisionId.ToString(), x.Disposition.ToString(), x.RecordedBy, x.IsDemonstration))));
+                (await CurrentCodeEvidenceProjection.ForReleaseAsync(db, projectId, release.Id, ct))
+                    .Select(x => x.LegacyRecord is { } legacy
+                        ? new ShowcaseInventoryExample(legacy.Id, legacy.RequirementRevisionId.ToString(), legacy.Disposition.ToString(), legacy.RecordedBy, legacy.IsDemonstration)
+                        : new ShowcaseInventoryExample(x.EvidenceSet?.Id ?? x.Selector!.Id, x.RequirementRevisionId.ToString(),
+                            $"{x.State}/{x.EvidenceSet?.Disposition}", x.EvidenceSet?.RecordedBy))));
             var buildDocumentIds = documentProvenance.Where(x => x.ReleaseId == release.Id).Select(x => x.RevisionId).ToHashSet();
             rows.Add(Summarize("Managed document revisions", "Managed documents", "Explicit recorded build provenance only; project-library availability is separate",
                 managedRevisions.Where(x => buildDocumentIds.Contains(x.Id)).Select(x => new ShowcaseInventoryExample(x.Id,

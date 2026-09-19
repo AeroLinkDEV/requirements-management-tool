@@ -15,6 +15,33 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class CurrentCodeEvidenceProjectionTests
 {
     [Fact]
+    public async Task Release_gate_does_not_revive_legacy_evidence_after_replacement_is_invalidated()
+    {
+        await using var f = await Fixture.CreateAsync(changedInBuild: true);
+        var campaign = await f.CampaignAsync();
+        await f.Db.CandidateBaselines.Where(x => x.Id == campaign.BaselineId).ExecuteUpdateAsync(update => update
+            .SetProperty(x => x.State, CandidateBaselineState.Frozen)
+            .SetProperty(x => x.RequirementsMaterializedAt, f.Now));
+        async Task<ReadinessGate> Gate() => (await new ReleaseReadinessService(f.Db).CalculateAsync(campaign.Id, default))
+            .Gates.Single(x => x.Code == "code_traceability");
+        Assert.Equal(1, (await Gate()).Completed);
+        var set = new CodeEvidenceDispositionSet(f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id,
+            CodeEvidenceDisposition.NoCodeChangeRequired, "Replacement decision.", null, null, f.Legacy.Id, "tester", f.Now);
+        f.Db.AddRange(set, new CodeEvidenceCurrentSelector(f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id,
+            set.Id, "tester", f.Now));
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(1, (await Gate()).Completed);
+        f.Db.Add(new CodeEvidenceInvalidation(set.Id, f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id,
+            "tester", "Evidence no longer applies.", f.Now));
+        await f.Db.SaveChangesAsync();
+        var gate = await Gate();
+        Assert.Equal(1, gate.Total);
+        Assert.Equal(0, gate.Completed);
+        Assert.False(gate.Complete);
+        Assert.Equal(1, await f.Db.CodeTraceabilityRecords.CountAsync());
+    }
+
+    [Fact]
     public async Task Removing_exact_parent_link_from_a_retained_requirement_still_fails_closed()
     {
         await using var f = await Fixture.CreateAsync();
@@ -254,7 +281,7 @@ public sealed class CurrentCodeEvidenceProjectionTests
         public RequirementRevision Revision { get; private set; } = null!;
         public CodeTraceabilityRecord Legacy { get; private set; } = null!;
         private ProjectRepositoryConfiguration repository = null!;
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(bool changedInBuild = false)
         {
             var f = new Fixture();
             await f.connection.OpenAsync();
@@ -275,6 +302,16 @@ public sealed class CurrentCodeEvidenceProjectionTests
             f.Artifact = new(f.Project.Id, "LLR-000001", RequirementLevel.LowLevel, f.Now);
             f.Revision = RequirementRevision.FromAeroLinkBaseline(f.Artifact.Id, 1, "Synthetic requirement.", "Test", RequirementRevisionState.Active,
                 sourceBaseline.Id, baseline.Id, f.Now, "LLR-000001.00", parentKind: RequirementParentKind.Allocated, parentRevisionIds: [highRevision.Id]);
+            if (changedInBuild)
+            {
+                var change = new SystemChangeRequest("LLRCR-00001", 0, f.Project.Id, f.Release.Id,
+                    "Changed behavior", "Problem", "Analysis", "Solution", "tester", f.Now,
+                    ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel);
+                f.Db.Add(change);
+                f.Revision = new RequirementRevision(f.Artifact.Id, 1, "Changed synthetic requirement.", "Controlled change",
+                    "Test", RequirementRevisionState.Active, change.Id, baseline.Id, f.Now,
+                    RequirementParentKind.Allocated, parentRevisionIds: [highRevision.Id]);
+            }
             f.Legacy = new(f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id, CodeTraceDisposition.NoCodeChangeRequired,
                 "", "", "", "", "", null, "Existing retained disposition.", false, "tester", f.Now);
             f.repository = new(f.Project.Id, ProjectRepositorySetupMode.ConnectNow, "GitLab", "https://gitlab.example/group/project", "tester", f.Now);

@@ -156,15 +156,27 @@ public sealed class ProblemReportImpactProjection(AeroLinkDbContext db)
         // authoritative for its own records; this is the controlled thread to them, and is read-only.
         var requirementArtifactIds = requirementArtifacts.Values.Distinct().ToList();
         if (requirementArtifactIds.Count > 0)
-            foreach (var record in await db.CodeTraceabilityRecords.AsNoTracking()
-                         .Where(item => requirementArtifactIds.Contains(item.RequirementArtifactId))
-                         .ToListAsync(ct))
-                buckets["Code"].Add(new ProblemReportImpactArtifact(
-                    "CodeTraceability", record.Id,
-                    string.IsNullOrWhiteSpace(record.MergeRequestReference) ? record.RepositoryPath : record.MergeRequestReference,
-                    string.IsNullOrWhiteSpace(record.MergeRequestTitle) ? record.RepositoryPath : record.MergeRequestTitle,
-                    record.MergedAt is null ? "Open" : "Merged", "", "CodeChange",
-                    record.MergeCommitSha.Length >= 12 ? record.MergeCommitSha[..12] : record.MergeCommitSha));
+        {
+            var currentCode = await CurrentCodeEvidenceProjection.ForArtifactsAsync(db, report.ProjectId, requirementArtifactIds, ct);
+            var codeReleaseIds = currentCode.Select(x => x.ReleaseId).Distinct().ToArray();
+            var codeReleases = await db.Releases.AsNoTracking().Where(x => x.ProjectId == report.ProjectId && codeReleaseIds.Contains(x.Id))
+                .ToDictionaryAsync(x => x.Id, x => x.Version, ct);
+            foreach (var current in currentCode)
+            {
+                var releaseVersion = codeReleases.GetValueOrDefault(current.ReleaseId, "");
+                var context = $"Related requirement identity; exact revision {current.RequirementRevisionId}. Implementation build {releaseVersion}.";
+                if (current.LegacyRecord is { } record)
+                    buckets["Code"].Add(new ProblemReportImpactArtifact("CodeTraceability", record.Id,
+                        string.IsNullOrWhiteSpace(record.MergeRequestReference) ? record.RepositoryPath : record.MergeRequestReference,
+                        string.IsNullOrWhiteSpace(record.MergeRequestTitle) ? record.RepositoryPath : record.MergeRequestTitle,
+                        record.Disposition == CodeTraceDisposition.NoCodeChangeRequired ? "NoCodeChangeRequired" : "Merged",
+                        releaseVersion, "CodeChange", context));
+                else
+                    buckets["Code"].Add(new ProblemReportImpactArtifact("CodeEvidenceSet", current.EvidenceSet?.Id ?? current.Selector!.Id,
+                        "Implementation evidence", current.EvidenceSet?.Disposition.ToString() ?? "Unavailable evidence identity",
+                        current.State.ToString(), releaseVersion, "CodeChange", context + " " + current.InvalidationRationale));
+            }
+        }
 
         // A document reaches the report either directly or through one of its change requests.
         var documentTargets = changeRequestIds.Append(report.Id).ToList();

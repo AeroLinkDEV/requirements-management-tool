@@ -38,8 +38,9 @@ public static partial class ChangeRequestTraceProjection
         public HashSet<Guid> Reviews { get; } = [];
         public HashSet<Guid> Requirements { get; } = [];
         public HashSet<Guid> Code { get; } = [];
+        public HashSet<Guid> CodeEvidence { get; } = [];
         public HashSet<Guid> Reports { get; } = [];
-        public int Count => Changes.Count + Reviews.Count + Requirements.Count + Code.Count + Reports.Count;
+        public int Count => Changes.Count + Reviews.Count + Requirements.Count + Code.Count + CodeEvidence.Count + Reports.Count;
         public bool Truncated { get; set; }
     }
 
@@ -195,7 +196,11 @@ public static partial class ChangeRequestTraceProjection
                     select new { Source = source.Id, Target = target.Id }, ct);
                 foreach (var pair in traces) { scope.Requirements.Add(pair.Source); scope.Requirements.Add(pair.Target); }
                 scope.Code.UnionWith(await budget.ReadAsync(db.CodeTraceabilityRecords.AsNoTracking()
-                    .Where(x => x.ProjectId == projectId && req.Contains(x.RequirementRevisionId)).Select(x => x.Id), ct));
+                    .Where(x => x.ProjectId == projectId && req.Contains(x.RequirementRevisionId)
+                        && !db.CodeEvidenceCurrentSelectors.Any(s => s.ProjectId == projectId && s.ReleaseId == x.ReleaseId
+                            && s.RequirementRevisionId == x.RequirementRevisionId)).Select(x => x.Id), ct));
+                scope.CodeEvidence.UnionWith(await budget.ReadAsync(db.CodeEvidenceCurrentSelectors.AsNoTracking()
+                    .Where(x => x.ProjectId == projectId && req.Contains(x.RequirementRevisionId)).Select(x => x.EvidenceSetId), ct));
             }
             if (scope.Count > TraceReadBudget.MaximumNodes) throw new TraceWorkLimitException();
             // The register inspector promises immediate relationships. Do not expand a neighbour's

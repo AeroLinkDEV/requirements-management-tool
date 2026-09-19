@@ -420,6 +420,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         foreach (var entry in ChangeTracker.Entries<CodeTraceabilityRecord>().Where(x => x.State == EntityState.Added))
             candidates.Add((entry.Entity.ProjectId, "code-traceability", entry.Entity.Id.ToString("D"),
                 LadderSealActor ?? "system.persistence"));
+        foreach (var entry in ChangeTracker.Entries<CodeEvidenceDispositionSet>().Where(x => x.State == EntityState.Added))
+            candidates.Add((entry.Entity.ProjectId, "code-traceability", entry.Entity.Id.ToString("D"),
+                entry.Entity.RecordedBy));
 
         if (candidates.Count == 0) return;
         var authority = new ProjectLadderSealAuthority(this);
