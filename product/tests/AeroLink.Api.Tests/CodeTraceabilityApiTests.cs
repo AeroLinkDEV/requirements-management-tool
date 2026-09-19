@@ -43,6 +43,7 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
         var row = accepted.GetProperty("requirements").EnumerateArray().Single(x => x.GetProperty("revisionId").GetGuid() == revisionId);
         Assert.Equal(JsonValueKind.Null, row.GetProperty("mapping").ValueKind);
         Assert.Equal(setId, row.GetProperty("evidence").GetProperty("evidenceSetId").GetGuid());
+        Assert.Equal(summary.ReleasedBaselineId, accepted.GetProperty("campaignBaselineId").GetGuid());
         Assert.True(row.GetProperty("evidence").GetProperty("countsAsImplementation").GetBoolean());
         Assert.Equal(5, accepted.GetProperty("summary").GetProperty("mapped").GetInt32());
         using (var scope = factory.Services.CreateScope())

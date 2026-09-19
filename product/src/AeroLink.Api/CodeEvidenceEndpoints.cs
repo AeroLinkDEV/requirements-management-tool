@@ -48,7 +48,9 @@ public static class CodeEvidenceEndpoints
 
             sourceSnapshot = await db.GitLabSourceSnapshots.AsNoTracking()
                 .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.Id == request.ExpectedSourceSnapshotId, ct);
-            if (sourceSnapshot is null || sourceSnapshot.RemoteProjectId != configuration.RemoteProjectId
+            if (sourceSnapshot is null || sourceSnapshot.RepositoryConfigurationId != configuration.Id
+                || sourceSnapshot.ConfigurationVersion != configuration.Version
+                || sourceSnapshot.RemoteProjectId != configuration.RemoteProjectId
                 || !string.Equals(sourceSnapshot.PathWithNamespace, configuration.RemotePathWithNamespace, StringComparison.Ordinal)
                 || !string.Equals(sourceSnapshot.InstanceBaseUrl, settings.Value.BaseUrl, StringComparison.OrdinalIgnoreCase))
                 return Results.Conflict(new { code = "source_changed", error = "Refresh the verified source selection before accepting evidence." });
@@ -71,9 +73,27 @@ public static class CodeEvidenceEndpoints
                     var row = fileRows.Single(x => x.Id == item.RelationshipId);
                     if (!row.IsActive || row.Version != item.ExpectedRelationshipVersion
                         || row.ReleaseId != request.ReleaseId
-                        || row.InstanceBaseUrl != settings.Value.BaseUrl
-                        || row.RemoteProjectId != configuration.RemoteProjectId)
+                        || row.SourceSnapshotId != sourceSnapshot.Id
+                        || !string.Equals(row.InstanceBaseUrl, settings.Value.BaseUrl, StringComparison.OrdinalIgnoreCase)
+                        || row.RemoteProjectId != configuration.RemoteProjectId
+                        || !string.Equals(row.CommitSha, sourceSnapshot.CommitSha, StringComparison.OrdinalIgnoreCase))
                         return RelationshipChanged();
+                    if (item.ParentPath is null || !TryNormalizeTreeParent(item.ParentPath, out var parentPath)
+                        || !IsImmediateChild(row.Path, parentPath))
+                        return Results.BadRequest(new { code = "invalid_file_page", error = "Each file contribution must identify the safe parent path containing its exact file entry." });
+                    var tree = await reader.ReadTreePageAsync(configuration, sourceSnapshot.CommitSha, parentPath,
+                        item.Cursor, item.PageSize ?? 50, ct);
+                    denied = await GitLabMetadataEndpoints.CurrentAccessFailureAsync(projectId, http, db, ct);
+                    if (denied is not null) return denied;
+                    if (!tree.Succeeded || tree.Value is null) return MetadataFailure(tree);
+                    if (!string.Equals(tree.Value.CommitSha, sourceSnapshot.CommitSha, StringComparison.OrdinalIgnoreCase)
+                        || !string.Equals(tree.Value.RequestedPath ?? string.Empty, parentPath, StringComparison.Ordinal))
+                        return Results.Conflict(new { code = "metadata_invalid", error = "GitLab returned a tree page for a different commit or parent path." });
+                    var entries = tree.Value.Entries.Where(x => string.Equals(x.Path, row.Path, StringComparison.Ordinal)).ToArray();
+                    if (entries.Length != 1)
+                        return Results.Conflict(new { code = "file_unobserved", error = "The exact file was not present on the bounded repository-tree page." });
+                    if (entries[0].Kind != GitLabTreeEntryKind.Blob)
+                        return Results.Conflict(new { code = "file_type_unsupported", error = "Only a regular GitLab blob can be accepted as a file contribution." });
                     continue;
                 }
 
@@ -120,7 +140,7 @@ public static class CodeEvidenceEndpoints
                 return Results.Forbid();
             var policy = await policyResolver.ResolveAsync(projectId, ct);
             var command = new CodeEvidenceAcceptanceCommand(projectId, request.ReleaseId,
-                request.RequirementArtifactId, request.RequirementRevisionId, request.Disposition,
+                request.ExpectedBaselineId, request.RequirementArtifactId, request.RequirementRevisionId, request.Disposition,
                 request.ExpectedSelectorVersion, request.ExpectedLegacyRecordId, request.ExpectedConfigurationVersion,
                 request.ExpectedSourceSelectionEventId, request.ExpectedSourceSnapshotId,
                 request.ExpectedSourceSelectionVersion,
@@ -145,9 +165,10 @@ public static class CodeEvidenceEndpoints
 
     private static IResult? ValidateRequest(Guid projectId, AcceptCodeEvidenceRequest request)
     {
-        if (projectId == Guid.Empty || request.ReleaseId == Guid.Empty || request.RequirementArtifactId == Guid.Empty
+        if (projectId == Guid.Empty || request.ReleaseId == Guid.Empty || request.ExpectedBaselineId == Guid.Empty
+            || request.RequirementArtifactId == Guid.Empty
             || request.RequirementRevisionId == Guid.Empty || !Enum.IsDefined(request.Disposition))
-            return Results.BadRequest(new { code = "invalid_request", error = "Project, release, exact requirement and disposition are required." });
+            return Results.BadRequest(new { code = "invalid_request", error = "Project, release, expected baseline, exact requirement and disposition are required." });
         var contributions = request.Contributions ?? [];
         if (request.ExpectedSelectorVersion < 0 || contributions.Count > MaxContributions
             || contributions.Any(x => x.RelationshipId == Guid.Empty || x.ExpectedRelationshipVersion < 1
@@ -173,6 +194,11 @@ public static class CodeEvidenceEndpoints
                 || !request.ExpectedSourceSnapshotId.HasValue
                 || request.ExpectedSourceSelectionVersion is not > 0)
                 return Results.BadRequest(new { code = "invalid_request", error = "A GitLab disposition requires source expectations, contributions and no mixed no-code rationale." });
+            if (contributions.Any(x => x.Kind == CodeEvidenceContributionKind.File
+                    && (x.ParentPath is null || x.PageSize is <= 0 or > 100))
+                || contributions.Any(x => x.Kind == CodeEvidenceContributionKind.MergeRequest
+                    && (x.ParentPath is not null || x.Cursor is not null || x.PageSize is not null)))
+                return Results.BadRequest(new { code = "invalid_request", error = "File contributions require a bounded parent-tree page, and merge-request contributions cannot carry file-page fields." });
         }
         return null;
     }
@@ -198,6 +224,21 @@ public static class CodeEvidenceEndpoints
         error = "Refresh the verified repository configuration before accepting evidence."
     });
 
+    private static bool TryNormalizeTreeParent(string value, out string path)
+    {
+        path = value.Trim().Trim('/');
+        return path.Length == 0 || (path.Length <= 2048 && !path.Contains('\\')
+            && !path.Contains("//", StringComparison.Ordinal) && path.Split('/').All(SafePathSegment));
+    }
+
+    private static bool IsImmediateChild(string path, string parent) => parent.Length == 0
+        ? !path.Contains('/')
+        : path.StartsWith(parent + "/", StringComparison.Ordinal)
+            && !path[(parent.Length + 1)..].Contains('/');
+
+    private static bool SafePathSegment(string segment) => segment.Length > 0 && segment is not "." and not ".."
+        && segment.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-');
+
     private static IResult MetadataFailure<T>(GitLabMetadataResult<T> result) => result.Status switch
     {
         GitLabMetadataStatus.Unauthorized => Results.Unauthorized(),
@@ -211,6 +252,7 @@ public static class CodeEvidenceEndpoints
 
 public sealed record AcceptCodeEvidenceRequest(
     Guid ReleaseId,
+    Guid ExpectedBaselineId,
     Guid RequirementArtifactId,
     Guid RequirementRevisionId,
     CodeEvidenceDisposition Disposition,
@@ -226,4 +268,7 @@ public sealed record AcceptCodeEvidenceRequest(
 public sealed record AcceptCodeEvidenceContribution(
     CodeEvidenceContributionKind Kind,
     Guid RelationshipId,
-    long ExpectedRelationshipVersion);
+    long ExpectedRelationshipVersion,
+    string? ParentPath = null,
+    string? Cursor = null,
+    int? PageSize = null);

@@ -55,7 +55,7 @@ public static class CodeTraceabilityEndpoints
 
         var required = await CodeTraceabilityProjection.RequiredAsync(db, projectId, releaseId, campaignBaselineId!.Value, ladderPolicy, ct);
         var current = await CurrentCodeEvidenceProjection.ForReleaseAsync(db, projectId, releaseId, ct);
-        return Results.Ok(Response(release.Version, frozen, required, current, repository));
+        return Results.Ok(Response(release.Version, frozen, campaignBaselineId.Value, required, current, repository));
     }
 
     /// The one baseline the release decision is made against. A release has at most one campaign.
@@ -164,7 +164,8 @@ public static class CodeTraceabilityEndpoints
 
     private const string SourceOfTruth = "GitLab is the source of truth for source code, merge-request review, and commit content. AeroLink stores immutable traceability pointers only.";
 
-    private static object Response(string version, bool readOnly, IReadOnlyList<RequiredCodeTraceabilityRequirement> candidates,
+    private static object Response(string version, bool readOnly, Guid campaignBaselineId,
+        IReadOnlyList<RequiredCodeTraceabilityRequirement> candidates,
         IReadOnlyList<CurrentCodeEvidence> current, ProjectRepositoryEvidenceReadiness repository)
     {
         var byRevision = current.ToDictionary(x => (x.RequirementArtifactId, x.RequirementRevisionId));
@@ -173,6 +174,7 @@ public static class CodeTraceabilityEndpoints
         return new
         {
             repository,
+            campaignBaselineId,
             build = new { version, readOnly },
             sourceOfTruth = SourceOfTruth,
             evaluationState = "Evaluated",

@@ -187,8 +187,8 @@ public sealed class CurrentCodeEvidenceProjectionTests
             CodeEvidenceDisposition.NoCodeChangeRequired, "Retained historical decision.", null, null, null, "tester", f.Now);
         f.Db.AddRange(set, new CodeEvidenceCurrentSelector(f.Project.Id, f.Release.Id, artifactId, revisionId, set.Id, "tester", f.Now));
         await f.Db.SaveChangesAsync();
-        var current = Assert.Single((await CurrentCodeEvidenceProjection.ForReleaseAsync(f.Db, f.Project.Id, f.Release.Id, default))
-            .Where(x => x.RequirementRevisionId == revisionId));
+        var current = Assert.Single(await CurrentCodeEvidenceProjection.ForReleaseAsync(f.Db, f.Project.Id, f.Release.Id, default),
+            x => x.RequirementRevisionId == revisionId);
         Assert.Equal(CurrentCodeEvidenceState.InvalidIdentity, current.State);
         Assert.False(current.CountsAsImplementation);
         Assert.Equal(set.Id, current.EvidenceSet!.Id);
@@ -231,7 +231,7 @@ public sealed class CurrentCodeEvidenceProjectionTests
             .SetProperty(x => x.RequirementsMaterializedAt, f.Now));
 
         await using var scope = await ProjectControlledWriteScope.AcquireAsync(f.Db, f.Project.Id);
-        var command = new CodeEvidenceAcceptanceCommand(f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id,
+        var command = new CodeEvidenceAcceptanceCommand(f.Project.Id, f.Release.Id, campaign.BaselineId, f.Artifact.Id, f.Revision.Id,
             CodeEvidenceDisposition.NoCodeChangeRequired, 0, f.Legacy.Id, null, null, null, null, [],
             "The changed requirement has no implementation code impact.");
         var result = await new CodeEvidenceAcceptanceService(f.Db).AcceptAsync(scope, command,
@@ -249,6 +249,35 @@ public sealed class CurrentCodeEvidenceProjectionTests
         Assert.Equal(result.EvidenceSetId, selector.EvidenceSetId);
         Assert.Equal(1, selector.Version);
         Assert.Empty(await f.Db.CodeEvidenceContributions.ToListAsync());
+
+        var staleBaseline = command with { ExpectedBaselineId = Guid.NewGuid(), ExpectedSelectorVersion = 1 };
+        await using (var baselineScope = await ProjectControlledWriteScope.AcquireAsync(f.Db, f.Project.Id))
+        {
+            await Assert.ThrowsAsync<DomainException>(() => new CodeEvidenceAcceptanceService(f.Db).AcceptAsync(
+                baselineScope, staleBaseline, new Dictionary<Guid, CodeEvidenceMergeObservation>(),
+                LegacyLadderPolicy.Instance, "tester", f.Now, default));
+        }
+        await using (var staleScope = await ProjectControlledWriteScope.AcquireAsync(f.Db, f.Project.Id))
+        {
+            await Assert.ThrowsAsync<DomainException>(() => new CodeEvidenceAcceptanceService(f.Db).AcceptAsync(
+                staleScope, command, new Dictionary<Guid, CodeEvidenceMergeObservation>(),
+                LegacyLadderPolicy.Instance, "tester", f.Now, default));
+        }
+        var replacement = command with
+        {
+            ExpectedSelectorVersion = 1,
+            NoCodeChangeRationale = "The same exact baseline decision was explicitly reconfirmed."
+        };
+        await using (var replacementScope = await ProjectControlledWriteScope.AcquireAsync(f.Db, f.Project.Id))
+        {
+            var replacementResult = await new CodeEvidenceAcceptanceService(f.Db).AcceptAsync(replacementScope,
+                replacement, new Dictionary<Guid, CodeEvidenceMergeObservation>(), LegacyLadderPolicy.Instance,
+                "tester", f.Now, default);
+            await f.Db.SaveChangesAsync();
+            await replacementScope.CommitAsync();
+            Assert.Equal(2, replacementResult.SelectorVersion);
+        }
+        Assert.Equal(2, (await f.Db.CodeEvidenceCurrentSelectors.SingleAsync()).Version);
     }
 
     [Fact]
@@ -271,7 +300,7 @@ public sealed class CurrentCodeEvidenceProjectionTests
         f.Db.AddRange(snapshot, selection, current, relationship);
         await f.Db.SaveChangesAsync();
 
-        var command = new CodeEvidenceAcceptanceCommand(f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id,
+        var command = new CodeEvidenceAcceptanceCommand(f.Project.Id, f.Release.Id, campaign.BaselineId, f.Artifact.Id, f.Revision.Id,
             CodeEvidenceDisposition.GitLabContributions, 0, f.Legacy.Id, f.Repository.Version,
             selection.Id, snapshot.Id, selection.ResultingVersion,
             [new(CodeEvidenceContributionKind.MergeRequest, relationship.Id, relationship.Version)], null);
@@ -283,6 +312,55 @@ public sealed class CurrentCodeEvidenceProjectionTests
         }
         Assert.Empty(await f.Db.CodeEvidenceDispositionSets.ToListAsync());
         Assert.Empty(await f.Db.CodeEvidenceContributions.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Acceptance_service_accepts_source_less_merge_context_and_file_from_prior_event_into_current_selection()
+    {
+        await using var f = await Fixture.CreateAsync(changedInBuild: true);
+        var campaign = await f.CampaignAsync();
+        await f.Db.CandidateBaselines.Where(x => x.Id == campaign.BaselineId).ExecuteUpdateAsync(update => update
+            .SetProperty(x => x.State, CandidateBaselineState.Frozen)
+            .SetProperty(x => x.RequirementsMaterializedAt, f.Now));
+        f.Repository.RecordVerification("tester", f.Now, 17, "group/project");
+        var snapshot = f.Snapshot('a');
+        var first = new GitLabSourceSelectionEvent(f.Project.Id, f.Release.Id, snapshot.Id, 0, "tester", f.Now);
+        var current = new GitLabSourceSelectionEvent(f.Project.Id, f.Release.Id, snapshot.Id, 1, "tester", f.Now);
+        var pointer = new GitLabCurrentSourceSelection(f.Project.Id, f.Release.Id, snapshot.Id, first.Id, "tester", f.Now);
+        pointer.Move(1, snapshot.Id, current.Id, "tester", f.Now);
+        var target = CodeRelationshipTarget.ForRequirementRevision(f.Revision.Id, f.Artifact.Id, f.Revision.Revision, "LLR-000001.01");
+        var merge = new GitLabMergeRequestRelationship(f.Project.Id, f.Release.Id, snapshot.InstanceBaseUrl,
+            snapshot.RemoteProjectId, 12, 1200, null, null, snapshot.PathWithNamespace,
+            "https://gitlab.example/group/project/-/merge_requests/12", "Observed later", target,
+            CodeRelationshipMeaning.Implements, "tester", f.Now);
+        var file = new GitLabFileRelationship(f.Project.Id, f.Release.Id, snapshot.InstanceBaseUrl,
+            snapshot.RemoteProjectId, snapshot.Id, first.Id, snapshot.CommitSha, "src/demo.c", 1, 3, 12,
+            target, CodeRelationshipMeaning.Implements, "tester", f.Now);
+        f.Db.AddRange(snapshot, first, current, pointer, merge, file);
+        await f.Db.SaveChangesAsync();
+
+        var command = new CodeEvidenceAcceptanceCommand(f.Project.Id, f.Release.Id, campaign.BaselineId,
+            f.Artifact.Id, f.Revision.Id, CodeEvidenceDisposition.GitLabContributions, 0, f.Legacy.Id,
+            f.Repository.Version, current.Id, snapshot.Id, current.ResultingVersion,
+            [new(CodeEvidenceContributionKind.MergeRequest, merge.Id, merge.Version),
+             new(CodeEvidenceContributionKind.File, file.Id, file.Version)], null);
+        var observations = new Dictionary<Guid, CodeEvidenceMergeObservation>
+        {
+            [merge.Id] = new(merge.Id, merge.Version, snapshot.CommitSha, GitLabMergeResultKind.MergeCommit,
+                f.Now, f.Now)
+        };
+        await using var scope = await ProjectControlledWriteScope.AcquireAsync(f.Db, f.Project.Id);
+        var result = await new CodeEvidenceAcceptanceService(f.Db).AcceptAsync(scope, command, observations,
+            LegacyLadderPolicy.Instance, "tester", f.Now, default);
+        await f.Db.SaveChangesAsync();
+        await scope.CommitAsync();
+
+        var contributions = await f.Db.CodeEvidenceContributions.OrderBy(x => x.ContributionKind).ToListAsync();
+        Assert.Equal(2, contributions.Count);
+        Assert.All(contributions, x => Assert.Equal(snapshot.Id, x.SourceSnapshotId));
+        Assert.Equal(GitLabMergeResultKind.MergeCommit, contributions.Single(x => x.ContributionKind == CodeEvidenceContributionKind.MergeRequest).MergeResultKind);
+        Assert.Equal("src/demo.c", contributions.Single(x => x.ContributionKind == CodeEvidenceContributionKind.File).FilePath);
+        Assert.Equal(result.EvidenceSetId, contributions[0].EvidenceSetId);
     }
 
     [Fact]

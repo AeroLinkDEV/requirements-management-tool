@@ -22,9 +22,9 @@ public sealed class CodeEvidenceAcceptanceService(AeroLinkDbContext db)
         CancellationToken ct)
     {
         ProjectControlledWriteScope.Require(db, command.ProjectId, scope);
-        if (command.ProjectId == Guid.Empty || command.ReleaseId == Guid.Empty
+        if (command.ProjectId == Guid.Empty || command.ReleaseId == Guid.Empty || command.ExpectedBaselineId == Guid.Empty
             || command.RequirementArtifactId == Guid.Empty || command.RequirementRevisionId == Guid.Empty)
-            throw new DomainException("Project, release and exact requirement identities are required.");
+            throw new DomainException("Project, expected baseline, release and exact requirement identities are required.");
         if (command.ExpectedSelectorVersion < 0)
             throw new DomainException("The expected evidence selector version cannot be negative.");
         if (command.ExpectedLegacyRecordId == Guid.Empty)
@@ -51,8 +51,10 @@ public sealed class CodeEvidenceAcceptanceService(AeroLinkDbContext db)
         var campaign = await db.ReleaseCampaigns.AsNoTracking()
             .SingleOrDefaultAsync(x => x.ProjectId == command.ProjectId && x.ReleaseId == command.ReleaseId, ct)
             ?? throw new DomainException("The release has no controlled review campaign.");
+        if (campaign.BaselineId != command.ExpectedBaselineId)
+            throw new DomainException("The expected materialized baseline changed; refresh before accepting Code evidence.");
         var baseline = await db.CandidateBaselines.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.Id == campaign.BaselineId && x.ProjectId == command.ProjectId
+            .SingleOrDefaultAsync(x => x.Id == command.ExpectedBaselineId && x.ProjectId == command.ProjectId
                 && x.ReleaseId == command.ReleaseId && x.State != CandidateBaselineState.Draft
                 && x.RequirementsMaterializedAt != null, ct)
             ?? throw new DomainException("Materialize the exact release baseline before accepting Code evidence.");
@@ -117,7 +119,9 @@ public sealed class CodeEvidenceAcceptanceService(AeroLinkDbContext db)
             sourceSnapshot = await db.GitLabSourceSnapshots.AsNoTracking().SingleOrDefaultAsync(x => x.ProjectId == command.ProjectId
                 && x.Id == command.ExpectedSourceSnapshotId.Value, ct)
                 ?? throw new DomainException("The expected source snapshot is not part of this project.");
-            if (sourceSnapshot.RemoteProjectId != configuration.RemoteProjectId
+            if (sourceSnapshot.RepositoryConfigurationId != configuration.Id
+                || sourceSnapshot.ConfigurationVersion != configuration.Version
+                || sourceSnapshot.RemoteProjectId != configuration.RemoteProjectId
                 || !string.Equals(sourceSnapshot.PathWithNamespace, configuration.RemotePathWithNamespace, StringComparison.Ordinal))
                 throw new DomainException("The expected source snapshot is not bound to the verified repository.");
             if (selectionEvent.SourceSnapshotId != sourceSnapshot.Id)
@@ -143,14 +147,14 @@ public sealed class CodeEvidenceAcceptanceService(AeroLinkDbContext db)
             {
                 var row = merges[request.RelationshipId];
                 ValidateRelationship(row.ProjectId, row.ReleaseId, row.IsActive, row.Version,
-                    request.ExpectedRelationshipVersion, command, sourceSnapshot, selectionEvent);
-                if (row.SourceSnapshotId != sourceSnapshot!.Id || row.SourceSelectionEventId != selectionEvent!.Id
-                    || !string.Equals(row.InstanceBaseUrl, sourceSnapshot.InstanceBaseUrl, StringComparison.OrdinalIgnoreCase)
+                    request.ExpectedRelationshipVersion, command);
+                if (!string.Equals(row.InstanceBaseUrl, sourceSnapshot!.InstanceBaseUrl, StringComparison.OrdinalIgnoreCase)
                     || row.RemoteProjectId != sourceSnapshot.RemoteProjectId
                     || !string.Equals(row.RepositoryPathSnapshot, sourceSnapshot.PathWithNamespace, StringComparison.Ordinal)
+                    || row.Meaning != CodeRelationshipMeaning.Implements
                     || row.TargetKind != CodeRelationshipTargetKind.RequirementRevision
                     || row.TargetIdentityId != command.RequirementRevisionId || row.TargetOwnerIdentityId != command.RequirementArtifactId)
-                    throw new DomainException("Every accepted merge-request contribution must bind the exact selected source and requirement revision.");
+                    throw new DomainException("Every accepted merge-request contribution must bind the configured repository and exact requirement revision.");
                 if (!mergeObservations.TryGetValue(row.Id, out var observation)
                     || observation.RelationshipId != row.Id || observation.ExpectedRelationshipVersion != row.Version)
                     throw new DomainException("A merge-request contribution is missing its provider observation.");
@@ -159,13 +163,14 @@ public sealed class CodeEvidenceAcceptanceService(AeroLinkDbContext db)
             {
                 var row = files[request.RelationshipId];
                 ValidateRelationship(row.ProjectId, row.ReleaseId, row.IsActive, row.Version,
-                    request.ExpectedRelationshipVersion, command, sourceSnapshot, selectionEvent);
-                if (row.SourceSnapshotId != sourceSnapshot!.Id || row.SourceSelectionEventId != selectionEvent!.Id
+                    request.ExpectedRelationshipVersion, command);
+                if (row.SourceSnapshotId != sourceSnapshot!.Id
                     || !string.Equals(row.InstanceBaseUrl, sourceSnapshot.InstanceBaseUrl, StringComparison.OrdinalIgnoreCase)
                     || row.RemoteProjectId != sourceSnapshot.RemoteProjectId
                     || row.CommitSha != sourceSnapshot.CommitSha || row.TargetKind != CodeRelationshipTargetKind.RequirementRevision
+                    || row.Meaning != CodeRelationshipMeaning.Implements
                     || row.TargetIdentityId != command.RequirementRevisionId || row.TargetOwnerIdentityId != command.RequirementArtifactId)
-                    throw new DomainException("Every accepted file contribution must bind the exact selected source and requirement revision.");
+                    throw new DomainException("Every accepted file contribution must bind the exact selected source commit and requirement revision.");
             }
         }
 
@@ -225,12 +230,11 @@ public sealed class CodeEvidenceAcceptanceService(AeroLinkDbContext db)
     }
 
     private static void ValidateRelationship(Guid projectId, Guid releaseId, bool active, long version,
-        long expectedVersion, CodeEvidenceAcceptanceCommand command, GitLabSourceSnapshot? source,
-        GitLabSourceSelectionEvent? selection)
+        long expectedVersion, CodeEvidenceAcceptanceCommand command)
     {
         if (!active || version != expectedVersion)
             throw new DomainException("A Code contribution relationship changed or is withdrawn; refresh before accepting.");
-        if (projectId != command.ProjectId || releaseId != command.ReleaseId || source is null || selection is null)
+        if (projectId != command.ProjectId || releaseId != command.ReleaseId)
             throw new DomainException("A Code contribution relationship is outside the exact acceptance scope.");
     }
 
@@ -256,7 +260,7 @@ public sealed class CodeEvidenceAcceptanceService(AeroLinkDbContext db)
 }
 
 public sealed record CodeEvidenceAcceptanceCommand(Guid ProjectId, Guid ReleaseId,
-    Guid RequirementArtifactId, Guid RequirementRevisionId, CodeEvidenceDisposition Disposition,
+    Guid ExpectedBaselineId, Guid RequirementArtifactId, Guid RequirementRevisionId, CodeEvidenceDisposition Disposition,
     long ExpectedSelectorVersion, Guid? ExpectedLegacyRecordId, long? ExpectedConfigurationVersion,
     Guid? ExpectedSourceSelectionEventId, Guid? ExpectedSourceSnapshotId, long? ExpectedSourceSelectionVersion,
     IReadOnlyList<CodeEvidenceContributionRequest> Contributions, string? NoCodeChangeRationale);
