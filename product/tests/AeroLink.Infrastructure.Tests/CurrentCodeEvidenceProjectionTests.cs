@@ -15,6 +15,37 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class CurrentCodeEvidenceProjectionTests
 {
     [Fact]
+    public async Task Associated_register_pages_grouped_local_identities_before_remote_decoration()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var target = CodeRelationshipTarget.ForRequirementRevision(f.Revision.Id, f.Artifact.Id, 1, "LLR-000001.01");
+        GitLabMergeRequestRelationship Mr(int iid, CodeRelationshipMeaning meaning, Guid? release = null) =>
+            new(f.Project.Id, release ?? f.Release.Id, "https://gitlab.example", 17, iid, null, null, null,
+                "group/project", $"https://gitlab.example/group/project/-/merge_requests/{iid}", $"Recorded MR {iid}",
+                target, meaning, "tester", f.Now);
+        var first = Mr(1, CodeRelationshipMeaning.Implements);
+        var firstContext = Mr(1, CodeRelationshipMeaning.RelatedContext);
+        var withdrawn = Mr(3, CodeRelationshipMeaning.Addresses);
+        withdrawn.Withdraw(1, "tester", "Retain abandoned work.", f.Now);
+        var predecessor = await f.Db.Releases.SingleAsync(x => x.ProjectId == f.Project.Id && x.Id != f.Release.Id);
+        var snapshot = f.Snapshot('a');
+        var file = new GitLabFileRelationship(f.Project.Id, f.Release.Id, snapshot.InstanceBaseUrl, 17,
+            snapshot.Id, null, snapshot.CommitSha, "src/demo.c", null, null, 2, target,
+            CodeRelationshipMeaning.Implements, "tester", f.Now);
+        f.Db.AddRange(first, firstContext, withdrawn, Mr(99, CodeRelationshipMeaning.Implements, predecessor.Id), snapshot, file);
+        await f.Db.SaveChangesAsync();
+        var page1 = await CodeMergeRequestRegisterProjection.ReadPageAsync(f.Db, f.Project.Id, f.Release.Id, 1, 1, false, default);
+        var page2 = await CodeMergeRequestRegisterProjection.ReadPageAsync(f.Db, f.Project.Id, f.Release.Id, 2, 1, false, default);
+        Assert.Equal(2, page1.Total);
+        Assert.Equal(1, Assert.Single(page1.Items).MergeRequestIid);
+        Assert.Equal(2, page1.Items[0].RelationshipCount);
+        Assert.Equal(2, Assert.Single(page2.Items).MergeRequestIid);
+        Assert.Empty((await CodeMergeRequestRegisterProjection.ReadPageAsync(f.Db, f.Project.Id, f.Release.Id, 3, 1, false, default)).Items);
+        Assert.Equal(3, (await CodeMergeRequestRegisterProjection.ReadPageAsync(f.Db, f.Project.Id, f.Release.Id, 1, 10, true, default)).Total);
+        Assert.Empty((await CodeMergeRequestRegisterProjection.ReadPageAsync(f.Db, Guid.NewGuid(), f.Release.Id, 1, 10, true, default)).Items);
+    }
+
+    [Fact]
     public async Task V2_manifest_is_stable_and_commits_explicit_selection_and_invalidation()
     {
         await using var f = await Fixture.CreateAsync();
