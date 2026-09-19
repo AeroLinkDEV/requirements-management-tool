@@ -44,6 +44,8 @@ public enum CodeEvidenceContributionKind
     File,
 }
 
+public enum GitLabMergeResultKind { MergeCommit, SquashCommit }
+
 internal static class CodeEvidenceValidation
 {
     private static readonly Regex ShaPattern = new("^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$", RegexOptions.CultureInvariant);
@@ -549,7 +551,9 @@ public sealed class CodeEvidenceContribution
         Guid requirementArtifactId, Guid requirementRevisionId, Guid sourceSnapshotId, CodeEvidenceContributionKind contributionKind, Guid? relationshipId,
         string instanceBaseUrl, long remoteProjectId, string repositoryPathSnapshot, int? mergeRequestIid, long? mergeRequestId,
         string? mergeRequestUrlSnapshot, string? mergeRequestTitleSnapshot, string? commitSha, string? filePath,
-        int? startLine, int? endLine, CodeRelationshipTarget target, string recordedBy, DateTimeOffset recordedAt)
+        int? startLine, int? endLine, CodeRelationshipTarget target, string recordedBy, DateTimeOffset recordedAt,
+        string? mergeResultSha = null, GitLabMergeResultKind? mergeResultKind = null,
+        DateTimeOffset? mergedAt = null, DateTimeOffset? providerObservedAt = null)
     {
         CodeEvidenceValidation.Id(evidenceSetId, "An evidence contribution requires an evidence set.");
         CodeEvidenceValidation.Id(projectId, "An evidence contribution requires a project.");
@@ -567,9 +571,16 @@ public sealed class CodeEvidenceContribution
         {
             if (mergeRequestIid is not > 0) throw new DomainException("A merge-request contribution requires a positive IID.");
             if (string.IsNullOrWhiteSpace(mergeRequestUrlSnapshot)) throw new DomainException("A merge-request contribution requires its URL snapshot.");
+            MergeResultSha = CodeEvidenceValidation.Sha(mergeResultSha, "A merge-request contribution requires the observed exact merge or squash result SHA.");
+            if (mergeResultKind is null || mergedAt is null || providerObservedAt is null)
+                throw new DomainException("A merge-request contribution requires the result kind, merge time and provider observation time.");
+            CodeEvidenceValidation.Enum(mergeResultKind.Value, "The merge result kind is not supported.");
+            MergeResultKind = mergeResultKind; MergedAt = mergedAt; ProviderObservedAt = providerObservedAt;
         }
         else
         {
+            if (mergeResultSha is not null || mergeResultKind is not null || mergedAt is not null || providerObservedAt is not null)
+                throw new DomainException("A file contribution cannot carry merge-result facts.");
             if (string.IsNullOrWhiteSpace(filePath))
                 throw new DomainException("A file contribution requires its exact path.");
             CodeEvidenceValidation.RelativeFilePath(filePath);
@@ -604,6 +615,11 @@ public sealed class CodeEvidenceContribution
     public string? MergeRequestTitleSnapshot { get; private set; }
     public string CommitSha { get; private set; } = string.Empty;
     public string? FilePath { get; private set; }
+    /// <summary>The actual provider merge/squash result checked for ancestry; CommitSha remains the selected snapshot.</summary>
+    public string? MergeResultSha { get; private set; }
+    public GitLabMergeResultKind? MergeResultKind { get; private set; }
+    public DateTimeOffset? MergedAt { get; private set; }
+    public DateTimeOffset? ProviderObservedAt { get; private set; }
     public int? StartLine { get; private set; }
     public int? EndLine { get; private set; }
     public CodeRelationshipTargetKind TargetKind { get; private set; }

@@ -112,6 +112,29 @@ public sealed class CodeEvidencePostgresQualificationTests
                 var failure = await Assert.ThrowsAsync<DbUpdateException>(() => duplicate.SaveChangesAsync());
                 Assert.Equal(PostgresErrorCodes.UniqueViolation, Assert.IsType<PostgresException>(failure.InnerException).SqlState);
             }
+            var sourceEvent = new GitLabSourceSelectionEvent(project.Id, release.Id, snapshot.Id, 0, "tester", now);
+            var mergedEvidence = CodeEvidenceDispositionSet.CreateGitLab(project.Id, release.Id, artifact, revision,
+                sourceEvent, snapshot, null, "tester", now);
+            var mergedContribution = new CodeEvidenceContribution(mergedEvidence.Id, project.Id, release.Id,
+                artifact, revision, snapshot.Id, CodeEvidenceContributionKind.MergeRequest, association.Id,
+                snapshot.InstanceBaseUrl, snapshot.RemoteProjectId, snapshot.PathWithNamespace, 3, 53,
+                "https://gitlab.example/demo/code/-/merge_requests/3", "Context before source selection",
+                snapshot.CommitSha, null, null, null, target, "tester", now,
+                new string('b', 40), GitLabMergeResultKind.SquashCommit, now.AddHours(-1), now);
+            await using (var captureMerge = new AeroLinkDbContext(options))
+            {
+                captureMerge.AddRange(sourceEvent, mergedEvidence, mergedContribution);
+                await captureMerge.SaveChangesAsync();
+            }
+            await using (var readMerge = new AeroLinkDbContext(options))
+            {
+                var persisted = await readMerge.CodeEvidenceContributions.SingleAsync(x => x.Id == mergedContribution.Id);
+                Assert.Equal(snapshot.CommitSha, persisted.CommitSha);
+                Assert.Equal(new string('b', 40), persisted.MergeResultSha);
+                Assert.Equal(GitLabMergeResultKind.SquashCommit, persisted.MergeResultKind);
+                Assert.Equal(now.AddHours(-1).ToUnixTimeMilliseconds(), persisted.MergedAt!.Value.ToUnixTimeMilliseconds());
+                Assert.Equal(now.ToUnixTimeMilliseconds(), persisted.ProviderObservedAt!.Value.ToUnixTimeMilliseconds());
+            }
         }
         finally
         {

@@ -2023,6 +2023,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<CodeEvidenceContribution>(b =>
         {
             b.ToTable("code_evidence_contributions"); b.HasKey(x => x.Id);
+            b.Property(x => x.MergeResultSha).HasMaxLength(64);
+            b.Property(x => x.MergeResultKind).HasConversion<string>().HasMaxLength(30);
             b.Property(x => x.ContributionKind).HasConversion<string>().HasMaxLength(30).IsRequired(); b.Property(x => x.InstanceBaseUrl).HasMaxLength(500).IsRequired(); b.Property(x => x.RepositoryPathSnapshot).HasMaxLength(300).IsRequired(); b.Property(x => x.MergeRequestUrlSnapshot).HasMaxLength(1000); b.Property(x => x.MergeRequestTitleSnapshot).HasMaxLength(500); b.Property(x => x.CommitSha).HasMaxLength(64).IsRequired(); b.Property(x => x.FilePath).HasMaxLength(1000); b.Property(x => x.TargetKind).HasConversion<string>().HasMaxLength(40).IsRequired(); b.Property(x => x.TargetStableIdentity).HasMaxLength(200).IsRequired(); b.Property(x => x.TargetDisplaySnapshot).HasMaxLength(500).IsRequired(); b.Property(x => x.RecordedBy).HasMaxLength(100).IsRequired();
             b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.RequirementRevisionId, x.SourceSnapshotId, x.EvidenceSetId });
             b.HasOne<CodeEvidenceDispositionSet>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId, x.RequirementArtifactId, x.RequirementRevisionId, x.EvidenceSetId }).HasPrincipalKey(x => new { x.ProjectId, x.ReleaseId, x.RequirementArtifactId, x.RequirementRevisionId, x.Id }).OnDelete(DeleteBehavior.Restrict);
