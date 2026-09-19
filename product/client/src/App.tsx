@@ -93,6 +93,7 @@ const DocumentCenter = lazyView(() => import("./DocumentCenter"));
 const ManagedDocumentationCenter = lazyView(() => import("./ManagedDocumentationCenter"));
 const ProblemReportCenter = lazyView(() => import("./ProblemReportCenter"));
 const CodeTraceabilityCenter = lazyView(() => import("./CodeTraceabilityCenter"));
+const CodeWorkspace = lazyView(() => import("./CodeWorkspace"));
 const DigitalThreadPage = lazyView(() => import("./DigitalThreadPage"));
 const ReleaseCampaignCenter = lazyView(() => import("./ReleaseCampaignCenter"));
 const LifecycleDecisionRoom = lazyView(() => import("./LifecycleDecisionRoom"));
@@ -125,6 +126,8 @@ const viewCode: Partial<Record<View, { warm: () => void }>> = {
   managedDocuments: ManagedDocumentationCenter,
   problemReports: ProblemReportCenter,
   code: CodeTraceabilityCenter,
+  codeMergeRequests: CodeWorkspace,
+  codeExplorer: CodeWorkspace,
   lifecycle: DigitalThreadPage,
   release: LifecycleDecisionRoom,
   releaseImpact: LifecycleDecisionRoom,
@@ -283,7 +286,10 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
               </>}
           {item("Generated Documents","documents","documents",verificationScope,verificationScope==="softwareTest"?"Generated Software Verification Documents":"Generated System Verification Documents")}
          </details>}
-         {hasCodeTraceability && <div className="navStandalone">{item("Code","code","code","software","Code traceability",undefined,true)}</div>}
+         {hasCodeTraceability && <details className="navGroup" open={["code", "codeMergeRequests", "codeExplorer"].includes(view)}><summary>CODE</summary>
+           {item("Merge Requests", "codeMergeRequests", "code", "software", "Code merge requests")}
+           {item("Code Explorer", "codeExplorer", "code", "software", "Code explorer")}
+         </details>}
         <div className="navStandalone">{item("Documentation Center","managedDocuments","library","system","Documentation Center",undefined,true)}</div>
         <div className="navStandalone">{item("Problem Reports","problemReports","problemReports","system","Problem Reports",undefined,true)}</div>
         <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","release","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","baselines","system","Configuration Baselines / Legacy Verification Bootstrap")}{item("Digital Thread","lifecycle","digitalThread","system","Digital Thread")}</details>
@@ -741,7 +747,7 @@ function App() {
   if(view==="approvalConfiguration"&&project)return <ApprovalConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} onBackToBuilds={()=>{updateRoute("view", "builds");writeHistory("pushState", openProjectBuildsPath)}} onSignOut={signOut}/>;
    if(view==="projectConfiguration"&&project)return <ProjectConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} initialSection={projectConfigurationSection} onBackToBuilds={()=>{updateRoute("view", "builds");writeHistory("pushState", openProjectBuildsPath)}} onOpenApprovalConfiguration={()=>showProjectConfiguration("approvals")} onActivated={value=>{setLadder({effectiveSteps:value.effectiveSteps,effectiveRelationships:value.effectiveRelationships});setLadderError("");}} onSignOut={signOut}/>;
    const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={active?.program.id??""} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} coverageReport={coverageReport} context={context} projectWide={view==="managedDocuments"} density={density} ladder={ladder} onNavigate={navigate} onOpenCoverage={openCoverage} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
-   const labels:Record<View,string>={projects:"Projects",projectSetup:"Create New Project",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",createInterfaceChange:"New Interface / ICD Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",teamwork:"Team Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
+   const labels:Record<View,string>={projects:"Projects",projectSetup:"Create New Project",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",createInterfaceChange:"New Interface / ICD Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",codeMergeRequests:"Merge Requests",codeExplorer:"Code Explorer",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",teamwork:"Team Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const coverageLabel = discipline === "systemTest" ? "System Coverage" : selectedArtifactKind === "LowLevel" ? "Software LLR Coverage" : selectedArtifactKind === "HighLevel" ? "Software HLR Coverage" : "Software Coverage";
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:view==="procedureExplorer"?coverageReport?coverageLabel:`${discipline==="softwareTest"?"Software Test Case/Procedure":"System Test Procedure"} Explorer`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
@@ -793,7 +799,7 @@ function App() {
        ? scopedLevelAllowed(discipline, LadderCapability.Verification)
          && (discipline === "softwareTest" || discipline === "systemTest" ? exactVerificationAllowed(discipline) : true) :
      view === "documents" ? scopedLevelAllowed(discipline, discipline === "systemTest" || discipline === "softwareTest" ? LadderCapability.Verification : LadderCapability.RequirementsDocument) :
-     view === "code" ? ladderHasAny(ladder, ["System", "HighLevel", "LowLevel"], LadderCapability.CodeTraceability) : true
+     ["code", "codeMergeRequests", "codeExplorer"].includes(view) ? ladderHasAny(ladder, ["System", "HighLevel", "LowLevel"], LadderCapability.CodeTraceability) : true
    );
    if (!viewAllowed)
      return inShell(<main className="artifactState"><div><span>!</span><h1>Workspace unavailable</h1><p>This level or capability is not present in the active project ladder.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
@@ -1175,6 +1181,11 @@ function App() {
         onBack={() => navigate("dashboard")}
       />
     );
+  if ((view === "codeMergeRequests" || view === "codeExplorer") && project && release)
+    return inShell(<CodeWorkspace api={API} projectId={project.project.id} releaseId={release.id}
+      readOnly={release.isReleased} page={view === "codeExplorer" ? "explorer" : "mergeRequests"}
+      onBack={() => navigate("dashboard")}
+      onPage={page => navigate(page === "explorer" ? "codeExplorer" : "codeMergeRequests", "software")} />);
   if (view === "lifecycle" && project)
     return inShell(
       <DigitalThreadPage

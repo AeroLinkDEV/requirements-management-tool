@@ -10,6 +10,7 @@
   "rendered": [
     "code-source-rendered.spec.ts",
     "code-evidence-rendered.spec.ts",
+    "code-workspace-rendered.spec.ts",
     "artifact-thread-rendered.spec.ts"
   ]
 }

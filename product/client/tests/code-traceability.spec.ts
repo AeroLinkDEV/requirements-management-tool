@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { login, openNavigationGroup } from './auth'
 
 /**
@@ -14,10 +14,9 @@ test('Code reports the active build gate as unevaluated until the build has its 
   test.setTimeout(90_000)
   await login(page)
 
-  const nav = page.getByRole('navigation', { name: 'Primary navigation' })
-  await nav.getByRole('link', { name: 'Code traceability' }).click()
-  await expect(page.getByRole('heading', { name: 'Code', level: 1 })).toBeVisible()
-  await expect(page).toHaveURL(/\/code$/)
+  await openCode(page)
+  await expect(page.getByRole('heading', { name: 'Code Explorer', level: 1 })).toBeVisible()
+  await expect(page).toHaveURL(/\/code\/explorer$/)
   await expect(page.getByText('GitLab is the source of truth', { exact: true })).toBeVisible()
 
   const gate = page.locator('.codeGate')
@@ -31,6 +30,7 @@ test('Code reports the active build gate as unevaluated until the build has its 
 
   const activeUrl = page.url()
   await page.reload()
+  await page.getByText('Implementation evidence and build gate', { exact: true }).click()
   await expect(page).toHaveURL(activeUrl)
   await expect(page.locator('.codeGate')).toContainText('Not evaluated yet')
 })
@@ -44,7 +44,7 @@ test('Code shows the released build as evaluated, complete, and historical', asy
 
   await page.getByRole('button', { name: 'Back to Software Builds' }).click()
   await page.getByRole('button', { name: 'Open build 1.5' }).click()
-  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'Code traceability' }).click()
+  await openCode(page)
 
   await expect(page.getByText('Historical · read-only', { exact: true })).toBeVisible()
   await expect(page.getByText('Demonstration data', { exact: true })).toBeVisible()
@@ -57,6 +57,7 @@ test('Code shows the released build as evaluated, complete, and historical', asy
   await expect(page.getByRole('button', { name: '+ Record code mapping' })).toHaveCount(0)
 
   await page.reload()
+  await page.getByText('Implementation evidence and build gate', { exact: true }).click()
   await expect(page.getByText('Historical · read-only', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '5 of 700 exact requirement revisions mapped' })).toBeVisible()
 })
@@ -64,7 +65,7 @@ test('Code shows the released build as evaluated, complete, and historical', asy
 test('Code does not invent a gate result while evidence is unavailable', async ({ page }) => {
   await login(page)
   await page.route('**/api/code-traceability?**', route => route.fulfill({ status: 503, json: { error: 'Isolated unavailable-service fixture' } }))
-  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'Code traceability' }).click()
+  await openCode(page)
   await expect(page.getByRole('heading', { name: 'Code traceability unavailable' })).toBeVisible()
   await expect(page.locator('.codeGate')).not.toContainText('%')
   await expect(page.getByRole('button', { name: '+ Record code mapping' })).toHaveCount(0)
@@ -87,7 +88,7 @@ test('Pending repository explains its prerequisite and keeps a no-code decision 
       requirements: [{ artifactId: '10000000-0000-0000-0000-000000000001', revisionId: '10000000-0000-0000-0000-000000000002', displayNumber: 'LLR-991037.00', statement: 'Isolated UI wiring fixture.', mapping: null }],
     } })
   })
-  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'Code traceability' }).click()
+  await openCode(page)
   await expect(page.getByText('Repository Pending', { exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open repository configuration' })).toHaveAttribute('href', `/projects/${projectId}/configuration/repository`)
   await page.getByRole('button', { name: '+ Record code mapping' }).click()
@@ -134,3 +135,9 @@ test('Digital Thread reads the requirement-to-evidence chain by exact identifier
   await page.reload()
   await expect(page.locator('.dtnRoot')).toBeVisible()
 })
+
+async function openCode(page: Page) {
+  await openNavigationGroup(page, 'CODE')
+  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'Code explorer', exact: true }).click()
+  await page.getByText('Implementation evidence and build gate', { exact: true }).click()
+}

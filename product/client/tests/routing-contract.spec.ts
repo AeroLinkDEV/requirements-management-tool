@@ -7,6 +7,14 @@ const context = {
   releaseId: 'release-a',
 }
 
+test('Code pages preserve build context and the legacy evidence address', () => {
+  for (const [view, suffix] of [['codeMergeRequests', 'code/merge-requests'], ['codeExplorer', 'code/explorer'], ['code', 'code']] as const) {
+    const address = routePath(context, view, 'software')
+    expect(address).toBe(`/programs/program-a/projects/project-a/releases/release-a/${suffix}`)
+    expect(parseRoute(address)).toMatchObject({ ...context, view, discipline: 'software' })
+  }
+})
+
 test('the authenticated project selector has a context-free route', () => {
   expect(parseRoute('/')).toMatchObject({ view: 'projects', discipline: 'system' })
   expect(parseRoute('/projects')).toMatchObject({ view: 'projects', discipline: 'system' })

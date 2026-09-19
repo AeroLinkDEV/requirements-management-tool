@@ -67,7 +67,7 @@ function SourcePanel({ api, projectId, releaseId, readOnly, onSource }: {
     }
   }, [base, projectId, releaseId, beginLoad])
   useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort() }, [load])
-  const canSelect = !readOnly && source?.capabilities.canSelect === true
+  const canSelect = !readOnly && source?.capabilities?.canSelect === true
 
   const resolve = async (event: FormEvent) => {
     event.preventDefault()
@@ -131,7 +131,7 @@ function SourcePanel({ api, projectId, releaseId, readOnly, onSource }: {
       <button disabled={busy} onClick={() => { setError(''); void load() }}>Refresh source</button>
       <a href={projectConfigurationRepositoryPath(projectId)}>Repository configuration</a>
     </div>
-    {source?.capabilities.sourceSelectionFrozen && <p>Source selection is frozen for this build.</p>}
+    {source?.capabilities?.sourceSelectionFrozen && <p>Source selection is frozen for this build.</p>}
     {error && <p role="alert">{error}</p>}
     {editing && canSelect && <form onSubmit={resolve} className="codeSourceForm">
       <label>GitLab branch, tag, or full commit<input value={reference} required disabled={busy}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { AuthUser } from "./IdentityCenter";
 import PersonPicker from "./PersonPicker";
+import ProblemReportCodeRelationships from "./ProblemReportCodeRelationships";
 import { PersonName } from "./People";
 import { RichContentEditor, RichContentView } from "./RichContent";
 import { emptyRichContent, toPlainText } from "./richContentModel";
@@ -402,7 +403,7 @@ export default function ProblemReportCenter({
   });
   const [showCreate, setShowCreate] = useState(false),
     [showEdit, setShowEdit] = useState(false),
-    [tab, setTab] = useState<"record" | "history">("record"),
+    [tab, setTab] = useState<"record" | "history" | "code">("record"),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [create, setCreate] = useState<Draft>(newDraft()),
@@ -1175,6 +1176,9 @@ export default function ProblemReportCenter({
                 </a>
               </nav>
               <nav className="prTabs" aria-label="Problem Report sections">
+                <button className={tab === "code" ? "active" : ""} onClick={() => setTab("code")}>
+                  Code
+                </button>
                 <button
                   className={tab === "record" ? "active" : ""}
                   onClick={() => setTab("record")}
@@ -1188,7 +1192,13 @@ export default function ProblemReportCenter({
                   History <span>{selected.revisions?.length ?? 0}</span>
                 </button>
               </nav>
-              {tab === "history" ? (
+              {tab === "code" ? (
+                <ProblemReportCodeRelationships
+                  {...{ api, projectId, releaseId }}
+                  reportId={selected.id}
+                  snapshotId={isHistorical ? selected.snapshotId : undefined}
+                />
+              ) : tab === "history" ? (
                 <section className="prTimeline">
                   <div>
                     <h3>

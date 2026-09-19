@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ControlledArtifactInspector } from './ControlledArtifactExplorer'
 import ExactArtifactLink from './ExactArtifactLink'
+import ArtifactCodeRelationships from './ArtifactCodeRelationships'
 import { PersonName } from './People'
 import { formatEvidentiaryDateTime, formatOrdinaryDateTime, stateLabel } from './presentation'
 import { traceProvenanceLabel } from './tracePresentation'
@@ -106,6 +107,7 @@ export default function ChangeRequestInspector({
   const [comments, setComments] = useState<Comment[]>([])
   const [discussionFailure, setDiscussionFailure] = useState(false)
   const [tab, setTab] = useState('overview')
+  const [codeProposalId, setCodeProposalId] = useState('')
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState('')
 
@@ -204,10 +206,19 @@ export default function ChangeRequestInspector({
     subtitle={`${stateLabel(detail.state)} · exact revision ${detail.revision}`}
     closeLabel="Close change request inspector"
     onClose={onClose}
-    tabs={tabs}
+    tabs={kind === 'ChangeRequest' ? [...tabs, { id: 'code', label: 'Code' }] : tabs}
     activeTab={tab}
     onTab={setTab}
   >
+    {tab === 'code' && kind === 'ChangeRequest' && <div className="inspectorBody">
+      <label>Exact target<select value={changes.some(change => change.id === codeProposalId) ? codeProposalId : ''} onChange={event => setCodeProposalId(event.target.value)}>
+        <option value="">{detail.displayNumber} · change request</option>
+        {changes.map(change => <option value={change.id} key={change.id}>{change.displayNumber || 'Unnamed proposal'} · proposal</option>)}
+      </select></label>
+      <ArtifactCodeRelationships {...{ api, projectId, releaseId }}
+        targetKind={changes.some(change => change.id === codeProposalId) ? 'RequirementProposal' : 'ChangeRequestRevision'}
+        targetId={changes.some(change => change.id === codeProposalId) ? codeProposalId : id} />
+    </div>}
     {tab === 'overview' && <div className="inspectorBody">
       <ExactArtifactLink className="impactLaunch" href={href} onOpen={() => onOpen(id)}>Open change request →</ExactArtifactLink>
       <p className="changeBoundaryNote">Exact controlled revision {detail.displayNumber}. Opening the record uses its Project and build authorization.</p>
