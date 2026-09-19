@@ -55,10 +55,13 @@ See [product/docs/ARCHITECTURE.md](product/docs/ARCHITECTURE.md).
 
 ## Project creation and entry
 
-Projects with creation-time repository configuration require verified repository identity before recording
-GitLab merge evidence. The namespace, configured origin/path and merge-request number must match;
-No-code decisions retain their ordinary lifecycle prerequisites. Repository verification does not verify
-the supplied merge/commit facts, and existing projects without setup configuration retain compatibility.
+Code provides build-scoped Merge Requests and Code Explorer views over the configured GitLab repository.
+Source selection pins an exact commit; relationships identify exact controlled targets and files, with
+attributable withdrawal/re-add history. Separately accepted implementation evidence binds a materialized
+baseline and source-selection event, verifies actual merge-result ancestry or exact file availability, and
+can contain multiple contributions. Contextual links and observed GitLab status do not complete a release gate.
+No-code decisions retain their baseline prerequisites without requiring GitLab. Historical manual records
+and signed manifests remain unchanged; a new evidence selector explicitly supersedes a prior decision.
 
 Administrators can create a server-side setup draft and resume it across sessions. The creator and
 administrators may edit it; unfinished setup is distinct from a usable project. Fresh completion atomically

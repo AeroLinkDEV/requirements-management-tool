@@ -58,32 +58,50 @@ that one software build, not separate product concepts presented to the user.
 ## Code traceability boundary
 
 GitLab is the source of truth for repositories, source code, branches, merge requests, review discussion, CI,
-and commit content. AeroLink's `CodeTraceabilityRecord` is an immutable lifecycle pointer: Project, build,
-exact LLR artifact/revision, GitLab repository/MR reference and URL, merge commit SHA/time, or an attributable
-`No code change required` rationale. A uniqueness constraint prevents competing mappings for the same exact
-LLR revision in one build. The Code center and release readiness use the same required-LLR projection; exact
-mappings are included in the signed review manifest. Released-build mutation protection applies server-side
-at the endpoint even when a caller does not supply browser workspace context.
+and commit content. AeroLink records contextual relationships separately from accepted implementation evidence.
+Merge-request relationships identify the repository, numeric remote project and IID; file relationships pin
+an immutable source snapshot, full SHA, path and optional line range. Targets are exact requirement revisions,
+change-request revisions, typed requirement proposals or historical Problem Report snapshots. Adding links
+does not amend signed target content. Withdrawal and re-add retain independently attributable history.
+
+The current build source is an explicit versioned selector over immutable selection events and snapshots.
+A friendly ref is resolved before confirmation; confirmation supplies the previewed SHA and expected source
+and repository versions. A branch/tag move cannot silently substitute another commit. Selected-source browsing
+checks snapshot/repository identity before returning bounded metadata, including cached observations.
+
+Evidence acceptance is a separate command against an expected materialized campaign baseline and exact
+required revision. `CodeTraceabilityProjection.RequiredAsync` remains the obligation authority. A new immutable
+evidence set records one or more active `Implements` relationships, or a justified no-code decision. GitLab
+acceptance observes each actual merged MR's merge/squash result and verifies ancestry to the selected source;
+each file must be observed as a regular blob on a bounded exact-commit tree page. Provider failures are not
+accepted evidence. No-code acceptance requires no repository or source selection.
+
+An explicit versioned selector chooses the current set and names any superseded legacy record. Source changes
+or candidate take-back can invalidate applicability without deleting the set or falling back to older evidence.
+Readiness, Code, change/report projections and review manifests consume the same current-evidence projection.
+Legacy `CodeTraceabilityRecord` rows remain readable historical facts; the old manual GitLab capture command
+cannot bypass the new acceptance checks. A new format is frozen per campaign approval cycle, while existing
+v1 serialization and historical signatures remain unchanged.
 
 Project repository configuration persists separately from those evidence records and from the creation draft. A URL
 starts unverified; an installation-scoped read-only GitLab probe can record the exact remote project identity.
 The browser cannot supply connection verification, and edits or failed rechecks clear current verified status.
 No database transaction spans the probe; optimistic configuration versions prevent stale observations from
 overwriting a newer connection. Deferred setup remains pending and does not block unrelated engineering work.
-For projects carrying this configuration, recording a GitLab merge requires current verified repository identity:
-the namespace path, HTTPS origin, repository URL path and merge-request number must match. The Code overview
-exposes this prerequisite; no-code decisions remain available subject to their normal baseline prerequisites.
-An observed repository connection does not assert that a manually supplied merge or commit exists. Existing
-projects without a setup record retain their prior capture contract, and historical evidence is never rewritten
-or hidden when connection configuration changes.
-Acceptance locks the observed configuration row for the short local evidence transaction, so a concurrent
-edit or failed verification cannot clear the prerequisite before that record commits. Each new GitLab mapping
-retains the observed remote project ID, endpoint/path, configuration version, verification actor and time.
-Later connection changes cannot rewrite that immutable snapshot; legacy and no-code records retain null values.
+GitLab commands require the current verified repository identity. Repository verification alone does not
+establish implementation, merge or approval. Historical evidence is never rewritten or hidden when connection
+configuration changes. Remote command preflight runs outside the transaction; the short shared project write
+scope then rechecks authority, lifecycle, baseline, configuration, source and expected record versions before
+atomically persisting the result. Configuration, source, campaign/reopen and evidence writers share that boundary.
 
-Implementation evidence capture remains manual, with a small, conspicuously labelled FMS demonstration set.
-Webhook synchronization, CI state, many-to-many MR/LLR mapping, and automated
-commit-in-build proof remain later integration depth. AeroLink never clones a repository or approves a merge.
+The MR register groups and pages recorded build associations before bounded metadata decoration; discovery
+separately includes unlinked remote MRs. Code Explorer traverses all exact-source file pages, with an optional
+server-paged linked-file register. Artifact tabs use the same relationship store. Approval participants are
+provider observations, never inferred from a merge, an empty approval list or satisfied rules. Display reads
+use a bounded short-lived cache and disclose observation time; commands use fresh uncached reads.
+Source text, diffs, discussions, webhook synchronization and runtime GitLab writes are outside this boundary.
+AeroLink never clones a repository or approves a merge. Live synthetic qualification is distinct from local
+mock-provider tests and must not fabricate remote identifiers, statuses or participants.
 
 ## Persistence
 
