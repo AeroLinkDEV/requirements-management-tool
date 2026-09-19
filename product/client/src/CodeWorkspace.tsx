@@ -4,7 +4,6 @@ import CodeSourcePanel, { type CodeSource } from './CodeSourcePanel'
 import CodeTraceabilityCenter from './CodeTraceabilityCenter'
 import CodeLinkPicker from './CodeLinkPicker'
 import CodeRelationshipList from './CodeRelationshipList'
-import { stateLabel } from './presentation'
 import { codeQuery, mergeRequestState, useCodeRead, type CodePage, type CodeRelationship, type InspectedMergeRequest,
   type MergeRequest, type MetadataObservation, type RegisteredMergeRequest, type TreeEntry, type TreePage } from './codeWorkspaceData'
 import './RequirementsWorkspace.css'
@@ -88,7 +87,7 @@ function MergeRequestRegister({ api, projectId, releaseId, readOnly }: Pick<Prop
         <table><thead><tr><th scope="col">MR</th><th scope="col">Title</th><th scope="col">GitLab state</th><th scope="col">Recorded relationships</th></tr></thead>
           <tbody>{rows?.map(row => <tr key={row.key} aria-selected={selected?.iid === row.iid && selected.origin === row.origin && selected.remoteProjectId === row.remoteProjectId}>
             <td><button onClick={() => setSelected({ iid: row.iid, origin: row.origin, remoteProjectId: row.remoteProjectId })}>!{row.iid}</button></td>
-            <td>{row.mr?.title ?? 'Metadata unavailable'}</td><td>{mergeRequestState(row.mr)}</td><td>{row.count ?? 'Not evaluated in discovery'}</td>
+            <td>{row.mr ? <a href={row.mr.webUrl} target="_blank" rel="noreferrer">{row.mr.title} ↗</a> : 'Metadata unavailable'}</td><td>{mergeRequestState(row.mr)}</td><td>{row.count ?? 'Not evaluated in discovery'}</td>
           </tr>)}</tbody></table>
         {rows?.length === 0 && <p>{mode === 'linked' ? 'No merge request relationship is recorded for this build.' : 'No merge requests returned for this GitLab query.'}</p>}
         <div className="codePagination"><button disabled={page <= 1} onClick={() => { setPage(value => value - 1); setSelected(undefined) }}>Previous page</button>
@@ -117,6 +116,10 @@ function MergeRequestRegister({ api, projectId, releaseId, readOnly }: Pick<Prop
 
 function SourceExplorer({ api, projectId, releaseId, source, readOnly }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly'> & { source?: CodeSource }) {
   const [linking, setLinking] = useState(false)
+  const [linkedOnly, setLinkedOnly] = useState(false)
+  const [filePage, setFilePage] = useState(1)
+  const [fileSearch, setFileSearch] = useState('')
+  const [fileQuery, setFileQuery] = useState('')
   const [path, setPath] = useState('')
   const [cursors, setCursors] = useState<string[]>([''])
   const [selected, setSelected] = useState<TreeEntry>()
@@ -124,8 +127,10 @@ function SourceExplorer({ api, projectId, releaseId, source, readOnly }: Pick<Pr
   const [refresh, setRefresh] = useState(0)
   const snapshot = source?.snapshot
   const base = `${api}/api/projects/${projectId}`
-  const tree = useCodeRead<MetadataObservation<TreePage>>(snapshot
+  const tree = useCodeRead<MetadataObservation<TreePage>>(snapshot && !linkedOnly
     ? `${base}/code/source/${snapshot.id}/tree?${codeQuery({ commit: snapshot.commitSha, path, cursor: cursors.at(-1), pageSize: 25 })}` : undefined, refresh)
+  const linkedFiles = useCodeRead<CodePage<{ path: string; relationshipCount: number }>>(snapshot && linkedOnly
+    ? `${base}/code/files?${codeQuery({ releaseId, sourceSnapshotId: snapshot.id, search: fileQuery, page: filePage, pageSize: 25 })}` : undefined, refresh)
   const links = useCodeRead<CodePage<CodeRelationship>>(snapshot && selected
     ? `${base}/code/relationships?${codeQuery({ releaseId, relationshipKind: 'File', sourceSnapshotId: snapshot.id, path: selected.path, page: linkPage, pageSize: 25 })}` : undefined, refresh)
   if (!snapshot) return <section className="codeEmptySource"><h2>Choose a build source to browse files</h2>
@@ -137,22 +142,38 @@ function SourceExplorer({ api, projectId, releaseId, source, readOnly }: Pick<Pr
     && tree.value.observation.value?.commitSha === snapshot.commitSha
     && entries?.some(entry => entry.kind === 'Blob' && entry.path === selected?.path)
   return <section aria-label="Repository files">
+    <div className="codeCommandBar"><label><input type="checkbox" checked={linkedOnly} onChange={event => {
+      setLinkedOnly(event.target.checked); setFilePage(1); setSelected(undefined); setLinking(false)
+    }} /> Linked files only</label>
+      {linkedOnly && <form onSubmit={event => { event.preventDefault(); setFileQuery(fileSearch); setFilePage(1); setSelected(undefined) }}>
+        <input aria-label="Search linked file paths" value={fileSearch} maxLength={200} onChange={event => setFileSearch(event.target.value)} /><button>Search paths</button>
+      </form>}</div>
+    {linkedOnly && <p>Recorded active links at this source snapshot, across all directories. This is not a measure of repository coverage.</p>}
+    {!linkedOnly && <>
     <div className="codeCommandBar"><nav aria-label="Repository directory"><button onClick={() => changePath('')}>Repository root</button>
       {path.split('/').filter(Boolean).map((segment, index, parts) => <button key={parts.slice(0, index + 1).join('/')}
         onClick={() => changePath(parts.slice(0, index + 1).join('/'))}>{segment}</button>)}</nav>
-      <button onClick={() => setRefresh(value => value + 1)}>Refresh directory</button></div>
+      <button onClick={() => setRefresh(value => value + 1)}>Refresh directory</button></div></>}
     {tree.error && <p role="alert">{tree.error}</p>}
     {tree.value && !tree.value.observation.succeeded && <p role="alert">{tree.value.observation.detail}</p>}
+    {linkedFiles.error && <p role="alert">{linkedFiles.error}</p>}
     <div className="codeRegisterLayout"><div>
-      {tree.loading ? <p role="status">Loading directory…</p> : <ul className="codeTree">{entries?.map(entry => <li key={entry.path}>
+      {linkedOnly ? <>{linkedFiles.loading ? <p role="status">Loading linked files…</p> : <ul className="codeTree">{linkedFiles.value?.items.map(file => <li key={file.path}>
+        <button aria-pressed={selected?.path === file.path} onClick={() => { setSelected({ path: file.path, name: file.path.split('/').at(-1)!, kind: 'Blob' }); setLinkPage(1) }}>{file.path}</button>
+        <small>{file.relationshipCount} relationship(s)</small></li>)}</ul>}
+        {linkedFiles.value?.items.length === 0 && <p>No matching linked file at this source snapshot.</p>}
+        <div className="codePagination"><button disabled={filePage <= 1} onClick={() => { setFilePage(value => value - 1); setSelected(undefined) }}>Previous linked files</button>
+          <span>Page {filePage}{linkedFiles.value ? ` · ${linkedFiles.value.total} linked files` : ''}</span>
+          <button disabled={!linkedFiles.value || filePage * 25 >= linkedFiles.value.total} onClick={() => { setFilePage(value => value + 1); setSelected(undefined) }}>Next linked files</button></div>
+      </> : <>{tree.loading ? <p role="status">Loading directory…</p> : <ul className="codeTree">{entries?.map(entry => <li key={entry.path}>
         <button disabled={entry.kind !== 'Tree' && entry.kind !== 'Blob'} aria-pressed={selected?.path === entry.path}
           onClick={() => { if (entry.kind === 'Tree') changePath(entry.path); else { setSelected(entry); setLinkPage(1) } }}>
           <span aria-hidden="true">{entry.kind === 'Tree' ? '▸' : '▤'}</span> {entry.name}
-        </button><small>{entry.kind === 'Link' || entry.kind === 'Commit' ? 'External target · not followed' : stateLabel(entry.kind)}</small>
+        </button><small>{entry.kind === 'Link' || entry.kind === 'Commit' ? 'External target · not followed' : entry.kind === 'Blob' ? 'File' : 'Directory'}</small>
       </li>)}</ul>}
       {entries?.length === 0 && <p>No entries returned in this directory page.</p>}
       <div className="codePagination"><button disabled={cursors.length <= 1} onClick={() => { setCursors(value => value.slice(0, -1)); setSelected(undefined) }}>Previous directory page</button>
-        <span>Directory page {cursors.length}</span><button disabled={!nextCursor} onClick={() => { setCursors(value => [...value, nextCursor!]); setSelected(undefined) }}>Next directory page</button></div>
+        <span>Directory page {cursors.length}</span><button disabled={!nextCursor} onClick={() => { setCursors(value => [...value, nextCursor!]); setSelected(undefined) }}>Next directory page</button></div></>}
     </div>{selected ? <ControlledArtifactInspector artifactType="Repository file" displayNumber={selected.name}
       subtitle={selected.path} closeLabel="Close file inspector" onClose={() => setSelected(undefined)}
       tabs={[{ id: 'relationships', label: 'Recorded relationships' }]} activeTab="relationships" onTab={() => {}}>

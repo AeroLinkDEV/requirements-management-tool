@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 967,
-    "cases": 1093,
+    "tests": 968,
+    "cases": 1094,
     "classes": 152,
-    "hostedTests": 918,
-    "hostedCases": 1022,
+    "hostedTests": 919,
+    "hostedCases": 1023,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 15,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 595,
-      "cases": 672,
+      "tests": 596,
+      "cases": 673,
       "unknownCases": 0,
       "classes": 119
     },
@@ -5498,6 +5498,24 @@
       "sourceLines": {
         "start": 19,
         "end": 45
+      }
+    },
+    {
+      "cls": "GitLabSourceApiTests",
+      "test": "Linked_files_are_grouped_before_paging_and_scoped_to_exact_snapshot",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 117,
+        "end": 158
       }
     },
     {

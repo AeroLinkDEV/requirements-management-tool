@@ -157,3 +157,25 @@ test('artifact code panel asks for exact revision and keeps server pages separat
   expect(requests.some(query => query.includes('targetId=exact-two') && query.includes('page=1'))).toBeTruthy()
   expect(requests.every(query => query.includes('targetKind=RequirementRevision'))).toBeTruthy()
 })
+
+test('linked-only files use a grouped server page and leave all-file browsing reachable', async ({ page }) => {
+  await mockWorkspace(page)
+  await page.route('**/code/files?**', async route => {
+    const url = new URL(route.request().url())
+    expect(url.searchParams.get('sourceSnapshotId')).toBe('source-one')
+    const second = url.searchParams.get('page') === '2'
+    await route.fulfill({ json: { page: second ? 2 : 1, pageSize: 25, total: 26,
+      items: [{ path: second ? 'tests/fms_test.c' : 'src/route.c', relationshipCount: 2 }] } })
+  })
+  await page.goto('/tests/fixtures/code-workspace.html')
+  await page.getByRole('button', { name: 'Code Explorer', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'README.md', exact: true })).toBeVisible()
+  await page.getByLabel('Linked files only').check()
+  await expect(page.getByRole('button', { name: 'src/route.c', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'README.md', exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Next linked files' }).click()
+  await expect(page.getByRole('button', { name: 'tests/fms_test.c', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'src/route.c', exact: true })).toHaveCount(0)
+  await page.getByLabel('Linked files only').uncheck()
+  await expect(page.getByRole('button', { name: 'README.md', exact: true })).toBeVisible()
+})

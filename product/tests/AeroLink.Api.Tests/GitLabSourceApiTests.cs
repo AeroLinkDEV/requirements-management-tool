@@ -114,6 +114,49 @@ public sealed class GitLabSourceApiTests
             .Where(x => x.ProjectId == data.ProjectId).ToListAsync());
     }
 
+    [Fact]
+    public async Task Linked_files_are_grouped_before_paging_and_scoped_to_exact_snapshot()
+    {
+        using var factory = new AeroLinkApiFactory();
+        var data = await SeedAsync(factory.Services);
+        Guid snapshotId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var configuration = await db.ProjectRepositoryConfigurations.SingleAsync(x => x.ProjectId == data.ProjectId);
+            var snapshot = new GitLabSourceSnapshot(data.ProjectId, configuration.Id, "https://gitlab.example", 17,
+                "group/project", Sha, "main", "tester", DateTimeOffset.UtcNow, configuration.Version);
+            var other = new GitLabSourceSnapshot(data.ProjectId, configuration.Id, "https://gitlab.example", 17,
+                "group/project", new string('b', 40), "next", "tester", DateTimeOffset.UtcNow, configuration.Version);
+            snapshotId = snapshot.Id;
+            db.AddRange(snapshot, other);
+            foreach (var path in new[] { "src/a.c", "src/a.c", "src/b.c", "src/c.c" })
+                db.Add(new GitLabFileRelationship(data.ProjectId, data.ReleaseId, "https://gitlab.example", 17,
+                    snapshot.Id, null, Sha, path, null, null, null,
+                    CodeRelationshipTarget.ForChangeRequestRevision(Guid.NewGuid(), 0, "LLRCR-00001.00"),
+                    CodeRelationshipMeaning.RelatedContext, "fixture", DateTimeOffset.UtcNow));
+            db.Add(new GitLabFileRelationship(data.ProjectId, data.ReleaseId, "https://gitlab.example", 17,
+                other.Id, null, other.CommitSha, "src/other.c", null, null, null,
+                CodeRelationshipTarget.ForChangeRequestRevision(Guid.NewGuid(), 0, "LLRCR-00002.00"),
+                CodeRelationshipMeaning.RelatedContext, "fixture", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+        using var client = factory.CreateClient();
+        await SignInAsync(client, data.UserName);
+        var url = $"/api/projects/{data.ProjectId}/code/files?releaseId={data.ReleaseId}&sourceSnapshotId={snapshotId}&pageSize=1";
+        var first = await client.GetFromJsonAsync<System.Text.Json.JsonElement>(url);
+        Assert.Equal(3, first.GetProperty("total").GetInt32());
+        var item = Assert.Single(first.GetProperty("items").EnumerateArray());
+        Assert.Equal("src/a.c", item.GetProperty("path").GetString());
+        Assert.Equal(2, item.GetProperty("relationshipCount").GetInt32());
+        var second = await client.GetFromJsonAsync<System.Text.Json.JsonElement>(url + "&page=2");
+        Assert.Equal("src/b.c", Assert.Single(second.GetProperty("items").EnumerateArray()).GetProperty("path").GetString());
+        var searched = await client.GetFromJsonAsync<System.Text.Json.JsonElement>(url + "&search=c.c");
+        Assert.Equal(1, searched.GetProperty("total").GetInt32());
+        Assert.Equal("src/c.c", Assert.Single(searched.GetProperty("items").EnumerateArray()).GetProperty("path").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(url.Replace(snapshotId.ToString(), Guid.NewGuid().ToString()))).StatusCode);
+    }
+
     private static object Request(Guid releaseId) => new { releaseId, reference = Sha, referenceKind = "Commit",
         previewSha = Sha, expectedConfigurationVersion = 2, expectedSelectionVersion = 0 };
     private static HttpResponseMessage Commit() => new(HttpStatusCode.OK) { Content = new StringContent("{\"id\":\"" + Sha + "\"}") };
