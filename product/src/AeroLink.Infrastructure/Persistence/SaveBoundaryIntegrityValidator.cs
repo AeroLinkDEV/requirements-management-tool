@@ -593,7 +593,12 @@ internal sealed class SaveBoundaryIntegrityValidator(AeroLinkDbContext db)
             if (entry.Entity.Type == RequirementTraceType.AllocatedFrom || wasAllocated)
                 changedLinkSourceIds.Add(entry.Entity.SourceRevisionId);
         }
-        var candidateIds = addedIds.Concat(changedLinkSourceIds).Distinct().ToList();
+        // Dematerialization removes a candidate revision and its authored parent links together. Validate
+        // the final retained graph, rather than reloading that deleted source from the pre-save database.
+        // A retained child whose parent/link is removed remains a candidate and still fails closed below.
+        var deletedRevisionIds = _db.ChangeTracker.Entries<RequirementRevision>()
+            .Where(x => x.State == EntityState.Deleted).Select(x => x.Entity.Id).ToHashSet();
+        var candidateIds = addedIds.Concat(changedLinkSourceIds).Except(deletedRevisionIds).Distinct().ToList();
         if (candidateIds.Count == 0) return;
 
         var revisions = await _db.RequirementRevisions.AsNoTracking()

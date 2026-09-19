@@ -413,6 +413,7 @@ static class ApiMap
         revisionsTakenBack = x.RevisionsTakenBack,
         requirementsRemoved = x.RequirementsRemoved,
         codeRecordsTakenBack = x.CodeRecordsTakenBack,
+        codeEvidenceSetsInvalidated = x.CodeEvidenceSetsInvalidated,
         strandedChangeRequests = x.StrandedChangeRequests.Select(s => new
         {
             s.ChangeRequestId, s.DisplayNumber, state = s.State, s.ReviewWillBeCancelled, s.Requirements,

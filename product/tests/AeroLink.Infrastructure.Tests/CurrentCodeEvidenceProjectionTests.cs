@@ -15,6 +15,44 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class CurrentCodeEvidenceProjectionTests
 {
     [Fact]
+    public async Task Removing_exact_parent_link_from_a_retained_requirement_still_fails_closed()
+    {
+        await using var f = await Fixture.CreateAsync();
+        f.Db.RequirementTraces.Remove(await f.Db.RequirementTraces.SingleAsync(x => x.SourceRevisionId == f.Revision.Id));
+        await Assert.ThrowsAsync<AeroLink.Domain.Common.DomainException>(() => f.Db.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task Reopen_preview_matches_retained_evidence_invalidation_without_legacy_fallback()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var set = new CodeEvidenceDispositionSet(f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id,
+            CodeEvidenceDisposition.NoCodeChangeRequired, "Controlled decision.", null, null, f.Legacy.Id, "tester", f.Now);
+        f.Db.AddRange(set, new CodeEvidenceCurrentSelector(f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id,
+            set.Id, "tester", f.Now));
+        await f.Db.SaveChangesAsync();
+        var baseline = await f.Db.CandidateBaselines.SingleAsync(x => x.ReleaseId == f.Release.Id);
+        var service = new RequirementBaselineDematerializer(f.Db, new VerificationImpactService(f.Db));
+        var preview = await service.PreviewAsync(baseline.Id, baseline.DisplayNumber, default);
+        Assert.Equal(1, preview.CodeEvidenceSetsInvalidated);
+        Assert.Empty(await f.Db.CodeEvidenceInvalidations.ToListAsync());
+        await using var scope = await ProjectControlledWriteScope.AcquireAsync(f.Db, f.Project.Id);
+        var actual = await service.DematerializeAsync(baseline.Id, "tester", baseline.DisplayNumber, f.Now, default, scope);
+        await f.Db.SaveChangesAsync();
+        await scope.CommitAsync();
+        Assert.Equal(preview.CodeEvidenceSetsInvalidated, actual.CodeEvidenceSetsInvalidated);
+        Assert.Equal(set.Id, (await f.Db.CodeEvidenceDispositionSets.SingleAsync()).Id);
+        Assert.Equal(set.Id, (await f.Db.CodeEvidenceCurrentSelectors.SingleAsync()).EvidenceSetId);
+        var current = await f.CurrentAsync();
+        Assert.Equal(CurrentCodeEvidenceState.Invalidated, current.State);
+        Assert.False(current.CountsAsImplementation);
+        Assert.Null(current.LegacyRecord);
+        Assert.Contains(baseline.DisplayNumber, current.InvalidationRationale!);
+        Assert.Equal(0, (await service.PreviewAsync(baseline.Id, baseline.DisplayNumber, default)).CodeEvidenceSetsInvalidated);
+        Assert.Single(await f.Db.CodeEvidenceInvalidations.ToListAsync());
+    }
+
+    [Fact]
     public async Task Associated_register_pages_grouped_local_identities_before_remote_decoration()
     {
         await using var f = await Fixture.CreateAsync();

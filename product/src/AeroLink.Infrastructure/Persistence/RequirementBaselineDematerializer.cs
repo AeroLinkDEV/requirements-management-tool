@@ -3,6 +3,7 @@ using AeroLink.Domain.Common;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Integrations;
 using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Infrastructure.Persistence;
@@ -25,7 +26,8 @@ public sealed record ReopenConsequences(
     IReadOnlyList<string> RequirementsRemoved,
     IReadOnlyList<StrandedChangeRequest> StrandedChangeRequests,
     IReadOnlyList<DisturbedCoverage> DisturbedCoverage,
-    int CodeRecordsTakenBack)
+    int CodeRecordsTakenBack,
+    int CodeEvidenceSetsInvalidated = 0)
 {
     public int RevisionCount => RevisionsTakenBack.Count;
     public static ReopenConsequences None { get; } = new([], [], [], [], 0);
@@ -85,6 +87,10 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, Veri
         db.TestCoverage.RemoveRange(plan.Coverage);
         db.RequirementRevisionProfiles.RemoveRange(plan.Profiles);
         db.CodeTraceabilityRecords.RemoveRange(plan.CodeRecords);
+        foreach (var evidence in plan.CodeEvidenceSets)
+            db.CodeEvidenceInvalidations.Add(new(evidence.Id, evidence.ProjectId, evidence.ReleaseId,
+                evidence.RequirementArtifactId, evidence.RequirementRevisionId, actorId,
+                $"Baseline {baselineDisplayNumber} was reopened; its exact requirement revision was taken back.", now));
         db.BaselineRequirements.RemoveRange(plan.Selections);
         db.RequirementRevisions.RemoveRange(plan.Revisions);
         db.SpecificationNodes.RemoveRange(plan.Placements);
@@ -121,6 +127,7 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, Veri
         List<TestRequirementCoverage> Coverage,
         List<(TestRequirementCoverage Link, Guid OntoRevisionId, string Reason)> CoverageToMove,
         List<CodeTraceabilityRecord> CodeRecords,
+        List<CodeEvidenceDispositionSet> CodeEvidenceSets,
         List<BaselineRequirementSelection> Selections,
         List<SpecificationNode> Placements,
         List<RequirementArtifact> OrphanedArtifacts,
@@ -134,7 +141,7 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, Veri
     {
         var revisions = await db.RequirementRevisions.Where(x => x.EffectiveBaselineId == baselineId).ToListAsync(ct);
         if (revisions.Count == 0)
-            return new Plan([], [], [], [], [], [], [], [], [], [], [], Guid.Empty, Guid.Empty, ReopenConsequences.None);
+            return new Plan([], [], [], [], [], [], [], [], [], [], [], [], Guid.Empty, Guid.Empty, ReopenConsequences.None);
 
         var revisionIds = revisions.Select(x => x.Id).ToList();
         var going = revisionIds.ToHashSet();
@@ -165,6 +172,9 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, Veri
         // reader deciding whether to reopen should know code was already written against this wording.
         var codeRecords = await db.CodeTraceabilityRecords
             .Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToListAsync(ct);
+        var codeEvidenceSets = await db.CodeEvidenceDispositionSets.AsNoTracking()
+            .Where(x => revisionIds.Contains(x.RequirementRevisionId)
+                && !db.CodeEvidenceInvalidations.Any(i => i.EvidenceSetId == x.Id)).ToListAsync(ct);
         // Every selection naming one of these revisions, not only this baseline's own. A selection is what a
         // build says it contains, and one left naming a revision that is gone would be a build describing
         // something that does not exist.
@@ -188,12 +198,12 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, Veri
                 x.ChangeRequest.State.ToString(), x.ChangeRequest.State == ChangeRequestState.InReview,
                 x.Requirements)).ToList(),
             coveragePlan.Disturbed,
-            codeRecords.Count);
+            codeRecords.Count, codeEvidenceSets.Count);
 
         var projectId = artifactById.Values.Select(x => x.ProjectId).First();
         var releaseId = await db.CandidateBaselines.AsNoTracking()
             .Where(x => x.Id == baselineId).Select(x => x.ReleaseId).SingleAsync(ct);
-        return new Plan(revisions, profiles, traces, coveragePlan.Coverage, coveragePlan.ToMove, codeRecords,
+        return new Plan(revisions, profiles, traces, coveragePlan.Coverage, coveragePlan.ToMove, codeRecords, codeEvidenceSets,
             selections, placements, orphanedArtifacts, stranded, coveragePlan.Orphaned, projectId, releaseId,
             consequences);
     }

@@ -8,7 +8,8 @@ public enum CurrentCodeEvidenceState { LegacyAccepted, Accepted, Invalidated, So
 
 public sealed record CurrentCodeEvidence(Guid RequirementArtifactId, Guid RequirementRevisionId,
     CurrentCodeEvidenceState State, CodeTraceabilityRecord? LegacyRecord, CodeEvidenceDispositionSet? EvidenceSet,
-    CodeEvidenceCurrentSelector? Selector, IReadOnlyList<CodeEvidenceContribution> Contributions)
+    CodeEvidenceCurrentSelector? Selector, IReadOnlyList<CodeEvidenceContribution> Contributions,
+    string? InvalidationRationale = null)
 {
     public bool CountsAsImplementation => State is CurrentCodeEvidenceState.LegacyAccepted or CurrentCodeEvidenceState.Accepted;
 }
@@ -40,9 +41,12 @@ public static class CurrentCodeEvidenceProjection
             .ToDictionaryAsync(x => x.Id, ct);
         var contributions = await db.CodeEvidenceContributions.AsNoTracking()
             .Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId && setIds.Contains(x.EvidenceSetId)).ToListAsync(ct);
-        var invalidated = (await db.CodeEvidenceInvalidations.AsNoTracking()
+        var invalidations = await db.CodeEvidenceInvalidations.AsNoTracking()
             .Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId && setIds.Contains(x.EvidenceSetId))
-            .Select(x => x.EvidenceSetId).Distinct().ToListAsync(ct)).ToHashSet();
+            .ToListAsync(ct);
+        var invalidated = invalidations.Select(x => x.EvidenceSetId).ToHashSet();
+        var invalidationReasons = invalidations.OrderByDescending(x => x.InvalidatedAt).ThenBy(x => x.Id)
+            .GroupBy(x => x.EvidenceSetId).ToDictionary(x => x.Key, x => x.First().Rationale);
         var currentSource = await db.GitLabCurrentSourceSelections.AsNoTracking()
             .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.ReleaseId == releaseId, ct);
         var source = currentSource is null ? null : await db.GitLabSourceSnapshots.AsNoTracking()
@@ -57,11 +61,12 @@ public static class CurrentCodeEvidenceProjection
         {
             sets.TryGetValue(selector.EvidenceSetId, out var set);
             var items = bySet[selector.EvidenceSetId].OrderBy(x => x.Id).ToArray();
-            var state = exactRequirements.Contains((selector.RequirementArtifactId, selector.RequirementRevisionId))
-                ? State(selector, set, items, invalidated, currentSource, source)
-                : CurrentCodeEvidenceState.InvalidIdentity;
+            var state = State(selector, set, items, invalidated, currentSource, source);
+            if (state != CurrentCodeEvidenceState.Invalidated
+                && !exactRequirements.Contains((selector.RequirementArtifactId, selector.RequirementRevisionId)))
+                state = CurrentCodeEvidenceState.InvalidIdentity;
             result.Add(new(selector.RequirementArtifactId, selector.RequirementRevisionId, state,
-                null, set, selector, items));
+                null, set, selector, items, invalidationReasons.GetValueOrDefault(selector.EvidenceSetId)));
         }
         return result.OrderBy(x => x.RequirementRevisionId).ToArray();
     }
