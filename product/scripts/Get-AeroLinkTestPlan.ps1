@@ -568,6 +568,23 @@ function Get-DisposableDockerCommand {
     }
     return $dockerCommand.Source
 }
+function Test-OwnedApiProcessExited {
+    param([Parameter(Mandatory)][int]$ProcessId, [Parameter(Mandatory)][Int64]$StartedAt)
+    # Get-Process can still enumerate a terminated process during object teardown. Presence alone is not
+    # liveness. Keep the helper's held-job proof and independently check this exact recorded lifetime.
+    try { $observed = Get-Process -Id $ProcessId -ErrorAction Stop }
+    catch {
+        if ($_.FullyQualifiedErrorId -eq 'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.GetProcessCommand') { return $true }
+        throw
+    }
+    try {
+        if ($observed.HasExited) { return $true }
+        if ([Int64]$observed.StartTime.ToFileTimeUtc() -ne $StartedAt) { return $true } # A replacement is not ours.
+        return $observed.HasExited
+    }
+    finally { $observed.Dispose() }
+}
+
 function Invoke-DisposablePostgreSqlGate {
     $docker = Get-DisposableDockerCommand
     $runId = ([Guid]::NewGuid().ToString('N'))
@@ -730,7 +747,7 @@ function Invoke-DisposablePostgreSqlGate {
                     if ($helper.HasExited -and $helper.ExitCode -ne 0) { [void]$cleanupErrors.Add('The owned API process helper exited nonzero.') }
                     $statusAfter = Read-BoundedTextFile -Path $apiStatus
                     if ($statusAfter -notmatch '(?m)^(STOPPED|EXITED)\|.*\|jobCount=0\r?$' -or $statusAfter -notmatch '(?m)^CLEANUP\|handles=closed\r?$') { [void]$cleanupErrors.Add('Owned API job cleanup was not proven.') }
-                    if ($null -ne $apiPid) { try { if ($null -ne (Get-Process -Id $apiPid -ErrorAction SilentlyContinue)) { [void]$cleanupErrors.Add('The owned API process remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API process exit could not be verified.') } }
+                    if ($null -ne $apiPid) { try { if (-not (Test-OwnedApiProcessExited -ProcessId $apiPid -StartedAt $apiStart)) { [void]$cleanupErrors.Add('The owned API process remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API process exit could not be verified.') } }
                     if ($null -ne $apiPort) { try { if (@(Get-BoundedListenerConnections -Port $apiPort | Where-Object { [int]$_.OwningProcess -eq $apiPid }).Count -gt 0) { [void]$cleanupErrors.Add('The owned API listener remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API listener cleanup could not be verified.') } }
                 }
                 else {

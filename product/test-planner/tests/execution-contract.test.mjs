@@ -137,6 +137,56 @@ test('owned process boundary authenticates natural exits and controlled stop', (
   }
 })
 
+test('API cleanup distinguishes an exited object, a live lifetime, replacement and unreadable identity on both hosts', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'aerolink-api-exit-'))
+  const harness = join(fixture, 'harness.ps1')
+  const script = String.raw`$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile('${wrapperPath.replaceAll("'", "''")}', [ref]$tokens, [ref]$errors)
+$definition = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Test-OwnedApiProcessExited' }, $true)
+if (-not $definition) { throw 'Missing exact-lifetime cleanup check.' }
+. ([scriptblock]::Create($definition.Extent.Text))
+$script:expected = [datetime]::UtcNow.ToFileTimeUtc()
+function Get-Process {
+  [CmdletBinding()] param([int]$Id)
+  if ($script:mode -eq 'absent') { Microsoft.PowerShell.Management\Get-Process -Id 2147483647 -ErrorAction Stop; return }
+  if ($script:mode -eq 'unreadable') { throw 'Access denied to the process inventory.' }
+  $object = [pscustomobject]@{ Id = $Id }
+  $object | Add-Member ScriptProperty HasExited { return $script:mode -eq 'exited' }
+  $object | Add-Member ScriptProperty StartTime {
+    if ($script:mode -eq 'unreadable-lifetime') { throw 'Cannot read creation time.' }
+    return [datetime]::FromFileTimeUtc($script:expected + $(if ($script:mode -eq 'replacement') { 10000 } else { 0 }))
+  }
+  $object | Add-Member ScriptMethod Dispose { $script:disposed = $true }
+  return $object
+}
+foreach ($case in @(@('exited',$true), @('live',$false), @('replacement',$true), @('absent',$true))) {
+  $script:mode = $case[0]; $script:disposed = $false
+  $actual = Test-OwnedApiProcessExited -ProcessId 123 -StartedAt $script:expected
+  if ($actual -ne $case[1]) { throw "Wrong cleanup verdict for $script:mode." }
+  if ($script:mode -ne 'absent' -and -not $script:disposed) { throw 'Process observation handle leaked.' }
+}
+foreach ($script:mode in @('unreadable','unreadable-lifetime')) {
+  $refused = $false
+  try { Test-OwnedApiProcessExited -ProcessId 123 -StartedAt $script:expected | Out-Null } catch { $refused = $true }
+  if (-not $refused) { throw "Unreadable state accepted: $script:mode." }
+}
+$script:mode = 'exited'
+if ($null -eq (Get-Process -Id 123)) { throw 'Negative control failed to represent the still-enumerated exited process.' }
+Write-Output 'API_EXIT_BOUNDARIES_PASS'
+`
+  try {
+    writeFileSync(harness, script)
+    for (const host of ['powershell.exe', 'pwsh.exe']) {
+      const output = execFileSync(host, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harness], { cwd: repoRoot, encoding: 'utf8', timeout: 30000 })
+      assert.match(output, /API_EXIT_BOUNDARIES_PASS/)
+    }
+    assert.match(wrapper, /Test-OwnedApiProcessExited -ProcessId \$apiPid -StartedAt \$apiStart/)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
 test('Docker ownership boundary distinguishes real absence from arbitrary and daemon errors', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'aerolink-fake-docker-'))
   const fakeScript = join(fixture, 'fake-docker.ps1')
