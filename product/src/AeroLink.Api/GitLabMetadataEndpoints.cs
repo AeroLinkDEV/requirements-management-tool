@@ -64,7 +64,7 @@ public static class GitLabMetadataEndpoints
             remoteProjectId = configuration.RemoteProjectId, checkedAt = DateTimeOffset.UtcNow, observation = result });
     }
 
-    private static async Task<IResult?> CurrentAccessFailureAsync(Guid projectId, HttpContext http,
+    internal static async Task<IResult?> CurrentAccessFailureAsync(Guid projectId, HttpContext http,
         AeroLinkDbContext db, CancellationToken ct)
     {
         var actorId = http.UserAccount().Id;
