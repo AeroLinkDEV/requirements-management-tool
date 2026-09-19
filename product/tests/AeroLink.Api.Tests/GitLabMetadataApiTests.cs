@@ -53,6 +53,7 @@ public sealed class GitLabMetadataApiTests
                 "/api/v4/projects/17/merge_requests/1/approvals" => "{\"approved\":true,\"approved_by\":[]}",
                 var resource when resource == "/api/v4/projects/17/repository/commits/" + sha => "{\"id\":\"" + sha + "\"}",
                 "/api/v4/projects/17/repository/tree" => "[{\"id\":\"" + sha + "\",\"name\":\"README.md\",\"path\":\"README.md\",\"type\":\"blob\",\"mode\":\"100644\"}]",
+                "/api/v4/projects/17/repository/tags/release-demo" => "{\"name\":\"release-demo\",\"commit\":{\"id\":\"" + sha + "\"}}",
                 _ => throw new InvalidOperationException("Unexpected remote resource: " + uri.AbsolutePath)
             };
             var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) };
@@ -74,6 +75,7 @@ public sealed class GitLabMetadataApiTests
             $"/api/projects/{data.ProjectId}/repository/merge-requests",
             $"/api/projects/{data.ProjectId}/repository/merge-requests/1",
             $"/api/projects/{data.ProjectId}/repository/commit?reference={sha}",
+            $"/api/projects/{data.ProjectId}/repository/commit?reference=release-demo&referenceKind=Tag",
             $"/api/projects/{data.ProjectId}/repository/tree?commit={sha}"
         };
         foreach (var route in routes)
@@ -87,7 +89,8 @@ public sealed class GitLabMetadataApiTests
             Assert.Equal(17, document.RootElement.GetProperty("remoteProjectId").GetInt64());
             Assert.Equal("ok", document.RootElement.GetProperty("observation").GetProperty("code").GetString());
         }
-        Assert.Equal(5, requests.Count);
+        Assert.Equal(6, requests.Count);
+        Assert.Contains("/api/v4/projects/17/repository/tags/release-demo", requests);
     }
 
     [Theory]

@@ -22,9 +22,9 @@ public static class GitLabMetadataEndpoints
                 reader.GetMergeRequestAsync(configuration, iid, token), ct));
 
         app.MapGet("/api/projects/{projectId:guid}/repository/commit", (Guid projectId,
-            string reference, HttpContext http, AeroLinkDbContext db, GitLabMetadataReader reader,
+            string reference, GitLabReferenceKind? referenceKind, HttpContext http, AeroLinkDbContext db, GitLabMetadataReader reader,
             CancellationToken ct) => ObserveAsync(projectId, http, db, (configuration, token) =>
-                reader.ResolveCommitAsync(configuration, reference, token), ct));
+                reader.ResolveCommitAsync(configuration, reference, referenceKind ?? GitLabReferenceKind.Auto, token), ct));
 
         app.MapGet("/api/projects/{projectId:guid}/repository/tree", (Guid projectId, string commit,
             string? path, string? cursor, int? pageSize, HttpContext http, AeroLinkDbContext db,

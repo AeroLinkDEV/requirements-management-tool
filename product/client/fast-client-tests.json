@@ -8,6 +8,8 @@
     "digital-thread-reveal.spec.ts"
   ],
   "rendered": [
+    "code-source-rendered.spec.ts",
+    "code-evidence-rendered.spec.ts",
     "artifact-thread-rendered.spec.ts"
   ]
 }
