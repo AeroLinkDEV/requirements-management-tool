@@ -1,6 +1,7 @@
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Integrations;
+using AeroLink.Domain.Releases;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -12,11 +13,12 @@ public static class GitLabSourceEndpoints
     public static void MapGitLabSourceEndpoints(this WebApplication app)
     {
         app.MapGet("/api/projects/{projectId:guid}/code/source", ReadAsync);
+        app.MapGet("/api/projects/{projectId:guid}/code/source/history", ReadHistoryAsync);
         app.MapPost("/api/projects/{projectId:guid}/code/source", SelectAsync);
     }
 
     private static async Task<IResult> ReadAsync(Guid projectId, Guid releaseId,
-        HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+        HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         var denied = await GitLabMetadataEndpoints.CurrentAccessFailureAsync(projectId, http, db, ct);
@@ -27,9 +29,39 @@ public static class GitLabSourceEndpoints
             .SingleOrDefaultAsync(x => x.ProjectId == projectId && x.ReleaseId == releaseId, ct);
         var snapshot = current is null ? null : await db.GitLabSourceSnapshots.AsNoTracking()
             .SingleAsync(x => x.Id == current.SourceSnapshotId && x.ProjectId == projectId, ct);
+        var release = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == releaseId && x.ProjectId == projectId, ct);
+        var frozen = release.IsReleased || await db.ReleaseCampaigns.AsNoTracking().AnyAsync(x => x.ProjectId == projectId
+            && x.ReleaseId == releaseId && (x.State == ReleaseCampaignState.InReview || x.State == ReleaseCampaignState.Released), ct);
+        var canSelect = !frozen && await http.HasProjectRoleAsync(db, identity, projectId, ct,
+            ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager);
         http.Response.Headers.CacheControl = "no-store";
         return Results.Ok(new { projectId, releaseId, version = current?.Version ?? 0,
-            selectionEventId = current?.SelectionEventId, snapshot });
+            selectionEventId = current?.SelectionEventId, snapshot,
+            capabilities = new { canSelect, sourceSelectionFrozen = frozen } });
+    }
+
+    private static async Task<IResult> ReadHistoryAsync(Guid projectId, Guid releaseId, int? page,
+        int? pageSize, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+        var denied = await GitLabMetadataEndpoints.CurrentAccessFailureAsync(projectId, http, db, ct);
+        if (denied is not null) return denied;
+        if (releaseId == Guid.Empty || page is < 1 or > 100_000 || pageSize is < 1 or > 100)
+            return Results.BadRequest(new { code = "invalid_request", error = "Supply a valid release and bounded history page." });
+        if (!await db.Releases.AsNoTracking().AnyAsync(x => x.ProjectId == projectId && x.Id == releaseId, ct)) return Results.NotFound();
+        var events = db.GitLabSourceSelectionEvents.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId);
+        var total = await events.CountAsync(ct);
+        var rows = await (from selection in events
+                          join snapshot in db.GitLabSourceSnapshots.AsNoTracking()
+                              on new { selection.ProjectId, SnapshotId = selection.SourceSnapshotId }
+                              equals new { snapshot.ProjectId, SnapshotId = snapshot.Id }
+                          orderby selection.ResultingVersion descending
+                          select new { selection.Id, selection.ExpectedCurrentVersion, selection.ResultingVersion,
+                              selection.SelectedBy, selection.SelectedAt, snapshot }).Skip(((page ?? 1) - 1) * (pageSize ?? 25))
+            .Take(pageSize ?? 25).ToListAsync(ct);
+        http.Response.Headers.CacheControl = "no-store";
+        return Results.Ok(new { page = page ?? 1, pageSize = pageSize ?? 25, total, items = rows });
     }
 
     private static async Task<IResult> SelectAsync(Guid projectId, SelectGitLabSourceRequest request,

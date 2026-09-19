@@ -307,6 +307,7 @@
         "ChangeRequestTargetReleaseGuardApiTests",
         "ChangeRequestUpstreamTraceApiTests",
         "ClosedReleaseAuthoringTests",
+        "CodeRelationshipApiTests",
         "ControlledAttachmentMutationApiTests",
         "ControlledEditingCheckInApiTests",
         "ControlledEditingProcedureAuthorityTests",
@@ -322,6 +323,7 @@
         "EffectiveExecutionAuthorityApiTests",
         "ExternalIdentityAdminApiTests",
         "GitLabMetadataApiTests",
+        "GitLabSourceApiTests",
         "GovernanceEvidenceApiTests",
         "HistoricalPublicationFreezeApiTests",
         "IdentifierAllocationTests",
@@ -593,6 +595,7 @@
       "path": "/api/baselines/{id:guid}/reopen",
       "file": "BaselineEndpoints.cs",
       "coveredBy": [
+        "ReleaseCampaignExactIntentApiTests",
         "ReopenBaselineConsequencesApiTests",
         "WithdrawChangeRequestApiTests"
       ]
@@ -1849,6 +1852,46 @@
         "ProjectSetupDiscardApiTests",
         "ProjectSetupInceptionApiTests",
         "ProjectSetupKestrelQualificationTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/code/relationships/{relationshipKind}/{relationshipId:guid}/re-add",
+      "file": "CodeRelationshipEndpoints.cs",
+      "coveredBy": [
+        "CodeRelationshipApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/code/relationships/{relationshipKind}/{relationshipId:guid}/withdraw",
+      "file": "CodeRelationshipEndpoints.cs",
+      "coveredBy": [
+        "CodeRelationshipApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/code/relationships/files",
+      "file": "CodeRelationshipEndpoints.cs",
+      "coveredBy": [
+        "CodeRelationshipApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/code/relationships/merge-requests",
+      "file": "CodeRelationshipEndpoints.cs",
+      "coveredBy": [
+        "CodeRelationshipApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/code/source",
+      "file": "GitLabSourceEndpoints.cs",
+      "coveredBy": [
+        "GitLabSourceApiTests"
       ]
     },
     {

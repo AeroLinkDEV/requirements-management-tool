@@ -60,6 +60,22 @@ public sealed class GitLabSourceApiTests
         Assert.Equal(0, transport.Calls);
     }
 
+    [Fact]
+    public async Task Source_read_does_not_advertise_selection_to_a_view_only_member()
+    {
+        using var transport = new Transport(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)));
+        using var factory = new AeroLinkApiFactory();
+        using var configured = Configure(factory, transport);
+        var data = await SeedAsync(configured.Services, role: ProgramRole.Reviewer);
+        using var client = configured.CreateClient();
+        await SignInAsync(client, data.UserName);
+
+        using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/source?releaseId={data.ReleaseId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(json.RootElement.GetProperty("capabilities").GetProperty("canSelect").GetBoolean());
+    }
+
     [Theory]
     [InlineData("session")]
     [InlineData("account")]
@@ -107,7 +123,8 @@ public sealed class GitLabSourceApiTests
             services.Configure<ProjectGitLabOptions>(options => { options.BaseUrl = "https://gitlab.example"; options.ReadAccessToken = "test-only-token"; });
             services.AddHttpClient<GitLabMetadataReader>().ConfigurePrimaryHttpMessageHandler(() => transport);
         }));
-    private static async Task<(Guid ProjectId, Guid ReleaseId, Guid UserId, string UserName)> SeedAsync(IServiceProvider services)
+    private static async Task<(Guid ProjectId, Guid ReleaseId, Guid UserId, string UserName)> SeedAsync(
+        IServiceProvider services, ProgramRole role = ProgramRole.Engineer)
     {
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -118,7 +135,7 @@ public sealed class GitLabSourceApiTests
         var user = new UserAccount("source." + tag, "Source engineer", tag + "@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
         var repository = new ProjectRepositoryConfiguration(project.Id, ProjectRepositorySetupMode.ConnectNow, "GitLab", "https://gitlab.example/group/project", "tester", now);
         repository.RecordVerification("tester", now, 17, "group/project");
-        db.AddRange(program, project, release, user, repository, new ProgramMembership(user.Id, program.Id, ProgramRole.Engineer, "tester", now));
+        db.AddRange(program, project, release, user, repository, new ProgramMembership(user.Id, program.Id, role, "tester", now));
         await db.SaveChangesAsync();
         return (project.Id, release.Id, user.Id, user.UserName);
     }
