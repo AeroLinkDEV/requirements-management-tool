@@ -67,6 +67,12 @@ public static class CodeTraceabilityEndpoints
         IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct)
     {
         if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+        if (request.Disposition == CodeTraceDisposition.GitLabMerge)
+            return Results.Conflict(new
+            {
+                code = "legacy_gitlab_capture_retired",
+                error = "Legacy GitLab evidence writes are retired. Use the source-bound Code evidence acceptance command."
+            });
         var release = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId, ct);
         if (release is null) return Results.BadRequest(new { error = "The selected build does not belong to this Project." });
         var ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);

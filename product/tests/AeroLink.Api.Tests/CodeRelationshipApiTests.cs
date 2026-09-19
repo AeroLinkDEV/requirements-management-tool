@@ -1,10 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Releases;
+using AeroLink.Domain.Traceability;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -277,6 +282,167 @@ public sealed class CodeRelationshipApiTests
         using var second = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?releaseId={data.ReleaseId}&page=2&pageSize=1");
         using var secondJson = JsonDocument.Parse(await second.Content.ReadAsStringAsync());
         Assert.Equal("File", secondJson.RootElement.GetProperty("items")[0].GetProperty("relationshipKind").GetString());
+    }
+
+    [Fact]
+    public async Task Relationship_file_filters_bind_snapshot_and_use_exact_ordinal_path_before_paging()
+    {
+        const string firstSha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        const string secondSha = "cccccccccccccccccccccccccccccccccccccccc";
+        using var factory = Configure(new AeroLinkApiFactory(), new Remote(_ => new(HttpStatusCode.ServiceUnavailable)));
+        var data = await SeedFileAsync(factory.Services, firstSha);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var repository = await db.ProjectRepositoryConfigurations.SingleAsync(x => x.ProjectId == data.ProjectId);
+            var target = await db.SystemChangeRequests.SingleAsync(x => x.Id == data.TargetId);
+            var targetSnapshot = CodeRelationshipTarget.ForChangeRequestRevision(target.Id, target.Revision, target.DisplayNumber);
+            var firstFile = new GitLabFileRelationship(data.ProjectId, data.ReleaseId, "https://gitlab.example", 17,
+                data.SnapshotId, data.SelectionEventId, firstSha, "src/Program.cs", null, null, null, targetSnapshot,
+                CodeRelationshipMeaning.Implements, data.UserName, now);
+            var secondFirstSnapshotFile = new GitLabFileRelationship(data.ProjectId, data.ReleaseId, "https://gitlab.example", 17,
+                data.SnapshotId, data.SelectionEventId, firstSha, "src/Program.cs", 1, 1, null, targetSnapshot,
+                CodeRelationshipMeaning.Implements, data.UserName, now.AddSeconds(1));
+            var secondSnapshot = new GitLabSourceSnapshot(data.ProjectId, repository.Id, "https://gitlab.example", 17,
+                "group/project", secondSha, "feature", data.UserName, now, repository.Version);
+            var secondSelection = new GitLabSourceSelectionEvent(data.ProjectId, data.ReleaseId, secondSnapshot.Id, 1,
+                data.UserName, now);
+            var secondFile = new GitLabFileRelationship(data.ProjectId, data.ReleaseId, "https://gitlab.example", 17,
+                secondSnapshot.Id, secondSelection.Id, secondSha, "src/Program.cs", null, null, null, targetSnapshot,
+                CodeRelationshipMeaning.Implements, data.UserName, now);
+            db.AddRange(firstFile, secondFirstSnapshotFile, secondSnapshot, secondSelection, secondFile,
+                new GitLabCodeRelationshipEvent(CodeRelationshipKind.File, firstFile.Id,
+                    CodeRelationshipEventKind.Added, data.UserName, now),
+                new GitLabCodeRelationshipEvent(CodeRelationshipKind.File, secondFirstSnapshotFile.Id,
+                    CodeRelationshipEventKind.Added, data.UserName, now.AddSeconds(1)),
+                new GitLabCodeRelationshipEvent(CodeRelationshipKind.File, secondFile.Id,
+                    CodeRelationshipEventKind.Added, data.UserName, now));
+            await db.SaveChangesAsync();
+        }
+
+        using var client = factory.CreateClient();
+        await SignInAsync(client, data.UserName);
+        var exact = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?relationshipKind=File&sourceSnapshotId={data.SnapshotId}&path=src/Program.cs&pageSize=1");
+        Assert.Equal(HttpStatusCode.OK, exact.StatusCode);
+        using var exactJson = JsonDocument.Parse(await exact.Content.ReadAsStringAsync());
+        Assert.Equal(2, exactJson.RootElement.GetProperty("total").GetInt32());
+        Assert.Equal("src/Program.cs", exactJson.RootElement.GetProperty("items")[0].GetProperty("path").GetString());
+        var exactPage2 = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?relationshipKind=File&sourceSnapshotId={data.SnapshotId}&path=src/Program.cs&page=2&pageSize=1");
+        using var exactPage2Json = JsonDocument.Parse(await exactPage2.Content.ReadAsStringAsync());
+        Assert.Single(exactPage2Json.RootElement.GetProperty("items").EnumerateArray());
+
+        var caseMismatch = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?relationshipKind=File&sourceSnapshotId={data.SnapshotId}&path=src/program.cs");
+        Assert.Equal(HttpStatusCode.OK, caseMismatch.StatusCode);
+        using var caseJson = JsonDocument.Parse(await caseMismatch.Content.ReadAsStringAsync());
+        Assert.Equal(0, caseJson.RootElement.GetProperty("total").GetInt32());
+
+        var mixed = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?relationshipKind=MergeRequest&sourceSnapshotId={data.SnapshotId}&path=src/Program.cs");
+        Assert.Equal(HttpStatusCode.BadRequest, mixed.StatusCode);
+        var foreign = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?relationshipKind=File&sourceSnapshotId={Guid.NewGuid()}&path=src/Program.cs");
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+    }
+
+    [Fact]
+    public async Task Legacy_gitlab_post_is_refused_before_remote_or_legacy_record_write()
+    {
+        using var transport = new Remote(_ => throw new InvalidOperationException("The retired route must not call GitLab."));
+        using var factory = Configure(new AeroLinkApiFactory(), transport);
+        var data = await SeedAsync(factory.Services);
+        using var client = factory.CreateClient();
+        await SignInAsync(client, data.UserName);
+        using var response = await client.PostAsJsonAsync("/api/code-traceability", new
+        {
+            projectId = data.ProjectId, releaseId = data.ReleaseId, requirementArtifactId = Guid.NewGuid(),
+            requirementRevisionId = Guid.NewGuid(), disposition = "GitLabMerge", repositoryPath = "group/project",
+            mergeRequestReference = "!1", mergeRequestTitle = "retired", mergeRequestUrl = "https://gitlab.example/group/project/-/merge_requests/1",
+            mergeCommitSha = new string('a', 40), mergedAt = DateTimeOffset.UtcNow
+        });
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("legacy_gitlab_capture_retired", json.RootElement.GetProperty("code").GetString());
+        Assert.Equal(0, transport.Calls);
+    }
+
+    [Fact]
+    public async Task Evidence_no_code_validation_rejects_mixed_contributions_without_gitlab()
+    {
+        using var transport = new Remote(_ => throw new InvalidOperationException("No-code validation must not call GitLab."));
+        using var factory = Configure(new AeroLinkApiFactory(), transport);
+        var data = await SeedAsync(factory.Services);
+        using var client = factory.CreateClient();
+        await SignInAsync(client, data.UserName);
+        using var response = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", new
+        {
+            releaseId = data.ReleaseId, requirementArtifactId = Guid.NewGuid(), requirementRevisionId = Guid.NewGuid(),
+            disposition = "NoCodeChangeRequired", expectedSelectorVersion = 0L, expectedLegacyRecordId = (Guid?)null,
+            contributions = new[] { new { kind = "File", relationshipId = Guid.NewGuid(), expectedRelationshipVersion = 1L } },
+            noCodeChangeRationale = "not applicable"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, transport.Calls);
+    }
+
+    [Fact]
+    public async Task Evidence_endpoint_accepts_no_code_without_gitlab_after_exact_baseline_materialization()
+    {
+        using var transport = new Remote(_ => throw new InvalidOperationException("No-code acceptance must not call GitLab."));
+        using var factory = Configure(new AeroLinkApiFactory(), transport);
+        var data = await SeedAsync(factory.Services);
+        Guid artifactId;
+        Guid revisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var baseline = new CandidateBaseline("BL-900001", 0, data.ProjectId, data.ReleaseId, null,
+                "Acceptance baseline", data.UserName, now);
+            var system = new RequirementArtifact(data.ProjectId, "SYS-900001", RequirementLevel.System, now);
+            var high = new RequirementArtifact(data.ProjectId, "HLR-900001", RequirementLevel.HighLevel, now);
+            var artifact = new RequirementArtifact(data.ProjectId, "LLR-900001", RequirementLevel.LowLevel, now);
+            var change = new SystemChangeRequest("LLRCR-90001", 0, data.ProjectId, data.ReleaseId,
+                "No-code acceptance", "Problem", "Analysis", "Solution", data.UserName, now,
+                ChangeRequestType.Software, softwareLevel: RequirementLevel.LowLevel);
+            var systemRevision = new RequirementRevision(system.Id, 1, "System behavior.", "Acceptance test", "Test",
+                RequirementRevisionState.Active, change.Id, baseline.Id, now);
+            var highRevision = new RequirementRevision(high.Id, 1, "High-level behavior.", "Acceptance test", "Test",
+                RequirementRevisionState.Active, change.Id, baseline.Id, now,
+                RequirementParentKind.Allocated, parentRevisionIds: [systemRevision.Id]);
+            var revision = new RequirementRevision(artifact.Id, 1, "No implementation change is required.",
+                "Acceptance test", "Test", RequirementRevisionState.Active, change.Id, baseline.Id, now,
+                RequirementParentKind.Allocated, parentRevisionIds: [highRevision.Id]);
+            var campaign = new ReleaseCampaign(data.ProjectId, data.ReleaseId, baseline.Id,
+                "Acceptance campaign", data.UserName, now);
+            artifactId = artifact.Id;
+            revisionId = revision.Id;
+            db.AddRange(baseline, system, systemRevision, high, highRevision, artifact, change, revision, campaign,
+                new BaselineRequirementSelection(baseline.Id, system.Id, systemRevision.Id),
+                new BaselineRequirementSelection(baseline.Id, high.Id, highRevision.Id),
+                new BaselineRequirementSelection(baseline.Id, artifact.Id, revision.Id),
+                new RequirementTraceLink(data.ProjectId, highRevision.Id, systemRevision.Id,
+                    RequirementTraceType.AllocatedFrom, "Exact parent", now),
+                new RequirementTraceLink(data.ProjectId, revision.Id, highRevision.Id,
+                    RequirementTraceType.AllocatedFrom, "Exact parent", now));
+            await db.SaveChangesAsync();
+            await db.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(update => update
+                .SetProperty(x => x.State, CandidateBaselineState.Frozen)
+                .SetProperty(x => x.RequirementsMaterializedAt, now));
+        }
+
+        using var client = factory.CreateClient();
+        await SignInAsync(client, data.UserName);
+        using var response = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", new
+        {
+            releaseId = data.ReleaseId, requirementArtifactId = artifactId, requirementRevisionId = revisionId,
+            disposition = "NoCodeChangeRequired", expectedSelectorVersion = 0L, expectedLegacyRecordId = (Guid?)null,
+            contributions = Array.Empty<object>(), noCodeChangeRationale = "The exact changed requirement has no implementation code impact."
+        });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(0, transport.Calls);
+        using var verify = factory.Services.CreateScope();
+        var saved = verify.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Single(await saved.CodeEvidenceDispositionSets.Where(x => x.ProjectId == data.ProjectId).ToListAsync());
+        Assert.Empty(await saved.CodeEvidenceContributions.Where(x => x.ProjectId == data.ProjectId).ToListAsync());
     }
 
     [Fact]

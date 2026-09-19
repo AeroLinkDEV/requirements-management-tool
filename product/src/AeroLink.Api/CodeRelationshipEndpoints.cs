@@ -25,7 +25,8 @@ public static class CodeRelationshipEndpoints
 
     private static async Task<IResult> ReadRelationshipsAsync(Guid projectId, Guid? releaseId,
         string? relationshipKind, string? targetKind, Guid? targetId, int? page, int? pageSize,
-        bool? includeWithdrawn, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+        bool? includeWithdrawn, Guid? sourceSnapshotId, string? path,
+        HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         var denied = await GitLabMetadataEndpoints.CurrentAccessFailureAsync(projectId, http, db, ct);
@@ -33,10 +34,21 @@ public static class CodeRelationshipEndpoints
         if (!TryParseKind(relationshipKind, out CodeRelationshipKind? parsedKind)
             || !TryParseTargetKind(targetKind, out CodeRelationshipTargetKind? parsedTargetKind))
             return Results.BadRequest(new { code = "invalid_filter", error = "The relationship filter is not supported." });
+        var hasSourceSnapshot = sourceSnapshotId.HasValue;
+        var hasPath = !string.IsNullOrWhiteSpace(path);
+        if (hasSourceSnapshot != hasPath || (hasSourceSnapshot && parsedKind != CodeRelationshipKind.File))
+            return Results.BadRequest(new { code = "invalid_filter", error = "Exact file filters require relationshipKind=File, sourceSnapshotId and path together." });
+        string? normalizedPath = null;
+        if (hasPath && (!TryNormalizePath(path!, out normalizedPath) || normalizedPath is null))
+            return Results.BadRequest(new { code = "invalid_filter", error = "The exact file path filter is unsafe or empty." });
+        if (hasSourceSnapshot && !await db.GitLabSourceSnapshots.AsNoTracking()
+                .AnyAsync(x => x.ProjectId == projectId && x.Id == sourceSnapshotId!.Value, ct))
+            return Results.NotFound(new { code = "source_not_found", error = "The source snapshot is not owned by this project." });
         try
         {
             var result = await new CodeRelationshipService(db).ReadPageAsync(projectId, releaseId, parsedKind,
-                parsedTargetKind, targetId, page ?? 1, pageSize ?? 25, includeWithdrawn == true, ct);
+                parsedTargetKind, targetId, page ?? 1, pageSize ?? 25, includeWithdrawn == true, ct,
+                sourceSnapshotId, normalizedPath);
             http.Response.Headers.CacheControl = "no-store";
             var capabilityState = await RelationshipCapabilityStateAsync(projectId, result.Items.Select(x => x.ReleaseId), http, db, ct);
             var items = result.Items.Select(x => ToReadItem(x,

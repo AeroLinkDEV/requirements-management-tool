@@ -64,6 +64,14 @@ public sealed class CodeRelationshipPagingPostgresQualificationTests
             Assert.Equal(2, first.Total);
             Assert.Equal(CodeRelationshipKind.MergeRequest, Assert.Single(first.Items).RelationshipKind);
             Assert.Equal(CodeRelationshipKind.File, Assert.Single(second.Items).RelationshipKind);
+
+            var exactFile = await new CodeRelationshipService(read).ReadPageAsync(project.Id, release.Id,
+                CodeRelationshipKind.File, null, null, 1, 1, false, default, snapshot.Id, "src/demo.c");
+            Assert.Equal(1, exactFile.Total);
+            Assert.Equal("src/demo.c", Assert.Single(exactFile.Items).Path);
+            var caseMismatch = await new CodeRelationshipService(read).ReadPageAsync(project.Id, release.Id,
+                CodeRelationshipKind.File, null, null, 1, 1, false, default, snapshot.Id, "src/Demo.c");
+            Assert.Equal(0, caseMismatch.Total);
         }
         finally
         {

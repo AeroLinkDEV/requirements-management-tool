@@ -407,6 +407,7 @@ app.MapBaselineImportEndpoints();
 app.MapRequirementsEndpoints();
 app.MapCodeTraceabilityEndpoints();
 app.MapCodeRelationshipEndpoints();
+app.MapCodeEvidenceEndpoints();
 app.MapBaselineEndpoints();
 app.MapArtifactThreadEndpoints();
 app.MapVerificationEndpoints();

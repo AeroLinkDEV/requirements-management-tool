@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 150,
-    "tests": 946,
-    "knownCases": 1069,
+    "classes": 151,
+    "tests": 962,
+    "knownCases": 1085,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -14,9 +14,9 @@
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 56,
-      "tests": 332,
-      "knownCases": 379,
+      "classes": 57,
+      "tests": 348,
+      "knownCases": 395,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -487,6 +487,19 @@
       ]
     },
     {
+      "cls": "CodeRelationshipApiTests",
+      "tests": 15,
+      "knownCases": 15,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "ef-translation",
+        "http-boundary",
+        "startup-config"
+      ]
+    },
+    {
       "cls": "AuthoringTracedImpactTests",
       "tests": 14,
       "knownCases": 14,
@@ -740,6 +753,18 @@
       ]
     },
     {
+      "cls": "GitLabSourceApiTests",
+      "tests": 4,
+      "knownCases": 7,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "GovernanceEvidenceApiTests",
       "tests": 4,
       "knownCases": 4,
@@ -810,18 +835,6 @@
         "ef-translation",
         "http-boundary",
         "in-process-logic"
-      ]
-    },
-    {
-      "cls": "GitLabSourceApiTests",
-      "tests": 3,
-      "knownCases": 6,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
-      "intents": [
-        "auth-policy",
-        "http-boundary"
       ]
     },
     {

@@ -1,5 +1,6 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Common;
 using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
@@ -221,6 +222,70 @@ public sealed class CurrentCodeEvidenceProjectionTests
     }
 
     [Fact]
+    public async Task Acceptance_service_records_no_code_without_gitlab_and_supersedes_only_expected_legacy_identity()
+    {
+        await using var f = await Fixture.CreateAsync(changedInBuild: true);
+        var campaign = await f.CampaignAsync();
+        await f.Db.CandidateBaselines.Where(x => x.Id == campaign.BaselineId).ExecuteUpdateAsync(update => update
+            .SetProperty(x => x.State, CandidateBaselineState.Frozen)
+            .SetProperty(x => x.RequirementsMaterializedAt, f.Now));
+
+        await using var scope = await ProjectControlledWriteScope.AcquireAsync(f.Db, f.Project.Id);
+        var command = new CodeEvidenceAcceptanceCommand(f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id,
+            CodeEvidenceDisposition.NoCodeChangeRequired, 0, f.Legacy.Id, null, null, null, null, [],
+            "The changed requirement has no implementation code impact.");
+        var result = await new CodeEvidenceAcceptanceService(f.Db).AcceptAsync(scope, command,
+            new Dictionary<Guid, CodeEvidenceMergeObservation>(),
+            LegacyLadderPolicy.Instance, "tester", f.Now, default);
+        await f.Db.SaveChangesAsync();
+        await scope.CommitAsync();
+
+        var set = await f.Db.CodeEvidenceDispositionSets.SingleAsync(x => x.Id == result.EvidenceSetId);
+        var selector = await f.Db.CodeEvidenceCurrentSelectors.SingleAsync();
+        Assert.Equal(CodeEvidenceDisposition.NoCodeChangeRequired, set.Disposition);
+        Assert.Equal(f.Legacy.Id, set.SupersededLegacyRecordId);
+        Assert.Null(set.SourceSnapshotId);
+        Assert.Null(set.SourceSelectionEventId);
+        Assert.Equal(result.EvidenceSetId, selector.EvidenceSetId);
+        Assert.Equal(1, selector.Version);
+        Assert.Empty(await f.Db.CodeEvidenceContributions.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Acceptance_service_refuses_a_gitlab_contribution_without_provider_observation()
+    {
+        await using var f = await Fixture.CreateAsync(changedInBuild: true);
+        var campaign = await f.CampaignAsync();
+        await f.Db.CandidateBaselines.Where(x => x.Id == campaign.BaselineId).ExecuteUpdateAsync(update => update
+            .SetProperty(x => x.State, CandidateBaselineState.Frozen)
+            .SetProperty(x => x.RequirementsMaterializedAt, f.Now));
+        f.Repository.RecordVerification("tester", f.Now, 17, "group/project");
+        var snapshot = f.Snapshot('a');
+        var selection = new GitLabSourceSelectionEvent(f.Project.Id, f.Release.Id, snapshot.Id, 0, "tester", f.Now);
+        var current = new GitLabCurrentSourceSelection(f.Project.Id, f.Release.Id, snapshot.Id, selection.Id, "tester", f.Now);
+        var target = CodeRelationshipTarget.ForRequirementRevision(f.Revision.Id, f.Artifact.Id, f.Revision.Revision, "LLR-000001.01");
+        var relationship = new GitLabMergeRequestRelationship(f.Project.Id, f.Release.Id, snapshot.InstanceBaseUrl,
+            snapshot.RemoteProjectId, 12, 1200, snapshot.Id, selection.Id, snapshot.PathWithNamespace,
+            "https://gitlab.example/group/project/-/merge_requests/12", "Observed later", target,
+            CodeRelationshipMeaning.Implements, "tester", f.Now);
+        f.Db.AddRange(snapshot, selection, current, relationship);
+        await f.Db.SaveChangesAsync();
+
+        var command = new CodeEvidenceAcceptanceCommand(f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id,
+            CodeEvidenceDisposition.GitLabContributions, 0, f.Legacy.Id, f.Repository.Version,
+            selection.Id, snapshot.Id, selection.ResultingVersion,
+            [new(CodeEvidenceContributionKind.MergeRequest, relationship.Id, relationship.Version)], null);
+        await using (var scope = await ProjectControlledWriteScope.AcquireAsync(f.Db, f.Project.Id))
+        {
+            await Assert.ThrowsAsync<DomainException>(() => new CodeEvidenceAcceptanceService(f.Db).AcceptAsync(scope,
+                command, new Dictionary<Guid, CodeEvidenceMergeObservation>(), LegacyLadderPolicy.Instance,
+                "tester", f.Now, default));
+        }
+        Assert.Empty(await f.Db.CodeEvidenceDispositionSets.ToListAsync());
+        Assert.Empty(await f.Db.CodeEvidenceContributions.ToListAsync());
+    }
+
+    [Fact]
     public async Task A_to_B_to_A_requires_explicit_reconfirmation_instead_of_reviving_acceptance()
     {
         await using var f = await Fixture.CreateAsync();
@@ -280,7 +345,7 @@ public sealed class CurrentCodeEvidenceProjectionTests
         public RequirementArtifact Artifact { get; private set; } = null!;
         public RequirementRevision Revision { get; private set; } = null!;
         public CodeTraceabilityRecord Legacy { get; private set; } = null!;
-        private ProjectRepositoryConfiguration repository = null!;
+        public ProjectRepositoryConfiguration Repository { get; private set; } = null!;
         public static async Task<Fixture> CreateAsync(bool changedInBuild = false)
         {
             var f = new Fixture();
@@ -314,8 +379,8 @@ public sealed class CurrentCodeEvidenceProjectionTests
             }
             f.Legacy = new(f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id, CodeTraceDisposition.NoCodeChangeRequired,
                 "", "", "", "", "", null, "Existing retained disposition.", false, "tester", f.Now);
-            f.repository = new(f.Project.Id, ProjectRepositorySetupMode.ConnectNow, "GitLab", "https://gitlab.example/group/project", "tester", f.Now);
-            f.Db.AddRange(program, f.Project, predecessor, f.Release, sourceBaseline, baseline, f.Artifact, f.Revision, f.Legacy, f.repository);
+            f.Repository = new(f.Project.Id, ProjectRepositorySetupMode.ConnectNow, "GitLab", "https://gitlab.example/group/project", "tester", f.Now);
+            f.Db.AddRange(program, f.Project, predecessor, f.Release, sourceBaseline, baseline, f.Artifact, f.Revision, f.Legacy, f.Repository);
             f.Db.AddRange(system, systemRevision, high, highRevision,
                 new BaselineRequirementSelection(baseline.Id, system.Id, systemRevision.Id),
                 new BaselineRequirementSelection(baseline.Id, high.Id, highRevision.Id),
@@ -325,8 +390,8 @@ public sealed class CurrentCodeEvidenceProjectionTests
             await f.Db.SaveChangesAsync();
             return f;
         }
-        public GitLabSourceSnapshot Snapshot(char sha) => new(Project.Id, repository.Id, "https://gitlab.example", 17,
-            "group/project", new string(sha, 40), "main", "tester", Now, repository.Version);
+        public GitLabSourceSnapshot Snapshot(char sha) => new(Project.Id, Repository.Id, "https://gitlab.example", 17,
+            "group/project", new string(sha, 40), "main", "tester", Now, Repository.Version);
         public CodeEvidenceDispositionSet AcceptFile(GitLabSourceSnapshot snapshot, GitLabSourceSelectionEvent selection,
             CodeRelationshipTarget? target = null)
         {

@@ -16,10 +16,24 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
 
     public async Task<CodeRelationshipPage> ReadPageAsync(Guid projectId, Guid? releaseId,
         CodeRelationshipKind? kind, CodeRelationshipTargetKind? targetKind, Guid? targetId,
-        int page, int pageSize, bool includeWithdrawn, CancellationToken ct)
+        int page, int pageSize, bool includeWithdrawn, CancellationToken ct,
+        Guid? sourceSnapshotId = null, string? path = null)
     {
         if (projectId == Guid.Empty || page is < 1 or > 100_000 || pageSize is < 1 or > 100)
             throw new DomainException("Choose a valid relationship page between 1 and 100000 and a page size between 1 and 100.");
+        var hasPath = !string.IsNullOrWhiteSpace(path);
+        if (sourceSnapshotId.HasValue != hasPath)
+            throw new DomainException("A file path filter requires its exact source snapshot identity, and vice versa.");
+        if (sourceSnapshotId.HasValue)
+        {
+            if (sourceSnapshotId.Value == Guid.Empty || !await db.GitLabSourceSnapshots.AsNoTracking()
+                    .AnyAsync(x => x.ProjectId == projectId && x.Id == sourceSnapshotId.Value, ct))
+                throw new DomainException("The source snapshot filter is not owned by this project.");
+            path = path!.Trim().Trim('/');
+            if (path.Length == 0 || path.Contains('\\') || path.Contains("//", StringComparison.Ordinal)
+                || path.Split('/').Any(x => x is "" or "." or ".."))
+                throw new DomainException("The file path filter is unsafe or empty.");
+        }
         var mergeQuery = db.GitLabMergeRequestRelationships.AsNoTracking()
             .Where(x => x.ProjectId == projectId && (!releaseId.HasValue || x.ReleaseId == releaseId.Value)
                 && (includeWithdrawn || x.IsActive) && (!targetKind.HasValue || x.TargetKind == targetKind.Value)
@@ -27,7 +41,9 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
         var fileQuery = db.GitLabFileRelationships.AsNoTracking()
             .Where(x => x.ProjectId == projectId && (!releaseId.HasValue || x.ReleaseId == releaseId.Value)
                 && (includeWithdrawn || x.IsActive) && (!targetKind.HasValue || x.TargetKind == targetKind.Value)
-                && (!targetId.HasValue || x.TargetIdentityId == targetId.Value));
+                && (!targetId.HasValue || x.TargetIdentityId == targetId.Value)
+                && (!sourceSnapshotId.HasValue || x.SourceSnapshotId == sourceSnapshotId.Value)
+                && (!hasPath || x.Path == path));
         var mergeCount = kind is null or CodeRelationshipKind.MergeRequest ? await mergeQuery.CountAsync(ct) : 0;
         var fileCount = kind is null or CodeRelationshipKind.File ? await fileQuery.CountAsync(ct) : 0;
         var total = mergeCount + fileCount;
