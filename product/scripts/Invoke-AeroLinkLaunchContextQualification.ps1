@@ -276,8 +276,15 @@ function Stop-TwinInstanceTrees {
         Start-Sleep -Milliseconds 250
     }
     foreach ($p in $owned) {
-        $still = Get-Process -Id ([int]$p.ProcessId) -ErrorAction SilentlyContinue
-        if ($still) { $remaining.Add([ordered]@{ processId = [int]$p.ProcessId; name = $still.ProcessName }) }
+        # Re-verify the IDENTITY, not just the pid: between the stop and this check a finished twin process's pid
+        # can be reused by an unrelated process, and reporting that stranger as "survived" withholds a good
+        # qualification (measured: pid reuse by svchost.exe produced CleanupFailed for a clean run).
+        $live = $null
+        try { $live = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$p.ProcessId)" -ErrorAction Stop }
+        catch { $remaining.Add([ordered]@{ processId = [int]$p.ProcessId; name = 'query-failed'; state = 'Unknown'; detail = $_.Exception.Message }); continue }
+        if (-not $live) { continue }
+        if ([string]$live.CreationDate -ne [string]$p.CreationDate) { continue }
+        $remaining.Add([ordered]@{ processId = [int]$p.ProcessId; name = [string]$live.Name; state = 'Running' })
     }
     return @($remaining)
 }
@@ -369,8 +376,14 @@ function Stop-RecordedIdentities {
         Start-Sleep -Milliseconds 250
     }
     foreach ($identity in $targets) {
-        $still = Get-Process -Id ([int]$identity.processId) -ErrorAction SilentlyContinue
-        if ($still) { $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = $still.ProcessName }) }
+        # Same identity rule as Stop-TwinInstanceTrees: a reused pid is a stranger, and an unreadable state is
+        # Unknown rather than a claimed survivor (and vice versa - it is never a claimed stop).
+        $live = $null
+        try { $live = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$identity.processId)" -ErrorAction Stop }
+        catch { $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = 'query-failed'; state = 'Unknown'; detail = $_.Exception.Message }); continue }
+        if (-not $live) { continue }
+        if ([string]$live.CreationDate -ne [string]$identity.created) { continue }
+        $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = [string]$live.Name; state = 'Running' })
     }
     if ($stopped) { Write-Verbose "stopped $stopped recorded twin process(es)" }
     return $remaining.ToArray()
