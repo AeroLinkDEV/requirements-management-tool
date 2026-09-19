@@ -633,6 +633,99 @@ public static class Program {
     Check ((Get-TwinObservationDescriptorHash $t21Other) -eq 'ABC') 'T21: an active record must contribute the descriptor of the context it measured.'
     Check ((Get-TwinObservationDescriptorHash ([ordered]@{ descriptorHash = 'DIRECT' })) -eq 'DIRECT') 'T21: a completed record contributes its own descriptor hash.'
     Check ((Get-TwinObservationDescriptorHash ([ordered]@{ probe = 1 })) -eq '') 'T21: an observation with no descriptor hash reports none, so the three-run check cannot pass on one run.'
+
+    # ---------------------------------------------------------------------------------------------------------
+    # T23 (Astra 7e878834, F801-1): the qualifier's owned-tree cleanup submits ONLY an identity the selection
+    # bound to the lifetime the inventory described, preserves a replacement instead of terminating it, and
+    # withholds a successful cleanup verdict when a discovery gap leaves a live process it cannot attribute.
+    # The shipped functions are extracted (the review's method) with controlled seams: nothing is terminated here.
+    # ---------------------------------------------------------------------------------------------------------
+    foreach ($functionName in @('Stop-TwinInstanceTrees', 'Complete-TwinRun')) {
+        $node = $qualifierAst.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq $functionName }, $true)
+        if (-not $node) { throw "T23: the qualifier no longer defines $functionName." }
+        . ([scriptblock]::Create($node.Extent.Text))
+    }
+    $t23Epoch = [DateTime]::Parse('2026-09-19T10:00:00Z').ToUniversalTime().ToFileTimeUtc()
+    $t23Root = [ordered]@{ processId = 100; creationFileTime = $t23Epoch }
+    $t23Child = [ordered]@{ processId = 101; creationFileTime = ($t23Epoch + 10000000) }
+    $t23Foreign = ($t23Epoch + 90000000)
+    $t23StopRequests = [System.Collections.Generic.List[object]]::new()
+    $cleanupErrors = [System.Collections.Generic.List[string]]::new()
+    function Test-TwinProcessIdentity { param($Identity) [ordered]@{ state = 'Match'; detail = '' } }
+    function Get-TwinTreeIdentities { param($EngineIdentity, [int]$MaxDepth = 12) $script:t23Tree }
+    function Stop-VerifiedTwinIdentity {
+        param($Identity)
+        $script:t23StopRequests.Add([ordered]@{ processId = [int]$Identity.processId; creationFileTime = [long]$Identity.creationFileTime })
+        return [ordered]@{ state = 'Stopped'; processId = [int]$Identity.processId; detail = '' }
+    }
+    function Assert-T23BoundOnly([string]$Name, $Tree) {
+        $allowed = @(@($Tree.identities) | ForEach-Object { "$([int]$_.processId)@$([long]$_.creationFileTime)" })
+        foreach ($request in @($script:t23StopRequests)) {
+            $token = "$([int]$request.processId)@$([long]$request.creationFileTime)"
+            Check ($allowed -contains $token) "T23 ${Name}: only an identity the inventory bound may be submitted for termination (submitted $token; the selection bound [$($allowed -join ', ')])."
+        }
+    }
+
+    # A tree the selection bound is settled exactly by those identities, and nothing is left over.
+    $script:t23StopRequests.Clear()
+    $script:t23Tree = [ordered]@{ state = 'Match'; identities = @($t23Root, $t23Child); unresolved = @(); replaced = @(); detail = '' }
+    $t23Left = @(Stop-TwinInstanceTrees -Engines @($t23Root))
+    Assert-T23BoundOnly 'bound tree' $script:t23Tree
+    Check ($script:t23StopRequests.Count -eq 2) "T23 bound tree: both bound identities must be submitted (submitted $($script:t23StopRequests.Count))."
+    Check (@($t23Left).Count -eq 0) 'T23 bound tree: a settled tree leaves no unresolved entry.'
+
+    # A pid the inventory showed as ANOTHER lifetime is preserved, reported, and never submitted.
+    $script:t23StopRequests.Clear()
+    $script:t23Tree = [ordered]@{ state = 'Match'; identities = @($t23Root); unresolved = @()
+        replaced = @([ordered]@{ processId = 101; role = 'tree-entry'; state = 'Replaced'; creationFileTime = $t23Foreign; detail = 'another lifetime' }); detail = '' }
+    $t23Left = @(Stop-TwinInstanceTrees -Engines @($t23Root))
+    Assert-T23BoundOnly 'replaced child' $script:t23Tree
+    Check (-not @($script:t23StopRequests | Where-Object { [long]$_.creationFileTime -eq [long]$t23Foreign }).Count) 'T23 replaced child: the replacement lifetime must never be submitted for termination.'
+    Check (@($t23Left | Where-Object { [int]$_.processId -eq 101 -and $_.state -eq 'PidReused' }).Count -eq 1) 'T23 replaced child: the replacement is reported as preserved, not as a survivor of ours.'
+    $cleanupErrors.Clear()
+    Complete-TwinRun -Name 'replaced child' -Run ([pscustomobject]@{ Instance = [pscustomobject]@{ EngineIdentity = $t23Root } })
+    Check ($cleanupErrors.Count -eq 0) "T23 replaced child: a preserved foreign process is not a cleanup error (got '$(@($cleanupErrors) -join '; ')')."
+
+    # A discovery gap is Unknown: never submitted, always reported, and it withholds the qualification.
+    foreach ($t23Case in @(
+        @{ Name = 'unreadable child'; Identities = @($t23Root); Expected = 101
+           Unresolved = @([ordered]@{ processId = 101; role = 'tree-entry'; state = 'Unknown'; creationFileTime = 0L; detail = 'Access denied' }) },
+        @{ Name = 'unattributable descendant'; Identities = @($t23Root); Expected = 102
+           Unresolved = @([ordered]@{ processId = 102; role = 'unattributable-descendant'; state = 'Unknown'; creationFileTime = ($t23Epoch + 20000000); detail = 'its ancestry cannot be bound: pid 101 now belongs to a different lifetime' }) },
+        @{ Name = 'unreadable root'; Identities = @(); Expected = 100
+           Unresolved = @([ordered]@{ processId = 100; role = 'root'; state = 'Unknown'; creationFileTime = 0L; detail = 'Access denied' }) }
+    )) {
+        $script:t23StopRequests.Clear()
+        $script:t23Tree = [ordered]@{ state = 'Unknown'; identities = @($t23Case.Identities); unresolved = @($t23Case.Unresolved); replaced = @(); detail = 'a tree entry could not be bound to a live lifetime' }
+        $t23Left = @(Stop-TwinInstanceTrees -Engines @($t23Root))
+        Assert-T23BoundOnly $t23Case.Name $script:t23Tree
+        Check (@($t23Left | Where-Object { [int]$_.processId -eq [int]$t23Case.Expected -and $_.state -eq 'Unknown' }).Count -eq 1) "T23 $($t23Case.Name): the discovery gap must be carried out as Unknown."
+        $cleanupErrors.Clear()
+        Complete-TwinRun -Name $t23Case.Name -Run ([pscustomobject]@{ Instance = [pscustomobject]@{ EngineIdentity = $t23Root } })
+        Check ($cleanupErrors.Count -ge 1) "T23 $($t23Case.Name): an unresolved discovery must withhold a successful cleanup verdict."
+        Check ((@($cleanupErrors) -join ' ') -match [string]$t23Case.Expected) "T23 $($t23Case.Name): the refusal must name pid $($t23Case.Expected)."
+    }
+
+    # The engine identity itself: a reused or unreadable recorded engine is reported, never terminated.
+    foreach ($t23EngineCase in @(
+        @{ Name = 'reused engine identity'; State = 'Reused'; Expect = 'PidReused' },
+        @{ Name = 'unreadable engine identity'; State = 'Unknown'; Expect = 'Unknown' }
+    )) {
+        $script:t23StopRequests.Clear()
+        function Test-TwinProcessIdentity { param($Identity) [ordered]@{ state = $script:t23EngineState; detail = 'engine identity' } }
+        $script:t23EngineState = $t23EngineCase.State
+        $t23Left = @(Stop-TwinInstanceTrees -Engines @($t23Root))
+        Check ($script:t23StopRequests.Count -eq 0) "T23 $($t23EngineCase.Name): no termination may be submitted from an unverified engine."
+        Check (@($t23Left | Where-Object { $_.state -eq $t23EngineCase.Expect }).Count -eq 1) "T23 $($t23EngineCase.Name): the engine must be reported as $($t23EngineCase.Expect)."
+    }
+    function Test-TwinProcessIdentity { param($Identity) [ordered]@{ state = 'Match'; detail = '' } }
+
+    # A selection that cannot be read is Unknown, never a settled cleanup.
+    $script:t23StopRequests.Clear()
+    function Get-TwinTreeIdentities { param($EngineIdentity, [int]$MaxDepth = 12) throw 'the inventory query failed' }
+    $t23Left = @(Stop-TwinInstanceTrees -Engines @($t23Root))
+    Check ($script:t23StopRequests.Count -eq 0) 'T23 query failure: no termination may be submitted when the selection could not be read.'
+    Check (@($t23Left | Where-Object { $_.state -eq 'Unknown' }).Count -eq 1) 'T23 query failure: the gap is reported as Unknown.'
 }
 catch { $failures.Add("Suite error: $($_.Exception.Message) @ $($_.InvocationInfo.PositionMessage) :: $($_.ScriptStackTrace)") }
 finally {

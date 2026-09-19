@@ -287,13 +287,31 @@ function Stop-AeroLinkProcessByIdentity {
 
 function Get-AeroLinkOwnedTreeIdentities {
     <#
-      Identities of the live descendants of a VERIFIED root (root included). The root is verified natively against
-      the recorded FILETIME, and the SAME topology snapshot that selects descendants is the one validated: a link
-      is only accepted when every process in the chain is live in that snapshot and every parent predates its
-      child, so a replacement root or a stale parent pid cannot be adopted.
+      Identities of the live descendants of a VERIFIED root (root included).
+
+      Astra review 7e878834 (F801-1): the topology comes from a CIM snapshot, but a candidate's native identity is
+      read later - a child that exits in between can have its pid reused by a foreign process, and adopting the
+      replacement's FILETIME would authorize terminating the replacement. Every candidate AND every link of its
+      parent chain is therefore BOUND to the snapshot entry that supplied the relationship: the native creation
+      FILETIME must correspond to that entry's own creation time within the measured CIM conversion skew
+      (<= 9 ticks; the bound is 1 ms). The result separates three things:
+
+        * identities - bound to the same live lifetime the snapshot described, and inside the verified root's tree;
+        * replaced   - the pid now belongs to a DIFFERENT lifetime than the snapshot described: a preserved foreign
+                       process, reported, never terminated;
+        * unresolved - a live process discovered under the root that cannot be attributed (an unreadable native
+                       read, a snapshot entry with no creation time, or an ancestry link that cannot be bound).
+                       Unknown is never absence: callers must fail closed on these entries.
+
+      A candidate whose own lifetime is positively gone is neither adopted nor reported: nothing of ours is left at
+      that pid. A candidate that stays live while a link of its ancestry cannot be bound is reported as an
+      unattributable descendant - it may be ours (an orphan) or foreign, so it is neither terminated nor dismissed.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)]$RootIdentity, [int]$MaxDepth = 12)
+    $toleranceTicks = [long]10000   # 1 ms; measured CIM<->native skew is <= 9 ticks (0.9 microseconds) on both hosts
+    $bindingOverride = Get-Variable -Name AeroLinkSnapshotBindingToleranceTicks -Scope Script -ErrorAction SilentlyContinue -ValueOnly
+    if ($null -ne $bindingOverride -and [string]$bindingOverride -ne '') { $toleranceTicks = [long]$bindingOverride }
     $rootPid = 0; $expected = [long]0
     if ($RootIdentity -is [System.Collections.IDictionary]) {
         if ($RootIdentity.Contains('processId')) { $rootPid = [int]$RootIdentity['processId'] }
@@ -305,26 +323,39 @@ function Get-AeroLinkOwnedTreeIdentities {
     }
     $verified = Test-AeroLinkProcessIdentity -Identity ([ordered]@{ processId = $rootPid; creationFileTime = $expected })
     if ($verified.state -ne 'Match') {
-        return [ordered]@{ state = $verified.state; identities = @(); detail = [string]$verified.detail }
+        $unresolved = @()
+        if ($verified.state -eq 'Unknown') { $unresolved = @([ordered]@{ processId = $rootPid; role = 'root'; state = 'Unknown'; creationFileTime = 0L; detail = [string]$verified.detail }) }
+        return [ordered]@{ state = $verified.state; identities = @(); unresolved = $unresolved; replaced = @(); detail = [string]$verified.detail }
     }
     $snapshot = @(Get-AeroLinkProcessSnapshot)
     $byId = @{}
     foreach ($process in $snapshot) { $byId[[int]$process.ProcessId] = $process }
     if (-not $byId.ContainsKey($rootPid)) {
         # The recorded root left the inventory after the native verification: nothing is adopted from it.
-        return [ordered]@{ state = 'Gone'; identities = @(); detail = 'the verified root left the selection inventory' }
+        return [ordered]@{ state = 'Gone'; identities = @(); unresolved = @(); replaced = @(); detail = 'the verified root left the selection inventory' }
     }
-    # Re-verify the root against the inventory we are about to select from: if the pid was reused between the
-    # identity check and this snapshot, the replacement must not become an owned root.
-    $recheck = Get-AeroLinkProcessCreationFileTime -ProcessId $rootPid
-    if ($recheck.state -eq 'Gone') { return [ordered]@{ state = 'Gone'; identities = @(); detail = 'the verified root exited before the selection inventory was validated' } }
-    if ($recheck.state -ne 'Ok') { return [ordered]@{ state = 'Unknown'; identities = @(); detail = [string]$recheck.detail } }
-    if ([long]$recheck.creationFileTime -ne $expected) {
-        return [ordered]@{ state = 'Reused'; identities = @(); detail = 'the pid was reused between the identity check and the selection inventory' }
+    # Bind the ROOT to the inventory it will be selected from: the native read must still equal the recorded
+    # identity AND must correspond to the snapshot entry's own creation time.
+    $rootRecheck = Get-AeroLinkProcessCreationFileTime -ProcessId $rootPid
+    if ($rootRecheck.state -eq 'Gone') { return [ordered]@{ state = 'Gone'; identities = @(); unresolved = @(); replaced = @(); detail = 'the verified root exited before the selection inventory was validated' } }
+    if ($rootRecheck.state -ne 'Ok') { return [ordered]@{ state = 'Unknown'; identities = @(); unresolved = @([ordered]@{ processId = $rootPid; role = 'root'; state = 'Unknown'; creationFileTime = 0L; detail = [string]$rootRecheck.detail }); replaced = @(); detail = [string]$rootRecheck.detail } }
+    if ([long]$rootRecheck.creationFileTime -ne $expected) {
+        return [ordered]@{ state = 'Reused'; identities = @(); unresolved = @(); replaced = @([ordered]@{ processId = $rootPid; role = 'root'; state = 'Replaced'; creationFileTime = [long]$rootRecheck.creationFileTime; detail = 'the pid was reused between the identity check and the selection inventory' }); detail = 'the pid was reused between the identity check and the selection inventory' }
+    }
+    $rootSnapshotFileTime = [long]0
+    try { if ($byId[$rootPid].CreationDate) { $rootSnapshotFileTime = [long]$byId[$rootPid].CreationDate.ToUniversalTime().ToFileTimeUtc() } } catch { $rootSnapshotFileTime = 0 }
+    if ($rootSnapshotFileTime -le 0) {
+        # The inventory entry carries no lifetime to bind to: Unknown, never a reported replacement.
+        return [ordered]@{ state = 'Unknown'; identities = @(); unresolved = @([ordered]@{ processId = $rootPid; role = 'root'; state = 'Unknown'; creationFileTime = $expected; detail = 'the selection inventory entry carried no creation time to bind the root identity to' }); replaced = @(); detail = 'the selection inventory entry for the root carried no creation time' }
+    }
+    if ([Math]::Abs([long]$expected - $rootSnapshotFileTime) -gt $toleranceTicks) {
+        return [ordered]@{ state = 'Reused'; identities = @(); unresolved = @(); replaced = @([ordered]@{ processId = $rootPid; role = 'root'; state = 'Replaced'; creationFileTime = $rootSnapshotFileTime; detail = "the root in the selection inventory belongs to a different lifetime than the recorded identity (snapshot $rootSnapshotFileTime, recorded $expected)" }); detail = 'the root in the selection inventory belongs to a different lifetime than the recorded identity' }
     }
     $identityCache = @{}
     $identityCache[$rootPid] = $expected
     $owned = [System.Collections.Generic.List[object]]::new()
+    $unresolvedEntries = [ordered]@{}
+    $replacedEntries = [ordered]@{}
     foreach ($process in $snapshot) {
         $cursor = $process; $depth = 0; $walked = @(); $chain = @()
         $reachedRoot = $false
@@ -339,35 +370,70 @@ function Get-AeroLinkOwnedTreeIdentities {
             $depth++
         }
         if (-not $reachedRoot) { continue }
-        # Exact identities for the candidate and every intermediate link; a link whose parent postdates it is a
-        # stale parent pid (its real parent is gone and the pid was reused), never ownership.
+        # Bind the candidate AND every link of its parent chain to the snapshot entry that supplied the
+        # relationship: the native lifetime must be the one that entry described.
         $candidateId = [int]$process.ProcessId
-        if (-not $identityCache.ContainsKey($candidateId)) {
-            $read = Get-AeroLinkProcessCreationFileTime -ProcessId $candidateId
-            if ($read.state -ne 'Ok') { continue }
-            $identityCache[$candidateId] = [long]$read.creationFileTime
-        }
-        $chainOk = $true
+        $chainOk = $true; $chainGap = ''; $gapPid = 0; $gapReason = ''
         $previousId = $candidateId
         foreach ($linkId in @($chain)) {
-            if (-not $identityCache.ContainsKey($linkId)) {
-                $read = Get-AeroLinkProcessCreationFileTime -ProcessId $linkId
-                if ($read.state -ne 'Ok') { $chainOk = $false; break }
-                $identityCache[$linkId] = [long]$read.creationFileTime
+            $link = [int]$linkId
+            $linkRole = if ($link -eq $candidateId) { 'tree-entry' } else { 'ancestry-entry' }
+            if (-not $byId.ContainsKey($link)) {
+                $chainOk = $false; $chainGap = 'Gone'; $gapPid = $link; $gapReason = 'left the selection inventory'; break
             }
-            if ([long]$identityCache[$linkId] -gt [long]$identityCache[$previousId]) { $chainOk = $false; break }
-            $previousId = $linkId
+            if (-not $identityCache.ContainsKey($link)) {
+                $read = Get-AeroLinkProcessCreationFileTime -ProcessId $link
+                if ($read.state -eq 'Unknown') {
+                    $unresolvedEntries[[string]$link] = [ordered]@{ processId = $link; role = $linkRole; state = 'Unknown'; creationFileTime = 0L; detail = [string]$read.detail }
+                    $chainOk = $false; $chainGap = 'Unknown'; $gapPid = $link; $gapReason = "could not be identified ($([string]$read.detail))"; break
+                }
+                if ($read.state -ne 'Ok') {
+                    # Positively gone: nothing of ours is left at this pid.
+                    $chainOk = $false; $chainGap = 'Gone'; $gapPid = $link; $gapReason = 'is positively gone'; break
+                }
+                $linkSnapshotFileTime = [long]0
+                try { if ($byId[$link].CreationDate) { $linkSnapshotFileTime = [long]$byId[$link].CreationDate.ToUniversalTime().ToFileTimeUtc() } } catch { $linkSnapshotFileTime = 0 }
+                if ($linkSnapshotFileTime -le 0) {
+                    $unresolvedEntries[[string]$link] = [ordered]@{ processId = $link; role = $linkRole; state = 'Unknown'; creationFileTime = [long]$read.creationFileTime; detail = 'the snapshot entry carried no creation time to bind the native identity to' }
+                    $chainOk = $false; $chainGap = 'Unknown'; $gapPid = $link; $gapReason = 'has a snapshot entry with no creation time'; break
+                }
+                if ([Math]::Abs([long]$read.creationFileTime - $linkSnapshotFileTime) -gt $toleranceTicks) {
+                    $replacedEntries[[string]$link] = [ordered]@{ processId = $link; role = $linkRole; state = 'Replaced'; creationFileTime = [long]$read.creationFileTime; detail = "the pid now belongs to a different lifetime (snapshot $linkSnapshotFileTime, native $($read.creationFileTime))" }
+                    $chainOk = $false; $chainGap = 'Replaced'; $gapPid = $link; $gapReason = 'now belongs to a different lifetime'; break
+                }
+                $identityCache[$link] = [long]$read.creationFileTime
+            }
+            if ([long]$identityCache[$link] -gt [long]$identityCache[[int]$previousId]) {
+                $chainOk = $false; $chainGap = 'Ordering'; $gapPid = $link
+                $gapReason = "belongs to a later lifetime than pid $previousId, so the relationship the inventory recorded is stale"
+                break
+            }
+            $previousId = $link
         }
+        if (-not $chainOk) {
+            # The process is live inside the snapshot's view of the root's tree, but the lifetime that carried the
+            # relationship cannot be bound. It can be neither adopted (it may be foreign) nor dismissed: a gap at an
+            # ancestor link makes this candidate unattributable, and Unknown withholds a clean verdict.
+            if ($gapPid -ne $candidateId -and -not $unresolvedEntries.Contains([string]$candidateId)) {
+                $candidateIdentity = [long]0
+                if ($identityCache.ContainsKey($candidateId)) { $candidateIdentity = [long]$identityCache[$candidateId] }
+                $unresolvedEntries[[string]$candidateId] = [ordered]@{ processId = $candidateId; role = 'unattributable-descendant'; state = 'Unknown'; creationFileTime = $candidateIdentity; detail = "its ancestry cannot be bound: pid $gapPid $gapReason" }
+            }
+            continue
+        }
+        if (-not $identityCache.ContainsKey($candidateId)) { continue }
         # The verified root must also predate its own child (the last link, or the candidate when the chain is just
         # the root). A child that is OLDER than the pid it points at means its real parent is gone and that pid was
         # reused by our root - an old parent pid is not ownership.
-        if ($chainOk -and [long]$expected -gt [long]$identityCache[$previousId]) { $chainOk = $false }
-        if (-not $chainOk) { continue }
+        if ([long]$expected -gt [long]$identityCache[[int]$previousId]) { continue }
         $owned.Add([ordered]@{ processId = $candidateId; creationFileTime = [long]$identityCache[$candidateId]
             createdUtc = [DateTime]::FromFileTimeUtc([long]$identityCache[$candidateId]).ToString('o')
-            name = [string]$process.Name; image = [string]$process.ExecutablePath; depth = $depth; source = 'live-parent-chain' })
+            name = [string]$process.Name; image = [string]$process.ExecutablePath; depth = $depth; source = 'snapshot-bound-native-identity' })
     }
-    return [ordered]@{ state = 'Match'; identities = @($owned.ToArray()); detail = '' }
+    $unresolved = @($unresolvedEntries.Values)
+    $state = if ($unresolved.Count) { 'Unknown' } else { 'Match' }
+    return [ordered]@{ state = $state; identities = @($owned.ToArray()); unresolved = $unresolved
+        replaced = @($replacedEntries.Values); detail = $(if ($unresolved.Count) { "$($unresolved.Count) tree entr(ies) could not be bound to a live lifetime" } else { '' }) }
 }
 
 function Stop-AeroLinkVerifiedIdentity {

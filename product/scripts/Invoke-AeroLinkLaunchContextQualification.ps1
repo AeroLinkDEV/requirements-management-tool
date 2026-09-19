@@ -161,6 +161,9 @@ $probes = [System.Collections.Generic.List[object]]::new()
 $instanceEngines = [System.Collections.Generic.List[object]]::new()
 $twinEngineIdentityCache = @{}
 $observedIdentities = [System.Collections.Generic.List[object]]::new()
+# Tree entries that were discovered but whose native lifetime could not be read: they must survive to the final
+# verdict even if the root exits before the final tree scan (Astra review 7e878834, F801-1).
+$twinTreeUnresolved = [System.Collections.Generic.List[object]]::new()
 $paths = [ordered]@{}
 $descriptors = @{}
 $runDescriptors = [ordered]@{}
@@ -313,11 +316,14 @@ function Stop-TwinInstanceTrees {
         # boundary); a replacement root is never adopted.
         try { $tree = Get-TwinTreeIdentities -EngineIdentity $identity }
         catch { $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = 'query-failed'; state = 'Unknown'; detail = $_.Exception.Message }); continue }
-        # The tree selection re-verifies the root inside its own inventory; a refusal there is recorded, not silent.
-        if ([string]$tree.state -eq 'Reused') { $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = 'unverified-identity'; state = 'PidReused'; detail = [string]$tree.detail }); continue }
-        if ([string]$tree.state -eq 'Unknown') { $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = 'unverified-identity'; state = 'Unknown'; detail = [string]$tree.detail }); continue }
         if ([string]$tree.state -eq 'Gone') { continue }
+        # Settle what the selection PROVED it owns; then carry every discovery gap forward. A tree entry whose
+        # native lifetime is unknown, or was replaced, is never silently dropped.
         $candidates = @($tree.identities)
+        foreach ($left in @($tree.unresolved)) { $remaining.Add([ordered]@{ processId = [int]$left.processId; name = 'unresolved-tree-entry'; state = 'Unknown'; detail = [string]$left.detail }) }
+        foreach ($left in @($tree.replaced)) { $remaining.Add([ordered]@{ processId = [int]$left.processId; name = 'replaced-tree-entry'; state = 'PidReused'; detail = [string]$left.detail }) }
+        if (-not $candidates.Count -and [string]$tree.state -eq 'Reused' -and -not @($tree.replaced).Count) { $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = 'unverified-identity'; state = 'PidReused'; detail = [string]$tree.detail }) }
+        if (-not $candidates.Count -and [string]$tree.state -eq 'Unknown' -and -not @($tree.unresolved).Count) { $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = 'unverified-identity'; state = 'Unknown'; detail = [string]$tree.detail }) }
         foreach ($candidate in $candidates) {
             if (-not @($selected | Where-Object { $_.processId -eq $candidate.processId -and $_.creationFileTime -eq $candidate.creationFileTime }).Count) { $selected.Add($candidate) }
         }
@@ -377,6 +383,10 @@ function Add-TwinTreeIdentities {
             $script:observedIdentities.Add($identity)
         }
     }
+    foreach ($left in @($tree.unresolved)) {
+        if (-not @($script:twinTreeUnresolved | Where-Object { [int]$_.processId -eq [int]$left.processId }).Count) { $script:twinTreeUnresolved.Add($left) }
+    }
+    return $tree
 }
 
 function Stop-RecordedIdentities {
@@ -748,6 +758,23 @@ finally {
         }
     }
     catch { $cleanupErrors.Add("the recorded-identity cleanup threw: $($_.Exception.Message)") }
+    # A tree entry discovered during the run that could not be attributed to the twin is NOT a proof of absence, and
+    # it was deliberately never terminated. It is re-checked here BY IDENTITY: a positively gone pid, or a pid that
+    # now belongs to another lifetime, clears it; the same process still running, or an identity that still cannot
+    # be read, withholds the qualification (Astra review 7e878834: unresolved discovery must reach the verdict).
+    foreach ($entry in @($script:twinTreeUnresolved)) {
+        $processId = [int]$entry.processId
+        $recordedFileTime = [long]0
+        if ($entry.PSObject.Properties['creationFileTime']) { $recordedFileTime = [long]$entry.creationFileTime }
+        $read = $null
+        try { $read = Get-AeroLinkProcessCreationFileTime -ProcessId $processId } catch { $read = $null }
+        if ($read -and $read.state -eq 'Gone') { continue }
+        if ($read -and $read.state -eq 'Ok' -and $recordedFileTime -gt 0 -and [long]$read.creationFileTime -ne $recordedFileTime) { continue }
+        $state = if ($read) { [string]$read.state } else { 'Unknown' }
+        $detail = if ($read) { [string]$read.detail } else { 'the identity could not be re-read' }
+        $cleanupErrors.Add("a tree entry observed during the run (pid $processId) was never proven gone ($state): $($entry.detail) / $detail")
+    }
+    $summary['treeUnresolved'] = @($script:twinTreeUnresolved)
     Start-Sleep -Seconds 1
     try {
         $remaining = Get-ScheduledTask -TaskName $twin -ErrorAction Stop
