@@ -343,14 +343,18 @@ public sealed class GitLabMetadataReader(HttpClient client, IOptions<ProjectGitL
             if (body is null)
                 return TransportResponse.Failure(GitLabMetadataStatus.InvalidResponse, "response_too_large", "GitLab returned a response larger than the bounded metadata limit.");
             response.Headers.TryGetValues("X-Next-Page", out var nextPageValues);
-            response.Headers.TryGetValues("X-Next-Page-Token", out var nextCursorValues);
-            var nextCursor = ExtractNextCursor(response.Headers, uri) ?? FirstHeader(nextCursorValues);
+            string? nextCursor = null;
+            if (uri.AbsolutePath.EndsWith("/repository/tree", StringComparison.Ordinal)
+                && !TryExtractTreeCursor(response.Headers, uri, out nextCursor))
+                return TransportResponse.Failure(GitLabMetadataStatus.InvalidResponse, "invalid_response", "GitLab returned an invalid tree continuation.");
             return TransportResponse.Success(body, FirstHeader(nextPageValues), nextCursor);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         { return TransportResponse.Failure(GitLabMetadataStatus.Timeout, "timeout", "GitLab did not respond in time."); }
         catch (HttpRequestException)
         { return TransportResponse.Failure(GitLabMetadataStatus.ServiceUnavailable, "service_unavailable", "The GitLab metadata connection is unavailable."); }
+        catch (IOException)
+        { return TransportResponse.Failure(GitLabMetadataStatus.ServiceUnavailable, "service_unavailable", "The GitLab metadata response was interrupted."); }
         catch (InvalidOperationException)
         { return TransportResponse.Failure(GitLabMetadataStatus.InvalidResponse, "invalid_response", "GitLab returned an unsupported metadata response."); }
     }
@@ -483,10 +487,11 @@ public sealed class GitLabMetadataReader(HttpClient client, IOptions<ProjectGitL
             || !TryReadPositiveInt(item, "iid", out var iid)) return false;
         var title = StringProperty(item, "title", 500); var state = StringProperty(item, "state", 32);
         var web = StringProperty(item, "web_url", 2000);
-        if (title is null || state is null || web is null || !IsMergeRequestUrl(web, target, iid)) return false;
+        if (title is null || state is null || web is null || !IsMergeRequestUrl(web, target, iid)
+            || !TryReadBoolean(item, "draft", out var draft)) return false;
         var sha = OptionalSha(item, "sha"); var mergeSha = OptionalSha(item, "merge_commit_sha"); var squashSha = OptionalSha(item, "squash_merge_commit_sha");
         if (sha.Invalid || mergeSha.Invalid || squashSha.Invalid) return false;
-        value = new(id, iid, title, state, BoolProperty(item, "draft"), web,
+        value = new(id, iid, title, state, draft, web,
             sha.Value, mergeSha.Value, squashSha.Value, DateProperty(item, "merged_at"));
         return true;
     }
@@ -497,10 +502,11 @@ public sealed class GitLabMetadataReader(HttpClient client, IOptions<ProjectGitL
         if (item.ValueKind != JsonValueKind.Object || !TryReadPositiveLong(item, "id", out var id) || !TryReadPositiveLong(item, "project_id", out var projectId)
             || projectId != target.ProjectId || !TryReadPositiveInt(item, "iid", out var iid) || iid != requestedIid) return false;
         var title = StringProperty(item, "title", 500); var state = StringProperty(item, "state", 32); var web = StringProperty(item, "web_url", 2000);
-        if (title is null || state is null || web is null || projectId != target.ProjectId || !IsMergeRequestUrl(web, target, iid)) return false;
+        if (title is null || state is null || web is null || projectId != target.ProjectId || !IsMergeRequestUrl(web, target, iid)
+            || !TryReadBoolean(item, "draft", out var draft)) return false;
         var sha = OptionalSha(item, "sha"); var mergeSha = OptionalSha(item, "merge_commit_sha"); var squashSha = OptionalSha(item, "squash_merge_commit_sha");
         if (sha.Invalid || mergeSha.Invalid || squashSha.Invalid) return false;
-        value = new(id, projectId, iid, title, state, BoolProperty(item, "draft"), web,
+        value = new(id, projectId, iid, title, state, draft, web,
             StringProperty(item, "source_branch", 256), StringProperty(item, "target_branch", 256),
             sha.Value, mergeSha.Value, squashSha.Value, DateProperty(item, "merged_at"),
             new(false, [], "unknown", "Approval data has not been read."));
@@ -558,7 +564,14 @@ public sealed class GitLabMetadataReader(HttpClient client, IOptions<ProjectGitL
         value = 0;
         return item.ValueKind == JsonValueKind.Object && item.TryGetProperty(property, out var element) && element.TryGetInt32(out value) && value > 0;
     }
-    private static bool BoolProperty(JsonElement item, string property) => item.ValueKind == JsonValueKind.Object && item.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.True;
+    private static bool TryReadBoolean(JsonElement item, string property, out bool result)
+    {
+        result = false;
+        if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty(property, out var value)
+            || value.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
+        result = value.GetBoolean();
+        return true;
+    }
     private static string? StringProperty(JsonElement item, string property, int max)
     {
         if (item.ValueKind != JsonValueKind.Object) return null;
@@ -585,27 +598,38 @@ public sealed class GitLabMetadataReader(HttpClient client, IOptions<ProjectGitL
 
     private static string? FirstHeader(IEnumerable<string>? values) => values?.FirstOrDefault();
 
-    private static string? ExtractNextCursor(HttpResponseHeaders headers, Uri requestUri)
+    private static bool TryExtractTreeCursor(HttpResponseHeaders headers, Uri requestUri, out string? cursor)
     {
-        if (!headers.TryGetValues("Link", out var links)) return null;
+        // GitLab's keyset pager omits Link on a terminal page. Invalid continuation is a failed
+        // observation, not a terminal page; never follow a server-supplied URL with credentials.
+        cursor = "";
+        if (!headers.TryGetValues("Link", out var links)) return true;
+        var sawNext = false;
         foreach (var link in links.SelectMany(value => value.Split(',', StringSplitOptions.TrimEntries)))
         {
             var open = link.IndexOf('<'); var close = link.IndexOf('>');
-            if (open < 0 || close <= open || (!link[(close + 1)..].Contains("rel=\"next\"", StringComparison.OrdinalIgnoreCase)
-                && !link[(close + 1)..].Contains("rel=next", StringComparison.OrdinalIgnoreCase))) continue;
+            if (open != 0 || close <= open) return false;
+            var relation = Regex.Match(link[(close + 1)..], "(?:^|;)\\s*rel=(?:\"(?<rel>[^\"]+)\"|(?<rel>[^;\\s]+))(?=;|$)", RegexOptions.IgnoreCase);
+            if (!relation.Success) return false;
+            if (!relation.Groups["rel"].Value.Split(' ').Contains("next", StringComparer.OrdinalIgnoreCase)) continue;
+            if (sawNext) return false;
+            sawNext = true;
             var candidate = link[(open + 1)..close];
             if (!Uri.TryCreate(requestUri, candidate, out var next) || !SameOrigin(next, requestUri)
-                || !string.Equals(next.AbsolutePath, requestUri.AbsolutePath, StringComparison.Ordinal)) continue;
+                || next.UserInfo.Length != 0 || next.Fragment.Length != 0
+                || !string.Equals(next.AbsolutePath, requestUri.AbsolutePath, StringComparison.Ordinal)) return false;
             var query = next.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
+            var tokens = new List<string>();
             foreach (var pair in query)
             {
                 var separator = pair.IndexOf('=');
                 if (separator <= 0 || !string.Equals(Uri.UnescapeDataString(pair[..separator]), "page_token", StringComparison.Ordinal)) continue;
-                var cursor = Uri.UnescapeDataString(pair[(separator + 1)..]);
-                return IsSafeCursor(cursor) ? cursor : null;
+                tokens.Add(Uri.UnescapeDataString(pair[(separator + 1)..]));
             }
+            if (tokens.Count != 1 || tokens[0].Length == 0 || !IsSafeCursor(tokens[0])) return false;
+            cursor = tokens[0];
         }
-        return null;
+        return true;
     }
     private static GitLabMetadataResult<T> Failure<T>(TransportResponse response) => new(response.Status, response.Code, response.Detail);
     private static GitLabMetadataResult<T> Invalid<T>(string detail) => new(GitLabMetadataStatus.InvalidResponse, "invalid_response", detail);
