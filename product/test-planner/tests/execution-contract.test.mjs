@@ -439,15 +439,16 @@ test('the native Windows operator owner retains the complete family and evidence
 
   // Derive this inventory from the live workflow so a newly added native contract is not silently omitted from
   // the planner proof. The schedule preview is a distinct non-mutating check and is included separately below.
-  const nativeScripts = [...job.matchAll(/& \.\/product\/scripts\/([^\s]+\.ps1)/g)].map(match => match[1])
-  assert.ok(nativeScripts.length >= 15, 'the native owner must execute the complete current operator family')
+  const nativeInvocations = [...job.matchAll(/& (?:powershell\.exe -NoProfile -ExecutionPolicy Bypass -File )?\.\/product\/scripts\/([^\s]+\.ps1)/g)]
+  const nativeScripts = nativeInvocations.map(match => match[1])
+  assert.ok(nativeScripts.length >= 17, 'the native owner must execute the complete current operator family')
   for (const name of [
     'AeroLinkEvidenceStore.Tests.ps1', 'AeroLinkBackupVerification.Tests.ps1', 'AeroLinkRestoreContract.Tests.ps1',
     'AeroLinkMigrationPosture.Tests.ps1', 'AeroLinkRemoteDemo.Tests.ps1', 'AeroLinkRemoteDemoRecovery.Tests.ps1',
     // The transition handoff and its budgets. Adding a suite to the LOCAL runner list changes nothing here,
     // and that is not a visible failure: the suite simply never runs on a protected candidate, so the
     // regression it exists to catch would merge green.
-    'AeroLinkTransitionHandoff.Tests.ps1',
+    'AeroLinkTransitionHandoff.Tests.ps1', 'AeroLinkProcessControl.Tests.ps1', 'AeroLinkProductionTransition.Tests.ps1',
     'AeroLinkLauncherContract.Tests.ps1', 'AeroLinkBootstrap.Tests.ps1', 'AeroLinkInstallation.Tests.ps1',
     'AeroLinkProductionSource.Tests.ps1', 'AeroLinkRuntimeIdentity.Tests.ps1', 'AeroLinkUpgrade.Tests.ps1',
     'Get-AeroLinkTestPlan.Tests.ps1', 'AeroLinkTestDiagnostics.Tests.ps1',
@@ -476,10 +477,11 @@ test('the native Windows operator owner retains the complete family and evidence
   // Every native test command must propagate a nonzero child exit. Telemetry and cleanup remain allowed to be
   // best-effort after the required family, but the operator proofs themselves cannot be made optional.
   for (const step of nativeScripts.filter(name => name.endsWith('.Tests.ps1') || name === 'Test-RepositoryLayout.ps1')) {
-    const at = job.indexOf(`& ./product/scripts/${step}`)
+    const invocation = nativeInvocations.find(match => match[1] === step)[0]
+    const at = job.indexOf(invocation)
     const next = job.indexOf('\n      - name:', at)
     const body = job.slice(at, next < 0 ? job.length : next)
-    const invocationEnd = body.indexOf('\n', body.indexOf(`& ./product/scripts/${step}`))
+    const invocationEnd = body.indexOf('\n', body.indexOf(invocation))
     const following = body.slice(invocationEnd < 0 ? body.length : invocationEnd).trimStart()
     assert.match(following, /^if \(\$LASTEXITCODE -ne 0\)/, `${step} must propagate native failure immediately after invocation`)
   }

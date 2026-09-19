@@ -310,6 +310,8 @@ function Invoke-ScriptContractSuite {
         'AeroLinkRemoteDemo.Tests.ps1',
         'AeroLinkRemoteDemoRecovery.Tests.ps1',
         'AeroLinkTransitionHandoff.Tests.ps1',
+        'AeroLinkProcessControl.Tests.ps1',
+        'AeroLinkProductionTransition.Tests.ps1',
         'AeroLinkInstallation.Tests.ps1',
         'AeroLinkProductionSource.Tests.ps1',
         'AeroLinkRuntimeIdentity.Tests.ps1',

@@ -65,10 +65,23 @@ try {
     $limit = $document.SelectSingleNode('//t:Settings/t:ExecutionTimeLimit',$ns)
     if ($limit.InnerText -ne 'PT2H15M' -and $limit.InnerText -ne 'PT135M') { throw "Unexpected production limit $($limit.InnerText)." }
     $originalLimit = $limit.InnerText
+    if ($Definition -eq 'FirstDeployment') {
+        # The local bare origin makes this candidate the approved main of THIS disposable repository.
+        # It changes neither GitHub main nor any operator checkout. No HOME controllers exist on this VM.
+        $origin = Join-Path $world 'origin.git'; $dev = Join-Path $world 'dev'; $prod = Join-Path $world 'prod'
+        Invoke-FixtureGit @('init','--bare','-b','main',$origin)
+        Invoke-FixtureGit @('-C',$repository,'push',$origin,"${sha}:refs/heads/main")
+        Invoke-FixtureGit @('clone','--quiet',$origin,$dev)
+        $env:AEROLINK_INSTALLATION_ROOT = $installation
+        & $powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dev 'product\scripts\Configure-AeroLinkProductionSource.ps1') -Action Install -SourceRoot $prod -InstallationRoot $installation
+        if ($LASTEXITCODE -ne 0) { throw 'Disposable production-source install failed.' }
+        & $powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $prod 'product\scripts\Setup-Postgres.ps1')
+        if ($LASTEXITCODE -ne 0) { throw 'Disposable PostgreSQL setup failed.' }
+    }
     # First prove the real powershell-image S4U path cheaply. This is diagnostic evidence only, never the
     # PT135M qualification. Then restore the exact generated definition and exercise its actual hard limit.
     foreach ($stage in @('Preflight','Final')) {
-        $limit.InnerText = if ($stage -eq 'Preflight') { 'PT1M' } else { $originalLimit }
+        $limit.InnerText = if ($stage -eq 'Preflight') { 'PT5M' } else { $originalLimit }
         Register-ScheduledTask -TaskName $sourceName -Xml $document.OuterXml -Force | Out-Null
         if (-not $ownedTasks.Contains($sourceName)) { $ownedTasks.Add($sourceName) }
         $exported = Export-ScheduledTask -TaskName $sourceName
@@ -77,7 +90,7 @@ try {
         $experiment = Join-Path $world $stage
         Write-Host "Beginning $Definition $stage at $((Get-Date).ToUniversalTime().ToString('o'))"
         & (Join-Path $scripts 'Invoke-AeroLinkLaunchContextQualification.ps1') -InstallationRoot $installation -TaskName $sourceName `
-            -TwinNamePrefix $prefix -ProbeStateRoot $experiment -EndingTimeoutSeconds $(if ($stage -eq 'Final') { 9000 } else { 180 })
+            -TwinNamePrefix $prefix -ProbeStateRoot $experiment -EndingTimeoutSeconds $(if ($stage -eq 'Final') { 9000 } else { 420 })
         $qualifierExit = $LASTEXITCODE
         $summaries = @(Get-ChildItem -LiteralPath (Join-Path $installation 'bootstrap\transitions\qualification-runs') -Filter "$prefix*.summary.json")
         if ($summaries.Count -ne 1) { throw "$stage produced $($summaries.Count) summaries." }
@@ -98,17 +111,6 @@ try {
         }
     }
     if ($Definition -eq 'FirstDeployment') {
-        # The local bare origin makes this candidate the approved main of THIS disposable repository.
-        # It changes neither GitHub main nor any operator checkout. No HOME controllers exist on this VM.
-        $origin = Join-Path $world 'origin.git'; $dev = Join-Path $world 'dev'; $prod = Join-Path $world 'prod'
-        Invoke-FixtureGit @('init','--bare','-b','main',$origin)
-        Invoke-FixtureGit @('-C',$repository,'push',$origin,"${sha}:refs/heads/main")
-        Invoke-FixtureGit @('clone','--quiet',$origin,$dev)
-        $env:AEROLINK_INSTALLATION_ROOT = $installation
-        & $powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dev 'product\scripts\Configure-AeroLinkProductionSource.ps1') -Action Install -SourceRoot $prod -InstallationRoot $installation
-        if ($LASTEXITCODE -ne 0) { throw 'Disposable production-source install failed.' }
-        & $powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $prod 'product\scripts\Setup-Postgres.ps1')
-        if ($LASTEXITCODE -ne 0) { throw 'Disposable PostgreSQL setup failed.' }
         $beforeTasks = @(Get-ScheduledTask -ErrorAction Stop | ForEach-Object TaskName)
         & $powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $dev 'product\scripts\Initialize-AeroLinkHomeProcessControl.ps1')
         $initializerExit = $LASTEXITCODE

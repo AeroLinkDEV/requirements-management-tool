@@ -302,7 +302,7 @@ not run inside the state of the installation they certify.
 
 For disposable S4U and first-deployment acceptance without an operator's HOME services, the manually dispatched
 **Isolated Windows process qualification** workflow uses fresh GitHub-hosted Windows machines. It first exercises
-a one-minute diagnostic definition, then each generated definition's actual 135-minute limit. A separate machine
+a five-minute diagnostic definition, then each generated definition's actual 135-minute limit. A separate machine
 qualifies the first-deployment definition and runs the real initializer against a local bare origin containing the
 candidate. The fixture refuses operator machines, pre-existing HOME controllers and occupied service ports.
 Its artifacts retain the candidate, exported definitions, per-run descriptors, integrity sidecars, transition
