@@ -12,6 +12,27 @@ namespace AeroLink.Infrastructure.Tests;
 
 public sealed class CurrentCodeEvidenceProjectionTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Retained_history_for_a_missing_or_mismatched_requirement_does_not_count(bool wrongArtifact)
+    {
+        await using var f = await Fixture.CreateAsync();
+        var artifactId = wrongArtifact ? Guid.NewGuid() : f.Artifact.Id;
+        var revisionId = wrongArtifact ? f.Revision.Id : Guid.NewGuid();
+        var set = new CodeEvidenceDispositionSet(f.Project.Id, f.Release.Id, artifactId, revisionId,
+            CodeEvidenceDisposition.NoCodeChangeRequired, "Retained historical decision.", null, null, null, "tester", f.Now);
+        f.Db.AddRange(set, new CodeEvidenceCurrentSelector(f.Project.Id, f.Release.Id, artifactId, revisionId, set.Id, "tester", f.Now));
+        await f.Db.SaveChangesAsync();
+        var current = Assert.Single((await CurrentCodeEvidenceProjection.ForReleaseAsync(f.Db, f.Project.Id, f.Release.Id, default))
+            .Where(x => x.RequirementRevisionId == revisionId));
+        Assert.Equal(CurrentCodeEvidenceState.InvalidIdentity, current.State);
+        Assert.False(current.CountsAsImplementation);
+        Assert.Equal(set.Id, current.EvidenceSet!.Id);
+        Assert.Null(current.LegacyRecord);
+        Assert.Equal(1, await f.Db.CodeEvidenceDispositionSets.CountAsync());
+    }
+
     [Fact]
     public async Task Invalidated_new_decision_never_falls_back_to_retained_legacy_evidence()
     {

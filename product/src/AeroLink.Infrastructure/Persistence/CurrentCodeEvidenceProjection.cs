@@ -28,6 +28,13 @@ public static class CurrentCodeEvidenceProjection
         var selectors = await db.CodeEvidenceCurrentSelectors.AsNoTracking()
             .Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId).ToListAsync(ct);
         var setIds = selectors.Select(x => x.EvidenceSetId).ToArray();
+        var selectedRevisionIds = selectors.Select(x => x.RequirementRevisionId).ToArray();
+        var exactRequirements = (await (from revision in db.RequirementRevisions.AsNoTracking()
+                                       where selectedRevisionIds.Contains(revision.Id)
+                                       join artifact in db.Requirements.AsNoTracking().Where(x => x.ProjectId == projectId)
+                                           on revision.ArtifactId equals artifact.Id
+                                       select new { ArtifactId = artifact.Id, RevisionId = revision.Id }).ToListAsync(ct))
+            .Select(x => (x.ArtifactId, x.RevisionId)).ToHashSet();
         var sets = await db.CodeEvidenceDispositionSets.AsNoTracking()
             .Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId && setIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, ct);
@@ -50,7 +57,9 @@ public static class CurrentCodeEvidenceProjection
         {
             sets.TryGetValue(selector.EvidenceSetId, out var set);
             var items = bySet[selector.EvidenceSetId].OrderBy(x => x.Id).ToArray();
-            var state = State(selector, set, items, invalidated, currentSource, source);
+            var state = exactRequirements.Contains((selector.RequirementArtifactId, selector.RequirementRevisionId))
+                ? State(selector, set, items, invalidated, currentSource, source)
+                : CurrentCodeEvidenceState.InvalidIdentity;
             result.Add(new(selector.RequirementArtifactId, selector.RequirementRevisionId, state,
                 null, set, selector, items));
         }
