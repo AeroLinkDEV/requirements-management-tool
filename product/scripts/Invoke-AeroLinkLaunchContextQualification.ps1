@@ -330,6 +330,24 @@ function Get-TwinTreeIdentities {
     return $found.ToArray()
 }
 
+function Add-TwinTreeIdentities {
+    <#
+      Snapshot the twin's LIVE tree and add only the identities this tool has not already recorded. One snapshot
+      taken the instant the instance appears is not enough: the action is a wrapper (cmd.exe > powershell.exe) and
+      its real entry can spawn after that snapshot, while a terminated action then orphans the child - so at cleanup
+      time the parent chain no longer proves ownership. Re-snapshotting while the chain is still intact keeps every
+      entry process owned by identity (Astra: a surviving child must not disappear from ownership accounting).
+      Measured on the 20260919T011739Z control-flow P run: three of four twin action processes outlived cleanup
+      because they were spawned after the one-time snapshot.
+    #>
+    param([int]$EnginePid)
+    foreach ($identity in @(Get-TwinTreeIdentities -EnginePid $EnginePid)) {
+        if (-not @($script:observedIdentities | Where-Object { $_.processId -eq $identity.processId -and $_.created -eq $identity.created }).Count) {
+            $script:observedIdentities.Add($identity)
+        }
+    }
+}
+
 function Stop-RecordedIdentities {
     <# Stop exactly these recorded identities, bounded; a pid whose creation time differs is not ours and is
        reported, not stopped. Returns what remains. #>
@@ -440,7 +458,7 @@ function Invoke-TwinRun {
     # Record the instance's own tree by IDENTITY now, while the chain is intact: a terminated action can orphan
     # these processes, and the final cleanup must be able to stop them without a parent chain.
     if ($instance) {
-        foreach ($identity in @(Get-TwinTreeIdentities -EnginePid ([int]$instance.EnginePid))) { $script:observedIdentities.Add($identity) }
+        Add-TwinTreeIdentities -EnginePid ([int]$instance.EnginePid)
     }
     # The synchronization point for an interrupt-during-mutation run: wait until the attempt has PUBLISHED its
     # live mutator identity, so the ending this run causes cannot land after the transition already finished.
@@ -465,6 +483,7 @@ function Invoke-TwinRun {
     $deadline = $since.AddSeconds($LimitSeconds + $RecordTimeoutSeconds)
     if ($Ending -ne 'HardLimit') { $deadline = (Get-Date).AddSeconds($RecordTimeoutSeconds) }
     $cause = 'StillRunning'
+    $snapshotTick = 0
     while ((Get-Date) -lt $deadline) {
         if (-not $record) { $record = Wait-RunRecord $id 2; if ($record) { $null = Track-Probe $record } }
         # The stop must land while the attempt is MUTATING. The active-mutation record (published by the entry
@@ -483,6 +502,12 @@ function Invoke-TwinRun {
             }
             break
         }
+        if ($current) {
+            # The wrapper's real entry may spawn after the first snapshot. Re-snapshot every ~5 s while the parent
+            # chain is intact so the entry is owned before a terminated action can orphan it.
+            $snapshotTick++
+            if ($snapshotTick -ge 10) { $snapshotTick = 0; Add-TwinTreeIdentities -EnginePid ([int]$current.EnginePid) }
+        }
         if ($mutatorIdentity) {
             $mutatorPid = [int](Get-AeroLinkProperty $mutatorIdentity 'processId' 0)
             if ($mutatorPid -gt 0 -and $K::Classify($mutatorPid, (ConvertTo-AeroLinkUtcIso (Get-AeroLinkProperty $mutatorIdentity 'startedAt' '')), [string](Get-AeroLinkProperty $mutatorIdentity 'image' '')) -eq 'RunningMatch') {
@@ -496,6 +521,12 @@ function Invoke-TwinRun {
         try { Stop-ScheduledTask -TaskName $twin -ErrorAction Stop } catch { }
         $cause = 'TimedOutWaitingForEnding'
     }
+    # The entry publishes its record just before it exits, so the poll above can straddle the publication and the
+    # ending: the record lands inside the two-second window and the instance is already gone at the next check.
+    # One bounded re-read after the ending keeps that race from dropping a whole run's descriptor - and with it the
+    # launched probe whose identity this tool must own (measured: both concurrent definitions of the control-flow
+    # P run 20260919T011739Z lost run1 that way and left the run's probe process running).
+    if (-not $record) { $record = Wait-RunRecord $id 20; if ($record) { $null = Track-Probe $record } }
     $info = Get-TwinInfo $since
     if ($record) { $null = Track-Probe $record }
     elseif ($active) { $null = Track-Probe $active }
