@@ -1096,11 +1096,50 @@ function Test-AeroLinkLaunchContextQualification {
     $out = { param($ok, $why) [pscustomobject]@{ Supported = [bool]$ok; Detail = $why; Descriptor = $context.Descriptor; DescriptorHash = $context.DescriptorHash; BreakawayPermittedByImmediateJob = $breakaway; Context = $context } }
     if (-not $context.Valid) { return & $out $false "launch context unidentified: $($context.Reason)" }
     $path = Get-AeroLinkQualificationPath -InstallationRoot $InstallationRoot -DescriptorHash $context.DescriptorHash
-    $record = Read-AeroLinkJsonRecord -Path $path
+    $ioPath = ConvertTo-AeroLinkKernelIoPath $path
+    if (-not [IO.File]::Exists($ioPath)) { return & $out $false "the $($context.Descriptor.contextKind) context '$($context.Descriptor.contextName)' is not qualified for this exact descriptor ($($context.DescriptorHash.Substring(0, 12)))" }
+    # The record and its SHA-256 sidecar are ONE generation. A publication in flight holds this lock, so reading
+    # through it guarantees the pair belongs to the same generation; the lock cannot be held across a crash (the OS
+    # releases it), and a reader that cannot take it reports Unknown rather than trusting a half-applied pair.
+    $publicationLocks = Get-Variable -Name AeroLinkQualificationPublications -Scope Script -ErrorAction SilentlyContinue -ValueOnly
+    if (-not $publicationLocks) { $publicationLocks = @{}; Set-Variable -Name AeroLinkQualificationPublications -Scope Script -Value $publicationLocks }
+    $readKey = [IO.Path]::GetFullPath($path).ToLowerInvariant()
+    $readStream = $null; $readOwned = $false; $integrityProblem = $null
+    if (-not $publicationLocks.ContainsKey($readKey)) {
+        $readLockPath = ConvertTo-AeroLinkKernelIoPath ($path + '.publish.lock')
+        $readDeadline = (Get-Date).AddSeconds(10)
+        while (-not $readStream -and (Get-Date) -lt $readDeadline) {
+            try { $readStream = [IO.File]::Open($readLockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
+            catch { Start-Sleep -Milliseconds 25 }
+        }
+        if (-not $readStream) { return & $out $false "the qualification record for this descriptor is being published and could not be read coherently (its lock was not free within 10 s)" }
+        $publicationLocks[$readKey] = $readStream
+        $readOwned = $true
+    }
+    try {
+        $record = Read-AeroLinkJsonRecord -Path $path
+        if ($record.Class -eq 'Valid') {
+            $sidecar = "$path.sha256"
+            $ioSidecar = ConvertTo-AeroLinkKernelIoPath $sidecar
+            if (-not [IO.File]::Exists($ioSidecar)) { $integrityProblem = 'the qualification record has no integrity sidecar' }
+            else {
+                $recordHash = Get-AeroLinkSha256File $path
+                $sidecarHash = ([IO.File]::ReadAllText($ioSidecar)).Trim()
+                if ($sidecarHash -ne $recordHash) { $integrityProblem = 'the qualification record fails its integrity hash' }
+                elseif ((Get-AeroLinkSha256File $path) -ne $recordHash) { $integrityProblem = 'the qualification record changed while it was being read' }
+            }
+        }
+    }
+    finally {
+        if ($readOwned) {
+            $publicationLocks.Remove($readKey)
+            try { $readStream.Dispose() } catch { }
+            try { [IO.File]::Delete($readLockPath) } catch { }
+        }
+    }
     if ($record.Class -eq 'Absent') { return & $out $false "the $($context.Descriptor.contextKind) context '$($context.Descriptor.contextName)' is not qualified for this exact descriptor ($($context.DescriptorHash.Substring(0, 12)))" }
     if ($record.Class -ne 'Valid') { return & $out $false "the qualification record is $($record.Class.ToLower())" }
-    $sidecar = "$path.sha256"
-    if (-not [IO.File]::Exists((ConvertTo-AeroLinkKernelIoPath $sidecar)) -or ([IO.File]::ReadAllText((ConvertTo-AeroLinkKernelIoPath $sidecar)).Trim() -ne (Get-AeroLinkSha256File $path))) { return & $out $false 'the qualification record fails its integrity hash' }
+    if ($integrityProblem) { return & $out $false $integrityProblem }
     $r = $record.Value
     if ([string]$r.qualifierVersion -ne $script:QualifierVersion) { return & $out $false "the qualification was made by '$($r.qualifierVersion)', not '$($script:QualifierVersion)'" }
     foreach ($key in @($context.Descriptor.Keys)) {
@@ -1144,8 +1183,55 @@ function Write-AeroLinkLaunchContextQualification {
             elseif ($failed.Count) { "did not survive: $($failed -join ', ')" } else { $Detail })
         at = (Get-AeroLinkUtcNow) }
     $path = Get-AeroLinkQualificationPath -InstallationRoot $InstallationRoot -DescriptorHash $DescriptorHash
-    Publish-AeroLinkJsonAtomic -Path $path -Value $record
-    [IO.File]::WriteAllText((ConvertTo-AeroLinkKernelIoPath "$path.sha256"), (Get-AeroLinkSha256File $path))
+    # ---- ONE coherent generation ----------------------------------------------------------------------------
+    # The record and its SHA-256 sidecar are one artifact, and two twins of the SAME descriptor are qualified
+    # concurrently by design. Publication is therefore serialized with a bounded, process-re-entrant lock, and the
+    # sidecar is then CERTIFIED against what is actually on disk: if another publisher replaced the record while
+    # this writer was certifying it, this writer re-certifies the current generation instead of leaving a stale hash
+    # beside a newer record (measured 2026-09-19: without this, both writers returned success and the final
+    # record/sidecar pair disagreed, so the production integrity check rejected a valid qualification).
+    $publicationLocks = Get-Variable -Name AeroLinkQualificationPublications -Scope Script -ErrorAction SilentlyContinue -ValueOnly
+    if (-not $publicationLocks) { $publicationLocks = @{}; Set-Variable -Name AeroLinkQualificationPublications -Scope Script -Value $publicationLocks }
+    $publishKey = [IO.Path]::GetFullPath($path).ToLowerInvariant()
+    $lockStream = $null; $lockOwned = $false; $lockPath = $null
+    if (-not $publicationLocks.ContainsKey($publishKey)) {
+        $lockPath = ConvertTo-AeroLinkKernelIoPath ($path + '.publish.lock')
+        $lockDirectory = [IO.Path]::GetDirectoryName($lockPath)
+        if ($lockDirectory -and -not [IO.Directory]::Exists($lockDirectory)) { [void][IO.Directory]::CreateDirectory($lockDirectory) }
+        $lockDeadline = (Get-Date).AddSeconds(10)
+        while (-not $lockStream -and (Get-Date) -lt $lockDeadline) {
+            try { $lockStream = [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
+            catch { Start-Sleep -Milliseconds 25 }
+        }
+        if (-not $lockStream) { throw "the qualification record and its integrity sidecar could not be published: the lock for '$path' was not free within 10 s" }
+        $publicationLocks[$publishKey] = $lockStream
+        $lockOwned = $true
+    }
+    try {
+        Publish-AeroLinkJsonAtomic -Path $path -Value $record
+        $sidecar = "$path.sha256"
+        $ioSidecar = ConvertTo-AeroLinkKernelIoPath $sidecar
+        $certified = $false
+        for ($certifyAttempt = 1; $certifyAttempt -le 5 -and -not $certified; $certifyAttempt++) {
+            # Hash what is on disk twice: a record that changes between the two reads is another writer's generation.
+            $hash = Get-AeroLinkSha256File $path
+            if ((Get-AeroLinkSha256File $path) -ne $hash) { continue }
+            $temporary = $sidecar + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+            $ioTemporary = ConvertTo-AeroLinkKernelIoPath $temporary
+            [IO.File]::WriteAllText($ioTemporary, $hash, (New-Object Text.UTF8Encoding($false)))
+            if ([IO.File]::Exists($ioSidecar)) { [IO.File]::Delete($ioSidecar) }
+            [IO.File]::Move($ioTemporary, $ioSidecar)
+            if ((Get-AeroLinkSha256File $path) -eq $hash) { $certified = $true }
+        }
+        if (-not $certified) { throw "the qualification record at '$path' kept changing while its integrity sidecar was published; no coherent record/hash pair was produced" }
+    }
+    finally {
+        if ($lockOwned) {
+            $publicationLocks.Remove($publishKey)
+            try { $lockStream.Dispose() } catch { }
+            try { [IO.File]::Delete($lockPath) } catch { }
+        }
+    }
     return [pscustomobject]$record
 }
 

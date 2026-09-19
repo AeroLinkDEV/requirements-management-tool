@@ -291,9 +291,24 @@ Start-Sleep -Seconds $Seconds
         @{ Name = 'child-positively-gone'; Expect = 'Match'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @()
            Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
            Native = @{ 100 = (New-F801Native $f801Epoch); 101 = [ordered]@{ state = 'Gone'; creationFileTime = 0; detail = 'no such process' } } },
-        @{ Name = 'ancestor-link-positively-gone-is-a-routine-orphan'; Expect = 'Match'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @()
+        # A live orphan under a POSITIVELY GONE ancestor: a vanished parent proves only that parent gone, so the
+        # child is reported with its own bound lifetime and withholds a clean verdict (Astra review 4979b47d).
+        @{ Name = 'live-orphan-with-gone-ancestor-is-unresolved'; Expect = 'Unknown'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @(104)
            Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 103 100 ($f801Epoch + 5000000)), (New-F801Item 104 103 ($f801Epoch + 10000000)))
            Native = @{ 100 = (New-F801Native $f801Epoch); 103 = [ordered]@{ state = 'Gone'; creationFileTime = 0; detail = 'no such process' }; 104 = (New-F801Native ($f801Epoch + 10000000)) } },
+        # F497-2: a distinct lifetime 5,000 ticks (0.5 ms) after the snapshot's own lifetime must never be adopted.
+        @{ Name = 'close-but-distinct-lifetime-is-rejected'; Expect = 'Match'; Selected = $f801RootOnly; Replaced = @(101); Unresolved = @()
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 10005000)) } },
+        # F497-2: the genuine conversion difference (native 9 ticks ahead, inside the same microsecond) IS the same
+        # lifetime, and the identity the selection hands out is the NATIVE one.
+        @{ Name = 'conversion-skew-inside-the-representation-is-bound'; Expect = 'Match'; Selected = @(100, 101); Replaced = @(); Unresolved = @()
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 10000009)) } },
+        # A snapshot entry outside the CIM microsecond representation cannot be bound at all: Unknown, fail closed.
+        @{ Name = 'snapshot-entry-outside-the-cim-representation'; Expect = 'Unknown'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @(101)
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000005)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 10000005)) } },
         @{ Name = 'child-inventory-entry-without-creation-time'; Expect = 'Unknown'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @(101)
            Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 0))
            Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 10000000)) } },
@@ -316,17 +331,13 @@ Start-Sleep -Seconds $Seconds
         Check ((Get-F801Ids $tree.identities) -eq ((@($f801.Selected) | Sort-Object) -join ',')) "$label`: the selected identities must be exactly [$((@($f801.Selected) | Sort-Object) -join ',')] (got [$(Get-F801Ids $tree.identities)])."
         Check ((Get-F801Ids $tree.replaced) -eq ((@($f801.Replaced) | Sort-Object) -join ',')) "$label`: the replaced identities must be exactly [$((@($f801.Replaced) | Sort-Object) -join ',')] (got [$(Get-F801Ids $tree.replaced)])."
         Check ((Get-F801Ids $tree.unresolved) -eq ((@($f801.Unresolved) | Sort-Object) -join ',')) "$label`: the unresolved identities must be exactly [$((@($f801.Unresolved) | Sort-Object) -join ',')] (got [$(Get-F801Ids $tree.unresolved)])."
-        # A pid whose native read is unreadable, positively gone, or a DIFFERENT lifetime than the inventory
-        # described can never reach a caller as an authorized target.
-        foreach ($nativePid in @($f801.Native.Keys)) {
-            $entry = @(@($f801.Inventory) | Where-Object { [int]$_.ProcessId -eq [int]$nativePid })[0]
-            $nativeState = [string]$f801.Native[$nativePid].state
-            $nativeTime = [long]$f801.Native[$nativePid].creationFileTime
-            $snapshotTime = [long]0
-            if ($entry -and $entry.CreationDate) { $snapshotTime = [long]$entry.CreationDate.ToUniversalTime().ToFileTimeUtc() }
-            $sameLifetime = $nativeState -eq 'Ok' -and $snapshotTime -gt 0 -and [Math]::Abs($snapshotTime - $nativeTime) -le 10000
-            if ($sameLifetime) { continue }
-            Check (-not @($tree.identities | Where-Object { [int]$_.processId -eq [int]$nativePid }).Count) "$label`: pid $nativePid ($nativeState) is not the lifetime the inventory described and must never be selected."
+        # Every adopted identity must be the process's OWN current lifetime: the selection may never hand a caller
+        # an identity the live pid does not actually hold (the case expectations above are the oracle - this only
+        # re-reads the identity the selection produced).
+        foreach ($adopted in @($tree.identities)) {
+            $live = $f801.Native[[int]$adopted.processId]
+            if (-not $live -or [string]$live.state -ne 'Ok') { Check $false "$label`: pid $($adopted.processId) was selected although no live lifetime was read for it." ; continue }
+            Check ([long]$adopted.creationFileTime -eq [long]$live.creationFileTime) "$label`: the selected identity of pid $($adopted.processId) must be the live lifetime the native read returned."
         }
     }
 }

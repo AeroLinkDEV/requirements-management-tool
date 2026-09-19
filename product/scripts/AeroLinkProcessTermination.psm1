@@ -305,18 +305,22 @@ function Get-AeroLinkOwnedTreeIdentities {
 
       A candidate whose own lifetime is positively gone is neither adopted nor reported: nothing of ours is left at
       that pid. A candidate that stays live while a link of its ancestry cannot be bound is reported as an
-      unattributable descendant - it may be ours (an orphan) or foreign, so it is neither terminated nor dismissed.
-      The ONE exception is an ancestor link that is POSITIVELY GONE: that is the ordinary orphan case (a wrapper
-      exits and its child outlives it), the caller's repeatedly-refreshed recorded identities already cover what it
-      saw while the chain was intact, and there is nothing of ours left at the vanished link. Reporting it would
-      turn a routine orphan into a spurious failure, so it is dropped - Unknown and Replaced ancestry, and a
-      contradiction of the recorded relationship, still withhold a clean verdict.
+      unattributable ORPHAN - a vanished ancestor proves only that ancestor gone, never that its descendants are
+      not ours. The entry carries the orphan's own bound lifetime when it could be read, so a caller that ALREADY
+      holds a durable identity for that process (its ledger) can settle it by identity and clear it; with no such
+      ownership the entry must withhold a successful cleanup. It is never silently dropped: measured
+      2026-09-19, a live grandchild whose wrapper exited after the inventory was silently omitted from cleanup.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)]$RootIdentity, [int]$MaxDepth = 12)
-    $toleranceTicks = [long]10000   # 1 ms; measured CIM<->native skew is <= 9 ticks (0.9 microseconds) on both hosts
-    $bindingOverride = Get-Variable -Name AeroLinkSnapshotBindingToleranceTicks -Scope Script -ErrorAction SilentlyContinue -ValueOnly
-    if ($null -ne $bindingOverride -and [string]$bindingOverride -ne '') { $toleranceTicks = [long]$bindingOverride }
+    # CIM_DATETIME carries six fractional digits (microseconds) and Win32_Process.CreationDate is rendered through
+    # it: measured on both hosts (154 and 156 live processes), every snapshot value is a multiple of 10 ticks and
+    # the native lifetime is 0-9 ticks AHEAD of it - the snapshot is the native lifetime TRUNCATED to microseconds.
+    # Binding therefore converts the native lifetime into that same representation and compares EXACTLY. The
+    # remaining window is the representation's own resolution (one microsecond), never an assumed pid-reuse
+    # interval: a distinct lifetime one microsecond or more away can never compare equal, and a snapshot entry
+    # that is not itself in that representation cannot be bound at all (Unknown, fail closed).
+    $representationTicks = [long]10
     $rootPid = 0; $expected = [long]0
     if ($RootIdentity -is [System.Collections.IDictionary]) {
         if ($RootIdentity.Contains('processId')) { $rootPid = [int]$RootIdentity['processId'] }
@@ -353,7 +357,11 @@ function Get-AeroLinkOwnedTreeIdentities {
         # The inventory entry carries no lifetime to bind to: Unknown, never a reported replacement.
         return [ordered]@{ state = 'Unknown'; identities = @(); unresolved = @([ordered]@{ processId = $rootPid; role = 'root'; state = 'Unknown'; creationFileTime = $expected; detail = 'the selection inventory entry carried no creation time to bind the root identity to' }); replaced = @(); detail = 'the selection inventory entry for the root carried no creation time' }
     }
-    if ([Math]::Abs([long]$expected - $rootSnapshotFileTime) -gt $toleranceTicks) {
+    if (($rootSnapshotFileTime % $representationTicks) -ne 0) {
+        # Not the representation the inventory is rendered in: nothing can be bound to it.
+        return [ordered]@{ state = 'Unknown'; identities = @(); unresolved = @([ordered]@{ processId = $rootPid; role = 'root'; state = 'Unknown'; creationFileTime = $expected; detail = "the selection inventory entry is not in the microsecond representation a CIM inventory reports (value $rootSnapshotFileTime)" }); replaced = @(); detail = 'the selection inventory entry for the root is not in the CIM representation' }
+    }
+    if (([long]$expected - ([long]$expected % $representationTicks)) -ne $rootSnapshotFileTime) {
         return [ordered]@{ state = 'Reused'; identities = @(); unresolved = @(); replaced = @([ordered]@{ processId = $rootPid; role = 'root'; state = 'Replaced'; creationFileTime = $rootSnapshotFileTime; detail = "the root in the selection inventory belongs to a different lifetime than the recorded identity (snapshot $rootSnapshotFileTime, recorded $expected)" }); detail = 'the root in the selection inventory belongs to a different lifetime than the recorded identity' }
     }
     $identityCache = @{}
@@ -402,7 +410,11 @@ function Get-AeroLinkOwnedTreeIdentities {
                     $unresolvedEntries[[string]$link] = [ordered]@{ processId = $link; role = $linkRole; state = 'Unknown'; creationFileTime = [long]$read.creationFileTime; detail = 'the snapshot entry carried no creation time to bind the native identity to' }
                     $chainOk = $false; $chainGap = 'Unknown'; $gapPid = $link; $gapReason = 'has a snapshot entry with no creation time'; break
                 }
-                if ([Math]::Abs([long]$read.creationFileTime - $linkSnapshotFileTime) -gt $toleranceTicks) {
+                if (($linkSnapshotFileTime % $representationTicks) -ne 0) {
+                    $unresolvedEntries[[string]$link] = [ordered]@{ processId = $link; role = $linkRole; state = 'Unknown'; creationFileTime = [long]$read.creationFileTime; detail = "the snapshot entry is not in the microsecond representation a CIM inventory reports (value $linkSnapshotFileTime)" }
+                    $chainOk = $false; $chainGap = 'Unknown'; $gapPid = $link; $gapReason = 'has a snapshot entry outside the CIM representation'; break
+                }
+                if (([long]$read.creationFileTime - ([long]$read.creationFileTime % $representationTicks)) -ne $linkSnapshotFileTime) {
                     $replacedEntries[[string]$link] = [ordered]@{ processId = $link; role = $linkRole; state = 'Replaced'; creationFileTime = [long]$read.creationFileTime; detail = "the pid now belongs to a different lifetime (snapshot $linkSnapshotFileTime, native $($read.creationFileTime))" }
                     $chainOk = $false; $chainGap = 'Replaced'; $gapPid = $link; $gapReason = 'now belongs to a different lifetime'; break
                 }
@@ -417,14 +429,17 @@ function Get-AeroLinkOwnedTreeIdentities {
         }
         if (-not $chainOk) {
             # The process is live inside the snapshot's view of the root's tree, but the lifetime that carried the
-            # relationship cannot be bound. A link that is POSITIVELY GONE is the ordinary orphan case (its child
-            # outlived it and the caller's recorded identities already cover what it saw while the chain was
-            # intact): nothing of ours is left at the vanished pid, so the candidate is dropped. Anything else
-            # leaves a live process that can be neither adopted (it may be foreign) nor dismissed.
-            if ($chainGap -ne 'Gone' -and $gapPid -ne $candidateId -and -not $unresolvedEntries.Contains([string]$candidateId)) {
+            # relationship cannot be bound - including a POSITIVELY GONE ancestor, which proves only that ancestor
+            # gone, never that the live candidate below it is not ours. The candidate can be neither adopted (it
+            # may be foreign) nor dismissed, so it is reported as an orphan with its own bound lifetime when that
+            # could be read: a caller holding a durable identity for it settles it by identity and clears it, and
+            # without such ownership the entry withholds a successful cleanup.
+            if ($gapPid -ne $candidateId -and -not $unresolvedEntries.Contains([string]$candidateId)) {
                 $candidateIdentity = [long]0
                 if ($identityCache.ContainsKey($candidateId)) { $candidateIdentity = [long]$identityCache[$candidateId] }
-                $unresolvedEntries[[string]$candidateId] = [ordered]@{ processId = $candidateId; role = 'unattributable-descendant'; state = 'Unknown'; creationFileTime = $candidateIdentity; detail = "its ancestry cannot be bound: pid $gapPid $gapReason" }
+                $candidateDetail = if ($chainGap -eq 'Gone') { "an ancestor (pid $gapPid) $gapReason after the inventory was taken, so this live process is an orphan: it is ours only if a durable identity for it already exists" }
+                    else { "its ancestry cannot be bound: pid $gapPid $gapReason" }
+                $unresolvedEntries[[string]$candidateId] = [ordered]@{ processId = $candidateId; role = 'unattributable-orphan'; state = 'Unknown'; creationFileTime = $candidateIdentity; detail = $candidateDetail }
             }
             continue
         }

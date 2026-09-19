@@ -640,7 +640,7 @@ public static class Program {
     # withholds a successful cleanup verdict when a discovery gap leaves a live process it cannot attribute.
     # The shipped functions are extracted (the review's method) with controlled seams: nothing is terminated here.
     # ---------------------------------------------------------------------------------------------------------
-    foreach ($functionName in @('Stop-TwinInstanceTrees', 'Complete-TwinRun')) {
+    foreach ($functionName in @('Stop-TwinInstanceTrees', 'Test-TwinEntryDurablyOwned', 'Complete-TwinRun')) {
         $node = $qualifierAst.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq $functionName }, $true)
         if (-not $node) { throw "T23: the qualifier no longer defines $functionName." }
         . ([scriptblock]::Create($node.Extent.Text))
@@ -727,6 +727,27 @@ public static class Program {
     Check ($script:t23StopRequests.Count -eq 0) 'T23 query failure: no termination may be submitted when the selection could not be read.'
     Check (@($t23Left | Where-Object { $_.state -eq 'Unknown' }).Count -eq 1) 'T23 query failure: the gap is reported as Unknown.'
 
+    # F497-1: a LIVE ORPHAN (an unattributable entry: an ancestor vanished after the inventory) is carried to the
+    # caller as Unknown and withholds the verdict. The only thing that clears it is a durable identity this tool
+    # already recorded, which is settled by identity in its own pass.
+    function Get-TwinTreeIdentities { param($EngineIdentity, [int]$MaxDepth = 12) $script:t23Tree }
+    $script:observedIdentities = [System.Collections.Generic.List[object]]::new()
+    $t23Orphan = [ordered]@{ processId = 104; role = 'unattributable-orphan'; state = 'Unknown'
+        creationFileTime = ($t23Epoch + 10000000); detail = 'an ancestor (pid 103) is positively gone after the inventory was taken' }
+    $script:t23StopRequests.Clear()
+    $script:t23Tree = [ordered]@{ state = 'Unknown'; identities = @($t23Root); unresolved = @($t23Orphan); replaced = @(); detail = 'a tree entry could not be bound to a live lifetime' }
+    $t23Left = @(Stop-TwinInstanceTrees -Engines @($t23Root))
+    Assert-T23BoundOnly 'live orphan' $script:t23Tree
+    Check (@($t23Left | Where-Object { [int]$_.processId -eq 104 -and $_.state -eq 'Unknown' }).Count -eq 1) 'T23 live orphan: the caller must carry the orphan out as Unknown.'
+    $cleanupErrors.Clear()
+    Complete-TwinRun -Name 'unrecorded orphan' -Run ([pscustomobject]@{ Instance = [pscustomobject]@{ EngineIdentity = $t23Root } })
+    Check ($cleanupErrors.Count -ge 1) "T23 unrecorded orphan: a live orphan with no durable identity must withhold the cleanup verdict (got '$(@($cleanupErrors) -join '; ')')."
+    Check ((@($cleanupErrors) -join ' ') -match '104') 'T23 unrecorded orphan: the refusal must name the orphan pid.'
+    $script:observedIdentities.Add([ordered]@{ processId = 104; creationFileTime = ($t23Epoch + 10000000); name = 'entry'; image = 'C:\owned.exe' })
+    $cleanupErrors.Clear()
+    Complete-TwinRun -Name 'recorded orphan' -Run ([pscustomobject]@{ Instance = [pscustomobject]@{ EngineIdentity = $t23Root } })
+    Check ($cleanupErrors.Count -eq 0) "T23 recorded orphan: an orphan whose exact lifetime is already owned by identity is settled by that identity, not reported as a survivor (got '$(@($cleanupErrors) -join '; ')')."
+
     # ---------------------------------------------------------------------------------------------------------
     # T24 (Astra review 7e878834 follow-up; measured on the S4U owner-package preflight): two twins of ONE launch
     # context are qualified CONCURRENTLY by design, so two publishers write the SAME qualification record path.
@@ -757,6 +778,63 @@ exit 0
     $t24Read = Read-AeroLinkJsonRecord -Path $t24Path
     Check ($t24Read.Class -eq 'Valid' -and [int]$t24Read.Value.writer -gt 0 -and [int]$t24Read.Value.iteration -ge 0) "T24: the published record must be complete and readable, never partial (class $($t24Read.Class))."
     Check (@(Get-ChildItem -LiteralPath $t24Dir -Filter '*.tmp' -ErrorAction SilentlyContinue).Count -eq 0) 'T24: a publisher must not leave a temporary file behind.'
+
+    # ---------------------------------------------------------------------------------------------------------
+    # T26 (Astra review 4979b47d, F497-3): the qualification RECORD and its SHA-256 SIDECAR are ONE generation.
+    # Two twins of one descriptor are qualified concurrently by design, so publication must never leave a record
+    # beside another writer's hash, and a consumer must never accept a half-applied pair.
+    # ---------------------------------------------------------------------------------------------------------
+    $t26Root = Join-Path $root 't26-qualification'
+    New-Item -ItemType Directory -Path $t26Root -Force | Out-Null
+    $t26Descriptor = [ordered]@{ contextKind = 'Test'; contextName = 'pair-coherence' }
+    $t26Context = Get-AeroLinkLaunchContextDescriptor -Override $t26Descriptor
+    $t26Paths = [ordered]@{ normal = [ordered]@{ applicable = $true; observed = $true; survived = $true } }
+    $t26Writer = Join-Path $t26Root 'writer.ps1'
+    @'
+param([string]$ModuleDirectory, [string]$InstallationRoot, [int]$Iterations)
+$ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $ModuleDirectory 'AeroLinkTransitionKernel.psm1') -Force -DisableNameChecking
+Import-Module (Join-Path $ModuleDirectory 'AeroLinkTransitionAuthority.psm1') -Force -DisableNameChecking
+$descriptor = [ordered]@{ contextKind = 'Test'; contextName = 'pair-coherence' }
+$descriptorHash = (Get-AeroLinkLaunchContextDescriptor -Override $descriptor).DescriptorHash
+$paths = [ordered]@{ normal = [ordered]@{ applicable = $true; observed = $true; survived = $true } }
+for ($i = 0; $i -lt $Iterations; $i++) {
+    Write-AeroLinkLaunchContextQualification -InstallationRoot $InstallationRoot -Descriptor $descriptor -DescriptorHash $descriptorHash `
+        -Paths $paths -RequiredPaths @('normal') -Detail "writer $PID iteration $i" | Out-Null
+}
+exit 0
+'@ | Set-Content -LiteralPath $t26Writer -Encoding UTF8
+    $t26Procs = [System.Collections.Generic.List[object]]::new()
+    foreach ($t26WriterIndex in 1..3) {
+        $t26Procs.Add((Start-Process -FilePath $powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$t26Writer`" -ModuleDirectory `"$PSScriptRoot`" -InstallationRoot `"$t26Root`" -Iterations 25" -WindowStyle Hidden -PassThru))
+    }
+    $t26Codes = @()
+    foreach ($t26Proc in $t26Procs) {
+        if (-not $t26Proc.WaitForExit(120000)) { try { $t26Proc.Kill() } catch { }; Check $false "T26: a concurrent qualification writer (pid $($t26Proc.Id)) did not finish inside the bound." }
+        $t26Codes += $t26Proc.ExitCode; $t26Proc.Dispose()
+    }
+    Check (@($t26Codes | Where-Object { $_ -ne 0 }).Count -eq 0) "T26: every concurrent publisher of ONE descriptor must succeed (exit codes $($t26Codes -join ','))."
+    $t26RecordPath = Get-AeroLinkQualificationPath -InstallationRoot $t26Root -DescriptorHash $t26Context.DescriptorHash
+    $t26SidecarPath = ConvertTo-AeroLinkKernelIoPath "$t26RecordPath.sha256"
+    Check ([IO.File]::Exists($t26SidecarPath)) 'T26: the concurrent publication must leave an integrity sidecar beside the record.'
+    if ([IO.File]::Exists($t26SidecarPath)) {
+        Check ((([IO.File]::ReadAllText($t26SidecarPath)).Trim() -eq (Get-AeroLinkSha256File $t26RecordPath))) 'T26: the record and its sidecar must belong to the SAME generation after concurrent publication.'
+    }
+    $t26Accepted = Test-AeroLinkLaunchContextQualification -InstallationRoot $t26Root -DescriptorOverride $t26Descriptor
+    Check ($t26Accepted.Supported) "T26: the concurrent result must be consumable (got '$($t26Accepted.Detail)')."
+    # A stale hash (the reviewed symptom) and a record whose sidecar never arrived (an interrupted publication)
+    # must both be refused, and a later complete publication must repair the pair.
+    if ([IO.File]::Exists($t26SidecarPath)) { [IO.File]::WriteAllText($t26SidecarPath, ('0' * 64)) }
+    $t26Stale = Test-AeroLinkLaunchContextQualification -InstallationRoot $t26Root -DescriptorOverride $t26Descriptor
+    Check (-not $t26Stale.Supported) 'T26: a record certified by a stale hash must never be accepted.'
+    Check ($t26Stale.Detail -match 'integrity') "T26: the stale-hash refusal must name the integrity failure (got '$($t26Stale.Detail)')."
+    if ([IO.File]::Exists($t26SidecarPath)) { Remove-Item -LiteralPath $t26SidecarPath -Force }
+    $t26MissingSidecar = Test-AeroLinkLaunchContextQualification -InstallationRoot $t26Root -DescriptorOverride $t26Descriptor
+    Check (-not $t26MissingSidecar.Supported) 'T26: a record whose sidecar never arrived (an interrupted publication) must never be accepted.'
+    Check ($t26MissingSidecar.Detail -match 'integrity|sidecar') "T26: the interrupted-publication refusal must name the missing integrity evidence (got '$($t26MissingSidecar.Detail)')."
+    Write-AeroLinkLaunchContextQualification -InstallationRoot $t26Root -Descriptor $t26Descriptor -DescriptorHash $t26Context.DescriptorHash -Paths $t26Paths -RequiredPaths @('normal') -Detail 'repair' | Out-Null
+    $t26Repaired = Test-AeroLinkLaunchContextQualification -InstallationRoot $t26Root -DescriptorOverride $t26Descriptor
+    Check ($t26Repaired.Supported) "T26: a later complete publication must repair the pair (got '$($t26Repaired.Detail)')."
 }
 catch { $failures.Add("Suite error: $($_.Exception.Message) @ $($_.InvocationInfo.PositionMessage) :: $($_.ScriptStackTrace)") }
 finally {

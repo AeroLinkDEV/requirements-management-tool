@@ -323,7 +323,14 @@ function Stop-TwinInstanceTrees {
         # Settle what the selection PROVED it owns; then carry every discovery gap forward. A tree entry whose
         # native lifetime is unknown, or was replaced, is never silently dropped.
         $candidates = @($tree.identities)
-        foreach ($left in @($tree.unresolved)) { $remaining.Add([ordered]@{ processId = [int]$left.processId; name = 'unresolved-tree-entry'; state = 'Unknown'; detail = [string]$left.detail }) }
+        # Carry the entry's own bound lifetime with it: a caller that already owns that exact identity settles it by
+        # identity, while a caller that does not must withhold (Astra review 4979b47d, F497-1).
+        foreach ($left in @($tree.unresolved)) {
+            $leftFileTime = [long]0
+            if ($left -is [System.Collections.IDictionary]) { if ($left.Contains('creationFileTime')) { $leftFileTime = [long]$left['creationFileTime'] } }
+            elseif ($left.PSObject.Properties['creationFileTime']) { $leftFileTime = [long]$left.creationFileTime }
+            $remaining.Add([ordered]@{ processId = [int]$left.processId; name = 'unresolved-tree-entry'; state = 'Unknown'; creationFileTime = $leftFileTime; detail = [string]$left.detail })
+        }
         foreach ($left in @($tree.replaced)) { $remaining.Add([ordered]@{ processId = [int]$left.processId; name = 'replaced-tree-entry'; state = 'PidReused'; detail = [string]$left.detail }) }
         if (-not $candidates.Count -and [string]$tree.state -eq 'Reused' -and -not @($tree.replaced).Count) { $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = 'unverified-identity'; state = 'PidReused'; detail = [string]$tree.detail }) }
         if (-not $candidates.Count -and [string]$tree.state -eq 'Unknown' -and -not @($tree.unresolved).Count) { $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = 'unverified-identity'; state = 'Unknown'; detail = [string]$tree.detail }) }
@@ -410,6 +417,30 @@ function Stop-RecordedIdentities {
     return $remaining.ToArray()
 }
 
+function Test-TwinEntryDurablyOwned {
+    <#
+      A tree entry the selection could not attribute (an orphan: an ancestry link was gone, unreadable, replaced or
+      contradictory) is OURS only when this tool already holds a durable identity for that exact lifetime - one it
+      recorded while the parent chain was still intact. Such an entry is settled by identity in the
+      recorded-identity pass and verified at the end, so it is not a survivor here. An entry with no durable
+      identity is a live process this tool cannot prove it owns: it must withhold the verdict, never be dismissed
+      (Astra review 4979b47d, F497-1).
+    #>
+    param($Entry)
+    if (-not $Entry) { return $false }
+    $processId = [int]$Entry.processId
+    $creationFileTime = [long]0
+    # The entries cross the module boundary as ordered dictionaries, whose PSObject.Properties expose the
+    # dictionary's own members - never its keys: read them as a dictionary first.
+    if ($Entry -is [System.Collections.IDictionary]) { if ($Entry.Contains('creationFileTime')) { $creationFileTime = [long]$Entry['creationFileTime'] } }
+    elseif ($Entry.PSObject.Properties['creationFileTime']) { $creationFileTime = [long]$Entry.creationFileTime }
+    if ($creationFileTime -le 0) { return $false }
+    foreach ($recorded in @($script:observedIdentities)) {
+        if ([int]$recorded.processId -eq $processId -and [long]$recorded.creationFileTime -eq $creationFileTime) { return $true }
+    }
+    return $false
+}
+
 function Complete-TwinRun {
     <#
       Ends one run's containment: the preserved probes were already stopped by the caller, and the twin's own
@@ -422,6 +453,7 @@ function Complete-TwinRun {
     # observed must never authorize a termination (Astra review 801751be, F801-1).
     foreach ($left in @(Stop-TwinInstanceTrees -Engines @($Run.Instance.EngineIdentity))) {
         if ([string]$left.state -eq 'PidReused') { continue }
+        if (Test-TwinEntryDurablyOwned $left) { continue }
         $cleanupErrors.Add("${Name}: a twin action process (pid $($left.processId) $($left.name)) survived its ending")
     }
 }
@@ -760,6 +792,9 @@ finally {
         foreach ($left in @(Stop-TwinInstanceTrees)) {
             # PidReused is a preserved foreign process, not a survivor of ours.
             if ([string]$left.state -eq 'PidReused') { continue }
+            # A durably recorded identity is settled by the recorded-identity pass below and verified at the end;
+            # an unattributable entry with no durable identity stays a survivor that withholds the record.
+            if (Test-TwinEntryDurablyOwned $left) { Write-Verbose "twin entry pid $($left.processId) is owned by a recorded identity; settled in the recorded-identity pass"; continue }
             $cleanupErrors.Add("a twin action process (pid $($left.processId) $($left.name)) survived the twin's endings ($($left.state))")
         }
     }
@@ -779,7 +814,8 @@ finally {
     foreach ($entry in @($script:twinTreeUnresolved)) {
         $processId = [int]$entry.processId
         $recordedFileTime = [long]0
-        if ($entry.PSObject.Properties['creationFileTime']) { $recordedFileTime = [long]$entry.creationFileTime }
+        if ($entry -is [System.Collections.IDictionary]) { if ($entry.Contains('creationFileTime')) { $recordedFileTime = [long]$entry['creationFileTime'] } }
+        elseif ($entry.PSObject.Properties['creationFileTime']) { $recordedFileTime = [long]$entry.creationFileTime }
         $read = $null
         try { $read = Get-AeroLinkProcessCreationFileTime -ProcessId $processId } catch { $read = $null }
         if ($read -and $read.state -eq 'Gone') { continue }
