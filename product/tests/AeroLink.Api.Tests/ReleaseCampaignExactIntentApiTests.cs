@@ -4,6 +4,7 @@ using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
@@ -24,6 +25,99 @@ public sealed class ReleaseCampaignExactIntentApiTests
     private sealed record Scenario(
         Guid ProgramId, Guid ProjectId, Guid CampaignId, Guid ReleaseId, Guid BaselineId, Guid BuildId,
         string ManifestHash, Guid ChangeRequestId);
+
+    [Fact]
+    public async Task Code_review_format_is_frozen_per_cycle_and_rollback_leaves_no_identity()
+    {
+        using var factory = new AeroLinkApiFactory();
+        var scenario = await SeedAsync(factory, twoApprovers: false);
+        Guid snapshotId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var repository = new ProjectRepositoryConfiguration(scenario.ProjectId, ProjectRepositorySetupMode.ConnectNow,
+                "GitLab", "https://gitlab.example/demo/source", "cm", now);
+            var snapshot = new GitLabSourceSnapshot(scenario.ProjectId, repository.Id, "https://gitlab.example", 17,
+                "demo/source", new string('a', 40), "v1.6", "cm", now, repository.Version);
+            var selection = new GitLabSourceSelectionEvent(scenario.ProjectId, scenario.ReleaseId, snapshot.Id, 0, "cm", now);
+            db.AddRange(repository, snapshot, selection, new GitLabCurrentSourceSelection(scenario.ProjectId,
+                scenario.ReleaseId, snapshot.Id, selection.Id, "cm", now));
+            await db.SaveChangesAsync();
+            snapshotId = snapshot.Id;
+            // A historical cycle without a format identity remains v1 even if new Code data later exists.
+            var execution = scope.ServiceProvider.GetRequiredService<ReleaseExecutionService>();
+            Assert.Equal(scenario.ManifestHash, await execution.ComputeRecordedReviewManifestHashAsync(scenario.CampaignId, default));
+        }
+
+        async Task CancelAsync()
+        {
+            using var services = factory.Services.CreateScope();
+            var db = services.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            await using var write = await ProjectControlledWriteScope.AcquireAsync(db, scenario.ProjectId);
+            var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events)
+                .SingleAsync(x => x.Id == scenario.CampaignId);
+            campaign.CancelReleaseReview("cm", "Reconfirm exact source.", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+            await write.CommitAsync();
+        }
+        async Task<string> FreezeAsync(bool commit)
+        {
+            using var services = factory.Services.CreateScope();
+            var db = services.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var execution = services.ServiceProvider.GetRequiredService<ReleaseExecutionService>();
+            await using var write = await ProjectControlledWriteScope.AcquireAsync(db, scenario.ProjectId);
+            var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events)
+                .SingleAsync(x => x.Id == scenario.CampaignId);
+            var oldApprovals = campaign.Approvals.Select(x => x.Id).ToHashSet();
+            var prepared = await execution.PrepareCodeReviewManifestAsync(campaign, write, default);
+            Assert.Equal(2, prepared.FormatVersion);
+            var now = DateTimeOffset.UtcNow;
+            campaign.BeginReleaseReview("cm", [("release.approver", "Release Approver")], prepared.Hash, now);
+            execution.RecordCodeReviewManifest(campaign, prepared, write, "cm", now);
+            db.ReleaseApprovals.AddRange(campaign.Approvals.Where(x => !oldApprovals.Contains(x.Id)));
+            await db.SaveChangesAsync();
+            if (commit) await write.CommitAsync();
+            else await write.RollbackAsync();
+            return prepared.Hash;
+        }
+
+        await CancelAsync();
+        var firstHash = await FreezeAsync(true);
+        Assert.NotEqual(scenario.ManifestHash, firstHash);
+        using var approver = await ApproverClientAsync(factory, "release.approver");
+        using var approval = await approver.PostAsJsonAsync($"/api/release-campaigns/{scenario.CampaignId}/approve",
+            new { password = AeroLinkApiFactory.MemberPassword, meaning = "I approve this exact Code source.", expectedManifestHash = firstHash });
+        Assert.Equal(HttpStatusCode.OK, approval.StatusCode);
+        await CancelAsync();
+        using (var services = factory.Services.CreateScope())
+        {
+            var db = services.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            await using var write = await ProjectControlledWriteScope.AcquireAsync(db, scenario.ProjectId);
+            var pointer = await db.GitLabCurrentSourceSelections.SingleAsync(x => x.ProjectId == scenario.ProjectId);
+            var selection = new GitLabSourceSelectionEvent(scenario.ProjectId, scenario.ReleaseId, snapshotId, pointer.Version,
+                "cm", DateTimeOffset.UtcNow);
+            db.Add(selection);
+            pointer.Move(pointer.Version, snapshotId, selection.Id, "cm", selection.SelectedAt);
+            await db.SaveChangesAsync();
+            await write.CommitAsync();
+        }
+        var secondHash = await FreezeAsync(true);
+        Assert.NotEqual(firstHash, secondHash);
+        await CancelAsync();
+        await FreezeAsync(false);
+        using (var services = factory.Services.CreateScope())
+        {
+            var db = services.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var identities = await db.CodeReviewCycleManifestIdentities.Where(x => x.ReleaseCampaignId == scenario.CampaignId)
+                .OrderBy(x => x.ApprovalCycle).ToListAsync();
+            Assert.Equal(new[] { 2, 3 }, identities.Select(x => x.ApprovalCycle));
+            Assert.Equal(new[] { firstHash, secondHash }, identities.Select(x => x.ManifestHash));
+            Assert.Equal(firstHash, (await db.ElectronicSignatures.SingleAsync(x => x.ArtifactId == scenario.CampaignId)).ContentHash);
+            Assert.Equal(ReleaseCampaignState.Verification, (await db.ReleaseCampaigns.SingleAsync(x => x.Id == scenario.CampaignId)).State);
+            Assert.Equal(3, await db.ReleaseApprovals.Where(x => x.CampaignId == scenario.CampaignId).MaxAsync(x => x.Cycle));
+        }
+    }
 
     [Fact]
     public async Task Approval_after_a_package_change_is_refused_and_only_the_current_manifest_is_signed()

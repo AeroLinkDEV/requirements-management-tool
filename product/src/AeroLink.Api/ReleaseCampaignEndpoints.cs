@@ -259,8 +259,11 @@ public static class ReleaseCampaignEndpoints
                 if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every release approver must be a distinct active AeroLink user." });
                 var programId=await db.Projects.AsNoTracking().Where(x=>x.Id==campaign.ProjectId).Select(x=>x.ProgramId).SingleAsync(ct);
                 foreach(var approver in known)if(!await identity.HasRoleAsync(approver.Id,programId,ProgramRole.Approver,DateTimeOffset.UtcNow,ct))return Results.BadRequest(new{error=$"{approver.DisplayName} does not hold Approver authority for this Program."});
-                var manifestHash=await execution.ComputeReviewManifestHashAsync(id,ct);
-                campaign.BeginReleaseReview(freshActor.UserName, requested.Select(userName=>{var person=known.Single(x=>x.UserName==userName);return(person.UserName,person.DisplayName);}).ToList(),manifestHash,DateTimeOffset.UtcNow);
+                var prepared = await execution.PrepareCodeReviewManifestAsync(campaign, writeScope, ct);
+                var manifestHash = prepared.Hash;
+                var now = DateTimeOffset.UtcNow;
+                campaign.BeginReleaseReview(freshActor.UserName, requested.Select(userName=>{var person=known.Single(x=>x.UserName==userName);return(person.UserName,person.DisplayName);}).ToList(),manifestHash,now);
+                execution.RecordCodeReviewManifest(campaign, prepared, writeScope, freshActor.UserName, now);
                 // Existing approvals belong to the cancelled cycle and must stay Unchanged. The fresh rows
                 // have never been persisted; once DetectChanges discovers them through the campaign
                 // collection EF treats application-assigned keys as existing (Modified) and would UPDATE
@@ -309,7 +312,7 @@ public static class ReleaseCampaignEndpoints
             if(string.IsNullOrWhiteSpace(request.ExpectedManifestHash)||request.ExpectedManifestHash.Length!=64
                 ||!string.Equals(request.ExpectedManifestHash,campaign.ReleaseHash,StringComparison.OrdinalIgnoreCase))
                 return Results.Conflict(new{error="The release package you reviewed has changed. Reload the release package before approving.",code="stale_release_package",currentManifestHash=campaign.ReleaseHash});
-            var currentHash=await execution.ComputeReviewManifestHashAsync(id,ct);
+            var currentHash=await execution.ComputeRecordedReviewManifestHashAsync(id,ct);
             if(!string.Equals(currentHash,campaign.ReleaseHash,StringComparison.OrdinalIgnoreCase))
                 return Results.Conflict(new{error="The release package changed after review began. Cancel and restart release review against the current manifest.",code="release_manifest_changed",reviewedManifestHash=campaign.ReleaseHash,currentManifestHash=currentHash});
             var actor = freshActor; if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
@@ -358,7 +361,7 @@ public static class ReleaseCampaignEndpoints
                 var status = await readiness.CalculateAsync(id, ct); if (!status.ReadyForRelease) return Results.BadRequest(new { error = "Every release-readiness gate must be complete.", blockers = status.Gates.Where(x => !x.Complete).Select(x => x.Name) });
                 if (campaign.SoftwareBuildId is null) return Results.BadRequest(new { error = "Select the verified release build." });
                 var baseline = await db.CandidateBaselines.Include(x => x.Events).SingleAsync(x => x.Id == campaign.BaselineId, ct); var release = await db.Releases.SingleAsync(x => x.Id == campaign.ReleaseId, ct); var build = await db.SoftwareBuilds.SingleAsync(x => x.Id == campaign.SoftwareBuildId, ct);
-                var hash=await execution.ComputeReviewManifestHashAsync(id,ct);if(!string.Equals(campaign.ReleaseHash,hash,StringComparison.OrdinalIgnoreCase))return Results.Conflict(new{error="The release package changed after review began. Cancel and restart release review against the current manifest.",code="release_manifest_changed",reviewedManifestHash=campaign.ReleaseHash,currentManifestHash=hash});
+                var hash=await execution.ComputeRecordedReviewManifestHashAsync(id,ct);if(!string.Equals(campaign.ReleaseHash,hash,StringComparison.OrdinalIgnoreCase))return Results.Conflict(new{error="The release package changed after review began. Cancel and restart release review against the current manifest.",code="release_manifest_changed",reviewedManifestHash=campaign.ReleaseHash,currentManifestHash=hash});
                 var actor = freshActor.UserName; campaign.Release(build.Id, hash, actor, DateTimeOffset.UtcNow); baseline.MarkReleased(actor, DateTimeOffset.UtcNow); release.MarkReleased(DateTimeOffset.UtcNow); build.MarkReleased(DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); await writeScope.CommitAsync(ct); return Results.Ok(new { release = release.Version, build.BuildNumber, releaseHash = hash });
             }
             catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return Results.Conflict(new { error = "The release package changed concurrently. Reload before releasing.", code = "release_campaign_conflict" }); }

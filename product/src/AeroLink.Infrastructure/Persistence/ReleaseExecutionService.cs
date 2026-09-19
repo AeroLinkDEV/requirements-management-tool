@@ -9,6 +9,7 @@ using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Integrations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 
@@ -20,6 +21,8 @@ public sealed record ReleaseReconciliationResult(int TraceLinksCreated, int Susp
     int UncoveredRequirements, int UnsatisfiedCaseObligations);
 public sealed record VerificationManifestRow(Guid ProcedureRevisionId, string DisplayNumber, string Outcome, DateTimeOffset? ExecutedAt, string ExecutedBy, string Configuration, string Determination);
 public sealed record VerificationImportResult(int ExecutionsRecorded, int Passed, int Failed, int Blocked, Guid EvidenceId, string EvidenceSha256);
+public sealed record PreparedCodeReviewManifest(Guid CampaignId, int FormatVersion, string Format, string Hash,
+    Guid? SourceSelectionEventId, Guid? SourceSnapshotId, IReadOnlyList<Guid> EvidenceReferenceIds);
 
 public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileStore evidenceStore,
     IProjectLadderPolicyResolver? policyResolver = null)
@@ -234,6 +237,60 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         evidenceStore.Delete(staged.StorageKey);
     }
 
+    public async Task<PreparedCodeReviewManifest> PrepareCodeReviewManifestAsync(ReleaseCampaign campaign,
+        ProjectControlledWriteScope scope, CancellationToken ct)
+    {
+        ProjectControlledWriteScope.Require(db, campaign.ProjectId, scope);
+        var legacyHash = await ComputeReviewManifestHashAsync(campaign.Id, ct);
+        var useV2 = await db.GitLabCurrentSourceSelections.AsNoTracking()
+            .AnyAsync(x => x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId, ct)
+            || await db.CodeEvidenceCurrentSelectors.AsNoTracking()
+                .AnyAsync(x => x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId, ct);
+        if (!useV2) return new(campaign.Id, 1, "aerolink.release-review-manifest.v1", legacyHash, null, null, []);
+        var policy = policyResolver is null ? LegacyLadderPolicy.Instance : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
+        var material = await new CodeReviewManifestBuilder(db).BuildV2Async(campaign.Id, legacyHash, policy, ct);
+        return new(campaign.Id, 2, CodeReviewManifestBuilder.Format, material.Hash,
+            material.SourceSelectionEventId, material.SourceSnapshotId, material.EvidenceReferenceIds);
+    }
+
+    public void RecordCodeReviewManifest(ReleaseCampaign campaign, PreparedCodeReviewManifest prepared,
+        ProjectControlledWriteScope scope, string actor, DateTimeOffset now)
+    {
+        ProjectControlledWriteScope.Require(db, campaign.ProjectId, scope);
+        if (campaign.Id != prepared.CampaignId || campaign.State != ReleaseCampaignState.InReview
+            || campaign.ReleaseHash != prepared.Hash)
+            throw new DomainException("The prepared Code manifest does not belong to the new release review.");
+        var cycle = campaign.Approvals.Where(x => x.State != ReleaseApprovalState.Cancelled).Select(x => x.Cycle).Distinct().ToArray();
+        if (cycle.Length != 1) throw new DomainException("The release review must have one exact active approval cycle.");
+        db.CodeReviewCycleManifestIdentities.Add(new(campaign.ProjectId, campaign.ReleaseId, campaign.Id,
+            cycle[0], prepared.Format, prepared.FormatVersion, prepared.Hash, prepared.SourceSelectionEventId,
+            prepared.SourceSnapshotId, prepared.EvidenceReferenceIds.ToArray(), actor, now));
+    }
+
+    /// <summary>Uses the recorded active-cycle format. Missing identity means the historical v1 contract.</summary>
+    public async Task<string> ComputeRecordedReviewManifestHashAsync(Guid campaignId, CancellationToken ct)
+    {
+        var campaign = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals)
+            .SingleAsync(x => x.Id == campaignId, ct);
+        var cycles = campaign.Approvals.Where(x => x.State != ReleaseApprovalState.Cancelled).Select(x => x.Cycle).Distinct().ToArray();
+        if (cycles.Length > 1) throw new DomainException("The release review has inconsistent approval-cycle identity.");
+        var identity = cycles.Length == 0 ? null : await db.CodeReviewCycleManifestIdentities.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId
+                && x.ReleaseCampaignId == campaignId && x.ApprovalCycle == cycles[0], ct);
+        var legacyHash = await ComputeReviewManifestHashAsync(campaignId, ct);
+        if (identity is null) return legacyHash;
+        if (identity.ManifestHash != campaign.ReleaseHash)
+            throw new DomainException("The stored Code manifest does not match the frozen release review.");
+        if (identity.FormatVersion == 1 && identity.Format == "aerolink.release-review-manifest.v1")
+            return legacyHash;
+        if (identity.FormatVersion != 2 || identity.Format != CodeReviewManifestBuilder.Format)
+            throw new DomainException("This Code review manifest format is not supported.");
+        var policy = policyResolver is null ? LegacyLadderPolicy.Instance : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
+        var material = await new CodeReviewManifestBuilder(db).BuildV2Async(campaignId, legacyHash, policy, ct);
+        return material.Hash;
+    }
+
+    // Historical v1 serializer: preserve its payload, ordering and byte representation unchanged.
     public async Task<string> ComputeReviewManifestHashAsync(Guid campaignId, CancellationToken ct)
     {
         var campaign = await db.ReleaseCampaigns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == campaignId, ct)
