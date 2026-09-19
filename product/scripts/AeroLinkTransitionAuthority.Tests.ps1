@@ -607,6 +607,53 @@ public static class Program {
     $qualifierSource = Join-Path $PSScriptRoot 'Invoke-AeroLinkLaunchContextQualification.ps1'
     $qualifierTokens = $null; $qualifierErrors = $null
     $qualifierAst = [System.Management.Automation.Language.Parser]::ParseFile($qualifierSource, [ref]$qualifierTokens, [ref]$qualifierErrors)
+    # T27: a Task Scheduler Exec action is not a shell. The former unconditional redirection made every
+    # powershell.exe-image twin fail parameter binding before publishing a descriptor. Exercise the shipped
+    # argument builder and the real host parser, with a harmless probe substitute and no registered tasks.
+    & {
+        $builder = $qualifierAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Set-TwinArguments' }, $true)
+        function Register-ScheduledTask { param($TaskName, $Xml, [switch]$Force, $ErrorAction) }
+        $probeFolder = Join-Path $root 'probe with spaces'
+        New-Item -ItemType Directory -Path $probeFolder -Force | Out-Null
+        $builderPath = Join-Path $probeFolder 'builder.ps1'
+        $builder.Extent.Text | Set-Content -LiteralPath $builderPath -Encoding UTF8
+        . $builderPath
+        $stub = Join-Path $probeFolder 'probe.ps1'
+        '[CmdletBinding()] param([switch]$Probe,[string]$InstallationRoot,[string]$RunId,[int]$HoldSeconds,[int]$MutatorSeconds,[int]$ChainDeadlineSeconds) if ($RunId -ne "binding-proof") { exit 9 }; exit 0' | Set-Content -LiteralPath $stub -Encoding UTF8
+        $runs = $probeFolder; $ProbeStateRoot = $probeFolder; $twin = 'NoTaskIsRegistered'
+        foreach ($image in @('powershell.exe', 'cmd.exe')) {
+            $document = [xml]'<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Actions><Exec><Command/><Arguments/></Exec></Actions></Task>'
+            $ns = New-Object Xml.XmlNamespaceManager($document.NameTable)
+            $ns.AddNamespace('t', 'http://schemas.microsoft.com/windows/2004/02/mit/task')
+            $exec = @($document.SelectNodes('//t:Exec', $ns))
+            $exec[0].SelectSingleNode('t:Command', $ns).InnerText = $image
+            $script:argumentsNode = $exec[0].SelectSingleNode('t:Arguments', $ns)
+            $originalArguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "old.ps1" -Action Start'
+            if ($image -eq 'cmd.exe') { $originalArguments = '/d /c ""' + $powershell + '" ' + $originalArguments + '"' }
+            $fileMatch = [regex]::Match($originalArguments, '(?i)-File\s+(?:"[^"]+\.ps1"|\S+\.ps1)(?:\s+[^"&|]*)?')
+            Set-TwinArguments 'binding-proof' 0 0 60
+            $arguments = $script:argumentsNode.InnerText -replace '(?i)-File\s+"[^"]+\.ps1"', ('-File "' + $stub + '"')
+            $si = New-Object Diagnostics.ProcessStartInfo
+            $si.FileName = if ($image -eq 'cmd.exe') { $env:ComSpec } else { $powershell }
+            $si.Arguments = $arguments; $si.UseShellExecute = $false; $si.CreateNoWindow = $true
+            $si.RedirectStandardOutput = $true; $si.RedirectStandardError = $true
+            $p = [Diagnostics.Process]::Start($si)
+            try {
+                $stdout = $p.StandardOutput.ReadToEnd(); $stderr = $p.StandardError.ReadToEnd()
+                if (-not $p.WaitForExit(15000)) { $p.Kill(); throw 'T27 probe binding did not finish.' }
+                Check ($p.ExitCode -eq 0) "T27: $image twin arguments must reach the probe (exit $($p.ExitCode): $stderr $stdout)."
+            } finally { $p.Dispose() }
+            Check ($exec[0].SelectSingleNode('t:Command', $ns).InnerText -eq $image) 'T27: argument replacement must preserve the qualified action image.'
+            if ($image -eq 'powershell.exe') {
+                $si.Arguments = $arguments + ' > "' + (Join-Path $probeFolder 'invalid.log') + '" 2>&1'
+                $p = [Diagnostics.Process]::Start($si)
+                try {
+                    $null = $p.StandardOutput.ReadToEnd(); $stderr = $p.StandardError.ReadToEnd(); $p.WaitForExit()
+                    Check ($p.ExitCode -ne 0 -and $stderr -match 'PositionalParameterNotFound|ParameterArgumentTransformationError|CannotConvertArgument') "T27: the former shell redirection must reproduce the pre-probe binding failure (exit $($p.ExitCode): $stderr)."
+                } finally { $p.Dispose() }
+            }
+        }
+    }
     foreach ($functionName in @('Test-EndingMatched', 'Get-TwinObservationDescriptorHash')) {
         $node = $qualifierAst.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq $functionName }, $true)
         if (-not $node) { throw "T21: the qualifier no longer defines $functionName." }

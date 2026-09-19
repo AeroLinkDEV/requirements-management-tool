@@ -180,14 +180,20 @@ function Set-TwinArguments([string]$Id, [int]$Hold, [int]$MutatorSeconds = 0, [i
     $probeCall += ' -ChainDeadlineSeconds ' + $ChainDeadlineSeconds
     # Everything this definition put AFTER its product script is that product's own arguments and must not be
     # handed to the probe entry: the twin runs the probe INSTEAD of the product. What precedes -File (window
-    # style, execution policy, a cmd wrapper that sets the environment) is preserved, and the twin's own output
-    # is redirected to the run directory so it can never block on an unread inherited stdio handle.
+    # style, execution policy, a cmd wrapper that sets the environment) is preserved. Shell redirection belongs
+    # ONLY to a cmd action: powershell.exe -File passes '>' to the script as an argument and fails binding before
+    # the probe can publish anything. Direct PowerShell tasks use the probe's durable JSON diagnostics.
     $twinLog = Join-Path $runs "$Id.twin.log"
-    $rewritten = $originalArguments.Substring(0, $fileMatch.Index) + $probeCall + ' > "' + $twinLog + '" 2>&1'
+    $actionImage = [IO.Path]::GetFileName($exec[0].SelectSingleNode('t:Command', $ns).InnerText).ToLowerInvariant()
+    if ($actionImage -notin @('cmd.exe', 'powershell.exe', 'pwsh.exe')) { throw "Unsupported qualification action image '$actionImage'." }
+    $rewritten = $originalArguments.Substring(0, $fileMatch.Index) + $probeCall
     # cmd.exe strips the first and last quote of a `cmd /c "..."` command line. When the definition is wrapped
     # that way, the rewritten tail must still END in a quote or the closing quote of the redirection target is
     # the one cmd removes and the whole action fails as a malformed filename (measured).
-    if ($originalArguments -match '/c\s+"' -and $originalArguments.TrimEnd().EndsWith('"')) { $rewritten += '"' }
+    if ($actionImage -eq 'cmd.exe') {
+        $rewritten += ' > "' + $twinLog + '" 2>&1'
+        if ($originalArguments -match '/c\s+"' -and $originalArguments.TrimEnd().EndsWith('"')) { $rewritten += '"' }
+    }
     $script:argumentsNode.InnerText = $rewritten
     Register-ScheduledTask -TaskName $twin -Xml $document.OuterXml -Force -ErrorAction Stop | Out-Null
 }

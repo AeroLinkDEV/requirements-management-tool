@@ -300,6 +300,20 @@ installation. A terminating experiment can leave an attempt whose termination th
 admission refuses every later transition of an installation that holds such an attempt - so the experiments must
 not run inside the state of the installation they certify.
 
+For disposable S4U and first-deployment acceptance without an operator's HOME services, the manually dispatched
+**Isolated Windows process qualification** workflow uses fresh GitHub-hosted Windows machines. It first exercises
+a one-minute diagnostic definition, then each generated definition's actual 135-minute limit. A separate machine
+qualifies the first-deployment definition and runs the real initializer against a local bare origin containing the
+candidate. The fixture refuses operator machines, pre-existing HOME controllers and occupied service ports.
+Its artifacts retain the candidate, exported definitions, per-run descriptors, integrity sidecars, transition
+receipts and cleanup results. These are acceptance evidence for those machines: their account-bound records must
+never be transplanted to HOME or represented as qualification of HOME's principal. This workflow is additional
+operational evidence and does not replace the protected Product quality gate.
+
+Direct PowerShell task actions pass only PowerShell arguments to the probe; shell redirection is used only for
+`cmd.exe` actions. Probe state is passed explicitly through `InstallationRoot` and `ProbeStateRoot`; the marker
+probe does not launch application services or require a production profile, database or tunnel configuration.
+
 The qualification descriptor binds **placement**, not script bytes: the context kind and chain, the task
 definition's principal, settings and action *image* (not its arguments, triggers or URI), the native placement
 code hash and protocol, the host image, the principal SID, logon type, session class, the actual token
