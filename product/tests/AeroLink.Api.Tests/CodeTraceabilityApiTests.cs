@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
@@ -12,6 +13,54 @@ namespace AeroLink.Api.Tests;
 [Collection(ShowcaseApiCollection.Name)]
 public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
 {
+    [Fact]
+    public async Task Overview_preserves_new_evidence_identity_and_does_not_fall_back_after_invalidation()
+    {
+        using var factory = showcase.CreateFactory();
+        using var client = factory.CreateClient();
+        await ShowcaseApiFixture.LoginAdministratorAsync(client);
+        var summary = showcase.Summary;
+        Guid revisionId, setId, releaseId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            releaseId = await db.CandidateBaselines.Where(x => x.Id == summary.ReleasedBaselineId).Select(x => x.ReleaseId).SingleAsync();
+            var legacy = await db.CodeTraceabilityRecords.FirstAsync(x => x.ProjectId == summary.ProjectId
+                && x.ReleaseId == releaseId);
+            revisionId = legacy.RequirementRevisionId;
+            // Arrange retained controlled history only inside the disposable fixture, not through a released-build command.
+            var set = new CodeEvidenceDispositionSet(summary.ProjectId, legacy.ReleaseId, legacy.RequirementArtifactId,
+                revisionId, CodeEvidenceDisposition.NoCodeChangeRequired, "Explicit replacement decision.", null, null,
+                legacy.Id, "engineer", DateTimeOffset.UtcNow);
+            setId = set.Id;
+            db.AddRange(set, new CodeEvidenceCurrentSelector(summary.ProjectId, legacy.ReleaseId, legacy.RequirementArtifactId,
+                revisionId, set.Id, "engineer", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+        using var acceptedResponse = await client.GetAsync($"/api/code-traceability?projectId={summary.ProjectId}&releaseId={releaseId}");
+        Assert.Equal("no-store", acceptedResponse.Headers.CacheControl?.ToString());
+        var accepted = await acceptedResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var row = accepted.GetProperty("requirements").EnumerateArray().Single(x => x.GetProperty("revisionId").GetGuid() == revisionId);
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("mapping").ValueKind);
+        Assert.Equal(setId, row.GetProperty("evidence").GetProperty("evidenceSetId").GetGuid());
+        Assert.True(row.GetProperty("evidence").GetProperty("countsAsImplementation").GetBoolean());
+        Assert.Equal(5, accepted.GetProperty("summary").GetProperty("mapped").GetInt32());
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var set = await db.CodeEvidenceDispositionSets.SingleAsync(x => x.Id == setId);
+            db.Add(new CodeEvidenceInvalidation(set.Id, set.ProjectId, set.ReleaseId, set.RequirementArtifactId,
+                set.RequirementRevisionId, "engineer", "Replacement evidence no longer applies.", DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+        var invalidated = await client.GetFromJsonAsync<JsonElement>($"/api/code-traceability?projectId={summary.ProjectId}&releaseId={releaseId}");
+        row = invalidated.GetProperty("requirements").EnumerateArray().Single(x => x.GetProperty("revisionId").GetGuid() == revisionId);
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("mapping").ValueKind);
+        Assert.Equal("Invalidated", row.GetProperty("evidence").GetProperty("state").GetString());
+        Assert.False(row.GetProperty("evidence").GetProperty("countsAsImplementation").GetBoolean());
+        Assert.Equal(4, invalidated.GetProperty("summary").GetProperty("mapped").GetInt32());
+    }
+
     [Fact]
     public async Task Code_gate_is_build_scoped_and_accepts_a_justified_no_code_decision_for_active_work()
     {

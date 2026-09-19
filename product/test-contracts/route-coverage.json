@@ -307,7 +307,6 @@
         "ChangeRequestTargetReleaseGuardApiTests",
         "ChangeRequestUpstreamTraceApiTests",
         "ClosedReleaseAuthoringTests",
-        "CodeRelationshipApiTests",
         "ControlledAttachmentMutationApiTests",
         "ControlledEditingCheckInApiTests",
         "ControlledEditingProcedureAuthorityTests",
@@ -1852,38 +1851,6 @@
         "ProjectSetupDiscardApiTests",
         "ProjectSetupInceptionApiTests",
         "ProjectSetupKestrelQualificationTests"
-      ]
-    },
-    {
-      "method": "POST",
-      "path": "/api/projects/{projectId:guid}/code/relationships/{relationshipKind}/{relationshipId:guid}/re-add",
-      "file": "CodeRelationshipEndpoints.cs",
-      "coveredBy": [
-        "CodeRelationshipApiTests"
-      ]
-    },
-    {
-      "method": "POST",
-      "path": "/api/projects/{projectId:guid}/code/relationships/{relationshipKind}/{relationshipId:guid}/withdraw",
-      "file": "CodeRelationshipEndpoints.cs",
-      "coveredBy": [
-        "CodeRelationshipApiTests"
-      ]
-    },
-    {
-      "method": "POST",
-      "path": "/api/projects/{projectId:guid}/code/relationships/files",
-      "file": "CodeRelationshipEndpoints.cs",
-      "coveredBy": [
-        "CodeRelationshipApiTests"
-      ]
-    },
-    {
-      "method": "POST",
-      "path": "/api/projects/{projectId:guid}/code/relationships/merge-requests",
-      "file": "CodeRelationshipEndpoints.cs",
-      "coveredBy": [
-        "CodeRelationshipApiTests"
       ]
     },
     {
