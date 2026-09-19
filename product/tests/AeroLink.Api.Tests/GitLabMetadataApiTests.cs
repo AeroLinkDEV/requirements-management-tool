@@ -14,6 +14,81 @@ namespace AeroLink.Api.Tests;
 public sealed class GitLabMetadataApiTests
 {
     [Fact]
+    public async Task Cached_display_preserves_observation_time_and_still_requires_current_membership()
+    {
+        using var transport = new CaptureGitLab(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") }));
+        using var factory = new AeroLinkApiFactory();
+        using var configured = factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.Configure<ProjectGitLabOptions>(options => { options.BaseUrl = "https://gitlab.example"; options.ReadAccessToken = "test-only-token"; });
+            services.AddHttpClient<GitLabMetadataReader>().ConfigurePrimaryHttpMessageHandler(() => transport);
+        }));
+        var data = await SeedAsync(configured.Services);
+        using var client = configured.CreateClient();
+        await SignInAsync(client, data.UserName);
+        var url = $"/api/projects/{data.ProjectId}/repository/merge-requests";
+        var first = await client.GetFromJsonAsync<System.Text.Json.JsonElement>(url);
+        using var response = await client.GetAsync(url);
+        var second = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal(first.GetProperty("checkedAt").GetString(), second.GetProperty("checkedAt").GetString());
+        Assert.True(second.GetProperty("cache").GetProperty("reused").GetBoolean());
+        Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
+        Assert.Equal(1, transport.Calls);
+        using (var scope = configured.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            (await db.ProgramMemberships.SingleAsync(x => x.UserId == data.UserId)).End("test.operator", DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(url)).StatusCode);
+        Assert.Equal(1, transport.Calls);
+    }
+
+    [Fact]
+    public async Task Source_bound_tree_refuses_repository_drift_even_when_commit_is_shared()
+    {
+        using var transport = new CaptureGitLab(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[]") }));
+        using var factory = new AeroLinkApiFactory();
+        using var configured = factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.Configure<ProjectGitLabOptions>(options => { options.BaseUrl = "https://gitlab.example"; options.ReadAccessToken = "test-only-token"; });
+            services.AddHttpClient<GitLabMetadataReader>().ConfigurePrimaryHttpMessageHandler(() => transport);
+        }));
+        var data = await SeedAsync(configured.Services);
+        var sha = new string('a', 40);
+        Guid snapshotId;
+        using (var scope = configured.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var repository = await db.ProjectRepositoryConfigurations.SingleAsync(x => x.ProjectId == data.ProjectId);
+            var snapshot = new GitLabSourceSnapshot(data.ProjectId, repository.Id, "https://gitlab.example", 17,
+                "group/project", sha, "main", "test.operator", DateTimeOffset.UtcNow, repository.Version);
+            snapshotId = snapshot.Id;
+            db.Add(snapshot);
+            await db.SaveChangesAsync();
+        }
+        using var client = configured.CreateClient();
+        await SignInAsync(client, data.UserName);
+        var url = $"/api/projects/{data.ProjectId}/code/source/{snapshotId}/tree?commit={sha}";
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(url)).StatusCode);
+        Assert.Equal(1, transport.Calls);
+        using (var scope = configured.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var repository = await db.ProjectRepositoryConfigurations.SingleAsync(x => x.ProjectId == data.ProjectId);
+            repository.Configure(repository.Version, ProjectRepositorySetupMode.ConnectNow, "GitLab", "https://gitlab.example/group/replacement", "test.operator", DateTimeOffset.UtcNow);
+            repository.RecordVerification("test.operator", DateTimeOffset.UtcNow, 18, "group/replacement");
+            await db.SaveChangesAsync();
+        }
+        using var changed = await client.GetAsync(url);
+        Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
+        Assert.Contains("repository_changed", await changed.Content.ReadAsStringAsync());
+        Assert.Equal(1, transport.Calls);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(url.Replace(snapshotId.ToString(), Guid.NewGuid().ToString()))).StatusCode);
+        Assert.Equal(1, transport.Calls);
+    }
+
+    [Fact]
     public async Task UnconfiguredInstallationReportsUnavailableWithoutCallingGitLab()
     {
         using var transport = new CaptureGitLab(_ => throw new InvalidOperationException("Unconfigured remote call"));

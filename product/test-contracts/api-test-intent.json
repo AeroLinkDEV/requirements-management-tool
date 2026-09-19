@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 965,
-    "cases": 1091,
+    "tests": 967,
+    "cases": 1093,
     "classes": 152,
-    "hostedTests": 916,
-    "hostedCases": 1020,
+    "hostedTests": 918,
+    "hostedCases": 1022,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 15,
@@ -29,16 +29,16 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 182,
-      "cases": 196,
+      "tests": 183,
+      "cases": 197,
       "unknownCases": 0,
-      "classes": 65
+      "classes": 66
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 108,
-      "cases": 121,
+      "tests": 109,
+      "cases": 122,
       "unknownCases": 0,
       "classes": 64
     },
@@ -5372,8 +5372,26 @@
         "host-customization"
       ],
       "sourceLines": {
-        "start": 38,
-        "end": 94
+        "start": 113,
+        "end": 169
+      }
+    },
+    {
+      "cls": "GitLabMetadataApiTests",
+      "test": "Cached_display_preserves_observation_time_and_still_requires_current_membership",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 16,
+        "end": 45
       }
     },
     {
@@ -5390,8 +5408,8 @@
         "host-customization"
       ],
       "sourceLines": {
-        "start": 148,
-        "end": 164
+        "start": 223,
+        "end": 239
       }
     },
     {
@@ -5408,8 +5426,26 @@
         "host-customization"
       ],
       "sourceLines": {
-        "start": 96,
-        "end": 146
+        "start": 171,
+        "end": 221
+      }
+    },
+    {
+      "cls": "GitLabMetadataApiTests",
+      "test": "Source_bound_tree_refuses_repository_drift_even_when_commit_is_shared",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 47,
+        "end": 89
       }
     },
     {
@@ -5426,8 +5462,8 @@
         "host-customization"
       ],
       "sourceLines": {
-        "start": 16,
-        "end": 36
+        "start": 91,
+        "end": 111
       }
     },
     {

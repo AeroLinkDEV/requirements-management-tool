@@ -24,8 +24,9 @@ async function mockWorkspace(page: Page) {
         webUrl: 'https://gitlab.example/demo/fms/-/merge_requests/3', approvals: { known: false, approvedBy: [], detail: 'Unavailable' } },
       mergeRequests: [{ id: 'edge-one', relationshipKind: 'MergeRequest', version: 4, isActive: true, capabilities: { canWithdraw: true, canReAdd: false }, targetKind: 'ChangeRequestRevision',
         targetDisplaySnapshot: 'LLRCR-00001.00', meaning: 'Addresses', recordedBy: 'engineer', recordedAt: '2026-09-19T12:00:00Z' }], files: [] }
-    else if (path.endsWith('/repository/tree')) {
+    else if (path.endsWith('/code/source/source-one/tree')) {
       expect(url.searchParams.get('commit')).toBe(sha)
+      expect(url.pathname).toContain('/code/source/source-one/tree')
       body = { configurationVersion: 1, observation: { succeeded: true, completeness: 'Complete', value: { commitSha: sha,
         entries: url.searchParams.get('path') === 'src' ? [{ path: 'src/route.c', name: 'route.c', kind: 'Blob', mode: '100644' }]
           : [{ path: 'src', name: 'src', kind: 'Tree' }, { path: 'README.md', name: 'README.md', kind: 'Blob', mode: '100644' }] } } }
@@ -116,6 +117,19 @@ test('missing source capabilities fail closed without losing the workspace', asy
   await page.goto('/tests/fixtures/code-workspace.html')
   await page.getByRole('button', { name: '!3', exact: true }).click()
   await expect(page.getByText('GitLab approvals unknown')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Link AeroLink artifact' })).toHaveCount(0)
+})
+
+test('repository drift cannot decorate the selected snapshot with another repository tree', async ({ page }) => {
+  await mockWorkspace(page)
+  await page.route('**/code/source/*/tree?**', async route => {
+    expect(new URL(route.request().url()).pathname).toContain('/code/source/source-one/tree')
+    await route.fulfill({ status: 409, json: { code: 'repository_changed', error: 'Selected source belongs to a different repository configuration.' } })
+  })
+  await page.goto('/tests/fixtures/code-workspace.html')
+  await page.getByRole('button', { name: 'Code Explorer', exact: true }).click()
+  await expect(page.getByRole('alert')).toHaveText('Selected source belongs to a different repository configuration.')
+  await expect(page.getByRole('button', { name: 'README.md', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Link AeroLink artifact' })).toHaveCount(0)
 })
 

@@ -125,7 +125,7 @@ function SourceExplorer({ api, projectId, releaseId, source, readOnly }: Pick<Pr
   const snapshot = source?.snapshot
   const base = `${api}/api/projects/${projectId}`
   const tree = useCodeRead<MetadataObservation<TreePage>>(snapshot
-    ? `${base}/repository/tree?${codeQuery({ commit: snapshot.commitSha, path, cursor: cursors.at(-1), pageSize: 25 })}` : undefined, refresh)
+    ? `${base}/code/source/${snapshot.id}/tree?${codeQuery({ commit: snapshot.commitSha, path, cursor: cursors.at(-1), pageSize: 25 })}` : undefined, refresh)
   const links = useCodeRead<CodePage<CodeRelationship>>(snapshot && selected
     ? `${base}/code/relationships?${codeQuery({ releaseId, relationshipKind: 'File', sourceSnapshotId: snapshot.id, path: selected.path, page: linkPage, pageSize: 25 })}` : undefined, refresh)
   if (!snapshot) return <section className="codeEmptySource"><h2>Choose a build source to browse files</h2>
@@ -133,6 +133,9 @@ function SourceExplorer({ api, projectId, releaseId, source, readOnly }: Pick<Pr
   const changePath = (next: string) => { setPath(next); setCursors(['']); setSelected(undefined) }
   const entries = tree.value?.observation.value?.entries
   const nextCursor = tree.value?.observation.value?.nextCursor
+  const selectedFileObserved = tree.value?.observation.succeeded === true
+    && tree.value.observation.value?.commitSha === snapshot.commitSha
+    && entries?.some(entry => entry.kind === 'Blob' && entry.path === selected?.path)
   return <section aria-label="Repository files">
     <div className="codeCommandBar"><nav aria-label="Repository directory"><button onClick={() => changePath('')}>Repository root</button>
       {path.split('/').filter(Boolean).map((segment, index, parts) => <button key={parts.slice(0, index + 1).join('/')}
@@ -156,7 +159,7 @@ function SourceExplorer({ api, projectId, releaseId, source, readOnly }: Pick<Pr
       <small>EXACT SOURCE</small><code>{snapshot.commitSha}</code>
       <p><a href={`${snapshot.instanceBaseUrl}/${snapshot.pathWithNamespace.split('/').map(encodeURIComponent).join('/')}/-/blob/${snapshot.commitSha}/${selected.path.split('/').map(encodeURIComponent).join('/')}`}
         target="_blank" rel="noreferrer">Open exact file in GitLab ↗</a></p>
-      {!readOnly && <button onClick={() => setLinking(true)}>Link AeroLink artifact</button>}
+      {!readOnly && selectedFileObserved && <button onClick={() => setLinking(true)}>Link AeroLink artifact</button>}
       {links.loading && <p>Loading recorded relationships…</p>}{links.error && <p role="alert">{links.error}</p>}
       {links.value && <CodeRelationshipList {...{ api, projectId, readOnly }} onChanged={() => setRefresh(value => value + 1)} items={links.value.items} empty="No relationship recorded for this file." />}
       {links.value && links.value.total > 25 && <div className="codePagination">
@@ -165,7 +168,7 @@ function SourceExplorer({ api, projectId, releaseId, source, readOnly }: Pick<Pr
         <button disabled={linkPage * 25 >= links.value.total} onClick={() => setLinkPage(value => value + 1)}>Next relationship page</button>
       </div>}
     </ControlledArtifactInspector> : <aside className="codeEmptyInspector">Select a file to inspect recorded relationships. Source content opens in GitLab.</aside>}</div>
-    {linking && selected && source && <CodeLinkPicker key={selected.path} {...{ api, projectId, releaseId }}
+    {linking && selected && source && selectedFileObserved && <CodeLinkPicker key={selected.path} {...{ api, projectId, releaseId }}
       subject={{ kind: 'File', path: selected.path, parentPath: path, cursor: cursors.at(-1), source }}
       onClose={() => setLinking(false)} onSaved={() => { setLinking(false); setRefresh(value => value + 1) }} />}
   </section>

@@ -637,6 +637,21 @@ reads one directory page. The response describes continuation/completeness; an u
 must not be shown as the full repository. MR detail includes independently observed approval entries;
 an unavailable approval response is unknown, and an empty `approved_by` list never implies a human approval.
 
+Display metadata uses a process-local cache with a 15-second absolute lifetime, at most 128 retained
+observations and 8 MiB of retained serialized payload, and at most 16 shared in-flight requests. Requests
+beyond that shared-request capacity run uncached. Keys include project/configuration identity, the verified
+repository and installation origin, operation arguments and credential identity. Failed observations are
+not retained. Each caller still proves current session, account and project access before and after the
+read; configuration is rechecked afterward. `checkedAt` remains the original observation time, and the
+response includes reuse and expiry information. Browser responses remain `no-store`.
+
+The selected-source tree uses `/api/projects/{projectId}/code/source/{sourceSnapshotId}/tree`, with the
+exact `commit` and directory paging arguments. Before any remote or cached read, the server checks the
+stored snapshot against the current repository configuration, numeric project, origin, path and SHA.
+A mismatch refuses browsing while retained relationships remain readable. Source confirmation and
+evidence/relationship commands use fresh uncached provider reads; display metadata never supplies their
+acceptance authority.
+
 **Visibility boundary:** every currently authorized member of the configured AeroLink project can read
 these selected metadata fields through the installation credential. Configure only a repository whose
 metadata may be shared with that project's membership. The service checks project access before fetching

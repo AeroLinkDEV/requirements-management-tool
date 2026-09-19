@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 152,
-    "tests": 965,
-    "knownCases": 1091,
+    "tests": 967,
+    "knownCases": 1093,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 58,
-      "tests": 351,
-      "knownCases": 401,
+      "tests": 353,
+      "knownCases": 403,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -632,6 +632,19 @@
       ]
     },
     {
+      "cls": "GitLabMetadataApiTests",
+      "tests": 6,
+      "knownCases": 9,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "TeamWorkProjectionApiTests",
       "tests": 6,
       "knownCases": 6,
@@ -737,18 +750,6 @@
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
         "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "GitLabMetadataApiTests",
-      "tests": 4,
-      "knownCases": 7,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
-      "intents": [
-        "auth-policy",
         "http-boundary"
       ]
     },
