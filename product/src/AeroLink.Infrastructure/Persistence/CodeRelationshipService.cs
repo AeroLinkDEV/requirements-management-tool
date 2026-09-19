@@ -91,15 +91,19 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
         }
         else
         {
-            items = await combined.Select(x => new CodeRelationshipReadRow(
+            // Order and page the scalar UNION before constructing the read DTO. PostgreSQL cannot
+            // translate ordering over a client-side record constructor, while the scalar shape is
+            // fully translatable and preserves one global chronology across both relationship kinds.
+            var pageRows = await combined
+                .OrderByDescending(x => x.RecordedAt).ThenBy(x => x.Id)
+                .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
+            items = pageRows.Select(x => new CodeRelationshipReadRow(
                 x.Id, x.RelationshipKind, x.ProjectId, x.ReleaseId, x.InstanceBaseUrl, x.RemoteProjectId,
                 x.IsActive, x.Version, x.TargetKind, x.TargetIdentityId, x.TargetStableIdentity,
                 x.TargetDisplaySnapshot, x.Meaning, x.RecordedBy, x.RecordedAt, x.WithdrawnAt, x.WithdrawnBy,
                 x.WithdrawalRationale, x.ReAddedBy, x.ReAddedAt, x.SourceSnapshotId, x.SourceSelectionEventId,
                 x.MergeRequestIid, x.MergeRequestId, x.MergeRequestUrlSnapshot, x.MergeRequestTitleSnapshot,
-                x.CommitSha, x.Path, x.StartLine, x.EndLine, x.FileMergeRequestIid, x.RepositoryPathSnapshot))
-                .OrderByDescending(x => x.RecordedAt).ThenBy(x => x.Id)
-                .Skip((page - 1) * pageSize).Take(pageSize).ToArrayAsync(ct);
+                x.CommitSha, x.Path, x.StartLine, x.EndLine, x.FileMergeRequestIid, x.RepositoryPathSnapshot)).ToArray();
         }
         return new(page, pageSize, total, items);
     }
@@ -241,6 +245,8 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
         {
             var row = await db.GitLabMergeRequestRelationships.SingleOrDefaultAsync(x => x.Id == relationshipId && x.ProjectId == scope.ProjectId, ct)
                 ?? throw new KeyNotFoundException("The code relationship was not found.");
+            await EnsureTargetStillExistsAsync(scope.ProjectId, row.TargetKind, row.TargetIdentityId,
+                row.TargetOwnerIdentityId, row.TargetRevisionNumber, row.TargetStableIdentity, ct);
             row.ReAdd(expectedVersion, actor, now);
             db.GitLabCodeRelationshipEvents.Add(new(kind, row.Id, CodeRelationshipEventKind.ReAdded, actor, now));
             return CodeRelationshipMutation.Applied(kind, row.Id, row.Version, true);
@@ -248,6 +254,8 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
 
         var file = await db.GitLabFileRelationships.SingleOrDefaultAsync(x => x.Id == relationshipId && x.ProjectId == scope.ProjectId, ct)
             ?? throw new KeyNotFoundException("The code relationship was not found.");
+        await EnsureTargetStillExistsAsync(scope.ProjectId, file.TargetKind, file.TargetIdentityId,
+            file.TargetOwnerIdentityId, file.TargetRevisionNumber, file.TargetStableIdentity, ct);
         file.ReAdd(expectedVersion, actor, now);
         db.GitLabCodeRelationshipEvents.Add(new(kind, file.Id, CodeRelationshipEventKind.ReAdded, actor, now));
         return CodeRelationshipMutation.Applied(kind, file.Id, file.Version, true);
@@ -271,6 +279,16 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
             : await db.GitLabFileRelationships.Where(x => x.Id == relationshipId && x.ProjectId == projectId).Select(x => x.ReleaseId).SingleOrDefaultAsync(ct);
         if (releaseId == Guid.Empty) throw new KeyNotFoundException("The code relationship was not found.");
         await EnsureMutableReleaseAsync(projectId, releaseId, ct);
+    }
+
+    private async Task EnsureTargetStillExistsAsync(Guid projectId, CodeRelationshipTargetKind kind,
+        Guid targetId, Guid? ownerId, int? revision, string stableIdentity, CancellationToken ct)
+    {
+        var target = await CodeRelationshipTargetResolver.ResolveAsync(db, projectId, kind, targetId, ct);
+        if (target is null || target.Kind != kind || target.ExactIdentityId != targetId
+            || target.OwningIdentityId != ownerId || target.RevisionNumber != revision
+            || !string.Equals(target.StableIdentity, stableIdentity, StringComparison.Ordinal))
+            throw new DomainException("The exact relationship target is no longer available; the withdrawn relationship cannot be re-added.");
     }
 
     private static void ValidateConfiguration(ProjectRepositoryConfiguration configuration, Guid projectId,

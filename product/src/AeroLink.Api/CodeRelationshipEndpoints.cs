@@ -1,6 +1,7 @@
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Integrations;
+using AeroLink.Domain.Releases;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -37,7 +38,9 @@ public static class CodeRelationshipEndpoints
             var result = await new CodeRelationshipService(db).ReadPageAsync(projectId, releaseId, parsedKind,
                 parsedTargetKind, targetId, page ?? 1, pageSize ?? 25, includeWithdrawn == true, ct);
             http.Response.Headers.CacheControl = "no-store";
-            var items = result.Items.Select(ToReadItem).ToArray();
+            var capabilityState = await RelationshipCapabilityStateAsync(projectId, result.Items.Select(x => x.ReleaseId), http, db, ct);
+            var items = result.Items.Select(x => ToReadItem(x,
+                capabilityState.CanMutate && capabilityState.MutableReleaseIds.Contains(x.ReleaseId))).ToArray();
             return Results.Ok(new { result.Page, result.PageSize, result.Total,
                 items });
         }
@@ -248,7 +251,9 @@ public static class CodeRelationshipEndpoints
                 metadataKnown = metadataIsCurrent && x.RemoteProjectId == configuration?.RemoteProjectId
                     && string.Equals(x.InstanceBaseUrl, settings.Value.BaseUrl, StringComparison.OrdinalIgnoreCase)
                     && observations.ContainsKey(x.MergeRequestIid),
-                metadata = metadataIsCurrent && observations.TryGetValue(x.MergeRequestIid, out var row) ? row : null }) });
+                metadata = metadataIsCurrent && x.RemoteProjectId == configuration?.RemoteProjectId
+                    && string.Equals(x.InstanceBaseUrl, settings.Value.BaseUrl, StringComparison.OrdinalIgnoreCase)
+                    && observations.TryGetValue(x.MergeRequestIid, out var row) ? row : null }) });
     }
 
     private static async Task<IResult> InspectMergeRequestAsync(Guid projectId, int iid, Guid releaseId,
@@ -283,11 +288,15 @@ public static class CodeRelationshipEndpoints
                 && string.Equals(latest.RemotePathWithNamespace, configuration.RemotePathWithNamespace, StringComparison.Ordinal);
         }
         http.Response.Headers.CacheControl = "no-store";
+        var capabilityState = await RelationshipCapabilityStateAsync(projectId,
+            direct.Select(x => x.ReleaseId).Concat(files.Select(x => x.ReleaseId)), http, db, ct);
         return Results.Ok(new { projectId, releaseId, mergeRequestIid = iid, identities = groups,
             metadataKnown = metadataIsCurrent, metadata = metadataIsCurrent ? metadata?.Value : null,
             observation = metadata is null || metadata.Succeeded ? null : new { metadata.Status, metadata.Code, metadata.Detail },
-            mergeRequests = direct.Where(x => groups.Any(g => g.InstanceBaseUrl == x.InstanceBaseUrl && g.RemoteProjectId == x.RemoteProjectId)).Select(ToReadItem),
-            files = files.Where(x => groups.Any(g => g.InstanceBaseUrl == x.InstanceBaseUrl && g.RemoteProjectId == x.RemoteProjectId)).Select(ToReadItem) });
+            mergeRequests = direct.Where(x => groups.Any(g => g.InstanceBaseUrl == x.InstanceBaseUrl && g.RemoteProjectId == x.RemoteProjectId))
+                .Select(x => ToReadItem(x, capabilityState.CanMutate && capabilityState.MutableReleaseIds.Contains(x.ReleaseId))),
+            files = files.Where(x => groups.Any(g => g.InstanceBaseUrl == x.InstanceBaseUrl && g.RemoteProjectId == x.RemoteProjectId))
+                .Select(x => ToReadItem(x, capabilityState.CanMutate && capabilityState.MutableReleaseIds.Contains(x.ReleaseId))) });
     }
 
     private static object MutationResponse(CodeRelationshipMutation result) => new
@@ -296,7 +305,7 @@ public static class CodeRelationshipEndpoints
         capabilities = new { canWithdraw = result.IsActive, canReAdd = !result.IsActive }
     };
 
-    private static object ToReadItem(CodeRelationshipReadRow x) => new
+    private static object ToReadItem(CodeRelationshipReadRow x, bool canMutate) => new
     {
         x.Id, relationshipKind = x.RelationshipKind.ToString(), x.ProjectId, x.ReleaseId, x.InstanceBaseUrl,
         x.RemoteProjectId, x.IsActive, x.Version, targetKind = x.TargetKind.ToString(), x.TargetIdentityId,
@@ -305,10 +314,10 @@ public static class CodeRelationshipEndpoints
         x.SourceSelectionEventId, mergeRequestIid = x.RelationshipKind == CodeRelationshipKind.File ? x.FileMergeRequestIid : x.MergeRequestIid,
         x.MergeRequestId, x.MergeRequestUrlSnapshot, x.MergeRequestTitleSnapshot, x.CommitSha, x.Path, x.StartLine,
         x.EndLine, repositoryPathSnapshot = x.RepositoryPathSnapshot,
-        capabilities = new { canWithdraw = x.IsActive, canReAdd = !x.IsActive }
+        capabilities = new { canWithdraw = canMutate && x.IsActive, canReAdd = canMutate && !x.IsActive }
     };
 
-    private static object ToReadItem(GitLabMergeRequestRelationship x) => new
+    private static object ToReadItem(GitLabMergeRequestRelationship x, bool canMutate) => new
     {
         x.Id, relationshipKind = x.RelationshipKind.ToString(), x.ProjectId, x.ReleaseId, x.InstanceBaseUrl,
         x.RemoteProjectId, x.IsActive, x.Version, targetKind = x.TargetKind.ToString(), x.TargetIdentityId,
@@ -317,10 +326,10 @@ public static class CodeRelationshipEndpoints
         x.SourceSelectionEventId, mergeRequestIid = x.MergeRequestIid, x.MergeRequestId, x.MergeRequestUrlSnapshot,
         x.MergeRequestTitleSnapshot, commitSha = (string?)null, path = (string?)null, startLine = (int?)null,
         endLine = (int?)null, repositoryPathSnapshot = x.RepositoryPathSnapshot,
-        capabilities = new { canWithdraw = x.IsActive, canReAdd = !x.IsActive }
+        capabilities = new { canWithdraw = canMutate && x.IsActive, canReAdd = canMutate && !x.IsActive }
     };
 
-    private static object ToReadItem(GitLabFileRelationship x) => new
+    private static object ToReadItem(GitLabFileRelationship x, bool canMutate) => new
     {
         x.Id, relationshipKind = x.RelationshipKind.ToString(), x.ProjectId, x.ReleaseId, x.InstanceBaseUrl,
         x.RemoteProjectId, x.IsActive, x.Version, targetKind = x.TargetKind.ToString(), x.TargetIdentityId,
@@ -329,8 +338,41 @@ public static class CodeRelationshipEndpoints
         x.SourceSelectionEventId, mergeRequestId = (long?)null,
         mergeRequestUrlSnapshot = (string?)null, mergeRequestTitleSnapshot = (string?)null, x.CommitSha, x.Path,
         x.StartLine, x.EndLine, mergeRequestIid = x.MergeRequestIid, repositoryPathSnapshot = (string?)null,
-        capabilities = new { canWithdraw = x.IsActive, canReAdd = !x.IsActive }
+        capabilities = new { canWithdraw = canMutate && x.IsActive, canReAdd = canMutate && !x.IsActive }
     };
+
+    private static async Task<RelationshipCapabilityState> RelationshipCapabilityStateAsync(Guid projectId,
+        IEnumerable<Guid> releaseIds, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var ids = releaseIds.Where(x => x != Guid.Empty).ToHashSet();
+        var mutable = ids.Count == 0
+            ? new HashSet<Guid>()
+            : await db.Releases.AsNoTracking()
+                .Where(x => x.ProjectId == projectId && ids.Contains(x.Id) && !x.IsReleased
+                    && !db.ReleaseCampaigns.Any(c => c.ProjectId == projectId && c.ReleaseId == x.Id
+                        && (c.State == ReleaseCampaignState.InReview || c.State == ReleaseCampaignState.Released)))
+                .Select(x => x.Id).ToHashSetAsync(ct);
+        return new(await HasFreshMutationRoleAsync(projectId, http, db, ct), mutable);
+    }
+
+    private static async Task<bool> HasFreshMutationRoleAsync(Guid projectId, HttpContext http,
+        AeroLinkDbContext db, CancellationToken ct)
+    {
+        var actor = http.UserAccount();
+        if (actor.IsAdministrator) return true;
+        var programId = await db.Projects.AsNoTracking().Where(x => x.Id == projectId)
+            .Select(x => (Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
+        if (programId is null) return false;
+        var authority = new ProjectAuthorityResolver(db);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var role in CodeRelationshipService.AllowedMutationRoles)
+            if (await authority.IsSatisfiedAsync(actor.Id, programId.Value,
+                    ProjectAuthorityRequirement.LegacyRoleDemand(role), now, ct))
+                return true;
+        return false;
+    }
+
+    private sealed record RelationshipCapabilityState(bool CanMutate, HashSet<Guid> MutableReleaseIds);
 
     private static IResult MetadataFailure<T>(GitLabMetadataResult<T> result) => result.Status switch
     {

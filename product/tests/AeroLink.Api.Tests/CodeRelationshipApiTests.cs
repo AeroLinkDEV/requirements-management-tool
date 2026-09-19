@@ -63,6 +63,48 @@ public sealed class CodeRelationshipApiTests
     }
 
     [Fact]
+    public async Task Register_does_not_apply_current_metadata_to_a_colliding_recorded_identity()
+    {
+        using var transport = new Remote(_ => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent("[{\"id\":107,\"project_id\":17,\"iid\":7,\"title\":\"Current metadata\",\"state\":\"opened\",\"draft\":false,\"web_url\":\"https://gitlab.example/group/project/-/merge_requests/7\"}]")
+        });
+        using var factory = Configure(new AeroLinkApiFactory(), transport);
+        var data = await SeedAsync(factory.Services);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var currentTarget = CodeRelationshipTarget.ForChangeRequestRevision(Guid.NewGuid(), 1, "SCR-1.01");
+            var oldTarget = CodeRelationshipTarget.ForChangeRequestRevision(Guid.NewGuid(), 1, "SCR-1.02");
+            var current = new GitLabMergeRequestRelationship(data.ProjectId, data.ReleaseId, "https://gitlab.example", 17, 7,
+                107, null, null, "group/project", "https://gitlab.example/group/project/-/merge_requests/7",
+                "Recorded current context", currentTarget, CodeRelationshipMeaning.RelatedContext, data.UserName, DateTimeOffset.UtcNow);
+            var old = new GitLabMergeRequestRelationship(data.ProjectId, data.ReleaseId, "https://old.gitlab.example", 99, 7,
+                9907, null, null, "old/project", "https://old.gitlab.example/old/project/-/merge_requests/7",
+                "Recorded old context", oldTarget, CodeRelationshipMeaning.RelatedContext, data.UserName, DateTimeOffset.UtcNow.AddSeconds(-1));
+            db.AddRange(current, old,
+                new GitLabCodeRelationshipEvent(CodeRelationshipKind.MergeRequest, current.Id, CodeRelationshipEventKind.Added, data.UserName, current.RecordedAt),
+                new GitLabCodeRelationshipEvent(CodeRelationshipKind.MergeRequest, old.Id, CodeRelationshipEventKind.Added, data.UserName, old.RecordedAt));
+            await db.SaveChangesAsync();
+        }
+
+        using var client = factory.CreateClient();
+        await SignInAsync(client, data.UserName);
+        using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/merge-requests/register?releaseId={data.ReleaseId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var items = json.RootElement.GetProperty("items").EnumerateArray().ToArray();
+        Assert.Equal(2, items.Length);
+        var currentItem = Assert.Single(items, x => x.GetProperty("remoteProjectId").GetInt64() == 17);
+        Assert.True(currentItem.GetProperty("metadataKnown").GetBoolean());
+        Assert.Equal("Current metadata", currentItem.GetProperty("metadata").GetProperty("title").GetString());
+        var oldItem = Assert.Single(items, x => x.GetProperty("remoteProjectId").GetInt64() == 99);
+        Assert.False(oldItem.GetProperty("metadataKnown").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, oldItem.GetProperty("metadata").ValueKind);
+        Assert.Equal(1, transport.Calls);
+    }
+
+    [Fact]
     public async Task Withdraw_and_readd_use_expected_versions_and_append_transition_events()
     {
         using var factory = Configure(new AeroLinkApiFactory(), new Remote(_ => new(HttpStatusCode.ServiceUnavailable)));
@@ -71,11 +113,14 @@ public sealed class CodeRelationshipApiTests
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var target = CodeRelationshipTarget.ForChangeRequestRevision(Guid.NewGuid(), 1, "SCR-1.01");
+            var targetRecord = new SystemChangeRequest("SRCR-00001", 0,
+                data.ProjectId, data.ReleaseId, "Re-add target", "Problem", "Analysis", "Solution", data.UserName, DateTimeOffset.UtcNow);
+            var target = CodeRelationshipTarget.ForChangeRequestRevision(targetRecord.Id, targetRecord.Revision, targetRecord.DisplayNumber);
             var row = new GitLabMergeRequestRelationship(data.ProjectId, data.ReleaseId, "https://gitlab.example", 17, 12,
                 1200, null, null, "group/project", "https://gitlab.example/group/project/-/merge_requests/12",
                 "Recorded context", target, CodeRelationshipMeaning.RelatedContext, data.UserName, DateTimeOffset.UtcNow);
             relationshipId = row.Id;
+            db.Add(targetRecord);
             db.GitLabMergeRequestRelationships.Add(row);
             db.GitLabCodeRelationshipEvents.Add(new(CodeRelationshipKind.MergeRequest, row.Id,
                 CodeRelationshipEventKind.Added, data.UserName, DateTimeOffset.UtcNow));
@@ -102,6 +147,39 @@ public sealed class CodeRelationshipApiTests
         var events = await db2.GitLabCodeRelationshipEvents.Where(x => x.RelationshipId == relationshipId).ToListAsync();
         Assert.Equal([CodeRelationshipEventKind.Added, CodeRelationshipEventKind.Withdrawn, CodeRelationshipEventKind.ReAdded],
             events.OrderBy(x => x.OccurredAt).ThenBy(x => x.Id).Select(x => x.EventKind).ToArray());
+    }
+
+    [Fact]
+    public async Task Readd_refuses_a_withdrawn_relationship_when_its_exact_target_is_unavailable()
+    {
+        using var factory = Configure(new AeroLinkApiFactory(), new Remote(_ => new(HttpStatusCode.ServiceUnavailable)));
+        var data = await SeedAsync(factory.Services);
+        Guid relationshipId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var target = CodeRelationshipTarget.ForChangeRequestRevision(Guid.NewGuid(), 1, "SCR-1.01");
+            var row = new GitLabMergeRequestRelationship(data.ProjectId, data.ReleaseId, "https://gitlab.example", 17, 13,
+                1300, null, null, "group/project", "https://gitlab.example/group/project/-/merge_requests/13",
+                "Recorded context", target, CodeRelationshipMeaning.RelatedContext, data.UserName, DateTimeOffset.UtcNow);
+            relationshipId = row.Id;
+            db.Add(row);
+            await db.SaveChangesAsync();
+        }
+        using var client = factory.CreateClient();
+        await SignInAsync(client, data.UserName);
+        const string relationshipKind = "merge-request";
+        using var withdrawn = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/relationships/{relationshipKind}/{relationshipId}/withdraw",
+            new { expectedVersion = 1L, rationale = "No longer applicable." });
+        Assert.Equal(HttpStatusCode.OK, withdrawn.StatusCode);
+        using var readded = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/relationships/{relationshipKind}/{relationshipId}/re-add",
+            new { expectedVersion = 2L });
+        Assert.Equal(HttpStatusCode.Conflict, readded.StatusCode);
+        using var scope2 = factory.Services.CreateScope();
+        var saved = await scope2.ServiceProvider.GetRequiredService<AeroLinkDbContext>().GitLabMergeRequestRelationships
+            .SingleAsync(x => x.Id == relationshipId);
+        Assert.False(saved.IsActive);
+        Assert.Equal(2, saved.Version);
     }
 
     [Fact]
@@ -202,6 +280,56 @@ public sealed class CodeRelationshipApiTests
     }
 
     [Fact]
+    public async Task Relationship_read_hides_mutation_capabilities_from_a_view_only_role()
+    {
+        using var factory = Configure(new AeroLinkApiFactory(), new Remote(_ => new(HttpStatusCode.ServiceUnavailable)));
+        var data = await SeedAsync(factory.Services, role: ProgramRole.Reviewer);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var target = CodeRelationshipTarget.ForChangeRequestRevision(Guid.NewGuid(), 1, "SCR-1.01");
+            var row = new GitLabMergeRequestRelationship(data.ProjectId, data.ReleaseId, "https://gitlab.example", 17, 22,
+                2200, null, null, "group/project", "https://gitlab.example/group/project/-/merge_requests/22",
+                "Recorded context", target, CodeRelationshipMeaning.RelatedContext, data.UserName, DateTimeOffset.UtcNow);
+            db.Add(row);
+            await db.SaveChangesAsync();
+        }
+        using var client = factory.CreateClient();
+        await SignInAsync(client, data.UserName);
+        using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?releaseId={data.ReleaseId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var capabilities = Assert.Single(json.RootElement.GetProperty("items").EnumerateArray()).GetProperty("capabilities");
+        Assert.False(capabilities.GetProperty("canWithdraw").GetBoolean());
+        Assert.False(capabilities.GetProperty("canReAdd").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Relationship_read_hides_mutation_capabilities_for_a_released_build()
+    {
+        using var factory = Configure(new AeroLinkApiFactory(), new Remote(_ => new(HttpStatusCode.ServiceUnavailable)));
+        var data = await SeedAsync(factory.Services, releaseIsReleased: true);
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var target = CodeRelationshipTarget.ForChangeRequestRevision(Guid.NewGuid(), 1, "SCR-1.01");
+            var row = new GitLabMergeRequestRelationship(data.ProjectId, data.ReleaseId, "https://gitlab.example", 17, 23,
+                2300, null, null, "group/project", "https://gitlab.example/group/project/-/merge_requests/23",
+                "Recorded context", target, CodeRelationshipMeaning.RelatedContext, data.UserName, DateTimeOffset.UtcNow);
+            db.Add(row);
+            await db.SaveChangesAsync();
+        }
+        using var client = factory.CreateClient();
+        await SignInAsync(client, data.UserName);
+        using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?releaseId={data.ReleaseId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var capabilities = Assert.Single(json.RootElement.GetProperty("items").EnumerateArray()).GetProperty("capabilities");
+        Assert.False(capabilities.GetProperty("canWithdraw").GetBoolean());
+        Assert.False(capabilities.GetProperty("canReAdd").GetBoolean());
+    }
+
+    [Fact]
     public async Task Relationship_command_refuses_a_target_from_another_project()
     {
         const string sha = "cccccccccccccccccccccccccccccccccccccccc";
@@ -235,7 +363,7 @@ public sealed class CodeRelationshipApiTests
         }));
 
     private static async Task<(Guid ProjectId, Guid ReleaseId, string UserName)> SeedAsync(IServiceProvider services,
-        bool releaseIsReleased = false)
+        bool releaseIsReleased = false, ProgramRole role = ProgramRole.Engineer)
     {
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -251,7 +379,7 @@ public sealed class CodeRelationshipApiTests
             "GitLab", "https://gitlab.example/group/project", "test.setup", now);
         repository.RecordVerification("test.setup", now, 17, "group/project");
         db.AddRange(program, project, release, user, repository,
-            new ProgramMembership(user.Id, program.Id, ProgramRole.Engineer, "test.setup", now));
+            new ProgramMembership(user.Id, program.Id, role, "test.setup", now));
         await db.SaveChangesAsync();
         return (project.Id, release.Id, user.UserName);
     }

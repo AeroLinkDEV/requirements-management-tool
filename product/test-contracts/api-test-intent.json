@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 952,
-    "cases": 1075,
+    "tests": 956,
+    "cases": 1079,
     "classes": 151,
-    "hostedTests": 904,
-    "hostedCases": 1005,
+    "hostedTests": 908,
+    "hostedCases": 1009,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 14,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 585,
-      "cases": 659,
+      "tests": 589,
+      "cases": 663,
       "unknownCases": 0,
       "classes": 118
     },
@@ -3786,8 +3786,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 107,
-        "end": 132
+        "start": 185,
+        "end": 210
       }
     },
     {
@@ -3804,8 +3804,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 134,
-        "end": 172
+        "start": 212,
+        "end": 250
       }
     },
     {
@@ -3824,6 +3824,42 @@
       "sourceLines": {
         "start": 18,
         "end": 32
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Readd_refuses_a_withdrawn_relationship_when_its_exact_target_is_unavailable",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 152,
+        "end": 183
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Register_does_not_apply_current_metadata_to_a_colliding_recorded_identity",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 65,
+        "end": 105
       }
     },
     {
@@ -3858,8 +3894,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 204,
-        "end": 228
+        "start": 332,
+        "end": 356
       }
     },
     {
@@ -3876,8 +3912,44 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 174,
-        "end": 202
+        "start": 252,
+        "end": 280
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Relationship_read_hides_mutation_capabilities_for_a_released_build",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 307,
+        "end": 330
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Relationship_read_hides_mutation_capabilities_from_a_view_only_role",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 282,
+        "end": 305
       }
     },
     {
@@ -3894,8 +3966,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 65,
-        "end": 105
+        "start": 107,
+        "end": 150
       }
     },
     {
