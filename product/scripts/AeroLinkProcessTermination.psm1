@@ -195,14 +195,21 @@ function Get-AeroLinkProcessCreationFileTime {
 }
 
 function ConvertTo-AeroLinkCreationFileTime {
-    <# Exact UTC ISO (round-trip format, as the transition kernel records it) -> native FILETIME. #>
+    <#
+      Exact UTC ISO (round-trip format, as the transition kernel records it) -> native FILETIME. Accepts a
+      DateTime as well: PowerShell 7's ConvertFrom-Json converts ISO strings to DateTime, and stringifying that
+      value loses the fractional seconds (measured on this host), so callers must hand over the raw value.
+    #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$IsoUtc)
-    if (-not $IsoUtc) { return [long]0 }
+    param([Parameter(Mandatory)]$IsoUtc)
+    if ($null -eq $IsoUtc) { return [long]0 }
+    if ($IsoUtc -is [datetime]) { try { return [long]$IsoUtc.ToUniversalTime().ToFileTimeUtc() } catch { return [long]0 } }
+    $text = [string]$IsoUtc
+    if (-not $text) { return [long]0 }
     try {
         # RoundtripKind alone: an exact ISO written by the kernel ends in 'Z' (or carries an offset), and combining
         # it with AdjustToUniversal is an invalid DateTimeStyles value on both hosts (measured).
-        $parsed = [DateTime]::Parse($IsoUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+        $parsed = [DateTime]::Parse($text, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
         return [long]$parsed.ToFileTimeUtc()
     }
     catch { return [long]0 }
