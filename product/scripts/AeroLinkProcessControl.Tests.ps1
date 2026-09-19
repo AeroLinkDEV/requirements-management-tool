@@ -220,11 +220,20 @@ Start-Sleep -Seconds $Seconds
     Check ($treeRootIdentity.creationFileTime -gt 0) 'F801-1: the witness root must have a canonical native identity.'
     $treeSelection = Get-AeroLinkOwnedTreeIdentities -RootIdentity $treeRootIdentity
     $treeSelectedIds = @($treeSelection.identities | ForEach-Object { [int]$_.processId })
-    Check ($treeSelection.state -eq 'Match') "F801-1: a stable owned tree must select cleanly (got $($treeSelection.state): $($treeSelection.detail))."
     Check ($treeSelectedIds -contains $treeParent.Id) 'F801-1: the verified root must be selected.'
     Check ($treeSelectedIds -contains $treeChildId) 'F801-1: the real child of the verified root must be selected.'
     Check (-not ($treeSelectedIds -contains $treeDecoy.Id)) 'F801-1: an unrelated process must never be adopted into the owned tree.'
-    Check (@($treeSelection.replaced).Count -eq 0 -and @($treeSelection.unresolved).Count -eq 0) 'F801-1: a stable tree has no replaced or unresolved entries.'
+    # The machine is shared: an unrelated process whose stale parent pointer lands inside this root's pid space is
+    # legitimately reported unresolved/replaced by design (and is never adopted). The assertions that matter here
+    # are about THIS test's processes: none of them may ever be dismissed as unattributable or as a replacement,
+    # and every identity the selection would terminate must be that live process's OWN lifetime.
+    $treeOwnedPids = @($treeParent.Id, $treeChildId, $treeDecoy.Id)
+    Check (-not @($treeSelection.unresolved | Where-Object { $treeOwnedPids -contains [int]$_.processId }).Count) 'F801-1: an owned process must never be reported as unattributable.'
+    Check (-not @($treeSelection.replaced | Where-Object { $treeOwnedPids -contains [int]$_.processId }).Count) 'F801-1: an owned process must never be reported as a replacement.'
+    foreach ($treeBound in @($treeSelection.identities)) {
+        $treeLive = Test-AeroLinkProcessIdentity -Identity $treeBound
+        Check ($treeLive.state -in @('Match', 'Gone')) "F801-1: the selected identity of pid $($treeBound.processId) must be that process's own lifetime (got $($treeLive.state))."
+    }
     $treeChildIdentity = @($treeSelection.identities | Where-Object { [int]$_.processId -eq $treeChildId })[0]
     Check ([long]$treeChildIdentity.creationFileTime -eq [long](Get-AeroLinkProcessCreationFileTime -ProcessId $treeChildId).creationFileTime) 'F801-1: the chosen child identity is the child''s own native lifetime.'
     $treeStopped = 0
