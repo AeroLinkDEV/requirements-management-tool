@@ -1,7 +1,9 @@
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Integrations;
+using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Infrastructure.Persistence;
@@ -12,6 +14,70 @@ namespace AeroLink.Infrastructure.Tests;
 
 public sealed class CurrentCodeEvidenceProjectionTests
 {
+    [Fact]
+    public async Task V2_manifest_is_stable_and_commits_explicit_selection_and_invalidation()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var campaign = await f.CampaignAsync();
+        var builder = new CodeReviewManifestBuilder(f.Db);
+        Task<CodeReviewManifestMaterial> Build() => builder.BuildV2Async(campaign.Id, new string('a', 64), LegacyLadderPolicy.Instance, default);
+        var empty = await Build();
+        Assert.Equal(empty.Hash, (await Build()).Hash);
+        var snapshot = f.Snapshot('a');
+        var selection = new GitLabSourceSelectionEvent(f.Project.Id, f.Release.Id, snapshot.Id, 0, "tester", f.Now);
+        f.Db.AddRange(snapshot, selection, new GitLabCurrentSourceSelection(f.Project.Id, f.Release.Id,
+            snapshot.Id, selection.Id, "tester", f.Now));
+        var set = f.AcceptFile(snapshot, selection);
+        f.Db.Add(new CodeEvidenceCurrentSelector(f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id, set.Id, "tester", f.Now));
+        await f.Db.SaveChangesAsync();
+        var accepted = await Build();
+        Assert.NotEqual(empty.Hash, accepted.Hash);
+        Assert.Equal(selection.Id, accepted.SourceSelectionEventId);
+        Assert.Equal(snapshot.Id, accepted.SourceSnapshotId);
+        Assert.Equal(set.Id, Assert.Single(accepted.EvidenceReferenceIds));
+        Assert.Equal(accepted.Hash, (await Build()).Hash);
+        f.Db.Add(new CodeEvidenceInvalidation(set.Id, f.Project.Id, f.Release.Id, f.Artifact.Id, f.Revision.Id,
+            "tester", "Reopened", f.Now));
+        await f.Db.SaveChangesAsync();
+        Assert.NotEqual(accepted.Hash, (await Build()).Hash);
+        var invalidatedHash = (await Build()).Hash;
+        var offBaseline = new CodeEvidenceDispositionSet(f.Project.Id, f.Release.Id, Guid.NewGuid(), Guid.NewGuid(),
+            CodeEvidenceDisposition.NoCodeChangeRequired, "Historical off-baseline record.", null, null, null, "tester", f.Now);
+        f.Db.AddRange(offBaseline, new CodeEvidenceCurrentSelector(f.Project.Id, f.Release.Id,
+            offBaseline.RequirementArtifactId, offBaseline.RequirementRevisionId, offBaseline.Id, "tester", f.Now));
+        await f.Db.SaveChangesAsync();
+        Assert.Equal(invalidatedHash, (await Build()).Hash);
+    }
+
+    [Fact]
+    public async Task V2_manifest_commits_reconfirmation_even_when_returning_to_the_same_snapshot()
+    {
+        await using var f = await Fixture.CreateAsync();
+        var campaign = await f.CampaignAsync();
+        var snapshot = f.Snapshot('a');
+        var selection = new GitLabSourceSelectionEvent(f.Project.Id, f.Release.Id, snapshot.Id, 0, "tester", f.Now);
+        var pointer = new GitLabCurrentSourceSelection(f.Project.Id, f.Release.Id, snapshot.Id, selection.Id, "tester", f.Now);
+        f.Db.AddRange(snapshot, selection, pointer);
+        await f.Db.SaveChangesAsync();
+        var builder = new CodeReviewManifestBuilder(f.Db);
+        Task<CodeReviewManifestMaterial> Build() => builder.BuildV2Async(campaign.Id, new string('a', 64), LegacyLadderPolicy.Instance, default);
+        var first = await Build();
+        var secondSnapshot = f.Snapshot('b');
+        var second = new GitLabSourceSelectionEvent(f.Project.Id, f.Release.Id, secondSnapshot.Id, 1, "tester", f.Now);
+        f.Db.AddRange(secondSnapshot, second);
+        pointer.Move(1, secondSnapshot.Id, second.Id, "tester", f.Now);
+        await f.Db.SaveChangesAsync();
+        Assert.NotEqual(first.Hash, (await Build()).Hash);
+        var third = new GitLabSourceSelectionEvent(f.Project.Id, f.Release.Id, snapshot.Id, 2, "tester", f.Now);
+        f.Db.Add(third);
+        pointer.Move(2, snapshot.Id, third.Id, "tester", f.Now);
+        await f.Db.SaveChangesAsync();
+        var final = await Build();
+        Assert.Equal(first.SourceSnapshotId, final.SourceSnapshotId);
+        Assert.NotEqual(first.SourceSelectionEventId, final.SourceSelectionEventId);
+        Assert.NotEqual(first.Hash, final.Hash);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -167,6 +233,16 @@ public sealed class CurrentCodeEvidenceProjectionTests
             return set;
         }
         public async Task<CurrentCodeEvidence> CurrentAsync() => Assert.Single(await CurrentCodeEvidenceProjection.ForReleaseAsync(Db, Project.Id, Release.Id, default));
+        public async Task<ReleaseCampaign> CampaignAsync()
+        {
+            var baseline = await Db.CandidateBaselines.SingleAsync(x => x.ReleaseId == Release.Id);
+            var build = new SoftwareBuild(Project.Id, Release.Id, baseline.Id, "SW-01.00", "Exact build", "tester", Now);
+            var campaign = new ReleaseCampaign(Project.Id, Release.Id, baseline.Id, "Code review", "tester", Now);
+            campaign.SelectVerificationBuild(build.Id, "tester", Now);
+            Db.AddRange(build, campaign);
+            await Db.SaveChangesAsync();
+            return campaign;
+        }
         public async ValueTask DisposeAsync() { await Db.DisposeAsync(); await connection.DisposeAsync(); }
     }
 }
