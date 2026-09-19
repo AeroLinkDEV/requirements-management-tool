@@ -169,6 +169,9 @@ $descriptors = @{}
 $runDescriptors = [ordered]@{}
 $descriptor = $null
 $cleanupErrors = [System.Collections.Generic.List[string]]::new()
+# Observations that neither prevented removal nor contradict a proven outcome (for example a transient Task
+# Scheduler read failure immediately before the twin is removed). They are published, never silently dropped.
+$cleanupNotes = [System.Collections.Generic.List[string]]::new()
 $twinRegistered = $false
 
 function Set-TwinArguments([string]$Id, [int]$Hold, [int]$MutatorSeconds = 0, [int]$ChainDeadlineSeconds = 300) {
@@ -731,15 +734,26 @@ catch { $summary['error'] = $_.Exception.Message }
 finally {
     # ---- cleanup FIRST: every owned probe, then the twin, and only then any consumable record. ----
     Stop-TrackedProbes
+    # The twin is THIS run's own disposable task. Removal is therefore attempted unconditionally: an unreadable
+    # pre-removal read must never decide that the task is left behind (measured: the Task Scheduler provider
+    # answered one read with "The system cannot find the file specified", the task was in fact still registered,
+    # and skipping the removal turned a valid qualification into CleanupFailed). What must be PROVEN is the
+    # outcome: absence after removal, by a bounded re-read. A pre-removal read that could not be made is a note.
     $existing = $null
-    try { $existing = Get-ScheduledTask -TaskName $twin -ErrorAction Stop }
-    catch { if (-not ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*')) { $cleanupErrors.Add("the twin's task state could not be read: $($_.Exception.Message)") } }
+    for ($readAttempt = 1; $readAttempt -le 3 -and -not $existing; $readAttempt++) {
+        try { $existing = Get-ScheduledTask -TaskName $twin -ErrorAction Stop }
+        catch {
+            if ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*') { break }
+            if ($readAttempt -ge 3) { $cleanupNotes.Add("the twin's task state could not be read before removal: $($_.Exception.Message)") }
+            else { Start-Sleep -Milliseconds 500 }
+        }
+    }
     if ($existing) {
         $twinRegistered = $true
-        if ($existing.State -eq 'Running') { try { Stop-ScheduledTask -TaskName $twin } catch { } }
-        try { Unregister-ScheduledTask -TaskName $twin -Confirm:$false -ErrorAction Stop }
-        catch { $cleanupErrors.Add("the twin task could not be unregistered: $($_.Exception.Message)") }
+        if ($existing.State -eq 'Running') { try { Stop-ScheduledTask -TaskName $twin -ErrorAction Stop } catch { } }
     }
+    try { Unregister-ScheduledTask -TaskName $twin -Confirm:$false -ErrorAction Stop }
+    catch { if (-not ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*')) { $cleanupErrors.Add("the twin task could not be unregistered: $($_.Exception.Message)") } }
     # The twin's own action trees are this tool's disposable processes; a probe entry that published its record
     # sleeps on as a live action process. Stop exactly those trees and fail the qualification if any survives.
     try {
@@ -775,20 +789,27 @@ finally {
         $cleanupErrors.Add("a tree entry observed during the run (pid $processId) was never proven gone ($state): $($entry.detail) / $detail")
     }
     $summary['treeUnresolved'] = @($script:twinTreeUnresolved)
-    Start-Sleep -Seconds 1
-    try {
-        $remaining = Get-ScheduledTask -TaskName $twin -ErrorAction Stop
-        if ($remaining) { $cleanupErrors.Add('the twin task still exists after unregistration') }
+    # Absence must be PROVEN, with a bounded re-read so a provider cache cannot redden a correct run: the task is
+    # gone only when a read returns no such task, or when the scheduler answers that it does not exist.
+    $twinAbsent = $false
+    for ($verifyAttempt = 1; $verifyAttempt -le 20 -and -not $twinAbsent; $verifyAttempt++) {
+        try {
+            $remaining = Get-ScheduledTask -TaskName $twin -ErrorAction Stop
+            if (-not $remaining) { $twinAbsent = $true }
+        }
+        catch { if ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*') { $twinAbsent = $true } }
+        if (-not $twinAbsent) { Start-Sleep -Milliseconds 500 }
     }
-    catch { if (-not ($_.FullyQualifiedErrorId -like 'CmdletizationQuery_NotFound*')) { $cleanupErrors.Add("the twin's absence could not be proven: $($_.Exception.Message)") } }
+    if (-not $twinAbsent) { $cleanupErrors.Add('the twin task still exists, or its absence could not be proven, after unregistration') }
     Stop-TrackedProbes
     Start-Sleep -Milliseconds 500
     $summary['probesProvenStopped'] = @($probes | ForEach-Object { [ordered]@{ processId = $_.ProcessId; state = $K::Classify($_.ProcessId, $_.StartedAtUtc, $_.ImagePath) } })
     foreach ($probeState in @($summary.probesProvenStopped | Where-Object { $_.state -eq 'RunningMatch' -or $_.state -like 'Unknown:*' })) {
         $cleanupErrors.Add("probe pid $($probeState.processId) is $($probeState.state), which is not a proven stop")
     }
-    $summary['twinRemaining'] = [bool](Get-ScheduledTask -TaskName $twin -ErrorAction SilentlyContinue)
+    $summary['twinRemaining'] = -not $twinAbsent
     $summary['cleanupErrors'] = @($cleanupErrors)
+    $summary['cleanupNotes'] = @($cleanupNotes)
     if ($cleanupErrors.Count) { $summary['cleanupError'] = ($cleanupErrors -join '; ') }
     # Publish usable qualification ONLY after every observation and every cleanup succeeded.
     if ($cleanupErrors.Count -eq 0 -and -not $summary.Contains('error') -and $summary['verdict'] -eq 'PendingCleanup') {
