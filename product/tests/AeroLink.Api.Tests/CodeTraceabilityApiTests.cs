@@ -91,6 +91,40 @@ public sealed class CodeTraceabilityApiTests(ShowcaseApiFixture showcase)
         Assert.Contains("released and read-only", await refused.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task No_code_capture_is_refused_while_the_release_package_is_in_review()
+    {
+        using var factory = showcase.CreateFactory();
+        using var client = factory.CreateClient();
+        await ShowcaseApiFixture.LoginAdministratorAsync(client);
+        var summary = showcase.Summary;
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals)
+                .SingleAsync(x => x.ProjectId == summary.ProjectId && x.ReleaseId == summary.ActiveReleaseId);
+            Assert.Equal(ReleaseCampaignState.Verification, campaign.State);
+            campaign.BeginReleaseReview("admin", [("admin", "AeroLink Administrator")], new string('a', 64), DateTimeOffset.UtcNow);
+            var persisted = await db.ReleaseApprovals.Where(x => x.CampaignId == campaign.Id).Select(x => x.Id).ToListAsync();
+            foreach (var approval in campaign.Approvals.Where(x => !persisted.Contains(x.Id))) db.ReleaseApprovals.Add(approval);
+            await db.SaveChangesAsync();
+        }
+
+        using var refused = await client.PostAsJsonAsync("/api/code-traceability", new
+        {
+            projectId = summary.ProjectId,
+            releaseId = summary.ActiveReleaseId,
+            requirementArtifactId = Guid.NewGuid(),
+            requirementRevisionId = Guid.NewGuid(),
+            disposition = "NoCodeChangeRequired",
+            noCodeChangeRationale = "The release package is still under controlled review.",
+        });
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        var body = await refused.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("release_package_frozen", body.GetProperty("code").GetString());
+    }
+
     /// An exact LLR revision the active build would inherit from its predecessor's baseline — the population
     /// the Code page used to measure, and the one a mapping must no longer be recorded against.
     private static async Task<(Guid ArtifactId, Guid RevisionId)> InheritedLlrRevisionAsync(

@@ -58,9 +58,14 @@ public sealed class RequirementBaselineDematerializer(AeroLinkDbContext db, Veri
 
     /// <summary>Does it, and returns the same description the preview would have given.</summary>
     public async Task<ReopenConsequences> DematerializeAsync(Guid baselineId, string actorId,
-        string baselineDisplayNumber, DateTimeOffset now, CancellationToken ct)
+        string baselineDisplayNumber, DateTimeOffset now, CancellationToken ct,
+        ProjectControlledWriteScope? writeScope = null)
     {
+        if (writeScope is not null)
+            ProjectControlledWriteScope.Require(db, writeScope.ProjectId, writeScope);
         var plan = await PlanAsync(baselineId, baselineDisplayNumber, ct);
+        if (writeScope is not null && plan.ProjectId != Guid.Empty && plan.ProjectId != writeScope.ProjectId)
+            throw new DomainException("The baseline does not belong to the acquired project scope.");
         if (plan.Revisions.Count == 0) return ReopenConsequences.None;
 
         foreach (var (link, ontoRevisionId, reason) in plan.CoverageToMove)

@@ -17,9 +17,10 @@ public sealed record MaterializationResult(string RequirementsHash, int ActiveRe
 public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, VerificationImpactService verificationImpact,
     ILadderPolicy? policy = null, IProjectLadderPolicyResolver? policyResolver = null)
 {
-    public Task<MaterializationResult> MaterializeAsync(Guid baselineId, string actorId, DateTimeOffset now, CancellationToken ct)
+    public Task<MaterializationResult> MaterializeAsync(Guid baselineId, string actorId, DateTimeOffset now,
+        CancellationToken ct, ProjectControlledWriteScope? writeScope = null)
         => MaterializeCoreAsync(baselineId, actorId, now, ct, allowLegacyHistoricalSeed: false,
-            joinExistingTransaction: false);
+            joinExistingTransaction: false, writeScope: writeScope);
 
     // The clean showcase creates and materializes a characterized pre-#738 release in one controlled seed
     // operation. This internal seam is deliberately unavailable through the normal DI/API materializer, so
@@ -27,16 +28,22 @@ public sealed class RequirementBaselineMaterializer(AeroLinkDbContext db, Verifi
     internal Task<MaterializationResult> MaterializeLegacyHistoricalSeedAsync(Guid baselineId, string actorId,
         DateTimeOffset now, CancellationToken ct, bool joinExistingTransaction = false)
         => MaterializeCoreAsync(baselineId, actorId, now, ct, allowLegacyHistoricalSeed: true,
-            joinExistingTransaction);
+            joinExistingTransaction, writeScope: null);
 
     private async Task<MaterializationResult> MaterializeCoreAsync(Guid baselineId, string actorId, DateTimeOffset now,
-        CancellationToken ct, bool allowLegacyHistoricalSeed, bool joinExistingTransaction)
+        CancellationToken ct, bool allowLegacyHistoricalSeed, bool joinExistingTransaction,
+        ProjectControlledWriteScope? writeScope)
     {
-        if (joinExistingTransaction && db.Database.CurrentTransaction is null)
+        if (writeScope is not null)
+            ProjectControlledWriteScope.Require(db, writeScope.ProjectId, writeScope);
+        else if (joinExistingTransaction && db.Database.CurrentTransaction is null)
             throw new InvalidOperationException("The caller requested baseline materialization in an existing transaction, but none is active.");
-        await using var transaction = joinExistingTransaction ? null : await db.Database.BeginTransactionAsync(ct);
+        await using var transaction = writeScope is not null || joinExistingTransaction
+            ? null : await db.Database.BeginTransactionAsync(ct);
         var baseline = await db.CandidateBaselines.Include(x => x.Selections).Include(x => x.ExternalPackageSelections).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == baselineId, ct)
             ?? throw new DomainException("Baseline not found.");
+        if (writeScope is not null && baseline.ProjectId != writeScope.ProjectId)
+            throw new InvalidOperationException("The baseline does not belong to the active project-controlled write scope.");
         if (baseline.State != CandidateBaselineState.Frozen) throw new DomainException("Freeze the baseline before materializing its requirements.");
         if (baseline.RequirementsMaterializedAt is not null) throw new DomainException("The requirement baseline is already materialized and immutable.");
         var ladderPolicy = policyResolver is null ? (policy ?? LegacyLadderPolicy.Instance)

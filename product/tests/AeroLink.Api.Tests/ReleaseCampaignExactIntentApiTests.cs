@@ -167,6 +167,49 @@ public sealed class ReleaseCampaignExactIntentApiTests
     }
 
     [Fact]
+    public async Task Baseline_reopen_is_blocked_by_review_and_by_released_history()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var administrator = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(administrator);
+        var scenario = await SeedAsync(factory, twoApprovers: false);
+        var now = DateTimeOffset.UtcNow;
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var baseline = await db.CandidateBaselines.SingleAsync(x => x.Id == scenario.BaselineId);
+            baseline.FreezeForInception("admin", now);
+            await db.SaveChangesAsync();
+        }
+
+        using (var refusedDuringReview = await administrator.PostAsJsonAsync($"/api/baselines/{scenario.BaselineId}/reopen",
+            new { reason = "Attempted while release review is active." }))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, refusedDuringReview.StatusCode);
+            var body = await refusedDuringReview.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("release_package_frozen", body.GetProperty("code").GetString());
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var baseline = await db.CandidateBaselines.SingleAsync(x => x.Id == scenario.BaselineId);
+            var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).SingleAsync(x => x.Id == scenario.CampaignId);
+            campaign.CancelReleaseReview("admin", "The review cycle is complete.", now.AddMinutes(2));
+            baseline.MarkRequirementsMaterialized("admin", new string('c', 64), 0, now.AddMinutes(2));
+            baseline.MarkReleased("admin", now.AddMinutes(3));
+            await db.SaveChangesAsync();
+        }
+
+        using var refusedAfterRelease = await administrator.PostAsJsonAsync($"/api/baselines/{scenario.BaselineId}/reopen",
+            new { reason = "Attempted against released history." });
+        Assert.Equal(HttpStatusCode.BadRequest, refusedAfterRelease.StatusCode);
+        var releasedBody = await refusedAfterRelease.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("baseline_released", releasedBody.GetProperty("code").GetString());
+    }
+
+    [Fact]
     public async Task Concurrent_stale_approval_writes_conflict_on_the_campaign_version()
     {
         using var factory = new AeroLinkApiFactory();
