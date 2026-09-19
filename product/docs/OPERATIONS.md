@@ -629,6 +629,22 @@ overwriting the newer answer. Missing installation settings and remote failures 
 Local handler/capture tests establish request and lifecycle behavior only. Actual service access requires an
 operator-authorized check against the configured installation and target; it must not be inferred from mocks.
 
+Verified connections also expose bounded, on-demand metadata reads under
+`/api/projects/{projectId}/repository`: `merge-requests`, `merge-requests/{iid}`, `commit?reference=...`,
+and `tree?commit=...`. Discovery reads the configured GitLab project, including MRs without AeroLink
+relationships; it is not a selected-build association register. The tree requires a full exact commit and
+reads one directory page. The response describes continuation/completeness; an unknown or partial page
+must not be shown as the full repository. MR detail includes independently observed approval entries;
+an unavailable approval response is unknown, and an empty `approved_by` list never implies a human approval.
+
+**Visibility boundary:** every currently authorized member of the configured AeroLink project can read
+these selected metadata fields through the installation credential. Configure only a repository whose
+metadata may be shared with that project's membership. The service checks project access before fetching
+and checks session, account, membership and configuration again after the remote wait. Responses are
+not stored by browser HTTP caches. No source text, diffs or discussions are read, and no GitLab write
+operation is exposed. Runtime read credentials remain separate from any demo-provisioning write credential.
+These observations do not record relationships, select build source or accept implementation evidence.
+
 ## Recoverable project setup, source uploads, and recovery
 
 Use the Create New Project flow for all three supported starting paths: an empty Fresh project, an exact authorized

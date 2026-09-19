@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 934,
-    "cases": 1050,
-    "classes": 148,
-    "hostedTests": 886,
-    "hostedCases": 980,
+    "tests": 938,
+    "cases": 1057,
+    "classes": 149,
+    "hostedTests": 890,
+    "hostedCases": 987,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 14,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 577,
-      "cases": 651,
+      "tests": 579,
+      "cases": 653,
       "unknownCases": 0,
-      "classes": 115
+      "classes": 116
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 103,
-      "cases": 109,
+      "tests": 105,
+      "cases": 114,
       "unknownCases": 0,
-      "classes": 62
+      "classes": 63
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -5000,6 +5000,78 @@
       "sourceLines": {
         "start": 107,
         "end": 152
+      }
+    },
+    {
+      "cls": "GitLabMetadataApiTests",
+      "test": "AuthorizedMembersCanReadDiscoveryDetailsCommitAndPinnedTreeWithoutSourceContent",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 38,
+        "end": 91
+      }
+    },
+    {
+      "cls": "GitLabMetadataApiTests",
+      "test": "ProjectMembershipIsRequiredBeforeAnyRemoteRequest",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 145,
+        "end": 161
+      }
+    },
+    {
+      "cls": "GitLabMetadataApiTests",
+      "test": "RemoteMetadataIsWithheldWhenAuthorityChangesDuringTheWait",
+      "kind": "Theory",
+      "intent": "auth-policy",
+      "cases": 4,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 93,
+        "end": 143
+      }
+    },
+    {
+      "cls": "GitLabMetadataApiTests",
+      "test": "UnconfiguredInstallationReportsUnavailableWithoutCallingGitLab",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 16,
+        "end": 36
       }
     },
     {
