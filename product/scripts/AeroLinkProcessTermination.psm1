@@ -351,6 +351,10 @@ function Get-AeroLinkOwnedTreeIdentities {
             if ([long]$identityCache[$linkId] -gt [long]$identityCache[$previousId]) { $chainOk = $false; break }
             $previousId = $linkId
         }
+        # The verified root must also predate its own child (the last link, or the candidate when the chain is just
+        # the root). A child that is OLDER than the pid it points at means its real parent is gone and that pid was
+        # reused by our root - an old parent pid is not ownership.
+        if ($chainOk -and [long]$expected -gt [long]$identityCache[$previousId]) { $chainOk = $false }
         if (-not $chainOk) { continue }
         $owned.Add([ordered]@{ processId = $candidateId; creationFileTime = [long]$identityCache[$candidateId]
             createdUtc = [DateTime]::FromFileTimeUtc([long]$identityCache[$candidateId]).ToString('o')
