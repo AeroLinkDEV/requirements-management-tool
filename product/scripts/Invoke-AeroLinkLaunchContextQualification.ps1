@@ -483,13 +483,24 @@ function Invoke-TwinRun {
     $deadline = $since.AddSeconds($LimitSeconds + $RecordTimeoutSeconds)
     if ($Ending -ne 'HardLimit') { $deadline = (Get-Date).AddSeconds($RecordTimeoutSeconds) }
     $cause = 'StillRunning'
-    $snapshotTick = 0
+    # Re-snapshot the live tree on a WALL-CLOCK cadence, not an iteration count: when the run record is absent the
+    # loop spends 2 s inside Wait-RunRecord, so a count-based tick can stretch past the whole run and never fire
+    # (measured on the 20260919T013442Z control-flow P run: run2's stop lands at ~8 s, count-based snapshots never
+    # fired, and both run2 entry processes survived a cleanup that reported zero errors).
+    $lastSnapshotAt = Get-Date
+    $snapshotEverySeconds = 3
     while ((Get-Date) -lt $deadline) {
         if (-not $record) { $record = Wait-RunRecord $id 2; if ($record) { $null = Track-Probe $record } }
         # The stop must land while the attempt is MUTATING. The active-mutation record (published by the entry
         # itself, with the preserved probe's identity) is the synchronization point; a completed run record is
         # only the fallback for a definition that cannot hold a mutator.
-        if ($Ending -eq 'DriverStop' -and -not $stopIssued -and ($active -or $record)) { try { Stop-ScheduledTask -TaskName $twin -ErrorAction Stop; $stopIssued = $true } catch { } }
+        if ($Ending -eq 'DriverStop' -and -not $stopIssued -and ($active -or $record)) {
+            # Snapshot the still-intact tree immediately BEFORE the stop: once the action is killed its entry is
+            # orphaned and the parent chain can no longer prove ownership, so this is the last deterministic moment
+            # at which the surviving entry process can be recorded by identity.
+            Add-TwinTreeIdentities -EnginePid ([int]$instance.EnginePid)
+            try { Stop-ScheduledTask -TaskName $twin -ErrorAction Stop; $stopIssued = $true } catch { }
+        }
         $current = Get-TwinInstance
         if ($current -and -not $instance) { $instance = $current }
         if ($instance -and -not $current) {
@@ -502,11 +513,11 @@ function Invoke-TwinRun {
             }
             break
         }
-        if ($current) {
-            # The wrapper's real entry may spawn after the first snapshot. Re-snapshot every ~5 s while the parent
-            # chain is intact so the entry is owned before a terminated action can orphan it.
-            $snapshotTick++
-            if ($snapshotTick -ge 10) { $snapshotTick = 0; Add-TwinTreeIdentities -EnginePid ([int]$current.EnginePid) }
+        if ($current -and ((Get-Date) - $lastSnapshotAt).TotalSeconds -ge $snapshotEverySeconds) {
+            # The wrapper's real entry may spawn after the first snapshot. Re-snapshot while the parent chain is
+            # intact so the entry is owned before a terminated action can orphan it.
+            Add-TwinTreeIdentities -EnginePid ([int]$current.EnginePid)
+            $lastSnapshotAt = Get-Date
         }
         if ($mutatorIdentity) {
             $mutatorPid = [int](Get-AeroLinkProperty $mutatorIdentity 'processId' 0)
