@@ -63,6 +63,12 @@ public sealed class CodeEvidencePostgresQualificationTests
                 seed.AddRange(program, project, release, repository, firstEvidence, secondEvidence, losingEvidence,
                     selector, association, snapshot, file);
                 await seed.SaveChangesAsync();
+                var register = await CodeMergeRequestRegisterProjection.ReadPageAsync(seed, project.Id,
+                    release.Id, 1, 1, false, default);
+                Assert.Equal(1, register.Total);
+                Assert.Equal(3, Assert.Single(register.Items).MergeRequestIid);
+                Assert.Empty((await CodeMergeRequestRegisterProjection.ReadPageAsync(seed, project.Id,
+                    release.Id, 2, 1, false, default)).Items);
             }
 
             await using (var restarted = new AeroLinkDbContext(options))
