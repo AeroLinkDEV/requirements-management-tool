@@ -8,22 +8,23 @@ type Target = { exactIdentityId: string; ownerId: string; revision?: number; dis
 export type CodeLinkSubject = { kind: 'MergeRequest'; iid: number } | { kind: 'File'; path: string;
   parentPath: string; cursor?: string; source: CodeSource }
 type Props = { api: string; projectId: string; releaseId: string; subject: CodeLinkSubject;
-  onClose: () => void; onSaved: () => void }
+  fixedTarget?: { kind: string; id: string }; onClose: () => void; onSaved: () => void }
 
 /** One picker for all exact controlled targets. Switching kind/search/page clears the selection. */
-export default function CodeLinkPicker({ api, projectId, releaseId, subject, onClose, onSaved }: Props) {
+export default function CodeLinkPicker({ api, projectId, releaseId, subject, fixedTarget, onClose, onSaved }: Props) {
   const dialog = useRef<HTMLDialogElement>(null)
   const pending = useRef<AbortController | null>(null)
-  const [kind, setKind] = useState('RequirementRevision')
+  const [kind, setKind] = useState(fixedTarget?.kind ?? 'RequirementRevision')
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
-  const [selected, setSelected] = useState<Target>()
+  const [selected, setSelected] = useState<Target | undefined>(fixedTarget ? { exactIdentityId: fixedTarget.id,
+    ownerId: '', display: 'Current exact artifact', title: '', lifecycle: '', available: true } : undefined)
   const [meaning, setMeaning] = useState('RelatedContext')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const base = `${api}/api/projects/${projectId}`
-  const targets = useCodeRead<CodePage<Target>>(`${base}/code/targets?${codeQuery({ releaseId, targetKind: kind, search: query, page, pageSize: 25 })}`)
+  const targets = useCodeRead<CodePage<Target>>(fixedTarget ? undefined : `${base}/code/targets?${codeQuery({ releaseId, targetKind: kind, search: query, page, pageSize: 25 })}`)
   const configuration = useCodeRead<unknown>(`${base}/repository`)
   const repository = decodeRepositoryResponse(configuration.value)?.repository
   useEffect(() => {
@@ -62,7 +63,7 @@ export default function CodeLinkPicker({ api, projectId, releaseId, subject, onC
     <header><h2 id="code-link-title">Link {subject.kind === 'MergeRequest' ? `merge request !${subject.iid}` : subject.path}</h2>
       <button type="button" onClick={onClose} aria-label="Close link picker">Close</button></header>
     <p>A relationship records context. It does not accept implementation evidence or approve a build.</p>
-    <label>Artifact type<select value={kind} disabled={busy} onChange={event => { setKind(event.target.value); setPage(1); setSelected(undefined); setQuery(''); setSearch('') }}>
+    {fixedTarget ? <p>This relationship targets the exact artifact revision or snapshot opened in the originating Code tab.</p> : <><label>Artifact type<select value={kind} disabled={busy} onChange={event => { setKind(event.target.value); setPage(1); setSelected(undefined); setQuery(''); setSearch('') }}>
       <option value="RequirementRevision">Requirement revision</option><option value="RequirementProposal">Requirement proposal</option>
       <option value="ChangeRequestRevision">Change request revision</option><option value="ProblemReportRevision">Problem Report snapshot</option>
     </select></label>
@@ -81,7 +82,7 @@ export default function CodeLinkPicker({ api, projectId, releaseId, subject, onC
     </fieldset>
     <div className="codePagination"><button disabled={busy || page <= 1} onClick={() => { setPage(value => value - 1); setSelected(undefined) }}>Previous targets</button>
       <span>Page {page}{targets.value ? ` · ${targets.value.total} targets` : ''}</span>
-      <button disabled={busy || !targets.value || page * 25 >= targets.value.total} onClick={() => { setPage(value => value + 1); setSelected(undefined) }}>Next targets</button></div>
+      <button disabled={busy || !targets.value || page * 25 >= targets.value.total} onClick={() => { setPage(value => value + 1); setSelected(undefined) }}>Next targets</button></div></>}
     <form onSubmit={save}><label>Relationship<select value={meaning} disabled={busy} onChange={event => setMeaning(event.target.value)}>
       <option value="RelatedContext">Related context</option><option value="Implements">Implements</option><option value="Addresses">Addresses</option>
     </select></label>

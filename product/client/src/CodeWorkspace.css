@@ -48,6 +48,8 @@
 .codeEmptySource { padding: 24px; border: 1px dashed var(--line, #dae1e9); border-radius: 8px; }
 .codeLinkDialog { width: min(760px, calc(100vw - 40px)); max-height: 90vh; box-sizing: border-box; overflow: auto; border: 1px solid #cad5df; border-radius: 10px; padding: 24px; color: #24475d; background: white; }
 .codeLinkDialog::backdrop { background: #14283b88; }
+.codeArtifactBrowser { width: min(1400px, calc(100vw - 40px)); }
+.codeLinkDialog code { overflow-wrap: anywhere; }
 .codeLinkDialog header { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
 .codeLinkDialog h2 { margin: 0; overflow-wrap: anywhere; }
 .codeLinkDialog label { display: grid; gap: 6px; margin: 10px 0; }

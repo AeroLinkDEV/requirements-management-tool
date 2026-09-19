@@ -37,7 +37,8 @@ function ScopedCodeWorkspace({ api, projectId, releaseId, readOnly, page, onBack
   </main>
 }
 
-function MergeRequestRegister({ api, projectId, releaseId, readOnly }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly'>) {
+type ArtifactLinkContext = { fixedTarget?: { kind: string; id: string }; onLinked?: () => void }
+export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixedTarget, onLinked }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly'> & ArtifactLinkContext) {
   const [linking, setLinking] = useState(false)
   const [mode, setMode] = useState<'linked' | 'discover'>('linked')
   const [page, setPage] = useState(1)
@@ -109,12 +110,12 @@ function MergeRequestRegister({ api, projectId, releaseId, readOnly }: Pick<Prop
       </ControlledArtifactInspector> : <aside className="codeEmptyInspector">Select a merge request to inspect its details and relationships.</aside>}
     </div>
     {linking && selected && mr && <CodeLinkPicker key={`${selected.origin}/${selected.remoteProjectId}/${selected.iid}`} {...{ api, projectId, releaseId }}
-      subject={{ kind: 'MergeRequest', iid: selected.iid }} onClose={() => setLinking(false)}
-      onSaved={() => { setLinking(false); setRefresh(value => value + 1) }} />}
+      subject={{ kind: 'MergeRequest', iid: selected.iid }} fixedTarget={fixedTarget} onClose={() => setLinking(false)}
+      onSaved={() => { setLinking(false); setRefresh(value => value + 1); onLinked?.() }} />}
   </section>
 }
 
-function SourceExplorer({ api, projectId, releaseId, source, readOnly }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly'> & { source?: CodeSource }) {
+export function SourceExplorer({ api, projectId, releaseId, source, readOnly, fixedTarget, onLinked }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly'> & { source?: CodeSource } & ArtifactLinkContext) {
   const [linking, setLinking] = useState(false)
   const [linkedOnly, setLinkedOnly] = useState(false)
   const [filePage, setFilePage] = useState(1)
@@ -190,7 +191,7 @@ function SourceExplorer({ api, projectId, releaseId, source, readOnly }: Pick<Pr
       </div>}
     </ControlledArtifactInspector> : <aside className="codeEmptyInspector">Select a file to inspect recorded relationships. Source content opens in GitLab.</aside>}</div>
     {linking && selected && source && selectedFileObserved && <CodeLinkPicker key={selected.path} {...{ api, projectId, releaseId }}
-      subject={{ kind: 'File', path: selected.path, parentPath: path, cursor: cursors.at(-1), source }}
-      onClose={() => setLinking(false)} onSaved={() => { setLinking(false); setRefresh(value => value + 1) }} />}
+      subject={{ kind: 'File', path: selected.path, parentPath: path, cursor: cursors.at(-1), source }} fixedTarget={fixedTarget}
+      onClose={() => setLinking(false)} onSaved={() => { setLinking(false); setRefresh(value => value + 1); onLinked?.() }} />}
   </section>
 }
