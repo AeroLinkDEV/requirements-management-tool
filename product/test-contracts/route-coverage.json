@@ -321,6 +321,7 @@
         "DownstreamAssessmentReopenApiTests",
         "EffectiveExecutionAuthorityApiTests",
         "ExternalIdentityAdminApiTests",
+        "GitLabMetadataApiTests",
         "GovernanceEvidenceApiTests",
         "HistoricalPublicationFreezeApiTests",
         "IdentifierAllocationTests",
