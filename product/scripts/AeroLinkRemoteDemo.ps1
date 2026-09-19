@@ -30,6 +30,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkProductionSource.psm1')
 
 $moduleRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $localDemoRoot = Join-Path $env:LOCALAPPDATA 'AeroLink\RemoteDemo'
@@ -68,10 +69,23 @@ switch ($Action) {
     'Start' {
         $config = Get-AeroLinkRemoteDemoConfig
         try {
-            $result = Start-AeroLinkRemoteDemo -Config $config -Scheduled:$Scheduled
+            # Observation first. An idempotent start that finds the demo exactly ready creates no attempt at all.
+            $assessment = Get-AeroLinkRemoteDemoStartAssessment -Config $config
+            if ($assessment.Decision -eq 'Refused') { throw $assessment.Detail }
+            if ($assessment.Decision -eq 'AlreadyReady') {
+                Write-AeroLinkRemoteDemoLog -Config $config -Run (New-AeroLinkRemoteDemoRun -Scheduled:$Scheduled) -Message 'Remote demo already ready; no new processes started.'
+                Write-Host 'AEROLINK REMOTE DEMO READY'
+                Write-Host "Public URL: $($config.PublicUrl)"
+                Write-Host $assessment.Detail
+                exit 0
+            }
+            # Everything else is a transition, run by THIS process as its outer authority.
+            $transition = Invoke-AeroLinkHomeTransitionOuter -InstallationRoot $activeInstallation.InstallationRoot -Lease $transitionLease -Operation RemoteDemoStart `
+                -SourceRoot $config.AeroLinkRoot -Config $config -Policy KeepReady -Scheduled:$Scheduled -StreamToHost
+            if ($transition.Decision -ne 'Completed') { throw $transition.Detail }
             Write-Host 'AEROLINK REMOTE DEMO READY'
-            Write-Host "Public URL: $($result.PublicUrl)"
-            Write-Host $result.Detail
+            Write-Host "Public URL: $($config.PublicUrl)"
+            Write-Host $transition.Detail
             exit 0
         }
         catch {
@@ -79,7 +93,7 @@ switch ($Action) {
             Write-AeroLinkRemoteDemoLog -Config $config -Run $failureRun -Message "AEROLINK REMOTE DEMO NOT READY: $($_.Exception.Message)"
             Write-Host 'AEROLINK REMOTE DEMO NOT READY' -ForegroundColor Red
             Write-Host $_.Exception.Message
-            exit 1
+            exit $(if ($transition -and $transition.ExitCode) { $transition.ExitCode } else { 1 })
         }
     }
     'Stop' {
@@ -118,11 +132,22 @@ switch ($Action) {
         # origin/main actually moved. A machine that stays up for weeks should not stay weeks behind.
         $config = Get-AeroLinkRemoteDemoConfig
         try {
-            $result = Invoke-AeroLinkProductionSourceReconciliation -Config $config -Scheduled:$Scheduled
-            Write-Host "AEROLINK PRODUCTION SOURCE $($result.Action.ToUpperInvariant())"
-            Write-Host $result.Detail
-            if ($result.Action -notin @('Updated', 'AlreadyCurrent', 'CachedCanonical')) { exit 1 }
-            exit 0
+            Assert-AeroLinkDedicatedProductionSource -SourceRoot $config.AeroLinkRoot | Out-Null
+            $inspect = Update-AeroLinkProductionSource -SourceRoot $config.AeroLinkRoot -InspectOnly
+            if (-not $inspect.Canonical -or $inspect.Action -ne 'UpdateAvailable') {
+                # Deliberately does NOTHING when the source has not moved, including when the demo is down: this is a
+                # bounded SOURCE reconciler, and an operator's explicit Stop must stay stopped.
+                Write-Host "AEROLINK PRODUCTION SOURCE $($inspect.Action.ToUpperInvariant())"
+                Write-Host $inspect.Reason
+                if ($inspect.Action -notin @('AlreadyCurrent', 'CachedCanonical')) { exit 1 }
+                exit 0
+            }
+            $transition = Invoke-AeroLinkHomeTransitionOuter -InstallationRoot $activeInstallation.InstallationRoot -Lease $transitionLease -Operation Reconcile `
+                -SourceRoot $config.AeroLinkRoot -Config $config -Policy KeepReady -Scheduled:$Scheduled -StreamToHost `
+                -AttemptDeadlineSeconds (Get-AeroLinkTransitionBudget).ContinuationSeconds
+            Write-Host "AEROLINK PRODUCTION SOURCE $(if ($transition.Decision -eq 'Completed') { 'UPDATED' } else { $transition.Decision.ToUpperInvariant() })"
+            Write-Host $transition.Detail
+            exit $transition.ExitCode
         }
         catch {
             Write-Host 'AEROLINK PRODUCTION SOURCE RECONCILIATION FAILED' -ForegroundColor Red

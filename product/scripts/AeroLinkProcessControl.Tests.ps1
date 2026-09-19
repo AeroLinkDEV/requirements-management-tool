@@ -2,6 +2,7 @@
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransitionKernel.psm1') -DisableNameChecking
 $root = Join-Path ([IO.Path]::GetTempPath()) ('aerolink-924-contract-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $root | Out-Null
 $failures = [Collections.Generic.List[string]]::new()
@@ -13,6 +14,9 @@ $child = $null
 $helper = $null
 $lease = $null
 $continuingChild = $null
+$treeParent = $null
+$treeChildId = 0
+$treeDecoy = $null
 $savedCapability = $env:AEROLINK_TRANSITION_LEASE
 try {
     $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -46,34 +50,43 @@ try {
         Start-Sleep -Milliseconds 100
     }
     Check ($helper.HasExited -and $helper.ExitCode -eq 7) 'A real redirected Windows PowerShell helper must retain its non-zero exit code.'
-    $setup = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Initialize-AeroLinkHomeProcessControl.ps1') -Raw
-    $invocation = [regex]::Match($setup, '(?s)    \$launcherPath = Join-Path \$Source.*?finally \{ \$launcher.Dispose\(\) \}')
-    if (-not $invocation.Success) { throw 'First-deployment native invocation was not found.' }
-    foreach ($expectedCode in @(0, 7)) {
-        Set-Content -LiteralPath (Join-Path $helperScripts 'Start-AeroLinkProduction.ps1') -Value ('[Console]::Error.WriteLine("native notice"); exit ' + $expectedCode) -Encoding UTF8
-        $Source = $root
-        $Log = Join-Path $root "deployment-stderr-$expectedCode.log"
-        $code = -1
-        . ([scriptblock]::Create($invocation.Value))
-        Check ($code -eq $expectedCode) 'First-deployment stderr must preserve both successful and failed native exit codes.'
-        Check ($ErrorActionPreference -eq 'Stop') 'First-deployment invocation must restore terminating error handling.'
-        Check ((Get-Content -LiteralPath "$Log.stderr" -Raw) -match 'native notice') 'Native stderr must remain in the deployment log.'
-    }
-    $survivor = $null
-    try {
-        @'
+    # The brokered first deployment is judged by ONE invocation's bound result AND its task result (#1053, F2/F3).
+    $deploymentDirectory = Join-Path $root 'first-deployment'
+    New-Item -ItemType Directory -Path $deploymentDirectory -Force | Out-Null
+    $requestId = [guid]::NewGuid().ToString('N')
+    $resultPath = Join-Path $deploymentDirectory "$requestId.result.json"
+    $writeResult = { param($Value) Publish-AeroLinkJsonAtomic -Path $resultPath -Value $Value }
+    Check ((Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $false -LastTaskResult 0).Unknown) 'A deployment task that has not ended is Unknown.'
+    Check ((Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $true -LastTaskResult 0).Unknown) 'An ended task with no result for this request is Unknown, never success.'
+    & $writeResult ([ordered]@{ requestId = 'another-request'; decision = 'Completed'; exitCode = 0 })
+    Check ((Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $true -LastTaskResult 0).Unknown) 'A result bound to another request cannot stand in for this one.'
+    & $writeResult ([ordered]@{ requestId = $requestId; decision = 'Completed'; exitCode = 0 })
+    $stale = Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $true -LastTaskResult 1
+    Check (-not $stale.Succeeded -and -not $stale.Unknown) 'A Completed file with a nonzero task result is a failure.'
+    & $writeResult ([ordered]@{ requestId = $requestId; decision = 'Completed'; exitCode = 24 })
+    Check (-not (Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $true -LastTaskResult 0).Succeeded) 'A Completed decision contradicted by its exit code is a failure.'
+    & $writeResult ([ordered]@{ requestId = $requestId; decision = 'RestorationFailed'; exitCode = 26 })
+    Check (-not (Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $true -LastTaskResult 26).Succeeded) 'A failed transition is a failure.'
+    & $writeResult ([ordered]@{ requestId = $requestId; decision = 'Completed'; exitCode = 0 })
+    Check ((Resolve-AeroLinkFirstDeploymentResult -ResultPath $resultPath -RequestId $requestId -TaskEnded $true -LastTaskResult 0).Succeeded) 'Completed, exit 0 and task result 0 for this request is success.'
+
+    # The task action itself: no staged request does nothing; outside the scheduled batch context it refuses and says so.
+    $deployInstallation = Join-Path $root 'deploy-installation'
+    New-Item -ItemType Directory -Path (Join-Path $deployInstallation 'bootstrap\first-deployment') -Force | Out-Null
+    $deployScript = Join-Path $PSScriptRoot 'Invoke-AeroLinkFirstDeployment.ps1'
+    & $powershell -NoProfile -ExecutionPolicy Bypass -File $deployScript -InstallationRoot $deployInstallation | Out-Null
+    Check ($LASTEXITCODE -eq 2) 'The deployment action with no staged request exits 2 and does nothing.'
+    Publish-AeroLinkJsonAtomic -Path (Join-Path $deployInstallation 'bootstrap\first-deployment\request.json') -Value ([ordered]@{ requestId = $requestId; sourceRoot = $root; configurationProfile = $env:LOCALAPPDATA })
+    & $powershell -NoProfile -ExecutionPolicy Bypass -File $deployScript -InstallationRoot $deployInstallation | Out-Null
+    $refusedResult = Read-AeroLinkJsonRecord -Path (Join-Path $deployInstallation "bootstrap\first-deployment\$requestId.result.json")
+    Check ($LASTEXITCODE -eq 1 -and $refusedResult.Class -eq 'Valid' -and $refusedResult.Value.requestId -eq $requestId -and $refusedResult.Value.exitCode -eq 1 -and
+        [string]$refusedResult.Value.detail -match 'scheduled batch') 'Outside the scheduled batch context the deployment action refuses with a result bound to its request.'
+    Check (-not (Test-Path -LiteralPath (Join-Path $deployInstallation 'bootstrap\transitions'))) 'A refused deployment admits no transition attempt.'
+    @'
 $child = Start-Process powershell.exe -ArgumentList '-NoProfile -Command "Start-Sleep -Seconds 30"' -WindowStyle Hidden -PassThru
 $child.Id | Set-Content (Join-Path $PSScriptRoot 'survivor.pid')
 exit 0
 '@ | Set-Content -LiteralPath (Join-Path $helperScripts 'Start-AeroLinkProduction.ps1') -Encoding UTF8
-        $Log = Join-Path $root 'deployment-survivor.log'
-        $timer = [Diagnostics.Stopwatch]::StartNew()
-        . ([scriptblock]::Create($invocation.Value))
-        $survivor = Get-Process -Id ([int](Get-Content (Join-Path $helperScripts 'survivor.pid')))
-        Check ($code -eq 0 -and $timer.Elapsed.TotalSeconds -lt 15 -and -not $survivor.HasExited) 'Setup must complete when its launcher exits while the launched service remains alive.'
-    } finally {
-        if ($survivor) { if (-not $survivor.HasExited) { $survivor.Kill(); $survivor.WaitForExit() }; $survivor.Dispose() }
-    }
     Import-Module (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1') -Force
     $reentrySurvivor = $null
     try {
@@ -174,6 +187,159 @@ function Exit-AeroLinkTransition($Lease) { Add-Content (Join-Path $PSScriptRoot 
         $stopCode = $LASTEXITCODE
     } finally { $ErrorActionPreference = $stopPreference }
     Check ($stopCode -ne 0 -and ((Get-Content (Join-Path $stopScripts 'events.txt')) -join ',') -eq 'enter,stop-5173,stop-5080,exit') 'Failed explicit Stop must release its lease and preserve PostgreSQL.'
+
+    # ---------------------------------------------------------------------------------------------------------
+    # #1055 F801-1: the owned-tree selector binds every candidate AND every ancestry link to the lifetime the CIM
+    # inventory described, and never turns a discovery gap into absence. Real processes first (the shipped module,
+    # a real parent/child tree and an unrelated decoy); then the shipped selector text with its read-only seams
+    # controlled and no termination at all.
+    # ---------------------------------------------------------------------------------------------------------
+    Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessTermination.psm1') -Force -DisableNameChecking
+    Check (Test-AeroLinkTerminationNative) 'F801-1: the native identity-bound termination helper must be available on this host.'
+    $treeWitness = Join-Path $root 'tree-witness.ps1'
+    @'
+param([string]$ChildPidPath, [int]$Seconds)
+$ErrorActionPreference = 'Stop'
+$powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$child = Start-Process -FilePath $powershell -ArgumentList '-NoProfile -NonInteractive -Command "Start-Sleep -Seconds 300"' -WindowStyle Hidden -PassThru
+Set-Content -LiteralPath $ChildPidPath -Value $child.Id
+Start-Sleep -Seconds $Seconds
+'@ | Set-Content -LiteralPath $treeWitness -Encoding UTF8
+    $treeChildPidPath = Join-Path $root 'tree-child.pid'
+    $treeParent = Start-Process -FilePath $powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$treeWitness`" -ChildPidPath `"$treeChildPidPath`" -Seconds 300" -WindowStyle Hidden -PassThru
+    for ($i = 0; $i -lt 200 -and $treeChildId -le 0; $i++) {
+        if (Test-Path -LiteralPath $treeChildPidPath) {
+            $text = (Get-Content -LiteralPath $treeChildPidPath -Raw).Trim()
+            if ($text -match '^[0-9]+$') { $treeChildId = [int]$text }
+        }
+        if ($treeChildId -le 0) { Start-Sleep -Milliseconds 100 }
+    }
+    $treeDecoy = Start-Process -FilePath $powershell -ArgumentList '-NoProfile -NonInteractive -Command "Start-Sleep -Seconds 300"' -WindowStyle Hidden -PassThru
+    Check ($treeChildId -gt 0) 'F801-1: the owned-tree witness must publish the pid of its real child.'
+    $treeRootIdentity = New-AeroLinkProcessIdentity -ProcessId $treeParent.Id
+    Check ($treeRootIdentity.creationFileTime -gt 0) 'F801-1: the witness root must have a canonical native identity.'
+    $treeSelection = Get-AeroLinkOwnedTreeIdentities -RootIdentity $treeRootIdentity
+    $treeSelectedIds = @($treeSelection.identities | ForEach-Object { [int]$_.processId })
+    Check ($treeSelectedIds -contains $treeParent.Id) 'F801-1: the verified root must be selected.'
+    Check ($treeSelectedIds -contains $treeChildId) 'F801-1: the real child of the verified root must be selected.'
+    Check (-not ($treeSelectedIds -contains $treeDecoy.Id)) 'F801-1: an unrelated process must never be adopted into the owned tree.'
+    # The machine is shared: an unrelated process whose stale parent pointer lands inside this root's pid space is
+    # legitimately reported unresolved/replaced by design (and is never adopted). The assertions that matter here
+    # are about THIS test's processes: none of them may ever be dismissed as unattributable or as a replacement,
+    # and every identity the selection would terminate must be that live process's OWN lifetime.
+    $treeOwnedPids = @($treeParent.Id, $treeChildId, $treeDecoy.Id)
+    Check (-not @($treeSelection.unresolved | Where-Object { $treeOwnedPids -contains [int]$_.processId }).Count) 'F801-1: an owned process must never be reported as unattributable.'
+    Check (-not @($treeSelection.replaced | Where-Object { $treeOwnedPids -contains [int]$_.processId }).Count) 'F801-1: an owned process must never be reported as a replacement.'
+    foreach ($treeBound in @($treeSelection.identities)) {
+        $treeLive = Test-AeroLinkProcessIdentity -Identity $treeBound
+        Check ($treeLive.state -in @('Match', 'Gone')) "F801-1: the selected identity of pid $($treeBound.processId) must be that process's own lifetime (got $($treeLive.state))."
+    }
+    $treeChildIdentity = @($treeSelection.identities | Where-Object { [int]$_.processId -eq $treeChildId })[0]
+    Check ([long]$treeChildIdentity.creationFileTime -eq [long](Get-AeroLinkProcessCreationFileTime -ProcessId $treeChildId).creationFileTime) 'F801-1: the chosen child identity is the child''s own native lifetime.'
+    $treeStopped = 0
+    foreach ($treeIdentity in @($treeSelection.identities | Sort-Object -Property @{ Expression = { [int]$_.depth } } -Descending)) {
+        $treeOutcome = Stop-AeroLinkVerifiedIdentity -Identity $treeIdentity
+        Check ($treeOutcome.state -in @('Stopped', 'AlreadyGone')) "F801-1: the bound identity of pid $($treeIdentity.processId) must be settled (got $($treeOutcome.state))."
+        if ($treeOutcome.state -eq 'Stopped') { $treeStopped++ }
+    }
+    Check ($treeStopped -ge 2) 'F801-1: the real owned tree must be stopped through identity-bound termination.'
+    Check ((Get-AeroLinkProcessCreationFileTime -ProcessId $treeParent.Id).state -eq 'Gone') 'F801-1: the stopped root must be positively proven gone.'
+    Check ((Get-AeroLinkProcessCreationFileTime -ProcessId $treeChildId).state -eq 'Gone') 'F801-1: the stopped child must be positively proven gone.'
+    Check ((Test-AeroLinkProcessIdentity -Identity (New-AeroLinkProcessIdentity -ProcessId $treeDecoy.Id)).state -eq 'Match') 'F801-1: an unrelated process must survive the owned tree''s cleanup.'
+
+    # The SHIPPED selector text with controlled inventory/native-read seams; the destructive seam is never called.
+    $terminationSource = Join-Path $PSScriptRoot 'AeroLinkProcessTermination.psm1'
+    $terminationTokens = $null; $terminationErrors = $null
+    $terminationAst = [System.Management.Automation.Language.Parser]::ParseFile($terminationSource, [ref]$terminationTokens, [ref]$terminationErrors)
+    $selectorNode = $terminationAst.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq 'Get-AeroLinkOwnedTreeIdentities' }, $true)
+    if (-not $selectorNode) { throw 'F801-1: the termination module no longer defines Get-AeroLinkOwnedTreeIdentities.' }
+    . ([scriptblock]::Create($selectorNode.Extent.Text))
+    function New-F801Item([int]$ProcessId, [int]$ParentProcessId, [long]$CreationFileTime) {
+        [pscustomobject]@{ ProcessId = $ProcessId; ParentProcessId = $ParentProcessId; CreationDate = [DateTime]::FromFileTimeUtc($CreationFileTime)
+            Name = 'owned.exe'; ExecutablePath = 'C:\owned.exe' }
+    }
+    function New-F801Native([long]$CreationFileTime) { [ordered]@{ state = 'Ok'; creationFileTime = $CreationFileTime; detail = '' } }
+    function Test-AeroLinkProcessIdentity { param($Identity) [ordered]@{ state = 'Match'; detail = '' } }
+    function Get-AeroLinkProcessSnapshot { @($script:f801Inventory) }
+    function Get-AeroLinkProcessCreationFileTime { param([int]$ProcessId) $script:f801Native[$ProcessId] }
+    function Get-F801Ids($Entries) { @(@($Entries) | ForEach-Object { [int]$_.processId } | Sort-Object) -join ',' }
+    $f801Epoch = [DateTime]::Parse('2026-09-19T10:00:00Z').ToUniversalTime().ToFileTimeUtc()
+    $script:f801Root = [ordered]@{ processId = 100; creationFileTime = $f801Epoch }
+    $f801RootOnly = @(100)
+    $f801Cases = @(
+        @{ Name = 'stable-child'; Expect = 'Match'; Selected = @(100, 101); Replaced = @(); Unresolved = @()
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 10000000)) } },
+        @{ Name = 'stable-child-within-measured-cim-skew'; Expect = 'Match'; Selected = @(100, 101); Replaced = @(); Unresolved = @()
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 10000009)) } },
+        @{ Name = 'child-replaced-after-inventory'; Expect = 'Match'; Selected = $f801RootOnly; Replaced = @(101); Unresolved = @()
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 90000000)) } },
+        @{ Name = 'child-replaced-inside-one-second'; Expect = 'Match'; Selected = $f801RootOnly; Replaced = @(101); Unresolved = @()
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 15000000)) } },
+        @{ Name = 'intermediate-parent-replaced-after-inventory'; Expect = 'Unknown'; Selected = $f801RootOnly; Replaced = @(101); Unresolved = @(102)
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)), (New-F801Item 102 101 ($f801Epoch + 20000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 90000000)); 102 = (New-F801Native ($f801Epoch + 20000000)) } },
+        @{ Name = 'unreadable-child-identity'; Expect = 'Unknown'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @(101)
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = [ordered]@{ state = 'Unknown'; creationFileTime = 0; detail = 'Access denied' } } },
+        @{ Name = 'unreadable-intermediate-identity'; Expect = 'Unknown'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @(101, 102)
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)), (New-F801Item 102 101 ($f801Epoch + 20000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = [ordered]@{ state = 'Unknown'; creationFileTime = 0; detail = 'Access denied' }; 102 = (New-F801Native ($f801Epoch + 20000000)) } },
+        @{ Name = 'child-positively-gone'; Expect = 'Match'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @()
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = [ordered]@{ state = 'Gone'; creationFileTime = 0; detail = 'no such process' } } },
+        # A live orphan under a POSITIVELY GONE ancestor: a vanished parent proves only that parent gone, so the
+        # child is reported with its own bound lifetime and withholds a clean verdict (Astra review 4979b47d).
+        @{ Name = 'live-orphan-with-gone-ancestor-is-unresolved'; Expect = 'Unknown'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @(104)
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 103 100 ($f801Epoch + 5000000)), (New-F801Item 104 103 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 103 = [ordered]@{ state = 'Gone'; creationFileTime = 0; detail = 'no such process' }; 104 = (New-F801Native ($f801Epoch + 10000000)) } },
+        # F497-2: a distinct lifetime 5,000 ticks (0.5 ms) after the snapshot's own lifetime must never be adopted.
+        @{ Name = 'close-but-distinct-lifetime-is-rejected'; Expect = 'Match'; Selected = $f801RootOnly; Replaced = @(101); Unresolved = @()
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 10005000)) } },
+        # F497-2: the genuine conversion difference (native 9 ticks ahead, inside the same microsecond) IS the same
+        # lifetime, and the identity the selection hands out is the NATIVE one.
+        @{ Name = 'conversion-skew-inside-the-representation-is-bound'; Expect = 'Match'; Selected = @(100, 101); Replaced = @(); Unresolved = @()
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 10000009)) } },
+        # A snapshot entry outside the CIM microsecond representation cannot be bound at all: Unknown, fail closed.
+        @{ Name = 'snapshot-entry-outside-the-cim-representation'; Expect = 'Unknown'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @(101)
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000005)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 10000005)) } },
+        @{ Name = 'child-inventory-entry-without-creation-time'; Expect = 'Unknown'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @(101)
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 0))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 10000000)) } },
+        @{ Name = 'root-replaced-after-inventory'; Expect = 'Reused'; Selected = @(); Replaced = @(100); Unresolved = @()
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native ($f801Epoch + 90000000)); 101 = (New-F801Native ($f801Epoch + 10000000)) } },
+        @{ Name = 'root-identity-unreadable'; Expect = 'Unknown'; Selected = @(); Replaced = @(); Unresolved = @(100)
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
+           Native = @{ 100 = [ordered]@{ state = 'Unknown'; creationFileTime = 0; detail = 'Access denied' }; 101 = (New-F801Native ($f801Epoch + 10000000)) } },
+        @{ Name = 'root-positively-gone'; Expect = 'Gone'; Selected = @(); Replaced = @(); Unresolved = @()
+           Inventory = @((New-F801Item 100 99 $f801Epoch))
+           Native = @{ 100 = [ordered]@{ state = 'Gone'; creationFileTime = 0; detail = 'no such process' } } }
+    )
+    foreach ($f801 in $f801Cases) {
+        $script:f801Inventory = @($f801.Inventory)
+        $script:f801Native = $f801.Native
+        $tree = Get-AeroLinkOwnedTreeIdentities -RootIdentity $script:f801Root
+        $label = "F801-1 $($f801.Name)"
+        Check ($tree.state -eq $f801.Expect) "$label`: the selector must report $($f801.Expect) (got $($tree.state): $($tree.detail))."
+        Check ((Get-F801Ids $tree.identities) -eq ((@($f801.Selected) | Sort-Object) -join ',')) "$label`: the selected identities must be exactly [$((@($f801.Selected) | Sort-Object) -join ',')] (got [$(Get-F801Ids $tree.identities)])."
+        Check ((Get-F801Ids $tree.replaced) -eq ((@($f801.Replaced) | Sort-Object) -join ',')) "$label`: the replaced identities must be exactly [$((@($f801.Replaced) | Sort-Object) -join ',')] (got [$(Get-F801Ids $tree.replaced)])."
+        Check ((Get-F801Ids $tree.unresolved) -eq ((@($f801.Unresolved) | Sort-Object) -join ',')) "$label`: the unresolved identities must be exactly [$((@($f801.Unresolved) | Sort-Object) -join ',')] (got [$(Get-F801Ids $tree.unresolved)])."
+        # Every adopted identity must be the process's OWN current lifetime: the selection may never hand a caller
+        # an identity the live pid does not actually hold (the case expectations above are the oracle - this only
+        # re-reads the identity the selection produced).
+        foreach ($adopted in @($tree.identities)) {
+            $live = $f801.Native[[int]$adopted.processId]
+            if (-not $live -or [string]$live.state -ne 'Ok') { Check $false "$label`: pid $($adopted.processId) was selected although no live lifetime was read for it." ; continue }
+            Check ([long]$adopted.creationFileTime -eq [long]$live.creationFileTime) "$label`: the selected identity of pid $($adopted.processId) must be the live lifetime the native read returned."
+        }
+    }
 }
 finally {
     Exit-AeroLinkTransition $lease
@@ -181,6 +347,18 @@ finally {
     if ($continuingChild) { if (-not $continuingChild.HasExited) { $continuingChild.Kill(); $continuingChild.WaitForExit() }; $continuingChild.Dispose() }
     if ($child) { if (-not $child.HasExited) { $child.Kill(); $child.WaitForExit() }; $child.Dispose() }
     if ($helper) { if (-not $helper.Process.HasExited) { $helper.Process.Kill(); $helper.Process.WaitForExit() }; $helper.Process.Dispose() }
+    # The F801-1 tree processes are disposable and owned by this suite: the parent is closed through the live
+    # Process object that holds its handle, and the child (which an early failure could leave orphaned) only ever
+    # through the module's identity-bound stop. Module-qualified calls: the controlled seams above shadow the
+    # module's own commands in this script scope.
+    if ($treeParent) { if (-not $treeParent.HasExited) { $treeParent.Kill(); $treeParent.WaitForExit() }; $treeParent.Dispose() }
+    if ($treeChildId -gt 0) {
+        $treeChildLive = AeroLinkProcessTermination\Get-AeroLinkProcessCreationFileTime -ProcessId $treeChildId
+        if ($treeChildLive.state -eq 'Ok') {
+            AeroLinkProcessTermination\Stop-AeroLinkVerifiedIdentity -Identity ([ordered]@{ processId = $treeChildId; creationFileTime = [long]$treeChildLive.creationFileTime }) | Out-Null
+        }
+    }
+    if ($treeDecoy) { if (-not $treeDecoy.HasExited) { $treeDecoy.Kill(); $treeDecoy.WaitForExit() }; $treeDecoy.Dispose() }
     $resolved = [IO.Path]::GetFullPath($root)
     if (-not $resolved.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()), [StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected fixture cleanup path.' }
     Remove-Item -LiteralPath $resolved -Recurse -Force

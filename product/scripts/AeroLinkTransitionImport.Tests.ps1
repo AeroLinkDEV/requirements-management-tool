@@ -45,13 +45,16 @@ if ($Handoff -eq '1') {
     Import-Module (Join-Path $Root 'product\scripts\AeroLinkTransition.psm1')
     $owner = Enter-AeroLinkTransition -InstallationRoot $env:AEROLINK_INSTALLATION_ROOT
     try {
+        # A continuation is contained work of an outer authority's attempt. Without one it refuses before starting
+        # anything, whatever restoration it was asked for (#1053).
         $result = 0
         try {
             Invoke-AeroLinkRemoteDemoHandoff -Config (Get-AeroLinkRemoteDemoConfig) -PreserveServiceState `
                 -Topology ([pscustomobject]@{ TunnelRunning=$false; RuntimeRunning=$true }) -HeadSha ('a' * 40)
+            throw 'A continuation outside a transition was started.'
         } catch {
-            if ($Failure -ne '1' -or $_.Exception.Message -notmatch 'exit code 1') { throw }
-            $result = 1
+            if ($_.Exception.Message -notmatch 'only inside a HOME transition') { throw }
+            $result = $(if ($Failure -eq '1') { 1 } else { 0 })
         }
         if (@(Get-ChildItem -LiteralPath $directory -Filter '*.active').Count) { throw 'Fresh-process continuation left a witness behind' }
         $blocked = $false
@@ -69,7 +72,10 @@ if ($env:AEROLINK_TRANSITION_LEASE -or $env:AEROLINK_TRANSITION_JOURNAL) { throw
 if (@(Get-ChildItem -LiteralPath $directory -Filter '*.active').Count) { throw 'Continuation left an owned witness behind' }
 $probe = [IO.File]::Open((Join-Path $directory 'home-transition.lock'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
 $probe.Dispose()
-if (@(Get-Content -LiteralPath $env:AEROLINK_1030_EVENTS).Count -ne 1) { throw 'Expected one runtime-only restoration' }
+if ($Handoff -eq '1') {
+    if (Test-Path -LiteralPath $env:AEROLINK_1030_EVENTS) { throw 'A refused continuation restored something' }
+}
+elseif (@(Get-Content -LiteralPath $env:AEROLINK_1030_EVENTS).Count -ne 1) { throw 'Expected one runtime-only restoration' }
 $expected = if ($Failure -eq '1') { 1 } else { 0 }
 if ($result -ne $expected) { throw "Continuation exit $result; expected $expected" }
 Write-Host 'LEASE_RELEASED_BEFORE_EXIT'
@@ -87,12 +93,12 @@ try {
         } finally { $ErrorActionPreference = $priorPreference }
         $output = Get-Content -LiteralPath $log -Raw
         if ($code -ne 0 -or $output -notmatch 'LEASE_RELEASED_BEFORE_EXIT') { throw "Nested import scenario $failure failed. Evidence: $log`n$output" }
-        if ($failure -eq '0' -and $output -notmatch 'AEROLINK TRANSITION CONTINUED') { throw 'Successful continuation was not reported' }
-        if ($failure -eq '1' -and ($output -notmatch 'AEROLINK TRANSITION CONTINUATION FAILED' -or $output -notmatch 'Injected runtime restoration failure')) { throw 'Restoration failure was not reported truthfully' }
+        if ($handoff -eq '0' -and $failure -eq '0' -and $output -notmatch 'AEROLINK TRANSITION CONTINUED') { throw 'Successful continuation was not reported' }
+        if ($handoff -eq '0' -and $failure -eq '1' -and ($output -notmatch 'AEROLINK TRANSITION CONTINUATION FAILED' -or $output -notmatch 'Injected runtime restoration failure')) { throw 'Restoration failure was not reported truthfully' }
       }
     }
     $passed = $true
-    Write-Host 'Transition nested import contracts passed (4 direct/fresh-process success/failure scenarios; real CLI and lease cleanup).'
+    Write-Host 'Transition nested import contracts passed (legacy continuation success/failure through the real CLI; a continuation outside a transition refused; lease cleanup).'
 }
 finally {
     if ($passed) {

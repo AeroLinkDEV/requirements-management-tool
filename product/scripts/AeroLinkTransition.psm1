@@ -29,6 +29,10 @@ function Enter-AeroLinkTransition {
             $reader = New-Object IO.StreamReader($readerStream)
             try { $active = $reader.ReadToEnd() | ConvertFrom-Json }
             finally { $reader.Dispose() }
+            # An unrelated invocation presents no capability at all. Say that, rather than letting a null
+            # pipeline into ConvertFrom-Json report "Cannot bind argument to parameter 'InputObject'", which
+            # masked the real refusal in the #1055 qualification run.
+            if ([string]::IsNullOrWhiteSpace($previous)) { throw 'This invocation presented no continuation capability; only a descendant of the active transition may share its lease.' }
             $inherited = $previous | ConvertFrom-Json
             if ($active.installationRoot -ine $root -or
                 (Get-AeroLinkTransitionDigest $inherited.token) -ne $active.tokenHash) { throw 'Lease capability does not match.' }

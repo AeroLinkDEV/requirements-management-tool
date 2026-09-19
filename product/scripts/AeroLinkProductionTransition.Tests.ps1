@@ -90,6 +90,7 @@ function Invoke-WebRequest { Event 'BuiltClientProof'; [pscustomobject]@{ Conten
 function Start-AeroLinkRemoteDemo { Event 'TunnelRestore'; [pscustomobject]@{ Ready=$true } }
 function Get-AeroLinkRemoteDemoNgrokProcess { [pscustomobject]@{ Owned=@(); Mismatched=@() } }
 function Get-AeroLinkProductionSourcePosture { [pscustomobject]@{ Canonical=$true; Posture=[pscustomobject]@{ HeadSha=('a' * 40) } } }
+function Get-AeroLinkServiceEndpoints { [pscustomobject]@{ ApiPort=5080; PostgresPort=54329; ApiBaseUri='http://127.0.0.1:5080'; ConnectionString=''; Qualification=$false } }
 function Invoke-AeroLinkBootstrapReentry { Event 'Compensate'; return 0 }
 & $Controller -DoNotOpenBrowser
 '@ | Set-Content -LiteralPath $driver -Encoding UTF8

@@ -359,6 +359,42 @@ function Set-AeroLinkInstanceConfig {
     return $configPath
 }
 
+function Get-AeroLinkServiceEndpoints {
+    <#
+        .SYNOPSIS The local ports this installation's services use: 5080 for the API and 54329 for PostgreSQL.
+        .DESCRIPTION
+            Fixed for every real installation. A DISPOSABLE qualification installation - AEROLINK_INSTALLATION_ROOT
+            set, which normal use never does - may move them with AEROLINK_QUALIFICATION_API_PORT and
+            AEROLINK_QUALIFICATION_POSTGRES_PORT, so the real launchers and transition callers can be qualified on a
+            machine whose HOME services are running. An override that names a persistent port is refused: a
+            disposable installation must never be able to reach the canonical API or database.
+    #>
+    [CmdletBinding()]
+    param()
+    $api = 5080
+    $postgres = 54329
+    $qualification = $false
+    if ($env:AEROLINK_INSTALLATION_ROOT -and ($env:AEROLINK_QUALIFICATION_API_PORT -or $env:AEROLINK_QUALIFICATION_POSTGRES_PORT)) {
+        foreach ($pair in @(@('AEROLINK_QUALIFICATION_API_PORT', 'api'), @('AEROLINK_QUALIFICATION_POSTGRES_PORT', 'postgres'))) {
+            $raw = [Environment]::GetEnvironmentVariable($pair[0], 'Process')
+            if (-not $raw) { throw "A disposable qualification installation must set both AEROLINK_QUALIFICATION_API_PORT and AEROLINK_QUALIFICATION_POSTGRES_PORT." }
+            $value = 0
+            if (-not [int]::TryParse($raw, [ref]$value) -or $value -lt 1024 -or $value -gt 65535 -or $value -in @(5080, 54329)) {
+                throw "$($pair[0]) must be a port from 1024 to 65535 other than the persistent 5080 and 54329; it is '$raw'."
+            }
+            if ($pair[1] -eq 'api') { $api = $value } else { $postgres = $value }
+        }
+        $qualification = $true
+    }
+    return [pscustomobject]@{
+        ApiPort          = $api
+        PostgresPort     = $postgres
+        ApiBaseUri       = "http://127.0.0.1:$api"
+        ConnectionString = "Host=127.0.0.1;Port=$postgres;Database=aerolink;Username=postgres"
+        Qualification    = $qualification
+    }
+}
+
 Export-ModuleMember -Function @(
     'Get-AeroLinkInstallationPointerPath',
     'Get-AeroLinkInstallationRoot',
@@ -366,5 +402,6 @@ Export-ModuleMember -Function @(
     'Set-AeroLinkInstallationPointer',
     'Get-AeroLinkInstallationIdentity',
     'Get-AeroLinkInstanceConfig',
+    'Get-AeroLinkServiceEndpoints',
     'Set-AeroLinkInstanceConfig'
 )

@@ -183,9 +183,16 @@ try {
         $activationPassed = $true
     }
 
-    $count = (Invoke-Psql $TargetDatabase 'SELECT COUNT(*) FROM programs;').Trim()
+    # The summary must not assume a migrated schema. Under -SkipCurrentCodeValidation the clone is deliberately
+    # pre-migration: an absent Program table is "not yet present", not a count and not a swallowed error
+    # (#1055 first start). When current-code validation was NOT deferred, the table is required, so its absence
+    # is a named failure rather than a quiet summary.
+    $schemaState = Get-AeroLinkDatabaseSchemaState -Psql (Join-Path $bin 'psql.exe') -Database $TargetDatabase -Port $PostgresPort
+    if ($schemaState.ProgramPresent) { $countText = (Invoke-Psql $TargetDatabase 'SELECT COUNT(*) FROM programs;').Trim() + ' Program record(s)' }
+    elseif ($deferCurrentCode) { $countText = 'Program table not present yet (pre-migration restore; current-code validation deferred)' }
+    else { throw "The restore summary expected the Program table in database '$TargetDatabase', but it is absent and current-code validation was not deferred." }
     $verified = Test-AeroLinkAttachmentInventory -Inventory $restoredInventory -EvidenceRoot $resolvedTarget
-    Write-Host "Restore verified in database '$TargetDatabase': $count Program record(s), $($verified.ReferencedAttachments) attachment row(s), $($verified.ReferencedObjects) object(s), $($verified.VerifiedBytes) byte(s), $($finalDownloads.ManagedDocumentDownloads) API download(s). Evidence root: $resolvedTarget" -ForegroundColor Green
+    Write-Host "Restore verified in database '$TargetDatabase': $countText, $($verified.ReferencedAttachments) attachment row(s), $($verified.ReferencedObjects) object(s), $($verified.VerifiedBytes) byte(s), $($finalDownloads.ManagedDocumentDownloads) API download(s). Evidence root: $resolvedTarget" -ForegroundColor Green
     if ($production) { Write-Host "Rollback retained as database '$oldDatabase'$(if($retained){" and evidence '$retained'"})." -ForegroundColor Yellow }
 }
 catch {
