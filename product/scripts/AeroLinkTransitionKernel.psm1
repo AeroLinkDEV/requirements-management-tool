@@ -615,8 +615,28 @@ function Publish-AeroLinkJsonAtomic {
     [IO.File]::WriteAllText($ioTemporary, ($Value | ConvertTo-Json -Depth 12), (New-Object Text.UTF8Encoding($false)))
     # Same replacement semantics as Move-Item -Force (which also removes the destination first), so a reader never
     # sees a half-written record and the previous record is never left behind.
-    if ([IO.File]::Exists($ioPath)) { [IO.File]::Delete($ioPath) }
-    [IO.File]::Move($ioTemporary, $ioPath)
+    #
+    # Measured on the #1055 S4U owner-package preflight: two publishers of the SAME record path - the designed
+    # shape when two twins of one launch context are qualified concurrently - can interleave delete+move, so one
+    # Move lands on the record the other just published and fails with "Cannot create a file when that file
+    # already exists", turning a valid qualification into Unqualifiable. The replacement is therefore retried,
+    # bounded: last writer wins, and a caller still either publishes completely or hears the failure.
+    $attempts = 0
+    while ($true) {
+        $attempts++
+        try {
+            if ([IO.File]::Exists($ioPath)) { [IO.File]::Delete($ioPath) }
+            [IO.File]::Move($ioTemporary, $ioPath)
+            return
+        }
+        catch {
+            if ($attempts -ge 20) {
+                try { [IO.File]::Delete($ioTemporary) } catch { }
+                throw
+            }
+            Start-Sleep -Milliseconds 25
+        }
+    }
 }
 
 function New-AeroLinkExclusiveRecord {

@@ -726,6 +726,37 @@ public static class Program {
     $t23Left = @(Stop-TwinInstanceTrees -Engines @($t23Root))
     Check ($script:t23StopRequests.Count -eq 0) 'T23 query failure: no termination may be submitted when the selection could not be read.'
     Check (@($t23Left | Where-Object { $_.state -eq 'Unknown' }).Count -eq 1) 'T23 query failure: the gap is reported as Unknown.'
+
+    # ---------------------------------------------------------------------------------------------------------
+    # T24 (Astra review 7e878834 follow-up; measured on the S4U owner-package preflight): two twins of ONE launch
+    # context are qualified CONCURRENTLY by design, so two publishers write the SAME qualification record path.
+    # The delete+rename publish must survive that interleaving; without the bounded retry one Move lands on the
+    # record the other just published and the run reports Unqualifiable for a valid context.
+    # ---------------------------------------------------------------------------------------------------------
+    $t24Dir = Join-Path $root 't24-publish'
+    New-Item -ItemType Directory -Path $t24Dir -Force | Out-Null
+    $t24Path = Join-Path $t24Dir 'record.json'
+    $t24Script = Join-Path $t24Dir 'publisher.ps1'
+    @'
+param([string]$Module, [string]$Path, [int]$Iterations)
+$ErrorActionPreference = 'Stop'
+Import-Module $Module -Force -DisableNameChecking
+for ($i = 0; $i -lt $Iterations; $i++) {
+    Publish-AeroLinkJsonAtomic -Path $Path -Value ([ordered]@{ writer = $PID; iteration = $i; at = (Get-Date).ToUniversalTime().ToString('o') })
+}
+exit 0
+'@ | Set-Content -LiteralPath $t24Script -Encoding UTF8
+    $t24Kernel = Join-Path $PSScriptRoot 'AeroLinkTransitionKernel.psm1'
+    $t24Procs = [System.Collections.Generic.List[object]]::new()
+    foreach ($t24Writer in 1..4) {
+        $t24Procs.Add((Start-Process -FilePath $powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$t24Script`" -Module `"$t24Kernel`" -Path `"$t24Path`" -Iterations 60" -WindowStyle Hidden -PassThru))
+    }
+    $t24Codes = @()
+    foreach ($t24Proc in $t24Procs) { $t24Proc.WaitForExit(); $t24Codes += $t24Proc.ExitCode; $t24Proc.Dispose() }
+    Check (@($t24Codes | Where-Object { $_ -ne 0 }).Count -eq 0) "T24: every concurrent publisher of the same record must succeed (exit codes $($t24Codes -join ','))."
+    $t24Read = Read-AeroLinkJsonRecord -Path $t24Path
+    Check ($t24Read.Class -eq 'Valid' -and [int]$t24Read.Value.writer -gt 0 -and [int]$t24Read.Value.iteration -ge 0) "T24: the published record must be complete and readable, never partial (class $($t24Read.Class))."
+    Check (@(Get-ChildItem -LiteralPath $t24Dir -Filter '*.tmp' -ErrorAction SilentlyContinue).Count -eq 0) 'T24: a publisher must not leave a temporary file behind.'
 }
 catch { $failures.Add("Suite error: $($_.Exception.Message) @ $($_.InvocationInfo.PositionMessage) :: $($_.ScriptStackTrace)") }
 finally {

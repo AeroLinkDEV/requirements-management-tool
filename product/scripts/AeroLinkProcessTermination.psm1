@@ -306,6 +306,11 @@ function Get-AeroLinkOwnedTreeIdentities {
       A candidate whose own lifetime is positively gone is neither adopted nor reported: nothing of ours is left at
       that pid. A candidate that stays live while a link of its ancestry cannot be bound is reported as an
       unattributable descendant - it may be ours (an orphan) or foreign, so it is neither terminated nor dismissed.
+      The ONE exception is an ancestor link that is POSITIVELY GONE: that is the ordinary orphan case (a wrapper
+      exits and its child outlives it), the caller's repeatedly-refreshed recorded identities already cover what it
+      saw while the chain was intact, and there is nothing of ours left at the vanished link. Reporting it would
+      turn a routine orphan into a spurious failure, so it is dropped - Unknown and Replaced ancestry, and a
+      contradiction of the recorded relationship, still withhold a clean verdict.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)]$RootIdentity, [int]$MaxDepth = 12)
@@ -412,9 +417,11 @@ function Get-AeroLinkOwnedTreeIdentities {
         }
         if (-not $chainOk) {
             # The process is live inside the snapshot's view of the root's tree, but the lifetime that carried the
-            # relationship cannot be bound. It can be neither adopted (it may be foreign) nor dismissed: a gap at an
-            # ancestor link makes this candidate unattributable, and Unknown withholds a clean verdict.
-            if ($gapPid -ne $candidateId -and -not $unresolvedEntries.Contains([string]$candidateId)) {
+            # relationship cannot be bound. A link that is POSITIVELY GONE is the ordinary orphan case (its child
+            # outlived it and the caller's recorded identities already cover what it saw while the chain was
+            # intact): nothing of ours is left at the vanished pid, so the candidate is dropped. Anything else
+            # leaves a live process that can be neither adopted (it may be foreign) nor dismissed.
+            if ($chainGap -ne 'Gone' -and $gapPid -ne $candidateId -and -not $unresolvedEntries.Contains([string]$candidateId)) {
                 $candidateIdentity = [long]0
                 if ($identityCache.ContainsKey($candidateId)) { $candidateIdentity = [long]$identityCache[$candidateId] }
                 $unresolvedEntries[[string]$candidateId] = [ordered]@{ processId = $candidateId; role = 'unattributable-descendant'; state = 'Unknown'; creationFileTime = $candidateIdentity; detail = "its ancestry cannot be bound: pid $gapPid $gapReason" }

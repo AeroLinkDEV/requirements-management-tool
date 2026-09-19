@@ -282,6 +282,9 @@ Start-Sleep -Seconds $Seconds
         @{ Name = 'child-positively-gone'; Expect = 'Match'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @()
            Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 ($f801Epoch + 10000000)))
            Native = @{ 100 = (New-F801Native $f801Epoch); 101 = [ordered]@{ state = 'Gone'; creationFileTime = 0; detail = 'no such process' } } },
+        @{ Name = 'ancestor-link-positively-gone-is-a-routine-orphan'; Expect = 'Match'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @()
+           Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 103 100 ($f801Epoch + 5000000)), (New-F801Item 104 103 ($f801Epoch + 10000000)))
+           Native = @{ 100 = (New-F801Native $f801Epoch); 103 = [ordered]@{ state = 'Gone'; creationFileTime = 0; detail = 'no such process' }; 104 = (New-F801Native ($f801Epoch + 10000000)) } },
         @{ Name = 'child-inventory-entry-without-creation-time'; Expect = 'Unknown'; Selected = $f801RootOnly; Replaced = @(); Unresolved = @(101)
            Inventory = @((New-F801Item 100 99 $f801Epoch), (New-F801Item 101 100 0))
            Native = @{ 100 = (New-F801Native $f801Epoch); 101 = (New-F801Native ($f801Epoch + 10000000)) } },
