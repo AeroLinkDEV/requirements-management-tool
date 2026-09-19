@@ -153,7 +153,10 @@ $summary = [ordered]@{ tool = 'aerolink-context-qualification'; sourceTask = ($s
     executionTimeLimit = $(if ($limit) { $limit.ToString() } else { 'none' }); runs = @(); startedAt = (Get-Date).ToUniversalTime().ToString('o') }
 $summary['probeStateRoot'] = $ProbeStateRoot
 $probes = [System.Collections.Generic.List[object]]::new()
-$instanceEngines = [System.Collections.Generic.List[int]]::new()
+# Engine identities, never bare pids: a historical numeric engine pid may belong to an unrelated process by the
+# time cleanup runs (Astra review 801751be, F801-1), so ownership must carry the creation time with the pid.
+$instanceEngines = [System.Collections.Generic.List[object]]::new()
+$twinEngineIdentityCache = @{}
 $observedIdentities = [System.Collections.Generic.List[object]]::new()
 $paths = [ordered]@{}
 $descriptors = @{}
@@ -180,13 +183,120 @@ function Set-TwinArguments([string]$Id, [int]$Hold, [int]$MutatorSeconds = 0, [i
     Register-ScheduledTask -TaskName $twin -Xml $document.OuterXml -Force -ErrorAction Stop | Out-Null
 }
 
+function New-TwinProcessIdentity($Record, [string]$Role = '', [int]$Depth = 0, [string]$Source = '') {
+    <# One process's full identity. The creation time is the ownership key; a bare pid is never enough. #>
+    if (-not $Record) { return $null }
+    $createdUtc = ''
+    # .NET StartTime is the same FILETIME value the transition kernel records (measured: CIM's own conversion is
+    # 200 ns off), so a recorded startedAt can be compared exactly instead of with a tolerance.
+    try { $createdUtc = ([Diagnostics.Process]::GetProcessById([int]$Record.ProcessId)).StartTime.ToUniversalTime().ToString('o') } catch { $createdUtc = '' }
+    return [ordered]@{ processId = [int]$Record.ProcessId; created = [string]$Record.CreationDate; createdUtc = $createdUtc
+        name = [string]$Record.Name; image = [string]$Record.ExecutablePath; role = $Role; depth = $Depth; source = $Source }
+}
+
+function Test-TwinProcessIdentity($Identity) {
+    <# Match | Gone | Reused | Unknown, verified NOW against the recorded full-precision creation time. #>
+    $processId = [int]$Identity.processId
+    if ($processId -le 0) { return [ordered]@{ state = 'Unknown'; detail = 'no process id was recorded'; live = $null } }
+    $created = [string]$Identity.created
+    $createdUtc = [string]$Identity.createdUtc
+    if (-not $created -and -not $createdUtc) { return [ordered]@{ state = 'Unknown'; detail = "no creation time was recorded for pid $processId"; live = $null } }
+    try { $record = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction Stop }
+    catch { return [ordered]@{ state = 'Unknown'; detail = $_.Exception.Message; live = $null } }
+    if (-not $record) { return [ordered]@{ state = 'Gone'; detail = ''; live = $null } }
+    $live = New-TwinProcessIdentity $record
+    $matches = $false
+    if ($created) { $matches = ($live.created -eq $created) }
+    elseif ($createdUtc) {
+        if (-not $live.createdUtc) { return [ordered]@{ state = 'Unknown'; live = $live; detail = "the creation time of pid $processId could not be read for comparison" } }
+        $matches = ($live.createdUtc -eq $createdUtc)
+    }
+    if (-not $matches) { return [ordered]@{ state = 'Reused'; live = $live; detail = "pid $processId now belongs to a different process" } }
+    return [ordered]@{ state = 'Match'; live = $live; detail = '' }
+}
+
+function Invoke-TwinTerminateProcess([int]$ProcessId) {
+    <#
+      Terminate through a kernel handle opened for the process object the caller just verified, so the termination
+      cannot follow a pid that was reused after the check. Stop-Process is only the fallback when the handle API
+      is unavailable; the caller always re-verifies the outcome.
+    #>
+    if (-not ('AeroLink.TransitionV1.ProcessTerminator' -as [type])) {
+        try {
+            Add-Type -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace AeroLink.TransitionV1 {
+    public static class ProcessTerminator {
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern bool TerminateProcess(IntPtr handle, uint code);
+        [DllImport("kernel32.dll", SetLastError = true)] private static extern bool CloseHandle(IntPtr handle);
+        public static int Terminate(int pid) {
+            IntPtr handle = OpenProcess(0x0001, false, pid);
+            if (handle == IntPtr.Zero) { return Marshal.GetLastWin32Error(); }
+            bool ok = TerminateProcess(handle, 1);
+            int error = ok ? 0 : Marshal.GetLastWin32Error();
+            CloseHandle(handle);
+            return error;
+        }
+    }
+}
+'@
+        }
+        catch { }
+    }
+    if ('AeroLink.TransitionV1.ProcessTerminator' -as [type]) {
+        $errorCode = [AeroLink.TransitionV1.ProcessTerminator]::Terminate($ProcessId)
+        if ($errorCode -eq 0) { return [ordered]@{ ok = $true; error = '' } }
+        return [ordered]@{ ok = $false; error = "TerminateProcess failed with Win32 error $errorCode" }
+    }
+    try { Stop-Process -Id $ProcessId -Force -ErrorAction Stop; return [ordered]@{ ok = $true; error = '' } }
+    catch { return [ordered]@{ ok = $false; error = $_.Exception.Message } }
+}
+
+function Stop-VerifiedTwinIdentity($Identity, [int]$WaitSeconds = 15) {
+    <# Verify, terminate, prove. A reused pid is preserved and reported; an unreadable identity is never stopped. #>
+    $processId = [int]$Identity.processId
+    $verified = Test-TwinProcessIdentity $Identity
+    if ($verified.state -eq 'Gone') { return [ordered]@{ processId = $processId; state = 'AlreadyGone'; detail = '' } }
+    if ($verified.state -eq 'Reused') { return [ordered]@{ processId = $processId; state = 'PidReused'; detail = [string]$verified.detail } }
+    if ($verified.state -eq 'Unknown') { return [ordered]@{ processId = $processId; state = 'Unknown'; detail = [string]$verified.detail } }
+    # Re-verify in the same breath as the destructive call: if the pid was reused between selection and now, the
+    # process this record describes is gone and the current holder is a stranger - it must not be terminated.
+    $confirm = Test-TwinProcessIdentity $Identity
+    if ($confirm.state -eq 'Gone') { return [ordered]@{ processId = $processId; state = 'AlreadyGone'; detail = '' } }
+    if ($confirm.state -eq 'Reused') { return [ordered]@{ processId = $processId; state = 'PidReused'; detail = [string]$confirm.detail } }
+    if ($confirm.state -eq 'Unknown') { return [ordered]@{ processId = $processId; state = 'Unknown'; detail = [string]$confirm.detail } }
+    $termination = Invoke-TwinTerminateProcess -ProcessId $processId
+    $deadline = (Get-Date).AddSeconds($WaitSeconds)
+    do {
+        Start-Sleep -Milliseconds 200
+        $after = Test-TwinProcessIdentity $Identity
+        if ($after.state -eq 'Gone' -or $after.state -eq 'Reused') { return [ordered]@{ processId = $processId; state = 'Stopped'; detail = [string]$termination.error } }
+    } while ((Get-Date) -lt $deadline)
+    return [ordered]@{ processId = $processId; state = 'Unknown'; detail = (([string]$termination.error) + ' ' + [string]$after.detail).Trim() }
+}
+
 function Get-TwinInstance {
-    <# The running instance of THIS twin through the Task Scheduler API, or $null when none is running. #>
+    <#
+      The running instance of THIS twin through the Task Scheduler API, or $null when none is running. The engine's
+      identity is read once per engine pid and cached for THIS run only, so later cleanup can verify ownership
+      instead of trusting a historical numeric pid.
+    #>
     $service = New-Object -ComObject 'Schedule.Service'
     $service.Connect()
     foreach ($running in @($service.GetRunningTasks(1))) {
         if ($running -and ([string]$running.Path).TrimEnd('\') -ieq $script:twinPath.TrimEnd('\')) {
-            return [pscustomobject]@{ InstanceGuid = [string]$running.InstanceGuid; EnginePid = [int]$running.EnginePID }
+            $enginePid = [int]$running.EnginePID
+            $identity = $null
+            if ($enginePid -gt 0) {
+                if ($script:twinEngineIdentityCache.ContainsKey($enginePid)) { $identity = $script:twinEngineIdentityCache[$enginePid] }
+                else {
+                    try { $record = Get-CimInstance Win32_Process -Filter "ProcessId=$enginePid" -ErrorAction Stop } catch { $record = $null }
+                    if ($record) { $identity = New-TwinProcessIdentity $record -Role 'engine' -Source 'task-engine-at-first-observation'; $script:twinEngineIdentityCache[$enginePid] = $identity }
+                }
+            }
+            return [pscustomobject]@{ InstanceGuid = [string]$running.InstanceGuid; EnginePid = $enginePid; EngineIdentity = $identity }
         }
     }
     return $null
@@ -227,64 +337,75 @@ function Track-Probe($Record) {
     return $identity
 }
 function Stop-TrackedProbes {
+    <#
+      Stop every probe this tool OBSERVED, by the kernel's exact identity (startedAt + image). The identity is
+      verified immediately before the termination and the kill is bound to the verified process object. A probe
+      whose identity cannot be read is reported; the caller's final accounting fails closed on it.
+    #>
+    $unresolved = [System.Collections.Generic.List[object]]::new()
     foreach ($identity in @($script:probes)) {
-        if ($K::Classify($identity.ProcessId, $identity.StartedAtUtc, $identity.ImagePath) -eq 'RunningMatch') { Stop-Process -Id $identity.ProcessId -Force -ErrorAction SilentlyContinue }
+        $state = $K::Classify($identity.ProcessId, $identity.StartedAtUtc, $identity.ImagePath)
+        if ($state -eq 'Gone') { continue }
+        if ($state -eq 'RunningDifferent' -or $state -like 'Unknown:no-recorded-identity*') {
+            $unresolved.Add([ordered]@{ processId = [int]$identity.ProcessId; state = 'PidReused'; detail = $state })
+            continue
+        }
+        if ($state -ne 'RunningMatch') { $unresolved.Add([ordered]@{ processId = [int]$identity.ProcessId; state = 'Unknown'; detail = $state }); continue }
+        $termination = Invoke-TwinTerminateProcess -ProcessId ([int]$identity.ProcessId)
+        $deadline = (Get-Date).AddSeconds(15)
+        do {
+            Start-Sleep -Milliseconds 200
+            $after = $K::Classify($identity.ProcessId, $identity.StartedAtUtc, $identity.ImagePath)
+        } while ($after -eq 'RunningMatch' -and (Get-Date) -lt $deadline)
+        if ($after -ne 'Gone' -and $after -ne 'RunningDifferent') {
+            $unresolved.Add([ordered]@{ processId = [int]$identity.ProcessId; state = 'Unknown'; detail = (([string]$termination.error) + ' ' + [string]$after).Trim() })
+        }
     }
+    return $unresolved.ToArray()
 }
 
 function Stop-TwinInstanceTrees {
     <#
-      The twin's own action processes are this tool's disposable processes: a probe entry that has published its
-      record then sleeps inside the task action, and a terminated ACTION can leave those processes running even
-      after the task is unregistered (measured in the first full qualification, where two run entries were still
-      alive minutes later and held the installation lease). Stop exactly the trees whose recorded engine pid
-      this tool observed, bounded, and report anything that remains. Nothing is selected by command line.
+      Stop exactly the trees this tool OWNS. Ownership is NEVER reconstructed from a historical numeric pid:
+      every recorded engine is re-verified by full identity (pid + creation time) against the live inventory, and
+      only then are its live descendants selected (every step of a candidate's parent chain must be a live
+      process, so an orphan or a reused pid cannot be adopted). Termination is bound to the verified process
+      object and re-verified while it is carried out.
       -Engines narrows the stop to one run's tree, which is what the driver does between runs: a terminated
       action can leave its outer alive (that survival is the placement property), and that outer holds the
       installation lease until its chain ends - while the NEXT run's probe must acquire it.
+      Returns the unresolved entries: Running (still alive after the bounded stop) and Unknown (unreadable).
+      A PidReused entry is a preserved foreign process, reported for the record and never an error.
     #>
-    param([int[]]$Engines = @())
-    # ::new(), not New-Object: a New-Object generic list cannot be passed to @() on either host
-    # ("Argument types do not match"), which is what aborted the previous qualification's cleanup.
+    param($Engines = @())
     $remaining = [System.Collections.Generic.List[object]]::new()
-    $targets = if ($Engines.Count) { @($Engines) } else { @($script:instanceEngines) }
+    $targets = if (@($Engines).Count) { @($Engines) } else { @($script:instanceEngines) }
     if (-not $targets.Count) { return @($remaining) }
-    $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
-    $byId = @{}
-    foreach ($p in $all) { $byId[[int]$p.ProcessId] = $p }
-    $owned = @()
+    $selected = [System.Collections.Generic.List[object]]::new()
     foreach ($engine in @($targets)) {
-        foreach ($p in $all) {
-            $cursor = $p; $depth = 0; $walked = @()
-            while ($cursor -and $depth -lt 12) {
-                if ([int]$cursor.ProcessId -eq [int]$engine) { $owned += $p; break }
-                $walked += [int]$cursor.ProcessId
-                $parentId = 0
-                try { $parentId = [int]$cursor.ParentProcessId } catch { $parentId = 0 }
-                if ($parentId -gt 0 -and $byId.ContainsKey($parentId) -and ($walked -notcontains $parentId)) { $cursor = $byId[$parentId] } else { $cursor = $null }
-                $depth++
-            }
+        # Accept the legacy bare pid only to report it as unverifiable; it never authorizes a termination.
+        $identity = if ($engine -is [int] -or $engine -is [long]) { [ordered]@{ processId = [int]$engine; created = ''; createdUtc = '' } } else { $engine }
+        $verified = Test-TwinProcessIdentity $identity
+        if ($verified.state -eq 'Gone') { continue }
+        if ($verified.state -ne 'Match') {
+            # A proven reused pid (Reused) is a preserved FOREIGN process, reported as PidReused so the callers do
+            # not treat it as a survivor; Unknown stays a fail-closed error.
+            $state = if ([string]$verified.state -eq 'Reused') { 'PidReused' } else { [string]$verified.state }
+            $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = $(if ($verified.live) { [string]$verified.live.name } else { 'unverified-identity' }); state = $state; detail = [string]$verified.detail })
+            continue
+        }
+        try { $candidates = @(Get-TwinTreeIdentities -EngineIdentity $identity) }
+        catch { $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = 'query-failed'; state = 'Unknown'; detail = $_.Exception.Message }); continue }
+        foreach ($candidate in $candidates) {
+            if (-not @($selected | Where-Object { $_.processId -eq $candidate.processId -and $_.created -eq $candidate.created }).Count) { $selected.Add($candidate) }
         }
     }
-    foreach ($p in @($owned | Sort-Object -Property @{ Expression = { [int]$_.ProcessId } } -Descending)) {
-        try { Stop-Process -Id ([int]$p.ProcessId) -Force -ErrorAction Stop } catch { }
-    }
-    $deadline = (Get-Date).AddSeconds(20)
-    while ((Get-Date) -lt $deadline) {
-        $alive = @($owned | Where-Object { Get-Process -Id ([int]$_.ProcessId) -ErrorAction SilentlyContinue })
-        if (-not $alive.Count) { break }
-        Start-Sleep -Milliseconds 250
-    }
-    foreach ($p in $owned) {
-        # Re-verify the IDENTITY, not just the pid: between the stop and this check a finished twin process's pid
-        # can be reused by an unrelated process, and reporting that stranger as "survived" withholds a good
-        # qualification (measured: pid reuse by svchost.exe produced CleanupFailed for a clean run).
-        $live = $null
-        try { $live = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$p.ProcessId)" -ErrorAction Stop }
-        catch { $remaining.Add([ordered]@{ processId = [int]$p.ProcessId; name = 'query-failed'; state = 'Unknown'; detail = $_.Exception.Message }); continue }
-        if (-not $live) { continue }
-        if ([string]$live.CreationDate -ne [string]$p.CreationDate) { continue }
-        $remaining.Add([ordered]@{ processId = [int]$p.ProcessId; name = [string]$live.Name; state = 'Running' })
+    # Deepest first: a child is settled before the wrapper that started it.
+    foreach ($candidate in @($selected | Sort-Object -Property @{ Expression = { [int]$_.depth } }, @{ Expression = { [int]$_.processId } } -Descending)) {
+        $outcome = Stop-VerifiedTwinIdentity $candidate
+        if ($outcome.state -eq 'Unknown') { $remaining.Add([ordered]@{ processId = [int]$outcome.processId; name = [string]$candidate.name; state = 'Unknown'; detail = [string]$outcome.detail }) }
+        elseif ($outcome.state -eq 'Running') { $remaining.Add([ordered]@{ processId = [int]$outcome.processId; name = [string]$candidate.name; state = 'Running'; detail = '' }) }
+        elseif ($outcome.state -eq 'PidReused') { $remaining.Add([ordered]@{ processId = [int]$outcome.processId; name = [string]$candidate.name; state = 'PidReused'; detail = [string]$outcome.detail }) }
     }
     return @($remaining)
 }
@@ -307,14 +428,19 @@ function Test-LeaseFree {
 
 function Get-TwinTreeIdentities {
     <#
-      Snapshot the descendants of one twin instance while its tree is still intact. A terminated action can
-      orphan the processes it started (the cmd wrapper exits, a surviving probe entry keeps running), so the
-      parent chain cannot be relied on later - the identity (pid + creation time) is what this tool owns, and
-      it is recorded here, at the moment it is observed, exactly like the probe identities.
+      Snapshot the LIVE descendants of a VERIFIED engine identity (the engine included). A historical numeric pid
+      never authorizes selection: the root's identity must match the live inventory first, and every step of a
+      candidate's parent chain must be a live process. A terminated action can orphan the processes it started
+      (the cmd wrapper exits, a surviving probe entry keeps running), so the identity (pid + creation time) is
+      what this tool owns, and it is recorded here at the moment it is observed.
     #>
-    param([int]$EnginePid, [int]$MaxDepth = 12)
+    param($EngineIdentity, [int]$MaxDepth = 12)
     $found = [System.Collections.Generic.List[object]]::new()
-    if ($EnginePid -le 0) { return $found.ToArray() }
+    if (-not $EngineIdentity) { return $found.ToArray() }
+    $verified = Test-TwinProcessIdentity $EngineIdentity
+    if ($verified.state -ne 'Match') { return $found.ToArray() }
+    $enginePid = [int]$EngineIdentity.processId
+    if ($enginePid -le 0) { return $found.ToArray() }
     # A query failure must not become "nothing to stop": the caller records the thrown error as a cleanup
     # failure, and a cleanup failure withholds the record.
     $all = @(Get-CimInstance Win32_Process -ErrorAction Stop)
@@ -323,8 +449,8 @@ function Get-TwinTreeIdentities {
     foreach ($p in $all) {
         $cursor = $p; $depth = 0; $walked = @()
         while ($cursor -and $depth -lt $MaxDepth) {
-            if ([int]$cursor.ProcessId -eq $EnginePid) {
-                $found.Add([ordered]@{ processId = [int]$p.ProcessId; name = [string]$p.Name; created = [string]$p.CreationDate })
+            if ([int]$cursor.ProcessId -eq $enginePid) {
+                $found.Add((New-TwinProcessIdentity $p -Role 'entry' -Depth $depth -Source 'live-parent-chain'))
                 break
             }
             $walked += [int]$cursor.ProcessId
@@ -347,8 +473,8 @@ function Add-TwinTreeIdentities {
       Measured on the 20260919T011739Z control-flow P run: three of four twin action processes outlived cleanup
       because they were spawned after the one-time snapshot.
     #>
-    param([int]$EnginePid)
-    foreach ($identity in @(Get-TwinTreeIdentities -EnginePid $EnginePid)) {
+    param($EngineIdentity)
+    foreach ($identity in @(Get-TwinTreeIdentities -EngineIdentity $EngineIdentity)) {
         if (-not @($script:observedIdentities | Where-Object { $_.processId -eq $identity.processId -and $_.created -eq $identity.created }).Count) {
             $script:observedIdentities.Add($identity)
         }
@@ -356,36 +482,20 @@ function Add-TwinTreeIdentities {
 }
 
 function Stop-RecordedIdentities {
-    <# Stop exactly these recorded identities, bounded; a pid whose creation time differs is not ours and is
-       reported, not stopped. Returns what remains. #>
+    <#
+      Stop exactly these recorded identities: full identity verified immediately before the termination, bound to
+      the verified process object. A reused pid is a preserved foreign process (reported, never stopped); an
+      unreadable identity is returned as Unknown so the caller fails closed. Returns what remains.
+    #>
     param($Identities)
     $remaining = [System.Collections.Generic.List[object]]::new()
-    $targets = @($Identities)
-    if (-not $targets.Count) { return $remaining.ToArray() }
-    $stopped = 0
-    foreach ($identity in $targets) {
-        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$identity.processId)" -ErrorAction SilentlyContinue
-        if (-not $proc) { continue }
-        if ([string]$proc.CreationDate -ne [string]$identity.created) { continue }
-        try { Stop-Process -Id ([int]$identity.processId) -Force -ErrorAction Stop; $stopped++ } catch { }
+    foreach ($identity in @($Identities)) {
+        if (-not $identity) { continue }
+        $outcome = Stop-VerifiedTwinIdentity $identity
+        if ($outcome.state -eq 'Unknown') { $remaining.Add([ordered]@{ processId = [int]$outcome.processId; name = 'unresolved-identity'; state = 'Unknown'; detail = [string]$outcome.detail }) }
+        elseif ($outcome.state -eq 'PidReused') { $remaining.Add([ordered]@{ processId = [int]$outcome.processId; name = 'foreign-process'; state = 'PidReused'; detail = [string]$outcome.detail }) }
+        elseif ($outcome.state -eq 'Stopped') { Write-Verbose "stopped recorded twin process $($outcome.processId) by verified identity" }
     }
-    $deadline = (Get-Date).AddSeconds(20)
-    while ((Get-Date) -lt $deadline) {
-        $alive = @($targets | Where-Object { Get-Process -Id ([int]$_.processId) -ErrorAction SilentlyContinue })
-        if (-not $alive.Count) { break }
-        Start-Sleep -Milliseconds 250
-    }
-    foreach ($identity in $targets) {
-        # Same identity rule as Stop-TwinInstanceTrees: a reused pid is a stranger, and an unreadable state is
-        # Unknown rather than a claimed survivor (and vice versa - it is never a claimed stop).
-        $live = $null
-        try { $live = Get-CimInstance Win32_Process -Filter "ProcessId=$([int]$identity.processId)" -ErrorAction Stop }
-        catch { $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = 'query-failed'; state = 'Unknown'; detail = $_.Exception.Message }); continue }
-        if (-not $live) { continue }
-        if ([string]$live.CreationDate -ne [string]$identity.created) { continue }
-        $remaining.Add([ordered]@{ processId = [int]$identity.processId; name = [string]$live.Name; state = 'Running' })
-    }
-    if ($stopped) { Write-Verbose "stopped $stopped recorded twin process(es)" }
     return $remaining.ToArray()
 }
 
@@ -397,7 +507,10 @@ function Complete-TwinRun {
     #>
     param([Parameter(Mandatory)][string]$Name, $Run)
     if (-not $Run -or -not $Run.Instance) { return }
-    foreach ($left in @(Stop-TwinInstanceTrees -Engines @([int]$Run.Instance.EnginePid))) {
+    # The engine is passed as its full identity, not its pid: a pid that has been reused since the instance was
+    # observed must never authorize a termination (Astra review 801751be, F801-1).
+    foreach ($left in @(Stop-TwinInstanceTrees -Engines @($Run.Instance.EngineIdentity))) {
+        if ([string]$left.state -eq 'PidReused') { continue }
         $cleanupErrors.Add("${Name}: a twin action process (pid $($left.processId) $($left.name)) survived its ending")
     }
 }
@@ -447,6 +560,8 @@ function Invoke-TwinRun {
         [int]$LimitSeconds = 0, [int]$RecordTimeoutSeconds = 600, [int]$MutatorSeconds = 0, [int]$ChainDeadlineSeconds = 300)
     $id = "$twin-$Name"
     Set-TwinArguments $id $HoldSeconds $MutatorSeconds $ChainDeadlineSeconds
+    # A fresh engine identity per run: a pid cached from an earlier run must never stand in for this run's engine.
+    $script:twinEngineIdentityCache = @{}
     # A task instance whose ACTION was terminated can leave the TASK itself Running for as long as a surviving
     # child holds its job, and MultipleInstancesPolicy = IgnoreNew then makes the next Start-ScheduledTask a
     # no-op: measured in the first full qualification, where run3's instance appeared five minutes after its
@@ -467,11 +582,16 @@ function Invoke-TwinRun {
     $instance = $null
     $appear = (Get-Date).AddSeconds(60)
     while (-not $instance -and (Get-Date) -lt $appear) { $instance = Get-TwinInstance; if (-not $instance) { Start-Sleep -Milliseconds 500 } }
-    if ($instance) { $script:instanceEngines.Add([int]$instance.EnginePid) }
+    if ($instance) {
+        # Record the engine's FULL identity. If it could not be read, record the pid with no creation time: the
+        # cleanup paths then report Unknown and withhold the record instead of trusting a bare pid (fail closed).
+        if ($instance.EngineIdentity) { $script:instanceEngines.Add($instance.EngineIdentity) }
+        else { $script:instanceEngines.Add([ordered]@{ processId = [int]$instance.EnginePid; created = ''; createdUtc = ''; name = ''; image = ''; role = 'engine'; depth = 0; source = 'engine-identity-unreadable' }) }
+    }
     # Record the instance's own tree by IDENTITY now, while the chain is intact: a terminated action can orphan
     # these processes, and the final cleanup must be able to stop them without a parent chain.
     if ($instance) {
-        Add-TwinTreeIdentities -EnginePid ([int]$instance.EnginePid)
+        Add-TwinTreeIdentities -EngineIdentity $instance.EngineIdentity
     }
     # The synchronization point for an interrupt-during-mutation run: wait until the attempt has PUBLISHED its
     # live mutator identity, so the ending this run causes cannot land after the transition already finished.
@@ -504,16 +624,6 @@ function Invoke-TwinRun {
     $snapshotEverySeconds = 3
     while ((Get-Date) -lt $deadline) {
         if (-not $record) { $record = Wait-RunRecord $id 2; if ($record) { $null = Track-Probe $record } }
-        # The stop must land while the attempt is MUTATING. The active-mutation record (published by the entry
-        # itself, with the preserved probe's identity) is the synchronization point; a completed run record is
-        # only the fallback for a definition that cannot hold a mutator.
-        if ($Ending -eq 'DriverStop' -and -not $stopIssued -and ($active -or $record)) {
-            # Snapshot the still-intact tree immediately BEFORE the stop: once the action is killed its entry is
-            # orphaned and the parent chain can no longer prove ownership, so this is the last deterministic moment
-            # at which the surviving entry process can be recorded by identity.
-            Add-TwinTreeIdentities -EnginePid ([int]$instance.EnginePid)
-            try { Stop-ScheduledTask -TaskName $twin -ErrorAction Stop; $stopIssued = $true } catch { }
-        }
         $current = Get-TwinInstance
         if ($current -and -not $instance) { $instance = $current }
         if ($instance -and -not $current) {
@@ -526,10 +636,24 @@ function Invoke-TwinRun {
             }
             break
         }
+        # The stop must land while the attempt is MUTATING. The active-mutation record (published by the entry
+        # itself, with the preserved probe's identity) is the synchronization point; a completed run record is
+        # only the fallback for a definition that cannot hold a mutator.
+        if ($current -and $Ending -eq 'DriverStop' -and -not $stopIssued -and ($active -or $record)) {
+            # Snapshot the still-intact tree immediately BEFORE the stop: once the action is killed its entry is
+            # orphaned and the parent chain can no longer prove ownership, so this is the last deterministic moment
+            # at which the surviving entry process can be recorded by identity.
+            $stopIdentity = if ($current.EngineIdentity) { $current.EngineIdentity } else { $instance.EngineIdentity }
+            if ($stopIdentity) { Add-TwinTreeIdentities -EngineIdentity $stopIdentity }
+            else { $cleanupErrors.Add("${Name}: the engine identity could not be read, so the pre-stop tree snapshot is unavailable and cleanup will fail closed") }
+            try { Stop-ScheduledTask -TaskName $twin -ErrorAction Stop; $stopIssued = $true } catch { }
+        }
         if ($current -and ((Get-Date) - $lastSnapshotAt).TotalSeconds -ge $snapshotEverySeconds) {
             # The wrapper's real entry may spawn after the first snapshot. Re-snapshot while the parent chain is
-            # intact so the entry is owned before a terminated action can orphan it.
-            Add-TwinTreeIdentities -EnginePid ([int]$current.EnginePid)
+            # intact so the entry is owned before a terminated action can orphan it. Only a VERIFIED engine
+            # identity can authorize the snapshot; an unreadable one is left for the fail-closed accounting.
+            $snapshotIdentity = if ($current.EngineIdentity) { $current.EngineIdentity } else { $instance.EngineIdentity }
+            if ($snapshotIdentity) { Add-TwinTreeIdentities -EngineIdentity $snapshotIdentity }
             $lastSnapshotAt = Get-Date
         }
         if ($mutatorIdentity) {
@@ -710,10 +834,21 @@ finally {
     }
     # The twin's own action trees are this tool's disposable processes; a probe entry that published its record
     # sleeps on as a live action process. Stop exactly those trees and fail the qualification if any survives.
-    try { foreach ($left in @(Stop-TwinInstanceTrees)) { $cleanupErrors.Add("a twin action process (pid $($left.processId) $($left.name)) survived the twin's endings") } }
+    try {
+        foreach ($left in @(Stop-TwinInstanceTrees)) {
+            # PidReused is a preserved foreign process, not a survivor of ours.
+            if ([string]$left.state -eq 'PidReused') { continue }
+            $cleanupErrors.Add("a twin action process (pid $($left.processId) $($left.name)) survived the twin's endings ($($left.state))")
+        }
+    }
     catch { $cleanupErrors.Add("the twin tree cleanup threw: $($_.Exception.Message)") }
     # The recorded identities are what this tool owns even after the parent chain is gone.
-    try { foreach ($left in @(Stop-RecordedIdentities -Identities $script:observedIdentities)) { $cleanupErrors.Add("a recorded twin process (pid $($left.processId) $($left.name)) survived cleanup") } }
+    try {
+        foreach ($left in @(Stop-RecordedIdentities -Identities $script:observedIdentities)) {
+            if ([string]$left.state -eq 'PidReused') { continue }
+            $cleanupErrors.Add("a recorded twin process (pid $($left.processId) $($left.name)) survived cleanup ($($left.state))")
+        }
+    }
     catch { $cleanupErrors.Add("the recorded-identity cleanup threw: $($_.Exception.Message)") }
     Start-Sleep -Seconds 1
     try {
