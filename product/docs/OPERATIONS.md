@@ -763,6 +763,34 @@ not stored by browser HTTP caches. No source text, diffs or discussions are read
 operation is exposed. Runtime read credentials remain separate from any demo-provisioning write credential.
 These observations do not record relationships, select build source or accept implementation evidence.
 
+### Resumable synthetic source and relationship setup
+
+`product/scripts/Invoke-AeroLinkResumableDemo.ps1` prepares a synthetic demo from an exact manifest. It performs
+live read-only repository, source, relationship, and bounded tree preflight by default; add `-Apply` only after
+reviewing the verified configuration, expected source CAS, and typed relationship identities. `-ResumePending`
+reconciles an interrupted Apply only when the exact source transition or complete relationship identity is observed.
+It writes only source confirmation and Code-relationship commands. It does not configure a repository, write GitLab,
+create evidence or NoCode records, invoke legacy capture, or change release/build state.
+
+The manifest pins project and release IDs, verified configuration ID/version, normalized GitLab origin and numeric
+project/path, desired full source SHA and expected selection version/event, plus explicit merge-request or exact-file
+relationships. File entries include the source snapshot, commit, safe path, parent path, cursor, page size, and
+optional line range or merge-request context. File writes require an exact source-bound tree observation proving one
+regular blob. A source or relationship POST is journaled atomically as `Pending` before send and becomes `Applied`
+only after exact readback. Existing exact records are `ObservedExisting`; withdrawn, conflicting, changed, frozen,
+released, cross-project, incomplete-page, provider-error, and ambiguous states stop for operator review. No blind
+repost or automatic re-add is attempted, including after source history ABA.
+
+Use the masked credential prompt. Remote API connections require HTTPS; plain HTTP is allowed only on loopback.
+Credentials remain process-local and never enter the manifest, journal, output, or
+logs. Keep the journal outside source control and use a disposable project/release for Apply.
+
+The optional synthetic-demo display settings are `ProjectGitLab:SyntheticDemoProjectId` (the local AeroLink project
+GUID) and `ProjectGitLab:SyntheticDemoRemoteProjectId` (the verified numeric GitLab project ID). The banner classifies
+the project only when both values are valid and the live verified configuration matches the approved origin, namespace
+path, and remote ID. They are display-only metadata: normal projects omit them, no credentials or permissions are
+changed, and the settings do not authorize source or relationship writes, add migrations, or reseed startup data.
+
 ## Recoverable project setup, source uploads, and recovery
 
 Use the Create New Project flow for all three supported starting paths: an empty Fresh project, an exact authorized
