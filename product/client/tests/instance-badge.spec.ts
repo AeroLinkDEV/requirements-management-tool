@@ -132,6 +132,52 @@ test('custom declared labels render verbatim under other supported classificatio
   }
 })
 
+test('HOME CANONICAL in a non-production mode keeps the plain label but never gains a currency claim', async ({ page }) => {
+  await page.route('**/health/identity', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      mode: 'UNKNOWN',
+      mainCurrency: null,
+      instance: { label: 'HOME CANONICAL', classification: 'HomeCanonical', snapshot: null },
+    }),
+  }))
+  await login(page, 'admin', { openProject: false })
+  const badge = page.getByTestId('instance-badge')
+  await expect(badge.getByTestId('instance-label')).toHaveText('HOME')
+  await expect(badge.getByTestId('main-currency')).toHaveCount(0)
+  await badge.locator('summary').click()
+  const details = badge.getByTestId('instance-details')
+  await expect(details).toContainText('HOME CANONICAL (HomeCanonical)')
+  await expect(details).not.toContainText('Main currency')
+})
+
+test('fields the server does not supply stay absent from the disclosure', async ({ page }) => {
+  // The non-loopback shape in RuntimeIdentity.cs omits source and database diagnostics; the badge must
+  // present exactly the supplied facts and nothing inferred.
+  await page.route('**/health/identity', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      mode: 'HOME-PRODUCTION',
+      mainCurrency: { state: 'Unverified', checkedAtUtc: null, remoteSha: null },
+      instance: { label: 'HOME CANONICAL', classification: 'HomeCanonical', snapshot: null },
+      database: { name: null },
+    }),
+  }))
+  await login(page, 'admin', { openProject: false })
+  const badge = page.getByTestId('instance-badge')
+  await expect(badge.getByTestId('main-currency')).toContainText('Main unverified')
+  await badge.locator('summary').click()
+  const details = badge.getByTestId('instance-details')
+  await expect(details).toContainText('HOME CANONICAL (HomeCanonical)')
+  await expect(details).toContainText('Main unverified')
+  await expect(details).not.toContainText('Database')
+  await expect(details).not.toContainText('Source')
+  await expect(details).not.toContainText('Last check')
+  await expect(details).not.toContainText('remote main')
+})
+
 test.describe('touch access to the installation disclosure', () => {
   test.use({ hasTouch: true })
 

@@ -148,7 +148,11 @@ test('#1048 after: the HOME badge stays inside the portal header at desktop and 
 })
 
 test('#1048 H04 after: the installation disclosure opens from the keyboard with the full supplied facts', async ({ page }) => {
-  await installIdentity(page, homeIdentity())
+  let identityReads = 0
+  await page.route('**/health/identity', route => {
+    identityReads++
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(homeIdentity()) })
+  })
   await login(page, 'admin', { openProject: false })
   const badge = page.getByTestId('instance-badge')
   await expect(badge).toBeVisible()
@@ -164,6 +168,16 @@ test('#1048 H04 after: the installation disclosure opens from the keyboard with 
   await expect(panel).toContainText('aerolink')
   await page.keyboard.press('Enter')
   await expect(panel).toBeHidden()
+  // Opening and closing the disclosure is presentation only: it must not add a single request. The
+  // baseline count is taken after the initial reads settle (dev StrictMode double-mounts the effect);
+  // only a delta across open/close would be a defect.
+  const readsBeforeToggle = identityReads
+  await summary.focus()
+  await page.keyboard.press('Enter')
+  await expect(panel).toBeVisible()
+  await page.keyboard.press('Enter')
+  await expect(panel).toBeHidden()
+  expect(identityReads, 'the disclosure must not trigger any additional identity read').toBe(readsBeforeToggle)
 })
 
 test('#1054 after: project setup releases the body floor and stays contained across intermediate widths', async ({ page }, testInfo) => {
@@ -270,6 +284,7 @@ test('#1048 H06 after: the header stays contained at the layout a 200%-zoomed de
 test('#1054 P05 after: the workspace keeps its floor, the portal releases it, and navigation restores each state', async ({ page }, testInfo) => {
   test.skip(!process.env.AEROLINK_SHOWCASE_SEED, 'requires the seeded disposable workspace lane')
   await login(page, 'admin')
+  const workspaceUrl = page.url()
   await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
 
   await settleAt(page, 900, 800)
@@ -285,11 +300,54 @@ test('#1054 P05 after: the workspace keeps its floor, the portal releases it, an
   expect(portal.document.bodyMinWidth, '#1054 P05: returning to the portal releases the floor again').toBe('0px')
   assertDocumentContained(900, portal)
 
-  await page.goBack()
+  // H02/P02: the Builds landing shares the consolidated header — measure it directly.
+  await page.locator('[data-project-card]').first().click()
+  await expect(page.getByRole('heading', { name: 'Software Builds' })).toBeVisible()
+  await settleAt(page, 900, 800)
+  const builds = await measureGeometry(page)
+  await record(page, testInfo, 'builds-900', builds)
+  expect(builds.document.bodyMinWidth, '#1054: the Builds landing already opts out of the body floor').toBe('0px')
+  assertHeaderContainsBadge(900, builds)
+  assertDocumentContained(900, builds)
+
+  // P04/H05: the remaining PortalHeader consumers get a header smoke at 900px, reached the way users
+  // reach them: buttons on the Builds landing and the Project configuration sections. These are
+  // administration surfaces: the header is the scope — unrelated content width is reported, not failed.
+  const smokeConsumer = async (label: string) => {
+    await expect(page.locator('.projectsTopBar')).toBeVisible()
+    await settleAt(page, 900, 800)
+    const g = await measureGeometry(page)
+    await record(page, testInfo, `consumer-${label.toLowerCase().replace(/\s+/g, '-')}-900`, g)
+    const { topBar, badge, account, signOut } = g.rects
+    expect(topBar && badge, `${label}: shared header renders`).toBeTruthy()
+    expect(badge!.bottom, `${label}: badge leaves the header`).toBeLessThanOrEqual(topBar!.bottom + 1)
+    expect(signOut!.right, `${label}: Sign out leaves the header content`).toBeLessThanOrEqual(topBarInnerSafe(g) + 1)
+    expect(g.accountTextVisible, `${label}: account identity stays visible`).toBe(true)
+    expect(visuallyCollide(badge, account), `${label}: badge collides with the account group`).toBe(false)
+  }
+  const backToBuilds = () => page.getByRole('button', { name: /Software Builds/i }).first().click()
+
+  for (const button of ['Personnel', 'Imported baselines'] as const) {
+    await page.getByRole('button', { name: button }).click()
+    await smokeConsumer(button)
+    await backToBuilds()
+    await expect(page.getByRole('heading', { name: 'Software Builds' })).toBeVisible()
+  }
+
+  await page.getByRole('button', { name: 'Project configuration' }).click()
+  await smokeConsumer('Project configuration')
+  await page.getByRole('button', { name: 'Approval configuration' }).click()
+  await smokeConsumer('Approval configuration')
+
+  await page.goto(workspaceUrl)
   await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
   const restored = await measureGeometry(page)
   expect(restored.document.bodyMinWidth, '#1054 P05: the workspace floor is active again after returning').toBe('960px')
 })
+
+function topBarInnerSafe(g: Geometry): number {
+  return g.rects.topBarInner ? g.rects.topBarInner.right : (g.rects.topBar?.right ?? g.document.clientWidth)
+}
 
 test('#1048 F02 after: the sidebar badge wraps a long label inside the measured column and opens its disclosure', async ({ page }, testInfo) => {
   test.skip(!process.env.AEROLINK_SHOWCASE_SEED, 'requires the seeded disposable workspace lane')
