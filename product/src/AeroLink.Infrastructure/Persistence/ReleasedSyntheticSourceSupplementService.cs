@@ -264,8 +264,19 @@ public sealed class ReleasedSyntheticSourceSupplementService(
             throw new DomainException("The supplement requires the exact released FMS campaign and baseline.");
         var baseline = await db.CandidateBaselines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == manifest.BaselineId
             && x.ProjectId == manifest.ProjectId && x.ReleaseId == manifest.ReleaseId, ct);
-        if (baseline is null || baseline.State != CandidateBaselineState.Released)
-            throw new DomainException("The supplement requires the exact released FMS baseline.");
+        if (baseline is null
+            || baseline.State is not (CandidateBaselineState.Frozen or CandidateBaselineState.Released)
+            || baseline.FrozenAt is null
+            || baseline.RequirementsMaterializedAt is null)
+            throw new DomainException("The supplement requires the exact frozen or released FMS baseline with a materialized requirement manifest.");
+        try
+        {
+            _ = CodeEvidenceValidation.Sha256(baseline.RequirementsHash);
+        }
+        catch (DomainException)
+        {
+            throw new DomainException("The supplement requires the exact FMS baseline's valid requirement manifest hash.");
+        }
 
         var configuration = await db.ProjectRepositoryConfigurations.AsNoTracking()
             .SingleOrDefaultAsync(x => x.ProjectId == manifest.ProjectId, ct);

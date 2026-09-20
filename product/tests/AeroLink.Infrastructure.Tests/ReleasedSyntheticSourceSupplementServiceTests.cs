@@ -71,6 +71,73 @@ public sealed class ReleasedSyntheticSourceSupplementServiceTests
     }
 
     [Fact]
+    public async Task Materialized_frozen_baseline_can_receive_the_released_campaign_supplement()
+    {
+        await using var fixture = await Fixture.CreateAsync(releaseBaseline: false);
+
+        var result = await fixture.ApplyAsync(fixture.Manifest(), fixture.Preflight(fixture.Manifest()));
+
+        Assert.False(result.IsReplay);
+        Assert.Equal(1, await fixture.Db.ReleasedSyntheticSourceSupplements.CountAsync());
+    }
+
+    [Fact]
+    public async Task Draft_baseline_is_rejected_even_when_the_campaign_is_released()
+    {
+        await using var fixture = await Fixture.CreateAsync(releaseBaseline: false);
+        var baseline = await fixture.Db.CandidateBaselines.SingleAsync();
+        await fixture.Db.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(setters => setters
+            .SetProperty(x => x.State, CandidateBaselineState.Draft)
+            .SetProperty(x => x.FrozenAt, (DateTimeOffset?)null)
+            .SetProperty(x => x.RequirementsMaterializedAt, (DateTimeOffset?)null)
+            .SetProperty(x => x.RequirementsHash, (string?)null));
+        fixture.Db.ChangeTracker.Clear();
+
+        await Assert.ThrowsAsync<DomainException>(() => fixture.ApplyAsync(
+            fixture.Manifest(), fixture.Preflight(fixture.Manifest())));
+    }
+
+    [Fact]
+    public async Task Unmaterialized_frozen_baseline_is_rejected()
+    {
+        await using var fixture = await Fixture.CreateAsync(releaseBaseline: false);
+        var baseline = await fixture.Db.CandidateBaselines.SingleAsync();
+        await fixture.Db.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(setters => setters
+            .SetProperty(x => x.RequirementsMaterializedAt, (DateTimeOffset?)null)
+            .SetProperty(x => x.RequirementsHash, (string?)null));
+        fixture.Db.ChangeTracker.Clear();
+
+        await Assert.ThrowsAsync<DomainException>(() => fixture.ApplyAsync(
+            fixture.Manifest(), fixture.Preflight(fixture.Manifest())));
+    }
+
+    [Fact]
+    public async Task Frozen_baseline_without_a_freeze_timestamp_is_rejected()
+    {
+        await using var fixture = await Fixture.CreateAsync(releaseBaseline: false);
+        var baseline = await fixture.Db.CandidateBaselines.SingleAsync();
+        await fixture.Db.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(setters => setters
+            .SetProperty(x => x.FrozenAt, (DateTimeOffset?)null));
+        fixture.Db.ChangeTracker.Clear();
+
+        await Assert.ThrowsAsync<DomainException>(() => fixture.ApplyAsync(
+            fixture.Manifest(), fixture.Preflight(fixture.Manifest())));
+    }
+
+    [Fact]
+    public async Task Frozen_baseline_with_invalid_requirement_manifest_hash_is_rejected()
+    {
+        await using var fixture = await Fixture.CreateAsync(releaseBaseline: false);
+        var baseline = await fixture.Db.CandidateBaselines.SingleAsync();
+        await fixture.Db.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(setters => setters
+            .SetProperty(x => x.RequirementsHash, "not-a-sha256"));
+        fixture.Db.ChangeTracker.Clear();
+
+        await Assert.ThrowsAsync<DomainException>(() => fixture.ApplyAsync(
+            fixture.Manifest(), fixture.Preflight(fixture.Manifest())));
+    }
+
+    [Fact]
     public async Task Manifest_digest_is_canonical_and_wrong_project_or_reference_is_refused()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -246,7 +313,7 @@ public sealed class ReleasedSyntheticSourceSupplementServiceTests
             db, new GitLabMetadataReader(new HttpClient(new RejectingHandler()), Options.Create(settings)),
             Options.Create(settings));
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(bool releaseBaseline = true)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
@@ -275,7 +342,8 @@ public sealed class ReleasedSyntheticSourceSupplementServiceTests
             campaign.Approve("approver", Now);
             campaign.Release(build.Id, new string('d', 64), "tester", Now);
             release.MarkReleased(Now);
-            baseline.MarkReleased("tester", Now);
+            if (releaseBaseline)
+                baseline.MarkReleased("tester", Now);
             db.AddRange(program, project, release, configuration, baseline, build, campaign,
                 new ShowcaseUpgradeStep(program.Id, "released-campaign", "Fixture ownership marker.", Now));
             await db.SaveChangesAsync();

@@ -16,9 +16,12 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class ReleasedSupplementManifestPreservationTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Dated_supplement_preserves_recomputed_recorded_manifest_and_original_release(bool noCodeV2)
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task Dated_supplement_preserves_recomputed_recorded_manifest_and_original_release(
+        bool baselineReleased, bool noCodeV2)
     {
         var releasedAt = DateTimeOffset.Parse("2026-01-02T03:04:05Z");
         var supplementedAt = releasedAt.AddMonths(8);
@@ -64,7 +67,8 @@ public sealed class ReleasedSupplementManifestPreservationTests
         await db.SaveChangesAsync();
         baseline.FreezeForInception("tester", releasedAt);
         baseline.MarkRequirementsMaterialized("tester", new string('c', 64), 1, releasedAt);
-        baseline.MarkReleased("tester", releasedAt);
+        if (baselineReleased)
+            baseline.MarkReleased("tester", releasedAt);
         release.MarkReleased(releasedAt);
         build.MarkReleased(releasedAt);
         await db.SaveChangesAsync();
