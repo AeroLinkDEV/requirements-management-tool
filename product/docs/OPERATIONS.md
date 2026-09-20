@@ -805,13 +805,17 @@ POST /api/projects/{projectId}/code/source/released-supplement/apply
 GET  /api/projects/{projectId}/code/source/released-supplement?releaseId={releaseId}
 ```
 
-Preview validates the exact local project, released release/campaign/baseline, configured authority tuple, verified
+Preview validates the exact local project, released release/campaign and its materialized baseline, configured authority tuple, verified
 repository configuration, expected source version zero, and the exact remote commit. Its response contains the
 canonical manifest digest and either the concrete proposed source snapshot or the exact existing receipt. Review that
 digest and the proposed SHA before sending the same manifest to `apply`; the server recomputes the digest and repeats
 the local checks after the remote observation. A successful apply records one immutable source snapshot and one
 immutable supplement receipt, but it does not create an ordinary current source selection, selection event,
 relationship, evidence, NoCode disposition, release change, or readiness claim.
+
+The historical FMS showcase may retain a Frozen, materialized baseline under its released campaign. The supplement
+accepts this retained shape as well as a Released baseline, with the original freeze/materialization timestamps and
+requirements hash present. It does not transition the baseline or regenerate its historical hashes.
 
 The GET response is the readback and replay reference. It shows the recorded actor/time, digest, exact repository and
 commit identity, and the durable label that this was recorded after release as a synthetic historical supplement and is
