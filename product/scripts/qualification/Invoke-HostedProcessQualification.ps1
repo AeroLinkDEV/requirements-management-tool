@@ -167,6 +167,7 @@ finally {
         if ($left.Count) { $result.cleanupErrors += "Owned tasks remain: $($left.TaskName -join ', ')" }
         # Retain transition receipts, probe identities and all diagnostics; exclude PostgreSQL binaries/data.
         if (Test-Path (Join-Path $installation 'bootstrap')) { Copy-Item -LiteralPath (Join-Path $installation 'bootstrap') -Destination (Join-Path $evidence 'installation-bootstrap') -Recurse }
+        if (Test-Path (Join-Path $installation 'logs')) { Copy-Item -LiteralPath (Join-Path $installation 'logs') -Destination (Join-Path $evidence 'installation-logs') -Recurse }
         foreach ($stage in @('Preflight','Final')) { if (Test-Path (Join-Path $world $stage)) { Copy-Item -LiteralPath (Join-Path $world $stage) -Destination $evidence -Recurse } }
     } catch { $result.cleanupErrors += $_.Exception.Message }
     if ($result.cleanupErrors.Count) { $result.verdict = 'Incomplete'; $code = 1 }

@@ -310,6 +310,11 @@ receipts and cleanup results. These are acceptance evidence for those machines: 
 never be transplanted to HOME or represented as qualification of HOME's principal. This workflow is additional
 operational evidence and does not replace the protected Product quality gate.
 
+Production API readiness has a 600-second allowance inside the existing 2,400-second production-launcher
+deadline. A fresh demonstration database seeds controlled content before opening its listener; measured cold
+startup exceeded the generic service helper's 120-second allowance. This does not extend the enclosing
+continuation, recovery or Task Scheduler budgets, skip readiness checks, or turn a recovered failure into success.
+
 Direct PowerShell task actions pass only PowerShell arguments to the probe; shell redirection is used only for
 `cmd.exe` actions. Probe state is passed explicitly through `InstallationRoot` and `ProbeStateRoot`; the marker
 probe does not launch application services or require a production profile, database or tunnel configuration.

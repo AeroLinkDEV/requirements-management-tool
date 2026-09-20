@@ -46,6 +46,22 @@ try {
     # #1043: the budgets must stay coherent RELATIVE TO EACH OTHER, not merely large.
     # ---------------------------------------------------------------------------------------------
     $budget = Get-AeroLinkTransitionBudget
+    Assert-True ($budget.ProductionApiReadinessSeconds -gt 170 -and $budget.ProductionApiReadinessSeconds -lt $budget.SupportedUpgradeSeconds) `
+        'Scenario 6: cold API seeding exceeded 120 seconds; its readiness allowance must cover the measured cold start while remaining inside the bounded production launcher.'
+    $startupTokens = $null; $startupErrors = $null
+    $startupAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Start-AeroLinkProduction.ps1'), [ref]$startupTokens, [ref]$startupErrors)
+    $serviceCall = @($startupAst.FindAll({ param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Start-AeroLinkService' }, $true))
+    Assert-True ($serviceCall.Count -eq 1) 'Scenario 6: the production API must have one service-launch call.'
+    if ($serviceCall.Count -eq 1) {
+        $timeoutValue = $null
+        for ($i = 0; $i -lt $serviceCall[0].CommandElements.Count - 1; $i++) {
+            $element = $serviceCall[0].CommandElements[$i]
+            if ($element -is [Management.Automation.Language.CommandParameterAst] -and $element.ParameterName -eq 'TimeoutSeconds') {
+                $timeoutValue = & ([scriptblock]::Create($serviceCall[0].CommandElements[$i + 1].Extent.Text))
+            }
+        }
+        Assert-True ($timeoutValue -eq $budget.ProductionApiReadinessSeconds) 'Scenario 6: production startup must pass the cold-start budget instead of falling back to the generic 120-second default.'
+    }
     # COMPOSITION, not arithmetic over chosen numbers. The continuation must cover every stage it actually
     # contains; a continuation smaller than the sum of its stages terminates work still inside its own
     # component allowance, which is the original 900 s defect one level up.

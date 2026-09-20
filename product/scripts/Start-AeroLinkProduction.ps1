@@ -452,6 +452,7 @@ else {
         -StandardError (Join-Path $logs 'production.stderr.log') `
         -ReadyUri "$url/health/ready" `
         -ServiceName 'AeroLink' `
+        -TimeoutSeconds (Get-AeroLinkTransitionBudget).ProductionApiReadinessSeconds `
         -Environment $runtimeEnvironment -OnStarted $grantApiAccess `
         -TransitionReadiness @{ kind = 'api'; port = $endpoints.ApiPort; baseUri = $url; expectedMode = $launcherMode; expectedSourceIdentity = $sourceFingerprint.Identity
             expectedInstanceId = $instance.InstanceId; expectedClassification = $instance.Classification } `

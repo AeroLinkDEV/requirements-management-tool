@@ -90,6 +90,10 @@ $script:ReconcileTaskName = 'AeroLinkProductionSourceReconcile'
 # original 900 s, one level up.
 $script:AeroLinkPostgresRecoveryTimeoutSeconds = 300
 $script:AeroLinkSupportedUpgradeTimeoutSeconds = 2400
+# Nested within the production-launcher budget, not an additional sequential stage. A fresh
+# demonstration database also seeds controlled content before Kestrel listens; measured cold
+# startup exceeded the old 120-second generic service allowance (169 seconds on a disposable DB).
+$script:AeroLinkProductionApiReadinessSeconds = 600
 $script:AeroLinkNgrokProtectionWaitSeconds = 120
 $script:AeroLinkContinuationOverheadSeconds = 300
 $script:AeroLinkTransitionContinuationTimeoutSeconds =
@@ -140,6 +144,7 @@ function Get-AeroLinkTransitionBudget {
     return [pscustomobject]@{
         PostgresRecoverySeconds      = $script:AeroLinkPostgresRecoveryTimeoutSeconds
         SupportedUpgradeSeconds      = $script:AeroLinkSupportedUpgradeTimeoutSeconds
+        ProductionApiReadinessSeconds = $script:AeroLinkProductionApiReadinessSeconds
         NgrokProtectionSeconds       = $script:AeroLinkNgrokProtectionWaitSeconds
         ContinuationOverheadSeconds  = $script:AeroLinkContinuationOverheadSeconds
         ContinuationSeconds          = $script:AeroLinkTransitionContinuationTimeoutSeconds

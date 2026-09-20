@@ -24,7 +24,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        definition: [Recovery, Reconcile, FirstDeployment]
+        # Branch pushes exercise the changing first-deployment path. Manual qualification covers all
+        # definitions; retained Recovery/Reconcile results remain tied to their recorded source hashes.
+        definition: ${{ github.event_name == 'push' && fromJSON('["FirstDeployment"]') || fromJSON('["Recovery","Reconcile","FirstDeployment"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
