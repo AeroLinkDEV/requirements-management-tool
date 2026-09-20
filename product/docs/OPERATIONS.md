@@ -416,8 +416,7 @@ deliberately defers current-code validation, so its archive/evidence checks run 
 missing count, and the storage health/inventory readers classify the schema first - `Fresh` (no migration
 history and no application relations) or `PreStorage` (a supported older schema that predates the
 managed-document storage migration) means there is nothing to verify before the upgrade, while a partial schema,
-a malformed catalogue answer or an empty answer fails closed. The operator supplies a reviewed JSON manifest to these no-store routes:
-launcher then migrates the clone, proves it
+a malformed catalogue answer or an empty answer fails closed. The launcher then migrates the clone, proves it
 current and readable, and only then applies the same upgrade to the real database.
 
 **Isolated means the evidence store too.** A maintenance run pointed at a clone by connection string alone
