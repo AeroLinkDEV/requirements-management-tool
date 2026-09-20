@@ -11,6 +11,15 @@
   overflow: auto;
 }
 
+/* Reserve the complete pointer target between panels, never over their controls. */
+.resizableWorkspace--horizontal {
+  column-gap: 24px !important;
+}
+
+.resizableWorkspace--vertical {
+  row-gap: 24px !important;
+}
+
 .workspaceSplitter {
   position: absolute;
   z-index: 30;
@@ -40,8 +49,9 @@
   z-index: 1;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
   border: 1px solid color-mix(in srgb, var(--border, #8da0bd) 70%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface, #111827) 92%, transparent);
@@ -53,8 +63,7 @@
   transition: opacity 140ms ease, transform 140ms ease, border-color 140ms ease;
 }
 
-/* 24px, not the 18px this shipped with: WCAG 2.2 SC 2.5.8 sets 24x24 as the minimum target size.
-   Only the hit area grows — the visible line is the 2px ::before, so nothing looks different. */
+/* Keep the 24px accessible target inside the reserved gutter; the visible line stays 2px. */
 .workspaceSplitter--horizontal {
   top: 0;
   bottom: 0;
@@ -72,6 +81,7 @@
 .workspaceSplitter--vertical {
   left: 0;
   right: 0;
+  min-height: 24px;
   height: 24px;
   transform: translateY(-50%);
   cursor: row-resize;

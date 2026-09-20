@@ -2,6 +2,11 @@ const MIN_PANEL_PX = 220;
 const STORAGE_PREFIX = "aerolink-resizable-layout:";
 const ENHANCED = "data-resizable-enhanced";
 const PANEL_COUNT = "data-resizable-panel-count";
+const observedElements = new Set();
+const enhancedLayouts = new Map();
+const resizeObserver = new ResizeObserver(() => {
+  enhancedLayouts.forEach((axis, container) => positionHandles(container, axis));
+});
 
 const layoutTargets = [
   { selector: ".commandCenterPage > .grid", axis: "horizontal", key: "command-center-main" },
@@ -66,21 +71,29 @@ function applySizes(container, axis, sizes) {
   );
 }
 
-function handlePosition(sizes, boundary) {
-  return sizes.slice(0, boundary + 1).reduce((sum, item) => sum + item, 0);
-}
-
-function positionHandles(container, axis, sizes) {
+function positionHandles(container, axis) {
+  const panels = directPanels(container);
+  const bounds = container.getBoundingClientRect();
   container.querySelectorAll(":scope > .workspaceSplitter").forEach((handle) => {
     const boundary = Number(handle.dataset.boundary);
-    const position = handlePosition(sizes, boundary);
-    handle.style.setProperty(axis === "horizontal" ? "left" : "top", `${position}%`);
+    if (!panels[boundary] || !panels[boundary + 1]) return;
+    const before = panels[boundary].getBoundingClientRect();
+    const after = panels[boundary + 1].getBoundingClientRect();
+    // Fractions describe the tracks, not container padding/borders or grid gaps.
+    const position = axis === "horizontal"
+      ? (before.right + after.left) / 2 - bounds.left - container.clientLeft + container.scrollLeft
+      : (before.bottom + after.top) / 2 - bounds.top - container.clientTop + container.scrollTop;
+    handle.style.setProperty(axis === "horizontal" ? "left" : "top", `${position}px`);
   });
 }
 
-function resizeBoundary(container, panels, axis, sizes, boundary, deltaPx) {
-  const rect = container.getBoundingClientRect();
-  const totalPx = axis === "horizontal" ? rect.width : rect.height;
+function resizeBoundary(container, axis, sizes, boundary, deltaPx) {
+  const panels = directPanels(container);
+  if (panels.length !== sizes.length) return sizes;
+  const totalPx = panels.reduce((total, panel) => {
+    const rect = panel.getBoundingClientRect();
+    return total + (axis === "horizontal" ? rect.width : rect.height);
+  }, 0);
   if (!totalPx) return sizes;
 
   const pairPercent = sizes[boundary] + sizes[boundary + 1];
@@ -93,7 +106,7 @@ function resizeBoundary(container, panels, axis, sizes, boundary, deltaPx) {
   next[boundary + 1] = pairPercent - next[boundary];
 
   applySizes(container, axis, next);
-  positionHandles(container, axis, next);
+  positionHandles(container, axis);
   panels.forEach((panel) => panel.dispatchEvent(new CustomEvent("workspace:resized")));
   return next;
 }
@@ -135,7 +148,6 @@ function createHandle(container, panels, target, sizesRef, boundary, key) {
     const pointer = axis === "horizontal" ? event.clientX : event.clientY;
     sizesRef.value = resizeBoundary(
       container,
-      panels,
       axis,
       startSizes,
       boundary,
@@ -154,7 +166,6 @@ function createHandle(container, panels, target, sizesRef, boundary, key) {
     const step = event.shiftKey ? 40 : 12;
     sizesRef.value = resizeBoundary(
       container,
-      panels,
       axis,
       sizesRef.value,
       boundary,
@@ -166,7 +177,7 @@ function createHandle(container, panels, target, sizesRef, boundary, key) {
   handle.addEventListener("dblclick", () => {
     sizesRef.value = equalSizes(panels.length);
     applySizes(container, axis, sizesRef.value);
-    positionHandles(container, axis, sizesRef.value);
+    positionHandles(container, axis);
     saveSizes(key, sizesRef.value);
   });
 
@@ -177,8 +188,20 @@ function enhance(container, target) {
   const panels = directPanels(container);
   if (panels.length < 2) return;
 
+  // React may replace className while preserving the frame and panel count.
+  container.classList.add("resizableWorkspace", `resizableWorkspace--${target.axis}`);
+  panels.forEach((panel) => panel.classList.add("resizableWorkspacePanel"));
+  enhancedLayouts.set(container, target.axis);
+  [container, ...panels].forEach((element) => {
+    if (observedElements.has(element)) return;
+    observedElements.add(element);
+    resizeObserver.observe(element);
+  });
   const previousCount = Number(container.getAttribute(PANEL_COUNT) || 0);
-  if (container.getAttribute(ENHANCED) === "true" && previousCount === panels.length) return;
+  if (container.getAttribute(ENHANCED) === "true" && previousCount === panels.length) {
+    positionHandles(container, target.axis);
+    return;
+  }
 
   container.querySelectorAll(":scope > .workspaceSplitter").forEach((handle) => handle.remove());
   const currentPanels = directPanels(container);
@@ -186,17 +209,21 @@ function enhance(container, target) {
   const sizesRef = { value: loadSizes(key, currentPanels.length) };
   container.setAttribute(ENHANCED, "true");
   container.setAttribute(PANEL_COUNT, String(currentPanels.length));
-  container.classList.add("resizableWorkspace", `resizableWorkspace--${target.axis}`);
-  currentPanels.forEach((panel) => panel.classList.add("resizableWorkspacePanel"));
   applySizes(container, target.axis, sizesRef.value);
 
   for (let boundary = 0; boundary < currentPanels.length - 1; boundary += 1) {
     createHandle(container, currentPanels, target, sizesRef, boundary, key);
   }
-  positionHandles(container, target.axis, sizesRef.value);
+  positionHandles(container, target.axis);
 }
 
 function scan() {
+  observedElements.forEach((element) => {
+    if (element.isConnected) return;
+    resizeObserver.unobserve(element);
+    observedElements.delete(element);
+    enhancedLayouts.delete(element);
+  });
   layoutTargets.forEach((target) => {
     document.querySelectorAll(target.selector).forEach((container) => enhance(container, target));
   });
@@ -212,7 +239,16 @@ function queueScan() {
   });
 }
 
-const observer = new MutationObserver(queueScan);
-observer.observe(document.documentElement, { childList: true, subtree: true });
+const observer = new MutationObserver((mutations) => {
+  if (mutations.some((mutation) => {
+    if (mutation.type === "childList") return true;
+    const axis = enhancedLayouts.get(mutation.target);
+    return axis && (!mutation.target.classList.contains("resizableWorkspace") ||
+      !mutation.target.classList.contains(`resizableWorkspace--${axis}`));
+  })) queueScan();
+});
+observer.observe(document.documentElement, {
+  childList: true, subtree: true, attributes: true, attributeFilter: ["class"],
+});
 addEventListener("resize", queueScan, { passive: true });
 scan();
