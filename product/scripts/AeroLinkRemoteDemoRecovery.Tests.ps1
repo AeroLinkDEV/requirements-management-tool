@@ -620,6 +620,77 @@ catch {
 Assert-True $threw 'Scenario 16: a non-canonical production source must stop the remote-demo start.'
 Assert-True ($script:ngrokCalls -eq 0) 'Scenario 16: ngrok must never be started when the production source was refused.'
 
+# --- Start-Postgres helper branches (#1055 TA-2) ---
+# The readiness stub above proves the remote-demo probe. These cases exercise the helper SCRIPT's own branches,
+# which a readiness stub never reaches: the database-existence probe (an empty answer means "not there yet")
+# and the postmaster.pid handling whose file a shutting-down postmaster removes. Start-Postgres.ps1 is
+# dot-sourced with its documented -TestOnly seam, so no installation resolution, cluster or process work runs.
+$helperScript = Join-Path $PSScriptRoot 'Start-Postgres.ps1'
+. $helperScript -TestOnly
+Assert-True ($null -ne (Get-Command -Name Test-AeroLinkDatabaseExists -ErrorAction SilentlyContinue)) 'The Start-Postgres database-existence helper must be reachable under the -TestOnly seam.'
+Assert-True ($null -ne (Get-Command -Name Clear-AeroLinkStalePostmasterPid -ErrorAction SilentlyContinue)) 'The postmaster.pid helper must be reachable under the -TestOnly seam.'
+$helperBin = Join-Path $tempRoot 'pg-helper-bin'
+$helperLogs = Join-Path $tempRoot 'pg-helper-logs'
+$helperData = Join-Path $tempRoot 'pg-helper-data'
+New-Item -ItemType Directory -Path $helperBin,$helperLogs,$helperData -Force | Out-Null
+$helperStubSource = Join-Path $helperBin 'quiet-stub.cs'
+Set-Content -LiteralPath $helperStubSource -Value 'public static class AeroLinkPgHelperStub { public static int Main(string[] args) { System.Console.Write(System.Environment.GetEnvironmentVariable("AL_PG_STUB_OUT") ?? ""); return int.Parse(System.Environment.GetEnvironmentVariable("AL_PG_STUB_EXIT") ?? "0"); } }' -Encoding ASCII
+$helperStubExe = Join-Path $helperBin 'psql.exe'
+$pgHelperCsc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+if (-not (Test-Path -LiteralPath $pgHelperCsc)) { $pgHelperCsc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
+& $pgHelperCsc @('/nologo','/target:exe',('/out:' + $helperStubExe),$helperStubSource) | Out-Null
+Copy-Item -LiteralPath $helperStubExe -Destination (Join-Path $helperBin 'pg_isready.exe') -Force
+$bin = $helperBin; $logs = $helperLogs; $postgresPort = 55998
+$savedStubOut = $env:AL_PG_STUB_OUT; $savedStubExit = $env:AL_PG_STUB_EXIT
+try {
+    $env:AL_PG_STUB_OUT = ''; $env:AL_PG_STUB_EXIT = '0'
+    Assert-True ((Test-AeroLinkDatabaseExists) -eq $false) 'An empty database-existence answer must be False, not a null-valued method call.'
+    $env:AL_PG_STUB_OUT = '1'
+    Assert-True ((Test-AeroLinkDatabaseExists) -eq $true) 'A database-existence row must be True.'
+    $env:AL_PG_STUB_OUT = ''; $env:AL_PG_STUB_EXIT = '1'
+    Assert-True ((Test-AeroLinkDatabaseExists) -eq $false) 'A failed database-existence query must be False.'
+    $env:AL_PG_STUB_EXIT = '0'
+    Assert-True ((Test-AeroLinkPostgresAccepting) -eq $true) 'A successful pg_isready must be accepting.'
+    Assert-True ((Test-AeroLinkPostgresAccepting -RequireQuery) -eq $false) 'An empty SELECT 1 answer must not be query-ready.'
+    $env:AL_PG_STUB_OUT = '1'
+    Assert-True ((Test-AeroLinkPostgresAccepting -RequireQuery) -eq $true) 'SELECT 1 returning 1 must be query-ready.'
+}
+finally {
+    if ($null -eq $savedStubOut) { Remove-Item Env:\AL_PG_STUB_OUT -ErrorAction SilentlyContinue } else { $env:AL_PG_STUB_OUT = $savedStubOut }
+    if ($null -eq $savedStubExit) { Remove-Item Env:\AL_PG_STUB_EXIT -ErrorAction SilentlyContinue } else { $env:AL_PG_STUB_EXIT = $savedStubExit }
+}
+
+# The vanish-race tolerance is deterministic here: create the file, prove it exists, then remove it the way a
+# shutting-down postmaster does, and require the helper only to ignore that specific disappearance.
+$racePath = Join-Path $helperData 'vanished.pid'
+Set-Content -LiteralPath $racePath -Value '12345'
+Assert-True ((Get-AeroLinkFileFirstLineIfPresent -Path $racePath) -eq '12345') 'A present file must yield its first line.'
+Remove-Item -LiteralPath $racePath -Force
+Assert-True ($null -eq (Get-AeroLinkFileFirstLineIfPresent -Path $racePath)) 'A file removed between existence and read must yield $null, not throw.'
+Remove-AeroLinkFileIfPresent -Path $racePath
+Assert-True $true 'Removing an already-vanished file must be a no-op.'
+$directoryInstead = Join-Path $helperData 'not-a-file'
+New-Item -ItemType Directory -Path $directoryInstead -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $directoryInstead 'keep.txt') -Value 'keep'
+$directoryThrew = $false
+try { Remove-AeroLinkFileIfPresent -Path $directoryInstead } catch { $directoryThrew = $true }
+Assert-True $directoryThrew 'A non-file removal failure must not be swallowed.'
+
+$foreignPidFile = Join-Path $helperData 'postmaster.pid'
+Set-Content -LiteralPath $foreignPidFile -Value $PID
+$foreignThrew = $false
+try { Clear-AeroLinkStalePostmasterPid -Bin $helperBin -Data $helperData -Logs $helperLogs -ReleaseWaitSeconds 5 } catch { $foreignThrew = $true }
+Assert-True $foreignThrew 'A postmaster.pid naming a live non-postgres process must fail closed.'
+Assert-True (Test-Path -LiteralPath $foreignPidFile) 'A refused postmaster.pid must not be deleted.'
+Set-Content -LiteralPath $foreignPidFile -Value '2147483000'
+Clear-AeroLinkStalePostmasterPid -Bin $helperBin -Data $helperData -Logs $helperLogs -ReleaseWaitSeconds 5
+Assert-True (-not (Test-Path -LiteralPath $foreignPidFile)) 'A postmaster.pid naming a dead process must be removed as stale.'
+Set-Content -LiteralPath $foreignPidFile -Value ''
+$emptyThrew = $false
+try { Clear-AeroLinkStalePostmasterPid -Bin $helperBin -Data $helperData -Logs $helperLogs -ReleaseWaitSeconds 5 } catch { $emptyThrew = $true }
+Assert-True $emptyThrew 'An unparseable postmaster.pid must fail closed rather than be treated as absent.'
+Remove-Item -LiteralPath $foreignPidFile -Force -ErrorAction SilentlyContinue
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     Write-Host "Remote-demo recovery regression FAILED ($($failures.Count) failure(s))." -ForegroundColor Red

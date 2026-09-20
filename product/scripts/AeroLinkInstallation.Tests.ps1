@@ -191,6 +191,25 @@ try {
     $env:AEROLINK_INSTALLATION_ROOT = $canonicalInstallation
     Assert-True ((Get-AeroLinkInstallationRoot -ProductRoot $productRoot) -eq [IO.Path]::GetFullPath($canonicalInstallation)) `
         'A valid override wins over the pointer and the default.'
+
+    # --- 10. Service ports move ONLY for a disposable qualification installation, and never onto a persistent port ---
+    $previousPorts = @($env:AEROLINK_QUALIFICATION_API_PORT, $env:AEROLINK_QUALIFICATION_POSTGRES_PORT)
+    try {
+        $env:AEROLINK_QUALIFICATION_API_PORT = '5196'; $env:AEROLINK_QUALIFICATION_POSTGRES_PORT = '55329'
+        $moved = Get-AeroLinkServiceEndpoints
+        Assert-True ($moved.Qualification -and $moved.ApiPort -eq 5196 -and $moved.PostgresPort -eq 55329 -and $moved.ConnectionString -match 'Port=55329') 'A disposable installation may move both service ports, and the connection string moves with them.'
+        $env:AEROLINK_INSTALLATION_ROOT = $null
+        $fixed = Get-AeroLinkServiceEndpoints
+        Assert-True (-not $fixed.Qualification -and $fixed.ApiPort -eq 5080 -and $fixed.PostgresPort -eq 54329) 'Without AEROLINK_INSTALLATION_ROOT the port override is ignored: a real installation stays on 5080/54329.'
+        $env:AEROLINK_INSTALLATION_ROOT = $canonicalInstallation
+        $env:AEROLINK_QUALIFICATION_POSTGRES_PORT = '54329'
+        Assert-Throws { Get-AeroLinkServiceEndpoints } 'persistent' 'A disposable installation may never be pointed at the persistent PostgreSQL port.'
+        $env:AEROLINK_QUALIFICATION_POSTGRES_PORT = '55329'; $env:AEROLINK_QUALIFICATION_API_PORT = '5080'
+        Assert-Throws { Get-AeroLinkServiceEndpoints } 'persistent' 'A disposable installation may never be pointed at the persistent API port.'
+        $env:AEROLINK_QUALIFICATION_API_PORT = $null
+        Assert-Throws { Get-AeroLinkServiceEndpoints } 'both' 'A half-specified override refuses rather than mixing a disposable and a persistent port.'
+    }
+    finally { $env:AEROLINK_QUALIFICATION_API_PORT = $previousPorts[0]; $env:AEROLINK_QUALIFICATION_POSTGRES_PORT = $previousPorts[1] }
     $env:AEROLINK_INSTALLATION_ROOT = $null
 }
 finally {

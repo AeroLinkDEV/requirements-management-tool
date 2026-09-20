@@ -137,6 +137,56 @@ test('owned process boundary authenticates natural exits and controlled stop', (
   }
 })
 
+test('API cleanup distinguishes an exited object, a live lifetime, replacement and unreadable identity on both hosts', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'aerolink-api-exit-'))
+  const harness = join(fixture, 'harness.ps1')
+  const script = String.raw`$ErrorActionPreference = 'Stop'
+$tokens = $null; $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile('${wrapperPath.replaceAll("'", "''")}', [ref]$tokens, [ref]$errors)
+$definition = $ast.Find({ param($a) $a -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Test-OwnedApiProcessExited' }, $true)
+if (-not $definition) { throw 'Missing exact-lifetime cleanup check.' }
+. ([scriptblock]::Create($definition.Extent.Text))
+$script:expected = [datetime]::UtcNow.ToFileTimeUtc()
+function Get-Process {
+  [CmdletBinding()] param([int]$Id)
+  if ($script:mode -eq 'absent') { Microsoft.PowerShell.Management\Get-Process -Id 2147483647 -ErrorAction Stop; return }
+  if ($script:mode -eq 'unreadable') { throw 'Access denied to the process inventory.' }
+  $object = [pscustomobject]@{ Id = $Id }
+  $object | Add-Member ScriptProperty HasExited { return $script:mode -eq 'exited' }
+  $object | Add-Member ScriptProperty StartTime {
+    if ($script:mode -eq 'unreadable-lifetime') { throw 'Cannot read creation time.' }
+    return [datetime]::FromFileTimeUtc($script:expected + $(if ($script:mode -eq 'replacement') { 10000 } else { 0 }))
+  }
+  $object | Add-Member ScriptMethod Dispose { $script:disposed = $true }
+  return $object
+}
+foreach ($case in @(@('exited',$true), @('live',$false), @('replacement',$true), @('absent',$true))) {
+  $script:mode = $case[0]; $script:disposed = $false
+  $actual = Test-OwnedApiProcessExited -ProcessId 123 -StartedAt $script:expected
+  if ($actual -ne $case[1]) { throw "Wrong cleanup verdict for $script:mode." }
+  if ($script:mode -ne 'absent' -and -not $script:disposed) { throw 'Process observation handle leaked.' }
+}
+foreach ($script:mode in @('unreadable','unreadable-lifetime')) {
+  $refused = $false
+  try { Test-OwnedApiProcessExited -ProcessId 123 -StartedAt $script:expected | Out-Null } catch { $refused = $true }
+  if (-not $refused) { throw "Unreadable state accepted: $script:mode." }
+}
+$script:mode = 'exited'
+if ($null -eq (Get-Process -Id 123)) { throw 'Negative control failed to represent the still-enumerated exited process.' }
+Write-Output 'API_EXIT_BOUNDARIES_PASS'
+`
+  try {
+    writeFileSync(harness, script)
+    for (const host of ['powershell.exe', 'pwsh.exe']) {
+      const output = execFileSync(host, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', harness], { cwd: repoRoot, encoding: 'utf8', timeout: 30000 })
+      assert.match(output, /API_EXIT_BOUNDARIES_PASS/)
+    }
+    assert.match(wrapper, /Test-OwnedApiProcessExited -ProcessId \$apiPid -StartedAt \$apiStart/)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
 test('Docker ownership boundary distinguishes real absence from arbitrary and daemon errors', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'aerolink-fake-docker-'))
   const fakeScript = join(fixture, 'fake-docker.ps1')
@@ -439,11 +489,16 @@ test('the native Windows operator owner retains the complete family and evidence
 
   // Derive this inventory from the live workflow so a newly added native contract is not silently omitted from
   // the planner proof. The schedule preview is a distinct non-mutating check and is included separately below.
-  const nativeScripts = [...job.matchAll(/& \.\/product\/scripts\/([^\s]+\.ps1)/g)].map(match => match[1])
-  assert.ok(nativeScripts.length >= 14, 'the native owner must execute the complete current operator family')
+  const nativeInvocations = [...job.matchAll(/& (?:powershell\.exe -NoProfile -ExecutionPolicy Bypass -File )?\.\/product\/scripts\/([^\s]+\.ps1)/g)]
+  const nativeScripts = nativeInvocations.map(match => match[1])
+  assert.ok(nativeScripts.length >= 17, 'the native owner must execute the complete current operator family')
   for (const name of [
     'AeroLinkEvidenceStore.Tests.ps1', 'AeroLinkBackupVerification.Tests.ps1', 'AeroLinkRestoreContract.Tests.ps1',
     'AeroLinkMigrationPosture.Tests.ps1', 'AeroLinkRemoteDemo.Tests.ps1', 'AeroLinkRemoteDemoRecovery.Tests.ps1',
+    // The transition handoff and its budgets. Adding a suite to the LOCAL runner list changes nothing here,
+    // and that is not a visible failure: the suite simply never runs on a protected candidate, so the
+    // regression it exists to catch would merge green.
+    'AeroLinkTransitionHandoff.Tests.ps1', 'AeroLinkProcessControl.Tests.ps1', 'AeroLinkProductionTransition.Tests.ps1',
     'AeroLinkLauncherContract.Tests.ps1', 'AeroLinkBootstrap.Tests.ps1', 'AeroLinkInstallation.Tests.ps1',
     'AeroLinkProductionSource.Tests.ps1', 'AeroLinkRuntimeIdentity.Tests.ps1', 'AeroLinkUpgrade.Tests.ps1',
     'Get-AeroLinkTestPlan.Tests.ps1', 'AeroLinkTestDiagnostics.Tests.ps1',
@@ -472,10 +527,11 @@ test('the native Windows operator owner retains the complete family and evidence
   // Every native test command must propagate a nonzero child exit. Telemetry and cleanup remain allowed to be
   // best-effort after the required family, but the operator proofs themselves cannot be made optional.
   for (const step of nativeScripts.filter(name => name.endsWith('.Tests.ps1') || name === 'Test-RepositoryLayout.ps1')) {
-    const at = job.indexOf(`& ./product/scripts/${step}`)
+    const invocation = nativeInvocations.find(match => match[1] === step)[0]
+    const at = job.indexOf(invocation)
     const next = job.indexOf('\n      - name:', at)
     const body = job.slice(at, next < 0 ? job.length : next)
-    const invocationEnd = body.indexOf('\n', body.indexOf(`& ./product/scripts/${step}`))
+    const invocationEnd = body.indexOf('\n', body.indexOf(invocation))
     const following = body.slice(invocationEnd < 0 ? body.length : invocationEnd).trimStart()
     assert.match(following, /^if \(\$LASTEXITCODE -ne 0\)/, `${step} must propagate native failure immediately after invocation`)
   }

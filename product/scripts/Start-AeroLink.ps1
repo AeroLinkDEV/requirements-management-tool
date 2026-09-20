@@ -21,6 +21,9 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkUpgrade.psm1') -Force
+# See Start-AeroLinkProduction.ps1: the body's helpers must be true at the point of use, after every import.
+. (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
+. (Join-Path $PSScriptRoot 'AeroLinkLaunch.ps1')
 
 $productRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repositoryRoot = (Resolve-Path (Join-Path $productRoot '..')).Path

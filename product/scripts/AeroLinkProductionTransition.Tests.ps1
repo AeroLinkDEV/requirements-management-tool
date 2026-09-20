@@ -76,9 +76,11 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
 function Update-AeroLinkClientDependencies { Event 'Dependencies' }
 function npm.cmd { Event 'ClientBuild'; $global:LASTEXITCODE=0 }
 function Invoke-FakeApiBuild { Event 'ApiBuild'; $global:LASTEXITCODE=0 }
+function Get-AeroLinkTransitionBudget { [pscustomobject]@{ ProductionApiReadinessSeconds=371 } }
 function Start-AeroLinkService {
-    param($Environment)
+    param($Environment, $TimeoutSeconds)
     Event 'ApiStart'
+    if ($TimeoutSeconds -ne 371) { throw 'Production startup did not pass the configured API readiness budget' }
     if ($case.Tunnel -and $Environment.Notifications__BaseUrl -ne 'https://example.invalid') { throw 'Wrong startup origin' }
     $script:started=$true
 }
@@ -90,6 +92,7 @@ function Invoke-WebRequest { Event 'BuiltClientProof'; [pscustomobject]@{ Conten
 function Start-AeroLinkRemoteDemo { Event 'TunnelRestore'; [pscustomobject]@{ Ready=$true } }
 function Get-AeroLinkRemoteDemoNgrokProcess { [pscustomobject]@{ Owned=@(); Mismatched=@() } }
 function Get-AeroLinkProductionSourcePosture { [pscustomobject]@{ Canonical=$true; Posture=[pscustomobject]@{ HeadSha=('a' * 40) } } }
+function Get-AeroLinkServiceEndpoints { [pscustomobject]@{ ApiPort=5080; PostgresPort=54329; ApiBaseUri='http://127.0.0.1:5080'; ConnectionString=''; Qualification=$false } }
 function Invoke-AeroLinkBootstrapReentry { Event 'Compensate'; return 0 }
 & $Controller -DoNotOpenBrowser
 '@ | Set-Content -LiteralPath $driver -Encoding UTF8

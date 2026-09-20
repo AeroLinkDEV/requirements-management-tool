@@ -50,6 +50,10 @@ $distRoot = Join-Path $clientRoot 'dist'
 # The persistent installation this source belongs to. On HOME that is the canonical installation, whether
 # this source is the development checkout or the dedicated production clone beside it (#881).
 $installation = Get-AeroLinkInstallationPaths -ProductRoot $productRoot
+# The API and PostgreSQL ports (fixed; movable only for a disposable qualification installation). When they are
+# moved, the connection string moves with them, for the maintenance host and the API alike.
+$endpoints = Get-AeroLinkServiceEndpoints
+if ($endpoints.Qualification) { $env:ConnectionStrings__AeroLink = $endpoints.ConnectionString }
 $logs = $installation.Logs
 $launcherMode = 'HOME-PRODUCTION'
 
@@ -123,6 +127,15 @@ was started and nothing was changed.
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1')
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkRemoteDemo.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1')
+
+# Re-establish the launcher helpers immediately before the body that calls them. They are dot-sourced at the top
+# of this file, but a launcher reached through the source-update / re-entry path can run its body with an
+# incomplete session: measured in #1055 S4 OFF, `Resolve-AeroLinkDotnet` (AeroLinkPrerequisites) and then
+# `Assert-AeroLinkPostgres` (AeroLinkLaunch) were "not recognized" AFTER the runtime had already been restored,
+# turning a successful restoration into a reported ChainFailed. Dot-sourcing them here, after every
+# Import-Module, is idempotent and makes the body's dependencies true at the point of use.
+. (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
+. (Join-Path $PSScriptRoot 'AeroLinkLaunch.ps1')
 $lease = Enter-AeroLinkTransition -InstallationRoot $installation.InstallationRoot
 $previousObligation = $env:AEROLINK_PRODUCTION_OBLIGATION
 $obligation = $null
@@ -215,16 +228,16 @@ $instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode HomeCanon
 # perfectly well and gets back a bare HTTP 400 with no body — which reads exactly like a binding problem, and
 # is not one. Both settings move together or neither should.
 if ($Shared) {
-    $bindUrl = 'http://0.0.0.0:5080'
+    $bindUrl = "http://0.0.0.0:$($endpoints.ApiPort)"
     $allowedHosts = '*'
 }
 else {
-    $bindUrl = 'http://127.0.0.1:5080'
+    $bindUrl = $endpoints.ApiBaseUri
     $allowedHosts = 'localhost;127.0.0.1'
 }
 # Everything this script checks for itself goes over loopback, whichever mode is in force: it is reachable in
 # both, and it does not depend on which network this machine happens to be on today.
-$url = 'http://127.0.0.1:5080'
+$url = $endpoints.ApiBaseUri
 
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 
@@ -267,7 +280,7 @@ if ($Shared) {
     # needs the very same reachable origin. Do not guess a loopback fallback for another person's message.
     $lan = Get-AeroLinkLanAddress
     if (-not $lan) { throw 'Shared mode requires a reachable LAN IPv4 address so notification links are not fabricated.' }
-    $effectiveNotificationBaseUrl = "http://${lan}:5080"
+    $effectiveNotificationBaseUrl = "http://${lan}:$($endpoints.ApiPort)"
 }
 else {
     $effectiveNotificationBaseUrl = Resolve-AeroLinkNotificationBaseUrl $NotificationBaseUrl
@@ -285,8 +298,8 @@ else {
 # This runs ahead of the upgrade, not after the client build. Migrating the canonical database while an
 # old-schema process still serves requests against it is the condition the clone-validation path exists to
 # avoid, and the client build would have widened that window by tens of seconds.
-Write-Host '      Checking what is already on 127.0.0.1:5080...' -ForegroundColor Cyan
-$disposition = Resolve-AeroLinkRuntimeDisposition -Port 5080 -BaseUri $url `
+Write-Host "      Checking what is already on $url..." -ForegroundColor Cyan
+$disposition = Resolve-AeroLinkRuntimeDisposition -Port $endpoints.ApiPort -BaseUri $url `
     -ExpectedMode $launcherMode -ExpectedSourceIdentity $sourceFingerprint.Identity `
     -ExpectedInstanceId $instance.InstanceId -ExpectedClassification $instance.Classification `
     -OwnershipFragments @($apiProjectDirectory)
@@ -335,7 +348,7 @@ else {
         'upgrade-required' {
             Write-Host "      Upgrade pending: $(@($upgradePosture.Analysis.pendingEfMigrations).Count) schema migration(s), $(@($upgradePosture.Analysis.pendingSemanticUpgrades).Count) semantic upgrade(s)." -ForegroundColor Yellow
             $schemaState = 'upgrade attempted; final schema not yet proven'
-            $upgrade = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -DotnetPath $dotnet
+            $upgrade = Invoke-AeroLinkCloneValidatedUpgrade -ProductRoot $productRoot -DotnetPath $dotnet -PostgresPort $endpoints.PostgresPort
             if (-not $upgrade.Applied) {
                 Write-Host ''
                 Write-Host 'DATABASE UPGRADE NOT APPLIED' -ForegroundColor Red
@@ -416,6 +429,7 @@ else {
         Instance__Classification = $instance.Classification
         Instance__InstanceId     = $instance.InstanceId
     }
+    if ($endpoints.Qualification) { $runtimeEnvironment['ConnectionStrings__AeroLink'] = $endpoints.ConnectionString }
     if ($instance.SnapshotSourceLabel) { $runtimeEnvironment['Instance__SnapshotSourceLabel'] = $instance.SnapshotSourceLabel }
     if ($instance.SnapshotSourceSha) { $runtimeEnvironment['Instance__SnapshotSourceSha'] = $instance.SnapshotSourceSha }
     if ($instance.SnapshotCreatedAtUtc) { $runtimeEnvironment['Instance__SnapshotCreatedAtUtc'] = $instance.SnapshotCreatedAtUtc }
@@ -438,13 +452,17 @@ else {
         -StandardError (Join-Path $logs 'production.stderr.log') `
         -ReadyUri "$url/health/ready" `
         -ServiceName 'AeroLink' `
-        -Environment $runtimeEnvironment -OnStarted $grantApiAccess
-    $newOwner = Get-AeroLinkPortOwner -Port 5080
+        -TimeoutSeconds (Get-AeroLinkTransitionBudget).ProductionApiReadinessSeconds `
+        -Environment $runtimeEnvironment -OnStarted $grantApiAccess `
+        -TransitionReadiness @{ kind = 'api'; port = $endpoints.ApiPort; baseUri = $url; expectedMode = $launcherMode; expectedSourceIdentity = $sourceFingerprint.Identity
+            expectedInstanceId = $instance.InstanceId; expectedClassification = $instance.Classification } `
+        -GrantOperatorAccessArguments @('--urls', $bindUrl)
+    $newOwner = Get-AeroLinkPortOwner -Port $endpoints.ApiPort
     if (-not $newOwner.Found -or $newOwner.Ambiguous -or
         -not (Test-AeroLinkProcessOwnership -CommandLine $newOwner.CommandLine -ExecutablePath $newOwner.ExecutablePath -OwnershipFragments @($apiProjectDirectory))) {
         throw 'The new listener cannot be attributed to this production source.'
     }
-    $newDisposition = Resolve-AeroLinkRuntimeDisposition -Port 5080 -BaseUri $url -ExpectedMode $launcherMode `
+    $newDisposition = Resolve-AeroLinkRuntimeDisposition -Port $endpoints.ApiPort -BaseUri $url -ExpectedMode $launcherMode `
         -ExpectedSourceIdentity $sourceFingerprint.Identity -ExpectedInstanceId $instance.InstanceId `
         -ExpectedClassification $instance.Classification -OwnershipFragments @($apiProjectDirectory)
     if ($newDisposition.Disposition -ne 'Reuse' -or $newDisposition.ProcessId -ne $newOwner.ProcessId) { throw 'The new API did not prove the expected runtime/installation identity.' }
@@ -540,7 +558,7 @@ catch {
     $actualSha = 'unknown'
     try { $actualSha = (Get-AeroLinkSourceFingerprint -RepositoryRoot $repositoryRoot).Sha } catch {}
     $runtimeState = 'unknown'; $tunnelState = 'unknown'
-    try { $runtimeState = if ((Get-AeroLinkPortOwner -Port 5080).Found) { 'running (readiness not asserted)' } else { 'stopped' } } catch {}
+    try { $runtimeState = if ((Get-AeroLinkPortOwner -Port $endpoints.ApiPort).Found) { 'running (readiness not asserted)' } else { 'stopped' } } catch {}
     try {
         if ($demoConfig) {
             $actualTunnels = Get-AeroLinkRemoteDemoNgrokProcess -Config $demoConfig

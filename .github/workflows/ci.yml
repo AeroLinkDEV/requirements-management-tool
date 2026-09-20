@@ -903,6 +903,27 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/AeroLinkRemoteDemoRecovery.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Remote-demo recovery regression failed.' }
+
+      - name: Validate the transition handoff and budget contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkTransitionHandoff.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Transition handoff regression failed.' }
+      - name: Validate the process-control contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./product/scripts/AeroLinkProcessControl.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'process-control regression failed.' }
+
+      - name: Validate the production-transition contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./product/scripts/AeroLinkProductionTransition.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'production-transition regression failed.' }
+
       # The double-clickable launchers are the only part of AeroLink some people run directly, and the part
       # with no compiler behind it. Both defects that shipped in them -- a launcher that could not find its
       # own modules, and three that reported success after failing -- were invisible to every suite that

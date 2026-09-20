@@ -31,6 +31,8 @@ $planner = Join-Path $repositoryRoot 'product\test-planner\tools\plan.mjs'
 # Durable TRX/blame capture for the qualification test suites (#756). Imported rather than inlined so the
 # synthetic regression contract (AeroLinkTestDiagnostics.Tests.ps1) can exercise the exact same code path.
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTestDiagnostics.psm1') -Force
+# For the owned API helper's stop token. Its bytes must not depend on which PowerShell host ran the planner.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1') -Force
 $node = Get-Command node.exe -ErrorAction SilentlyContinue
 if (-not $node) { throw 'Node.js is required to run the shared AeroLink test planner.' }
 if (-not (Test-Path -LiteralPath $planner -PathType Leaf)) { throw "Shared planner not found: $planner" }
@@ -307,6 +309,9 @@ function Invoke-ScriptContractSuite {
         'AeroLinkMigrationPosture.Tests.ps1',
         'AeroLinkRemoteDemo.Tests.ps1',
         'AeroLinkRemoteDemoRecovery.Tests.ps1',
+        'AeroLinkTransitionHandoff.Tests.ps1',
+        'AeroLinkProcessControl.Tests.ps1',
+        'AeroLinkProductionTransition.Tests.ps1',
         'AeroLinkInstallation.Tests.ps1',
         'AeroLinkProductionSource.Tests.ps1',
         'AeroLinkRuntimeIdentity.Tests.ps1',
@@ -563,6 +568,23 @@ function Get-DisposableDockerCommand {
     }
     return $dockerCommand.Source
 }
+function Test-OwnedApiProcessExited {
+    param([Parameter(Mandatory)][int]$ProcessId, [Parameter(Mandatory)][Int64]$StartedAt)
+    # Get-Process can still enumerate a terminated process during object teardown. Presence alone is not
+    # liveness. Keep the helper's held-job proof and independently check this exact recorded lifetime.
+    try { $observed = Get-Process -Id $ProcessId -ErrorAction Stop }
+    catch {
+        if ($_.FullyQualifiedErrorId -eq 'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.GetProcessCommand') { return $true }
+        throw
+    }
+    try {
+        if ($observed.HasExited) { return $true }
+        if ([Int64]$observed.StartTime.ToFileTimeUtc() -ne $StartedAt) { return $true } # A replacement is not ours.
+        return $observed.HasExited
+    }
+    finally { $observed.Dispose() }
+}
+
 function Invoke-DisposablePostgreSqlGate {
     $docker = Get-DisposableDockerCommand
     $runId = ([Guid]::NewGuid().ToString('N'))
@@ -622,7 +644,17 @@ function Invoke-DisposablePostgreSqlGate {
         $startInfo = New-Object System.Diagnostics.ProcessStartInfo; $startInfo.FileName = $dotnetCommand.Source; $startInfo.Arguments = (($helperArguments | ForEach-Object { ConvertTo-WindowsArgument ([string]$_) }) -join ' ')
         $startInfo.WorkingDirectory = $repositoryRoot; $startInfo.UseShellExecute = $false; $startInfo.CreateNoWindow = $true; $startInfo.RedirectStandardInput = $true; $startInfo.RedirectStandardOutput = $true; $startInfo.RedirectStandardError = $true
         $helper = New-Object System.Diagnostics.Process; $helper.StartInfo = $startInfo; $apiOwnershipIntent = $true
-        if (-not $helper.Start()) { throw 'The owned disposable API process helper could not start.' }
+        # The stop token's bytes are decided HERE, not where it is written. StandardInput is a StreamWriter
+        # over the ambient console encoding, materialized with AutoFlush set - so under a UTF-8 console the
+        # preamble reaches the helper before any caller writes, and the exact 'stop' match failed under
+        # Windows PowerShell 5.1 while succeeding under 7. Pin the encoding across Start and across the first
+        # touch of StandardInput, then restore it; the write itself happens much later, during cleanup.
+        $previousInputEncoding = Push-AeroLinkDeterministicProcessInputEncoding
+        try {
+            if (-not $helper.Start()) { throw 'The owned disposable API process helper could not start.' }
+            $null = $helper.StandardInput
+        }
+        finally { Pop-AeroLinkDeterministicProcessInputEncoding -Previous $previousInputEncoding }
         $apiProcessStarted = $true; $null = $helper.StandardOutput.ReadToEndAsync(); $null = $helper.StandardError.ReadToEndAsync()
         $started = $false
         for ($attempt = 0; $attempt -lt 120; $attempt++) {
@@ -709,13 +741,13 @@ function Invoke-DisposablePostgreSqlGate {
         if ($apiOwnershipIntent -and $null -ne $helper) {
             try {
                 if ($apiProcessStarted) {
-                    if (-not $helper.HasExited) { $helper.StandardInput.WriteLine('stop'); $helper.StandardInput.Flush() }
+                    if (-not $helper.HasExited) { Write-AeroLinkProcessControlToken -Process $helper -Token 'stop' }
                     $helperExited = $helper.WaitForExit(10000)
                     if (-not $helperExited) { try { $helper.Kill() } catch { }; [void]$cleanupErrors.Add('The owned API process helper did not exit within the bounded cleanup wait.') }
                     if ($helper.HasExited -and $helper.ExitCode -ne 0) { [void]$cleanupErrors.Add('The owned API process helper exited nonzero.') }
                     $statusAfter = Read-BoundedTextFile -Path $apiStatus
                     if ($statusAfter -notmatch '(?m)^(STOPPED|EXITED)\|.*\|jobCount=0\r?$' -or $statusAfter -notmatch '(?m)^CLEANUP\|handles=closed\r?$') { [void]$cleanupErrors.Add('Owned API job cleanup was not proven.') }
-                    if ($null -ne $apiPid) { try { if ($null -ne (Get-Process -Id $apiPid -ErrorAction SilentlyContinue)) { [void]$cleanupErrors.Add('The owned API process remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API process exit could not be verified.') } }
+                    if ($null -ne $apiPid) { try { if (-not (Test-OwnedApiProcessExited -ProcessId $apiPid -StartedAt $apiStart)) { [void]$cleanupErrors.Add('The owned API process remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API process exit could not be verified.') } }
                     if ($null -ne $apiPort) { try { if (@(Get-BoundedListenerConnections -Port $apiPort | Where-Object { [int]$_.OwningProcess -eq $apiPid }).Count -gt 0) { [void]$cleanupErrors.Add('The owned API listener remained after cleanup.') } } catch { [void]$cleanupErrors.Add('The owned API listener cleanup could not be verified.') } }
                 }
                 else {

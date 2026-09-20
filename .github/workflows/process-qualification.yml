@@ -1,0 +1,51 @@
+name: Isolated Windows process qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/1041-1043-1053-process-control]
+    paths:
+      - ".github/workflows/process-qualification.yml"
+      - "product/scripts/qualification/Invoke-HostedProcessQualification.ps1"
+      - "product/scripts/Invoke-AeroLinkLaunchContextQualification.ps1"
+
+# No installation secrets, approval credentials or merge authority. Each matrix entry owns a fresh VM.
+permissions:
+  contents: read
+
+concurrency:
+  group: process-qualification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    runs-on: windows-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        # Branch pushes exercise the changing first-deployment path. Manual qualification covers all
+        # definitions; retained Recovery/Reconcile results remain tied to their recorded source hashes.
+        definition: ${{ github.event_name == 'push' && fromJSON('["FirstDeployment"]') || fromJSON('["Recovery","Reconcile","FirstDeployment"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Qualify actual S4U task endings and first deployment
+        shell: powershell
+        run: ./product/scripts/qualification/Invoke-HostedProcessQualification.ps1 -Definition '${{ matrix.definition }}'
+      - name: Retain attributable acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: process-qualification-${{ matrix.definition }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/process-qualification-evidence/
+          if-no-files-found: error
+          retention-days: 30

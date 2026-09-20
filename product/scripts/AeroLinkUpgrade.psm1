@@ -239,7 +239,7 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
     # The exact artifact this backup produced. Picking "the newest aerolink-*.zip" instead makes the
     # recovery point depend on file timestamps, which a clock skew or a hand-placed archive decides.
     $archive = if ($BackupRunner) { & $BackupRunner } else {
-        $capture = & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -PostgresAlreadyRunning
+        $capture = & (Join-Path $PSScriptRoot 'Backup-AeroLink.ps1') -PostgresAlreadyRunning -PostgresPort $PostgresPort
         ($capture | Where-Object { $_.PSObject.Properties['Archive'] } | Select-Object -Last 1).Archive
     }
     if (-not $archive) {

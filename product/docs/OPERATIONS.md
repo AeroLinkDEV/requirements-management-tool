@@ -235,6 +235,98 @@ The replacement API receives an owed public notification origin before it starts
 start identity own the origin proof before tunnel restoration; public 401 and readiness are checked again.
 An incomplete owed restoration exits unsuccessfully even when a safe local API remains available.
 
+**One outer authority per transition.** The caller's own process (`AeroLinkRemoteDemo.ps1` Start/Reconcile,
+`Configure-AeroLinkProductionSource.ps1` Update including its delegation, and the brokered first-deployment
+task) is the outer authority. It qualifies its own launch context before touching anything, admits the attempt
+(every prior attempt of this installation must be proven quiescent and every launch request resolved), records
+the attempt in a durable index, starts a completion witness, and creates one armed kill-on-close job whose
+membership is query-only to everyone else. The delegate actor - from the checkout whose source identity the
+versioned handoff names - is created suspended inside that job with its creation handle retained for its whole
+life. After an advance, a continuation from the advanced source runs in the same job.
+
+**Preserved services are launched by request.** PostgreSQL, the API and the tunnel do not start themselves: each
+is created outside the job by the outer authority, with an explicit stdio handle list naming only its own log
+files. That is what keeps a restored API from holding the scheduled task's output pipe open (#1053). A service is
+committed - kill-on-close cleared - only after it proves readiness against the exact pid that was created:
+postmaster.pid, listener ownership and pg_isready for PostgreSQL; sole listener, `/health/ready` and a published
+`/health/identity` bound to mode, instance and the source identity on disk for the API; and a live process plus a
+protected (401) public endpoint for the tunnel.
+
+**The outer verifies the result itself.** After the job is terminated and zero members are observed through the
+held handle, the outer re-checks every required role against the exact registered instance, reconciles the
+delegate's actual exit status with its durable outcome (exit 0 with Completed, 3 with Failed, and 30/32/33 for
+refusals), and publishes three separate verdicts - operation, cleanup and recovery - before returning. The caller
+releases the installation lease last, after that verification.
+
+**Recovery is an admission decision, never a catch.** When an attempt began mutation and left a required role
+unrestored, one recovery attempt runs only if the failed attempt is proven quiescent and every launch request it
+made is resolved; the recovery restores the prior topology from the source now on disk. Otherwise the restoration
+obligation is retained and the result says exactly what could not be proven. If the outer dies, its witness
+collects the job and publishes the completion receipt, and the next admission decides from durable records.
+Unknown state is never treated as absence, and a host error is published with its own cleanup and admission
+evidence rather than an empty explanation.
+
+**A killed or failed scheduled action is not restarted by Task Scheduler.** RestartOnFailure was measured on this
+host in a disposable installation (InteractiveToken, two cases over 5.5 minutes): a nonzero action exit and a
+hard time-limit termination were both NOT retried. Recovery after an interrupted transition therefore depends on
+the next trigger or the next on-demand run plus the admission rules above; it is not claimed as automatic.
+Fail-closed safety and eventual recovery are separate facts: after an interruption whose termination could not
+be proven (a task stop or hard limit that kills the completion witness with the task), every following attempt
+refuses with the obligation retained rather than mutating. That is safe, and it means an outage lasts until the
+attempt can be proven quiescent - the boot-time fallback is the only automatic path today, and it is acceptable
+only while no unproven attempt exists. The qualification tool records this distinction explicitly as
+`QualifiedPlacementOnly` versus `Qualified` (see the operator guide); a placement-only record never claims that
+recovery was established.
+
+**Launch-context qualification.** A HOME transition refuses - before anything is stopped - unless its own launch
+context is qualified for an exact descriptor. Qualification is produced by
+`product\scripts\Invoke-AeroLinkLaunchContextQualification.ps1`: it registers a trigger-less twin of the
+definition and drives one normal completion, one explicit task stop and one run that outlives the definition's
+own hard limit - each with a transient mutator active inside the attempt, so the ending lands during work rather
+than after it. It then checks by exact identity that the preserved probe survived every path, proves every probe
+stopped and the twin unregistered, and only then writes the record with its integrity sidecar. Cleanup or an
+observation that did not complete withholds the record entirely.
+
+Supported entry points for a scheduled transition are the installed tasks, attested through the Task Scheduler
+API (the running instance's engine process and its bounded wrapper chain), and an operator console started as
+`explorer.exe > cmd.exe`. A launch from a PowerShell prompt or Windows Terminal is **unidentified** and refused
+before teardown. That is a deliberate behaviour change: the supported remedy is to use the repository's own
+`.bat` launchers (which run through that cmd context) or the installed tasks, and to qualify any other context
+explicitly. Existing launcher paths are unchanged.
+
+The qualifier runs its three experiments against a disposable state root
+(`<installation>\qualification-probe-state`, recorded in its summary) and writes the record for the real
+installation. A terminating experiment can leave an attempt whose termination the witness cannot prove, and
+admission refuses every later transition of an installation that holds such an attempt - so the experiments must
+not run inside the state of the installation they certify.
+
+For disposable S4U and first-deployment acceptance without an operator's HOME services, the manually dispatched
+**Isolated Windows process qualification** workflow uses fresh GitHub-hosted Windows machines. It first exercises
+a five-minute diagnostic definition, then each generated definition's actual 135-minute limit. A separate machine
+qualifies the first-deployment definition and runs the real initializer against a local bare origin containing the
+candidate. The fixture refuses operator machines, pre-existing HOME controllers and occupied service ports.
+Its artifacts retain the candidate, exported definitions, per-run descriptors, integrity sidecars, transition
+receipts and cleanup results. These are acceptance evidence for those machines: their account-bound records must
+never be transplanted to HOME or represented as qualification of HOME's principal. This workflow is additional
+operational evidence and does not replace the protected Product quality gate.
+
+Production API readiness has a 600-second allowance inside the existing 2,400-second production-launcher
+deadline. A fresh demonstration database seeds controlled content before opening its listener; measured cold
+startup exceeded the generic service helper's 120-second allowance. This does not extend the enclosing
+continuation, recovery or Task Scheduler budgets, skip readiness checks, or turn a recovered failure into success.
+
+Direct PowerShell task actions pass only PowerShell arguments to the probe; shell redirection is used only for
+`cmd.exe` actions. Probe state is passed explicitly through `InstallationRoot` and `ProbeStateRoot`; the marker
+probe does not launch application services or require a production profile, database or tunnel configuration.
+
+The qualification descriptor binds **placement**, not script bytes: the context kind and chain, the task
+definition's principal, settings and action *image* (not its arguments, triggers or URI), the native placement
+code hash and protocol, the host image, the principal SID, logon type, session class, the actual token
+(elevation, elevation type, integrity level, Administrators-group attributes) and the immediate job flags. A
+product merge therefore does not disqualify an installed definition, and a disposable twin of a definition
+qualifies that definition. A change to placement code, to any principal/settings/token fact, or to the relevant
+scheduling behaviour does invalidate it and requires a new qualification.
+
 API and ngrok ownership uses live Windows executable/command-line and process-creation evidence, not a saved
 PID or a health response alone. Supported creators add limited-query/terminate/synchronize access for the
 operator's account SID to each new service process, retaining the existing ACL. This makes the same process
@@ -249,12 +341,14 @@ the expected executable and exact start time, rejecting stale PIDs. Ngrok's full
 must match; extra URL/config/policy overrides are not treated as the configured tunnel.
 
 One installation lease coordinates production Start, remote-demo Start/Stop, and source reconciliation.
-The OS file handle remains held through a fresh child continuation. Only a descendant with the matching
-per-run capability and live owner creation identity can share it. Contending invocations fail promptly with a
-retry diagnosis. Each child holds a separate OS witness so parent interruption cannot admit a competing
-transition while the child is still running. An interrupted quiescing transition retains its installation/source-bound
-restoration intent. The next launcher revalidates live ownership and current source before recovering; this intent
-is never process provenance. Completed intent is not replayed, and a successful explicit Stop supersedes it.
+The OS file handle is held by the outer authority for the whole attempt, and the delegate and its continuation
+hold it only as descendants with the matching per-run capability and live owner creation identity. Contending
+invocations fail promptly with a retry diagnosis. A competing transition is refused while the previous attempt
+is not proven quiescent: the witness's completion receipt, the launch accounting, and (after a reboot) the boot
+time are the evidence, and a name that vanished without an observation is TerminationUnconfirmed rather than
+admission. An interrupted transition retains its installation/source-bound restoration intent. The next launcher
+revalidates live ownership and current source before recovering; this intent is never process provenance.
+Completed intent is not replayed, and a successful explicit Stop supersedes it.
 Ordinary production/preserve-state and explicit remote Start/scheduled keep-ready remain separate
 policies. No durable disabled-tunnel preference is introduced.
 
@@ -315,6 +409,15 @@ copy** through the supported `Restore-AeroLink.ps1` path, applies this build's u
 the copy is then current, proves current AeroLink can actually serve it, and only then upgrades the real
 database. The ordering is the safety property: a failure at any earlier step leaves the persistent database
 and evidence untouched because nothing had reached them.
+
+**A database with no AeroLink schema is supported through that same path.** The pre-migration restore
+deliberately defers current-code validation, so its archive/evidence checks run against a copy that has no
+`programs` table and no managed-document storage yet: those are reported as *not yet present* rather than as a
+missing count, and the storage health/inventory readers classify the schema first - `Fresh` (no migration
+history and no application relations) or `PreStorage` (a supported older schema that predates the
+managed-document storage migration) means there is nothing to verify before the upgrade, while a partial schema,
+a malformed catalogue answer or an empty answer fails closed. The launcher then migrates the clone, proves it
+current and readable, and only then applies the same upgrade to the real database.
 
 **Isolated means the evidence store too.** A maintenance run pointed at a clone by connection string alone
 still resolved the live `Evidence:Root`, and one of the semantic authorities in this upgrade set rewrites

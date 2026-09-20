@@ -186,6 +186,27 @@ $stubUnreachable = { param($PublicUrl) throw 'network down' }
 $probe = Test-AeroLinkRemoteDemoPublicProtection -Config $config -ProbeScriptBlock $stubUnreachable
 Assert-True ($probe.Protected -eq $false -and $null -eq $probe.StatusCode) 'Unreachable endpoint must not be classified as protected.'
 
+# A disposable qualification installation may point the protection probe at a loopback stand-in edge (the same
+# override the authority's tunnel readiness uses); anything else, including a non-loopback override, is ignored.
+$savedProtectionEnv = @{ Root = $env:AEROLINK_INSTALLATION_ROOT; Probe = $env:AEROLINK_QUALIFICATION_PROTECTION_PROBE }
+try {
+    $env:AEROLINK_INSTALLATION_ROOT = 'C:\disposable-installation'
+    $env:AEROLINK_QUALIFICATION_PROTECTION_PROBE = 'http://127.0.0.1:5197/'
+    $script:capturedProtectionTarget = $null
+    $captureLoopback = { param($PublicUrl) $script:capturedProtectionTarget = $PublicUrl; [pscustomobject]@{ StatusCode = 200 } }
+    $null = Test-AeroLinkRemoteDemoPublicProtection -Config $config -ProbeScriptBlock $captureLoopback
+    Assert-True ($script:capturedProtectionTarget -eq 'http://127.0.0.1:5197/') 'A disposable installation must probe the loopback stand-in edge it names.'
+    $env:AEROLINK_QUALIFICATION_PROTECTION_PROBE = 'https://example.com/'
+    $script:capturedProtectionTarget = $null
+    $captureRemote = { param($PublicUrl) $script:capturedProtectionTarget = $PublicUrl; [pscustomobject]@{ StatusCode = 200 } }
+    $null = Test-AeroLinkRemoteDemoPublicProtection -Config $config -ProbeScriptBlock $captureRemote
+    Assert-True ($script:capturedProtectionTarget -eq 'https://example.ngrok-free.dev') 'A non-loopback protection override must be ignored.'
+}
+finally {
+    if ($null -eq $savedProtectionEnv.Root) { Remove-Item Env:\AEROLINK_INSTALLATION_ROOT -ErrorAction SilentlyContinue } else { $env:AEROLINK_INSTALLATION_ROOT = $savedProtectionEnv.Root }
+    if ($null -eq $savedProtectionEnv.Probe) { Remove-Item Env:\AEROLINK_QUALIFICATION_PROTECTION_PROBE -ErrorAction SilentlyContinue } else { $env:AEROLINK_QUALIFICATION_PROTECTION_PROBE = $savedProtectionEnv.Probe }
+}
+
 # --- 7. Scheduled-task XML contains no secrets ---
 $taskConfig = [pscustomobject]@{
     AeroLinkRoot = $moduleRoot
@@ -230,6 +251,137 @@ try {
 } catch { }
 Assert-True ($null -ne $parsedTimestamp) "Operator log timestamp must parse as ISO-8601; got '$timestampText'."
 Assert-True ($logLine -match 'log-format-probe') 'Operator log line must contain the message.'
+
+# --- 9. Postgres query probe: an empty answer is a failed answer, never a crash (#1055 TA-2) ---
+# Measured in the disposable integration world on 2026-09-17: the first start of a cluster whose `aerolink`
+# database does not exist yet ran `SELECT 1 FROM pg_database WHERE datname='aerolink'`, psql exited 0 with no
+# rows, and `([string]$value).Trim()` threw InvokeMethodOnNull - because in Windows PowerShell 5.1 a [string]
+# cast of $null is still $null. The supported start path must answer "false" there and continue to createdb.
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
+Assert-True ($null -eq (Get-AeroLinkNativeOutputLine $null)) 'Empty native output must yield $null, not throw.'
+Assert-True ($null -eq (Get-AeroLinkNativeOutputLine '')) 'Blank native output must yield $null.'
+Assert-True ($null -eq (Get-AeroLinkNativeOutputLine "`r`n")) 'Whitespace-only native output must yield $null.'
+Assert-True ((Get-AeroLinkNativeOutputLine "`r`n1`r`n") -eq '1') 'The last non-empty native output line must be returned.'
+Assert-True ((Get-AeroLinkNativeOutputLine "connecting`nrow-a`nrow-b") -eq 'row-b') 'The LAST non-empty line must be returned.'
+
+# The default query probe must observe that empty answer without throwing, and the readiness result must be a
+# truthful Ready=false. Two quiet stubs stand in for the binaries; nothing here starts a PostgreSQL cluster.
+# csc.exe is used directly so the same stub compiles under Windows PowerShell 5.1 and PowerShell 7.
+$stubBin = Join-Path $tempRoot 'stub-pg-bin'
+New-Item -ItemType Directory -Path $stubBin -Force | Out-Null
+$stubAssembly = Join-Path $stubBin 'quiet-probe.exe'
+$stubSource = Join-Path $stubBin 'quiet-probe.cs'
+Set-Content -LiteralPath $stubSource -Value 'public static class AeroLinkQuietProbeStub { public static int Main(string[] args) { return 0; } }' -Encoding ASCII
+$csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+if (-not (Test-Path -LiteralPath $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
+& $csc @('/nologo', '/target:exe', ('/out:' + $stubAssembly), $stubSource) | Out-Null
+Assert-True (Test-Path -LiteralPath $stubAssembly) 'The quiet native probe stub must compile for the readiness contract.'
+Copy-Item -LiteralPath $stubAssembly -Destination (Join-Path $stubBin 'psql.exe') -Force
+Copy-Item -LiteralPath $stubAssembly -Destination (Join-Path $stubBin 'pg_isready.exe') -Force
+$stubConfig = [pscustomobject]@{ LogsPath = (Join-Path $tempRoot 'stub-logs'); AeroLinkRoot = $moduleRoot }
+$stubReadiness = Test-AeroLinkRemoteDemoPostgresReady -Config $stubConfig -PostgresBin $stubBin -DatabasePort 55999 -DatabaseName 'aerolink'
+Assert-True ($stubReadiness.PgIsreadyOk -eq $true) 'The quiet stub pg_isready must be observed as accepting connections.'
+Assert-True ($stubReadiness.QueryOk -eq $false) 'A query that answers with no rows must report QueryOk=false.'
+Assert-True ($stubReadiness.Ready -eq $false) 'A query that answers with no rows must report Ready=false, not throw.'
+Assert-True ($stubReadiness.Detail -match 'SELECT 1') 'The not-ready detail must name the real query, not a listener.'
+
+# ---------------------------------------------------------------------------------------------------------
+# The remote-demo log is SHARED: the transition outer tails it while the delegate and the continuation each
+# write it. Two measured facts drive this protocol:
+#   * Add-Content (FileShare.Read) denies other writers: #1055 S4 ON failed an attempt whose services were
+#     already restored with "being used by another process".
+#   * Sharing widely (FileShare.ReadWrite|Delete) is NOT enough: two append handles opened before either write
+#     both start at the same end offset, and the second write overwrites the first (Astra's interleaving probe;
+#     both writes returned success and only one line survived).
+# The logger therefore serialises writers with a bounded retry on a FileShare.Read open, which still admits the
+# tail reader and never silently loses or overwrites a line.
+# ---------------------------------------------------------------------------------------------------------
+
+# Negative control: reproduce the overwrite interleaving with the WIDE share mode, so the reason for the
+# serialised protocol is asserted here rather than assumed.
+$interleaveDir = Join-Path $tempRoot 'interleave-log'
+New-Item -ItemType Directory -Path $interleaveDir -Force | Out-Null
+$interleavePath = Join-Path $interleaveDir 'remote-demo.log'
+$wideShare = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+$writerA = [IO.File]::Open($interleavePath, [IO.FileMode]::Append, [IO.FileAccess]::Write, $wideShare)
+$writerB = [IO.File]::Open($interleavePath, [IO.FileMode]::Append, [IO.FileAccess]::Write, $wideShare)
+try {
+    $a = [Text.Encoding]::UTF8.GetBytes("writer-A`n"); $writerA.Write($a, 0, $a.Length); $writerA.Flush($true)
+    $b = [Text.Encoding]::UTF8.GetBytes("writer-B`n"); $writerB.Write($b, 0, $b.Length); $writerB.Flush($true)
+}
+finally { $writerA.Dispose(); $writerB.Dispose() }
+$interleaved = (Get-Content -LiteralPath $interleavePath -Raw)
+Assert-True (-not ($interleaved -match 'writer-A' -and $interleaved -match 'writer-B')) `
+    'The wide-share interleaving control must show one append overwriting the other; otherwise the serialised protocol is not justified.'
+
+# The protocol's actual serialisation: a second append handle cannot be opened while one is in flight.
+$serialisePath = Join-Path $interleaveDir 'serialised.log'
+$first = [IO.File]::Open($serialisePath, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::Read)
+$secondDenied = $false
+try { $null = [IO.File]::Open($serialisePath, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::Read) }
+catch [IO.IOException] { $secondDenied = $true }
+finally { $first.Dispose() }
+Assert-True $secondDenied 'A second writer must not open the log while an append is in flight; this is what preserves both lines.'
+
+# The real logger succeeds while the TAIL READER (FileShare.ReadWrite|Delete, the arrangement the transition
+# outer actually uses) holds the file.
+$sharedLogConfig = [pscustomobject]@{ LogsPath = (Join-Path $tempRoot 'shared-log') }
+New-Item -ItemType Directory -Path $sharedLogConfig.LogsPath -Force | Out-Null
+$sharedLogPath = Join-Path $sharedLogConfig.LogsPath 'remote-demo.log'
+$sharedLine = "reader-sharing-probe $(Get-Date -Format o)"
+$tailReader = [IO.File]::Open($sharedLogPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+try { Write-AeroLinkRemoteDemoLog -Config $sharedLogConfig -Message $sharedLine }
+finally { $tailReader.Dispose() }
+Assert-True ((Get-Content -LiteralPath $sharedLogPath -Raw) -match [regex]::Escape($sharedLine)) `
+    'The logger must append while the transition tail reader holds the file.'
+
+# A genuinely incompatible holder denies writing: the logger must refuse within its bound, with a named error,
+# and must not change the file.
+$blockedDir = Join-Path $tempRoot 'blocked-log'
+New-Item -ItemType Directory -Path $blockedDir -Force | Out-Null
+$blockedPath = Join-Path $blockedDir 'remote-demo.log'
+Set-Content -LiteralPath $blockedPath -Value 'preexisting' -Encoding UTF8
+$blocker = [IO.File]::Open($blockedPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+$blockedConfig = [pscustomobject]@{ LogsPath = $blockedDir }
+$blockedRefused = $false
+$blockedMessage = ''
+$started = Get-Date
+try { Write-AeroLinkRemoteDemoLog -Config $blockedConfig -Message 'must-not-land' }
+catch { $blockedRefused = $true; $blockedMessage = $_.Exception.Message }
+finally { $blocker.Dispose() }
+$blockedSeconds = ((Get-Date) - $started).TotalSeconds
+Assert-True $blockedRefused 'An incompatible holder must make the logger refuse rather than drop the line silently.'
+Assert-True ($blockedMessage -match 'NOT written') 'The refusal must be named, not a raw sharing violation.'
+Assert-True ($blockedSeconds -lt 20) 'The refusal must be bounded, not an unbounded wait.'
+Assert-True ((Get-Content -LiteralPath $blockedPath -Raw) -match 'preexisting') 'A refused append must not change the file.'
+
+# Overlapping REAL appends across processes: every unique record must appear exactly once and no line may be
+# partial. This is the behaviour the operator-facing log depends on.
+$overlapDir = Join-Path $tempRoot 'overlap-log'
+New-Item -ItemType Directory -Path $overlapDir -Force | Out-Null
+$appendProbe = Join-Path $tempRoot 'append-probe.ps1'
+[IO.File]::WriteAllText($appendProbe, @'
+param([string]$ModulePath, [string]$LogsPath, [string]$Marker, [int]$DelayMs = 0)
+$ErrorActionPreference = 'Stop'
+Import-Module $ModulePath -Force
+if ($DelayMs -gt 0) { Start-Sleep -Milliseconds $DelayMs }
+Write-AeroLinkRemoteDemoLog -Config ([pscustomobject]@{ LogsPath = $LogsPath }) -Message $Marker
+'@, (New-Object Text.UTF8Encoding($false)))
+$markers = @(1..12 | ForEach-Object { "overlap-$_-" + [guid]::NewGuid().ToString('N') })
+$appendProcs = @()
+foreach ($marker in $markers) {
+    $appendProcs += Start-Process -FilePath (Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+        -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "' + $appendProbe + '" -ModulePath "' + $modulePath + '" -LogsPath "' + $overlapDir + '" -Marker ' + $marker + ' -DelayMs ' + (Get-Random -Minimum 0 -Maximum 40)) `
+        -WindowStyle Hidden -PassThru
+}
+foreach ($proc in $appendProcs) { $proc.WaitForExit(60000) | Out-Null }
+$overlapText = Get-Content -LiteralPath (Join-Path $overlapDir 'remote-demo.log') -Raw
+foreach ($marker in $markers) {
+    $occurrences = ([regex]::Matches($overlapText, [regex]::Escape($marker))).Count
+    Assert-True ($occurrences -eq 1) "Overlapping append '$marker' must appear exactly once (found $occurrences)."
+}
+$partialLines = @(($overlapText -split "`r?`n") | Where-Object { $_ -and $_ -notmatch '^\d{4}-\d{2}-\d{2}T[^]]+\] overlap-\d+-[0-9a-f]{32}$' })
+Assert-True ($partialLines.Count -eq 0) "Overlapping appends produced $($partialLines.Count) partial or interleaved line(s)."
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
