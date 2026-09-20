@@ -28,6 +28,16 @@ public static class CodeTargetEndpoints
         var number = page ?? 1;
         var size = pageSize ?? 25;
         var query = search?.Trim().ToLowerInvariant() ?? "";
+        var separator = query.LastIndexOf('.');
+        var exactBase = "";
+        var exactRevision = -1;
+        if (separator > 0 && int.TryParse(query.AsSpan(separator + 1),
+                System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture,
+                out var parsedRevision))
+        {
+            exactBase = query[..separator];
+            exactRevision = parsedRevision;
+        }
         var offset = (number - 1) * size;
 
         if (kind == CodeRelationshipTargetKind.RequirementRevision)
@@ -39,7 +49,8 @@ public static class CodeTargetEndpoints
                          join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
                          where artifact.ProjectId == projectId && effectiveBaseline != null
                              && db.BaselineRequirements.Any(x => x.BaselineId == effectiveBaseline && x.RevisionId == revision.Id)
-                             && (query == "" || artifact.BaseNumber.ToLower().Contains(query) || revision.Statement.ToLower().Contains(query))
+                             && (query == "" || artifact.BaseNumber.ToLower().Contains(query) || revision.Statement.ToLower().Contains(query)
+                                 || (artifact.BaseNumber.ToLower() == exactBase && revision.Revision == exactRevision))
                          select new { revision, artifact };
             var total = await source.CountAsync(ct);
             var rows = await source.OrderBy(x => x.artifact.BaseNumber).ThenByDescending(x => x.revision.Revision)
@@ -52,7 +63,8 @@ public static class CodeTargetEndpoints
         if (kind == CodeRelationshipTargetKind.ChangeRequestRevision)
         {
             var source = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId
-                && x.TargetReleaseId == releaseId && (query == "" || x.BaseNumber.ToLower().Contains(query) || x.Title.ToLower().Contains(query)));
+                && x.TargetReleaseId == releaseId && (query == "" || x.BaseNumber.ToLower().Contains(query) || x.Title.ToLower().Contains(query)
+                    || (x.BaseNumber.ToLower() == exactBase && x.Revision == exactRevision)));
             var total = await source.CountAsync(ct);
             var rows = await source.OrderBy(x => x.BaseNumber).ThenByDescending(x => x.Revision).ThenBy(x => x.Id)
                 .Skip(offset).Take(size).ToListAsync(ct);
@@ -66,7 +78,9 @@ public static class CodeTargetEndpoints
                          join owner in db.SystemChangeRequests.AsNoTracking() on proposal.ChangeRequestId equals owner.Id
                          where owner.ProjectId == projectId && owner.TargetReleaseId == releaseId
                              && (query == "" || proposal.BaseNumber.ToLower().Contains(query) || proposal.Statement.ToLower().Contains(query)
-                                 || owner.BaseNumber.ToLower().Contains(query))
+                                 || owner.BaseNumber.ToLower().Contains(query)
+                                 || (proposal.BaseNumber.ToLower() == exactBase && proposal.Revision == exactRevision)
+                                 || (owner.BaseNumber.ToLower() == exactBase && owner.Revision == exactRevision))
                          select new { proposal, owner };
             var total = await source.CountAsync(ct);
             var rows = await source.OrderBy(x => x.owner.BaseNumber).ThenByDescending(x => x.owner.Revision)
@@ -84,7 +98,8 @@ public static class CodeTargetEndpoints
                         join report in db.ProblemReports.AsNoTracking() on snapshot.ProblemReportId equals report.Id
                         where report.ProjectId == projectId && (reportId == null || report.Id == reportId)
                         select new { snapshot, report.ReportNumber };
-        if (query != "") snapshots = snapshots.Where(x => x.ReportNumber.ToLower().Contains(query));
+        if (query != "") snapshots = snapshots.Where(x => x.ReportNumber.ToLower().Contains(query)
+            || (x.ReportNumber.ToLower() == exactBase && x.snapshot.Revision == exactRevision));
         var snapshotTotal = await snapshots.CountAsync(ct);
         var snapshotRows = await snapshots.OrderBy(x => x.ReportNumber).ThenByDescending(x => x.snapshot.Revision)
             .ThenBy(x => x.snapshot.Id).Skip(offset).Take(size).ToListAsync(ct);

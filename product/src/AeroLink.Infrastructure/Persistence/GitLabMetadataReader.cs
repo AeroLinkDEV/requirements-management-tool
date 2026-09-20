@@ -472,6 +472,15 @@ public sealed class GitLabMetadataReader(HttpClient client, IOptions<ProjectGitL
         return true;
     }
 
+    /// <summary>Identity comparison only; this does not grant access or establish a successful remote observation.</summary>
+    public static bool MatchesVerifiedRepositoryIdentity(ProjectRepositoryConfiguration configuration, string baseUrl) =>
+        configuration.Status == ProjectRepositorySetupStatus.Verified
+        && string.Equals(configuration.Provider, "GitLab", StringComparison.OrdinalIgnoreCase)
+        && configuration.RemoteProjectId is > 0
+        && TryCreateServer(baseUrl, out var server)
+        && TryNormalizeEndpoint(configuration.Endpoint, server!, out var path)
+        && string.Equals(path, configuration.RemotePathWithNamespace, StringComparison.Ordinal);
+
     private static bool TryCreateServer(string? value, out Uri? server)
     {
         server = null;

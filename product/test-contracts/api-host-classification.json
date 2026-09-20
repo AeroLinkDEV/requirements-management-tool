@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 154,
-    "tests": 975,
-    "knownCases": 1107,
+    "tests": 977,
+    "knownCases": 1112,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 59,
-      "tests": 360,
-      "knownCases": 416,
+      "tests": 362,
+      "knownCases": 421,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -656,6 +656,19 @@
       ]
     },
     {
+      "cls": "GitLabSourceApiTests",
+      "tests": 6,
+      "knownCases": 9,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "TeamWorkProjectionApiTests",
       "tests": 6,
       "knownCases": 6,
@@ -702,18 +715,6 @@
       "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
       "intents": [
         "ef-translation",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "GitLabSourceApiTests",
-      "tests": 5,
-      "knownCases": 8,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
-      "intents": [
-        "auth-policy",
         "http-boundary"
       ]
     },
@@ -837,6 +838,17 @@
       ]
     },
     {
+      "cls": "CodeTargetApiTests",
+      "tests": 3,
+      "knownCases": 9,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "DraftDocumentApiTests",
       "tests": 3,
       "knownCases": 3,
@@ -878,17 +890,6 @@
       "cls": "ShowcaseUpgradeApiTests",
       "tests": 3,
       "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "CodeTargetApiTests",
-      "tests": 2,
-      "knownCases": 5,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",

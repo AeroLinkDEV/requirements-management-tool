@@ -1,12 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 
 const sha = 'a'.repeat(40)
-async function mockWorkspace(page: Page) {
+const demoBinding = { configurationId: 'configuration-one', configurationVersion: 7, remoteProjectId: 17 }
+async function mockWorkspace(page: Page, demonstration?: typeof demoBinding) {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url())
     const path = url.pathname
     let body: unknown = {}
-    if (path.endsWith('/code/source')) body = { projectId: 'project-one', releaseId: 'release-one', version: 1,
+    if (path.endsWith('/code/source')) body = { projectId: 'project-one', releaseId: 'release-one', version: 1, demonstration,
       selectionEventId: 'selection-one', capabilities: { canSelect: true, sourceSelectionFrozen: false }, snapshot: {
         id: 'source-one', instanceBaseUrl: 'https://gitlab.example', pathWithNamespace: 'demo/fms', commitSha: sha, friendlyRef: 'main',
       } }
@@ -46,6 +47,7 @@ test('linked register pages recorded identities and keeps unknown approvals expl
   await page.getByRole('button', { name: '!3', exact: true }).click()
   await expect(page.getByText('GitLab approvals unknown')).toBeVisible()
   await expect(page.getByText('LLRCR-00001.00')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Synthetic demonstration' })).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('merge-request-register.png'), fullPage: true })
   await page.getByRole('button', { name: 'Next page', exact: true }).click()
   await expect(page.getByRole('button', { name: '!9', exact: true })).toBeVisible()
@@ -60,11 +62,11 @@ test('explorer includes unlinked files and requests relationships for the exact 
   await expect(page.getByRole('button', { name: 'README.md', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'src', exact: true }).click()
   await page.getByRole('button', { name: 'route.c', exact: true }).click()
-  await expect(page.getByText('No relationship recorded for this file.')).toBeVisible()
+  await expect(page.getByText('No LLR link or other AeroLink relationship is recorded for this file.')).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open exact file in GitLab' })).toHaveAttribute('href', `https://gitlab.example/demo/fms/-/blob/${sha}/src/route.c`)
   await page.screenshot({ path: testInfo.outputPath('code-explorer.png'), fullPage: true })
   await page.setViewportSize({ width: 700, height: 900 })
-  await expect(page.getByText('No relationship recorded for this file.')).toBeVisible()
+  await expect(page.getByText('No LLR link or other AeroLink relationship is recorded for this file.')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('code-explorer-narrow.png'), fullPage: true })
 })
 
@@ -90,8 +92,54 @@ test('shared picker clears old selections on page and target-kind changes and su
   await page.screenshot({ path: testInfo.outputPath('shared-link-picker.png'), fullPage: true })
   await dialog.getByRole('button', { name: 'Record relationship' }).click()
   await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Link AeroLink artifact' })).toBeFocused()
   expect(recorded).toMatchObject({ releaseId: 'release-one', targetKind: 'RequirementProposal',
     targetId: 'RequirementProposal-1', expectedConfigurationVersion: 7, meaning: 'RelatedContext', mergeRequestIid: 3 })
+})
+
+for (const subject of ['file', 'merge request']) {
+  test(`link picker restores ${subject} opener focus after searching and Escape`, async ({ page }) => {
+    await mockWorkspace(page)
+    await page.goto('/tests/fixtures/code-workspace.html')
+    if (subject === 'file') {
+      await page.getByRole('button', { name: 'Code Explorer', exact: true }).click()
+      await page.getByRole('button', { name: 'src', exact: true }).click()
+      await page.getByRole('button', { name: 'route.c', exact: true }).click()
+    } else {
+      await page.getByRole('button', { name: '!3', exact: true }).click()
+    }
+    const opener = page.getByRole('button', { name: 'Link AeroLink artifact' })
+    await opener.click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByLabel('Artifact type').selectOption('RequirementProposal')
+    await dialog.getByRole('textbox', { name: 'Search link targets' }).fill('flight plan')
+    await dialog.getByRole('button', { name: 'Search targets' }).click()
+    await dialog.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    await expect(opener).toBeFocused()
+  })
+}
+
+test('failed post-save refresh cannot restore focus after the user changes selection', async ({ page }) => {
+  await mockWorkspace(page)
+  let detailReads = 0
+  await page.route('**/code/merge-requests/3?**', async route => {
+    detailReads++
+    if (detailReads === 2) await route.fulfill({ status: 503, json: { error: 'Metadata temporarily unavailable.' } })
+    else await route.fallback()
+  })
+  await page.route('**/code/relationships/merge-requests', route => route.fulfill({ json: { id: 'new-link', version: 1 } }))
+  await page.goto('/tests/fixtures/code-workspace.html')
+  const selection = page.getByRole('button', { name: '!3', exact: true })
+  await selection.click()
+  await page.getByRole('button', { name: 'Link AeroLink artifact' }).click()
+  await page.getByRole('radio', { name: /LLR-00001.00/ }).check()
+  await page.getByRole('button', { name: 'Record relationship' }).click()
+  await expect(page.getByRole('alert')).toHaveText('Metadata temporarily unavailable.')
+  await page.getByRole('button', { name: 'Close merge request inspector' }).click()
+  await selection.click()
+  await expect(page.getByRole('button', { name: 'Link AeroLink artifact' })).toBeVisible()
+  await expect(selection).toBeFocused()
 })
 
 test('relationship withdrawal sends expected version and retains an attributable rationale', async ({ page }) => {
@@ -235,4 +283,58 @@ test('Code browsers use the shared resizable frame and stack it at narrow widths
   await page.setViewportSize({ width: 700, height: 900 })
   await expect(layout.getByRole('separator')).toBeHidden()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy()
+})
+
+for (const outcome of ['cached', 'failure', 'configuration changed']) {
+  test(`synthetic banner reports ${outcome} observation truthfully`, async ({ page }, testInfo) => {
+    await mockWorkspace(page, demoBinding)
+    let reads = 0
+    await page.route('**/repository/merge-requests?**', async route => {
+      const url = new URL(route.request().url())
+      expect(url.searchParams.get('pageSize')).toBe('1')
+      reads++
+      await route.fulfill({ json: { ...demoBinding,
+        configurationVersion: outcome === 'configuration changed' ? 8 : 7,
+        checkedAt: '2026-09-20T03:00:00Z', cache: { reused: outcome === 'cached' },
+        observation: { succeeded: outcome !== 'failure' } } })
+    })
+    await page.goto('/tests/fixtures/code-workspace.html')
+    const banner = page.getByRole('region', { name: 'Synthetic demonstration' })
+    await expect(banner).toBeVisible()
+    if (outcome === 'cached') {
+      await expect(banner).toContainText('Synthetic demonstration content · live GitLab metadata')
+      await expect(banner).toContainText('cached observation (up to 15 seconds)')
+      await expect(banner.locator('time')).toHaveAttribute('datetime', '2026-09-20T03:00:00Z')
+      await page.screenshot({ path: testInfo.outputPath('synthetic-live-banner.png'), fullPage: true })
+    } else {
+      await expect(banner).not.toContainText('live GitLab metadata')
+      await expect(banner).toContainText(outcome === 'failure' ? 'GitLab metadata unavailable.' : 'Repository configuration changed;')
+    }
+    expect(reads).toBe(1)
+    await banner.getByRole('button', { name: 'Check GitLab connection' }).click()
+    await expect.poll(() => reads).toBe(2)
+  })
+}
+
+test('a delayed demo connection observation cannot survive page navigation', async ({ page }) => {
+  await mockWorkspace(page, demoBinding)
+  let release: (() => void) | undefined
+  const held = new Promise<void>(resolve => { release = resolve })
+  let started = false
+  await page.route('**/repository/merge-requests?**', async route => {
+    started = true
+    await held
+    await route.fulfill({ json: { ...demoBinding, checkedAt: '2026-09-20T03:00:00Z', cache: { reused: false },
+      observation: { succeeded: true } } }).catch(() => {})
+  })
+  await page.goto('/tests/fixtures/code-workspace.html')
+  await expect.poll(() => started).toBeTruthy()
+  await expect(page.getByText('GitLab metadata not yet checked.')).toBeVisible()
+  await page.route('**/code/source?**', route => route.fulfill({ json: { projectId: 'project-one', releaseId: 'release-one',
+    version: 0, capabilities: { canSelect: true, sourceSelectionFrozen: false } } }))
+  await page.getByRole('button', { name: 'Code Explorer', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Choose a build source to browse files' })).toBeVisible()
+  release!()
+  await expect(page.getByRole('region', { name: 'Synthetic demonstration' })).toHaveCount(0)
+  await expect(page.getByText('Synthetic demonstration content · live GitLab metadata')).toHaveCount(0)
 })

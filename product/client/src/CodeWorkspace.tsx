@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ControlledArtifactExplorerHeader, ControlledArtifactExplorerLayout, ControlledArtifactInspector, ControlledArtifactInspectorEmpty } from './ControlledArtifactExplorer'
 import CodeSourcePanel, { type CodeSource } from './CodeSourcePanel'
 import CodeTraceabilityCenter from './CodeTraceabilityCenter'
 import CodeLinkPicker from './CodeLinkPicker'
+import CodeDemonstrationBanner from './CodeDemonstrationBanner'
 import CodeRelationshipList from './CodeRelationshipList'
 import { codeQuery, mergeRequestState, useCodeRead, type CodePage, type CodeRelationship, type InspectedMergeRequest,
   type MergeRequest, type MetadataObservation, type RegisteredMergeRequest, type TreeEntry, type TreePage } from './codeWorkspaceData'
@@ -28,6 +29,9 @@ function ScopedCodeWorkspace({ api, projectId, releaseId, readOnly, page, onBack
       <button aria-current={page === 'explorer' ? 'page' : undefined} onClick={() => onPage('explorer')}>Code Explorer</button>
     </nav>
     <p className="codeBoundary">GitLab owns source and merge review. Recorded relationships provide context; accepted implementation evidence is a separate engineering decision.</p>
+    {currentSource?.demonstration && <CodeDemonstrationBanner
+      key={`${projectId}/${releaseId}/${currentSource.demonstration.configurationId}/${currentSource.demonstration.configurationVersion}`}
+      {...{ api, projectId }} binding={currentSource.demonstration} />}
     <CodeSourcePanel {...{ api, projectId, releaseId, readOnly }} onSource={setSource} />
     {page === 'mergeRequests' ? <MergeRequestRegister {...{ api, projectId, releaseId }} readOnly={readOnly || !currentSource?.capabilities?.canSelect} />
       : <SourceExplorer key={currentSource?.selectionEventId ?? 'unselected'} {...{ api, projectId, releaseId }} readOnly={readOnly || !currentSource?.capabilities?.canSelect} source={currentSource} />}
@@ -38,6 +42,32 @@ function ScopedCodeWorkspace({ api, projectId, releaseId, readOnly, page, onBack
 }
 
 type ArtifactLinkContext = { fixedTarget?: { kind: string; id: string }; onLinked?: () => void }
+function useLinkReturnFocus(linking: boolean, subjectKey: string) {
+  const opener = useRef<HTMLButtonElement>(null)
+  const wasLinking = useRef(false)
+  const restore = useRef(false)
+  const previousSubject = useRef(subjectKey)
+  useEffect(() => {
+    if (previousSubject.current !== subjectKey) {
+      restore.current = false
+      wasLinking.current = false
+      previousSubject.current = subjectKey
+    }
+    if (wasLinking.current && !linking) restore.current = true
+    wasLinking.current = linking
+    // Saving refreshes metadata and temporarily removes the opener. Restore when it returns.
+    const focused = document.activeElement
+    if (!linking && restore.current && focused instanceof HTMLElement && focused.isConnected
+      && focused !== document.body && focused !== document.documentElement && focused !== opener.current) {
+      restore.current = false
+    }
+    if (!linking && restore.current && opener.current) {
+      opener.current.focus()
+      restore.current = false
+    }
+  })
+  return opener
+}
 function CodeRegisterFrame({ resizableKey, children, inspector }: {
   resizableKey: string
   children: ReactNode
@@ -58,6 +88,7 @@ export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixe
   const [state, setState] = useState('all')
   const [refresh, setRefresh] = useState(0)
   const [selected, setSelected] = useState<{ iid: number; origin?: string; remoteProjectId?: number }>()
+  const linkButton = useLinkReturnFocus(linking, `${projectId}/${releaseId}/${mode}/${selected?.origin}/${selected?.remoteProjectId}/${selected?.iid}`)
   const base = `${api}/api/projects/${projectId}`
   const linked = useCodeRead<CodePage<RegisteredMergeRequest>>(mode === 'linked'
     ? `${base}/code/merge-requests/register?${codeQuery({ releaseId, page, pageSize: 25 })}` : undefined, refresh)
@@ -105,7 +136,7 @@ export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixe
         <p>{mr.approvals?.known ? `${mr.approvals.approvedBy.length} recorded GitLab approval(s)` : 'GitLab approvals unknown'}</p>
         {mr.approvals?.known && <ul>{mr.approvals.approvedBy.map(person => <li key={person.id}>{person.name} (@{person.username})</li>)}</ul>}
         <a href={mr.webUrl} target="_blank" rel="noreferrer">Open in GitLab ↗</a>
-        {!readOnly && <p><button onClick={() => setLinking(true)}>Link AeroLink artifact</button></p>}
+        {!readOnly && <p><button ref={linkButton} onClick={() => setLinking(true)}>Link AeroLink artifact</button></p>}
       </> : !detail.loading && !remoteDetail.loading && <p>Current GitLab metadata is unknown. Retained relationships remain readable.</p>}
       {mode === 'linked' && <CodeRelationshipList {...{ api, projectId, readOnly }} onChanged={() => setRefresh(value => value + 1)} items={[...(detail.value?.mergeRequests ?? []), ...(detail.value?.files ?? [])]} />}
     </ControlledArtifactInspector> : <ControlledArtifactInspectorEmpty title="merge request"
@@ -139,6 +170,7 @@ export function SourceExplorer({ api, projectId, releaseId, source, readOnly, fi
   const [linkPage, setLinkPage] = useState(1)
   const [refresh, setRefresh] = useState(0)
   const snapshot = source?.snapshot
+  const linkButton = useLinkReturnFocus(linking, `${projectId}/${releaseId}/${source?.selectionEventId}/${path}/${selected?.path}/${linkedOnly}`)
   const base = `${api}/api/projects/${projectId}`
   const tree = useCodeRead<MetadataObservation<TreePage>>(snapshot && !linkedOnly
     ? `${base}/code/source/${snapshot.id}/tree?${codeQuery({ commit: snapshot.commitSha, path, cursor: cursors.at(-1), pageSize: 25 })}` : undefined, refresh)
@@ -177,9 +209,9 @@ export function SourceExplorer({ api, projectId, releaseId, source, readOnly, fi
       <small>EXACT SOURCE</small><code>{snapshot.commitSha}</code>
       <p><a href={`${snapshot.instanceBaseUrl}/${snapshot.pathWithNamespace.split('/').map(encodeURIComponent).join('/')}/-/blob/${snapshot.commitSha}/${selected.path.split('/').map(encodeURIComponent).join('/')}`}
         target="_blank" rel="noreferrer">Open exact file in GitLab ↗</a></p>
-      {!readOnly && selectedFileObserved && <button onClick={() => setLinking(true)}>Link AeroLink artifact</button>}
+      {!readOnly && selectedFileObserved && <button ref={linkButton} onClick={() => setLinking(true)}>Link AeroLink artifact</button>}
       {links.loading && <p>Loading recorded relationships…</p>}{links.error && <p role="alert">{links.error}</p>}
-      {links.value && <CodeRelationshipList {...{ api, projectId, readOnly }} onChanged={() => setRefresh(value => value + 1)} items={links.value.items} empty="No relationship recorded for this file." />}
+      {links.value && <CodeRelationshipList {...{ api, projectId, readOnly }} onChanged={() => setRefresh(value => value + 1)} items={links.value.items} empty="No LLR link or other AeroLink relationship is recorded for this file." />}
       {links.value && links.value.total > 25 && <div className="codePagination">
         <button disabled={linkPage <= 1} onClick={() => setLinkPage(value => value - 1)}>Previous relationship page</button>
         <span>Page {linkPage} · {links.value.total} relationships</span>

@@ -18,7 +18,8 @@ public static class GitLabSourceEndpoints
     }
 
     private static async Task<IResult> ReadAsync(Guid projectId, Guid releaseId,
-        HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
+        HttpContext http, AeroLinkDbContext db, IdentityService identity,
+        IOptions<ProjectGitLabOptions> settings, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         var denied = await GitLabMetadataEndpoints.CurrentAccessFailureAsync(projectId, http, db, ct);
@@ -35,8 +36,9 @@ public static class GitLabSourceEndpoints
         var canSelect = !frozen && await http.HasProjectRoleAsync(db, identity, projectId, ct,
             ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager);
         http.Response.Headers.CacheControl = "no-store";
+        var demonstration = await GitLabSyntheticDemonstration.ReadAsync(db, projectId, settings.Value, ct);
         return Results.Ok(new { projectId, releaseId, version = current?.Version ?? 0,
-            selectionEventId = current?.SelectionEventId, snapshot,
+            selectionEventId = current?.SelectionEventId, snapshot, demonstration,
             capabilities = new { canSelect, sourceSelectionFrozen = frozen } });
     }
 

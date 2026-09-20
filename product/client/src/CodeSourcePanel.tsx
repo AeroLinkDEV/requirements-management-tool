@@ -12,6 +12,7 @@ export type CodeSourceSnapshot = {
 export type CodeSource = {
   projectId: string; releaseId: string; version: number; selectionEventId?: string;
   snapshot?: CodeSourceSnapshot; capabilities: { canSelect: boolean; sourceSelectionFrozen: boolean };
+  demonstration?: { configurationId: string; configurationVersion: number; remoteProjectId: number };
 }
 type Preview = { reference: string; referenceKind: string; sha: string; configurationVersion: number; selectionVersion: number }
 type History = { page: number; total: number; items: {

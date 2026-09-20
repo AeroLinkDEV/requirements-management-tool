@@ -64,11 +64,13 @@ public sealed class GitLabDisplayMetadataCache(TimeProvider? timeProvider = null
         TaskCompletionSource<object> completion)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        GitLabDisplayObservation<T>? observed = null;
+        Exception? failure = null;
         try
         {
             // One caller abandoning its page must not cancel another caller's shared observation.
             // The reader also has its own bounded transport timeout; this bounds the entire shared call.
-            var observed = Wrap(await observe(timeout.Token));
+            observed = Wrap(await observe(timeout.Token));
             if (observed.Observation.Succeeded)
             {
                 var bytes = JsonSerializer.SerializeToUtf8Bytes(observed).Length;
@@ -83,20 +85,36 @@ public sealed class GitLabDisplayMetadataCache(TimeProvider? timeProvider = null
                     }
                 }
             }
-            completion.TrySetResult(observed);
         }
         catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
-            completion.TrySetResult(Wrap(new GitLabMetadataResult<T>(GitLabMetadataStatus.Timeout,
-                "metadata_timeout", "GitLab metadata did not complete within the display observation window.")));
+            observed = Wrap(new GitLabMetadataResult<T>(GitLabMetadataStatus.Timeout,
+                "metadata_timeout", "GitLab metadata did not complete within the display observation window."));
         }
-        catch (Exception failure)
+        catch (Exception exception)
         {
-            completion.TrySetException(failure);
-            // All waiters may have navigated away; observe the fault without retaining a poisoned entry.
-            _ = completion.Task.Exception;
+            failure = exception;
         }
-        finally { lock (gate) pending.Remove(key); }
+        finally
+        {
+            lock (gate)
+            {
+                // Remove the completed operation before waking waiters. Otherwise a caller can advance
+                // past the observation expiry after completion is signaled but before this cleanup runs,
+                // then reuse an already-completed pending task instead of starting a fresh observation.
+                pending.Remove(key);
+                if (failure is not null)
+                    completion.TrySetException(failure);
+                else
+                    completion.TrySetResult(observed!);
+            }
+
+            if (failure is not null)
+            {
+                // All waiters may have navigated away; observe the fault without retaining a poisoned entry.
+                _ = completion.Task.Exception;
+            }
+        }
     }
 
     private void Remove(string key)

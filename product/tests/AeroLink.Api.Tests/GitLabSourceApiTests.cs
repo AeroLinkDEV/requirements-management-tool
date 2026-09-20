@@ -9,12 +9,65 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace AeroLink.Api.Tests;
 
 public sealed class GitLabSourceApiTests
 {
     private static readonly string Sha = new('a', 40);
+
+    [Fact]
+    public async Task Synthetic_demo_classification_requires_exact_operator_binding_and_verified_repository()
+    {
+        using var transport = new Transport(_ => throw new InvalidOperationException("Classification must not call GitLab"));
+        using var factory = new AeroLinkApiFactory();
+        using var configured = Configure(factory, transport);
+        var data = await SeedAsync(configured.Services, programCode: FmsShowcaseSeeder.ProgramCode);
+        using var client = configured.CreateClient();
+        await SignInAsync(client, data.UserName);
+        var route = $"/api/projects/{data.ProjectId}/code/source?releaseId={data.ReleaseId}";
+        var settings = configured.Services.GetRequiredService<IOptions<ProjectGitLabOptions>>().Value;
+        async Task<JsonElement> Read() => await client.GetFromJsonAsync<JsonElement>(route);
+        Assert.Equal(JsonValueKind.Null, (await Read()).GetProperty("demonstration").ValueKind);
+        settings.SyntheticDemoProjectId = data.ProjectId.ToString();
+        settings.SyntheticDemoRemoteProjectId = "17";
+        var bound = (await Read()).GetProperty("demonstration");
+        Assert.Equal(17, bound.GetProperty("remoteProjectId").GetInt64());
+        Assert.Equal(2, bound.GetProperty("configurationVersion").GetInt64());
+
+        settings.SyntheticDemoProjectId = Guid.NewGuid().ToString();
+        Assert.Equal(JsonValueKind.Null, (await Read()).GetProperty("demonstration").ValueKind);
+        settings.SyntheticDemoProjectId = data.ProjectId.ToString();
+        foreach (var remote in new[] { "", "invalid", "0", "18" })
+        {
+            settings.SyntheticDemoRemoteProjectId = remote;
+            Assert.Equal(JsonValueKind.Null, (await Read()).GetProperty("demonstration").ValueKind);
+        }
+        settings.SyntheticDemoRemoteProjectId = "17";
+        settings.BaseUrl = "https://different.example";
+        Assert.Equal(JsonValueKind.Null, (await Read()).GetProperty("demonstration").ValueKind);
+        settings.BaseUrl = "https://gitlab.example";
+
+        using var scope = configured.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var repository = await db.ProjectRepositoryConfigurations.SingleAsync(x => x.ProjectId == data.ProjectId);
+        repository.RecordVerification("tester", DateTimeOffset.UtcNow, 17, "group/project");
+        await db.SaveChangesAsync();
+        var refreshed = (await Read()).GetProperty("demonstration");
+        Assert.Equal(repository.Id, refreshed.GetProperty("configurationId").GetGuid());
+        Assert.Equal(3, refreshed.GetProperty("configurationVersion").GetInt64());
+        repository.RecordVerification("tester", DateTimeOffset.UtcNow, 17, "group/different");
+        await db.SaveChangesAsync();
+        Assert.Equal(JsonValueKind.Null, (await Read()).GetProperty("demonstration").ValueKind);
+        repository.RecordVerificationFailure("tester", DateTimeOffset.UtcNow);
+        await db.SaveChangesAsync();
+        Assert.Equal(JsonValueKind.Null, (await Read()).GetProperty("demonstration").ValueKind);
+        var ordinary = await SeedAsync(configured.Services);
+        settings.SyntheticDemoProjectId = ordinary.ProjectId.ToString();
+        Assert.Null(await GitLabSyntheticDemonstration.ReadAsync(db, ordinary.ProjectId, settings, default));
+        Assert.Equal(0, transport.Calls);
+    }
 
     [Fact]
     public async Task Exact_preview_confirmation_is_persisted_and_stale_confirmation_cannot_overwrite_it()
@@ -33,6 +86,7 @@ public sealed class GitLabSourceApiTests
         using var read = await client.GetAsync(route + "?releaseId=" + data.ReleaseId);
         Assert.Equal(HttpStatusCode.OK, read.StatusCode);
         using var state = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Null, state.RootElement.GetProperty("demonstration").ValueKind);
         Assert.Equal(eventId, state.RootElement.GetProperty("selectionEventId").GetGuid());
         Assert.Equal(Sha, state.RootElement.GetProperty("snapshot").GetProperty("commitSha").GetString());
         Assert.Equal("https://gitlab.example", state.RootElement.GetProperty("snapshot").GetProperty("instanceBaseUrl").GetString());
@@ -167,12 +221,12 @@ public sealed class GitLabSourceApiTests
             services.AddHttpClient<GitLabMetadataReader>().ConfigurePrimaryHttpMessageHandler(() => transport);
         }));
     private static async Task<(Guid ProjectId, Guid ReleaseId, Guid UserId, string UserName)> SeedAsync(
-        IServiceProvider services, ProgramRole role = ProgramRole.Engineer)
+        IServiceProvider services, ProgramRole role = ProgramRole.Engineer, string? programCode = null)
     {
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
         var tag = Guid.NewGuid().ToString("N")[..8]; var now = DateTimeOffset.UtcNow;
-        var program = new ProgramRecord("Source test " + tag, "GS" + tag);
+        var program = new ProgramRecord("Source test " + tag, programCode ?? "GS" + tag);
         var project = new ProjectRecord(program.Id, "Source project", "Software");
         var release = new SoftwareRelease(project.Id, "1.0", false);
         var user = new UserAccount("source." + tag, "Source engineer", tag + "@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
