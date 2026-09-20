@@ -307,6 +307,7 @@
         "ChangeRequestTargetReleaseGuardApiTests",
         "ChangeRequestUpstreamTraceApiTests",
         "ClosedReleaseAuthoringTests",
+        "CodeEvidenceAcceptanceRaceTests",
         "CodeRelationshipApiTests",
         "ControlledAttachmentMutationApiTests",
         "ControlledEditingCheckInApiTests",
@@ -1860,6 +1861,7 @@
       "path": "/api/projects/{projectId:guid}/code/evidence",
       "file": "CodeEvidenceEndpoints.cs",
       "coveredBy": [
+        "CodeEvidenceAcceptanceRaceTests",
         "CodeRelationshipApiTests"
       ]
     },

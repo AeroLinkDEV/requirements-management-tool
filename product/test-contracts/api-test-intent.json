@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 968,
-    "cases": 1094,
-    "classes": 152,
-    "hostedTests": 919,
-    "hostedCases": 1023,
+    "tests": 972,
+    "cases": 1103,
+    "classes": 153,
+    "hostedTests": 923,
+    "hostedCases": 1032,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 15,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 596,
-      "cases": 673,
+      "tests": 600,
+      "cases": 682,
       "unknownCases": 0,
-      "classes": 119
+      "classes": 120
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -3770,6 +3770,78 @@
       "sourceLines": {
         "start": 93,
         "end": 109
+      }
+    },
+    {
+      "cls": "CodeEvidenceAcceptanceRaceTests",
+      "test": "Deferred_provider_preflight_rechecks_source_review_and_authority",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 5,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 23,
+        "end": 56
+      }
+    },
+    {
+      "cls": "CodeEvidenceAcceptanceRaceTests",
+      "test": "Missing_or_non_blob_file_provider_result_rolls_back_without_evidence",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 2,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 118,
+        "end": 137
+      }
+    },
+    {
+      "cls": "CodeEvidenceAcceptanceRaceTests",
+      "test": "Mixed_merge_and_file_acceptance_commits_atomically_and_replaces_only_with_fresh_selector_version",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 58,
+        "end": 92
+      }
+    },
+    {
+      "cls": "CodeEvidenceAcceptanceRaceTests",
+      "test": "Non_implements_merge_context_rolls_back_after_successful_provider_preflight",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 94,
+        "end": 116
       }
     },
     {
