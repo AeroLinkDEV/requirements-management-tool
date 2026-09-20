@@ -37,9 +37,18 @@
   align-items: baseline;
   gap: 7px;
   min-width: 0;
+  /* DEC-049's 24px minimum activation target: the summary is the whole tap and click area, so the
+     control itself — not its padded parent — carries the height. */
+  min-height: 24px;
 }
 
 .instanceBadge summary::-webkit-details-marker { display: none; }
+
+/* A declared label may contain unbroken tokens (no spaces, no hyphens). anywhere adds intra-word break
+   opportunities so the label can never escape the capped chip — ordinary words still wrap at their
+   boundaries first. It also collapses the flex child's min-content, which is what let a single long
+   token push past the badge box (Checkpoint B, F01). */
+.instanceBadge summary [data-testid="instance-label"] { overflow-wrap: anywhere; }
 
 .instanceBadge--homecanonical {
   border-color: #3f7f72;

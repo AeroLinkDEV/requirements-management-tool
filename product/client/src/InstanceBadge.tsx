@@ -21,6 +21,7 @@ import "./InstanceBadge.css";
  */
 
 type InstanceIdentity = {
+  sourceSha?: string;
   sourceShortSha?: string;
   mode?: string;
   mainCurrency?: { state: string; checkedAtUtc?: string | null; remoteSha?: string | null } | null;
@@ -111,10 +112,13 @@ export default function InstanceBadge() {
 
   // Supplied facts only. Fields the server does not send (including the loopback redactions in
   // RuntimeIdentity.cs) stay absent everywhere — never inferred, never fetched from another endpoint.
+  // The full source identity leads when supplied; the short form is the fallback, not a substitute
+  // shown alongside a missing full value (#1048).
+  const sourceSha = identity.sourceSha ?? identity.sourceShortSha ?? null;
   const details: ReadonlyArray<[string, string]> = [
     ["Instance", `${label} (${classification})`],
     identity.database?.name ? ["Database", identity.database.name] : null,
-    identity.sourceShortSha ? ["Source", identity.sourceShortSha] : null,
+    sourceSha ? ["Source", sourceSha] : null,
     identity.mode ? ["Mode", identity.mode] : null,
     showCurrency ? ["Main currency", `${currencyLabel}; ${checkAge}`] : null,
     showCurrency && currency?.checkedAtUtc ? ["Last check", currency.checkedAtUtc] : null,

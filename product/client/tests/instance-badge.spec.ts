@@ -178,6 +178,60 @@ test('fields the server does not supply stay absent from the disclosure', async 
   await expect(details).not.toContainText('remote main')
 })
 
+test('the Source row shows the full supplied SHA, falls back to the short form, and stays absent when neither is supplied', async ({ page }) => {
+  // Distinguishable hashes so a wrong-row match cannot pass: source (a…), remote main (c…), snapshot
+  // provenance (d…) are all different 40-character values.
+  const fullSha = 'a'.repeat(40)
+  const shortSha = 'b1c2d3e4'
+  const remoteSha = 'c'.repeat(40)
+  const snapshotSha = 'd'.repeat(40)
+  const cases = [
+    { name: 'full supplied', payload: { sourceSha: fullSha, sourceShortSha: shortSha }, expected: `Source${fullSha}` },
+    { name: 'short only', payload: { sourceShortSha: shortSha }, expected: `Source${shortSha}` },
+    { name: 'absent or redacted', payload: {}, expected: null },
+  ]
+  for (const { name, payload, expected } of cases) {
+    await page.route('**/health/identity', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        mode: 'HOME-PRODUCTION',
+        mainCurrency: { state: 'Current', checkedAtUtc: new Date().toISOString(), remoteSha },
+        instance: {
+          label: 'HOME CANONICAL',
+          classification: 'HomeCanonical',
+          snapshot: { sourceLabel: 'ELSEWHERE', sourceSha: snapshotSha, createdAtUtc: new Date().toISOString() },
+        },
+        ...payload,
+      }),
+    }))
+    await page.goto('/')
+    // An authenticated session from an earlier case goes straight to Projects; a first visit signs in.
+    const username = page.getByLabel('Username')
+    if (await username.isVisible().catch(() => false)) {
+      await username.fill('admin')
+      await page.getByLabel('Password').fill('AeroLink!2026')
+      await page.getByRole('button', { name: /Sign in securely/ }).click()
+    }
+    const badge = page.getByTestId('instance-badge')
+    await expect(badge).toBeVisible()
+    await badge.locator('summary').click()
+    const panel = badge.getByTestId('instance-details')
+    await expect(panel).toBeVisible()
+    const sourceRow = panel.locator(':scope > div').filter({ hasText: /^Source/ })
+    if (expected === null) {
+      await expect(sourceRow, `${name}: no Source row may be invented`).toHaveCount(0)
+    } else {
+      // Exact row text: the field heading plus exactly the supplied value.
+      await expect(sourceRow, `${name}: the Source row must carry the exact supplied identity`).toHaveText(expected)
+    }
+    // The remote-main fact is separate from the running source and stays distinct.
+    if (expected !== null) {
+      await expect(panel.locator(':scope > div').filter({ hasText: /^Last observed remote main/ })).toHaveText(`Last observed remote main${remoteSha}`)
+    }
+  }
+})
+
 test.describe('touch access to the installation disclosure', () => {
   test.use({ hasTouch: true })
 

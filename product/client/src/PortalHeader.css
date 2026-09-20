@@ -23,6 +23,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  /* Deliberate reflow before collision: when the brand and account groups cannot share a row, the
+     account stacks below instead of overflowing the page (Checkpoint B, F01). */
+  flex-wrap: wrap;
+  row-gap: 8px;
   box-sizing: border-box;
 }
 
@@ -48,11 +52,10 @@
    widths: account identity stays readable and reachable down to the narrowest portal width (#1048
    H04 / #1054 P03), with Sign out always a reachable sibling. */
 .projectsAccount > div:not(.personAvatar) { min-width: min-content; display: flex; flex-direction: column; gap: 2px; }
-/* break-word, not anywhere: names and roles wrap at word boundaries as the block shrinks, and a word
-   breaks only when it alone cannot fit — mid-letter breaks would make the account unreadable.
-   min-content keeps the block from being squeezed below its longest word in the first place. */
+/* anywhere, with the row-wrap above as the first response to narrow widths: ordinary values keep their
+   word boundaries, and a genuinely unbroken name or role token still wraps instead of overflowing. */
 .projectsAccount b,
-.projectsAccount small { overflow-wrap: break-word; }
+.projectsAccount small { overflow-wrap: anywhere; }
 .projectsAccount b { font-size: 13px; }
 .projectsAccount small { color: #9fb0c6; font-size: 12px; }
 
@@ -84,6 +87,8 @@
 @media (max-width: 560px) {
   .projectsTopBar { min-height: 68px; }
   .projectsTopBarInner { padding: 11px 18px; }
-  .projectsBrand b { font-size: 18px; }
+  /* The wordmark only. A descendant selector here also styled the opened disclosure's field headings
+     at wordmark size (Checkpoint B, F01). */
+  .projectsBrand > b { font-size: 18px; }
   .projectsSignOut { padding-inline: 9px; }
 }
