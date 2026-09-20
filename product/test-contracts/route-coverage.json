@@ -1862,7 +1862,8 @@
       "file": "CodeEvidenceEndpoints.cs",
       "coveredBy": [
         "CodeEvidenceAcceptanceRaceTests",
-        "CodeRelationshipApiTests"
+        "CodeRelationshipApiTests",
+        "ProjectSetupCodeEvidenceApiTests"
       ]
     },
     {
@@ -1894,7 +1895,8 @@
       "path": "/api/projects/{projectId:guid}/code/relationships/merge-requests",
       "file": "CodeRelationshipEndpoints.cs",
       "coveredBy": [
-        "CodeRelationshipApiTests"
+        "CodeRelationshipApiTests",
+        "ProjectSetupCodeEvidenceApiTests"
       ]
     },
     {
@@ -1902,7 +1904,8 @@
       "path": "/api/projects/{projectId:guid}/code/source",
       "file": "GitLabSourceEndpoints.cs",
       "coveredBy": [
-        "GitLabSourceApiTests"
+        "GitLabSourceApiTests",
+        "ProjectSetupCodeEvidenceApiTests"
       ]
     },
     {
