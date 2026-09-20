@@ -71,6 +71,8 @@ async function measureHeaderState(page: Page, fixtureName: string, open: boolean
       scrollWidth: doc.scrollWidth,
       bodyMinWidth: getComputedStyle(document.body).minWidth,
       density: document.documentElement.dataset.density ?? 'comfortable',
+      observedLabel: document.querySelector('[data-testid="instance-label"]')?.textContent ?? null,
+      observedClassification: badge?.getAttribute('data-classification') ?? null,
       rects: {
         topBar: rect('.projectsTopBar'),
         brand: rect('.projectsBrand'),
@@ -219,14 +221,25 @@ test('the built setup portal releases the body floor and stays contained at 900 
 })
 
 test('the built workspace sidebar meets the disclosure target in both densities and both label lengths, and the opened panel stays in the column', async ({ page }, testInfo) => {
-  // A mutable payload lets one route serve both identity states.
-  let payload = homeIdentity({
+  // Stable fixtures, defined once: the active route payload is selected from these per case. The
+  // round-3 version read from the mutable payload here, so the compact "long-label" case silently
+  // rendered Q — the observed label is now asserted and recorded per capture.
+  const LONG_FIXTURE = homeIdentity({
     mode: 'UNKNOWN', mainCurrency: null,
     instance: {
       id: 'work-laptop', label: 'FLIGHT TEST LAPTOP LONG INSTALLATION NAME', classification: 'WorkLaptopLocal',
       snapshot: { sourceLabel: 'HOME CANONICAL', sourceSha: 'd4c3b2a1d4c3b2a1d4c3b2a1d4c3b2a1d4c3b2a1', createdAtUtc: new Date(Date.now() - 5 * 86_400_000).toISOString(), activatedAtUtc: null },
     },
   })
+  const SHORT_FIXTURE = homeIdentity({
+    mode: 'UNKNOWN', mainCurrency: null,
+    instance: { id: 'short', label: 'Q', classification: 'WorkLaptopLocal', snapshot: null },
+  })
+  const CASES = [
+    { fixtureName: 'long-label', fixture: LONG_FIXTURE, expectedLabel: 'FLIGHT TEST LAPTOP LONG INSTALLATION NAME', hasSnapshot: true },
+    { fixtureName: 'short-label', fixture: SHORT_FIXTURE, expectedLabel: 'Q', hasSnapshot: false },
+  ] as const
+  let payload = LONG_FIXTURE
   await page.route('**/health/identity', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) }))
   await login(page, 'admin')
@@ -234,32 +247,44 @@ test('the built workspace sidebar meets the disclosure target in both densities 
   await expect(brandBadge).toBeVisible()
 
   for (const density of ['comfortable', 'compact'] as const) {
-    for (const [fixtureName, fixture] of [
-      ['long-label', payload],
-      ['short-label', homeIdentity({
-        mode: 'UNKNOWN', mainCurrency: null,
-        instance: { id: 'short', label: 'Q', classification: 'WorkLaptopLocal', snapshot: null },
-      })],
-    ] as const) {
+    for (const { fixtureName, fixture, expectedLabel, hasSnapshot } of CASES) {
       payload = fixture
       await page.evaluate(value => localStorage.setItem('aerolink-density', value), density)
       await page.reload()
       // Wait for the rendered density, exactly as the design-system journeys do.
       await expect.poll(() => page.evaluate(() => document.documentElement.dataset.density), { timeout: 10_000 }).toBe(density)
       await expect(brandBadge).toBeVisible()
+      // The capture must prove which identity actually rendered, not which one was intended.
+      await expect(brandBadge.getByTestId('instance-label')).toHaveText(expectedLabel)
+      await expect(brandBadge).toHaveAttribute('data-classification', 'WorkLaptopLocal')
       await settleAt(page, 1280, 900)
       const closed = await measureHeaderState(page, fixtureName, false)
+      expect(closed.observedLabel, `sidebar ${fixtureName} ${density}: the rendered label is not the fixture's`).toBe(expectedLabel)
+      expect(closed.observedClassification).toBe('WorkLaptopLocal')
       expect(closed.rects.badgeSummary!.width, `built sidebar ${fixtureName} ${density}: target width below 24px`).toBeGreaterThanOrEqual(24)
       expect(closed.rects.badgeSummary!.height, `built sidebar ${fixtureName} ${density}: target height below 24px`).toBeGreaterThanOrEqual(24)
       expect(closed.rects.badge!.right, `built sidebar ${fixtureName} ${density}: badge leaves the ${closed.rects.sidebar?.width}px column`).toBeLessThanOrEqual(closed.rects.sidebar!.right + 1)
-      await record(closed, page, testInfo, `sidebar-${fixtureName}-${density}-closed`, { fixtureName })
+      // At 1280px the workspace document is contained; the 960px floor below 960px is unaffected.
+      expect(closed.scroll.x, `built sidebar ${fixtureName} ${density}: measurements must start at the scroll origin`).toBe(0)
+      expect(closed.scrollWidth, `built sidebar ${fixtureName} ${density}: document overflows (scrollWidth ${closed.scrollWidth} > clientWidth ${closed.clientWidth})`).toBeLessThanOrEqual(closed.clientWidth + 1)
+      await record(closed, page, testInfo, `sidebar-${fixtureName}-${density}-closed`, { fixtureName, expectedLabel })
 
       await brandBadge.getByTestId('instance-summary').click()
       await expect(brandBadge.getByTestId('instance-details')).toBeVisible()
+      if (hasSnapshot) {
+        // The long fixture carries snapshot provenance; assert it rendered.
+        await expect(brandBadge.getByTestId('instance-details')).toContainText('HOME CANONICAL')
+        await expect(brandBadge.getByTestId('instance-details')).toContainText('5 days old')
+      } else {
+        await expect(brandBadge.getByTestId('instance-details')).not.toContainText('Snapshot')
+      }
       await settleAt(page, 1280, 900)
       const opened = await measureHeaderState(page, fixtureName, true)
+      expect(opened.observedLabel).toBe(expectedLabel)
+      expect(opened.scroll.x, `built sidebar ${fixtureName} ${density} open: measurements must start at the scroll origin`).toBe(0)
+      expect(opened.scrollWidth, `built sidebar ${fixtureName} ${density} open: document overflows (scrollWidth ${opened.scrollWidth} > clientWidth ${opened.clientWidth})`).toBeLessThanOrEqual(opened.clientWidth + 1)
       expect(opened.rects.badgePanel!.right, `built sidebar ${fixtureName} ${density}: opened panel leaves the column`).toBeLessThanOrEqual(opened.rects.sidebar!.right + 1)
-      await record(opened, page, testInfo, `sidebar-${fixtureName}-${density}-open`, { fixtureName })
+      await record(opened, page, testInfo, `sidebar-${fixtureName}-${density}-open`, { fixtureName, expectedLabel })
     }
   }
 })
