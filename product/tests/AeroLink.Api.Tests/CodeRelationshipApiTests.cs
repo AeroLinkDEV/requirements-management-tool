@@ -107,6 +107,13 @@ public sealed class CodeRelationshipApiTests
         Assert.False(oldItem.GetProperty("metadataKnown").GetBoolean());
         Assert.Equal(JsonValueKind.Null, oldItem.GetProperty("metadata").ValueKind);
         Assert.Equal(1, transport.Calls);
+        var checkedAt = json.RootElement.GetProperty("metadataCheckedAt").GetDateTimeOffset();
+        using var reused = await client.GetAsync($"/api/projects/{data.ProjectId}/code/merge-requests/register?releaseId={data.ReleaseId}");
+        reused.EnsureSuccessStatusCode();
+        using var reusedJson = JsonDocument.Parse(await reused.Content.ReadAsStringAsync());
+        Assert.True(reusedJson.RootElement.GetProperty("metadataReused").GetBoolean());
+        Assert.Equal(checkedAt, reusedJson.RootElement.GetProperty("metadataCheckedAt").GetDateTimeOffset());
+        Assert.Equal(1, transport.Calls);
     }
 
     [Fact]

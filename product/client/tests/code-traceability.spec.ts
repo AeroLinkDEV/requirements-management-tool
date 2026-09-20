@@ -81,7 +81,7 @@ test('Pending repository explains its prerequisite and keeps a no-code decision 
   await page.route('**/api/code-traceability?**', async route => {
     projectId = new URL(route.request().url()).searchParams.get('projectId')!
     await route.fulfill({ json: {
-      build: { version: '1.6', readOnly: false }, sourceOfTruth: 'GitLab is the source of truth.',
+      campaignBaselineId: '10000000-0000-0000-0000-000000000003', build: { version: '1.6', readOnly: false }, sourceOfTruth: 'GitLab is the source of truth.',
       evaluationState: 'Evaluated', demonstrationScope: false,
       repository: { status: 'Pending', canRecordGitLabMerge: false, detail: 'Configure and verify this project repository before recording a GitLab merge. No-code decisions remain available.' },
       summary: { required: 1, mapped: 0, missing: 1, percent: 0, gateComplete: false },
@@ -91,9 +91,8 @@ test('Pending repository explains its prerequisite and keeps a no-code decision 
   await openCode(page)
   await expect(page.getByText('Repository Pending', { exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open repository configuration' })).toHaveAttribute('href', `/projects/${projectId}/configuration/repository`)
-  await page.getByRole('button', { name: '+ Record code mapping' }).click()
-  await expect(page.getByRole('radio', { name: 'GitLab merge', exact: true })).toBeDisabled()
-  await expect(page.getByRole('radio', { name: 'No code change required', exact: true })).toBeChecked()
+  await page.getByRole('button', { name: 'Accept implementation evidence', exact: true }).click()
+  await page.getByRole('radio', { name: 'No code change required', exact: true }).check()
   await expect(page.getByLabel('No-code rationale')).toBeVisible()
   await expect(page.getByLabel('GitLab merge request URL')).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('pending-repository-code-prerequisite.png'), fullPage: true })

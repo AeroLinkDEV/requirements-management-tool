@@ -11,10 +11,10 @@ export type CodeRelationship = { id: string; relationshipKind: string; version: 
   mergeRequestIid?: number; recordedBy: string; recordedAt: string; withdrawalRationale?: string;
   mergeRequestUrlSnapshot?: string; mergeRequestTitleSnapshot?: string;
   capabilities: { canWithdraw: boolean; canReAdd: boolean } }
-export type CodePage<T> = { page: number; pageSize: number; total: number; items: T[] }
+export type CodePage<T> = { page: number; pageSize: number; total: number; items: T[]; metadataCheckedAt?: string; metadataReused?: boolean }
 export type RegisteredMergeRequest = { instanceBaseUrl: string; remoteProjectId: number; mergeRequestIid: number;
   relationshipCount: number; metadataKnown: boolean; metadata?: MergeRequest }
-export type InspectedMergeRequest = { metadataKnown: boolean; metadata?: MergeRequest;
+export type InspectedMergeRequest = { metadataKnown: boolean; metadata?: MergeRequest; metadataCheckedAt?: string;
   mergeRequests: CodeRelationship[]; files: CodeRelationship[] }
 export type TreeEntry = { path: string; name: string; kind: string; mode?: string }
 export type TreePage = { commitSha: string; entries: TreeEntry[]; nextCursor?: string }

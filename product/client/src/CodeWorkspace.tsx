@@ -81,7 +81,8 @@ export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixe
       <button onClick={() => setRefresh(value => value + 1)}>Refresh merge requests</button>
     </div>
     <p>{mode === 'linked' ? 'Recorded relationships for this build, including records whose GitLab metadata is unavailable.'
-      : 'Live GitLab discovery. Appearing here does not mean a merge request is linked or accepted in AeroLink.'}</p>
+      : 'GitLab discovery. Appearing here does not mean a merge request is linked or accepted in AeroLink.'}</p>
+    {(mode === 'linked' ? linked.value?.metadataCheckedAt : discovered.value?.checkedAt) && <p>GitLab metadata checked {new Date((mode === 'linked' ? linked.value!.metadataCheckedAt : discovered.value!.checkedAt)!).toLocaleString()} · observations may be reused for up to 15 seconds.</p>}
     {error && <p role="alert">{error}</p>}
     <div className="codeRegisterLayout">
       <div>{loading ? <p role="status">Loading merge requests…</p> : <>
@@ -101,6 +102,7 @@ export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixe
         {(detail.loading || remoteDetail.loading) && <p>Loading merge request details…</p>}
         {(detail.error || remoteDetail.error) && <p role="alert">{detail.error || remoteDetail.error}</p>}
         {mr ? <><h3>{mr.title}</h3><p>{mergeRequestState(mr)}</p><p>{mr.sourceBranch} → {mr.targetBranch}</p>
+          {(detail.value?.metadataCheckedAt || remoteDetail.value?.checkedAt) && <p>Details checked {new Date((detail.value?.metadataCheckedAt || remoteDetail.value?.checkedAt)!).toLocaleString()}</p>}
           <p>{mr.approvals?.known ? `${mr.approvals.approvedBy.length} recorded GitLab approval(s)` : 'GitLab approvals unknown'}</p>
           {mr.approvals?.known && <ul>{mr.approvals.approvedBy.map(person => <li key={person.id}>{person.name} (@{person.username})</li>)}</ul>}
           <a href={mr.webUrl} target="_blank" rel="noreferrer">Open in GitLab ↗</a>
@@ -151,6 +153,7 @@ export function SourceExplorer({ api, projectId, releaseId, source, readOnly, fi
       </form>}</div>
     {linkedOnly && <p>Recorded active links at this source snapshot, across all directories. This is not a measure of repository coverage.</p>}
     {!linkedOnly && <>
+    {tree.value?.checkedAt && <p>Directory metadata checked {new Date(tree.value.checkedAt).toLocaleString()} · exact selected source.</p>}
     <div className="codeCommandBar"><nav aria-label="Repository directory"><button onClick={() => changePath('')}>Repository root</button>
       {path.split('/').filter(Boolean).map((segment, index, parts) => <button key={parts.slice(0, index + 1).join('/')}
         onClick={() => changePath(parts.slice(0, index + 1).join('/'))}>{segment}</button>)}</nav>

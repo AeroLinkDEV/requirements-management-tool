@@ -228,7 +228,7 @@ public static class CodeRelationshipEndpoints
     }
 
     private static async Task<IResult> ReadRegisterAsync(Guid projectId, Guid releaseId, int? page, int? pageSize,
-        bool? includeWithdrawn, HttpContext http, AeroLinkDbContext db, GitLabMetadataReader reader,
+        bool? includeWithdrawn, HttpContext http, AeroLinkDbContext db, GitLabMetadataReader reader, GitLabDisplayMetadataCache cache,
         IOptions<ProjectGitLabOptions> settings, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
@@ -243,8 +243,15 @@ public static class CodeRelationshipEndpoints
             ? local.Items.Where(x => x.RemoteProjectId == configuration.RemoteProjectId
                 && string.Equals(x.InstanceBaseUrl, settings.Value.BaseUrl, StringComparison.OrdinalIgnoreCase)).ToArray() : [];
         GitLabMetadataResult<IReadOnlyList<GitLabMergeRequestSummary>>? metadata = null;
+        GitLabDisplayObservation<IReadOnlyList<GitLabMergeRequestSummary>>? display = null;
         var metadataIsCurrent = false;
-        if (current.Length > 0) metadata = await reader.ReadMergeRequestSummariesAsync(configuration!, current.Select(x => x.MergeRequestIid).ToArray(), ct);
+        if (current.Length > 0)
+        {
+            var iids = current.Select(x => x.MergeRequestIid).Distinct().Order().ToArray();
+            display = await cache.ReadAsync(GitLabDisplayMetadataCache.Key(configuration!, settings.Value,
+                "merge-request-register", iids), token => reader.ReadMergeRequestSummariesAsync(configuration!, iids, token), ct);
+            metadata = display.Observation;
+        }
         denied = await GitLabMetadataEndpoints.CurrentAccessFailureAsync(projectId, http, db, ct);
         if (denied is not null) return denied;
         if (metadata?.Succeeded == true && configuration is not null)
@@ -259,6 +266,8 @@ public static class CodeRelationshipEndpoints
         var observations = metadata?.Succeeded == true ? metadata.Value!.ToDictionary(x => x.Iid) : new Dictionary<int, GitLabMergeRequestSummary>();
         http.Response.Headers.CacheControl = "no-store";
         return Results.Ok(new { local.Page, local.PageSize, local.Total,
+            metadataCheckedAt = metadataIsCurrent ? display?.ObservedAt : null,
+            metadataReused = metadataIsCurrent && display?.Reused == true,
             items = local.Items.Select(x => new { x.InstanceBaseUrl, x.RemoteProjectId, x.MergeRequestIid, x.RelationshipCount,
                 metadataKnown = metadataIsCurrent && x.RemoteProjectId == configuration?.RemoteProjectId
                     && string.Equals(x.InstanceBaseUrl, settings.Value.BaseUrl, StringComparison.OrdinalIgnoreCase)
@@ -270,7 +279,7 @@ public static class CodeRelationshipEndpoints
 
     private static async Task<IResult> InspectMergeRequestAsync(Guid projectId, int iid, Guid releaseId,
         string? instanceBaseUrl, long? remoteProjectId, HttpContext http, AeroLinkDbContext db,
-        GitLabMetadataReader reader, IOptions<ProjectGitLabOptions> settings, CancellationToken ct)
+        GitLabMetadataReader reader, GitLabDisplayMetadataCache cache, IOptions<ProjectGitLabOptions> settings, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         var denied = await GitLabMetadataEndpoints.CurrentAccessFailureAsync(projectId, http, db, ct);
@@ -283,10 +292,15 @@ public static class CodeRelationshipEndpoints
         if (remoteProjectId.HasValue) groups = groups.Where(x => x.RemoteProjectId == remoteProjectId.Value).ToArray();
         var configuration = await db.ProjectRepositoryConfigurations.AsNoTracking().SingleOrDefaultAsync(x => x.ProjectId == projectId, ct);
         GitLabMetadataResult<GitLabMergeRequestDetails>? metadata = null;
+        GitLabDisplayObservation<GitLabMergeRequestDetails>? display = null;
         if (groups.Length == 1 && configuration is { Status: ProjectRepositorySetupStatus.Verified, RemoteProjectId: > 0 }
             && groups[0].RemoteProjectId == configuration.RemoteProjectId
             && string.Equals(groups[0].InstanceBaseUrl, settings.Value.BaseUrl, StringComparison.OrdinalIgnoreCase))
-            metadata = await reader.GetMergeRequestAsync(configuration, iid, ct);
+        {
+            display = await cache.ReadAsync(GitLabDisplayMetadataCache.Key(configuration, settings.Value,
+                "merge-request-detail", iid), token => reader.GetMergeRequestAsync(configuration, iid, token), ct);
+            metadata = display.Observation;
+        }
         denied = await GitLabMetadataEndpoints.CurrentAccessFailureAsync(projectId, http, db, ct);
         if (denied is not null) return denied;
         var metadataIsCurrent = false;
@@ -304,6 +318,8 @@ public static class CodeRelationshipEndpoints
             direct.Select(x => x.ReleaseId).Concat(files.Select(x => x.ReleaseId)), http, db, ct);
         return Results.Ok(new { projectId, releaseId, mergeRequestIid = iid, identities = groups,
             metadataKnown = metadataIsCurrent, metadata = metadataIsCurrent ? metadata?.Value : null,
+            metadataCheckedAt = metadataIsCurrent ? display?.ObservedAt : null,
+            metadataReused = metadataIsCurrent && display?.Reused == true,
             observation = metadata is null || metadata.Succeeded ? null : new { metadata.Status, metadata.Code, metadata.Detail },
             mergeRequests = direct.Where(x => groups.Any(g => g.InstanceBaseUrl == x.InstanceBaseUrl && g.RemoteProjectId == x.RemoteProjectId))
                 .Select(x => ToReadItem(x, capabilityState.CanMutate && capabilityState.MutableReleaseIds.Contains(x.ReleaseId))),
