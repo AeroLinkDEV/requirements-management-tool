@@ -60,11 +60,11 @@ test('explorer includes unlinked files and requests relationships for the exact 
   await expect(page.getByRole('button', { name: 'README.md', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'src', exact: true }).click()
   await page.getByRole('button', { name: 'route.c', exact: true }).click()
-  await expect(page.getByText('No relationship recorded for this file.')).toBeVisible()
+  await expect(page.getByText('No LLR link or other AeroLink relationship is recorded for this file.')).toBeVisible()
   await expect(page.getByRole('link', { name: 'Open exact file in GitLab' })).toHaveAttribute('href', `https://gitlab.example/demo/fms/-/blob/${sha}/src/route.c`)
   await page.screenshot({ path: testInfo.outputPath('code-explorer.png'), fullPage: true })
   await page.setViewportSize({ width: 700, height: 900 })
-  await expect(page.getByText('No relationship recorded for this file.')).toBeVisible()
+  await expect(page.getByText('No LLR link or other AeroLink relationship is recorded for this file.')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('code-explorer-narrow.png'), fullPage: true })
 })
 
@@ -90,8 +90,54 @@ test('shared picker clears old selections on page and target-kind changes and su
   await page.screenshot({ path: testInfo.outputPath('shared-link-picker.png'), fullPage: true })
   await dialog.getByRole('button', { name: 'Record relationship' }).click()
   await expect(dialog).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Link AeroLink artifact' })).toBeFocused()
   expect(recorded).toMatchObject({ releaseId: 'release-one', targetKind: 'RequirementProposal',
     targetId: 'RequirementProposal-1', expectedConfigurationVersion: 7, meaning: 'RelatedContext', mergeRequestIid: 3 })
+})
+
+for (const subject of ['file', 'merge request']) {
+  test(`link picker restores ${subject} opener focus after searching and Escape`, async ({ page }) => {
+    await mockWorkspace(page)
+    await page.goto('/tests/fixtures/code-workspace.html')
+    if (subject === 'file') {
+      await page.getByRole('button', { name: 'Code Explorer', exact: true }).click()
+      await page.getByRole('button', { name: 'src', exact: true }).click()
+      await page.getByRole('button', { name: 'route.c', exact: true }).click()
+    } else {
+      await page.getByRole('button', { name: '!3', exact: true }).click()
+    }
+    const opener = page.getByRole('button', { name: 'Link AeroLink artifact' })
+    await opener.click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByLabel('Artifact type').selectOption('RequirementProposal')
+    await dialog.getByRole('textbox', { name: 'Search link targets' }).fill('flight plan')
+    await dialog.getByRole('button', { name: 'Search targets' }).click()
+    await dialog.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    await expect(opener).toBeFocused()
+  })
+}
+
+test('failed post-save refresh cannot restore focus after the user changes selection', async ({ page }) => {
+  await mockWorkspace(page)
+  let detailReads = 0
+  await page.route('**/code/merge-requests/3?**', async route => {
+    detailReads++
+    if (detailReads === 2) await route.fulfill({ status: 503, json: { error: 'Metadata temporarily unavailable.' } })
+    else await route.fallback()
+  })
+  await page.route('**/code/relationships/merge-requests', route => route.fulfill({ json: { id: 'new-link', version: 1 } }))
+  await page.goto('/tests/fixtures/code-workspace.html')
+  const selection = page.getByRole('button', { name: '!3', exact: true })
+  await selection.click()
+  await page.getByRole('button', { name: 'Link AeroLink artifact' }).click()
+  await page.getByRole('radio', { name: /LLR-00001.00/ }).check()
+  await page.getByRole('button', { name: 'Record relationship' }).click()
+  await expect(page.getByRole('alert')).toHaveText('Metadata temporarily unavailable.')
+  await page.getByRole('button', { name: 'Close merge request inspector' }).click()
+  await selection.click()
+  await expect(page.getByRole('button', { name: 'Link AeroLink artifact' })).toBeVisible()
+  await expect(selection).toBeFocused()
 })
 
 test('relationship withdrawal sends expected version and retains an attributable rationale', async ({ page }) => {

@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 975,
-    "cases": 1107,
+    "tests": 976,
+    "cases": 1111,
     "classes": 154,
-    "hostedTests": 926,
-    "hostedCases": 1036,
+    "hostedTests": 927,
+    "hostedCases": 1040,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 15,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 603,
-      "cases": 686,
+      "tests": 604,
+      "cases": 690,
       "unknownCases": 0,
       "classes": 121
     },
@@ -4196,8 +4196,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 14,
-        "end": 53
+        "start": 45,
+        "end": 84
       }
     },
     {
@@ -4214,8 +4214,25 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 55,
-        "end": 71
+        "start": 86,
+        "end": 102
+      }
+    },
+    {
+      "cls": "CodeTargetApiTests",
+      "test": "Target_search_accepts_the_displayed_revision_identifier",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 4,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 14,
+        "end": 43
       }
     },
     {

@@ -13,6 +13,37 @@ public sealed class CodeTargetApiTests(ShowcaseApiFixture showcase)
 {
     [Theory]
     [InlineData("RequirementRevision")]
+    [InlineData("RequirementProposal")]
+    [InlineData("ChangeRequestRevision")]
+    [InlineData("ProblemReportRevision")]
+    public async Task Target_search_accepts_the_displayed_revision_identifier(string kind)
+    {
+        using var factory = showcase.CreateFactory();
+        using var client = factory.CreateClient();
+        await ShowcaseApiFixture.LoginAdministratorAsync(client);
+        var url = $"/api/projects/{showcase.Summary.ProjectId}/code/targets?releaseId={showcase.Summary.ActiveReleaseId}&targetKind={kind}";
+        var all = await client.GetFromJsonAsync<JsonElement>(url);
+        var first = all.GetProperty("items").EnumerateArray().First();
+        var display = first.GetProperty("display").GetString()!;
+        var identifier = display.Split(' ')[0];
+        var found = await client.GetFromJsonAsync<JsonElement>(url + "&search=" + Uri.EscapeDataString(identifier.ToLowerInvariant()));
+        Assert.Contains(found.GetProperty("items").EnumerateArray(), row =>
+            row.GetProperty("exactIdentityId").GetGuid() == first.GetProperty("exactIdentityId").GetGuid());
+        if (kind == "RequirementProposal")
+        {
+            var ownerIdentifier = display.Split(" in ")[1];
+            var byOwner = await client.GetFromJsonAsync<JsonElement>(url + "&search=" + Uri.EscapeDataString(ownerIdentifier));
+            Assert.Contains(byOwner.GetProperty("items").EnumerateArray(), row =>
+                row.GetProperty("exactIdentityId").GetGuid() == first.GetProperty("exactIdentityId").GetGuid());
+            var title = first.GetProperty("title").GetString()!;
+            var byTitle = await client.GetFromJsonAsync<JsonElement>(url + "&search=" + Uri.EscapeDataString(title[..Math.Min(100, title.Length)]));
+            Assert.Contains(byTitle.GetProperty("items").EnumerateArray(), row =>
+                row.GetProperty("exactIdentityId").GetGuid() == first.GetProperty("exactIdentityId").GetGuid());
+        }
+    }
+
+    [Theory]
+    [InlineData("RequirementRevision")]
     [InlineData("ChangeRequestRevision")]
     [InlineData("RequirementProposal")]
     [InlineData("ProblemReportRevision")]

@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 154,
-    "tests": 975,
-    "knownCases": 1107,
+    "tests": 976,
+    "knownCases": 1111,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 59,
-      "tests": 360,
-      "knownCases": 416,
+      "tests": 361,
+      "knownCases": 420,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -837,6 +837,17 @@
       ]
     },
     {
+      "cls": "CodeTargetApiTests",
+      "tests": 3,
+      "knownCases": 9,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "DraftDocumentApiTests",
       "tests": 3,
       "knownCases": 3,
@@ -878,17 +889,6 @@
       "cls": "ShowcaseUpgradeApiTests",
       "tests": 3,
       "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "CodeTargetApiTests",
-      "tests": 2,
-      "knownCases": 5,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
