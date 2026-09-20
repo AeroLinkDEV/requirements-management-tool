@@ -3,6 +3,7 @@ using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Traceability;
@@ -31,6 +32,44 @@ internal sealed class SaveBoundaryIntegrityValidator(AeroLinkDbContext db)
         await ValidateCaseProcedureLinksAsync(ct);
         await ValidateExactLinkLifecycleIntegrityAsync(ct);
         await ValidateExecutionCutoverProvenanceIntegrityAsync(ct);
+        await ValidateReleasedSyntheticSourceSupplementIntegrityAsync(ct);
+    }
+
+    /// <summary>
+    /// Keeps the DEC-131 source supplement and the source snapshot it owns immutable at the application
+    /// boundary. PostgreSQL receives the same protection from the additive trigger migration; this check
+    /// gives SQLite fixtures and every EF caller the same fail-closed behavior.
+    /// </summary>
+    private async Task ValidateReleasedSyntheticSourceSupplementIntegrityAsync(CancellationToken ct)
+    {
+        _db.ChangeTracker.DetectChanges();
+        var supplements = _db.ChangeTracker.Entries<ReleasedSyntheticSourceSupplement>().ToList();
+        if (supplements.Any(x => x.State is EntityState.Modified or EntityState.Deleted))
+            throw new DomainException(
+                "A released synthetic source supplement is immutable historical provenance; it cannot be modified or deleted.");
+
+        var changedSnapshots = _db.ChangeTracker.Entries<GitLabSourceSnapshot>()
+            .Where(x => x.State is EntityState.Modified or EntityState.Deleted)
+            .ToList();
+        if (changedSnapshots.Count == 0)
+            return;
+
+        var changedSnapshotIds = changedSnapshots
+            .Select(x => x.Entity.Id)
+            .Distinct()
+            .ToArray();
+        var protectedSnapshotIds = (await _db.ReleasedSyntheticSourceSupplements.AsNoTracking()
+                .Where(x => changedSnapshotIds.Contains(x.SourceSnapshotId))
+                .Select(x => x.SourceSnapshotId)
+                .ToListAsync(ct))
+            .ToHashSet();
+        protectedSnapshotIds.UnionWith(supplements
+            .Where(x => x.State is EntityState.Added or EntityState.Unchanged)
+            .Select(x => x.Entity.SourceSnapshotId));
+
+        if (changedSnapshots.Any(x => protectedSnapshotIds.Contains(x.Entity.Id)))
+            throw new DomainException(
+                "A source snapshot owned by a released synthetic supplement is immutable historical provenance.");
     }
 
     /// <summary>

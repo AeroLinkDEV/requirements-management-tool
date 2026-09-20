@@ -62,6 +62,9 @@ baseline and source-selection event, verifies actual merge-result ancestry or ex
 can contain multiple contributions. Contextual links and observed GitLab status do not complete a release gate.
 No-code decisions retain their baseline prerequisites without requiring GitLab. Historical manual records
 and signed manifests remain unchanged; a new evidence selector explicitly supersedes a prior decision.
+The exact operator-bound synthetic FMS 1.5 release can receive one dated, source-only supplement under
+DEC-131. This separate append-only record enables source browsing without becoming an original release
+source selection, accepted implementation evidence, or proof of the delivered binary.
 
 Administrators can create a server-side setup draft and resume it across sessions. The creator and
 administrators may edit it; unfinished setup is distinct from a usable project. Fresh completion atomically

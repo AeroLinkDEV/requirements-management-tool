@@ -29,7 +29,9 @@ test('source confirmation sends the previewed commit and observed versions, then
   await expect(page.getByText(sha, { exact: true })).toBeVisible()
   expect(command).toBeUndefined()
   await page.getByRole('button', { name: 'Confirm source selection' }).click()
-  await expect(page.getByText('Selection 4', { exact: false })).toBeVisible()
+  await expect(page.getByText('Selected source · v4', { exact: true })).toBeVisible()
+  await expect(page.getByText(sha, { exact: true })).toBeVisible()
+  await expect(page.getByText('v1.5', { exact: true })).toBeVisible()
   expect(command).toEqual({ releaseId: 'release-a', reference: 'v1.5', referenceKind: 'Tag', previewSha: sha,
     expectedConfigurationVersion: 7, expectedSelectionVersion: 3 })
 })

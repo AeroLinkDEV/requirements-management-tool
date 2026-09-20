@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ControlledArtifactExplorerHeader, ControlledArtifactExplorerLayout, ControlledArtifactInspector, ControlledArtifactInspectorEmpty } from './ControlledArtifactExplorer'
-import CodeSourcePanel, { type CodeSource } from './CodeSourcePanel'
+import CodeSourcePanel, { type CodeSource, type CodeSourceSupplement } from './CodeSourcePanel'
 import CodeTraceabilityCenter from './CodeTraceabilityCenter'
 import CodeLinkPicker from './CodeLinkPicker'
 import CodeDemonstrationBanner from './CodeDemonstrationBanner'
@@ -20,7 +20,12 @@ export default function CodeWorkspace(props: Props) {
 
 function ScopedCodeWorkspace({ api, projectId, releaseId, readOnly, page, onBack, onPage }: Props) {
   const [source, setSource] = useState<CodeSource>()
+  const [supplement, setSupplement] = useState<CodeSourceSupplement>()
   const currentSource = source?.projectId === projectId && source.releaseId === releaseId ? source : undefined
+  const browseSource = currentSource?.snapshot ? currentSource : supplement ? {
+    projectId, releaseId, version: 0, snapshot: supplement.source,
+    capabilities: { canSelect: false, sourceSelectionFrozen: true }, provenance: supplement.provenance,
+  } satisfies CodeSource : currentSource
   return <main className="codeWorkspace">
     <ControlledArtifactExplorerHeader back={{ label: 'Command Center', onClick: onBack }} eyebrow="CODE"
       title={page === 'mergeRequests' ? 'Merge Requests' : 'Code Explorer'} />
@@ -28,13 +33,14 @@ function ScopedCodeWorkspace({ api, projectId, releaseId, readOnly, page, onBack
       <button aria-current={page === 'mergeRequests' ? 'page' : undefined} onClick={() => onPage('mergeRequests')}>Merge Requests</button>
       <button aria-current={page === 'explorer' ? 'page' : undefined} onClick={() => onPage('explorer')}>Code Explorer</button>
     </nav>
-    <p className="codeBoundary">GitLab owns source and merge review. Recorded relationships provide context; accepted implementation evidence is a separate engineering decision.</p>
+    <p className="codeBoundary"><strong>Source and merge review</strong> stay with GitLab. AeroLink records relationships as context; accepted implementation evidence remains a separate engineering decision.</p>
     {currentSource?.demonstration && <CodeDemonstrationBanner
       key={`${projectId}/${releaseId}/${currentSource.demonstration.configurationId}/${currentSource.demonstration.configurationVersion}`}
       {...{ api, projectId }} binding={currentSource.demonstration} />}
-    <CodeSourcePanel {...{ api, projectId, releaseId, readOnly }} onSource={setSource} />
+    <CodeSourcePanel {...{ api, projectId, releaseId, readOnly }} onSource={setSource} onSupplement={setSupplement} />
     {page === 'mergeRequests' ? <MergeRequestRegister {...{ api, projectId, releaseId }} readOnly={readOnly || !currentSource?.capabilities?.canSelect} />
-      : <SourceExplorer key={currentSource?.selectionEventId ?? 'unselected'} {...{ api, projectId, releaseId }} readOnly={readOnly || !currentSource?.capabilities?.canSelect} source={currentSource} />}
+      : <SourceExplorer key={currentSource?.selectionEventId ?? `supplement-${supplement?.source.id ?? 'unselected'}`} {...{ api, projectId, releaseId }}
+        readOnly={readOnly || !currentSource?.capabilities?.canSelect} source={browseSource} />}
     <details className="codeEvidenceSection"><summary>Implementation evidence and build gate</summary>
       <CodeTraceabilityCenter {...{ api, projectId, releaseId, readOnly, onBack }} embedded />
     </details>
@@ -77,6 +83,15 @@ function CodeRegisterFrame({ resizableKey, children, inspector }: {
     <div className="codeRegisterPanel">{children}</div>
     {inspector}
   </ControlledArtifactExplorerLayout>
+}
+
+function MergeRequestStatus({ item }: { item?: MergeRequest }) {
+  const state = item?.state?.toLowerCase() ?? 'unknown'
+  const tone = state === 'merged' ? 'merged' : state === 'opened' || state === 'open' ? 'open' : state === 'closed' ? 'closed' : 'unknown'
+  return <span className="codeStateCluster" aria-label={mergeRequestState(item)}>
+    <span className={`codeStatusBadge codeStatusBadge--${tone}`}>{item?.state ?? 'Unknown'}</span>
+    {item?.draft && <span className="codeStatusBadge codeStatusBadge--draft">Draft</span>}
+  </span>
 }
 
 export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixedTarget, onLinked }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly'> & ArtifactLinkContext) {
@@ -131,7 +146,7 @@ export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixe
       onClose={() => setSelected(undefined)} tabs={[{ id: 'details', label: 'Details and relationships' }]} activeTab="details" onTab={() => {}}>
       {(detail.loading || remoteDetail.loading) && <p>Loading merge request details…</p>}
       {(detail.error || remoteDetail.error) && <p role="alert">{detail.error || remoteDetail.error}</p>}
-      {mr ? <><h3>{mr.title}</h3><p>{mergeRequestState(mr)}</p><p>{mr.sourceBranch} → {mr.targetBranch}</p>
+      {mr ? <><h3>{mr.title}</h3><p><MergeRequestStatus item={mr} /></p><p>{mr.sourceBranch} → {mr.targetBranch}</p>
         {(detail.value?.metadataCheckedAt || remoteDetail.value?.checkedAt) && <p>Details checked {new Date((detail.value?.metadataCheckedAt || remoteDetail.value?.checkedAt)!).toLocaleString()}</p>}
         <p>{mr.approvals?.known ? `${mr.approvals.approvedBy.length} recorded GitLab approval(s)` : 'GitLab approvals unknown'}</p>
         {mr.approvals?.known && <ul>{mr.approvals.approvedBy.map(person => <li key={person.id}>{person.name} (@{person.username})</li>)}</ul>}
@@ -145,7 +160,7 @@ export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixe
         <table><thead><tr><th scope="col">MR</th><th scope="col">Title</th><th scope="col">GitLab state</th><th scope="col">Recorded relationships</th></tr></thead>
           <tbody>{rows?.map(row => <tr key={row.key} aria-selected={selected?.iid === row.iid && selected.origin === row.origin && selected.remoteProjectId === row.remoteProjectId}>
             <td><button onClick={() => setSelected({ iid: row.iid, origin: row.origin, remoteProjectId: row.remoteProjectId })}>!{row.iid}</button></td>
-            <td>{row.mr ? <a href={row.mr.webUrl} target="_blank" rel="noreferrer">{row.mr.title} ↗</a> : 'Metadata unavailable'}</td><td>{mergeRequestState(row.mr)}</td><td>{row.count ?? 'Not evaluated in discovery'}</td>
+            <td>{row.mr ? <a href={row.mr.webUrl} target="_blank" rel="noreferrer">{row.mr.title} ↗</a> : 'Metadata unavailable'}</td><td><MergeRequestStatus item={row.mr} /></td><td>{row.count ?? 'Not evaluated in discovery'}</td>
           </tr>)}</tbody></table>
         {rows?.length === 0 && <p>{mode === 'linked' ? 'No merge request relationship is recorded for this build.' : 'No merge requests returned for this GitLab query.'}</p>}
         <div className="codePagination"><button disabled={page <= 1} onClick={() => { setPage(value => value - 1); setSelected(undefined) }}>Previous page</button>
@@ -187,16 +202,21 @@ export function SourceExplorer({ api, projectId, releaseId, source, readOnly, fi
     && tree.value.observation.value?.commitSha === snapshot.commitSha
     && entries?.some(entry => entry.kind === 'Blob' && entry.path === selected?.path)
   return <section aria-label="Repository files">
-    <div className="codeCommandBar"><label><input type="checkbox" checked={linkedOnly} onChange={event => {
+    {source.provenance && <aside className="codeSupplementContext" role="note">
+      <span className="codeStatusBadge codeStatusBadge--supplement">Historical source supplement</span>
+      <span>Browsing exact files recorded {new Date(source.provenance.recordedAt).toLocaleString()} for synthetic release context.</span>
+      <strong>Not an ordinary source selection or delivered-binary proof.</strong>
+    </aside>}
+    <div className="codeCommandBar codeFileToolbar"><label><input type="checkbox" checked={linkedOnly} onChange={event => {
       setLinkedOnly(event.target.checked); setFilePage(1); setSelected(undefined); setLinking(false)
     }} /> Linked files only</label>
       {linkedOnly && <form onSubmit={event => { event.preventDefault(); setFileQuery(fileSearch); setFilePage(1); setSelected(undefined) }}>
         <input aria-label="Search linked file paths" value={fileSearch} maxLength={200} onChange={event => setFileSearch(event.target.value)} /><button>Search paths</button>
       </form>}</div>
-    {linkedOnly && <p>Recorded active links at this source snapshot, across all directories. This is not a measure of repository coverage.</p>}
+    {linkedOnly && <p className="codeToolbarHint">Recorded active links at this source snapshot, across all directories. This is not a measure of repository coverage.</p>}
     {!linkedOnly && <>
-    {tree.value?.checkedAt && <p>Directory metadata checked {new Date(tree.value.checkedAt).toLocaleString()} · exact selected source.</p>}
-    <div className="codeCommandBar"><nav aria-label="Repository directory"><button onClick={() => changePath('')}>Repository root</button>
+    {tree.value?.checkedAt && <p className="codeToolbarHint">Directory metadata checked {new Date(tree.value.checkedAt).toLocaleString()} · exact {source.provenance ? 'supplement' : 'selected source'}.</p>}
+    <div className="codeCommandBar codePathToolbar"><nav aria-label="Repository directory"><button onClick={() => changePath('')}>Repository root</button>
       {path.split('/').filter(Boolean).map((segment, index, parts) => <button key={parts.slice(0, index + 1).join('/')}
         onClick={() => changePath(parts.slice(0, index + 1).join('/'))}>{segment}</button>)}</nav>
       <button onClick={() => setRefresh(value => value + 1)}>Refresh directory</button></div></>}
@@ -206,7 +226,7 @@ export function SourceExplorer({ api, projectId, releaseId, source, readOnly, fi
     <CodeRegisterFrame resizableKey="code-source-explorer" inspector={selected ? <ControlledArtifactInspector artifactType="Repository file" displayNumber={selected.name}
       subtitle={selected.path} closeLabel="Close file inspector" onClose={() => setSelected(undefined)}
       tabs={[{ id: 'relationships', label: 'Recorded relationships' }]} activeTab="relationships" onTab={() => {}}>
-      <small>EXACT SOURCE</small><code>{snapshot.commitSha}</code>
+      <small className="codeSourceLabel">{source.provenance ? 'EXACT SUPPLEMENT SOURCE' : 'EXACT SOURCE'}</small><code>{snapshot.commitSha}</code>
       <p><a href={`${snapshot.instanceBaseUrl}/${snapshot.pathWithNamespace.split('/').map(encodeURIComponent).join('/')}/-/blob/${snapshot.commitSha}/${selected.path.split('/').map(encodeURIComponent).join('/')}`}
         target="_blank" rel="noreferrer">Open exact file in GitLab ↗</a></p>
       {!readOnly && selectedFileObserved && <button ref={linkButton} onClick={() => setLinking(true)}>Link AeroLink artifact</button>}
@@ -219,18 +239,18 @@ export function SourceExplorer({ api, projectId, releaseId, source, readOnly, fi
       </div>}
     </ControlledArtifactInspector> : <ControlledArtifactInspectorEmpty title="file"
       description="Select a file to inspect its exact source and recorded relationships." />}>
-      {linkedOnly ? <>{linkedFiles.loading ? <p role="status">Loading linked files…</p> : <ul className="codeTree">{linkedFiles.value?.items.map(file => <li key={file.path}>
+      {linkedOnly ? <>{linkedFiles.loading ? <p role="status">Loading linked files…</p> : <ul className="codeTree">{linkedFiles.value?.items.map(file => <li key={file.path} className={selected?.path === file.path ? 'codeTreeRow codeTreeRow--selected' : 'codeTreeRow'}>
         <button aria-pressed={selected?.path === file.path} onClick={() => { setSelected({ path: file.path, name: file.path.split('/').at(-1)!, kind: 'Blob' }); setLinkPage(1) }}>{file.path}</button>
         <small>{file.relationshipCount} relationship(s)</small></li>)}</ul>}
         {linkedFiles.value?.items.length === 0 && <p>No matching linked file at this source snapshot.</p>}
         <div className="codePagination"><button disabled={filePage <= 1} onClick={() => { setFilePage(value => value - 1); setSelected(undefined) }}>Previous linked files</button>
           <span>Page {filePage}{linkedFiles.value ? ` · ${linkedFiles.value.total} linked files` : ''}</span>
           <button disabled={!linkedFiles.value || filePage * 25 >= linkedFiles.value.total} onClick={() => { setFilePage(value => value + 1); setSelected(undefined) }}>Next linked files</button></div>
-      </> : <>{tree.loading ? <p role="status">Loading directory…</p> : <ul className="codeTree">{entries?.map(entry => <li key={entry.path}>
+      </> : <>{tree.loading ? <p role="status">Loading directory…</p> : <ul className="codeTree">{entries?.map(entry => <li key={entry.path} className={selected?.path === entry.path ? 'codeTreeRow codeTreeRow--selected' : 'codeTreeRow'}>
         <button disabled={entry.kind !== 'Tree' && entry.kind !== 'Blob'} aria-pressed={selected?.path === entry.path}
           onClick={() => { if (entry.kind === 'Tree') changePath(entry.path); else { setSelected(entry); setLinkPage(1) } }}>
           <span aria-hidden="true">{entry.kind === 'Tree' ? '▸' : '▤'}</span> {entry.name}
-        </button><small>{entry.kind === 'Link' || entry.kind === 'Commit' ? 'External target · not followed' : entry.kind === 'Blob' ? 'File' : 'Directory'}</small>
+        </button><small className={`codeTreeKind codeTreeKind--${entry.kind.toLowerCase()}`}>{entry.kind === 'Link' || entry.kind === 'Commit' ? 'External target · not followed' : entry.kind === 'Blob' ? 'File' : 'Directory'}</small>
       </li>)}</ul>}
       {entries?.length === 0 && <p>No entries returned in this directory page.</p>}
       <div className="codePagination"><button disabled={cursors.length <= 1} onClick={() => { setCursors(value => value.slice(0, -1)); setSelected(undefined) }}>Previous directory page</button>

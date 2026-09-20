@@ -1,4 +1,4 @@
-.codeWorkspace { padding: 24px; min-width: 0; }
+.codeWorkspace { padding: clamp(16px, 2.2vw, 28px); min-width: 0; background: linear-gradient(180deg, #f5fbfc 0, #ffffff 250px); }
 .codeWorkspace > .reqHeader .back, .codeWorkspaceTabs button, .codeCommandBar button, .codePagination button, .codeSourcePanel button, .codeWorkspace td button {
   border: 1px solid #cad5df; border-radius: 6px; background: white; color: #24475d; padding: 8px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
 }
@@ -8,23 +8,44 @@
 .codeCommandBar input, .codeCommandBar select, .codeSourceForm input, .codeSourceForm select { border: 1px solid #cad5df; border-radius: 6px; padding: 8px 10px; font: inherit; font-size: 13px; background: white; color: #24475d; }
 .codeWorkspace a { color: #096d8b; }
 .codeWorkspaceTabs, .codeCommandBar, .codePagination, .codeSourceActions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-.codeWorkspaceTabs { margin: 12px 0; border-bottom: 1px solid var(--line, #dae1e9); padding-bottom: 10px; }
-.codeWorkspaceTabs [aria-current="page"] { background: var(--brand, #195fae); color: white; }
-.codeBoundary { color: var(--muted, #536276); max-width: 100ch; }
-.codeDemoBanner { border-left: 3px solid var(--teal-700, #17767c); background: var(--surface, #fff); padding: 12px 16px; margin: 16px 0; }
+.codeWorkspaceTabs { margin: 14px 0 12px; border-bottom: 1px solid var(--line, #dae1e9); padding: 0 0 10px; }
+.codeWorkspaceTabs button { background: #ffffffd9; }
+.codeWorkspaceTabs [aria-current="page"] { background: var(--brand, #195fae); color: white; box-shadow: 0 4px 12px #195fae2e; }
+.codeBoundary { color: var(--muted, #536276); max-width: 100ch; margin: 10px 0 16px; padding: 10px 14px; border-left: 4px solid #2b9da0; border-radius: 0 8px 8px 0; background: #eaf8f8; line-height: 1.5; }
+.codeBoundary strong { color: #155e75; }
+.codeDemoBanner { border: 1px solid #b9e4e2; border-left: 4px solid var(--teal-700, #17767c); border-radius: 8px; background: linear-gradient(105deg, #f4fffe, #ffffff 72%); padding: 12px 16px; margin: 14px 0; box-shadow: 0 5px 16px #17767c12; }
+.codeDemoBannerHeading, .codeSupplementHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
+.codeDemoBannerHeading strong { color: #155e75; }
 .codeDemoBanner p { margin: 6px 0; }
+.codeDemoBannerStatus { color: #355467; }
+.codeDemoBannerFooter { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.codeDemoBannerFooter p { color: var(--muted, #536276); }
 .codeDemoBanner button { font: inherit; color: inherit; background: var(--surface, #fff); border: 1px solid var(--line, #dae1e9); border-radius: 6px; padding: 8px 12px; cursor: pointer; }
-.codeSourcePanel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 20px; border: 1px solid var(--line, #dae1e9); border-radius: 8px; padding: 16px; margin: 18px 0; background: var(--surface, #fff); }
+.codeSourcePanel { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 20px; border: 1px solid #cfe0e7; border-radius: 10px; padding: 16px; margin: 18px 0; background: var(--surface, #fff); box-shadow: 0 5px 18px #24475d0c; }
 .codeSourcePanel > form, .codeSourcePanel > section, .codeSourcePanel > p { grid-column: 1 / -1; }
-.codeSourceActions { align-content: start; max-width: 350px; }
+.codeSourceSummary { min-width: 0; }
+.codeSectionEyebrow { color: #087f8c; font-size: 12px; font-weight: 800; letter-spacing: .12em; }
+.codeSourceActions { align-content: start; max-width: 420px; justify-content: end; }
 .codeSourcePanel h2 { font-size: 16px; margin: 0 0 8px; }
 .codeSourcePanel p { margin: 6px 0 12px; }
 .codeSourcePanel code, .codeWorkspace .requirementInspector code { overflow-wrap: anywhere; font-size: 12px; }
+.codeSourceIdentity { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+.codeSourceIdentity span { color: var(--muted, #536276); font-size: 12px; }
+.codeSourceSha { display: block; color: #164e63; font-weight: 750; letter-spacing: .02em; }
+.codeSourceMeta { color: var(--muted, #536276); }
+.codeSourceSupplement { border: 1px solid #e7c98c; border-left: 4px solid #d08a13; border-radius: 8px; padding: 12px 14px; background: #fffaf0; color: #5e4821; }
+.codeSourceSupplement p { margin: 8px 0; }
+.codeSourceSupplement small { color: #765e32; }
+.codeSupplementHeading > span:last-child { color: #765e32; font-size: 12px; }
 .codeSourceForm { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; border-top: 1px solid var(--line, #dae1e9); margin-top: 14px; padding-top: 14px; }
 .codeSourceForm label { display: grid; gap: 6px; }
 .codeSourceForm input { min-width: min(320px, 75vw); }
 .codeSourceForm > div { flex-basis: 100%; }
 .codeCommandBar { justify-content: space-between; margin: 16px 0; }
+.codeFileToolbar { padding: 10px 12px; border: 1px solid #d8e8ec; border-radius: 8px; background: #f5fbfc; }
+.codeFileToolbar > label { display: inline-flex; align-items: center; gap: 8px; color: #24475d; font-weight: 650; }
+.codePathToolbar { margin-top: 10px; padding-top: 12px; border-top: 1px solid #e1ebef; }
+.codeToolbarHint { color: var(--muted, #536276); font-size: 12px; }
 .codeCommandBar form { display: flex; gap: 8px; flex-wrap: wrap; }
 .codeRegisterLayout,
 .reqLayout.codeRegisterLayout.inspecting { height: auto; min-height: 320px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); border: 1px solid var(--line, #dae1e9); border-radius: 8px; overflow: hidden; background: var(--surface, #fff); }
@@ -32,7 +53,7 @@
 .codeWorkspace table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .codeWorkspace th, .codeWorkspace td { padding: 12px; text-align: left; border-bottom: 1px solid var(--line, #dae1e9); }
 .codeWorkspace th { background: #f1f5f9; font-size: 12px; }
-.codeWorkspace tr[aria-selected="true"] { background: #edf5ff; }
+.codeWorkspace tr[aria-selected="true"] { background: #e7f5f7; box-shadow: inset 3px 0 #159a9b; }
 .codeWorkspace td button { white-space: nowrap; }
 .codePagination { justify-content: space-between; padding: 12px; font-size: 12px; }
 .codeRegisterLayout .requirementInspector { width: auto; min-width: 0; position: static; max-height: none; border-left: 1px solid var(--line, #dae1e9); }
@@ -44,9 +65,27 @@
 .codeRegisterLayout .procedureInspectorEmpty p { max-width: 240px; margin: 0; line-height: 1.5; }
 .codeTree, .codeRelationships ul { list-style: none; padding: 0; margin: 0; }
 .codeTree li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--line, #dae1e9); }
+.codeTreeRow--selected { background: #e7f5f7; box-shadow: inset 3px 0 #159a9b; }
 .codeTree li button { text-align: left; border: 0; background: transparent; }
-.codeTree li button[aria-pressed="true"] { background: #edf5ff; }
+.codeTree li button[aria-pressed="true"] { color: #075e66; font-weight: 750; }
 .codeTree small { color: var(--muted, #536276); }
+.codeTreeKind { white-space: nowrap; font-size: 12px; }
+.codeTreeKind--blob { color: #276749; }
+.codeTreeKind--tree { color: #1769aa; }
+.codeTreeKind--link, .codeTreeKind--commit { color: #9a6700; }
+.codeStateCluster { display: inline-flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.codeStatusBadge { display: inline-flex; align-items: center; width: fit-content; border: 1px solid transparent; border-radius: 999px; padding: 3px 8px; font-size: 12px; font-weight: 750; line-height: 1.2; white-space: nowrap; }
+.codeStatusBadge--open, .codeStatusBadge--live { color: #116149; background: #e3f6ee; border-color: #a7dfc8; }
+.codeStatusBadge--merged { color: #5e3a8e; background: #f0e8ff; border-color: #d5bdf7; }
+.codeStatusBadge--closed, .codeStatusBadge--unknown, .codeStatusBadge--unavailable { color: #596574; background: #eef2f5; border-color: #d4dce3; }
+.codeStatusBadge--draft { color: #8a5300; background: #fff2cf; border-color: #efd28c; }
+.codeStatusBadge--checking { color: #135f88; background: #e4f2fc; border-color: #b6d8ec; }
+.codeStatusBadge--cached { color: #6e4e00; background: #fff4d8; border-color: #efd28c; }
+.codeStatusBadge--selected { color: #075e66; background: #e2f7f6; border-color: #9ed9d7; vertical-align: middle; }
+.codeStatusBadge--supplement { color: #8a5300; background: #fff2cf; border-color: #efd28c; }
+.codeSupplementContext { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 10px 0; padding: 9px 12px; border: 1px solid #efd28c; border-left: 4px solid #d08a13; border-radius: 8px; background: #fffaf0; color: #6e5122; font-size: 12px; }
+.codeSupplementContext strong { color: #7b4a00; }
+.codeSourceLabel { color: #087f8c; font-weight: 800; letter-spacing: .1em; }
 .codeRelationships li { padding: 12px 0; border-bottom: 1px solid var(--line, #dae1e9); overflow-wrap: anywhere; }
 .codeRelationships p { margin: 5px 0; }
 .codeEvidenceSection { margin-top: 22px; border-top: 1px solid var(--line, #dae1e9); padding-top: 14px; }
@@ -67,6 +106,71 @@
 .codeTargetRows { max-height: 36vh; overflow: auto; }
 .codeTargetRows > label { display: flex; align-items: start; gap: 10px; padding: 10px; border-bottom: 1px solid #dae1e9; }
 .codeTargetRows small { display: block; margin-top: 4px; }
-@media (max-width: 800px) { .codeRegisterLayout .requirementInspector { border-left: 0; border-top: 1px solid var(--line, #dae1e9); } }
-@media (max-width: 900px) { .codeSourcePanel { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 650px) { .codeWorkspace { padding: 14px; } .codeSourcePanel { grid-template-columns: minmax(0, 1fr); } .codeCommandBar form { width: 100%; } .codeCommandBar input { max-width: 100%; } }
+@media (max-width: 900px) {
+  .codeSourcePanel { grid-template-columns: minmax(0, 1fr); }
+  .codeSourceActions { justify-content: flex-start; max-width: none; }
+}
+@media (max-width: 800px) {
+  .codeRegisterLayout .requirementInspector { border-left: 0; border-top: 1px solid var(--line, #dae1e9); }
+  .codeRegisterLayout .requirementInspector > [role="tabpanel"] { padding: 16px; }
+}
+@media (max-width: 650px) {
+  .codeWorkspace { padding: 14px; }
+  .codeWorkspaceTabs { gap: 6px; }
+  .codeWorkspaceTabs button { flex: 1 1 0; padding-inline: 8px; }
+  .codeSourcePanel { grid-template-columns: minmax(0, 1fr); padding: 14px; }
+  .codeSourceActions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .codeSourceActions button, .codeSourceActions a { text-align: center; }
+  .codeCommandBar form { width: 100%; }
+  .codeCommandBar input { max-width: 100%; min-width: 0; }
+  .codePathToolbar nav { display: flex; gap: 6px; flex-wrap: wrap; }
+  .codeFileToolbar { align-items: stretch; }
+  .codeFileToolbar form { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .codeTree li { padding-inline: 8px; }
+  .codeTreeKind { max-width: 42%; overflow-wrap: anywhere; text-align: right; white-space: normal; }
+  .codeDemoBannerFooter { align-items: stretch; }
+  .codeDemoBannerFooter button { width: 100%; }
+}
+
+/* Keep the working register visible beneath the shared application chrome. */
+main.codeWorkspace { padding: 18px 28px; }
+.codeWorkspace > .reqHeader { margin: 0; padding: 0; }
+.codeWorkspace > .reqHeader > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 16px; }
+.codeWorkspace > .reqHeader .back { grid-column: 2; grid-row: 1 / 3; margin: 0; }
+.codeWorkspace > .reqHeader .eyebrow { grid-column: 1; margin: 0 0 3px; font-size: 12px; }
+.codeWorkspace > .reqHeader h1 { grid-column: 1; margin: 0; font-size: 26px; line-height: 1.25; }
+.codeWorkspace .codeWorkspaceTabs { margin: 10px 0 8px; padding-bottom: 8px; }
+.codeWorkspace .codeWorkspaceTabs [aria-current="page"] { background: #167f89; color: #fff; border-color: #167f89; }
+.codeWorkspace .codeBoundary { max-width: none; margin: 8px 0; padding: 7px 10px; font-size: 12px; }
+.codeWorkspace .codeDemoBanner { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 16px; margin: 8px 0; padding: 9px 12px; font-size: 12px; }
+.codeWorkspace .codeDemoBannerHeading { grid-column: 1; }
+.codeWorkspace .codeDemoBannerStatus { grid-column: 1; margin: 0; }
+.codeWorkspace .codeDemoBannerFooter { grid-column: 2; grid-row: 1 / 3; display: flex; flex-direction: column-reverse; align-items: end; gap: 3px; max-width: 360px; }
+.codeWorkspace .codeDemoBannerFooter p { margin: 0; font-size: 12px; text-align: right; }
+.codeWorkspace .codeDemoBanner button { padding: 5px 9px; font-size: 12px; }
+.codeWorkspace .codeSourcePanel { margin: 10px 0; padding: 10px 12px; gap: 8px 16px; }
+.codeWorkspace .codeSourcePanel h2 { margin: 0 0 3px; font-size: 14px; }
+.codeWorkspace .codeSourcePanel p { margin: 4px 0; font-size: 12px; }
+.codeWorkspace .codeSourceActions { align-content: center; }
+.codeWorkspace .codeSourceActions button, .codeWorkspace .codeSourceActions a { font-size: 12px; padding: 6px 9px; }
+.codeWorkspace .codeCommandBar { margin: 8px 0; }
+.codeWorkspace .codeFileToolbar { padding: 7px 10px; min-height: 0; }
+.codeWorkspace .codeFileToolbar > label { margin: 0; font-size: 12px; }
+.codeWorkspace .codeToolbarHint { margin: 6px 0; }
+.codeWorkspace .codePathToolbar { margin-top: 6px; padding-top: 6px; }
+@media (max-width: 650px) {
+  main.codeWorkspace { padding: 12px; }
+  .codeWorkspace > .reqHeader h1 { font-size: 23px; }
+  .codeWorkspace > .reqHeader .back { font-size: 12px; padding: 6px 8px; }
+  .codeWorkspace .codeDemoBanner { grid-template-columns: minmax(0, 1fr); }
+  .codeWorkspace .codeDemoBannerFooter { grid-column: 1; grid-row: auto; align-items: stretch; max-width: none; }
+  .codeWorkspace .codeDemoBannerFooter p { text-align: left; }
+}
+.codeWorkspace > .reqHeader { min-height: 52px; }
+.codeWorkspace .codeDemoBannerFooter { max-width: 470px; }
+.codeWorkspace .codeDemoBanner button { min-height: 28px; }
+.codeWorkspace .codeFileToolbar input[type="checkbox"] { width: 14px; height: 14px; min-height: 0; margin: 0; flex: 0 0 14px; }
+.codeWorkspace .codeSourceSummary { line-height: 1.35; }
+.codeWorkspace .codeWorkspaceTabs button[aria-current="page"]:hover,
+.codeWorkspace .codeWorkspaceTabs button[aria-current="page"]:focus-visible { background: #126a73; color: #fff; }
+.codeWorkspace > section[aria-label="Merge request register"] > p { margin: 6px 0; font-size: 12px; color: var(--muted, #536276); }

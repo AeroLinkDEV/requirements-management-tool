@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 977,
-    "cases": 1112,
-    "classes": 154,
-    "hostedTests": 928,
-    "hostedCases": 1041,
+    "tests": 980,
+    "cases": 1120,
+    "classes": 155,
+    "hostedTests": 931,
+    "hostedCases": 1049,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 15,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 604,
-      "cases": 690,
+      "tests": 605,
+      "cases": 691,
       "unknownCases": 0,
-      "classes": 121
+      "classes": 122
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 109,
-      "cases": 122,
+      "tests": 111,
+      "cases": 129,
       "unknownCases": 0,
-      "classes": 64
+      "classes": 65
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -12059,6 +12059,57 @@
       "sourceLines": {
         "start": 21,
         "end": 28
+      }
+    },
+    {
+      "cls": "ReleasedSyntheticSourceSupplementApiTests",
+      "test": "Authority_lost_during_remote_wait_prevents_append",
+      "kind": "Theory",
+      "intent": "auth-policy",
+      "cases": 4,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 97,
+        "end": 140
+      }
+    },
+    {
+      "cls": "ReleasedSyntheticSourceSupplementApiTests",
+      "test": "Invalid_authority_or_relationship_intent_is_refused_before_remote_access",
+      "kind": "Theory",
+      "intent": "auth-policy",
+      "cases": 3,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 72,
+        "end": 95
+      }
+    },
+    {
+      "cls": "ReleasedSyntheticSourceSupplementApiTests",
+      "test": "Preview_apply_read_and_replay_preserve_ordinary_source_history",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 24,
+        "end": 70
       }
     },
     {

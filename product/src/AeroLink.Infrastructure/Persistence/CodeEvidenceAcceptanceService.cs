@@ -119,6 +119,9 @@ public sealed class CodeEvidenceAcceptanceService(AeroLinkDbContext db)
             sourceSnapshot = await db.GitLabSourceSnapshots.AsNoTracking().SingleOrDefaultAsync(x => x.ProjectId == command.ProjectId
                 && x.Id == command.ExpectedSourceSnapshotId.Value, ct)
                 ?? throw new DomainException("The expected source snapshot is not part of this project.");
+            if (await db.ReleasedSyntheticSourceSupplements.AsNoTracking()
+                    .AnyAsync(x => x.ProjectId == command.ProjectId && x.SourceSnapshotId == sourceSnapshot.Id, ct))
+                throw new DomainException("A released synthetic supplement snapshot is browsing-only and cannot support Code evidence acceptance.");
             if (sourceSnapshot.RepositoryConfigurationId != configuration.Id
                 || sourceSnapshot.ConfigurationVersion != configuration.Version
                 || sourceSnapshot.RemoteProjectId != configuration.RemoteProjectId

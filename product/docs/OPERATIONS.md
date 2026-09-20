@@ -791,6 +791,34 @@ the project only when both values are valid and the live verified configuration 
 path, and remote ID. They are display-only metadata: normal projects omit them, no credentials or permissions are
 changed, and the settings do not authorize source or relationship writes, add migrations, or reseed startup data.
 
+### Released synthetic source supplement
+
+The one-time DEC-131 supplement for an explicitly configured released synthetic FMS 1.5 project is a source-only
+maintenance operation. It is separate from ordinary source selection and from the showcase upgrade workflow. The
+installation must explicitly configure the five-value `ProjectGitLab:ReleasedSyntheticSourceSupplementScope` tuple
+(`ProgramId`, `ProjectId`, `ReleaseId`, `BaselineId`, and `CampaignId`); an absent, partial, or mismatched tuple fails
+closed. The operator supplies a reviewed JSON manifest to these no-store routes:
+
+```text
+POST /api/projects/{projectId}/code/source/released-supplement/preview
+POST /api/projects/{projectId}/code/source/released-supplement/apply
+GET  /api/projects/{projectId}/code/source/released-supplement?releaseId={releaseId}
+```
+
+Preview validates the exact local project, released release/campaign/baseline, configured authority tuple, verified
+repository configuration, expected source version zero, and the exact remote commit. Its response contains the
+canonical manifest digest and either the concrete proposed source snapshot or the exact existing receipt. Review that
+digest and the proposed SHA before sending the same manifest to `apply`; the server recomputes the digest and repeats
+the local checks after the remote observation. A successful apply records one immutable source snapshot and one
+immutable supplement receipt, but it does not create an ordinary current source selection, selection event,
+relationship, evidence, NoCode disposition, release change, or readiness claim.
+
+The GET response is the readback and replay reference. It shows the recorded actor/time, digest, exact repository and
+commit identity, and the durable label that this was recorded after release as a synthetic historical supplement and is
+not part of the original release package. Repeating the exact manifest is an idempotent replay; a changed manifest,
+authority tuple, source history, configuration, or repository identity is refused. Use the normal resumable source and
+relationship utility for later in-work releases; do not use a generic showcase upgrade command for this supplement.
+
 ## Recoverable project setup, source uploads, and recovery
 
 Use the Create New Project flow for all three supported starting paths: an empty Fresh project, an exact authorized

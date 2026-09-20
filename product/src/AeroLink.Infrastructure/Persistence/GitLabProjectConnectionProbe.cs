@@ -10,6 +10,20 @@ public sealed class ProjectGitLabOptions
     public string ReadAccessToken { get; set; } = "";
     public string SyntheticDemoProjectId { get; set; } = "";
     public string SyntheticDemoRemoteProjectId { get; set; } = "";
+    public ReleasedSyntheticSourceSupplementScopeOptions ReleasedSyntheticSourceSupplementScope { get; set; } = new();
+}
+
+/// <summary>
+/// Explicit operator allow-list for the one DEC-131 released synthetic source supplement.
+/// Empty by default so ordinary installations cannot accidentally opt into the maintenance command.
+/// </summary>
+public sealed class ReleasedSyntheticSourceSupplementScopeOptions
+{
+    public string ProgramId { get; set; } = "";
+    public string ProjectId { get; set; } = "";
+    public string ReleaseId { get; set; } = "";
+    public string BaselineId { get; set; } = "";
+    public string CampaignId { get; set; } = "";
 }
 
 public sealed record ProjectRepositoryProbeResult(bool Verified, string Code, string Detail,

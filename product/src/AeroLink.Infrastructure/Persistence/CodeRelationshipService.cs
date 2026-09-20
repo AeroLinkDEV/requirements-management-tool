@@ -333,6 +333,9 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
 
         var snapshot = await db.GitLabSourceSnapshots.AsNoTracking().SingleOrDefaultAsync(x => x.ProjectId == projectId && x.Id == snapshotId.Value, ct)
             ?? throw new DomainException("The source snapshot is not part of this project.");
+        if (await db.ReleasedSyntheticSourceSupplements.AsNoTracking()
+                .AnyAsync(x => x.ProjectId == projectId && x.SourceSnapshotId == snapshot.Id, ct))
+            throw new DomainException("A released synthetic supplement snapshot is browsing-only and cannot bind a Code relationship.");
         if (snapshot.RemoteProjectId != configuration.RemoteProjectId
             || !string.Equals(snapshot.InstanceBaseUrl, instanceBaseUrl, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(snapshot.PathWithNamespace, configuration.RemotePathWithNamespace, StringComparison.Ordinal))
