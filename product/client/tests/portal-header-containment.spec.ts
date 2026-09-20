@@ -130,17 +130,21 @@ const assertDocumentContained = (width: number, g: Geometry) => {
   expect(g.document.scrollWidth, `#1054 at ${width}px: document scrollWidth ${g.document.scrollWidth} exceeds the viewport`).toBeLessThanOrEqual(g.document.clientWidth + 1)
 }
 
-/** DEC-049: the summary is the activation control, so its own box must meet the 24px target. */
+/** DEC-049: the summary is the activation control, so its own box must meet the 24x24 target in both
+    dimensions, however short the declared label is (Checkpoint B round 2, F03). */
 const assertDisclosureTarget = (context: string, g: Geometry) => {
   const summary = g.rects.badgeSummary
   expect(summary, `${context}: summary measured`).not.toBeNull()
-  expect(summary!.height, `${context}: disclosure activation target ${summary!.height}px is below the 24px minimum`).toBeGreaterThanOrEqual(24)
+  expect(summary!.width, `${context}: disclosure target width ${summary!.width}px is below the 24px minimum`).toBeGreaterThanOrEqual(24)
+  expect(summary!.height, `${context}: disclosure target height ${summary!.height}px is below the 24px minimum`).toBeGreaterThanOrEqual(24)
 }
 
 /** Asserts containment for every visible leaf text element in the header — the wrapper rectangles can
     be correct while a text run escapes them, so the rendered text itself is measured (Checkpoint B,
-    F01). Returns the number of visible text runs checked. */
-async function assertVisibleHeaderText(page: Page, context: string) {
+    F01). A closed details hides its non-summary content, but its visible summary text MUST be audited,
+    so only non-summary content of a closed details is excluded. expectedTexts asserts the known
+    summary/status text really is among the audited runs. Returns the audited run texts. */
+async function assertVisibleHeaderText(page: Page, context: string, expectedTexts: string[] = []): Promise<string[]> {
   const runs = await page.evaluate(() => {
     const header = document.querySelector('.projectsTopBar')
     if (!header) return null
@@ -153,9 +157,10 @@ async function assertVisibleHeaderText(page: Page, context: string) {
       const el = node.parentElement
       if (!el) continue
       if (getComputedStyle(el).display === 'none' || getComputedStyle(el).visibility === 'hidden') continue
-      // A closed details hides its content outside display:none; only audit text that can actually render.
+      // A closed details hides its non-summary content outside display:none; its summary stays visible
+      // and must be audited with the rest.
       const holder = el.closest('details')
-      if (holder && !(holder as HTMLDetailsElement).open) continue
+      if (holder && !(holder as HTMLDetailsElement).open && !el.closest('summary')) continue
       const range = document.createRange()
       range.selectNodeContents(node)
       for (const r of range.getClientRects()) {
@@ -167,12 +172,16 @@ async function assertVisibleHeaderText(page: Page, context: string) {
   })
   expect(runs, `${context}: header present for visible-text audit`).not.toBeNull()
   expect(runs!.runs.length, `${context}: visible header text runs found`).toBeGreaterThanOrEqual(4)
+  for (const expected of expectedTexts) {
+    expect(runs!.runs.some(run => run.text === expected), `${context}: expected visible summary/status text "${expected}" was not among the audited runs (audited: ${runs!.runs.map(r => r.text).join(" | ")})`).toBe(true)
+  }
   for (const run of runs!.runs) {
     expect(run.right, `${context}: visible text "${run.text.slice(0, 32)}" right edge ${run.right.toFixed(1)} exceeds the viewport ${runs!.clientWidth}`).toBeLessThanOrEqual(runs!.clientWidth + 1)
     expect(run.right, `${context}: visible text "${run.text.slice(0, 32)}" exceeds the header content`).toBeLessThanOrEqual(runs!.headerRight + 1)
     expect(run.bottom, `${context}: visible text "${run.text.slice(0, 32)}" exceeds the header bottom`).toBeLessThanOrEqual(runs!.headerBottom + 1)
     expect(run.top, `${context}: visible text "${run.text.slice(0, 32)}" starts above the header`).toBeGreaterThanOrEqual(-1)
   }
+  return runs!.runs.map(run => run.text)
 }
 
 test('#1048 after: the HOME badge stays inside the portal header at desktop and narrow widths', async ({ page }, testInfo) => {
@@ -190,7 +199,29 @@ test('#1048 after: the HOME badge stays inside the portal header at desktop and 
     assertHeaderContainsBadge(width, g)
     assertDocumentContained(width, g)
     assertDisclosureTarget(`portal ${width}px closed`, g)
-    await assertVisibleHeaderText(page, `portal ${width}px closed`)
+    // The closed summary's own text must be among the audited visible runs, not excluded with the
+    // closed panel (Checkpoint B round 2, F04).
+    await assertVisibleHeaderText(page, `portal ${width}px closed`, ['HOME', 'Current main'])
+  }
+})
+
+test('#1048 F03 after: a one-character declared label still meets the 24x24 disclosure target', async ({ page }, testInfo) => {
+  await installIdentity(page, homeIdentity({
+    mode: 'UNKNOWN',
+    mainCurrency: null,
+    instance: { id: 'short', label: 'Q', classification: 'WorkLaptopLocal', snapshot: null },
+  }))
+  await login(page, 'admin', { openProject: false })
+  const badge = page.getByTestId('instance-badge')
+  await expect(badge).toBeVisible()
+  for (const [width, height] of [[1440, 900], [390, 760]] as const) {
+    await settleAt(page, width, height)
+    const g = await measureGeometry(page)
+    await record(page, testInfo, `short-label-${width}`, g)
+    assertHeaderContainsBadge(width, g)
+    assertDocumentContained(width, g)
+    assertDisclosureTarget(`short label ${width}px`, g)
+    await assertVisibleHeaderText(page, `short label ${width}px closed`, ['Q'])
   }
 })
 
@@ -235,7 +266,7 @@ test('#1048 F01 after: an unbroken long label and the opened disclosure stay con
       } else {
         assertDisclosureTarget(`unbroken label ${width}px`, g)
       }
-      await assertVisibleHeaderText(page, `unbroken label ${width}px ${state}`)
+      await assertVisibleHeaderText(page, `unbroken label ${width}px ${state}`, ['FLIGHTTESTLAPTOPLONGINSTALLATIONNAMEWITHOUTGAPS'])
     }
   }
 })
@@ -462,7 +493,8 @@ function topBarInnerSafe(g: Geometry): number {
 
 test('#1048 F02 after: the sidebar badge wraps a long label inside the measured column and opens its disclosure', async ({ page }, testInfo) => {
   test.skip(!process.env.AEROLINK_SHOWCASE_SEED, 'requires the seeded disposable workspace lane')
-  await installIdentity(page, homeIdentity({
+  // A mutable payload lets one route serve both the long-label and short-label identity states.
+  let payload = homeIdentity({
     mode: 'UNKNOWN',
     mainCurrency: null,
     instance: {
@@ -476,7 +508,9 @@ test('#1048 F02 after: the sidebar badge wraps a long label inside the measured 
         activatedAtUtc: null,
       },
     },
-  }))
+  })
+  await page.route('**/health/identity', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) }))
   await login(page, 'admin')
   const brandBadge = page.locator('.brand').getByTestId('instance-badge')
   await expect(brandBadge).toBeVisible()
@@ -496,27 +530,45 @@ test('#1048 F02 after: the sidebar badge wraps a long label inside the measured 
     await expect(brandBadge).not.toContainText('Current main')
   }
 
-  // The disclosure target must meet DEC-049's 24px minimum in BOTH workspace densities, and the opened
-  // panel is measured at a stated viewport (Checkpoint B, F01/F03/F04: the previous capture reused the
-  // 800px loop state).
+  // The disclosure target must meet DEC-049's 24x24 in BOTH workspace densities, for the long label
+  // AND the short label, and the opened panel is measured inside each density (Checkpoint B rounds
+  // 2-3, F03/F04). Density is applied the way a person applies it - the stored preference, then a
+  // reload - and the rendered data-density value is awaited before measuring.
   for (const density of ['comfortable', 'compact'] as const) {
-    await page.evaluate(value => localStorage.setItem('aerolink-density', value), density)
-    await page.reload()
-    await expect(brandBadge).toBeVisible()
-    await settleAt(page, 1280, 900)
-    const densityGeometry = await measureGeometry(page)
-    assertDisclosureTarget(`sidebar ${density} density`, densityGeometry)
+    for (const [fixtureName, fixture] of [
+      ['long-label', homeIdentity({
+        mode: 'UNKNOWN', mainCurrency: null,
+        instance: {
+          id: 'work-laptop', label: 'FLIGHT TEST LAPTOP LONG INSTALLATION NAME', classification: 'WorkLaptopLocal',
+          snapshot: { sourceLabel: 'HOME CANONICAL', sourceSha: 'd4c3b2a1d4c3b2a1d4c3b2a1d4c3b2a1d4c3b2a1', createdAtUtc: new Date(Date.now() - 5 * 86_400_000).toISOString(), activatedAtUtc: null },
+        },
+      })],
+      ['short-label', homeIdentity({
+        mode: 'UNKNOWN', mainCurrency: null,
+        instance: { id: 'short', label: 'Q', classification: 'WorkLaptopLocal', snapshot: null },
+      })],
+    ] as const) {
+      payload = fixture
+      await page.evaluate(value => localStorage.setItem('aerolink-density', value), density)
+      await page.reload()
+      await expect.poll(() => page.evaluate(() => document.documentElement.dataset.density), { timeout: 10_000 }).toBe(density)
+      await expect(brandBadge).toBeVisible()
+      await settleAt(page, 1280, 900)
+      const g = await measureGeometry(page)
+      await record(page, testInfo, `sidebar-${fixtureName}-${density}-closed`, g)
+      assertDisclosureTarget(`sidebar ${fixtureName} ${density} density`, g)
+      const { sidebar, badge } = g.rects
+      expect(badge!.right, `sidebar ${fixtureName} ${density}: the badge leaves the ${sidebar!.width}px column`).toBeLessThanOrEqual(sidebar!.right + 1)
+      await brandBadge.getByTestId('instance-summary').click()
+      const panel = brandBadge.getByTestId('instance-details')
+      await expect(panel).toBeVisible()
+      await settleAt(page, 1280, 900)
+      const opened = await measureGeometry(page)
+      await record(page, testInfo, `sidebar-${fixtureName}-${density}-open`, opened)
+      const { badgePanel } = opened.rects
+      expect(badgePanel, 'the opened panel is measured').not.toBeNull()
+      expect(badgePanel!.right, `sidebar ${fixtureName} ${density}: the opened panel leaves the column`).toBeLessThanOrEqual(sidebar!.right + 1)
+      await expect(brandBadge).not.toContainText('Current main')
+    }
   }
-
-  await brandBadge.getByTestId('instance-summary').click()
-  const panel = brandBadge.getByTestId('instance-details')
-  await expect(panel).toBeVisible()
-  await expect(panel).toContainText('FLIGHT TEST LAPTOP LONG INSTALLATION NAME (WorkLaptopLocal)')
-  await expect(panel).toContainText('HOME CANONICAL')
-  await settleAt(page, 1280, 900)
-  const g = await measureGeometry(page)
-  const { sidebar, badgePanel } = g.rects
-  expect(badgePanel, 'the opened panel is measured').not.toBeNull()
-  expect(badgePanel!.right, 'the opened panel stays inside the sidebar column').toBeLessThanOrEqual(sidebar!.right + 1)
-  await record(page, testInfo, 'sidebar-open-1280', g)
 })

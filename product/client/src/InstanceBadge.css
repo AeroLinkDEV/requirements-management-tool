@@ -36,9 +36,9 @@
   display: flex;
   align-items: baseline;
   gap: 7px;
-  min-width: 0;
-  /* DEC-049's 24px minimum activation target: the summary is the whole tap and click area, so the
-     control itself — not its padded parent — carries the height. */
+  /* DEC-049's 24x24 minimum activation target: the summary is the whole tap and click area, so the
+     control itself — in BOTH dimensions, however short the declared label — carries the size. */
+  min-width: 24px;
   min-height: 24px;
 }
 
