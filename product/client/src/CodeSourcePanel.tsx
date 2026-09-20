@@ -9,10 +9,21 @@ export type CodeSourceSnapshot = {
   pathWithNamespace: string; commitSha: string; friendlyRef?: string;
   recordedBy: string; recordedAt: string; configurationVersion: number;
 }
+export type CodeSourceSupplement = {
+  projectId: string; releaseId: string;
+  provenance: {
+    kind: 'ReleasedSyntheticSourceSupplement'; recordedAfterRelease: boolean;
+    syntheticHistoricalSupplement: boolean; partOfOriginalReleasePackage: boolean;
+    provesDeliveredBinary: boolean; recordedBy: string; recordedAt: string;
+    manifestDigest: string; sourceSnapshotId?: string; commitSha?: string;
+  };
+  source: CodeSourceSnapshot;
+}
 export type CodeSource = {
   projectId: string; releaseId: string; version: number; selectionEventId?: string;
   snapshot?: CodeSourceSnapshot; capabilities: { canSelect: boolean; sourceSelectionFrozen: boolean };
   demonstration?: { configurationId: string; configurationVersion: number; remoteProjectId: number };
+  provenance?: CodeSourceSupplement['provenance'];
 }
 type Preview = { reference: string; referenceKind: string; sha: string; configurationVersion: number; selectionVersion: number }
 type History = { page: number; total: number; items: {
@@ -26,20 +37,39 @@ async function readJson<T>(url: string, options?: RequestInit): Promise<T> {
   return body as T
 }
 
-/** A friendly ref is only a preview input. Confirmation always binds the exact server-resolved commit. */
-export default function CodeSourcePanel({ api, projectId, releaseId, readOnly, onSource }: {
-  api: string; projectId: string; releaseId: string; readOnly: boolean;
-  onSource: (source: CodeSource | undefined) => void;
-}) {
-  // A keyed inner component prevents a previous workspace's selection or dialog surviving navigation.
-  return <SourcePanel key={`${api}/${projectId}/${releaseId}`} {...{ api, projectId, releaseId, readOnly, onSource }} />
+async function readSupplement(url: string, options?: RequestInit): Promise<CodeSourceSupplement | undefined> {
+  const response = await fetch(url, options)
+  if (response.status === 404) return undefined
+  let body: unknown
+  try { body = await response.json() } catch { throw new Error('Source supplement response was not valid JSON.') }
+  if (!response.ok) {
+    const detail = typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string'
+      ? body.error : 'Source supplement could not be loaded.'
+    throw new Error(detail)
+  }
+  if (typeof body !== 'object' || body === null || !('provenance' in body) || !('source' in body)) return undefined
+  const candidate = body as Partial<CodeSourceSupplement>
+  if (candidate.provenance?.kind !== 'ReleasedSyntheticSourceSupplement' || !candidate.source) return undefined
+  return candidate as CodeSourceSupplement
 }
 
-function SourcePanel({ api, projectId, releaseId, readOnly, onSource }: {
+/** A friendly ref is only a preview input. Confirmation always binds the exact server-resolved commit. */
+export default function CodeSourcePanel({ api, projectId, releaseId, readOnly, onSource, onSupplement }: {
   api: string; projectId: string; releaseId: string; readOnly: boolean;
   onSource: (source: CodeSource | undefined) => void;
+  onSupplement?: (supplement: CodeSourceSupplement | undefined) => void;
+}) {
+  // A keyed inner component prevents a previous workspace's selection or dialog surviving navigation.
+  return <SourcePanel key={`${api}/${projectId}/${releaseId}`} {...{ api, projectId, releaseId, readOnly, onSource, onSupplement }} />
+}
+
+function SourcePanel({ api, projectId, releaseId, readOnly, onSource, onSupplement }: {
+  api: string; projectId: string; releaseId: string; readOnly: boolean;
+  onSource: (source: CodeSource | undefined) => void;
+  onSupplement?: (supplement: CodeSourceSupplement | undefined) => void;
 }) {
   const [source, setSource] = useState<CodeSource>()
+  const [supplement, setSupplement] = useState<CodeSourceSupplement>()
   const [reference, setReference] = useState('')
   const [referenceKind, setReferenceKind] = useState('Auto')
   const [preview, setPreview] = useState<Preview>()
@@ -53,19 +83,30 @@ function SourcePanel({ api, projectId, releaseId, readOnly, onSource }: {
   const historyRequest = useLatestRequest()
   const notifySource = useRef(onSource)
   notifySource.current = onSource
+  const notifySupplement = useRef(onSupplement)
+  notifySupplement.current = onSupplement
   const base = `${api}/api/projects/${encodeURIComponent(projectId)}`
-  useLayoutEffect(() => () => notifySource.current(undefined), [])
+  useLayoutEffect(() => () => { notifySource.current(undefined); notifySupplement.current?.(undefined) }, [])
   const load = useCallback(async (signal?: AbortSignal) => {
     const current = beginLoad()
-    setSource(undefined); setPreview(undefined); notifySource.current(undefined)
-    try {
-      const value = await readJson<CodeSource>(`${base}/code/source?releaseId=${encodeURIComponent(releaseId)}`, { signal })
-      if (!current() || signal?.aborted) return
-      if (value.projectId !== projectId || value.releaseId !== releaseId) throw new Error('Source belongs to another workspace.')
-      setSource(value); notifySource.current(value)
-    } catch (failure) {
-      if (current() && !signal?.aborted) setError(failure instanceof Error ? failure.message : 'Source unavailable.')
-    }
+    setSource(undefined); setSupplement(undefined); setPreview(undefined)
+    notifySource.current(undefined); notifySupplement.current?.(undefined)
+    const [sourceResult, supplementResult] = await Promise.allSettled([
+      readJson<CodeSource>(`${base}/code/source?releaseId=${encodeURIComponent(releaseId)}`, { signal }),
+      readSupplement(`${base}/code/source/released-supplement?releaseId=${encodeURIComponent(releaseId)}`, { signal }),
+    ])
+    if (!current() || signal?.aborted) return
+    if (sourceResult.status === 'fulfilled') {
+      const value = sourceResult.value
+      if (value.projectId !== projectId || value.releaseId !== releaseId) setError('Source belongs to another workspace.')
+      else { setSource(value); notifySource.current(value) }
+    } else setError(sourceResult.reason instanceof Error ? sourceResult.reason.message : 'Source unavailable.')
+    if (supplementResult.status === 'fulfilled') {
+      const value = supplementResult.value
+      if (value && (value.projectId !== projectId || value.releaseId !== releaseId || value.source.projectId !== projectId))
+        setError('Source supplement belongs to another workspace.')
+      else if (value) { setSupplement(value); notifySupplement.current?.(value) }
+    } else setError(supplementResult.reason instanceof Error ? supplementResult.reason.message : 'Source supplement unavailable.')
   }, [base, projectId, releaseId, beginLoad])
   useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort() }, [load])
   const canSelect = !readOnly && source?.capabilities?.canSelect === true
@@ -121,11 +162,16 @@ function SourcePanel({ api, projectId, releaseId, readOnly, onSource }: {
   }
 
   return <section className="codeSourcePanel" aria-label="Build source">
-    <div><h2>Build source</h2>{source?.snapshot ? <>
-      <p>{source.snapshot.pathWithNamespace} · {source.snapshot.friendlyRef || 'Exact commit'}</p>
-      <code>{source.snapshot.commitSha}</code>
-      <p>Selection {source.version} · Branch and tag movement does not change this selection.</p>
-    </> : <p>{source ? 'No source selected for this build.' : 'Loading selected source…'}</p>}</div>
+    <div className="codeSourceSummary"><h2>Build source</h2>{source?.snapshot ? <>
+      <p className="codeSourceIdentity"><strong>{source.snapshot.pathWithNamespace}</strong><span>{source.snapshot.friendlyRef !== source.snapshot.commitSha ? source.snapshot.friendlyRef : null}</span></p>
+      <code className="codeSourceSha">{source.snapshot.commitSha}</code>
+      <p className="codeSourceMeta"><span className="codeStatusBadge codeStatusBadge--selected">Selected source · v{source.version}</span> Branch and tag movement does not change this selection.</p>
+    </> : supplement ? <div className="codeSourceSupplement" role="note">
+      <div className="codeSupplementHeading"><span className="codeStatusBadge codeStatusBadge--supplement">Historical source supplement</span><span>recorded {new Date(supplement.provenance.recordedAt).toLocaleString()}</span></div>
+      <p><strong>{supplement.source.pathWithNamespace}</strong> · exact commit <code>{supplement.source.commitSha}</code></p>
+      <p>Recorded after release for synthetic browsing context. It is not the original release package, does not select this build, and does not prove the delivered binary.</p>
+      <small>Recorded by <PersonName userName={supplement.provenance.recordedBy} /> · manifest {supplement.provenance.manifestDigest.slice(0, 12)}…</small>
+    </div> : <p>{source ? 'No source selected for this build.' : 'Loading selected source…'}</p>}</div>
     <div className="codeSourceActions">
       {canSelect && <button onClick={() => { setEditing(true); setPreview(undefined); setError('') }}>Select source</button>}
       <button onClick={() => void readHistory(1)}>Source history</button>

@@ -338,3 +338,40 @@ test('a delayed demo connection observation cannot survive page navigation', asy
   await expect(page.getByRole('region', { name: 'Synthetic demonstration' })).toHaveCount(0)
   await expect(page.getByText('Synthetic demonstration content · live GitLab metadata')).toHaveCount(0)
 })
+
+test('released source supplement stays separate from ordinary selection while enabling exact browsing', async ({ page }, testInfo) => {
+  const supplementSha = 'b'.repeat(40)
+  await mockWorkspace(page)
+  await page.route('**/api/projects/project-one/code/source?**', route => route.fulfill({ json: {
+    projectId: 'project-one', releaseId: 'release-one', version: 0,
+    capabilities: { canSelect: false, sourceSelectionFrozen: true },
+  } }))
+  await page.route('**/api/projects/project-one/code/source/released-supplement?**', route => route.fulfill({ json: {
+    projectId: 'project-one', releaseId: 'release-one', provenance: {
+      kind: 'ReleasedSyntheticSourceSupplement', recordedAfterRelease: true,
+      syntheticHistoricalSupplement: true, partOfOriginalReleasePackage: false,
+      provesDeliveredBinary: false, recordedBy: 'configuration-manager',
+      recordedAt: '2026-09-20T03:00:00Z', manifestDigest: 'c'.repeat(64),
+    }, source: { id: 'supplement-source', projectId: 'project-one', instanceBaseUrl: 'https://gitlab.example',
+      remoteProjectId: 17, pathWithNamespace: 'demo/fms', commitSha: supplementSha,
+      recordedBy: 'configuration-manager', recordedAt: '2026-09-20T03:00:00Z', configurationVersion: 7 },
+  } }))
+  await page.route('**/api/projects/project-one/code/source/supplement-source/tree?**', route => route.fulfill({ json: {
+    configurationVersion: 7, checkedAt: '2026-09-20T03:01:00Z',
+    observation: { succeeded: true, completeness: 'Complete', value: {
+      commitSha: supplementSha, entries: [{ path: 'README.md', name: 'README.md', kind: 'Blob', mode: '100644' }],
+    } },
+  } }))
+  await page.route('**/api/projects/project-one/code/relationships?**', route => route.fulfill({ json: { page: 1, pageSize: 25, total: 0, items: [] } }))
+  await page.goto('/tests/fixtures/code-workspace.html')
+  await expect(page.getByText('Historical source supplement').first()).toBeVisible()
+  await expect(page.getByText('does not select this build')).toBeVisible()
+  await expect(page.getByText('Selection 0')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Code Explorer', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'README.md', exact: true })).toBeVisible()
+  await expect(page.getByText('Browsing exact files recorded')).toBeVisible()
+  await page.getByRole('button', { name: 'README.md', exact: true }).click()
+  await expect(page.getByText('EXACT SUPPLEMENT SOURCE')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Link AeroLink artifact' })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('released-supplement-browse.png'), fullPage: true })
+})

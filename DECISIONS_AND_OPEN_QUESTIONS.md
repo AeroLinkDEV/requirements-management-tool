@@ -2538,3 +2538,12 @@ choices are created as focused issues only when their trigger and acceptance bou
 - Which external identity, test, document, or issue systems need integration?
 - Whether standards-plan management or compliance-objective mapping should ever enter product scope.
 - Whether local AI assistance provides sufficient value after the controlled domain model is proven.
+
+### DEC-131 - Released Synthetic FMS 1.5 May Receive a Dated Source-Only Supplement
+
+- **Date:** 2026-09-20
+- **Status:** Accepted
+- **Owner decision:** The owner approved adding the missing source association to released synthetic FMS 1.5 as a new, visibly dated supplement while preserving its original release records. Development and initial application are limited to the disposable demonstration; canonical HOME application remains a separately coordinated operator action.
+- **Scope:** A dedicated supported operator operation may initialize source context once for the positively identified owned synthetic FMS 1.5 release, using an exact reviewed manifest, verified repository configuration and full commit identity. It records the actual operator, current time, reason, operation identity and manifest digest. The product must distinguish this present-day synthetic association from the original released package and from proof of its delivered binary.
+- **Boundaries:** This permission is source-only. It does not authorize MR/file relationships, accepted implementation evidence, revised readiness or historical approval, later source replacement, arbitrary released builds, or changes to original release records, signatures, baseline membership or manifest bytes. Normal frozen/released source and relationship guards remain unchanged; no general force flag or startup seed is authorized.
+- **Safety:** Reject unexpected ownership, lifecycle, repository/configuration identity, prior source history or conflicting operation state. Validate remote metadata outside the controlled write scope and revalidate authority and local preconditions under the existing lock order before one atomic append. Exact replay returns the original receipt without changing provenance. Prove rollback, concurrency refusal and unchanged historical consumers in isolated qualification before application. DEC-041 and DEC-045 backup/recovery requirements continue to apply to canonical operations.

@@ -105,6 +105,7 @@ public static class DependencyInjection
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false, MaxConnectionsPerServer = 4 });
         services.AddSingleton<GitLabDisplayMetadataCache>();
         services.AddScoped<SoftwareReleaseIdentityAuthority>();
+        services.AddScoped<ReleasedSyntheticSourceSupplementService>();
         services.AddScoped<ProjectAssurancePolicyService>();
         services.AddScoped<ProjectVerificationVocabularyService>();
         services.AddScoped<IdentitySeeder>();

@@ -375,6 +375,7 @@
         "RebaseRequirementChangeTests",
         "ReleaseCampaignExactIntentApiTests",
         "ReleasedExecutionEvidenceApiTests",
+        "ReleasedSyntheticSourceSupplementApiTests",
         "RemoveRequirementChangeTests",
         "ReopenBaselineConsequencesApiTests",
         "RequirementFilterExactnessApiTests",
@@ -1905,7 +1906,24 @@
       "file": "GitLabSourceEndpoints.cs",
       "coveredBy": [
         "GitLabSourceApiTests",
-        "ProjectSetupCodeEvidenceApiTests"
+        "ProjectSetupCodeEvidenceApiTests",
+        "ReleasedSyntheticSourceSupplementApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/code/source/released-supplement/apply",
+      "file": "ReleasedSyntheticSourceSupplementEndpoints.cs",
+      "coveredBy": [
+        "ReleasedSyntheticSourceSupplementApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/projects/{projectId:guid}/code/source/released-supplement/preview",
+      "file": "ReleasedSyntheticSourceSupplementEndpoints.cs",
+      "coveredBy": [
+        "ReleasedSyntheticSourceSupplementApiTests"
       ]
     },
     {

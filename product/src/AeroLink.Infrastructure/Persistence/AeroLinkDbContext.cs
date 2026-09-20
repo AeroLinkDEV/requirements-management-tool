@@ -172,6 +172,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<GitLabSourceSnapshot> GitLabSourceSnapshots => Set<GitLabSourceSnapshot>();
     public DbSet<GitLabSourceSelectionEvent> GitLabSourceSelectionEvents => Set<GitLabSourceSelectionEvent>();
     public DbSet<GitLabCurrentSourceSelection> GitLabCurrentSourceSelections => Set<GitLabCurrentSourceSelection>();
+    public DbSet<ReleasedSyntheticSourceSupplement> ReleasedSyntheticSourceSupplements => Set<ReleasedSyntheticSourceSupplement>();
     public DbSet<GitLabMergeRequestRelationship> GitLabMergeRequestRelationships => Set<GitLabMergeRequestRelationship>();
     public DbSet<GitLabFileRelationship> GitLabFileRelationships => Set<GitLabFileRelationship>();
     public DbSet<GitLabCodeRelationshipEvent> GitLabCodeRelationshipEvents => Set<GitLabCodeRelationshipEvent>();
@@ -1983,6 +1984,35 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Version).IsConcurrencyToken(); b.Property(x => x.ChangedBy).HasMaxLength(100).IsRequired();
             b.HasIndex(x => new { x.ProjectId, x.ReleaseId }).IsUnique();
             b.HasOne<GitLabSourceSelectionEvent>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId, x.SourceSnapshotId, x.Version, x.SelectionEventId }).HasPrincipalKey(x => new { x.ProjectId, x.ReleaseId, x.SourceSnapshotId, x.ResultingVersion, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<ReleasedSyntheticSourceSupplement>(b =>
+        {
+            b.ToTable("released_synthetic_source_supplements"); b.HasKey(x => x.Id);
+            b.Property(x => x.InstanceBaseUrl).HasMaxLength(500).IsRequired();
+            b.Property(x => x.RepositoryPath).HasMaxLength(300).IsRequired();
+            b.Property(x => x.CommitSha).HasMaxLength(64).IsRequired();
+            b.Property(x => x.RequestedReference).HasMaxLength(256).IsRequired();
+            b.Property(x => x.ReferenceKind).HasMaxLength(30).IsRequired();
+            b.Property(x => x.AuthorityScopeDigest).HasMaxLength(64).IsRequired();
+            b.Property(x => x.ManifestDigest).HasMaxLength(64).IsRequired();
+            b.Property(x => x.PolicyId).HasMaxLength(120).IsRequired();
+            b.Property(x => x.AuthorizationReference).HasMaxLength(300).IsRequired();
+            b.Property(x => x.Reason).HasMaxLength(4000).IsRequired();
+            b.Property(x => x.RecordedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.OperationId }).IsUnique();
+            b.HasIndex(x => x.ManifestDigest).IsUnique();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId })
+                .HasPrincipalKey(x => new { x.ProjectId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ReleaseCampaign>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId, x.ReleaseCampaignId })
+                .HasPrincipalKey(x => new { x.ProjectId, x.ReleaseId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId, x.BaselineId })
+                .HasPrincipalKey(x => new { x.ProjectId, x.ReleaseId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ProjectRepositoryConfiguration>().WithMany().HasForeignKey(x => new { x.ProjectId, x.RepositoryConfigurationId })
+                .HasPrincipalKey(x => new { x.ProjectId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<GitLabSourceSnapshot>().WithMany().HasForeignKey(x => new { x.ProjectId, x.SourceSnapshotId })
+                .HasPrincipalKey(x => new { x.ProjectId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<GitLabMergeRequestRelationship>(b =>
         {

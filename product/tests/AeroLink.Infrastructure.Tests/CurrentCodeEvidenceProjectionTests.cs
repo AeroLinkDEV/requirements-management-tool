@@ -319,6 +319,46 @@ public sealed class CurrentCodeEvidenceProjectionTests
     }
 
     [Fact]
+    public async Task Acceptance_service_rejects_a_released_supplement_snapshot_before_provider_observation()
+    {
+        await using var f = await Fixture.CreateAsync(changedInBuild: true);
+        var campaign = await f.CampaignAsync();
+        await f.Db.CandidateBaselines.Where(x => x.Id == campaign.BaselineId).ExecuteUpdateAsync(update => update
+            .SetProperty(x => x.State, CandidateBaselineState.Frozen)
+            .SetProperty(x => x.RequirementsMaterializedAt, f.Now));
+        f.Repository.RecordVerification("tester", f.Now, 17, "group/project");
+        var snapshot = f.Snapshot('a');
+        var selection = new GitLabSourceSelectionEvent(f.Project.Id, f.Release.Id, snapshot.Id, 0, "tester", f.Now);
+        var current = new GitLabCurrentSourceSelection(f.Project.Id, f.Release.Id, snapshot.Id, selection.Id, "tester", f.Now);
+        var target = CodeRelationshipTarget.ForRequirementRevision(f.Revision.Id, f.Artifact.Id, f.Revision.Revision, "LLR-000001.01");
+        var relationship = new GitLabMergeRequestRelationship(f.Project.Id, f.Release.Id, snapshot.InstanceBaseUrl,
+            snapshot.RemoteProjectId, 12, 1200, snapshot.Id, selection.Id, snapshot.PathWithNamespace,
+            "https://gitlab.example/group/project/-/merge_requests/12", "Observed later", target,
+            CodeRelationshipMeaning.Implements, "tester", f.Now);
+        var supplement = new ReleasedSyntheticSourceSupplement(f.Project.Id, f.Release.Id, campaign.Id,
+            campaign.BaselineId, f.Repository.Id, f.Repository.Version, snapshot.Id, snapshot.InstanceBaseUrl,
+            snapshot.RemoteProjectId, snapshot.PathWithNamespace, snapshot.CommitSha, "main", "Branch", Guid.NewGuid(),
+            1, new string('a', 64), 1, new string('b', 64), "DEC-131", "test-authorization",
+            "Synthetic released source browsing context.", "tester", f.Now);
+        f.Db.AddRange(snapshot, selection, current, relationship, supplement);
+        await f.Db.SaveChangesAsync();
+
+        var command = new CodeEvidenceAcceptanceCommand(f.Project.Id, f.Release.Id, campaign.BaselineId,
+            f.Artifact.Id, f.Revision.Id, CodeEvidenceDisposition.GitLabContributions, 0, f.Legacy.Id,
+            f.Repository.Version, selection.Id, snapshot.Id, selection.ResultingVersion,
+            [new(CodeEvidenceContributionKind.MergeRequest, relationship.Id, relationship.Version)], null);
+        await using var scope = await ProjectControlledWriteScope.AcquireAsync(f.Db, f.Project.Id);
+        var failure = await Assert.ThrowsAsync<DomainException>(() => new CodeEvidenceAcceptanceService(f.Db).AcceptAsync(
+            scope, command, new Dictionary<Guid, CodeEvidenceMergeObservation>(), LegacyLadderPolicy.Instance,
+            "tester", f.Now, default));
+        await scope.RollbackAsync();
+
+        Assert.Contains("browsing-only", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await f.Db.CodeEvidenceDispositionSets.ToListAsync());
+        Assert.Empty(await f.Db.CodeEvidenceContributions.ToListAsync());
+    }
+
+    [Fact]
     public async Task Acceptance_service_accepts_source_less_merge_context_and_file_from_prior_event_into_current_selection()
     {
         await using var f = await Fixture.CreateAsync(changedInBuild: true);
