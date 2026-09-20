@@ -23,8 +23,9 @@
 .codeSourceForm > div { flex-basis: 100%; }
 .codeCommandBar { justify-content: space-between; margin: 16px 0; }
 .codeCommandBar form { display: flex; gap: 8px; flex-wrap: wrap; }
-.codeRegisterLayout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); border: 1px solid var(--line, #dae1e9); border-radius: 8px; overflow: hidden; background: var(--surface, #fff); }
-.codeRegisterLayout > div { min-width: 0; overflow-x: auto; }
+.codeRegisterLayout,
+.reqLayout.codeRegisterLayout.inspecting { height: auto; min-height: 320px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); border: 1px solid var(--line, #dae1e9); border-radius: 8px; overflow: hidden; background: var(--surface, #fff); }
+.codeRegisterLayout > .codeRegisterPanel { min-width: 0; overflow: auto; }
 .codeWorkspace table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .codeWorkspace th, .codeWorkspace td { padding: 12px; text-align: left; border-bottom: 1px solid var(--line, #dae1e9); }
 .codeWorkspace th { background: #f1f5f9; font-size: 12px; }
@@ -34,7 +35,10 @@
 .codeRegisterLayout .requirementInspector { width: auto; min-width: 0; position: static; max-height: none; border-left: 1px solid var(--line, #dae1e9); }
 .codeRegisterLayout .requirementInspector > [role="tabpanel"] { padding: 18px; }
 .codeRegisterLayout .requirementInspector > [role="tabpanel"] > code { display: block; margin: 6px 0 12px; }
-.codeEmptyInspector { padding: 24px; color: var(--muted, #536276); border-left: 1px solid var(--line, #dae1e9); }
+.codeRegisterLayout .procedureInspectorEmpty { min-height: 320px; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 24px; text-align: center; color: var(--muted, #536276); }
+.codeRegisterLayout .procedureInspectorEmpty > span { font-size: 28px; color: var(--teal-700, #17767c); }
+.codeRegisterLayout .procedureInspectorEmpty b { color: var(--ink-900, #26374c); }
+.codeRegisterLayout .procedureInspectorEmpty p { max-width: 240px; margin: 0; line-height: 1.5; }
 .codeTree, .codeRelationships ul { list-style: none; padding: 0; margin: 0; }
 .codeTree li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--line, #dae1e9); }
 .codeTree li button { text-align: left; border: 0; background: transparent; }
@@ -60,6 +64,6 @@
 .codeTargetRows { max-height: 36vh; overflow: auto; }
 .codeTargetRows > label { display: flex; align-items: start; gap: 10px; padding: 10px; border-bottom: 1px solid #dae1e9; }
 .codeTargetRows small { display: block; margin-top: 4px; }
-@media (max-width: 1050px) { .codeRegisterLayout { grid-template-columns: minmax(0, 1fr); } .codeRegisterLayout .requirementInspector, .codeEmptyInspector { border-left: 0; border-top: 1px solid var(--line, #dae1e9); } }
+@media (max-width: 800px) { .codeRegisterLayout .requirementInspector { border-left: 0; border-top: 1px solid var(--line, #dae1e9); } }
 @media (max-width: 900px) { .codeSourcePanel { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 650px) { .codeWorkspace { padding: 14px; } .codeSourcePanel { grid-template-columns: minmax(0, 1fr); } .codeCommandBar form { width: 100%; } .codeCommandBar input { max-width: 100%; } }

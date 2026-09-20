@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ControlledArtifactExplorerHeader, ControlledArtifactInspector } from './ControlledArtifactExplorer'
+import { useState, type ReactNode } from 'react'
+import { ControlledArtifactExplorerHeader, ControlledArtifactExplorerLayout, ControlledArtifactInspector, ControlledArtifactInspectorEmpty } from './ControlledArtifactExplorer'
 import CodeSourcePanel, { type CodeSource } from './CodeSourcePanel'
 import CodeTraceabilityCenter from './CodeTraceabilityCenter'
 import CodeLinkPicker from './CodeLinkPicker'
@@ -38,6 +38,17 @@ function ScopedCodeWorkspace({ api, projectId, releaseId, readOnly, page, onBack
 }
 
 type ArtifactLinkContext = { fixedTarget?: { kind: string; id: string }; onLinked?: () => void }
+function CodeRegisterFrame({ resizableKey, children, inspector }: {
+  resizableKey: string
+  children: ReactNode
+  inspector: ReactNode
+}) {
+  return <ControlledArtifactExplorerLayout inspecting resizableKey={resizableKey} className="codeRegisterLayout">
+    <div className="codeRegisterPanel">{children}</div>
+    {inspector}
+  </ControlledArtifactExplorerLayout>
+}
+
 export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixedTarget, onLinked }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly'> & ArtifactLinkContext) {
   const [linking, setLinking] = useState(false)
   const [mode, setMode] = useState<'linked' | 'discover'>('linked')
@@ -84,8 +95,22 @@ export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixe
       : 'GitLab discovery. Appearing here does not mean a merge request is linked or accepted in AeroLink.'}</p>
     {(mode === 'linked' ? linked.value?.metadataCheckedAt : discovered.value?.checkedAt) && <p>GitLab metadata checked {new Date((mode === 'linked' ? linked.value!.metadataCheckedAt : discovered.value!.checkedAt)!).toLocaleString()} · observations may be reused for up to 15 seconds.</p>}
     {error && <p role="alert">{error}</p>}
-    <div className="codeRegisterLayout">
-      <div>{loading ? <p role="status">Loading merge requests…</p> : <>
+    <CodeRegisterFrame resizableKey="code-merge-request-register" inspector={selected ? <ControlledArtifactInspector artifactType="GitLab merge request" displayNumber={`!${selected.iid}`}
+      subtitle="GitLab metadata and recorded AeroLink context" closeLabel="Close merge request inspector"
+      onClose={() => setSelected(undefined)} tabs={[{ id: 'details', label: 'Details and relationships' }]} activeTab="details" onTab={() => {}}>
+      {(detail.loading || remoteDetail.loading) && <p>Loading merge request details…</p>}
+      {(detail.error || remoteDetail.error) && <p role="alert">{detail.error || remoteDetail.error}</p>}
+      {mr ? <><h3>{mr.title}</h3><p>{mergeRequestState(mr)}</p><p>{mr.sourceBranch} → {mr.targetBranch}</p>
+        {(detail.value?.metadataCheckedAt || remoteDetail.value?.checkedAt) && <p>Details checked {new Date((detail.value?.metadataCheckedAt || remoteDetail.value?.checkedAt)!).toLocaleString()}</p>}
+        <p>{mr.approvals?.known ? `${mr.approvals.approvedBy.length} recorded GitLab approval(s)` : 'GitLab approvals unknown'}</p>
+        {mr.approvals?.known && <ul>{mr.approvals.approvedBy.map(person => <li key={person.id}>{person.name} (@{person.username})</li>)}</ul>}
+        <a href={mr.webUrl} target="_blank" rel="noreferrer">Open in GitLab ↗</a>
+        {!readOnly && <p><button onClick={() => setLinking(true)}>Link AeroLink artifact</button></p>}
+      </> : !detail.loading && !remoteDetail.loading && <p>Current GitLab metadata is unknown. Retained relationships remain readable.</p>}
+      {mode === 'linked' && <CodeRelationshipList {...{ api, projectId, readOnly }} onChanged={() => setRefresh(value => value + 1)} items={[...(detail.value?.mergeRequests ?? []), ...(detail.value?.files ?? [])]} />}
+    </ControlledArtifactInspector> : <ControlledArtifactInspectorEmpty title="merge request"
+      description="Select a merge request to inspect GitLab metadata and recorded AeroLink relationships." />}>
+      {loading ? <p role="status">Loading merge requests…</p> : <>
         <table><thead><tr><th scope="col">MR</th><th scope="col">Title</th><th scope="col">GitLab state</th><th scope="col">Recorded relationships</th></tr></thead>
           <tbody>{rows?.map(row => <tr key={row.key} aria-selected={selected?.iid === row.iid && selected.origin === row.origin && selected.remoteProjectId === row.remoteProjectId}>
             <td><button onClick={() => setSelected({ iid: row.iid, origin: row.origin, remoteProjectId: row.remoteProjectId })}>!{row.iid}</button></td>
@@ -95,22 +120,7 @@ export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixe
         <div className="codePagination"><button disabled={page <= 1} onClick={() => { setPage(value => value - 1); setSelected(undefined) }}>Previous page</button>
           <span>Page {page}{mode === 'linked' && linked.value ? ` · ${linked.value.total} recorded merge requests` : ''}</span>
           <button disabled={!next} onClick={() => { setPage(value => value + 1); setSelected(undefined) }}>Next page</button></div>
-      </>}</div>
-      {selected ? <ControlledArtifactInspector artifactType="GitLab merge request" displayNumber={`!${selected.iid}`}
-        subtitle="GitLab metadata and recorded AeroLink context" closeLabel="Close merge request inspector"
-        onClose={() => setSelected(undefined)} tabs={[{ id: 'details', label: 'Details and relationships' }]} activeTab="details" onTab={() => {}}>
-        {(detail.loading || remoteDetail.loading) && <p>Loading merge request details…</p>}
-        {(detail.error || remoteDetail.error) && <p role="alert">{detail.error || remoteDetail.error}</p>}
-        {mr ? <><h3>{mr.title}</h3><p>{mergeRequestState(mr)}</p><p>{mr.sourceBranch} → {mr.targetBranch}</p>
-          {(detail.value?.metadataCheckedAt || remoteDetail.value?.checkedAt) && <p>Details checked {new Date((detail.value?.metadataCheckedAt || remoteDetail.value?.checkedAt)!).toLocaleString()}</p>}
-          <p>{mr.approvals?.known ? `${mr.approvals.approvedBy.length} recorded GitLab approval(s)` : 'GitLab approvals unknown'}</p>
-          {mr.approvals?.known && <ul>{mr.approvals.approvedBy.map(person => <li key={person.id}>{person.name} (@{person.username})</li>)}</ul>}
-          <a href={mr.webUrl} target="_blank" rel="noreferrer">Open in GitLab ↗</a>
-          {!readOnly && <p><button onClick={() => setLinking(true)}>Link AeroLink artifact</button></p>}
-        </> : !detail.loading && !remoteDetail.loading && <p>Current GitLab metadata is unknown. Retained relationships remain readable.</p>}
-        {mode === 'linked' && <CodeRelationshipList {...{ api, projectId, readOnly }} onChanged={() => setRefresh(value => value + 1)} items={[...(detail.value?.mergeRequests ?? []), ...(detail.value?.files ?? [])]} />}
-      </ControlledArtifactInspector> : <aside className="codeEmptyInspector">Select a merge request to inspect its details and relationships.</aside>}
-    </div>
+      </>}</CodeRegisterFrame>
     {linking && selected && mr && <CodeLinkPicker key={`${selected.origin}/${selected.remoteProjectId}/${selected.iid}`} {...{ api, projectId, releaseId }}
       subject={{ kind: 'MergeRequest', iid: selected.iid }} fixedTarget={fixedTarget} onClose={() => setLinking(false)}
       onSaved={() => { setLinking(false); setRefresh(value => value + 1); onLinked?.() }} />}
@@ -161,7 +171,22 @@ export function SourceExplorer({ api, projectId, releaseId, source, readOnly, fi
     {tree.error && <p role="alert">{tree.error}</p>}
     {tree.value && !tree.value.observation.succeeded && <p role="alert">{tree.value.observation.detail}</p>}
     {linkedFiles.error && <p role="alert">{linkedFiles.error}</p>}
-    <div className="codeRegisterLayout"><div>
+    <CodeRegisterFrame resizableKey="code-source-explorer" inspector={selected ? <ControlledArtifactInspector artifactType="Repository file" displayNumber={selected.name}
+      subtitle={selected.path} closeLabel="Close file inspector" onClose={() => setSelected(undefined)}
+      tabs={[{ id: 'relationships', label: 'Recorded relationships' }]} activeTab="relationships" onTab={() => {}}>
+      <small>EXACT SOURCE</small><code>{snapshot.commitSha}</code>
+      <p><a href={`${snapshot.instanceBaseUrl}/${snapshot.pathWithNamespace.split('/').map(encodeURIComponent).join('/')}/-/blob/${snapshot.commitSha}/${selected.path.split('/').map(encodeURIComponent).join('/')}`}
+        target="_blank" rel="noreferrer">Open exact file in GitLab ↗</a></p>
+      {!readOnly && selectedFileObserved && <button onClick={() => setLinking(true)}>Link AeroLink artifact</button>}
+      {links.loading && <p>Loading recorded relationships…</p>}{links.error && <p role="alert">{links.error}</p>}
+      {links.value && <CodeRelationshipList {...{ api, projectId, readOnly }} onChanged={() => setRefresh(value => value + 1)} items={links.value.items} empty="No relationship recorded for this file." />}
+      {links.value && links.value.total > 25 && <div className="codePagination">
+        <button disabled={linkPage <= 1} onClick={() => setLinkPage(value => value - 1)}>Previous relationship page</button>
+        <span>Page {linkPage} · {links.value.total} relationships</span>
+        <button disabled={linkPage * 25 >= links.value.total} onClick={() => setLinkPage(value => value + 1)}>Next relationship page</button>
+      </div>}
+    </ControlledArtifactInspector> : <ControlledArtifactInspectorEmpty title="file"
+      description="Select a file to inspect its exact source and recorded relationships." />}>
       {linkedOnly ? <>{linkedFiles.loading ? <p role="status">Loading linked files…</p> : <ul className="codeTree">{linkedFiles.value?.items.map(file => <li key={file.path}>
         <button aria-pressed={selected?.path === file.path} onClick={() => { setSelected({ path: file.path, name: file.path.split('/').at(-1)!, kind: 'Blob' }); setLinkPage(1) }}>{file.path}</button>
         <small>{file.relationshipCount} relationship(s)</small></li>)}</ul>}
@@ -178,21 +203,7 @@ export function SourceExplorer({ api, projectId, releaseId, source, readOnly, fi
       {entries?.length === 0 && <p>No entries returned in this directory page.</p>}
       <div className="codePagination"><button disabled={cursors.length <= 1} onClick={() => { setCursors(value => value.slice(0, -1)); setSelected(undefined) }}>Previous directory page</button>
         <span>Directory page {cursors.length}</span><button disabled={!nextCursor} onClick={() => { setCursors(value => [...value, nextCursor!]); setSelected(undefined) }}>Next directory page</button></div></>}
-    </div>{selected ? <ControlledArtifactInspector artifactType="Repository file" displayNumber={selected.name}
-      subtitle={selected.path} closeLabel="Close file inspector" onClose={() => setSelected(undefined)}
-      tabs={[{ id: 'relationships', label: 'Recorded relationships' }]} activeTab="relationships" onTab={() => {}}>
-      <small>EXACT SOURCE</small><code>{snapshot.commitSha}</code>
-      <p><a href={`${snapshot.instanceBaseUrl}/${snapshot.pathWithNamespace.split('/').map(encodeURIComponent).join('/')}/-/blob/${snapshot.commitSha}/${selected.path.split('/').map(encodeURIComponent).join('/')}`}
-        target="_blank" rel="noreferrer">Open exact file in GitLab ↗</a></p>
-      {!readOnly && selectedFileObserved && <button onClick={() => setLinking(true)}>Link AeroLink artifact</button>}
-      {links.loading && <p>Loading recorded relationships…</p>}{links.error && <p role="alert">{links.error}</p>}
-      {links.value && <CodeRelationshipList {...{ api, projectId, readOnly }} onChanged={() => setRefresh(value => value + 1)} items={links.value.items} empty="No relationship recorded for this file." />}
-      {links.value && links.value.total > 25 && <div className="codePagination">
-        <button disabled={linkPage <= 1} onClick={() => setLinkPage(value => value - 1)}>Previous relationship page</button>
-        <span>Page {linkPage} · {links.value.total} relationships</span>
-        <button disabled={linkPage * 25 >= links.value.total} onClick={() => setLinkPage(value => value + 1)}>Next relationship page</button>
-      </div>}
-    </ControlledArtifactInspector> : <aside className="codeEmptyInspector">Select a file to inspect recorded relationships. Source content opens in GitLab.</aside>}</div>
+    </CodeRegisterFrame>
     {linking && selected && source && selectedFileObserved && <CodeLinkPicker key={selected.path} {...{ api, projectId, releaseId }}
       subject={{ kind: 'File', path: selected.path, parentPath: path, cursor: cursors.at(-1), source }} fixedTarget={fixedTarget}
       onClose={() => setLinking(false)} onSaved={() => { setLinking(false); setRefresh(value => value + 1); onLinked?.() }} />}

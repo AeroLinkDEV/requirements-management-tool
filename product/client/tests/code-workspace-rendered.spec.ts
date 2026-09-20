@@ -213,3 +213,26 @@ test('artifact entry reuses Code browsers and preserves its exact target for MR 
   expect(writes[1]).toMatchObject({ targetKind: 'RequirementRevision', targetId: 'exact-two', sourceSnapshotId: 'source-one', commitSha: sha, path: 'src/route.c', parentPath: 'src' })
   await expect(page.getByRole('button', { name: 'Add code relationship' })).toBeFocused()
 })
+
+test('Code browsers use the shared resizable frame and stack it at narrow widths', async ({ page }) => {
+  await mockWorkspace(page)
+  await page.goto('/tests/fixtures/code-workspace.html')
+
+  const layout = page.locator('.codeRegisterLayout')
+  await expect(layout).toHaveAttribute('data-resizable-layout', 'horizontal')
+  await expect(layout.locator(':scope > .codeRegisterPanel')).toHaveCount(1)
+  await expect(layout.getByRole('separator')).toHaveCount(1)
+  await expect(page.getByText('Select a merge request to inspect GitLab metadata and recorded AeroLink relationships.')).toBeVisible()
+
+  const panel = layout.locator(':scope > .codeRegisterPanel')
+  const before = await panel.boundingBox()
+  const splitter = layout.getByRole('separator')
+  await splitter.focus()
+  await splitter.press('ArrowRight')
+  const after = await panel.boundingBox()
+  expect(after?.width ?? 0).toBeGreaterThan(before?.width ?? 0)
+
+  await page.setViewportSize({ width: 700, height: 900 })
+  await expect(layout.getByRole('separator')).toBeHidden()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy()
+})
