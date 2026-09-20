@@ -169,6 +169,17 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ProblemReportLink> ProblemReportLinks => Set<ProblemReportLink>();
     public DbSet<ProblemReportClosureCandidate> ProblemReportClosureCandidates => Set<ProblemReportClosureCandidate>();
     public DbSet<CodeTraceabilityRecord> CodeTraceabilityRecords => Set<CodeTraceabilityRecord>();
+    public DbSet<GitLabSourceSnapshot> GitLabSourceSnapshots => Set<GitLabSourceSnapshot>();
+    public DbSet<GitLabSourceSelectionEvent> GitLabSourceSelectionEvents => Set<GitLabSourceSelectionEvent>();
+    public DbSet<GitLabCurrentSourceSelection> GitLabCurrentSourceSelections => Set<GitLabCurrentSourceSelection>();
+    public DbSet<GitLabMergeRequestRelationship> GitLabMergeRequestRelationships => Set<GitLabMergeRequestRelationship>();
+    public DbSet<GitLabFileRelationship> GitLabFileRelationships => Set<GitLabFileRelationship>();
+    public DbSet<GitLabCodeRelationshipEvent> GitLabCodeRelationshipEvents => Set<GitLabCodeRelationshipEvent>();
+    public DbSet<CodeEvidenceDispositionSet> CodeEvidenceDispositionSets => Set<CodeEvidenceDispositionSet>();
+    public DbSet<CodeEvidenceContribution> CodeEvidenceContributions => Set<CodeEvidenceContribution>();
+    public DbSet<CodeEvidenceCurrentSelector> CodeEvidenceCurrentSelectors => Set<CodeEvidenceCurrentSelector>();
+    public DbSet<CodeEvidenceInvalidation> CodeEvidenceInvalidations => Set<CodeEvidenceInvalidation>();
+    public DbSet<CodeReviewCycleManifestIdentity> CodeReviewCycleManifestIdentities => Set<CodeReviewCycleManifestIdentity>();
     public DbSet<ConfigurationChangeSet> ConfigurationChangeSets => Set<ConfigurationChangeSet>();
     public DbSet<ControlledAttachment> ControlledAttachments => Set<ControlledAttachment>();
     public DbSet<ControlledAttachmentStorageOperation> ControlledAttachmentStorageOperations => Set<ControlledAttachmentStorageOperation>();
@@ -409,6 +420,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         foreach (var entry in ChangeTracker.Entries<CodeTraceabilityRecord>().Where(x => x.State == EntityState.Added))
             candidates.Add((entry.Entity.ProjectId, "code-traceability", entry.Entity.Id.ToString("D"),
                 LadderSealActor ?? "system.persistence"));
+        foreach (var entry in ChangeTracker.Entries<CodeEvidenceDispositionSet>().Where(x => x.State == EntityState.Added))
+            candidates.Add((entry.Entity.ProjectId, "code-traceability", entry.Entity.Id.ToString("D"),
+                entry.Entity.RecordedBy));
 
         if (candidates.Count == 0) return;
         var authority = new ProjectLadderSealAuthority(this);
@@ -545,7 +559,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.RemotePathWithNamespace).HasMaxLength(300);
             b.Property(x => x.LastVerificationFailureBy).HasMaxLength(100);
             b.Property(x => x.Version).IsConcurrencyToken();
-            b.HasIndex(x => x.ProjectId).IsUnique();
+            b.HasIndex(x => x.ProjectId).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.Id }).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<ProjectLadderConfiguration>(b =>
@@ -739,6 +753,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.CanonicalIdentity).HasMaxLength(40);
             b.HasIndex(x => new { x.ProjectId, x.Version }).IsUnique();
             b.HasIndex(x => new { x.ProjectId, x.CanonicalIdentity }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.Id }).IsUnique();
             b.HasIndex(x => x.PredecessorReleaseId);
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.PredecessorReleaseId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -1522,7 +1537,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<ReleaseCampaign>(b =>
         {
             b.ToTable("release_campaigns"); b.HasKey(x => x.Id); b.Property(x => x.Name).HasMaxLength(300).IsRequired(); b.Property(x => x.OwnerId).HasMaxLength(100).IsRequired();
-            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.ReleaseHash).HasMaxLength(64); b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.ReleaseId }).IsUnique();
+            b.Property(x => x.State).HasConversion<string>().HasMaxLength(30); b.Property(x => x.ReleaseHash).HasMaxLength(64); b.Property(x => x.Version).IsConcurrencyToken(); b.HasIndex(x => new { x.ProjectId, x.ReleaseId }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.Id }).IsUnique();
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict); b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<CandidateBaseline>().WithMany().HasForeignKey(x => x.BaselineId).OnDelete(DeleteBehavior.Restrict); b.HasOne<SoftwareBuild>().WithMany().HasForeignKey(x => x.SoftwareBuildId).OnDelete(DeleteBehavior.Restrict);
             b.HasMany(x => x.Approvals).WithOne().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Restrict); b.HasMany(x => x.Events).WithOne().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Restrict);
@@ -1941,6 +1956,100 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => x.ReleaseId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<RequirementArtifact>().WithMany().HasForeignKey(x => x.RequirementArtifactId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<RequirementRevision>().WithMany().HasForeignKey(x => x.RequirementRevisionId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GitLabSourceSnapshot>(b =>
+        {
+            b.ToTable("gitlab_source_snapshots"); b.HasKey(x => x.Id);
+            b.Property(x => x.InstanceBaseUrl).HasMaxLength(500).IsRequired(); b.Property(x => x.PathWithNamespace).HasMaxLength(300).IsRequired();
+            b.Property(x => x.CommitSha).HasMaxLength(64).IsRequired(); b.Property(x => x.FriendlyRef).HasMaxLength(300);
+            b.Property(x => x.RecordedBy).HasMaxLength(100).IsRequired(); b.HasIndex(x => new { x.ProjectId, x.Id }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.Id, x.InstanceBaseUrl, x.RemoteProjectId }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.Id, x.InstanceBaseUrl, x.RemoteProjectId, x.CommitSha }).IsUnique();
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ProjectRepositoryConfiguration>().WithMany().HasForeignKey(x => new { x.ProjectId, x.RepositoryConfigurationId }).HasPrincipalKey(x => new { x.ProjectId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GitLabSourceSelectionEvent>(b =>
+        {
+            b.ToTable("gitlab_source_selection_events"); b.HasKey(x => x.Id);
+            b.Property(x => x.SelectedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.ResultingVersion }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.SourceSnapshotId, x.Id }).IsUnique();
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.SourceSnapshotId, x.ResultingVersion, x.Id }).IsUnique();
+            b.HasOne<GitLabSourceSnapshot>().WithMany().HasForeignKey(x => new { x.ProjectId, x.SourceSnapshotId }).HasPrincipalKey(x => new { x.ProjectId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId }).HasPrincipalKey(x => new { x.ProjectId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GitLabCurrentSourceSelection>(b =>
+        {
+            b.ToTable("gitlab_current_source_selections"); b.HasKey(x => x.Id);
+            b.Property(x => x.Version).IsConcurrencyToken(); b.Property(x => x.ChangedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId }).IsUnique();
+            b.HasOne<GitLabSourceSelectionEvent>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId, x.SourceSnapshotId, x.Version, x.SelectionEventId }).HasPrincipalKey(x => new { x.ProjectId, x.ReleaseId, x.SourceSnapshotId, x.ResultingVersion, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GitLabMergeRequestRelationship>(b =>
+        {
+            b.ToTable("gitlab_merge_request_relationships"); b.HasKey(x => x.Id);
+            b.Property(x => x.InstanceBaseUrl).HasMaxLength(500).IsRequired(); b.Property(x => x.RepositoryPathSnapshot).HasMaxLength(300).IsRequired();
+            b.Property(x => x.MergeRequestUrlSnapshot).HasMaxLength(1000).IsRequired(); b.Property(x => x.MergeRequestTitleSnapshot).HasMaxLength(500).IsRequired();
+            b.Property(x => x.RelationshipKind).HasConversion<string>().HasMaxLength(30).IsRequired(); b.Property(x => x.TargetKind).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.TargetStableIdentity).HasMaxLength(200).IsRequired(); b.Property(x => x.TargetDisplaySnapshot).HasMaxLength(500).IsRequired();
+            b.Property(x => x.Meaning).HasConversion<string>().HasMaxLength(40).IsRequired(); b.Property(x => x.ActiveEdgeKey).HasMaxLength(1200);
+            b.Property(x => x.RecordedBy).HasMaxLength(100).IsRequired(); b.Property(x => x.WithdrawnBy).HasMaxLength(100); b.Property(x => x.WithdrawalRationale).HasMaxLength(4000); b.Property(x => x.ReAddedBy).HasMaxLength(100); b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasIndex(x => x.ActiveEdgeKey).IsUnique().HasFilter("\"ActiveEdgeKey\" IS NOT NULL"); b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.IsActive });
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId }).HasPrincipalKey(x => new { x.ProjectId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            // A merge-request association may be recorded before the build's source is selected. When source
+            // context is present, the write service validates the paired event/snapshot and remote identity.
+        });
+        modelBuilder.Entity<GitLabFileRelationship>(b =>
+        {
+            b.ToTable("gitlab_file_relationships"); b.HasKey(x => x.Id);
+            b.Property(x => x.InstanceBaseUrl).HasMaxLength(500).IsRequired(); b.Property(x => x.CommitSha).HasMaxLength(64).IsRequired(); b.Property(x => x.Path).HasMaxLength(1000).IsRequired();
+            b.Property(x => x.RelationshipKind).HasConversion<string>().HasMaxLength(30).IsRequired(); b.Property(x => x.TargetKind).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.TargetStableIdentity).HasMaxLength(200).IsRequired(); b.Property(x => x.TargetDisplaySnapshot).HasMaxLength(500).IsRequired(); b.Property(x => x.Meaning).HasConversion<string>().HasMaxLength(40).IsRequired();
+            b.Property(x => x.ActiveEdgeKey).HasMaxLength(1600); b.Property(x => x.RecordedBy).HasMaxLength(100).IsRequired(); b.Property(x => x.WithdrawnBy).HasMaxLength(100); b.Property(x => x.WithdrawalRationale).HasMaxLength(4000); b.Property(x => x.ReAddedBy).HasMaxLength(100); b.Property(x => x.Version).IsConcurrencyToken();
+            b.HasIndex(x => x.ActiveEdgeKey).IsUnique().HasFilter("\"ActiveEdgeKey\" IS NOT NULL"); b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.IsActive });
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId }).HasPrincipalKey(x => new { x.ProjectId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<GitLabSourceSelectionEvent>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId, x.SourceSnapshotId, x.SourceSelectionEventId }).HasPrincipalKey(x => new { x.ProjectId, x.ReleaseId, x.SourceSnapshotId, x.Id }).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<GitLabSourceSnapshot>().WithMany().HasForeignKey(x => new { x.ProjectId, x.SourceSnapshotId, x.InstanceBaseUrl, x.RemoteProjectId, x.CommitSha }).HasPrincipalKey(x => new { x.ProjectId, x.Id, x.InstanceBaseUrl, x.RemoteProjectId, x.CommitSha }).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<GitLabCodeRelationshipEvent>(b =>
+        {
+            b.ToTable("gitlab_code_relationship_events"); b.HasKey(x => x.Id); b.Property(x => x.RelationshipKind).HasConversion<string>().HasMaxLength(30).IsRequired(); b.Property(x => x.EventKind).HasConversion<string>().HasMaxLength(30).IsRequired(); b.Property(x => x.Actor).HasMaxLength(100).IsRequired(); b.Property(x => x.Rationale).HasMaxLength(4000); b.HasIndex(x => new { x.RelationshipKind, x.RelationshipId, x.OccurredAt });
+        });
+        modelBuilder.Entity<CodeEvidenceDispositionSet>(b =>
+        {
+            b.ToTable("code_evidence_disposition_sets"); b.HasKey(x => x.Id);
+            b.Property(x => x.Disposition).HasConversion<string>().HasMaxLength(40).IsRequired(); b.Property(x => x.NoCodeChangeRationale).HasMaxLength(4000).IsRequired(); b.Property(x => x.RecordedBy).HasMaxLength(100).IsRequired();
+            b.Property(x => x.SourceSelectionEventId).IsRequired(false); b.Property(x => x.SourceSnapshotId).IsRequired(false);
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.RequirementArtifactId, x.RequirementRevisionId, x.Id }).IsUnique(); b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.RequirementRevisionId });
+            b.HasOne<SoftwareRelease>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId }).HasPrincipalKey(x => new { x.ProjectId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            // Source event/snapshot pairing is checked in the acceptance transaction; no-code rows keep both null.
+        });
+        modelBuilder.Entity<CodeEvidenceContribution>(b =>
+        {
+            b.ToTable("code_evidence_contributions"); b.HasKey(x => x.Id);
+            b.Property(x => x.MergeResultSha).HasMaxLength(64);
+            b.Property(x => x.MergeResultKind).HasConversion<string>().HasMaxLength(30);
+            b.Property(x => x.ContributionKind).HasConversion<string>().HasMaxLength(30).IsRequired(); b.Property(x => x.InstanceBaseUrl).HasMaxLength(500).IsRequired(); b.Property(x => x.RepositoryPathSnapshot).HasMaxLength(300).IsRequired(); b.Property(x => x.MergeRequestUrlSnapshot).HasMaxLength(1000); b.Property(x => x.MergeRequestTitleSnapshot).HasMaxLength(500); b.Property(x => x.CommitSha).HasMaxLength(64).IsRequired(); b.Property(x => x.FilePath).HasMaxLength(1000); b.Property(x => x.TargetKind).HasConversion<string>().HasMaxLength(40).IsRequired(); b.Property(x => x.TargetStableIdentity).HasMaxLength(200).IsRequired(); b.Property(x => x.TargetDisplaySnapshot).HasMaxLength(500).IsRequired(); b.Property(x => x.RecordedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.RequirementRevisionId, x.SourceSnapshotId, x.EvidenceSetId });
+            b.HasOne<CodeEvidenceDispositionSet>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId, x.RequirementArtifactId, x.RequirementRevisionId, x.EvidenceSetId }).HasPrincipalKey(x => new { x.ProjectId, x.ReleaseId, x.RequirementArtifactId, x.RequirementRevisionId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<GitLabSourceSnapshot>().WithMany().HasForeignKey(x => new { x.ProjectId, x.SourceSnapshotId, x.InstanceBaseUrl, x.RemoteProjectId, x.CommitSha }).HasPrincipalKey(x => new { x.ProjectId, x.Id, x.InstanceBaseUrl, x.RemoteProjectId, x.CommitSha }).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<CodeEvidenceCurrentSelector>(b =>
+        {
+            b.ToTable("code_evidence_current_selectors"); b.HasKey(x => x.Id); b.Property(x => x.Version).IsConcurrencyToken(); b.Property(x => x.SelectedBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.RequirementRevisionId }).IsUnique();
+            b.HasOne<CodeEvidenceDispositionSet>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId, x.RequirementArtifactId, x.RequirementRevisionId, x.EvidenceSetId }).HasPrincipalKey(x => new { x.ProjectId, x.ReleaseId, x.RequirementArtifactId, x.RequirementRevisionId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<CodeEvidenceInvalidation>(b =>
+        {
+            b.ToTable("code_evidence_invalidations"); b.HasKey(x => x.Id); b.Property(x => x.InvalidatedBy).HasMaxLength(100).IsRequired(); b.Property(x => x.Rationale).HasMaxLength(4000).IsRequired();
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseId, x.RequirementArtifactId, x.RequirementRevisionId, x.EvidenceSetId, x.InvalidatedAt });
+            b.HasOne<CodeEvidenceDispositionSet>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId, x.RequirementArtifactId, x.RequirementRevisionId, x.EvidenceSetId }).HasPrincipalKey(x => new { x.ProjectId, x.ReleaseId, x.RequirementArtifactId, x.RequirementRevisionId, x.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<CodeReviewCycleManifestIdentity>(b =>
+        {
+            b.ToTable("code_review_cycle_manifest_identities"); b.HasKey(x => x.Id); b.Property(x => x.Format).HasMaxLength(100).IsRequired(); b.Property(x => x.ManifestHash).HasMaxLength(64).IsRequired(); b.Property(x => x.EvidenceReferenceIdsJson).HasMaxLength(200000).IsRequired(); b.Property(x => x.FrozenBy).HasMaxLength(100).IsRequired();
+            b.HasIndex(x => new { x.ProjectId, x.ReleaseCampaignId, x.ApprovalCycle }).IsUnique();
+            b.HasOne<ReleaseCampaign>().WithMany().HasForeignKey(x => new { x.ProjectId, x.ReleaseId, x.ReleaseCampaignId }).HasPrincipalKey(x => new { x.ProjectId, x.ReleaseId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ConfigurationChangeSet>(b =>
         {

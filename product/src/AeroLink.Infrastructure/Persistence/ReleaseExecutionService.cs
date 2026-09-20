@@ -9,7 +9,9 @@ using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Verification;
+using AeroLink.Domain.Integrations;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace AeroLink.Infrastructure.Persistence;
 
@@ -19,14 +21,21 @@ public sealed record ReleaseReconciliationResult(int TraceLinksCreated, int Susp
     int UncoveredRequirements, int UnsatisfiedCaseObligations);
 public sealed record VerificationManifestRow(Guid ProcedureRevisionId, string DisplayNumber, string Outcome, DateTimeOffset? ExecutedAt, string ExecutedBy, string Configuration, string Determination);
 public sealed record VerificationImportResult(int ExecutionsRecorded, int Passed, int Failed, int Blocked, Guid EvidenceId, string EvidenceSha256);
+public sealed record PreparedCodeReviewManifest(Guid CampaignId, int FormatVersion, string Format, string Hash,
+    Guid? SourceSelectionEventId, Guid? SourceSnapshotId, IReadOnlyList<Guid> EvidenceReferenceIds);
 
 public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileStore evidenceStore,
     IProjectLadderPolicyResolver? policyResolver = null)
 {
-    public async Task<ReleaseReconciliationResult> ReconcileAsync(Guid campaignId, string actorId, DateTimeOffset now, CancellationToken ct)
+    public async Task<ReleaseReconciliationResult> ReconcileAsync(Guid campaignId, string actorId, DateTimeOffset now,
+        CancellationToken ct, ProjectControlledWriteScope? writeScope = null)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if (writeScope is not null)
+            ProjectControlledWriteScope.Require(db, writeScope.ProjectId, writeScope);
+        await using var transaction = writeScope is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == campaignId, ct) ?? throw new DomainException("Release campaign not found.");
+        if (writeScope is not null && campaign.ProjectId != writeScope.ProjectId)
+            throw new DomainException("The release campaign does not belong to the acquired project scope.");
         var ladderPolicy = policyResolver is null
             ? LegacyLadderPolicy.Instance
             : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
@@ -78,7 +87,8 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
             $"Baseline materialization owns exact trace carry-forward; {suspect} requirement revisions carry suspect coverage awaiting verification confirmation, "
             + $"{uncovered} still need confirmed coverage, and {unsatisfiedObligations} exact Case-to-Procedure obligations are unsatisfied "
             + "(zero links, suspect links, missing effectivity/selection, or no latest build-scoped Pass).", actorId, now);
-        await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+        await db.SaveChangesAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
         return new(0, suspect, uncovered, unsatisfiedObligations);
     }
 
@@ -110,47 +120,177 @@ public sealed class ReleaseExecutionService(AeroLinkDbContext db, EvidenceFileSt
         return JsonSerializer.SerializeToUtf8Bytes(template, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    public async Task<VerificationImportResult> ImportVerificationAsync(Guid campaignId, Stream manifestStream, Stream evidenceStream, string evidenceFileName, string evidenceContentType, string actorId, DateTimeOffset now, CancellationToken ct)
+    /// <summary>Stages a verification evidence object before a project write scope is acquired.</summary>
+    public Task<StagedEvidence> StageVerificationEvidenceAsync(Stream evidenceStream, string evidenceFileName,
+        string evidenceContentType, CancellationToken ct)
+        => evidenceStore.StageAsync(evidenceStream, Guid.NewGuid(), "verification", evidenceFileName, evidenceContentType, ct);
+
+    /// <summary>
+    /// Compatibility overload for callers that own no project scope. The evidence is staged first, then the method
+    /// owns the database transaction and cleans the object only after a known pre-commit rollback.
+    /// </summary>
+    public async Task<VerificationImportResult> ImportVerificationAsync(Guid campaignId, Stream manifestStream, Stream evidenceStream,
+        string evidenceFileName, string evidenceContentType, string actorId, DateTimeOffset now, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(actorId)) throw new DomainException("The verification import owner is required.");
-        var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == campaignId, ct) ?? throw new DomainException("Release campaign not found.");
+        // Preserve the legacy overload's validation order: callers that have not staged externally still receive the
+        // campaign-state/build refusal before an evidence stream is consumed.
+        var campaign = await db.ReleaseCampaigns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == campaignId, ct)
+            ?? throw new DomainException("Release campaign not found.");
         if (campaign.State == ReleaseCampaignState.InReview) throw new DomainException("The release package is frozen while approval is in progress.");
         if (campaign.State == ReleaseCampaignState.Released) throw new DomainException("A released campaign is immutable.");
         if (campaign.SoftwareBuildId is null) throw new DomainException("Select the exact verification build before importing results.");
-        List<VerificationManifestRow> manifest;
-        try { manifest = await JsonSerializer.DeserializeAsync<List<VerificationManifestRow>>(manifestStream, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, ct) ?? []; }
-        catch (JsonException) { throw new DomainException("The verification manifest is not valid JSON."); }
-        var ladderPolicy = policyResolver is null
-            ? LegacyLadderPolicy.Instance
-            : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
-        var required = await RequiredProceduresAsync(campaign.ProjectId, campaign.BaselineId, ladderPolicy, ct); var requiredIds = required.Select(x => x.Id).ToHashSet();
-        if (requiredIds.Count == 0) throw new DomainException("The baseline has no required covered verification artifacts to import.");
-        if (manifest.Count != requiredIds.Count || manifest.Select(x => x.ProcedureRevisionId).Distinct().Count() != manifest.Count || manifest.Any(x => !requiredIds.Contains(x.ProcedureRevisionId)))
-            throw new DomainException($"The manifest must contain exactly one result for each of the {requiredIds.Count} required verification artifact revisions.");
-        var parsed = manifest.Select(x => (Row: x, Outcome: Enum.TryParse<TestOutcome>(x.Outcome, true, out var value) ? value : (TestOutcome?)null)).ToList();
-        if (parsed.Any(x => x.Outcome is null || x.Row.ExecutedAt is null || string.IsNullOrWhiteSpace(x.Row.ExecutedBy) || string.IsNullOrWhiteSpace(x.Row.Determination)))
-            throw new DomainException("Every row requires a valid outcome, execution time, executor, and human determination.");
+        var staged = await StageVerificationEvidenceAsync(evidenceStream, evidenceFileName, evidenceContentType, ct);
+        return await ImportVerificationAsync(campaignId, manifestStream, staged, actorId, now, ct);
+    }
 
-        var stored = await evidenceStore.StoreAsync(evidenceStream, evidenceFileName, evidenceContentType, ct);
+    /// <summary>
+    /// Imports an already-staged evidence object. Scoped callers stage before acquiring the project lock, then
+    /// promote and persist under the lock. The caller owns rollback and cleanup when an outer commit was not tried.
+    /// </summary>
+    public async Task<VerificationImportResult> ImportVerificationAsync(Guid campaignId, Stream manifestStream,
+        StagedEvidence staged, string actorId, DateTimeOffset now, CancellationToken ct,
+        ProjectControlledWriteScope? writeScope = null)
+    {
+        if (string.IsNullOrWhiteSpace(actorId)) throw new DomainException("The verification import owner is required.");
+        if (writeScope is not null)
+            ProjectControlledWriteScope.Require(db, writeScope.ProjectId, writeScope);
+
+        IDbContextTransaction? transaction = null;
+        var commitAttempted = false;
+        // Before an owned transaction is opened, no database mutation can have committed. Once opened, this flips
+        // only after a successful rollback; a failed commit remains deliberately ambiguous.
+        var rollbackKnown = true;
         try
         {
-            await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            var evidence = new EvidenceRecord(campaign.ProjectId, stored.OriginalFileName, stored.ContentType, stored.Size, stored.Sha256, stored.StorageKey, actorId, now); db.EvidenceRecords.Add(evidence);
+            var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == campaignId, ct) ?? throw new DomainException("Release campaign not found.");
+            if (writeScope is not null && campaign.ProjectId != writeScope.ProjectId)
+                throw new DomainException("The release campaign does not belong to the acquired project scope.");
+            if (campaign.State == ReleaseCampaignState.InReview) throw new DomainException("The release package is frozen while approval is in progress.");
+            if (campaign.State == ReleaseCampaignState.Released) throw new DomainException("A released campaign is immutable.");
+            if (campaign.SoftwareBuildId is null) throw new DomainException("Select the exact verification build before importing results.");
+            List<VerificationManifestRow> manifest;
+            try { manifest = await JsonSerializer.DeserializeAsync<List<VerificationManifestRow>>(manifestStream, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, ct) ?? []; }
+            catch (JsonException) { throw new DomainException("The verification manifest is not valid JSON."); }
+            var ladderPolicy = policyResolver is null
+                ? LegacyLadderPolicy.Instance
+                : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
+            var required = await RequiredProceduresAsync(campaign.ProjectId, campaign.BaselineId, ladderPolicy, ct); var requiredIds = required.Select(x => x.Id).ToHashSet();
+            if (requiredIds.Count == 0) throw new DomainException("The baseline has no required covered verification artifacts to import.");
+            if (manifest.Count != requiredIds.Count || manifest.Select(x => x.ProcedureRevisionId).Distinct().Count() != manifest.Count || manifest.Any(x => !requiredIds.Contains(x.ProcedureRevisionId)))
+                throw new DomainException($"The manifest must contain exactly one result for each of the {requiredIds.Count} required verification artifact revisions.");
+            var parsed = manifest.Select(x => (Row: x, Outcome: Enum.TryParse<TestOutcome>(x.Outcome, true, out var value) ? value : (TestOutcome?)null)).ToList();
+            if (parsed.Any(x => x.Outcome is null || x.Row.ExecutedAt is null || string.IsNullOrWhiteSpace(x.Row.ExecutedBy) || string.IsNullOrWhiteSpace(x.Row.Determination)))
+                throw new DomainException("Every row requires a valid outcome, execution time, executor, and human determination.");
+
+            if (writeScope is null)
+            {
+                transaction = await db.Database.BeginTransactionAsync(ct);
+                rollbackKnown = false;
+            }
+            await evidenceStore.PromoteAsync(staged, ct);
+            var evidence = new EvidenceRecord(campaign.ProjectId, staged.OriginalFileName, staged.ContentType, staged.Size, staged.Sha256, staged.StorageKey, actorId, now); db.EvidenceRecords.Add(evidence);
             var prior = await db.TestExecutions.Where(x => x.SoftwareBuildId == campaign.SoftwareBuildId && requiredIds.Contains(x.ProcedureRevisionId)).ToListAsync(ct);
             var executions = new List<TestExecution>();
             foreach (var item in parsed)
             {
                 var retest = prior.Where(x => x.ProcedureRevisionId == item.Row.ProcedureRevisionId).OrderByDescending(x => x.ExecutedAt).ThenByDescending(x => x.RecordedAt).FirstOrDefault();
-                var execution = new TestExecution(campaign.ProjectId, item.Row.ProcedureRevisionId, campaign.SoftwareBuildId, retest?.Id, item.Outcome!.Value, item.Row.ExecutedBy, item.Row.Configuration, item.Row.Determination, $"{stored.OriginalFileName} / SHA-256 {stored.Sha256}", item.Row.ExecutedAt!.Value, now, campaign.ReleaseId);
+                var execution = new TestExecution(campaign.ProjectId, item.Row.ProcedureRevisionId, campaign.SoftwareBuildId, retest?.Id, item.Outcome!.Value, item.Row.ExecutedBy, item.Row.Configuration, item.Row.Determination, $"{staged.OriginalFileName} / SHA-256 {staged.Sha256}", item.Row.ExecutedAt!.Value, now, campaign.ReleaseId);
                 executions.Add(execution); db.TestExecutions.Add(execution); db.TestExecutionEvidence.Add(new TestExecutionEvidence(execution.Id, evidence.Id));
             }
-            campaign.RecordExecutionProgress("VerificationPackageImported", $"Imported {executions.Count} build-specific results with evidence SHA-256 {stored.Sha256}.", actorId, now);
-            await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+            campaign.RecordExecutionProgress("VerificationPackageImported", $"Imported {executions.Count} build-specific results with evidence SHA-256 {staged.Sha256}.", actorId, now);
+            await db.SaveChangesAsync(ct);
+            if (transaction is not null)
+            {
+                commitAttempted = true;
+                await transaction.CommitAsync(ct);
+                await transaction.DisposeAsync();
+                transaction = null;
+            }
             return new(executions.Count, executions.Count(x => x.Outcome == TestOutcome.Pass), executions.Count(x => x.Outcome == TestOutcome.Fail), executions.Count(x => x.Outcome == TestOutcome.Blocked), evidence.Id, evidence.Sha256);
         }
-        catch { evidenceStore.Delete(stored.StorageKey); throw; }
+        catch
+        {
+            if (transaction is not null && !commitAttempted)
+            {
+                try
+                {
+                    await transaction.RollbackAsync(CancellationToken.None);
+                    rollbackKnown = true;
+                }
+                finally { await transaction.DisposeAsync(); transaction = null; }
+            }
+            if (writeScope is null && !commitAttempted && rollbackKnown)
+                DeleteStagedEvidence(staged);
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
     }
 
+    /// <summary>Deletes both names for a staged object after the caller has established a known database rollback.</summary>
+    public void DeleteStagedEvidence(StagedEvidence staged)
+    {
+        evidenceStore.Delete(staged.StagingKey);
+        evidenceStore.Delete(staged.StorageKey);
+    }
+
+    public async Task<PreparedCodeReviewManifest> PrepareCodeReviewManifestAsync(ReleaseCampaign campaign,
+        ProjectControlledWriteScope scope, CancellationToken ct)
+    {
+        ProjectControlledWriteScope.Require(db, campaign.ProjectId, scope);
+        var legacyHash = await ComputeReviewManifestHashAsync(campaign.Id, ct);
+        var useV2 = await db.GitLabCurrentSourceSelections.AsNoTracking()
+            .AnyAsync(x => x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId, ct)
+            || await db.CodeEvidenceCurrentSelectors.AsNoTracking()
+                .AnyAsync(x => x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId, ct);
+        if (!useV2) return new(campaign.Id, 1, "aerolink.release-review-manifest.v1", legacyHash, null, null, []);
+        var policy = policyResolver is null ? LegacyLadderPolicy.Instance : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
+        var material = await new CodeReviewManifestBuilder(db).BuildV2Async(campaign.Id, legacyHash, policy, ct);
+        return new(campaign.Id, 2, CodeReviewManifestBuilder.Format, material.Hash,
+            material.SourceSelectionEventId, material.SourceSnapshotId, material.EvidenceReferenceIds);
+    }
+
+    public void RecordCodeReviewManifest(ReleaseCampaign campaign, PreparedCodeReviewManifest prepared,
+        ProjectControlledWriteScope scope, string actor, DateTimeOffset now)
+    {
+        ProjectControlledWriteScope.Require(db, campaign.ProjectId, scope);
+        if (campaign.Id != prepared.CampaignId || campaign.State != ReleaseCampaignState.InReview
+            || campaign.ReleaseHash != prepared.Hash)
+            throw new DomainException("The prepared Code manifest does not belong to the new release review.");
+        var cycle = campaign.Approvals.Where(x => x.State != ReleaseApprovalState.Cancelled).Select(x => x.Cycle).Distinct().ToArray();
+        if (cycle.Length != 1) throw new DomainException("The release review must have one exact active approval cycle.");
+        db.CodeReviewCycleManifestIdentities.Add(new(campaign.ProjectId, campaign.ReleaseId, campaign.Id,
+            cycle[0], prepared.Format, prepared.FormatVersion, prepared.Hash, prepared.SourceSelectionEventId,
+            prepared.SourceSnapshotId, prepared.EvidenceReferenceIds.ToArray(), actor, now));
+    }
+
+    /// <summary>Uses the recorded active-cycle format. Missing identity means the historical v1 contract.</summary>
+    public async Task<string> ComputeRecordedReviewManifestHashAsync(Guid campaignId, CancellationToken ct)
+    {
+        var campaign = await db.ReleaseCampaigns.AsNoTracking().Include(x => x.Approvals)
+            .SingleAsync(x => x.Id == campaignId, ct);
+        var cycles = campaign.Approvals.Where(x => x.State != ReleaseApprovalState.Cancelled).Select(x => x.Cycle).Distinct().ToArray();
+        if (cycles.Length > 1) throw new DomainException("The release review has inconsistent approval-cycle identity.");
+        var identity = cycles.Length == 0 ? null : await db.CodeReviewCycleManifestIdentities.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId
+                && x.ReleaseCampaignId == campaignId && x.ApprovalCycle == cycles[0], ct);
+        var legacyHash = await ComputeReviewManifestHashAsync(campaignId, ct);
+        if (identity is null) return legacyHash;
+        if (identity.ManifestHash != campaign.ReleaseHash)
+            throw new DomainException("The stored Code manifest does not match the frozen release review.");
+        if (identity.FormatVersion == 1 && identity.Format == "aerolink.release-review-manifest.v1")
+            return legacyHash;
+        if (identity.FormatVersion != 2 || identity.Format != CodeReviewManifestBuilder.Format)
+            throw new DomainException("This Code review manifest format is not supported.");
+        var policy = policyResolver is null ? LegacyLadderPolicy.Instance : await policyResolver.ResolveAsync(campaign.ProjectId, ct);
+        var material = await new CodeReviewManifestBuilder(db).BuildV2Async(campaignId, legacyHash, policy, ct);
+        return material.Hash;
+    }
+
+    // Historical v1 serializer: preserve its payload, ordering and byte representation unchanged.
     public async Task<string> ComputeReviewManifestHashAsync(Guid campaignId, CancellationToken ct)
     {
         var campaign = await db.ReleaseCampaigns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == campaignId, ct)

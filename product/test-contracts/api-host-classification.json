@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 149,
-    "tests": 938,
-    "knownCases": 1057,
+    "classes": 154,
+    "tests": 975,
+    "knownCases": 1107,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -14,9 +14,9 @@
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 55,
-      "tests": 324,
-      "knownCases": 367,
+      "classes": 59,
+      "tests": 360,
+      "knownCases": 416,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -26,9 +26,9 @@
       "unknownCaseTests": 0
     },
     "reusable-host": {
-      "classes": 56,
-      "tests": 347,
-      "knownCases": 393,
+      "classes": 57,
+      "tests": 348,
+      "knownCases": 394,
       "unknownCaseTests": 0
     }
   },
@@ -487,6 +487,19 @@
       ]
     },
     {
+      "cls": "CodeRelationshipApiTests",
+      "tests": 16,
+      "knownCases": 16,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "ef-translation",
+        "http-boundary",
+        "startup-config"
+      ]
+    },
+    {
       "cls": "AuthoringTracedImpactTests",
       "tests": 14,
       "knownCases": 14,
@@ -554,6 +567,20 @@
       ]
     },
     {
+      "cls": "ReleaseCampaignExactIntentApiTests",
+      "tests": 8,
+      "knownCases": 8,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary",
+        "in-process-logic"
+      ]
+    },
+    {
       "cls": "ReleasedExecutionEvidenceApiTests",
       "tests": 8,
       "knownCases": 8,
@@ -605,17 +632,27 @@
       ]
     },
     {
-      "cls": "ReleaseCampaignExactIntentApiTests",
+      "cls": "CodeEvidenceAcceptanceRaceTests",
       "tests": 6,
-      "knownCases": 6,
+      "knownCases": 12,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
-      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "GitLabMetadataApiTests",
+      "tests": 6,
+      "knownCases": 9,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
       "intents": [
         "auth-policy",
         "ef-translation",
-        "http-boundary",
-        "in-process-logic"
+        "http-boundary"
       ]
     },
     {
@@ -654,6 +691,30 @@
         "http-boundary",
         "in-process-logic",
         "startup-config"
+      ]
+    },
+    {
+      "cls": "CodeTraceabilityApiTests",
+      "tests": 5,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
+      "intents": [
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "GitLabSourceApiTests",
+      "tests": 5,
+      "knownCases": 8,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
+        "http-boundary"
       ]
     },
     {
@@ -716,18 +777,6 @@
       ]
     },
     {
-      "cls": "GitLabMetadataApiTests",
-      "tests": 4,
-      "knownCases": 7,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
-      "intents": [
-        "auth-policy",
-        "http-boundary"
-      ]
-    },
-    {
       "cls": "GovernanceEvidenceApiTests",
       "tests": 4,
       "knownCases": 4,
@@ -752,6 +801,18 @@
       ]
     },
     {
+      "cls": "ProjectRepositoryApiTests",
+      "tests": 4,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
+      "intents": [
+        "auth-policy",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "SavedViewLifecycleApiTests",
       "tests": 4,
       "knownCases": 4,
@@ -772,17 +833,6 @@
       "reason": "Reviewed #563 hold: fixed Program A/B users, controlled IDs/filename, and direct EvidenceFileStore.StoreAsync writes into the factory's shared evidence root lack reviewed per-test isolation proof. Keep fresh-host until all identities and IDs are tagged and shared evidence-root isolation is proven.",
       "intents": [
         "auth-policy",
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "CodeTraceabilityApiTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
-      "intents": [
         "http-boundary"
       ]
     },
@@ -812,18 +862,6 @@
       ]
     },
     {
-      "cls": "ProjectRepositoryApiTests",
-      "tests": 3,
-      "knownCases": 3,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
-      "intents": [
-        "auth-policy",
-        "http-boundary"
-      ]
-    },
-    {
       "cls": "ServerAuthorityContractTests",
       "tests": 3,
       "knownCases": 3,
@@ -840,6 +878,17 @@
       "cls": "ShowcaseUpgradeApiTests",
       "tests": 3,
       "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "CodeTargetApiTests",
+      "tests": 2,
+      "knownCases": 5,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (showcase-template-copy); sharing could change the subject or leak configuration.",
@@ -1747,6 +1796,17 @@
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "auth-policy"
+      ]
+    },
+    {
+      "cls": "CodeReviewLifecycleApiTests",
+      "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "http-boundary"
       ]
     },
     {

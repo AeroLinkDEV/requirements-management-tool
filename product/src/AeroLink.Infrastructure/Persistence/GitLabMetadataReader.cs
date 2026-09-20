@@ -91,6 +91,13 @@ public sealed record GitLabCommitReference(
     GitLabReferenceKind ReferenceKind,
     string Sha);
 
+public sealed record GitLabCommitAncestry(
+    long ProjectId,
+    string AncestorSha,
+    string DescendantSha,
+    string MergeBaseSha,
+    bool IsAncestor);
+
 public enum GitLabTreeEntryKind { Blob, Tree, Commit, Link, Unknown }
 
 public sealed record GitLabTreeEntry(
@@ -135,16 +142,41 @@ public sealed class GitLabMetadataReader(HttpClient client, IOptions<ProjectGitL
         var response = await GetAsync(new Uri(target.ApiBase, $"projects/{target.ProjectId}/merge_requests?{string.Join('&', queryParts)}"), ct);
         if (!response.Ok) return Failure<IReadOnlyList<GitLabMergeRequestSummary>>(response);
 
+        return ParseMergeRequestPage(target, response);
+    }
+
+    /// <summary>Observes only the MR identities on one locally paged register; absent rows remain unobserved.</summary>
+    public async Task<GitLabMetadataResult<IReadOnlyList<GitLabMergeRequestSummary>>> ReadMergeRequestSummariesAsync(
+        ProjectRepositoryConfiguration configuration, IReadOnlyCollection<int> iids, CancellationToken ct)
+    {
+        if (!TryCreateTarget(configuration, out var target, out var failure))
+            return Failure<IReadOnlyList<GitLabMergeRequestSummary>>(failure);
+        if (iids is null || iids.Count is < 1 or > MaxPageSize || iids.Any(iid => iid <= 0))
+            return InvalidRequest<IReadOnlyList<GitLabMergeRequestSummary>>("Supply between 1 and 100 positive merge-request IIDs.");
+        var requested = iids.ToHashSet();
+        var query = $"state=all&page=1&per_page={requested.Count}&"
+            + string.Join('&', requested.Order().Select(iid => $"iids%5B%5D={iid}"));
+        var response = await GetAsync(new Uri(target.ApiBase, $"projects/{target.ProjectId}/merge_requests?{query}"), ct);
+        return response.Ok ? ParseMergeRequestPage(target, response, requested)
+            : Failure<IReadOnlyList<GitLabMergeRequestSummary>>(response);
+    }
+
+    private static GitLabMetadataResult<IReadOnlyList<GitLabMergeRequestSummary>> ParseMergeRequestPage(
+        Target target, TransportResponse response, IReadOnlySet<int>? requested = null)
+    {
         try
         {
             using var json = JsonDocument.Parse(response.Body!);
             if (json.RootElement.ValueKind != JsonValueKind.Array)
                 return Invalid<IReadOnlyList<GitLabMergeRequestSummary>>("GitLab returned an unsupported merge-request response.");
             var rows = new List<GitLabMergeRequestSummary>();
+            var seen = new HashSet<int>();
             foreach (var item in json.RootElement.EnumerateArray())
             {
                 if (!TryParseMergeRequest(item, target, out var row))
                     return Invalid<IReadOnlyList<GitLabMergeRequestSummary>>("GitLab returned an unsupported merge-request response.");
+                if (!seen.Add(row!.Iid) || requested is not null && !requested.Contains(row.Iid))
+                    return Invalid<IReadOnlyList<GitLabMergeRequestSummary>>("GitLab returned duplicate or unrequested merge-request identities.");
                 rows.Add(row!);
                 if (rows.Count > MaxPageSize)
                     return Invalid<IReadOnlyList<GitLabMergeRequestSummary>>("GitLab returned too many merge requests for one bounded page.");
@@ -205,6 +237,31 @@ public sealed class GitLabMetadataReader(HttpClient client, IOptions<ProjectGitL
     public Task<GitLabMetadataResult<GitLabCommitReference>> ResolveCommitAsync(
         ProjectRepositoryConfiguration configuration, string reference, CancellationToken ct) =>
         ResolveCommitAsync(configuration, reference, GitLabReferenceKind.Auto, ct);
+
+    /// <summary>Checks exact commit ancestry using metadata only; provider failures never imply incorporation.</summary>
+    public async Task<GitLabMetadataResult<GitLabCommitAncestry>> ReadCommitAncestryAsync(
+        ProjectRepositoryConfiguration configuration, string ancestorSha, string descendantSha, CancellationToken ct)
+    {
+        if (!TryCreateTarget(configuration, out var target, out var failure))
+            return Failure<GitLabCommitAncestry>(failure);
+        if (!FullSha.IsMatch(ancestorSha ?? "") || !FullSha.IsMatch(descendantSha ?? ""))
+            return InvalidRequest<GitLabCommitAncestry>("Ancestry must use two exact full commit SHAs.");
+        var ancestor = ancestorSha!.ToLowerInvariant();
+        var descendant = descendantSha!.ToLowerInvariant();
+        var response = await GetAsync(new Uri(target.ApiBase,
+            $"projects/{target.ProjectId}/repository/merge_base?refs%5B%5D={ancestor}&refs%5B%5D={descendant}"), ct);
+        if (!response.Ok) return Failure<GitLabCommitAncestry>(response);
+        try
+        {
+            using var json = JsonDocument.Parse(response.Body!);
+            if (!TryReadCommitSha(json.RootElement, out var mergeBase))
+                return Invalid<GitLabCommitAncestry>("GitLab returned an unsupported merge-base identity.");
+            return new(GitLabMetadataStatus.Success, "ok", "GitLab returned exact commit ancestry metadata.",
+                new(target.ProjectId, ancestor, descendant, mergeBase!, string.Equals(ancestor, mergeBase, StringComparison.OrdinalIgnoreCase)));
+        }
+        catch (JsonException) { return Invalid<GitLabCommitAncestry>("GitLab returned an unsupported merge-base response."); }
+        catch (InvalidOperationException) { return Invalid<GitLabCommitAncestry>("GitLab returned an unsupported merge-base response."); }
+    }
 
     public async Task<GitLabMetadataResult<GitLabTreePage>> ReadTreePageAsync(
         ProjectRepositoryConfiguration configuration, string commitSha, string? path, string? cursor, int pageSize,

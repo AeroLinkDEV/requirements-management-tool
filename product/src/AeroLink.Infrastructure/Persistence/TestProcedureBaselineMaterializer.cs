@@ -29,12 +29,16 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
     private sealed record ProcedureSourceSnapshot(
         Guid ChangeRequestId, string ChangeRequestNumber, bool Originating);
     public async Task<TestProcedureMaterializationResult> MaterializeAsync(Guid baselineId, string actorId,
-        DateTimeOffset now, CancellationToken ct)
+        DateTimeOffset now, CancellationToken ct, ProjectControlledWriteScope? writeScope = null)
     {
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if (writeScope is not null)
+            ProjectControlledWriteScope.Require(db, writeScope.ProjectId, writeScope);
+        await using var transaction = writeScope is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var baseline = await db.CandidateBaselines.Include(x => x.TestChangeSelections).Include(x => x.Events)
                            .SingleOrDefaultAsync(x => x.Id == baselineId, ct)
                        ?? throw new DomainException("Baseline not found.");
+        if (writeScope is not null && baseline.ProjectId != writeScope.ProjectId)
+            throw new InvalidOperationException("The baseline does not belong to the active project-controlled write scope.");
         var ladderPolicy = policyResolver is null
             ? (policy ?? LegacyLadderPolicy.Instance)
             : await policyResolver.ResolveAsync(baseline.ProjectId, ct);
@@ -153,7 +157,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
         // committed together or not at all.
         await new TestProcedureDocumentBootstrap(db, ladderPolicy).EnsureForProjectAsync(baseline.ProjectId, ct);
         await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+        if (transaction is not null) await transaction.CommitAsync(ct);
         return new TestProcedureMaterializationResult(hash, current.Count, created, coverageLinks, settled);
     }
 

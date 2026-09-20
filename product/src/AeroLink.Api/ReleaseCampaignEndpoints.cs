@@ -77,13 +77,17 @@ public static class ReleaseCampaignEndpoints
         app.MapPost("/api/release-campaigns", async (CreateReleaseCampaignRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, IProjectAssurancePolicyResolver assurance, CancellationToken ct) =>
         {
             if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
-            if (await db.ReleaseCampaigns.AnyAsync(x => x.ProjectId == request.ProjectId && x.ReleaseId == request.ReleaseId, ct)) return Results.Conflict(new { error = "This release already has a campaign." });
-            var release = await db.Releases.SingleOrDefaultAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId && !x.IsReleased, ct);
-            var baseline = await db.CandidateBaselines.SingleOrDefaultAsync(x => x.Id == request.BaselineId && x.ProjectId == request.ProjectId && x.ReleaseId == request.ReleaseId, ct);
-            if (release is null || baseline is null) return Results.BadRequest(new { error = "Choose an unreleased version and one of its candidate baselines." });
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, request.ProjectId, ct);
             try
             {
-                var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct,
+                        ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+                if (await db.ReleaseCampaigns.AnyAsync(x => x.ProjectId == request.ProjectId && x.ReleaseId == request.ReleaseId, ct)) return Results.Conflict(new { error = "This release already has a campaign." });
+                var release = await db.Releases.SingleOrDefaultAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId && !x.IsReleased, ct);
+                var baseline = await db.CandidateBaselines.SingleOrDefaultAsync(x => x.Id == request.BaselineId && x.ProjectId == request.ProjectId && x.ReleaseId == request.ReleaseId, ct);
+                if (release is null || baseline is null) return Results.BadRequest(new { error = "Choose an unreleased version and one of its candidate baselines." });
+                var actor = freshActor; var now = DateTimeOffset.UtcNow;
                 // The campaign takes the project's assurance policy as it stands now and keeps it. Readiness
                 // is judged against this snapshot for the campaign's whole life, so a policy change later
                 // governs the next release rather than reinterpreting this one.
@@ -92,16 +96,23 @@ public static class ReleaseCampaignEndpoints
                 var changes = await db.SystemChangeRequests.Where(x => x.TargetReleaseId == request.ReleaseId).ToListAsync(ct);
                 foreach (var change in changes) foreach (var kind in Enum.GetValues<ImpactKind>())
                     db.ImpactDispositions.Add(new ChangeImpactDisposition(campaign.Id, change.Id, kind, change.DisplayNumber, $"Disposition {kind.ToString().ToLowerInvariant()} impact for {change.DisplayNumber}."));
-                await db.SaveChangesAsync(ct); return Results.Created($"/api/release-campaigns/{campaign.Id}", new { campaign.Id, campaign.ReleaseId, campaign.BaselineId, campaign.Name, state = campaign.State.ToString() });
+                await db.SaveChangesAsync(ct); await writeScope.CommitAsync(ct); return Results.Created($"/api/release-campaigns/{campaign.Id}", new { campaign.Id, campaign.ReleaseId, campaign.BaselineId, campaign.Name, state = campaign.State.ToString() });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
         app.MapPost("/api/release-campaigns/{id:guid}/start-verification", async (Guid id, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
-            var campaign = await db.ReleaseCampaigns.SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, campaign.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
-            try { campaign.StartVerification(http.UserAccount().UserName, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
+            var projectId = await db.ReleaseCampaigns.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
+            try
+            {
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+                var campaign = await db.ReleaseCampaigns.SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
+                campaign.StartVerification(freshActor.UserName, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); await writeScope.CommitAsync(ct); return Results.NoContent();
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
@@ -122,13 +133,20 @@ public static class ReleaseCampaignEndpoints
 
         app.MapPut("/api/release-campaigns/{id:guid}/impact-dispositions", async (Guid id, BulkDispositionImpactRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
-            var campaign = await db.ReleaseCampaigns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, campaign.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
-            if (campaign.State == ReleaseCampaignState.InReview) return Results.Conflict(new { error = "The release package is frozen while approval is in progress.", code = "release_package_frozen" });
-            if (campaign.State == ReleaseCampaignState.Released) return Results.BadRequest(new { error = "A released campaign is immutable." });
-            var impacts = await db.ImpactDispositions.Where(x => x.CampaignId == id && x.State == ImpactDispositionState.Pending && (request.ChangeRequestId == null || x.ChangeRequestId == request.ChangeRequestId)).ToListAsync(ct);
-            if (impacts.Count == 0) return Results.BadRequest(new { error = "No pending impacts match this disposition." });
-            try { foreach (var impact in impacts) impact.Disposition(request.State, request.Rationale, http.UserAccount().UserName, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.Ok(new { dispositioned = impacts.Count }); }
+            var projectId = await db.ReleaseCampaigns.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
+            try
+            {
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+                var campaign = await db.ReleaseCampaigns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
+                if (campaign.State == ReleaseCampaignState.InReview) return Results.Conflict(new { error = "The release package is frozen while approval is in progress.", code = "release_package_frozen" });
+                if (campaign.State == ReleaseCampaignState.Released) return Results.BadRequest(new { error = "A released campaign is immutable." });
+                var impacts = await db.ImpactDispositions.Where(x => x.CampaignId == id && x.State == ImpactDispositionState.Pending && (request.ChangeRequestId == null || x.ChangeRequestId == request.ChangeRequestId)).ToListAsync(ct);
+                if (impacts.Count == 0) return Results.BadRequest(new { error = "No pending impacts match this disposition." });
+                foreach (var impact in impacts) impact.Disposition(request.State, request.Rationale, freshActor.UserName, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); await writeScope.CommitAsync(ct); return Results.Ok(new { dispositioned = impacts.Count });
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
@@ -136,7 +154,16 @@ public static class ReleaseCampaignEndpoints
         {
             var projectId = await db.ReleaseCampaigns.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if (projectId is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
-            try { return Results.Ok(await execution.ReconcileAsync(id, http.UserAccount().UserName, DateTimeOffset.UtcNow, ct)); }
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
+            try
+            {
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct,
+                        ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+                var result = await execution.ReconcileAsync(id, freshActor.UserName, DateTimeOffset.UtcNow, ct, writeScope);
+                await writeScope.CommitAsync(ct);
+                return Results.Ok(result);
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
@@ -146,51 +173,107 @@ public static class ReleaseCampaignEndpoints
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
-        app.MapPost("/api/release-campaigns/{id:guid}/verification-package", async (Guid id, HttpRequest http, AeroLinkDbContext db, IdentityService identity, ReleaseExecutionService execution, CancellationToken ct) =>
+        app.MapPost("/api/release-campaigns/{id:guid}/verification-package", async (Guid id, HttpRequest http, AeroLinkDbContext db, IdentityService identity, ReleaseExecutionService execution, EvidenceFileStore evidenceStore, CancellationToken ct) =>
         {
             var projectId = await db.ReleaseCampaigns.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if (projectId is null) return Results.NotFound();
             if (!await http.HttpContext.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.TestEngineer)) return Results.Forbid();
             if (!http.HasFormContentType) return Results.BadRequest(new { error = "Use multipart form data with manifest and evidence files." });
-            var form = await http.ReadFormAsync(ct); var manifest = form.Files.GetFile("manifest"); var evidence = form.Files.GetFile("evidence"); var actorId = http.HttpContext.UserAccount().UserName;
+            var form = await http.ReadFormAsync(ct); var manifest = form.Files.GetFile("manifest"); var evidence = form.Files.GetFile("evidence");
             if (manifest is null || evidence is null || manifest.Length == 0 || evidence.Length == 0) return Results.BadRequest(new { error = "Both a completed JSON manifest and an evidence package are required." });
             if (manifest.Length > 10 * 1024 * 1024) return Results.BadRequest(new { error = "Verification manifests are limited to 10 MB." });
-            try { await using var manifestStream = manifest.OpenReadStream(); await using var evidenceStream = evidence.OpenReadStream(); return Results.Ok(await execution.ImportVerificationAsync(id, manifestStream, evidenceStream, evidence.FileName, evidence.ContentType, actorId, DateTimeOffset.UtcNow, ct)); }
-            catch (Exception ex) when (ex is DomainException or InvalidOperationException) { return Results.BadRequest(new { error = ex.Message }); }
+            StagedEvidence? staged = null;
+            ProjectControlledWriteScope? writeScope = null;
+            var commitAttempted = false;
+            async Task CleanupAfterKnownRollbackAsync()
+            {
+                if (writeScope is not null)
+                {
+                    try { await writeScope.RollbackAsync(CancellationToken.None); }
+                    catch { return; }
+                }
+                if (staged is not null) execution.DeleteStagedEvidence(staged);
+            }
+            try
+            {
+                await using (var evidenceStream = evidence.OpenReadStream())
+                    staged = await execution.StageVerificationEvidenceAsync(evidenceStream, evidence.FileName, evidence.ContentType, ct);
+                writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
+                var freshActor = await http.HttpContext.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HttpContext.HasFreshProjectRoleAsync(db, identity, writeScope, ct, ProgramRole.TestEngineer))
+                {
+                    await CleanupAfterKnownRollbackAsync();
+                    return Results.Forbid();
+                }
+                await using var manifestStream = manifest.OpenReadStream();
+                var result = await execution.ImportVerificationAsync(id, manifestStream, staged, freshActor.UserName,
+                    DateTimeOffset.UtcNow, ct, writeScope);
+                commitAttempted = true;
+                await writeScope.CommitAsync(ct);
+                return Results.Ok(result);
+            }
+            catch (Exception ex)
+            {
+                if (!commitAttempted) await CleanupAfterKnownRollbackAsync();
+                if (ex is DomainException or InvalidOperationException)
+                    return Results.BadRequest(new { error = ex.Message });
+                throw;
+            }
+            finally
+            {
+                if (writeScope is not null) await writeScope.DisposeAsync();
+            }
         }).DisableAntiforgery();
 
         app.MapPost("/api/release-campaigns/{id:guid}/verification-build", async (Guid id, SelectBuildRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
-            var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, campaign.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
-            if (!await db.SoftwareBuilds.AnyAsync(x => x.Id == request.SoftwareBuildId && x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId, ct)) return Results.BadRequest(new { error = "Select a software build from this campaign release." });
-            try { campaign.SelectVerificationBuild(request.SoftwareBuildId, http.UserAccount().UserName, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); return Results.NoContent(); }
+            var projectId = await db.ReleaseCampaigns.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
+            try
+            {
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+                var campaign = await db.ReleaseCampaigns.Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
+                if (!await db.SoftwareBuilds.AnyAsync(x => x.Id == request.SoftwareBuildId && x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId, ct)) return Results.BadRequest(new { error = "Select a software build from this campaign release." });
+                campaign.SelectVerificationBuild(request.SoftwareBuildId, freshActor.UserName, DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); await writeScope.CommitAsync(ct); return Results.NoContent();
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
         app.MapPost("/api/release-campaigns/{id:guid}/review", async (Guid id, StartReleaseReviewRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ReleaseReadinessService readiness, ReleaseExecutionService execution, CancellationToken ct) =>
         {
-            var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound(); var status = await readiness.CalculateAsync(id, ct);
-            if(!await http.HasProjectRoleAsync(db,identity,campaign.ProjectId,ct,ProgramRole.ConfigurationManager,ProgramRole.ProgramManager))return Results.Forbid();
-            var blockers = status.Gates.Where(x => x.Code != "release_approval" && !x.Complete).Select(x => x.Name).ToList(); if (blockers.Count > 0) return Results.BadRequest(new { error = "Resolve readiness gates before release review.", blockers });
+            var projectId = await db.ReleaseCampaigns.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
             try
             {
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct,
+                        ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+                var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
+                var status = await readiness.CalculateAsync(id, ct);
+                var blockers = status.Gates.Where(x => x.Code != "release_approval" && !x.Complete).Select(x => x.Name).ToList(); if (blockers.Count > 0) return Results.BadRequest(new { error = "Resolve readiness gates before release review.", blockers });
                 var requested=request.Approvers.Select(a=>a.UserId.Trim().ToLowerInvariant()).ToList();
+                if (requested.Count != requested.Distinct(StringComparer.OrdinalIgnoreCase).Count()) return Results.BadRequest(new { error = "Every release approver must be a distinct active AeroLink user." });
                 var known = await db.UserAccounts.AsNoTracking().Where(x => requested.Contains(x.UserName) && x.State == AccountState.Active).Select(x => new { x.Id, x.UserName, x.DisplayName }).ToListAsync(ct);
                 if (known.Count != request.Approvers.Count) return Results.BadRequest(new { error = "Every release approver must be a distinct active AeroLink user." });
                 var programId=await db.Projects.AsNoTracking().Where(x=>x.Id==campaign.ProjectId).Select(x=>x.ProgramId).SingleAsync(ct);
                 foreach(var approver in known)if(!await identity.HasRoleAsync(approver.Id,programId,ProgramRole.Approver,DateTimeOffset.UtcNow,ct))return Results.BadRequest(new{error=$"{approver.DisplayName} does not hold Approver authority for this Program."});
-                var manifestHash=await execution.ComputeReviewManifestHashAsync(id,ct);
-                campaign.BeginReleaseReview(http.UserAccount().UserName, requested.Select(userName=>{var person=known.Single(x=>x.UserName==userName);return(person.UserName,person.DisplayName);}).ToList(),manifestHash,DateTimeOffset.UtcNow);
+                var prepared = await execution.PrepareCodeReviewManifestAsync(campaign, writeScope, ct);
+                var manifestHash = prepared.Hash;
+                var now = DateTimeOffset.UtcNow;
+                var existingApprovalIds = campaign.Approvals.Select(x => x.Id).ToHashSet();
+                campaign.BeginReleaseReview(freshActor.UserName, requested.Select(userName=>{var person=known.Single(x=>x.UserName==userName);return(person.UserName,person.DisplayName);}).ToList(),manifestHash,now);
+                execution.RecordCodeReviewManifest(campaign, prepared, writeScope, freshActor.UserName, now);
                 // Existing approvals belong to the cancelled cycle and must stay Unchanged. The fresh rows
                 // have never been persisted; once DetectChanges discovers them through the campaign
                 // collection EF treats application-assigned keys as existing (Modified) and would UPDATE
                 // rows that do not exist. Capture the persisted approval ids before review starts and
                 // explicitly Add every newly created approval (Add also corrects a premature Modified
                 // attachment back to Added).
-                var existingApprovalIds = db.ChangeTracker.Entries<ReleaseApproval>().Select(e => e.Entity.Id).ToHashSet();
                 foreach (var approval in campaign.Approvals.Where(x => !existingApprovalIds.Contains(x.Id)))
                     db.ReleaseApprovals.Add(approval);
-                await db.SaveChangesAsync(ct); return Results.Ok(new{manifestHash});
+                await db.SaveChangesAsync(ct); await writeScope.CommitAsync(ct); return Results.Ok(new{manifestHash});
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return Results.Conflict(new { error = "The release campaign changed while review was starting. Reload and retry.", code = "release_campaign_conflict" }); }
@@ -198,13 +281,19 @@ public static class ReleaseCampaignEndpoints
 
         app.MapPost("/api/release-campaigns/{id:guid}/review/cancel", async (Guid id, CancelReleaseReviewRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
-            var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, campaign.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+            var projectId = await db.ReleaseCampaigns.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
             try
             {
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct,
+                        ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+                var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
                 var now = DateTimeOffset.UtcNow;
-                campaign.CancelReleaseReview(http.UserAccount().UserName, request.Reason, now);
+                campaign.CancelReleaseReview(freshActor.UserName, request.Reason, now);
                 await db.SaveChangesAsync(ct);
+                await writeScope.CommitAsync(ct);
                 return Results.Ok(new { state = campaign.State.ToString(), manifestHash = campaign.ReleaseHash });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -213,17 +302,21 @@ public static class ReleaseCampaignEndpoints
 
         app.MapPost("/api/release-campaigns/{id:guid}/approve", async (Guid id, ReleaseSignatureRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ReleaseExecutionService execution, CancellationToken ct) =>
         {
+            var projectId = await db.ReleaseCampaigns.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if (projectId is null) return Results.NotFound();
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
+            var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+            if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct, ProgramRole.Approver)) return Results.Forbid();
             var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
             if(string.IsNullOrWhiteSpace(request.Meaning))return Results.BadRequest(new{error="An explicit electronic signature meaning is required."});
             if(string.IsNullOrWhiteSpace(campaign.ReleaseHash)||campaign.ReleaseHash.Length!=64)return Results.Conflict(new{error="Release review is not bound to a valid package manifest.",code="release_manifest_missing"});
             if(string.IsNullOrWhiteSpace(request.ExpectedManifestHash)||request.ExpectedManifestHash.Length!=64
                 ||!string.Equals(request.ExpectedManifestHash,campaign.ReleaseHash,StringComparison.OrdinalIgnoreCase))
                 return Results.Conflict(new{error="The release package you reviewed has changed. Reload the release package before approving.",code="stale_release_package",currentManifestHash=campaign.ReleaseHash});
-            var currentHash=await execution.ComputeReviewManifestHashAsync(id,ct);
+            var currentHash=await execution.ComputeRecordedReviewManifestHashAsync(id,ct);
             if(!string.Equals(currentHash,campaign.ReleaseHash,StringComparison.OrdinalIgnoreCase))
                 return Results.Conflict(new{error="The release package changed after review began. Cancel and restart release review against the current manifest.",code="release_manifest_changed",reviewedManifestHash=campaign.ReleaseHash,currentManifestHash=currentHash});
-            var actor = http.UserAccount(); if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
-            var programId = await db.Projects.Where(x => x.Id == campaign.ProjectId).Select(x => x.ProgramId).SingleAsync(ct); if (!await identity.HasRoleAsync(actor, programId, ProgramRole.Approver, DateTimeOffset.UtcNow, ct)) return Results.Forbid();
+            var actor = freshActor; if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password, ct)) return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
+            var programId = await db.Projects.AsNoTracking().Where(x => x.Id == campaign.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
             try
             {
                 var now = DateTimeOffset.UtcNow;
@@ -249,7 +342,7 @@ public static class ReleaseCampaignEndpoints
                 var complete = campaign.Approve(actor.UserName, now);
                 db.ElectronicSignatures.Add(new(actor.Id, actor.UserName, actor.DisplayName, programId, "ReleaseCampaign", campaign.Id, campaign.Name, "ApproveRelease", request.Meaning, campaign.ReleaseHash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now,
                     reviewStepPosition: position, reviewCycle: active.Cycle, rationale: request.Rationale ?? ""));
-                await db.SaveChangesAsync(ct); return Results.Ok(new { complete, manifestHash = campaign.ReleaseHash });
+                await db.SaveChangesAsync(ct); await writeScope.CommitAsync(ct); return Results.Ok(new { complete, manifestHash = campaign.ReleaseHash });
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return Results.Conflict(new { error = "The release approval changed concurrently. Reload the release package before deciding.", code = "approval_step_conflict" }); }
@@ -257,14 +350,21 @@ public static class ReleaseCampaignEndpoints
 
         app.MapPost("/api/release-campaigns/{id:guid}/release", async (Guid id, EmptyMutationRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ReleaseReadinessService readiness, ReleaseExecutionService execution, CancellationToken ct) =>
         {
-            await using var transaction = await db.Database.BeginTransactionAsync(ct); var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, campaign.ProjectId, ct, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
-            var status = await readiness.CalculateAsync(id, ct); if (!status.ReadyForRelease) return Results.BadRequest(new { error = "Every release-readiness gate must be complete.", blockers = status.Gates.Where(x => !x.Complete).Select(x => x.Name) });
-            if (campaign.SoftwareBuildId is null) return Results.BadRequest(new { error = "Select the verified release build." });
-            var baseline = await db.CandidateBaselines.Include(x => x.Events).SingleAsync(x => x.Id == campaign.BaselineId, ct); var release = await db.Releases.SingleAsync(x => x.Id == campaign.ReleaseId, ct); var build = await db.SoftwareBuilds.SingleAsync(x => x.Id == campaign.SoftwareBuildId, ct);
-            var hash=await execution.ComputeReviewManifestHashAsync(id,ct);if(!string.Equals(campaign.ReleaseHash,hash,StringComparison.OrdinalIgnoreCase))return Results.Conflict(new{error="The release package changed after review began. Cancel and restart release review against the current manifest.",code="release_manifest_changed",reviewedManifestHash=campaign.ReleaseHash,currentManifestHash=hash});
-            try { var actor = http.UserAccount().UserName; campaign.Release(build.Id, hash, actor, DateTimeOffset.UtcNow); baseline.MarkReleased(actor, DateTimeOffset.UtcNow); release.MarkReleased(DateTimeOffset.UtcNow); build.MarkReleased(DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); return Results.Ok(new { release = release.Version, build.BuildNumber, releaseHash = hash }); }
-            catch (DbUpdateConcurrencyException) { await transaction.RollbackAsync(ct); db.ChangeTracker.Clear(); return Results.Conflict(new { error = "The release package changed concurrently. Reload before releasing.", code = "release_campaign_conflict" }); }
+            var projectId = await db.ReleaseCampaigns.AsNoTracking().Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if (projectId is null) return Results.NotFound();
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
+            try
+            {
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct,
+                        ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+                var campaign = await db.ReleaseCampaigns.Include(x => x.Approvals).Include(x => x.Events).SingleOrDefaultAsync(x => x.Id == id, ct); if (campaign is null) return Results.NotFound();
+                var status = await readiness.CalculateAsync(id, ct); if (!status.ReadyForRelease) return Results.BadRequest(new { error = "Every release-readiness gate must be complete.", blockers = status.Gates.Where(x => !x.Complete).Select(x => x.Name) });
+                if (campaign.SoftwareBuildId is null) return Results.BadRequest(new { error = "Select the verified release build." });
+                var baseline = await db.CandidateBaselines.Include(x => x.Events).SingleAsync(x => x.Id == campaign.BaselineId, ct); var release = await db.Releases.SingleAsync(x => x.Id == campaign.ReleaseId, ct); var build = await db.SoftwareBuilds.SingleAsync(x => x.Id == campaign.SoftwareBuildId, ct);
+                var hash=await execution.ComputeRecordedReviewManifestHashAsync(id,ct);if(!string.Equals(campaign.ReleaseHash,hash,StringComparison.OrdinalIgnoreCase))return Results.Conflict(new{error="The release package changed after review began. Cancel and restart release review against the current manifest.",code="release_manifest_changed",reviewedManifestHash=campaign.ReleaseHash,currentManifestHash=hash});
+                var actor = freshActor.UserName; campaign.Release(build.Id, hash, actor, DateTimeOffset.UtcNow); baseline.MarkReleased(actor, DateTimeOffset.UtcNow); release.MarkReleased(DateTimeOffset.UtcNow); build.MarkReleased(DateTimeOffset.UtcNow); await db.SaveChangesAsync(ct); await writeScope.CommitAsync(ct); return Results.Ok(new { release = release.Version, build.BuildNumber, releaseHash = hash });
+            }
+            catch (DbUpdateConcurrencyException) { db.ChangeTracker.Clear(); return Results.Conflict(new { error = "The release package changed concurrently. Reload before releasing.", code = "release_campaign_conflict" }); }
             catch (Exception ex) when (ex is DomainException or InvalidOperationException) { return Results.BadRequest(new { error = ex.Message }); }
         });
     }

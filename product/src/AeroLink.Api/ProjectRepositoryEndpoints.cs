@@ -28,10 +28,15 @@ public static class ProjectRepositoryEndpoints
                 return Results.BadRequest(new { error = "Choose Connect now or Configure later." });
             if (mode == ProjectRepositorySetupMode.ConnectNow && !string.Equals(request.Provider, "GitLab", StringComparison.OrdinalIgnoreCase))
                 return Results.BadRequest(new { error = "Choose the supported GitLab provider." });
-            var record = await db.ProjectRepositoryConfigurations.SingleOrDefaultAsync(x => x.ProjectId == projectId, ct);
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId, ct);
             try
             {
-                var actor = http.UserAccount().UserName;
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct,
+                        ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator))
+                    return Results.Forbid();
+                var record = await db.ProjectRepositoryConfigurations.SingleOrDefaultAsync(x => x.ProjectId == projectId, ct);
+                var actor = freshActor.UserName;
                 var now = DateTimeOffset.UtcNow;
                 if (record is null)
                 {
@@ -44,8 +49,9 @@ public static class ProjectRepositoryEndpoints
                     if (record.Version != request.ExpectedVersion) return Changed();
                     record.Configure(request.ExpectedVersion, mode, request.Provider, request.Endpoint, actor, now);
                 }
-                Audit(db, http, projectId, "RepositoryConfigured", new { mode, record.Provider, record.Endpoint, record.Version });
+                Audit(db, http, projectId, freshActor.UserName, "RepositoryConfigured", new { mode, record.Provider, record.Endpoint, record.Version });
                 await db.SaveChangesAsync(ct);
+                await writeScope.CommitAsync(ct);
                 return Results.Ok(View(record));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -56,26 +62,38 @@ public static class ProjectRepositoryEndpoints
             HttpContext http, AeroLinkDbContext db, IdentityService identity, GitLabProjectConnectionProbe probe, CancellationToken ct) =>
         {
             if (!await CanManage(http, db, identity, projectId, ct)) return Results.Forbid();
-            var record = await db.ProjectRepositoryConfigurations.SingleOrDefaultAsync(x => x.ProjectId == projectId, ct);
+            var record = await db.ProjectRepositoryConfigurations.AsNoTracking().SingleOrDefaultAsync(x => x.ProjectId == projectId, ct);
             if (record is null || record.Mode != ProjectRepositorySetupMode.ConnectNow)
                 return Results.Conflict(new { code = "repository_pending", error = "Configure the repository before verifying its connection." });
             if (record.Version != request.ExpectedVersion) return Changed();
+            var probedProvider = record.Provider;
+            var probedEndpoint = record.Endpoint;
             // No transaction spans GitLab. The tracked optimistic version rejects an edit made while awaiting it.
-            var result = await probe.ProbeAsync(record.Provider, record.Endpoint, ct);
-            if (!await CanManage(http, db, identity, projectId, ct)) return Results.Forbid();
+            var result = await probe.ProbeAsync(probedProvider, probedEndpoint, ct);
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId, ct);
             try
             {
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct,
+                        ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator))
+                    return Results.Forbid();
+                record = await db.ProjectRepositoryConfigurations.SingleOrDefaultAsync(x => x.ProjectId == projectId, ct);
+                if (record is null || record.Mode != ProjectRepositorySetupMode.ConnectNow || record.Version != request.ExpectedVersion
+                    || !string.Equals(record.Provider, probedProvider, StringComparison.Ordinal)
+                    || !string.Equals(record.Endpoint, probedEndpoint, StringComparison.Ordinal))
+                    return Changed();
                 if (result.Verified)
-                    record.RecordVerification(http.UserAccount().UserName, DateTimeOffset.UtcNow, result.RemoteProjectId!.Value, result.RemotePath!);
+                    record.RecordVerification(freshActor.UserName, DateTimeOffset.UtcNow, result.RemoteProjectId!.Value, result.RemotePath!);
                 else
-                    record.RecordVerificationFailure(http.UserAccount().UserName, DateTimeOffset.UtcNow);
-                Audit(db, http, projectId, "RepositoryConnectionObserved", new { result.Verified, result.Code, result.RemoteProjectId, result.RemotePath, record.Version });
+                    record.RecordVerificationFailure(freshActor.UserName, DateTimeOffset.UtcNow);
+                Audit(db, http, projectId, freshActor.UserName, "RepositoryConnectionObserved", new { result.Verified, result.Code, result.RemoteProjectId, result.RemotePath, record.Version });
                 await db.SaveChangesAsync(ct);
                 // Return the committed provider representation. PostgreSQL stores DateTimeOffset at microsecond
                 // precision; the tracked value can retain finer local ticks and would otherwise disagree with
                 // the immutable evidence snapshot read by the next request.
                 var persisted = await db.ProjectRepositoryConfigurations.AsNoTracking()
                     .SingleAsync(x => x.ProjectId == projectId, ct);
+                await writeScope.CommitAsync(ct);
                 return Results.Ok(new { repository = View(persisted), observation = result });
             }
             catch (DbUpdateConcurrencyException) { return Changed(); }
@@ -92,8 +110,8 @@ public static class ProjectRepositoryEndpoints
         record.RemoteProjectId, remotePath = record.RemotePathWithNamespace,
         record.LastVerificationFailureAt, record.LastVerificationFailureBy,
     };
-    private static void Audit(AeroLinkDbContext db, HttpContext http, Guid projectId, string kind, object detail) =>
-        db.SecurityAuditEvents.Add(new(kind, http.UserAccount().UserName, $"Project:{projectId}", "Success",
+    private static void Audit(AeroLinkDbContext db, HttpContext http, Guid projectId, string actorName, string kind, object detail) =>
+        db.SecurityAuditEvents.Add(new(kind, actorName, $"Project:{projectId}", "Success",
             JsonSerializer.Serialize(detail), http.Connection.RemoteIpAddress?.ToString() ?? "local", DateTimeOffset.UtcNow));
     public sealed record ConfigureProjectRepository(long ExpectedVersion, string Mode, string? Provider, string? Endpoint);
     public sealed record VerifyProjectRepository(long ExpectedVersion);

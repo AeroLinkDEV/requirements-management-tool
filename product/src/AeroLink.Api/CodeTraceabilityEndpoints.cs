@@ -4,6 +4,7 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Requirements;
+using AeroLink.Domain.Releases;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -20,6 +21,9 @@ public static class CodeTraceabilityEndpoints
         IProjectLadderPolicyResolver policyResolver, CancellationToken ct)
     {
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
+        var denied = await AeroLink.Api.GitLabMetadataEndpoints.CurrentAccessFailureAsync(projectId, http, db, ct);
+        if (denied is not null) return denied;
+        http.Response.Headers.CacheControl = "no-store";
         var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
         var release = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == releaseId && x.ProjectId == projectId, ct);
         if (release is null) return Results.NotFound();
@@ -42,14 +46,16 @@ public static class CodeTraceabilityEndpoints
         // population it belongs to is not ready.
         var recorded = await db.CodeTraceabilityRecords.AsNoTracking()
             .Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId).ToListAsync(ct);
+        var frozen = release.IsReleased || await db.ReleaseCampaigns.AsNoTracking().AnyAsync(x => x.ProjectId == projectId
+            && x.ReleaseId == releaseId && (x.State == ReleaseCampaignState.InReview || x.State == ReleaseCampaignState.Released), ct);
 
         if (!materialized)
-            return Results.Ok(Waiting(release.Version, release.IsReleased, recorded, repository));
+            return Results.Ok(Waiting(release.Version, frozen, recorded, repository,
+                await db.CodeEvidenceDispositionSets.AsNoTracking().CountAsync(x => x.ProjectId == projectId && x.ReleaseId == releaseId, ct)));
 
         var required = await CodeTraceabilityProjection.RequiredAsync(db, projectId, releaseId, campaignBaselineId!.Value, ladderPolicy, ct);
-        var revisionIds = required.Select(x => x.RevisionId).ToHashSet();
-        var mappings = recorded.Where(x => revisionIds.Contains(x.RequirementRevisionId)).ToList();
-        return Results.Ok(Response(release.Version, release.IsReleased, required, mappings, repository));
+        var current = await CurrentCodeEvidenceProjection.ForReleaseAsync(db, projectId, releaseId, ct);
+        return Results.Ok(Response(release.Version, frozen, campaignBaselineId.Value, required, current, repository));
     }
 
     /// The one baseline the release decision is made against. A release has at most one campaign.
@@ -61,47 +67,62 @@ public static class CodeTraceabilityEndpoints
         IdentityService identity, IProjectLadderPolicyResolver policyResolver, CancellationToken ct)
     {
         if (!await http.HasProjectRoleAsync(db, identity, request.ProjectId, ct, ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+        if (request.Disposition == CodeTraceDisposition.GitLabMerge)
+            return Results.Conflict(new
+            {
+                code = "legacy_gitlab_capture_retired",
+                error = "Legacy GitLab evidence writes are retired. Use the source-bound Code evidence acceptance command."
+            });
         var release = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId, ct);
         if (release is null) return Results.BadRequest(new { error = "The selected build does not belong to this Project." });
         var ladderPolicy = await policyResolver.ResolveAsync(request.ProjectId, ct);
         if (release.IsReleased) return Results.Conflict(new { error = $"Build {release.Version} is released and read-only." });
-        // Hold the observed repository row through evidence commit. A concurrent configuration edit or
-        // failed verification must wait for this bounded write; no external call occurs under the lock.
-        await using var repositoryTransaction = request.Disposition == CodeTraceDisposition.GitLabMerge
-            ? await db.Database.BeginTransactionAsync(ct) : null;
-        ProjectRepositoryConfiguration? repositoryConfiguration = null;
-        if (request.Disposition == CodeTraceDisposition.GitLabMerge)
+        await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, request.ProjectId, ct);
+        try
         {
-            var repositoryQuery = db.Database.IsNpgsql()
-                ? db.ProjectRepositoryConfigurations.FromSqlInterpolated(
-                    $"SELECT * FROM project_repository_configurations WHERE \"ProjectId\" = {request.ProjectId} FOR UPDATE")
-                : db.ProjectRepositoryConfigurations.AsQueryable();
-            repositoryConfiguration = await repositoryQuery.AsNoTracking()
-                .SingleOrDefaultAsync(x => x.ProjectId == request.ProjectId, ct);
-            var refusal = ProjectRepositoryEvidencePolicy.ValidateMerge(repositoryConfiguration, request.RepositoryPath,
-                request.MergeRequestUrl, request.MergeRequestReference);
-            if (refusal is not null) return Results.Conflict(new { code = refusal.Code, error = refusal.Error });
-        }
-        // Mapped against the population the release decision will actually read. Recording against an
-        // inherited predecessor revision produced an attributable record that the gate could never count.
-        var baselineId = await CampaignBaselineAsync(db, request.ProjectId, request.ReleaseId, ct);
-        if (baselineId is null || !await db.CandidateBaselines.AsNoTracking()
-                .AnyAsync(x => x.Id == baselineId && x.RequirementsMaterializedAt != null, ct))
-            return Results.Conflict(new
+            var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+            if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct,
+                    ProgramRole.Engineer, ProgramRole.ConfigurationManager, ProgramRole.ProgramManager))
+                return Results.Forbid();
+
+            release = await db.Releases.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.ReleaseId && x.ProjectId == request.ProjectId, ct);
+            if (release is null) return Results.BadRequest(new { error = "The selected build does not belong to this Project." });
+            if (release.IsReleased) return Results.Conflict(new { error = $"Build {release.Version} is released and read-only." });
+            if (await db.ReleaseCampaigns.AsNoTracking().AnyAsync(x => x.ProjectId == request.ProjectId
+                    && x.ReleaseId == request.ReleaseId
+                    && (x.State == ReleaseCampaignState.InReview || x.State == ReleaseCampaignState.Released), ct))
+                return Results.Conflict(new { error = "The release package is frozen or released and cannot accept new code traceability.", code = "release_package_frozen" });
+
+            // Hold the observed repository row through evidence commit. A concurrent configuration edit or
+            // failed verification must wait for this bounded write; no external call occurs under the lock.
+            ProjectRepositoryConfiguration? repositoryConfiguration = null;
+            if (request.Disposition == CodeTraceDisposition.GitLabMerge)
+            {
+                repositoryConfiguration = await db.ProjectRepositoryConfigurations.AsNoTracking()
+                    .SingleOrDefaultAsync(x => x.ProjectId == request.ProjectId, ct);
+                var refusal = ProjectRepositoryEvidencePolicy.ValidateMerge(repositoryConfiguration, request.RepositoryPath,
+                    request.MergeRequestUrl, request.MergeRequestReference);
+                if (refusal is not null) return Results.Conflict(new { code = refusal.Code, error = refusal.Error });
+            }
+
+            // Mapped against the population the release decision will actually read. Recording against an
+            // inherited predecessor revision produced an attributable record that the gate could never count.
+            var baselineId = await CampaignBaselineAsync(db, request.ProjectId, request.ReleaseId, ct);
+            if (baselineId is null || !await db.CandidateBaselines.AsNoTracking()
+                    .AnyAsync(x => x.Id == baselineId && x.RequirementsMaterializedAt != null, ct))
+                return Results.Conflict(new
             {
                 error = "This build has no materialized requirement population yet, so implementation evidence cannot be recorded against it. Freeze the candidate baseline and materialize its requirements first.",
                 code = "waiting_for_materialized_baseline"
             });
-        var requiredLevels = ladderPolicy.OrderedLevels.Where(ladderPolicy.HasCodeTraceability).ToArray();
-        if (requiredLevels.Length == 0)
-            return Results.BadRequest(new { error = "The effective project ladder declares no code-traceability capability." });
-        var exactLlr = await (from selection in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId && x.RevisionId == request.RequirementRevisionId)
+            var requiredLevels = ladderPolicy.OrderedLevels.Where(ladderPolicy.HasCodeTraceability).ToArray();
+            if (requiredLevels.Length == 0)
+                return Results.BadRequest(new { error = "The effective project ladder declares no code-traceability capability." });
+            var exactLlr = await (from selection in db.BaselineRequirements.AsNoTracking().Where(x => x.BaselineId == baselineId && x.RevisionId == request.RequirementRevisionId)
                                                        join artifact in db.Requirements.AsNoTracking().Where(x => x.Id == request.RequirementArtifactId && x.ProjectId == request.ProjectId && requiredLevels.Contains(x.Level)) on selection.ArtifactId equals artifact.Id
                                                        select artifact.Id).AnyAsync(ct);
-        if (!exactLlr) return Results.BadRequest(new { error = "Code traceability must map an exact requirement revision with code-traceability capability in the selected build baseline." });
-        try
-        {
-            var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
+            if (!exactLlr) return Results.BadRequest(new { error = "Code traceability must map an exact requirement revision with code-traceability capability in the selected build baseline." });
+            var actor = freshActor; var now = DateTimeOffset.UtcNow;
             var record = new CodeTraceabilityRecord(request.ProjectId, request.ReleaseId, request.RequirementArtifactId, request.RequirementRevisionId,
                 request.Disposition, request.RepositoryPath ?? "", request.MergeRequestReference ?? "", request.MergeRequestTitle ?? "",
                 request.MergeRequestUrl ?? "", request.MergeCommitSha ?? "", request.MergedAt, request.NoCodeChangeRationale ?? "", false, actor.UserName, now,
@@ -111,7 +132,7 @@ public static class CodeTraceabilityEndpoints
                 $"Mapped exact LLR revision {request.RequirementRevisionId} as {request.Disposition} for build {request.ReleaseId}.",
                 http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
             await db.SaveChangesAsync(ct);
-            if (repositoryTransaction is not null) await repositoryTransaction.CommitAsync(ct);
+            await writeScope.CommitAsync(ct);
             return Results.Created($"/api/code-traceability/{record.Id}", new { record.Id, disposition = record.Disposition.ToString() });
         }
         catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -124,7 +145,7 @@ public static class CodeTraceabilityEndpoints
     /// here is what let an inherited-baseline calculation read as this build's release gate.
     /// </summary>
     private static object Waiting(string version, bool readOnly, IReadOnlyList<CodeTraceabilityRecord> recorded,
-        ProjectRepositoryEvidenceReadiness repository) => new
+        ProjectRepositoryEvidenceReadiness repository, int evidenceSetCount) => new
     {
         repository,
         build = new { version, readOnly },
@@ -135,7 +156,7 @@ public static class CodeTraceabilityEndpoints
         {
             detail = "Waiting for a materialized baseline. The exact requirement-revision population does not exist yet, so this gate has not been evaluated.",
             action = "Complete the Requirement baseline materialized gate first: freeze the candidate baseline and materialize its requirements.",
-            recordedCount = recorded.Count,
+            recordedCount = recorded.Count + evidenceSetCount,
         },
         summary = (object?)null,
         requirements = Array.Empty<object>(),
@@ -143,33 +164,55 @@ public static class CodeTraceabilityEndpoints
 
     private const string SourceOfTruth = "GitLab is the source of truth for source code, merge-request review, and commit content. AeroLink stores immutable traceability pointers only.";
 
-    private static object Response(string version, bool readOnly, IReadOnlyList<RequiredCodeTraceabilityRequirement> candidates,
-        IReadOnlyList<CodeTraceabilityRecord> mappings, ProjectRepositoryEvidenceReadiness repository)
+    private static object Response(string version, bool readOnly, Guid campaignBaselineId,
+        IReadOnlyList<RequiredCodeTraceabilityRequirement> candidates,
+        IReadOnlyList<CurrentCodeEvidence> current, ProjectRepositoryEvidenceReadiness repository)
     {
-        var byRevision = mappings.ToDictionary(x => x.RequirementRevisionId);
-        var mapped = candidates.Count(candidate => byRevision.ContainsKey(candidate.RevisionId));
+        var byRevision = current.ToDictionary(x => (x.RequirementArtifactId, x.RequirementRevisionId));
+        var mapped = candidates.Count(candidate => byRevision.TryGetValue((candidate.ArtifactId, candidate.RevisionId), out var evidence)
+            && evidence.CountsAsImplementation);
         return new
         {
             repository,
+            campaignBaselineId,
             build = new { version, readOnly },
             sourceOfTruth = SourceOfTruth,
             evaluationState = "Evaluated",
-            demonstrationScope = mappings.Any(x => x.IsDemonstration),
+            demonstrationScope = current.Any(x => x.LegacyRecord?.IsDemonstration == true),
             summary = new { required = candidates.Count, mapped, missing = candidates.Count - mapped, percent = candidates.Count == 0 ? 100 : mapped * 100 / candidates.Count, gateComplete = mapped == candidates.Count },
             requirements = candidates.Select(candidate => new
             {
                 candidate.ArtifactId, candidate.RevisionId, displayNumber = $"{candidate.BaseNumber}.{candidate.Revision:D2}", candidate.Statement,
-                mapping = byRevision.TryGetValue(candidate.RevisionId, out var record) ? new
+                mapping = byRevision.TryGetValue((candidate.ArtifactId, candidate.RevisionId), out var evidence)
+                    ? LegacyMapping(evidence.LegacyRecord) : null,
+                evidence = evidence?.Selector is null ? null : new
                 {
-                    id = record.Id, disposition = record.Disposition.ToString(), record.RepositoryPath, record.MergeRequestReference,
-                    record.MergeRequestTitle, record.MergeRequestUrl, record.MergeCommitSha, record.MergedAt, record.NoCodeChangeRationale,
-                    record.VerifiedRemoteProjectId, record.VerifiedRepositoryEndpoint, record.VerifiedRepositoryPath,
-                    record.RepositoryConfigurationVersion, record.RepositoryVerifiedAt, record.RepositoryVerifiedBy,
-                    record.IsDemonstration, record.RecordedBy, record.RecordedAt
-                } : null
+                    state = evidence.State.ToString(), evidence.CountsAsImplementation,
+                    selectorVersion = evidence.Selector.Version, evidenceSetId = evidence.Selector.EvidenceSetId,
+                    disposition = evidence.EvidenceSet?.Disposition.ToString(),
+                    evidence.EvidenceSet?.NoCodeChangeRationale, evidence.EvidenceSet?.RecordedBy, evidence.EvidenceSet?.RecordedAt,
+                    evidence.EvidenceSet?.SourceSnapshotId, evidence.EvidenceSet?.SourceSelectionEventId,
+                    evidence.EvidenceSet?.SupersededLegacyRecordId, evidence.InvalidationRationale,
+                    contributions = evidence.Contributions.Select(x => new
+                    {
+                        x.Id, kind = x.ContributionKind.ToString(), x.RelationshipId, x.InstanceBaseUrl, x.RemoteProjectId,
+                        repositoryPath = x.RepositoryPathSnapshot, x.MergeRequestIid,
+                        mergeRequestTitle = x.MergeRequestTitleSnapshot, mergeRequestUrl = x.MergeRequestUrlSnapshot,
+                        x.CommitSha, path = x.FilePath, x.StartLine, x.EndLine, x.MergeResultSha,
+                        mergeResultKind = x.MergeResultKind?.ToString(), x.MergedAt, x.ProviderObservedAt, x.RecordedBy, x.RecordedAt
+                    })
+                }
             })
         };
     }
+    private static object? LegacyMapping(CodeTraceabilityRecord? record) => record is null ? null : new
+    {
+        id = record.Id, disposition = record.Disposition.ToString(), record.RepositoryPath, record.MergeRequestReference,
+        record.MergeRequestTitle, record.MergeRequestUrl, record.MergeCommitSha, record.MergedAt, record.NoCodeChangeRationale,
+        record.VerifiedRemoteProjectId, record.VerifiedRepositoryEndpoint, record.VerifiedRepositoryPath,
+        record.RepositoryConfigurationVersion, record.RepositoryVerifiedAt, record.RepositoryVerifiedBy,
+        record.IsDemonstration, record.RecordedBy, record.RecordedAt
+    };
     private sealed record CreateCodeTraceabilityRequest(Guid ProjectId, Guid ReleaseId, Guid RequirementArtifactId, Guid RequirementRevisionId,
         CodeTraceDisposition Disposition, string? RepositoryPath, string? MergeRequestReference, string? MergeRequestTitle,
         string? MergeRequestUrl, string? MergeCommitSha, DateTimeOffset? MergedAt, string? NoCodeChangeRationale);

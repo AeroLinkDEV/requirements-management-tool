@@ -3,6 +3,7 @@ using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Imports;
+using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
@@ -342,6 +343,31 @@ public sealed class ChangeRequestTraceProjectionTests
             && x.Relation == "RequirementCodeEvidence");
         Assert.DoesNotContain(result.Edges, x => x.ToId == externalRevision.Id
             && x.Relation == "OwnsRequirementRevision");
+
+        var replacement = new CodeEvidenceDispositionSet(fixture.Project.Id, fixture.Release.Id, external.Id,
+            externalRevision.Id, CodeEvidenceDisposition.NoCodeChangeRequired, "Explicit current decision.",
+            null, null, code.Id, "author", fixture.Now);
+        var selector = new CodeEvidenceCurrentSelector(fixture.Project.Id, fixture.Release.Id, external.Id,
+            externalRevision.Id, replacement.Id, "author", fixture.Now);
+        var anotherRelease = new SoftwareRelease(fixture.Project.Id, "9.9", false, fixture.Release.Id);
+        var otherBuildLegacy = new CodeTraceabilityRecord(fixture.Project.Id, anotherRelease.Id, external.Id,
+            externalRevision.Id, CodeTraceDisposition.NoCodeChangeRequired, "", "", "", "", "", null,
+            "Independent build decision.", false, "author", fixture.Now);
+        fixture.Db.AddRange(replacement, selector, anotherRelease, otherBuildLegacy);
+        await fixture.Db.SaveChangesAsync();
+        result = await ChangeRequestTraceProjection.ForChangeRequestAsync(
+            fixture.Db, fixture.Project.Id, root.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
+        Assert.DoesNotContain(result!.Nodes, x => x.Kind == "CodeTraceability" && x.Id == code.Id);
+        Assert.Contains(result.Nodes, x => x.Kind == "CodeTraceability" && x.Id == otherBuildLegacy.Id);
+        Assert.Contains(result.Nodes, x => x.Kind == "CodeEvidenceSet" && x.Id == replacement.Id && x.State == "Accepted");
+        Assert.Contains(result.Edges, x => x.ToId == replacement.Id && x.Provenance.Any(p => p.SourceId == selector.Id));
+        fixture.Db.Add(new CodeEvidenceInvalidation(replacement.Id, fixture.Project.Id, fixture.Release.Id,
+            external.Id, externalRevision.Id, "author", "Decision no longer applies.", fixture.Now));
+        await fixture.Db.SaveChangesAsync();
+        result = await ChangeRequestTraceProjection.ForChangeRequestAsync(
+            fixture.Db, fixture.Project.Id, root.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
+        Assert.Contains(result!.Nodes, x => x.Kind == "CodeEvidenceSet" && x.Id == replacement.Id && x.State == "Invalidated");
+        Assert.DoesNotContain(result.Nodes, x => x.Kind == "CodeTraceability" && x.Id == code.Id);
     }
 
     [Fact]

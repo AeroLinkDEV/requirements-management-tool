@@ -246,6 +246,7 @@ public static partial class ChangeRequestTraceProjection
         var tcrIds = scope.Reviews.ToArray();
         var reqIds = scope.Requirements.ToArray();
         var codeIds = scope.Code.ToArray();
+        var codeEvidenceIds = scope.CodeEvidence.ToArray();
         var reportIds = scope.Reports.ToArray();
         var allCr = await db.SystemChangeRequests.AsNoTracking()
             .Where(x => x.ProjectId == projectId && crIds.Contains(x.Id))
@@ -321,6 +322,7 @@ public static partial class ChangeRequestTraceProjection
                     || db.SystemChangeRequests.Any(cr => cr.ProjectId == projectId && crIds.Contains(cr.Id) && cr.TargetReleaseId == x.Id)
                     || db.TestChangeReviews.Any(tcr => tcr.ProjectId == projectId && tcrIds.Contains(tcr.Id) && tcr.ReleaseId == x.Id)
                     || db.CodeTraceabilityRecords.Any(code => code.ProjectId == projectId && codeIds.Contains(code.Id) && code.ReleaseId == x.Id)
+                    || db.CodeEvidenceDispositionSets.Any(code => code.ProjectId == projectId && codeEvidenceIds.Contains(code.Id) && code.ReleaseId == x.Id)
                     || db.ProblemReports.Any(report => report.ProjectId == projectId && reportIds.Contains(report.Id) && report.TargetReleaseId == x.Id)))
             .Select(x => new { x.Id, x.Version }).ReadTraceAsync(budget, ct);
         var releases = releaseRows.ToDictionary(x => x.Id, x => x.Version);
@@ -576,10 +578,9 @@ public static partial class ChangeRequestTraceProjection
             edge.Provenance.Add(new("RequirementTrace", link.Id));
             edgeBuilders.Add(edge);
         }
-        var code = await db.CodeTraceabilityRecords.AsNoTracking()
-            .Where(x => x.ProjectId == projectId && codeIds.Contains(x.Id))
-            .Select(x => new { x.Id, x.RequirementRevisionId, x.ReleaseId, x.Disposition, x.MergeRequestReference })
-            .ReadTraceAsync(budget, ct);
+        var currentCode = await CurrentCodeEvidenceProjection.ForRevisionsAsync(db, projectId, reqIds, budget, ct);
+        var code = currentCode.Where(x => x.LegacyRecord is not null && codeIds.Contains(x.LegacyRecord.Id))
+            .Select(x => x.LegacyRecord!);
         foreach (var record in code)
         {
             nodes[("CodeTraceability", record.Id)] = new(record.Id, "CodeTraceability", record.MergeRequestReference,
@@ -588,6 +589,20 @@ public static partial class ChangeRequestTraceProjection
             var edge = new EdgeBuilder(record.RequirementRevisionId, "RequirementRevision", record.Id,
                 "CodeTraceability", "RequirementCodeEvidence");
             edge.Provenance.Add(new("CodeTraceabilityRecord", record.Id));
+            edgeBuilders.Add(edge);
+        }
+        foreach (var current in currentCode.Where(x => x.EvidenceSet is not null && codeEvidenceIds.Contains(x.EvidenceSet.Id)))
+        {
+            var set = current.EvidenceSet!;
+            var title = set.Disposition == AeroLink.Domain.Integrations.CodeEvidenceDisposition.NoCodeChangeRequired
+                ? "No code change required" : $"{current.Contributions.Count} recorded implementation contributions";
+            nodes[("CodeEvidenceSet", set.Id)] = new(set.Id, "CodeEvidenceSet", title,
+                current.InvalidationRationale, current.State.ToString(), projectId, set.ReleaseId,
+                releases.GetValueOrDefault(set.ReleaseId), null, null);
+            var edge = new EdgeBuilder(set.RequirementRevisionId, "RequirementRevision", set.Id,
+                "CodeEvidenceSet", "RequirementCodeEvidence");
+            edge.Provenance.Add(new("CodeEvidenceDispositionSet", set.Id));
+            edge.Provenance.Add(new("CodeEvidenceCurrentSelector", current.Selector!.Id));
             edgeBuilders.Add(edge);
         }
 

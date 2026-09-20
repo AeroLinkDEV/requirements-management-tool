@@ -108,6 +108,57 @@ static class IdentityHttpExtensions
         var programId=await db.Projects.Where(x=>x.Id==projectId).Select(x=>(Guid?)x.ProgramId).SingleOrDefaultAsync(ct);
         return programId is not null&&actor.Programs.Any(x=>x.ProgramId==programId.Value);
     }
+
+    /// <summary>
+    /// Re-resolves the request session after a project write scope has acquired its serialization lock.
+    /// Middleware's cached user is suitable for routing, but it can carry memberships observed before a
+    /// concurrent administrator change. Controlled writes must ask the database again inside the scope.
+    /// </summary>
+    public static async Task<AuthenticatedUser?> FreshUserForScopeAsync(this HttpContext context,
+        IdentityService identity, ProjectControlledWriteScope scope, CancellationToken ct)
+    {
+        scope.EnsureJoined(scope.Db, scope.ProjectId);
+        _ = identity;
+        var tokenHash = IdentityService.TokenDigest(context.Request.Cookies[IdentityService.CookieName]);
+        if (tokenHash is null) return null;
+        var now = DateTimeOffset.UtcNow;
+        var session = await scope.Db.UserSessions.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.TokenHash == tokenHash, ct);
+        if (session is null || !session.IsValid(now)) return null;
+        var user = await scope.Db.UserAccounts.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == session.UserId && x.State == AccountState.Active, ct);
+        if (user is null) return null;
+        var memberships = await scope.Db.ProgramMemberships.AsNoTracking()
+            .Where(x => x.UserId == user.Id && x.EndedAt == null).ToListAsync(ct);
+        var programs = memberships.GroupBy(x => x.ProgramId)
+            .Select(g => new UserProgramAccess(g.Key, g.Select(x => x.Role.ToString()).Order().ToList()))
+            .ToList();
+        return new(user.Id, user.UserName, user.DisplayName, user.Email,
+            user.UserName == IdentityService.SystemAdministratorUserName, programs, user.MustChangePassword);
+    }
+
+    public static async Task<bool> HasFreshProjectRoleAsync(this HttpContext context, AeroLinkDbContext db,
+        IdentityService identity, ProjectControlledWriteScope scope, CancellationToken ct,
+        params ProgramRole[] roles)
+    {
+        ProjectControlledWriteScope.Require(db, scope.ProjectId, scope);
+        var actor = await context.FreshUserForScopeAsync(identity, scope, ct);
+        if (actor is null) return false;
+        if (actor.MustChangePassword) return false;
+        if (actor.IsAdministrator) return true;
+        var programId = await db.Projects.AsNoTracking()
+            .Where(x => x.Id == scope.ProjectId)
+            .Select(x => (Guid?)x.ProgramId)
+            .SingleOrDefaultAsync(ct);
+        if (programId is null) return false;
+        var resolver = new ProjectAuthorityResolver(db);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var role in roles)
+            if (await resolver.IsSatisfiedAsync(actor.Id, programId.Value,
+                    ProjectAuthorityRequirement.LegacyRoleDemand(role), now, ct))
+                return true;
+        return false;
+    }
 }
 
 /// <summary>
@@ -362,6 +413,7 @@ static class ApiMap
         revisionsTakenBack = x.RevisionsTakenBack,
         requirementsRemoved = x.RequirementsRemoved,
         codeRecordsTakenBack = x.CodeRecordsTakenBack,
+        codeEvidenceSetsInvalidated = x.CodeEvidenceSetsInvalidated,
         strandedChangeRequests = x.StrandedChangeRequests.Select(s => new
         {
             s.ChangeRequestId, s.DisplayNumber, state = s.State, s.ReviewWillBeCancelled, s.Requirements,

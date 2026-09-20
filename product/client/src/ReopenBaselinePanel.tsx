@@ -33,6 +33,7 @@ export type ReopenConsequences = {
   strandedChangeRequests: StrandedChangeRequest[];
   disturbedCoverage: DisturbedCoverage[];
   codeRecordsTakenBack: number;
+  codeEvidenceSetsInvalidated?: number;
 };
 
 type Preview = {
@@ -116,7 +117,7 @@ export function ReopenBaselinePanel({
     what.strandedChangeRequests.length === 0 &&
     what.disturbedCoverage.length === 0 &&
     what.requirementsRemoved.length === 0 &&
-    what.codeRecordsTakenBack === 0;
+    what.codeRecordsTakenBack === 0 && (what.codeEvidenceSetsInvalidated ?? 0) === 0;
 
   return (
     <div className="reopenPanel" data-testid="reopen-preview">
@@ -178,6 +179,11 @@ export function ReopenBaselinePanel({
               <p>Recorded against revisions that will not exist, so they cannot survive the reopen.</p>
             </section>
           )}
+
+          {(what.codeEvidenceSetsInvalidated ?? 0) > 0 && <section>
+            <b>{what.codeEvidenceSetsInvalidated} implementation evidence set{what.codeEvidenceSetsInvalidated === 1 ? '' : 's'} invalidated</b>
+            <p>The recorded evidence and its history remain available. They will no longer count as implementation of the revisions being taken back.</p>
+          </section>}
 
           {undisturbed && <p className="reopenQuiet">Nothing else was written against this build.</p>}
 

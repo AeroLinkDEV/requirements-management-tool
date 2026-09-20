@@ -1,6 +1,6 @@
 export type View =
   | "projects" | "projectSetup" | "builds" | "baselineImports" | "personnel" | "approvalConfiguration" | "projectConfiguration" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "createInterfaceChange" | "scr" | "baselines" | "history" | "requirements"
-  | "verification" | "testingCoverage" | "testChangeRequests" | "testChangeRequest" | "createTestChangeRequest" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "teamwork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
+  | "verification" | "testingCoverage" | "testChangeRequests" | "testChangeRequest" | "createTestChangeRequest" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "codeMergeRequests" | "codeExplorer" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "teamwork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 
@@ -239,6 +239,8 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "system-verification") return { ...base, view: "verification", discipline: "systemTest" };
   if (path === "software-verification") return { ...base, view: "verification", discipline: "softwareTest" };
   if (path === "code") return { ...base, view: "code", discipline: "software" };
+  if (path === "code/merge-requests") return { ...base, view: "codeMergeRequests", discipline: "software" };
+  if (path === "code/explorer") return { ...base, view: "codeExplorer", discipline: "software" };
   if (path === "documentation-center") return { ...base, view: "managedDocuments", discipline: "system" };
   if (tail[0] === "documentation-center" && tail[1]) return { ...base, view: "managedDocuments", discipline: "system", artifactId: decoded(tail[1]) };
   if (path === "problem-reports") return { ...base, view: "problemReports", discipline: "system", historicalProblemReportSnapshotId: query.get("snapshotId") || undefined };
@@ -384,6 +386,8 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "problemReports": return `${root}/problem-reports${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
     case "managedDocuments": return `/programs/${context.programId}/projects/${context.projectId}/documentation-center${artifactId ? `/${encodeURIComponent(artifactId)}` : ""}`;
     case "code": return `${root}/code`;
+    case "codeMergeRequests": return `${root}/code/merge-requests`;
+    case "codeExplorer": return `${root}/code/explorer`;
     case "lifecycle": {
       const segment = artifactKind && artifactKind !== "change-request"
         ? THREAD_SEGMENT_FOR_KIND[artifactKind]

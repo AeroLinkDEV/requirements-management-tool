@@ -8,6 +8,8 @@ export const traceProvenanceLabel = (kind: string) => {
   if (kind === 'RequirementRevisionSource') return 'Source of materialized revision'
   if (kind === 'RequirementTrace') return 'Requirement trace'
   if (kind === 'CodeTraceabilityRecord') return 'Code traceability record'
+  if (kind === 'CodeEvidenceDispositionSet') return 'Recorded code evidence decision'
+  if (kind === 'CodeEvidenceCurrentSelector') return 'Current evidence selection'
   if (kind.endsWith('Origin')) return 'From controlled verification origin'
   return stateLabel(kind)
 }
@@ -17,6 +19,7 @@ export const traceKindLabel = (kind: string) => {
   if (kind === 'TestChangeRequest') return 'Test change request'
   if (kind === 'RequirementRevision') return 'Requirement'
   if (kind === 'CodeTraceability') return 'Code traceability'
+  if (kind === 'CodeEvidenceSet') return 'Code evidence'
   return kind.replace(/([a-z])([A-Z])/g, '$1 $2')
 }
 

@@ -18,6 +18,7 @@ import { targetsFor } from "./presentation";
 import { LadderCapability, ladderAllows, ladderHasAny } from "./projectLadder";
 import type { ProjectLadderProjection } from "./projectLadder";
 import { TraceInspector, TraceGroup, TraceRelation } from './TraceInspector';
+import ArtifactCodeRelationships from './ArtifactCodeRelationships';
 import { ArtifactTraceRelations } from './artifactTraceInspector';
 import type { ArtifactThreadNode } from './artifactThreadContract';
 import { parseInspectorThread } from './artifactTraceInspectorModel';
@@ -305,7 +306,7 @@ export default function RequirementsWorkspace({
     [comments, setComments] = useState<Comment[]>([]),
     [deepLinkMissing, setDeepLinkMissing] = useState(false),
     [inspectorTab, setInspectorTab] = useState<
-      "details" | "trace" | "history" | "discussion"
+      "details" | "trace" | "history" | "discussion" | "code"
     >("details"),
     [error, setError] = useState(""),
     [showSave, setShowSave] = useState(false),
@@ -1421,12 +1422,16 @@ export default function RequirementsWorkspace({
             tabs={[
               { id: "details", label: "Overview" },
               { id: "trace", label: <>Trace &amp; impact</> },
+              { id: "code", label: "Code" },
               { id: "history", label: "History" },
               { id: "discussion", label: <>Discussion <span>{comments.length}</span></> },
             ]}
             activeTab={inspectorTab}
             onTab={(tab) => setInspectorTab(tab as typeof inspectorTab)}
           >
+            {inspectorTab === "code" && <div className="inspectorBody">{release ? <ArtifactCodeRelationships
+              {...{ api, projectId }} releaseId={release.id} targetKind="RequirementRevision" targetId={selected.revisionId}
+              readOnly={release.isReleased} /> : <p>Choose a build to inspect code relationships.</p>}</div>}
             {inspectorTab === "details" && (
               <div className="inspectorBody">
                 {release?.isReleased

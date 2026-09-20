@@ -591,7 +591,16 @@ public static class BaselineEndpoints
             var projectId = await db.CandidateBaselines.Where(x => x.Id == id).Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
             if (projectId is null) return Results.NotFound();
             if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
-            try { return Results.Ok(await materializer.MaterializeAsync(id, http.UserAccount().UserName, DateTimeOffset.UtcNow, ct)); }
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
+            try
+            {
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct, ProgramRole.ConfigurationManager))
+                    return Results.Forbid();
+                var result = await materializer.MaterializeAsync(id, freshActor.UserName, DateTimeOffset.UtcNow, ct, writeScope);
+                await writeScope.CommitAsync(ct);
+                return Results.Ok(result);
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
@@ -630,19 +639,26 @@ public static class BaselineEndpoints
             IBaselineRepository repository, IdentityService identity, AeroLinkDbContext db,
             VerificationImpactService verificationImpact, CancellationToken ct) =>
         {
-            var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
-
-            var refusal = await ReopenRefusalAsync(db, baseline, ct);
-            if (refusal is not null) return Results.BadRequest(new { error = refusal.Error, code = refusal.Code });
+            var projectId = await db.CandidateBaselines.AsNoTracking().Where(x => x.Id == id)
+                .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
             try
             {
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct, ProgramRole.ConfigurationManager))
+                    return Results.Forbid();
+                var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
+                var refusal = await ReopenRefusalAsync(db, baseline, ct);
+                if (refusal is not null) return Results.BadRequest(new { error = refusal.Error, code = refusal.Code });
                 // The revisions come back before the record says the build is open, so there is no moment at
                 // which the baseline reads as open while the requirements still read as sealed.
                 var consequences = await new RequirementBaselineDematerializer(db, verificationImpact).DematerializeAsync(
-                    baseline.Id, http.UserAccount().UserName, baseline.DisplayNumber, DateTimeOffset.UtcNow, ct);
-                baseline.Reopen(http.UserAccount().UserName, request.Reason ?? "", DateTimeOffset.UtcNow);
+                    baseline.Id, freshActor.UserName, baseline.DisplayNumber, DateTimeOffset.UtcNow, ct, writeScope);
+                baseline.Reopen(freshActor.UserName, request.Reason ?? "", DateTimeOffset.UtcNow);
                 await repository.SaveAsync(ct);
+                await writeScope.CommitAsync(ct);
                 return Results.Ok(new
                 {
                     baseline = ApiMap.Baseline(baseline),
@@ -659,12 +675,20 @@ public static class BaselineEndpoints
         // verification queue belongs to is release approval, where it appears as a named readiness gate.
         app.MapPost("/api/baselines/{id:guid}/freeze", async (Guid id, EmptyMutationRequest request, HttpContext http, IBaselineRepository repository, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
-            var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
-            if (!await http.HasProjectRoleAsync(db, identity, baseline.ProjectId, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+            var projectId = await db.CandidateBaselines.AsNoTracking().Where(x => x.Id == id)
+                .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(ct);
+            if (projectId is null) return Results.NotFound();
+            if (!await http.HasProjectRoleAsync(db, identity, projectId.Value, ct, ProgramRole.ConfigurationManager)) return Results.Forbid();
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
             try
             {
-                baseline.Freeze(http.UserAccount().UserName, DateTimeOffset.UtcNow);
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct, ProgramRole.ConfigurationManager))
+                    return Results.Forbid();
+                var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
+                baseline.Freeze(freshActor.UserName, DateTimeOffset.UtcNow);
                 await repository.SaveAsync(ct);
+                await writeScope.CommitAsync(ct);
                 return Results.Ok(ApiMap.Baseline(baseline));
             }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -673,7 +697,16 @@ public static class BaselineEndpoints
         app.MapPost("/api/baselines/{id:guid}/materialize-requirements", async (Guid id, EmptyMutationRequest request, HttpContext http, RequirementBaselineMaterializer materializer, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var projectId=await db.CandidateBaselines.Where(x=>x.Id==id).Select(x=>(Guid?)x.ProjectId).SingleOrDefaultAsync(ct); if(projectId is null)return Results.NotFound(); if(!await http.HasProjectRoleAsync(db,identity,projectId.Value,ct,ProgramRole.ConfigurationManager))return Results.Forbid();
-            try { return Results.Ok(await materializer.MaterializeAsync(id, http.UserAccount().UserName, DateTimeOffset.UtcNow, ct)); }
+            await using var writeScope = await ProjectControlledWriteScope.AcquireAsync(db, projectId.Value, ct);
+            try
+            {
+                var freshActor = await http.FreshUserForScopeAsync(identity, writeScope, ct);
+                if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct, ProgramRole.ConfigurationManager))
+                    return Results.Forbid();
+                var result = await materializer.MaterializeAsync(id, freshActor.UserName, DateTimeOffset.UtcNow, ct, writeScope);
+                await writeScope.CommitAsync(ct);
+                return Results.Ok(result);
+            }
             catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
         });
 
@@ -830,6 +863,15 @@ public static class BaselineEndpoints
                 "baseline_released");
         if (baseline.State != CandidateBaselineState.Frozen)
             return new("Only a frozen baseline can be reopened.", "not_frozen");
+
+        var campaignState = await db.ReleaseCampaigns.AsNoTracking()
+            .Where(x => x.ProjectId == baseline.ProjectId && x.ReleaseId == baseline.ReleaseId)
+            .Select(x => (ReleaseCampaignState?)x.State).SingleOrDefaultAsync(ct);
+        if (campaignState == ReleaseCampaignState.InReview)
+            return new("The release package is frozen while approval is in progress; cancel review before reopening its baseline.",
+                "release_package_frozen");
+        if (campaignState == ReleaseCampaignState.Released)
+            return new("A baseline used by a released campaign cannot be reopened.", "release_package_released");
 
         // A build sealed on top of this one derives from what this one contains. Taking these revisions back
         // would leave the successor sealed around requirement revisions that no longer exist, so the refusal

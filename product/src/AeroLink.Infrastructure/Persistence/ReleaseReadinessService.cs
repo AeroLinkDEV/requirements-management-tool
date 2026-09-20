@@ -217,10 +217,10 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
             ? Array.Empty<RequiredCodeTraceabilityRequirement>()
             : await CodeTraceabilityProjection.RequiredAsync(db, campaign.ProjectId, campaign.ReleaseId, baseline.Id, ladderPolicy, ct);
         var requiredCodeRevisionIds = requiredCode.Select(x => x.RevisionId).ToList();
-        var mappedCode = requiredCodeRevisionIds.Count == 0 ? 0 : await db.CodeTraceabilityRecords.AsNoTracking()
-            .Where(x => x.ProjectId == campaign.ProjectId && x.ReleaseId == campaign.ReleaseId
-                && requiredCodeRevisionIds.Contains(x.RequirementRevisionId))
-            .Select(x => x.RequirementRevisionId).Distinct().CountAsync(ct);
+        var requiredCodeIdentities = requiredCode.Select(x => (x.ArtifactId, x.RevisionId)).ToHashSet();
+        var mappedCode = requiredCodeRevisionIds.Count == 0 ? 0
+            : (await CurrentCodeEvidenceProjection.ForReleaseAsync(db, campaign.ProjectId, campaign.ReleaseId, ct))
+                .Count(x => x.CountsAsImplementation && requiredCodeIdentities.Contains((x.RequirementArtifactId, x.RequirementRevisionId)));
 
         var integrated = requests.Count(x => x.State == ChangeRequestState.SelectedForBaseline); var disposed = impacts.Count(x => x.State != ImpactDispositionState.Pending);
         var baselineMaterialized = baseline.RequirementsMaterializedAt is not null;

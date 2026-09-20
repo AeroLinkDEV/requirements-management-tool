@@ -30,14 +30,16 @@ export function ControlledArtifactExplorerHeader({
 export function ControlledArtifactExplorerLayout({
   inspecting,
   resizableKey,
+  className,
   children,
 }: {
   inspecting: boolean
   resizableKey: string
+  className?: string
   children: ReactNode
 }) {
   return <div
-    className={inspecting ? 'reqLayout inspecting' : 'reqLayout'}
+    className={[inspecting ? 'reqLayout inspecting' : 'reqLayout', className].filter(Boolean).join(' ')}
     data-resizable-layout="horizontal"
     data-resizable-key={resizableKey}
   >

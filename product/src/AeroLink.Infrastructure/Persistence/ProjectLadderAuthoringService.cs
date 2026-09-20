@@ -1,6 +1,7 @@
 using AeroLink.Domain.Common;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Verification;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -398,7 +399,15 @@ public sealed class ProjectLadderAuthoringService(
         if (await db.TestProcedures.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct)) return true;
         if (await db.TestChangeReviews.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct)) return true;
         if (await db.RequirementTraces.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct)) return true;
-        return await db.CodeTraceabilityRecords.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct);
+        return await db.CodeTraceabilityRecords.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct)
+            || await db.CodeEvidenceDispositionSets.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct)
+            || await db.CodeEvidenceCurrentSelectors.AsNoTracking().AnyAsync(x => x.ProjectId == projectId, ct)
+            || await db.GitLabMergeRequestRelationships.AsNoTracking().AnyAsync(x => x.ProjectId == projectId
+                && (x.TargetKind == CodeRelationshipTargetKind.RequirementRevision
+                    || x.TargetKind == CodeRelationshipTargetKind.RequirementProposal), ct)
+            || await db.GitLabFileRelationships.AsNoTracking().AnyAsync(x => x.ProjectId == projectId
+                && (x.TargetKind == CodeRelationshipTargetKind.RequirementRevision
+                    || x.TargetKind == CodeRelationshipTargetKind.RequirementProposal), ct);
     }
 
     private LadderConsumerManifestV2 BuildArtifactReadiness(ProjectLadderConfiguration configuration)

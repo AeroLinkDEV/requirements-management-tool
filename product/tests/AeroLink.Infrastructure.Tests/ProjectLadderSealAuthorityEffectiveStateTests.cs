@@ -1,6 +1,8 @@
 using AeroLink.Domain.Common;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Integrations;
+using AeroLink.Domain.Releases;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
@@ -11,6 +13,28 @@ namespace AeroLink.Infrastructure.Tests;
 
 public sealed class ProjectLadderSealAuthorityEffectiveStateTests
 {
+    [Fact]
+    public async Task Code_evidence_decision_cannot_bypass_draft_ladder_first_content_guard()
+    {
+        await using var db = CreateContext();
+        await db.Database.EnsureCreatedAsync();
+        var (project, ladder) = await AddProjectAsync(db, NewProjectLadderFactory.Create);
+        var release = new SoftwareRelease(project.Id, "1.0", false);
+        db.Releases.Add(release);
+        await db.SaveChangesAsync();
+        var set = new CodeEvidenceDispositionSet(project.Id, release.Id, Guid.NewGuid(), Guid.NewGuid(),
+            CodeEvidenceDisposition.NoCodeChangeRequired, "Explicit engineering decision.", null, null, null,
+            "engineer", DateTimeOffset.UtcNow);
+        db.CodeEvidenceDispositionSets.Add(set);
+
+        await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
+
+        db.ChangeTracker.Clear();
+        Assert.False(await db.CodeEvidenceDispositionSets.AnyAsync());
+        Assert.False((await db.ProjectLadderConfigurations.SingleAsync(x => x.Id == ladder.Id)).IsSealed);
+        Assert.False(await db.ProjectLadderConfigurationHistories.AnyAsync(x => x.ConfigurationId == ladder.Id));
+    }
+
     [Fact]
     public async Task First_content_against_a_draft_is_refused_before_history_or_content_is_saved()
     {

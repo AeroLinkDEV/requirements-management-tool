@@ -4,6 +4,7 @@ using System.Text.Json;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Options;
@@ -47,6 +48,50 @@ public sealed class ProjectRepositoryApiTests : IClassFixture<SharedApiHost>
         Assert.Equal("ConfiguredUnverified", repository.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, repository.GetProperty("remoteProjectId").ValueKind);
         Assert.Equal(2, repository.GetProperty("version").GetInt64());
+    }
+
+    [Theory]
+    [InlineData("session")]
+    [InlineData("account")]
+    public async Task Verification_rechecks_fresh_identity_after_the_remote_wait(string revoked)
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var transport = new DelayedGitLab(entered, release);
+        using var factory = new AeroLinkApiFactory();
+        using var configured = factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddSingleton(new GitLabProjectConnectionProbe(new HttpClient(transport),
+                Options.Create(new ProjectGitLabOptions { BaseUrl = "https://gitlab.example", ReadAccessToken = "test-only" })))));
+        var data = await SeedAsync(configured.Services);
+        using var client = configured.CreateClient();
+        await SignIn(client, data.Manager);
+        var initial = await client.PutAsJsonAsync($"/api/projects/{data.Project}/repository", new
+        { expectedVersion = 0, mode = "ConnectNow", provider = "GitLab", endpoint = "https://gitlab.example/group/project" });
+        Assert.True(initial.IsSuccessStatusCode, await initial.Content.ReadAsStringAsync());
+
+        var pending = client.PostAsJsonAsync($"/api/projects/{data.Project}/repository/verify", new { expectedVersion = 1 });
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            using var scope = configured.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var userId = await db.UserAccounts.Where(x => x.UserName == data.Manager).Select(x => x.Id).SingleAsync();
+            if (revoked == "session")
+            {
+                foreach (var session in await db.UserSessions.Where(x => x.UserId == userId).ToListAsync())
+                    session.Revoke(DateTimeOffset.UtcNow);
+            }
+            else
+            {
+                (await db.UserAccounts.SingleAsync(x => x.Id == userId)).Disable(DateTimeOffset.UtcNow);
+            }
+            await db.SaveChangesAsync();
+        }
+        finally { release.TrySetResult(); }
+
+        using var response = await pending;
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.DoesNotContain("observation", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]

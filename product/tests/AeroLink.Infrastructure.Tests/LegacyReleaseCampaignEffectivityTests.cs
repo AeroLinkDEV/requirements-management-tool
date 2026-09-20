@@ -40,11 +40,12 @@ public sealed class LegacyReleaseCampaignEffectivityTests(ShowcaseDatabaseFixtur
             var other = await db.CandidateBaselines.SingleAsync(x => x.ReleaseId == showcase.Summary.ActiveReleaseId);
             db.Entry(campaign).Property(x => x.BaselineId).CurrentValue = other.Id;
         }
+        Guid? otherReleaseId = null;
         if (scenario == "other-release")
         {
             var otherRelease = new SoftwareRelease(baseline.ProjectId, "9.9", true);
             db.Add(otherRelease);
-            db.Entry(campaign).Property(x => x.ReleaseId).CurrentValue = otherRelease.Id;
+            otherReleaseId = otherRelease.Id;
         }
         var selection = await (from member in db.BaselineTestProcedures
             join artifact in db.TestProcedures on member.ProcedureId equals artifact.Id
@@ -59,6 +60,12 @@ public sealed class LegacyReleaseCampaignEffectivityTests(ShowcaseDatabaseFixtur
             .Select(x => x.RequirementRevisionId).FirstAsync();
         db.Add(new TestRequirementCoverage(later.Id, requirementId));
         await db.SaveChangesAsync();
+        // Build the deliberately inconsistent legacy fixture in storage. ReleaseId now participates in
+        // controlled Code history identity, so EF correctly refuses changing it on a tracked campaign.
+        // This fixture has no Code review identity; production workflows never reassign campaign identity.
+        if (otherReleaseId is { } mismatchedReleaseId)
+            await db.ReleaseCampaigns.Where(x => x.Id == campaign.Id)
+                .ExecuteUpdateAsync(update => update.SetProperty(x => x.ReleaseId, mismatchedReleaseId));
         db.ChangeTracker.Clear();
 
         var result = Assert.IsType<TestProcedureEffectivityResult>(

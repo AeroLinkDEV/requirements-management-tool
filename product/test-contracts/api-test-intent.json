@@ -1,15 +1,15 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 938,
-    "cases": 1057,
-    "classes": 149,
-    "hostedTests": 890,
-    "hostedCases": 987,
+    "tests": 975,
+    "cases": 1107,
+    "classes": 154,
+    "hostedTests": 926,
+    "hostedCases": 1036,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
-    "unknownHostTests": 14,
-    "unknownHostCases": 22,
+    "unknownHostTests": 15,
+    "unknownHostCases": 23,
     "hostedCandidateTests": 18,
     "hostedCandidateCases": 18,
     "unknownCandidateTests": 8,
@@ -21,26 +21,26 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 579,
-      "cases": 653,
+      "tests": 603,
+      "cases": 686,
       "unknownCases": 0,
-      "classes": 116
+      "classes": 121
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 178,
-      "cases": 192,
+      "tests": 183,
+      "cases": 197,
       "unknownCases": 0,
-      "classes": 63
+      "classes": 66
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 105,
-      "cases": 114,
+      "tests": 109,
+      "cases": 122,
       "unknownCases": 0,
-      "classes": 63
+      "classes": 64
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -61,10 +61,10 @@
     "startup-config": {
       "label": "Startup, hosting and configuration",
       "level": "API (must stay hosted)",
-      "tests": 9,
-      "cases": 9,
+      "tests": 13,
+      "cases": 13,
       "unknownCases": 0,
-      "classes": 7
+      "classes": 8
     },
     "rule-matrix": {
       "label": "Business-rule matrix over data variations",
@@ -3773,6 +3773,452 @@
       }
     },
     {
+      "cls": "CodeEvidenceAcceptanceRaceTests",
+      "test": "Deferred_provider_preflight_rechecks_source_review_and_authority",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 5,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 94,
+        "end": 127
+      }
+    },
+    {
+      "cls": "CodeEvidenceAcceptanceRaceTests",
+      "test": "Missing_or_non_blob_file_provider_result_rolls_back_without_evidence",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 2,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 189,
+        "end": 208
+      }
+    },
+    {
+      "cls": "CodeEvidenceAcceptanceRaceTests",
+      "test": "Mixed_merge_and_file_acceptance_commits_atomically_and_replaces_only_with_fresh_selector_version",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 129,
+        "end": 163
+      }
+    },
+    {
+      "cls": "CodeEvidenceAcceptanceRaceTests",
+      "test": "Mixed_preflight_file_failure_preserves_prior_evidence_after_successful_merge_observation",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 2,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 54,
+        "end": 92
+      }
+    },
+    {
+      "cls": "CodeEvidenceAcceptanceRaceTests",
+      "test": "Non_implements_merge_context_rolls_back_after_successful_provider_preflight",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 165,
+        "end": 187
+      }
+    },
+    {
+      "cls": "CodeEvidenceAcceptanceRaceTests",
+      "test": "Relationship_withdrawal_during_remote_observation_commits_and_refuses_pending_acceptance",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 23,
+        "end": 52
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "A_released_release_rejects_relationship_withdrawal",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 197,
+        "end": 222
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Evidence_endpoint_accepts_no_code_without_gitlab_after_exact_baseline_materialization",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 393,
+        "end": 455
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Evidence_endpoint_accepts_source_less_merge_and_prior_event_file_after_fresh_provider_checks",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 457,
+        "end": 475
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Evidence_no_code_validation_rejects_mixed_contributions_without_gitlab",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 374,
+        "end": 391
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "File_relationship_requires_the_exact_blob_page_and_duplicate_retry_is_idempotent",
+      "kind": "Fact",
+      "intent": "startup-config",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 224,
+        "end": 262
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Legacy_gitlab_post_is_refused_before_remote_or_legacy_record_write",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 353,
+        "end": 372
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Merge_request_command_requires_exact_typed_target",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 23,
+        "end": 37
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Readd_refuses_a_withdrawn_relationship_when_its_exact_target_is_unavailable",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 164,
+        "end": 195
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Register_does_not_apply_current_metadata_to_a_colliding_recorded_identity",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 70,
+        "end": 117
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Register_keeps_recorded_identity_when_remote_metadata_is_unavailable",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 39,
+        "end": 68
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Relationship_command_refuses_a_target_from_another_project",
+      "kind": "Fact",
+      "intent": "startup-config",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 645,
+        "end": 669
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Relationship_file_filters_bind_snapshot_and_use_exact_ordinal_path_before_paging",
+      "kind": "Fact",
+      "intent": "startup-config",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 294,
+        "end": 351
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Relationship_pages_use_one_global_recorded_at_order",
+      "kind": "Fact",
+      "intent": "startup-config",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 264,
+        "end": 292
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Relationship_read_hides_mutation_capabilities_for_a_released_build",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 620,
+        "end": 643
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Relationship_read_hides_mutation_capabilities_from_a_view_only_role",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 595,
+        "end": 618
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Withdraw_and_readd_use_expected_versions_and_append_transition_events",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 119,
+        "end": 162
+      }
+    },
+    {
+      "cls": "CodeReviewLifecycleApiTests",
+      "test": "Reopened_and_rematerialized_baseline_preserves_signed_v1_history_and_reviews_new_source_as_v2",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 20,
+        "end": 119
+      }
+    },
+    {
+      "cls": "CodeTargetApiTests",
+      "test": "Paged_targets_preserve_exact_project_owned_identity",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 4,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 14,
+        "end": 53
+      }
+    },
+    {
+      "cls": "CodeTargetApiTests",
+      "test": "Target_discovery_rejects_foreign_context_and_unbounded_filters",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 55,
+        "end": 71
+      }
+    },
+    {
       "cls": "CodeTraceabilityApiTests",
       "test": "Code_gate_is_build_scoped_and_accepts_a_justified_no_code_decision_for_active_work",
       "kind": "Fact",
@@ -3786,8 +4232,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 15,
-        "end": 92
+        "start": 65,
+        "end": 142
       }
     },
     {
@@ -3804,8 +4250,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 132,
-        "end": 170
+        "start": 216,
+        "end": 254
       }
     },
     {
@@ -3821,8 +4267,44 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 115,
-        "end": 130
+        "start": 199,
+        "end": 214
+      }
+    },
+    {
+      "cls": "CodeTraceabilityApiTests",
+      "test": "No_code_capture_is_refused_while_the_release_package_is_in_review",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 144,
+        "end": 176
+      }
+    },
+    {
+      "cls": "CodeTraceabilityApiTests",
+      "test": "Overview_preserves_new_evidence_identity_and_does_not_fall_back_after_invalidation",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "showcase-factory",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 16,
+        "end": 63
       }
     },
     {
@@ -5016,8 +5498,26 @@
         "host-customization"
       ],
       "sourceLines": {
-        "start": 38,
-        "end": 91
+        "start": 113,
+        "end": 169
+      }
+    },
+    {
+      "cls": "GitLabMetadataApiTests",
+      "test": "Cached_display_preserves_observation_time_and_still_requires_current_membership",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 16,
+        "end": 45
       }
     },
     {
@@ -5034,8 +5534,8 @@
         "host-customization"
       ],
       "sourceLines": {
-        "start": 145,
-        "end": 161
+        "start": 223,
+        "end": 239
       }
     },
     {
@@ -5052,8 +5552,26 @@
         "host-customization"
       ],
       "sourceLines": {
-        "start": 93,
-        "end": 143
+        "start": 171,
+        "end": 221
+      }
+    },
+    {
+      "cls": "GitLabMetadataApiTests",
+      "test": "Source_bound_tree_refuses_repository_drift_even_when_commit_is_shared",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 47,
+        "end": 89
       }
     },
     {
@@ -5070,8 +5588,94 @@
         "host-customization"
       ],
       "sourceLines": {
-        "start": 16,
-        "end": 36
+        "start": 91,
+        "end": 111
+      }
+    },
+    {
+      "cls": "GitLabSourceApiTests",
+      "test": "Authority_changes_during_remote_wait_prevent_source_persistence",
+      "kind": "Theory",
+      "intent": "auth-policy",
+      "cases": 4,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 79,
+        "end": 115
+      }
+    },
+    {
+      "cls": "GitLabSourceApiTests",
+      "test": "Exact_preview_confirmation_is_persisted_and_stale_confirmation_cannot_overwrite_it",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 19,
+        "end": 45
+      }
+    },
+    {
+      "cls": "GitLabSourceApiTests",
+      "test": "Linked_files_are_grouped_before_paging_and_scoped_to_exact_snapshot",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 117,
+        "end": 158
+      }
+    },
+    {
+      "cls": "GitLabSourceApiTests",
+      "test": "Project_access_is_required_before_observation_or_reading_a_source_selection",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 47,
+        "end": 61
+      }
+    },
+    {
+      "cls": "GitLabSourceApiTests",
+      "test": "Source_read_does_not_advertise_selection_to_a_view_only_member",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 63,
+        "end": 77
       }
     },
     {
@@ -10283,8 +10887,8 @@
         "host-customization"
       ],
       "sourceLines": {
-        "start": 18,
-        "end": 50
+        "start": 19,
+        "end": 51
       }
     },
     {
@@ -10299,8 +10903,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 52,
-        "end": 76
+        "start": 97,
+        "end": 121
       }
     },
     {
@@ -10315,8 +10919,26 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 78,
-        "end": 93
+        "start": 123,
+        "end": 138
+      }
+    },
+    {
+      "cls": "ProjectRepositoryApiTests",
+      "test": "Verification_rechecks_fresh_identity_after_the_remote_wait",
+      "kind": "Theory",
+      "intent": "auth-policy",
+      "cases": 2,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "host-customization"
+      ],
+      "sourceLines": {
+        "start": 53,
+        "end": 95
       }
     },
     {
@@ -11103,8 +11725,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 28,
-        "end": 102
+        "start": 122,
+        "end": 196
       }
     },
     {
@@ -11120,8 +11742,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 104,
-        "end": 131
+        "start": 198,
+        "end": 225
+      }
+    },
+    {
+      "cls": "ReleaseCampaignExactIntentApiTests",
+      "test": "Baseline_reopen_is_blocked_by_review_and_by_released_history",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 263,
+        "end": 304
       }
     },
     {
@@ -11138,8 +11778,25 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 133,
-        "end": 167
+        "start": 227,
+        "end": 261
+      }
+    },
+    {
+      "cls": "ReleaseCampaignExactIntentApiTests",
+      "test": "Code_review_format_is_frozen_per_cycle_and_rollback_leaves_no_identity",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 29,
+        "end": 120
       }
     },
     {
@@ -11155,8 +11812,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 169,
-        "end": 192
+        "start": 306,
+        "end": 329
       }
     },
     {
@@ -11172,8 +11829,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 221,
-        "end": 261
+        "start": 358,
+        "end": 398
       }
     },
     {
@@ -11189,8 +11846,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 194,
-        "end": 219
+        "start": 331,
+        "end": 356
       }
     },
     {
