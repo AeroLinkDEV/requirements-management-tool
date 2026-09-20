@@ -251,15 +251,17 @@ public sealed class CurrentCodeEvidenceProjectionTests
         Assert.Empty(await f.Db.CodeEvidenceContributions.ToListAsync());
 
         var staleBaseline = command with { ExpectedBaselineId = Guid.NewGuid(), ExpectedSelectorVersion = 1 };
-        await using (var baselineScope = await ProjectControlledWriteScope.AcquireAsync(f.Db, f.Project.Id))
+        await using (var baselineDb = f.NewDb())
+        await using (var baselineScope = await ProjectControlledWriteScope.AcquireAsync(baselineDb, f.Project.Id))
         {
-            await Assert.ThrowsAsync<DomainException>(() => new CodeEvidenceAcceptanceService(f.Db).AcceptAsync(
+            await Assert.ThrowsAsync<DomainException>(() => new CodeEvidenceAcceptanceService(baselineDb).AcceptAsync(
                 baselineScope, staleBaseline, new Dictionary<Guid, CodeEvidenceMergeObservation>(),
                 LegacyLadderPolicy.Instance, "tester", f.Now, default));
         }
-        await using (var staleScope = await ProjectControlledWriteScope.AcquireAsync(f.Db, f.Project.Id))
+        await using (var staleDb = f.NewDb())
+        await using (var staleScope = await ProjectControlledWriteScope.AcquireAsync(staleDb, f.Project.Id))
         {
-            await Assert.ThrowsAsync<DomainException>(() => new CodeEvidenceAcceptanceService(f.Db).AcceptAsync(
+            await Assert.ThrowsAsync<DomainException>(() => new CodeEvidenceAcceptanceService(staleDb).AcceptAsync(
                 staleScope, command, new Dictionary<Guid, CodeEvidenceMergeObservation>(),
                 LegacyLadderPolicy.Instance, "tester", f.Now, default));
         }
@@ -268,16 +270,18 @@ public sealed class CurrentCodeEvidenceProjectionTests
             ExpectedSelectorVersion = 1,
             NoCodeChangeRationale = "The same exact baseline decision was explicitly reconfirmed."
         };
-        await using (var replacementScope = await ProjectControlledWriteScope.AcquireAsync(f.Db, f.Project.Id))
+        await using (var replacementDb = f.NewDb())
+        await using (var replacementScope = await ProjectControlledWriteScope.AcquireAsync(replacementDb, f.Project.Id))
         {
-            var replacementResult = await new CodeEvidenceAcceptanceService(f.Db).AcceptAsync(replacementScope,
+            var replacementResult = await new CodeEvidenceAcceptanceService(replacementDb).AcceptAsync(replacementScope,
                 replacement, new Dictionary<Guid, CodeEvidenceMergeObservation>(), LegacyLadderPolicy.Instance,
                 "tester", f.Now, default);
-            await f.Db.SaveChangesAsync();
+            await replacementDb.SaveChangesAsync();
             await replacementScope.CommitAsync();
             Assert.Equal(2, replacementResult.SelectorVersion);
         }
-        Assert.Equal(2, (await f.Db.CodeEvidenceCurrentSelectors.SingleAsync()).Version);
+        await using var verifyDb = f.NewDb();
+        Assert.Equal(2, (await verifyDb.CodeEvidenceCurrentSelectors.SingleAsync()).Version);
     }
 
     [Fact]
@@ -470,6 +474,7 @@ public sealed class CurrentCodeEvidenceProjectionTests
         }
         public GitLabSourceSnapshot Snapshot(char sha) => new(Project.Id, Repository.Id, "https://gitlab.example", 17,
             "group/project", new string(sha, 40), "main", "tester", Now, Repository.Version);
+        public AeroLinkDbContext NewDb() => new(new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options);
         public CodeEvidenceDispositionSet AcceptFile(GitLabSourceSnapshot snapshot, GitLabSourceSelectionEvent selection,
             CodeRelationshipTarget? target = null)
         {
