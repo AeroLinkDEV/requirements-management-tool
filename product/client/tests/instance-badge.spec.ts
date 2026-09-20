@@ -23,8 +23,12 @@ test('HOME currency refreshes passively and loses its current claim when the sta
   unavailable = false
   await page.clock.fastForward(61_000)
   await expect(currency).toContainText('Current main')
-  await expect(currency).toContainText('abc12345')
-  await expect(currency).toContainText(/checked \d+m ago/)
+  // The source SHA and check age moved into the disclosure under the summary (#1048): open it and read
+  // the same facts from their accessible surface instead of the closed chip.
+  await badge.locator('summary').click()
+  const details = badge.getByTestId('instance-details')
+  await expect(details).toContainText('abc12345')
+  await expect(details).toContainText(/checked \d+m ago/)
   const firstReads = reads
   state = 'UpdateAvailable'
   await page.clock.fastForward(61_000)
@@ -72,7 +76,12 @@ test('the badge shows the installation name and keeps the declaration in the too
   const badge = page.getByTestId('instance-badge')
   await expect(badge.getByTestId('instance-label')).toHaveText('HOME')
   await expect(badge.getByTestId('main-currency')).toContainText('Main unverified')
-  await expect(badge).not.toContainText('CANONICAL')
+  // The visible closed summary names the plain installation; the declaration stays in the disclosure.
+  await expect(badge.getByTestId('instance-summary')).not.toContainText('CANONICAL')
+  await badge.locator('summary').click()
+  const details = badge.getByTestId('instance-details')
+  await expect(details).toContainText('HOME CANONICAL (HomeCanonical)')
+  await expect(details).toContainText('aerolink')
   await expect(badge).toHaveAttribute('title', /Instance: HOME CANONICAL \(HomeCanonical\)/)
   await expect(badge).toHaveAttribute('title', /Database: aerolink/)
   await expect(badge).toHaveAttribute('data-classification', 'HomeCanonical')
@@ -93,7 +102,7 @@ test('an undeclared installation keeps its modest label unchanged', async ({ pag
   await login(page, 'admin')
 
   const badge = page.getByTestId('instance-badge')
-  await expect(badge).toHaveText('AEROLINK')
+  await expect(badge.getByTestId('instance-summary')).toHaveText('AEROLINK')
   await expect(badge).toHaveAttribute('data-classification', 'Undeclared')
 })
 
@@ -118,7 +127,34 @@ test('custom declared labels render verbatim under other supported classificatio
     }))
     await page.reload()
     const badge = page.getByTestId('instance-badge')
-    await expect(badge).toHaveText(declared.label)
+    await expect(badge.getByTestId('instance-summary')).toHaveText(declared.label)
     await expect(badge).toHaveAttribute('data-classification', declared.classification)
   }
+})
+
+test.describe('touch access to the installation disclosure', () => {
+  test.use({ hasTouch: true })
+
+  test('the disclosure opens from a touch activation, not only from hover', async ({ page }) => {
+    await page.route('**/health/identity', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        sourceShortSha: 'abc1234',
+        mode: 'HOME-PRODUCTION',
+        instance: { label: 'HOME CANONICAL', classification: 'HomeCanonical', snapshot: null },
+        database: { name: 'aerolink' },
+      }),
+    }))
+    await login(page, 'admin', { openProject: false })
+    const badge = page.getByTestId('instance-badge')
+    await expect(badge).toBeVisible()
+    const summary = badge.getByTestId('instance-summary')
+    const box = await summary.boundingBox()
+    expect(box, 'the summary has a tappable area').not.toBeNull()
+    await expect(badge.getByTestId('instance-details')).toBeHidden()
+    await page.touchscreen.tap(box!.x + box!.width / 2, box!.y + box!.height / 2)
+    await expect(badge.getByTestId('instance-details')).toBeVisible()
+    await expect(badge.getByTestId('instance-details')).toContainText('HOME CANONICAL (HomeCanonical)')
+  })
 })

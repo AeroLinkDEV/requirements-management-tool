@@ -1,0 +1,341 @@
+import { expect, test, type Page } from '@playwright/test'
+import { layoutSettled, login } from './auth'
+
+/**
+ * #1048 / #1054 regression: the shared portal header contains its content, and the setup portal
+ * releases the legacy 960px body floor without leaking into the controlled workspace.
+ *
+ * Assertions are outcome-based: measured rectangles, document containment, and readable controls —
+ * not the implementation's layout mechanism. Screenshots and geometry are captured from the same
+ * asserted, settled state so every pair matches (Checkpoint A refinement 4).
+ */
+
+type IdentityFixture = Record<string, unknown>
+
+const homeIdentity = (overrides: IdentityFixture = {}): IdentityFixture => ({
+  service: 'AeroLink API',
+  sourceSha: 'c2602d9360af27a333d789b379d379d66d08ff42',
+  sourceShortSha: 'c2602d93',
+  sourceIdentity: 'c2602d9360af27a333d789b379d379d66d08ff42',
+  mode: 'HOME-PRODUCTION',
+  mainCurrency: {
+    state: 'Current',
+    checkedAtUtc: new Date(Date.now() - 4 * 60_000).toISOString(),
+    remoteSha: 'c2602d9360af27a333d789b379d379d66d08ff42',
+  },
+  instance: {
+    id: 'home-canonical',
+    label: 'HOME CANONICAL',
+    classification: 'HomeCanonical',
+    snapshot: null,
+  },
+  database: { name: 'aerolink' },
+  schema: { latestAppliedMigration: '20260918120000_ExampleMigration' },
+  startedAtUtc: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+  ...overrides,
+})
+
+const installIdentity = (page: Page, payload: IdentityFixture) =>
+  page.route('**/health/identity', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) }))
+
+type Rect = { x: number; y: number; width: number; height: number; right: number; bottom: number } | null
+
+async function measureGeometry(page: Page) {
+  await page.evaluate(() => document.fonts.ready)
+  await layoutSettled(page)
+  return page.evaluate(() => {
+    const doc = document.documentElement
+    const rectOf = (selector: string): Rect => {
+      const el = document.querySelector(selector)
+      if (!el) return null
+      const r = el.getBoundingClientRect()
+      return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom }
+    }
+    const badge = document.querySelector('[data-testid="instance-badge"]') as HTMLElement | null
+    return {
+      location: window.location.pathname,
+      scroll: { x: window.scrollX, y: window.scrollY },
+      viewport: { width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio },
+      document: {
+        clientWidth: doc.clientWidth,
+        scrollWidth: doc.scrollWidth,
+        bodyMinWidth: getComputedStyle(document.body).minWidth,
+      },
+      rects: {
+        topBar: rectOf('.projectsTopBar'),
+        topBarInner: rectOf('.projectsTopBarInner'),
+        brand: rectOf('.projectsBrand'),
+        badge: rectOf('[data-testid="instance-badge"]'),
+        badgeSummary: rectOf('[data-testid="instance-summary"]'),
+        badgePanel: rectOf('[data-testid="instance-details"]'),
+        account: rectOf('.projectsAccount'),
+        accountText: rectOf('.projectsAccount > div:not(.personAvatar)'),
+        signOut: rectOf('.projectsSignOut'),
+        sidebar: rectOf('.shell aside.appNavigation'),
+      },
+      accountTextVisible: (() => {
+        const el = document.querySelector('.projectsAccount > div:not(.personAvatar)')
+        return el ? getComputedStyle(el).display !== 'none' && el.textContent!.trim().length > 0 : false
+      })(),
+      badgePresent: badge !== null,
+    }
+  })
+}
+
+type Geometry = Awaited<ReturnType<typeof measureGeometry>>
+
+async function record(page: Page, testInfo: { outputPath: (p: string) => string; attach: (name: string, o: { body: string; contentType: string }) => Promise<void> }, name: string, geometry: Geometry) {
+  const path = testInfo.outputPath(`after-${name}.png`)
+  await page.screenshot({ path })
+  const { copyFileSync, mkdirSync, writeFileSync } = await import('node:fs')
+  await testInfo.attach(`geometry-${name}`, { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' })
+  const evidenceRoot = process.env.AEROLINK_E2E_DIAGNOSTIC_DIR
+  if (evidenceRoot) {
+    mkdirSync(evidenceRoot, { recursive: true })
+    writeFileSync(`${evidenceRoot}\\geometry-after-${name}.json`, JSON.stringify(geometry, null, 2))
+    copyFileSync(path, `${evidenceRoot}\\after-${name}.png`)
+  }
+}
+
+/** True only when the two containers genuinely occupy the same pixels; a wrapped layout that stacks
+    them vertically is valid and must pass (Checkpoint A refinement 6). */
+function visuallyCollide(a: Rect, b: Rect): boolean {
+  return a !== null && b !== null && a.x < b.right && b.x < a.right && a.y < b.bottom && b.y < a.bottom
+}
+
+async function settleAt(page: Page, width: number, height: number) {
+  await page.setViewportSize({ width, height })
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await layoutSettled(page)
+}
+
+const assertHeaderContainsBadge = (width: number, g: Geometry) => {
+  const { topBar, topBarInner, badge, badgeSummary, account, accountText, signOut } = g.rects
+  expect(g.badgePresent, `badge renders in the shared header at ${width}px`).toBe(true)
+  expect(topBar && badge, 'header and badge measured').toBeTruthy()
+  expect(badge!.bottom, `#1048 at ${width}px: badge bottom ${badge!.bottom} leaves the header bottom ${topBar!.bottom}`).toBeLessThanOrEqual(topBar!.bottom + 1)
+  expect(badge!.y, `#1048 at ${width}px: badge top leaves the header top ${topBar!.y}`).toBeGreaterThanOrEqual(topBar!.y - 1)
+  expect(badge!.right, `#1048 at ${width}px: badge right leaves the header content`).toBeLessThanOrEqual(topBarInner!.right + 1)
+  expect(signOut!.right, `#1048 at ${width}px: Sign out leaves the header content`).toBeLessThanOrEqual(topBarInner!.right + 1)
+  expect(signOut!.bottom, `#1048 at ${width}px: Sign out leaves the header vertically`).toBeLessThanOrEqual(topBar!.bottom + 1)
+  expect(g.accountTextVisible, `#1048 H04 at ${width}px: account name/role stay visible (no display:none fallback)`).toBe(true)
+  expect(accountText!.width, `#1048 H04 at ${width}px: account text has measured width`).toBeGreaterThan(0)
+  expect(visuallyCollide(badgeSummary ?? badge, account), `#1048 at ${width}px: badge summary collides with the account group`).toBe(false)
+  expect(visuallyCollide(g.rects.brand, account), `#1048 at ${width}px: brand group collides with the account group`).toBe(false)
+}
+
+const assertDocumentContained = (width: number, g: Geometry) => {
+  expect(g.scroll.x, `#1054 at ${width}px: measurements must start at the horizontal scroll origin`).toBe(0)
+  expect(g.document.scrollWidth, `#1054 at ${width}px: document scrollWidth ${g.document.scrollWidth} exceeds the viewport`).toBeLessThanOrEqual(g.document.clientWidth + 1)
+}
+
+test('#1048 after: the HOME badge stays inside the portal header at desktop and narrow widths', async ({ page }, testInfo) => {
+  await installIdentity(page, homeIdentity())
+  await login(page, 'admin', { openProject: false })
+  const badge = page.getByTestId('instance-badge')
+  await expect(badge).toBeVisible()
+  await expect(badge.getByTestId('instance-label')).toHaveText('HOME')
+  await expect(badge.getByTestId('main-currency')).toContainText('Current main')
+
+  for (const [width, height] of [[1440, 900], [900, 800], [561, 700]] as const) {
+    await settleAt(page, width, height)
+    const g = await measureGeometry(page)
+    await record(page, testInfo, `home-portal-${width}`, g)
+    assertHeaderContainsBadge(width, g)
+    assertDocumentContained(width, g)
+  }
+})
+
+test('#1048 H04 after: the installation disclosure opens from the keyboard with the full supplied facts', async ({ page }) => {
+  await installIdentity(page, homeIdentity())
+  await login(page, 'admin', { openProject: false })
+  const badge = page.getByTestId('instance-badge')
+  await expect(badge).toBeVisible()
+  const summary = badge.getByTestId('instance-summary')
+  await summary.focus()
+  await expect(summary).toBeFocused()
+  await page.keyboard.press('Enter')
+  const panel = badge.getByTestId('instance-details')
+  await expect(panel).toBeVisible()
+  await expect(panel).toContainText('HOME CANONICAL (HomeCanonical)')
+  await expect(panel).toContainText('c2602d93')
+  await expect(panel).toContainText(/checked \d+m ago/)
+  await expect(panel).toContainText('aerolink')
+  await page.keyboard.press('Enter')
+  await expect(panel).toBeHidden()
+})
+
+test('#1054 after: project setup releases the body floor and stays contained across intermediate widths', async ({ page }, testInfo) => {
+  await installIdentity(page, homeIdentity())
+  await login(page, 'admin', { openProject: false })
+  // Owned disposable state only: this navigation POSTs /api/project-setups against the run's
+  // throwaway SQLite database (never the persistent installation).
+  await page.goto('/projects/new')
+  await expect(page.getByRole('heading', { name: 'Create New Project' })).toBeVisible()
+
+  for (const [width, height] of [[900, 800], [959, 800], [761, 800], [621, 800], [561, 700]] as const) {
+    await settleAt(page, width, height)
+    const g = await measureGeometry(page)
+    await record(page, testInfo, `setup-${width}`, g)
+    expect(g.document.bodyMinWidth, `#1054 at ${width}px: the body floor must be released on the setup portal route`).toBe('0px')
+    assertDocumentContained(width, g)
+    if (width === 900) {
+      assertHeaderContainsBadge(width, g)
+      const { signOut } = g.rects
+      expect(signOut!.right, `#1054 at 900px: Sign out stays inside the viewport`).toBeLessThanOrEqual(g.document.clientWidth)
+    }
+  }
+})
+
+test('#1054 after: the requirement-ladder step stays contained with controls at the scroll origin', async ({ page }, testInfo) => {
+  await installIdentity(page, homeIdentity())
+  await login(page, 'admin', { openProject: false })
+  await page.goto('/projects/new')
+  await expect(page.getByRole('heading', { name: 'Create New Project' })).toBeVisible()
+  await page.getByRole('button', { name: /Requirement ladder/ }).click()
+  await expect(page.getByRole('button', { name: /Requirement ladder/ })).toHaveClass(/selected/)
+  await settleAt(page, 900, 800)
+  const g = await measureGeometry(page)
+  await record(page, testInfo, 'setup-ladder-900', g)
+  expect(g.document.bodyMinWidth, '#1054: the body floor must stay released on the ladder step').toBe('0px')
+  assertDocumentContained(900, g)
+  await expect(page.getByRole('button', { name: /Requirement ladder/ })).toBeVisible()
+})
+
+test('#1054 after guard: the Projects portal stays contained at the adjacent breakpoint values', async ({ page }, testInfo) => {
+  await installIdentity(page, homeIdentity())
+  await login(page, 'admin', { openProject: false })
+  for (const [width, height] of [[959, 800], [761, 800]] as const) {
+    await settleAt(page, width, height)
+    const g = await measureGeometry(page)
+    await record(page, testInfo, `projects-${width}`, g)
+    expect(g.document.bodyMinWidth, `#1054 at ${width}px: Projects already opts out of the body floor`).toBe('0px')
+    assertDocumentContained(width, g)
+  }
+})
+
+test('#1048 F02 after: a long declared label with snapshot wraps in the narrow portal without currency claims', async ({ page }, testInfo) => {
+  await installIdentity(page, homeIdentity({
+    mode: 'UNKNOWN',
+    mainCurrency: null,
+    instance: {
+      id: 'work-laptop',
+      label: 'FLIGHT TEST LAPTOP LONG INSTALLATION NAME',
+      classification: 'WorkLaptopLocal',
+      snapshot: {
+        sourceLabel: 'HOME CANONICAL',
+        sourceSha: 'd4c3b2a1d4c3b2a1d4c3b2a1d4c3b2a1d4c3b2a1',
+        createdAtUtc: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+        activatedAtUtc: new Date(Date.now() - 4 * 86_400_000).toISOString(),
+      },
+    },
+  }))
+  await login(page, 'admin', { openProject: false })
+  const badge = page.getByTestId('instance-badge')
+  await expect(badge).toBeVisible()
+  await settleAt(page, 561, 700)
+  const g = await measureGeometry(page)
+  await record(page, testInfo, 'long-label-561', g)
+  assertHeaderContainsBadge(561, g)
+  assertDocumentContained(561, g)
+  await expect(badge).not.toContainText('Current main')
+  await expect(badge).not.toContainText('Main unverified')
+  // The snapshot fact is reachable through the disclosure even where the summary suffix hides.
+  await badge.getByTestId('instance-summary').click()
+  const panel = badge.getByTestId('instance-details')
+  await expect(panel).toBeVisible()
+  await expect(panel).toContainText('HOME CANONICAL')
+  const { badge: badgeRect, topBar } = g.rects
+  expect(badgeRect!.height, 'the long label wraps to a taller summary instead of overflowing').toBeGreaterThan(24)
+  expect(badgeRect!.bottom, 'the wrapped badge stays inside the header').toBeLessThanOrEqual(topBar!.bottom + 1)
+})
+
+test('#1048 H06 after: the header stays contained at the layout a 200%-zoomed desktop window computes', async ({ page }, testInfo) => {
+  // Browser page zoom multiplies CSS pixel sizes, so a 1440px window at 200% zoom lays out at 720 CSS px.
+  // This lane proves the wrap/reflow mechanism at that layout width. The visual magnification itself is
+  // not rendered by this tooling lane; the effective-text-size check therefore has this limitation, and
+  // the full browser-zoom presentation remains an operator check.
+  await installIdentity(page, homeIdentity())
+  await login(page, 'admin', { openProject: false })
+  const badge = page.getByTestId('instance-badge')
+  await expect(badge).toBeVisible()
+  await settleAt(page, 720, 450)
+  const g = await measureGeometry(page)
+  await record(page, testInfo, 'zoom-equivalent-720', g)
+  assertHeaderContainsBadge(720, g)
+  assertDocumentContained(720, g)
+})
+
+test('#1054 P05 after: the workspace keeps its floor, the portal releases it, and navigation restores each state', async ({ page }, testInfo) => {
+  test.skip(!process.env.AEROLINK_SHOWCASE_SEED, 'requires the seeded disposable workspace lane')
+  await login(page, 'admin')
+  await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
+
+  await settleAt(page, 900, 800)
+  const workspace = await measureGeometry(page)
+  await record(page, testInfo, 'workspace-900', workspace)
+  expect(workspace.document.bodyMinWidth, '#1054 P05: the controlled workspace keeps its 960px floor').toBe('960px')
+
+  await page.goto('/projects')
+  await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible()
+  await settleAt(page, 900, 800)
+  const portal = await measureGeometry(page)
+  await record(page, testInfo, 'portal-return-900', portal)
+  expect(portal.document.bodyMinWidth, '#1054 P05: returning to the portal releases the floor again').toBe('0px')
+  assertDocumentContained(900, portal)
+
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
+  const restored = await measureGeometry(page)
+  expect(restored.document.bodyMinWidth, '#1054 P05: the workspace floor is active again after returning').toBe('960px')
+})
+
+test('#1048 F02 after: the sidebar badge wraps a long label inside the measured column and opens its disclosure', async ({ page }, testInfo) => {
+  test.skip(!process.env.AEROLINK_SHOWCASE_SEED, 'requires the seeded disposable workspace lane')
+  await installIdentity(page, homeIdentity({
+    mode: 'UNKNOWN',
+    mainCurrency: null,
+    instance: {
+      id: 'work-laptop',
+      label: 'FLIGHT TEST LAPTOP LONG INSTALLATION NAME',
+      classification: 'WorkLaptopLocal',
+      snapshot: {
+        sourceLabel: 'HOME CANONICAL',
+        sourceSha: 'd4c3b2a1d4c3b2a1d4c3b2a1d4c3b2a1d4c3b2a1',
+        createdAtUtc: new Date(Date.now() - 5 * 86_400_000).toISOString(),
+        activatedAtUtc: null,
+      },
+    },
+  }))
+  await login(page, 'admin')
+  const brandBadge = page.locator('.brand').getByTestId('instance-badge')
+  await expect(brandBadge).toBeVisible()
+
+  for (const [width, height] of [[1280, 900], [800, 700]] as const) {
+    await settleAt(page, width, height)
+    const g = await measureGeometry(page)
+    await record(page, testInfo, `sidebar-${width}`, g)
+    const { sidebar, badge } = g.rects
+    expect(sidebar, 'the workspace sidebar is measured from the live cascade').not.toBeNull()
+    expect(badge!.right, `#1048 F02 at ${width}px: the badge leaves the measured ${sidebar!.width}px sidebar column`).toBeLessThanOrEqual(sidebar!.right + 1)
+    expect(badge!.x, `#1048 F02 at ${width}px: the badge starts inside the sidebar`).toBeGreaterThanOrEqual(sidebar!.x - 1)
+    expect(g.scroll.x, `at ${width}px: measurements must start at the horizontal scroll origin`).toBe(0)
+    // Document containment is deliberately NOT asserted here: the controlled workspace keeps its
+    // 960px floor at intermediate widths (asserted in the P05 test), so whole-document containment
+    // is a portal-only expectation. What F02 requires is containment within the sidebar column.
+    await expect(brandBadge).not.toContainText('Current main')
+  }
+
+  // The disclosure must open in the sidebar too, stay inside the column, and carry the snapshot fact.
+  await brandBadge.getByTestId('instance-summary').click()
+  const panel = brandBadge.getByTestId('instance-details')
+  await expect(panel).toBeVisible()
+  await expect(panel).toContainText('FLIGHT TEST LAPTOP LONG INSTALLATION NAME (WorkLaptopLocal)')
+  await expect(panel).toContainText('HOME CANONICAL')
+  const g = await measureGeometry(page)
+  const { sidebar, badgePanel } = g.rects
+  expect(badgePanel, 'the opened panel is measured').not.toBeNull()
+  expect(badgePanel!.right, 'the opened panel stays inside the sidebar column').toBeLessThanOrEqual(sidebar!.right + 1)
+  await record(page, testInfo, 'sidebar-open-1280', g)
+})

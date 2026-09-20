@@ -9,11 +9,12 @@ import "./InstanceBadge.css";
  * 127.0.0.1 at work and assuming it is therefore in the HOME database. Two installations, identical to the
  * pixel, holding different controlled records.
  *
- * So the badge is persistent and quiet. The label is the whole signal at a glance; the source revision,
- * database name and snapshot age live in the tooltip, where an operator can find them when they are looking
- * for them and nobody has to read them the rest of the time. Deployment diagnostics do not belong in a
- * product surface, but "which installation is this" is not a diagnostic — it is the context every record on
- * the screen belongs to.
+ * So the badge is persistent and quiet. The label (and, for HOME production, the truthful currency
+ * word) is the whole signal at a glance; the source revision, database name and snapshot age live in
+ * a native disclosure under the summary, where an operator can reach them with keyboard or touch,
+ * and nobody has to read them the rest of the time. A hover title remains as a convenience but is
+ * never the only access. Deployment diagnostics do not belong in a product surface, but "which
+ * installation is this" is not a diagnostic — it is the context every record on the screen belongs to.
  *
  * Canonical status is never inferred here. The API reports what the installation declared, and an
  * installation that declared nothing gets a modest label rather than a flattering one.
@@ -97,7 +98,7 @@ export default function InstanceBadge() {
   // identifies. That is handled by the single explicit rule below — same declared label, same declared
   // classification, spaced or not — because a general suffix-stripping algorithm guesses at other
   // operators' labels and can erase meaningful distinctions like a Demo declaration. Every label the
-  // rule does not name is shown verbatim, and the tooltip keeps the whole declared label,
+  // rule does not name is shown verbatim, and the disclosure keeps the whole declared label,
   // classification, source, database, mode and snapshot facts, so nothing is reclassified, renamed, or
   // inferred — the badge just stops shouting the operator word.
   const plainLabelRules: ReadonlyArray<{ declaredLabel: string; classification: string; plain: string }> = [
@@ -108,31 +109,39 @@ export default function InstanceBadge() {
     rule.classification === classification.trim() && normalize(rule.declaredLabel) === normalize(label));
   const visibleLabel = matched ? matched.plain : label;
 
-  const detail = [
-    `Instance: ${label} (${classification})`,
-    identity.database?.name ? `Database: ${identity.database.name}` : undefined,
-    identity.sourceShortSha ? `Source: ${identity.sourceShortSha}` : undefined,
-    identity.mode ? `Mode: ${identity.mode}` : undefined,
-    showCurrency ? `${currencyLabel}; ${checkAge}` : undefined,
-    showCurrency && currency?.checkedAtUtc ? `Last check: ${currency.checkedAtUtc}` : undefined,
-    showCurrency && currency?.remoteSha ? `Last observed remote main: ${currency.remoteSha}` : undefined,
-    snapshot ? `Snapshot from ${snapshot.sourceLabel ?? "another installation"}${age ? `, ${age}` : ""}` : undefined,
-  ].filter(Boolean).join("\n");
+  // Supplied facts only. Fields the server does not send (including the loopback redactions in
+  // RuntimeIdentity.cs) stay absent everywhere — never inferred, never fetched from another endpoint.
+  const details: ReadonlyArray<[string, string]> = [
+    ["Instance", `${label} (${classification})`],
+    identity.database?.name ? ["Database", identity.database.name] : null,
+    identity.sourceShortSha ? ["Source", identity.sourceShortSha] : null,
+    identity.mode ? ["Mode", identity.mode] : null,
+    showCurrency ? ["Main currency", `${currencyLabel}; ${checkAge}`] : null,
+    showCurrency && currency?.checkedAtUtc ? ["Last check", currency.checkedAtUtc] : null,
+    showCurrency && currency?.remoteSha ? ["Last observed remote main", currency.remoteSha] : null,
+    snapshot ? ["Snapshot", `from ${snapshot.sourceLabel ?? "another installation"}${age ? `, ${age}` : ""}`] : null,
+  ].filter((row): row is [string, string] => row !== null);
+  const detail = details.map(([key, value]) => `${key}: ${value}`).join("\n");
 
+  // The closed chip is the quiet summary: declared label and, for HOME production, the truthful
+  // currency word. Source, check, declaration and snapshot facts live in the native disclosure so
+  // keyboard and touch reach what a hover tooltip alone used to carry (#1048 H04). Opening it grows
+  // the header or sidebar in flow; it never issues a request beyond the passive identity read above.
   return (
-    <span
-      className={`instanceBadge instanceBadge--${classification.toLowerCase()}${showCurrency ? " instanceBadge--currency" : ""}`}
+    <details
+      className={`instanceBadge instanceBadge--${classification.toLowerCase()}`}
       title={detail}
       data-testid="instance-badge"
       data-classification={classification}
     >
-      <span data-testid="instance-label">{visibleLabel}</span>
-      {showCurrency ? <span className="instanceBadgeCurrency" data-testid="main-currency">
-        <span>{currencyLabel}</span>
-        {identity.sourceShortSha ? <span>{identity.sourceShortSha}</span> : null}
-        <span className="instanceBadgeCheckAge">{checkAge}</span>
-      </span> : null}
-      {snapshot ? <em className="instanceBadgeSnapshot">snapshot{age ? ` ${age}` : ""}</em> : null}
-    </span>
+      <summary data-testid="instance-summary">
+        <span data-testid="instance-label">{visibleLabel}</span>
+        {showCurrency ? <span className="instanceBadgeCurrency" data-testid="main-currency">{currencyLabel}</span> : null}
+        {snapshot ? <em className="instanceBadgeSnapshot">snapshot{age ? ` ${age}` : ""}</em> : null}
+      </summary>
+      <div className="instanceBadgePanel" data-testid="instance-details">
+        {details.map(([key, value]) => <div key={key}><b>{key}</b><span>{value}</span></div>)}
+      </div>
+    </details>
   );
 }
