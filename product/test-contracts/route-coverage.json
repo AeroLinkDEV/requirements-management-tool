@@ -2048,6 +2048,7 @@
       "path": "/api/release-campaigns/{id:guid}/approve",
       "file": "ReleaseCampaignEndpoints.cs",
       "coveredBy": [
+        "CodeReviewLifecycleApiTests",
         "ReleaseCampaignExactIntentApiTests"
       ]
     },

@@ -85,8 +85,9 @@ public sealed class CodeEvidenceAcceptanceRaceTests
         using var response = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", MixedPayload(data, replacing ? 1 : 0));
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var mergeIndex = observed.FindIndex(path => path.Contains("/merge_requests/12", StringComparison.Ordinal));
+        var ancestryIndex = observed.FindIndex(path => path.EndsWith("/merge_base", StringComparison.Ordinal));
         var fileIndex = observed.FindIndex(path => path.EndsWith("/repository/tree", StringComparison.Ordinal));
-        Assert.True(mergeIndex >= 0 && fileIndex > mergeIndex);
+        Assert.True(mergeIndex >= 0 && ancestryIndex > mergeIndex && fileIndex > ancestryIndex);
         await AssertEvidenceCountsAsync(factory.Services, data.ProjectId, replacing ? 1 : 0, replacing ? 2 : 0, replacing ? 1 : null);
     }
 
