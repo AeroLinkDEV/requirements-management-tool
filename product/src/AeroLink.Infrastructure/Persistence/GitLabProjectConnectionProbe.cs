@@ -8,6 +8,8 @@ public sealed class ProjectGitLabOptions
 {
     public string BaseUrl { get; set; } = "";
     public string ReadAccessToken { get; set; } = "";
+    public string SyntheticDemoProjectId { get; set; } = "";
+    public string SyntheticDemoRemoteProjectId { get; set; } = "";
 }
 
 public sealed record ProjectRepositoryProbeResult(bool Verified, string Code, string Detail,

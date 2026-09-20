@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 976,
-    "cases": 1111,
+    "tests": 977,
+    "cases": 1112,
     "classes": 154,
-    "hostedTests": 927,
-    "hostedCases": 1040,
+    "hostedTests": 928,
+    "hostedCases": 1041,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 15,
@@ -29,10 +29,10 @@
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 183,
-      "cases": 197,
+      "tests": 184,
+      "cases": 198,
       "unknownCases": 0,
-      "classes": 66
+      "classes": 67
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -5622,8 +5622,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 79,
-        "end": 115
+        "start": 133,
+        "end": 169
       }
     },
     {
@@ -5639,8 +5639,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 19,
-        "end": 45
+        "start": 72,
+        "end": 99
       }
     },
     {
@@ -5657,8 +5657,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 117,
-        "end": 158
+        "start": 171,
+        "end": 212
       }
     },
     {
@@ -5674,8 +5674,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 47,
-        "end": 61
+        "start": 101,
+        "end": 115
       }
     },
     {
@@ -5691,8 +5691,25 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 63,
-        "end": 77
+        "start": 117,
+        "end": 131
+      }
+    },
+    {
+      "cls": "GitLabSourceApiTests",
+      "test": "Synthetic_demo_classification_requires_exact_operator_binding_and_verified_repository",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 20,
+        "end": 70
       }
     },
     {

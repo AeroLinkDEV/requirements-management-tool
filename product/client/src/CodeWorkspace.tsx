@@ -3,6 +3,7 @@ import { ControlledArtifactExplorerHeader, ControlledArtifactExplorerLayout, Con
 import CodeSourcePanel, { type CodeSource } from './CodeSourcePanel'
 import CodeTraceabilityCenter from './CodeTraceabilityCenter'
 import CodeLinkPicker from './CodeLinkPicker'
+import CodeDemonstrationBanner from './CodeDemonstrationBanner'
 import CodeRelationshipList from './CodeRelationshipList'
 import { codeQuery, mergeRequestState, useCodeRead, type CodePage, type CodeRelationship, type InspectedMergeRequest,
   type MergeRequest, type MetadataObservation, type RegisteredMergeRequest, type TreeEntry, type TreePage } from './codeWorkspaceData'
@@ -28,6 +29,9 @@ function ScopedCodeWorkspace({ api, projectId, releaseId, readOnly, page, onBack
       <button aria-current={page === 'explorer' ? 'page' : undefined} onClick={() => onPage('explorer')}>Code Explorer</button>
     </nav>
     <p className="codeBoundary">GitLab owns source and merge review. Recorded relationships provide context; accepted implementation evidence is a separate engineering decision.</p>
+    {currentSource?.demonstration && <CodeDemonstrationBanner
+      key={`${projectId}/${releaseId}/${currentSource.demonstration.configurationId}/${currentSource.demonstration.configurationVersion}`}
+      {...{ api, projectId }} binding={currentSource.demonstration} />}
     <CodeSourcePanel {...{ api, projectId, releaseId, readOnly }} onSource={setSource} />
     {page === 'mergeRequests' ? <MergeRequestRegister {...{ api, projectId, releaseId }} readOnly={readOnly || !currentSource?.capabilities?.canSelect} />
       : <SourceExplorer key={currentSource?.selectionEventId ?? 'unselected'} {...{ api, projectId, releaseId }} readOnly={readOnly || !currentSource?.capabilities?.canSelect} source={currentSource} />}

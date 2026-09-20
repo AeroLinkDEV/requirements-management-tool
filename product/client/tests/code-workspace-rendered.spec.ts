@@ -1,12 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 
 const sha = 'a'.repeat(40)
-async function mockWorkspace(page: Page) {
+const demoBinding = { configurationId: 'configuration-one', configurationVersion: 7, remoteProjectId: 17 }
+async function mockWorkspace(page: Page, demonstration?: typeof demoBinding) {
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url())
     const path = url.pathname
     let body: unknown = {}
-    if (path.endsWith('/code/source')) body = { projectId: 'project-one', releaseId: 'release-one', version: 1,
+    if (path.endsWith('/code/source')) body = { projectId: 'project-one', releaseId: 'release-one', version: 1, demonstration,
       selectionEventId: 'selection-one', capabilities: { canSelect: true, sourceSelectionFrozen: false }, snapshot: {
         id: 'source-one', instanceBaseUrl: 'https://gitlab.example', pathWithNamespace: 'demo/fms', commitSha: sha, friendlyRef: 'main',
       } }
@@ -46,6 +47,7 @@ test('linked register pages recorded identities and keeps unknown approvals expl
   await page.getByRole('button', { name: '!3', exact: true }).click()
   await expect(page.getByText('GitLab approvals unknown')).toBeVisible()
   await expect(page.getByText('LLRCR-00001.00')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Synthetic demonstration' })).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('merge-request-register.png'), fullPage: true })
   await page.getByRole('button', { name: 'Next page', exact: true }).click()
   await expect(page.getByRole('button', { name: '!9', exact: true })).toBeVisible()
@@ -281,4 +283,58 @@ test('Code browsers use the shared resizable frame and stack it at narrow widths
   await page.setViewportSize({ width: 700, height: 900 })
   await expect(layout.getByRole('separator')).toBeHidden()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy()
+})
+
+for (const outcome of ['cached', 'failure', 'configuration changed']) {
+  test(`synthetic banner reports ${outcome} observation truthfully`, async ({ page }, testInfo) => {
+    await mockWorkspace(page, demoBinding)
+    let reads = 0
+    await page.route('**/repository/merge-requests?**', async route => {
+      const url = new URL(route.request().url())
+      expect(url.searchParams.get('pageSize')).toBe('1')
+      reads++
+      await route.fulfill({ json: { ...demoBinding,
+        configurationVersion: outcome === 'configuration changed' ? 8 : 7,
+        checkedAt: '2026-09-20T03:00:00Z', cache: { reused: outcome === 'cached' },
+        observation: { succeeded: outcome !== 'failure' } } })
+    })
+    await page.goto('/tests/fixtures/code-workspace.html')
+    const banner = page.getByRole('region', { name: 'Synthetic demonstration' })
+    await expect(banner).toBeVisible()
+    if (outcome === 'cached') {
+      await expect(banner).toContainText('Synthetic demonstration content · live GitLab metadata')
+      await expect(banner).toContainText('cached observation (up to 15 seconds)')
+      await expect(banner.locator('time')).toHaveAttribute('datetime', '2026-09-20T03:00:00Z')
+      await page.screenshot({ path: testInfo.outputPath('synthetic-live-banner.png'), fullPage: true })
+    } else {
+      await expect(banner).not.toContainText('live GitLab metadata')
+      await expect(banner).toContainText(outcome === 'failure' ? 'GitLab metadata unavailable.' : 'Repository configuration changed;')
+    }
+    expect(reads).toBe(1)
+    await banner.getByRole('button', { name: 'Check GitLab connection' }).click()
+    await expect.poll(() => reads).toBe(2)
+  })
+}
+
+test('a delayed demo connection observation cannot survive page navigation', async ({ page }) => {
+  await mockWorkspace(page, demoBinding)
+  let release: (() => void) | undefined
+  const held = new Promise<void>(resolve => { release = resolve })
+  let started = false
+  await page.route('**/repository/merge-requests?**', async route => {
+    started = true
+    await held
+    await route.fulfill({ json: { ...demoBinding, checkedAt: '2026-09-20T03:00:00Z', cache: { reused: false },
+      observation: { succeeded: true } } }).catch(() => {})
+  })
+  await page.goto('/tests/fixtures/code-workspace.html')
+  await expect.poll(() => started).toBeTruthy()
+  await expect(page.getByText('GitLab metadata not yet checked.')).toBeVisible()
+  await page.route('**/code/source?**', route => route.fulfill({ json: { projectId: 'project-one', releaseId: 'release-one',
+    version: 0, capabilities: { canSelect: true, sourceSelectionFrozen: false } } }))
+  await page.getByRole('button', { name: 'Code Explorer', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Choose a build source to browse files' })).toBeVisible()
+  release!()
+  await expect(page.getByRole('region', { name: 'Synthetic demonstration' })).toHaveCount(0)
+  await expect(page.getByText('Synthetic demonstration content · live GitLab metadata')).toHaveCount(0)
 })
