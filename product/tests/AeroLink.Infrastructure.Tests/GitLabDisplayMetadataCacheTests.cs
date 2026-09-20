@@ -8,29 +8,32 @@ public sealed class GitLabDisplayMetadataCacheTests
     [Fact]
     public async Task Coalescing_preserves_observation_time_and_isolates_caller_cancellation()
     {
-        var clock = new Clock();
-        var cache = new GitLabDisplayMetadataCache(clock);
-        var ready = new TaskCompletionSource<GitLabMetadataResult<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var calls = 0;
-        Task<GitLabMetadataResult<string>> Read(CancellationToken ct) { Interlocked.Increment(ref calls); return ready.Task; }
-        using var cancellation = new CancellationTokenSource();
-        var abandoned = cache.ReadAsync("same", Read, cancellation.Token);
-        var waiting = cache.ReadAsync("same", Read, default);
-        cancellation.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => abandoned);
-        ready.SetResult(Success("metadata"));
-        var observed = await waiting;
-        clock.Advance(5);
-        var cached = await cache.ReadAsync("same", Read, default);
-        Assert.Equal(1, calls);
-        Assert.True(cached.Reused);
-        Assert.Equal(observed.ObservedAt, cached.ObservedAt);
-        Assert.Equal(observed.ExpiresAt, cached.ExpiresAt);
-        clock.Advance(11);
-        var fresh = await cache.ReadAsync("same", Read, default);
-        Assert.Equal(2, calls);
-        Assert.False(fresh.Reused);
-        Assert.True(fresh.ObservedAt > observed.ObservedAt);
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            var clock = new Clock();
+            var cache = new GitLabDisplayMetadataCache(clock);
+            var ready = new TaskCompletionSource<GitLabMetadataResult<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var calls = 0;
+            Task<GitLabMetadataResult<string>> Read(CancellationToken ct) { Interlocked.Increment(ref calls); return ready.Task; }
+            using var cancellation = new CancellationTokenSource();
+            var abandoned = cache.ReadAsync("same", Read, cancellation.Token);
+            var waiting = cache.ReadAsync("same", Read, default);
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => abandoned);
+            ready.SetResult(Success("metadata"));
+            var observed = await waiting;
+            clock.Advance(5);
+            var cached = await cache.ReadAsync("same", Read, default);
+            Assert.Equal(1, calls);
+            Assert.True(cached.Reused);
+            Assert.Equal(observed.ObservedAt, cached.ObservedAt);
+            Assert.Equal(observed.ExpiresAt, cached.ExpiresAt);
+            clock.Advance(11);
+            var fresh = await cache.ReadAsync("same", Read, default);
+            Assert.Equal(2, calls);
+            Assert.False(fresh.Reused);
+            Assert.True(fresh.ObservedAt > observed.ObservedAt);
+        }
     }
 
     [Fact]
