@@ -20,6 +20,76 @@ namespace AeroLink.Api.Tests;
 
 public sealed class CodeEvidenceAcceptanceRaceTests
 {
+    [Fact]
+    public async Task Relationship_withdrawal_during_remote_observation_commits_and_refuses_pending_acceptance()
+    {
+        const string sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        using var transport = new DeferredRemote(_ => TreeResponse(sha, "src/demo.c", "blob", "100644"));
+        using var factory = Configure(new AeroLinkApiFactory(), transport);
+        var data = await SeedAsync(factory.Services);
+        using var client = factory.CreateClient();
+        await SignInAsync(client, data.UserName);
+        var pending = client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", FilePayload(data, 0));
+        await transport.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            using var withdrawn = await client.PostAsJsonAsync(
+                $"/api/projects/{data.ProjectId}/code/relationships/file/{data.FileId}/withdraw",
+                new { expectedVersion = 1, rationale = "Withdraw while provider observation is pending." })
+                .WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(HttpStatusCode.OK, withdrawn.StatusCode);
+        }
+        finally { transport.Release(); }
+        using var response = await pending;
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        await AssertEvidenceCountsAsync(factory.Services, data.ProjectId, 0, 0, null);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        var edge = await db.GitLabFileRelationships.SingleAsync(x => x.Id == data.FileId);
+        Assert.False(edge.IsActive);
+        Assert.Equal(2, edge.Version);
+        Assert.Equal("Withdraw while provider observation is pending.", edge.WithdrawalRationale);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Mixed_preflight_file_failure_preserves_prior_evidence_after_successful_merge_observation(bool replacing)
+    {
+        const string sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var failFile = false;
+        var observed = new List<string>();
+        using var transport = new Remote(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            observed.Add(path);
+            if (path.EndsWith("/merge_base", StringComparison.Ordinal))
+                return JsonResponse($"{{\"id\":\"{sha}\"}}");
+            if (path.EndsWith("/repository/tree", StringComparison.Ordinal))
+                return failFile ? JsonResponse("[]") : TreeResponse(sha, "src/demo.c", "blob", "100644");
+            if (path.Contains("/merge_requests/12", StringComparison.Ordinal))
+                return JsonResponse($"{{\"id\":1200,\"project_id\":17,\"iid\":12,\"title\":\"Merged change\",\"state\":\"merged\",\"draft\":false,\"web_url\":\"https://gitlab.example/group/project/-/merge_requests/12\",\"sha\":\"{sha}\",\"merge_commit_sha\":\"{sha}\",\"squash_merge_commit_sha\":null,\"merged_at\":\"2026-09-19T12:00:00Z\"}}");
+            return new(HttpStatusCode.ServiceUnavailable);
+        });
+        using var factory = Configure(new AeroLinkApiFactory(), transport);
+        var data = await SeedAsync(factory.Services);
+        using var client = factory.CreateClient();
+        await SignInAsync(client, data.UserName);
+        if (replacing)
+        {
+            using var accepted = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", MixedPayload(data, 0));
+            Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
+        }
+        observed.Clear();
+        failFile = true;
+        using var response = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", MixedPayload(data, replacing ? 1 : 0));
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var mergeIndex = observed.FindIndex(path => path.Contains("/merge_requests/12", StringComparison.Ordinal));
+        var fileIndex = observed.FindIndex(path => path.EndsWith("/repository/tree", StringComparison.Ordinal));
+        Assert.True(mergeIndex >= 0 && fileIndex > mergeIndex);
+        await AssertEvidenceCountsAsync(factory.Services, data.ProjectId, replacing ? 1 : 0, replacing ? 2 : 0, replacing ? 1 : null);
+    }
+
     [Theory]
     [InlineData("source", HttpStatusCode.Conflict)]
     [InlineData("configuration", HttpStatusCode.Conflict)]

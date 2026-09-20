@@ -262,6 +262,7 @@ public static class ReleaseCampaignEndpoints
                 var prepared = await execution.PrepareCodeReviewManifestAsync(campaign, writeScope, ct);
                 var manifestHash = prepared.Hash;
                 var now = DateTimeOffset.UtcNow;
+                var existingApprovalIds = campaign.Approvals.Select(x => x.Id).ToHashSet();
                 campaign.BeginReleaseReview(freshActor.UserName, requested.Select(userName=>{var person=known.Single(x=>x.UserName==userName);return(person.UserName,person.DisplayName);}).ToList(),manifestHash,now);
                 execution.RecordCodeReviewManifest(campaign, prepared, writeScope, freshActor.UserName, now);
                 // Existing approvals belong to the cancelled cycle and must stay Unchanged. The fresh rows
@@ -270,7 +271,6 @@ public static class ReleaseCampaignEndpoints
                 // rows that do not exist. Capture the persisted approval ids before review starts and
                 // explicitly Add every newly created approval (Add also corrects a premature Modified
                 // attachment back to Added).
-                var existingApprovalIds = db.ChangeTracker.Entries<ReleaseApproval>().Select(e => e.Entity.Id).ToHashSet();
                 foreach (var approval in campaign.Approvals.Where(x => !existingApprovalIds.Contains(x.Id)))
                     db.ReleaseApprovals.Add(approval);
                 await db.SaveChangesAsync(ct); await writeScope.CommitAsync(ct); return Results.Ok(new{manifestHash});

@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 972,
-    "cases": 1103,
-    "classes": 153,
-    "hostedTests": 923,
-    "hostedCases": 1032,
+    "tests": 975,
+    "cases": 1107,
+    "classes": 154,
+    "hostedTests": 926,
+    "hostedCases": 1036,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 15,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 600,
-      "cases": 682,
+      "tests": 603,
+      "cases": 686,
       "unknownCases": 0,
-      "classes": 120
+      "classes": 121
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -3786,8 +3786,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 23,
-        "end": 56
+        "start": 93,
+        "end": 126
       }
     },
     {
@@ -3804,8 +3804,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 118,
-        "end": 137
+        "start": 188,
+        "end": 207
       }
     },
     {
@@ -3822,8 +3822,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 58,
-        "end": 92
+        "start": 128,
+        "end": 162
+      }
+    },
+    {
+      "cls": "CodeEvidenceAcceptanceRaceTests",
+      "test": "Mixed_preflight_file_failure_preserves_prior_evidence_after_successful_merge_observation",
+      "kind": "Theory",
+      "intent": "http-boundary",
+      "cases": 2,
+      "caseEvidence": "InlineData",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 54,
+        "end": 91
       }
     },
     {
@@ -3840,8 +3858,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 94,
-        "end": 116
+        "start": 164,
+        "end": 186
+      }
+    },
+    {
+      "cls": "CodeEvidenceAcceptanceRaceTests",
+      "test": "Relationship_withdrawal_during_remote_observation_commits_and_refuses_pending_acceptance",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 23,
+        "end": 52
       }
     },
     {
@@ -4126,6 +4162,24 @@
       "sourceLines": {
         "start": 119,
         "end": 162
+      }
+    },
+    {
+      "cls": "CodeReviewLifecycleApiTests",
+      "test": "Reopened_and_rematerialized_baseline_preserves_signed_v1_history_and_reviews_new_source_as_v2",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 20,
+        "end": 119
       }
     },
     {

@@ -45,49 +45,53 @@ public sealed class CodeEvidenceAcceptancePostgresTests
             }
 
             var seed = await SeedAsync(options);
-            var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var readyCount = 0;
-
-            async Task<bool> AttemptAsync()
+            for (var expectedVersion = 0L; expectedVersion <= 1; expectedVersion++)
             {
-                await using var db = new AeroLinkDbContext(options);
-                if (Interlocked.Increment(ref readyCount) == 2)
-                    ready.TrySetResult(true);
-                await gate.Task;
-                try
+                var command = seed.Command with { ExpectedSelectorVersion = expectedVersion };
+                var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var ready = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var readyCount = 0;
+
+                async Task<bool> AttemptAsync()
                 {
-                    await using var scope = await ProjectControlledWriteScope.AcquireAsync(db, seed.ProjectId);
-                    var result = await new CodeEvidenceAcceptanceService(db).AcceptAsync(scope,
-                        seed.Command, new Dictionary<Guid, CodeEvidenceMergeObservation>(),
-                        LegacyLadderPolicy.Instance, "race-winner", DateTimeOffset.UtcNow, default);
-                    await db.SaveChangesAsync();
-                    await scope.CommitAsync();
-                    Assert.Equal(CodeEvidenceDisposition.NoCodeChangeRequired, result.Disposition);
-                    return true;
+                    await using var db = new AeroLinkDbContext(options);
+                    if (Interlocked.Increment(ref readyCount) == 2)
+                        ready.TrySetResult(true);
+                    await gate.Task;
+                    try
+                    {
+                        await using var scope = await ProjectControlledWriteScope.AcquireAsync(db, seed.ProjectId);
+                        var result = await new CodeEvidenceAcceptanceService(db).AcceptAsync(scope,
+                            command, new Dictionary<Guid, CodeEvidenceMergeObservation>(),
+                            LegacyLadderPolicy.Instance, "race-winner", DateTimeOffset.UtcNow, default);
+                        await db.SaveChangesAsync();
+                        await scope.CommitAsync();
+                        Assert.Equal(CodeEvidenceDisposition.NoCodeChangeRequired, result.Disposition);
+                        return true;
+                    }
+                    catch (DomainException)
+                    {
+                        return false;
+                    }
                 }
-                catch (DomainException)
-                {
-                    return false;
-                }
+
+                var first = AttemptAsync();
+                var second = AttemptAsync();
+                await ready.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                gate.TrySetResult(true);
+                var results = await Task.WhenAll(first, second);
+                Assert.Equal(1, results.Count(x => x));
+                Assert.Equal(1, results.Count(x => !x));
+
+                await using var verify = new AeroLinkDbContext(options);
+                Assert.Equal(expectedVersion + 1, await verify.CodeEvidenceDispositionSets.CountAsync(x => x.ProjectId == seed.ProjectId));
+                Assert.Empty(await verify.CodeEvidenceContributions.Where(x => x.ProjectId == seed.ProjectId).ToListAsync());
+                var selector = await verify.CodeEvidenceCurrentSelectors.SingleAsync(x => x.ProjectId == seed.ProjectId);
+                Assert.Equal(seed.ArtifactId, selector.RequirementArtifactId);
+                Assert.Equal(seed.RevisionId, selector.RequirementRevisionId);
+                Assert.Equal(expectedVersion + 1, selector.Version);
+                Assert.Empty(await verify.CodeEvidenceInvalidations.Where(x => x.ProjectId == seed.ProjectId).ToListAsync());
             }
-
-            var first = AttemptAsync();
-            var second = AttemptAsync();
-            await ready.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            gate.TrySetResult(true);
-            var results = await Task.WhenAll(first, second);
-            Assert.Equal(1, results.Count(x => x));
-            Assert.Equal(1, results.Count(x => !x));
-
-            await using var verify = new AeroLinkDbContext(options);
-            Assert.Equal(1, await verify.CodeEvidenceDispositionSets.CountAsync(x => x.ProjectId == seed.ProjectId));
-            Assert.Empty(await verify.CodeEvidenceContributions.Where(x => x.ProjectId == seed.ProjectId).ToListAsync());
-            var selector = await verify.CodeEvidenceCurrentSelectors.SingleAsync(x => x.ProjectId == seed.ProjectId);
-            Assert.Equal(seed.ArtifactId, selector.RequirementArtifactId);
-            Assert.Equal(seed.RevisionId, selector.RequirementRevisionId);
-            Assert.Equal(1, selector.Version);
-            Assert.Empty(await verify.CodeEvidenceInvalidations.Where(x => x.ProjectId == seed.ProjectId).ToListAsync());
         }
         finally
         {
