@@ -1558,4 +1558,3 @@ function Invoke-AeroLinkResumableDemo {
 
 }
 Export-ModuleMember -Function New-AeroLinkResumableClient,Close-AeroLinkResumableClient,Invoke-AeroLinkResumableRequest,Invoke-AeroLinkResumableDemo,Convert-ManifestToPlan,Get-ManifestDigest
-
