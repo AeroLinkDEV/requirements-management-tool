@@ -48,16 +48,26 @@ internal sealed class SaveBoundaryIntegrityValidator(AeroLinkDbContext db)
             throw new DomainException(
                 "A released synthetic source supplement is immutable historical provenance; it cannot be modified or deleted.");
 
+        var changedSnapshots = _db.ChangeTracker.Entries<GitLabSourceSnapshot>()
+            .Where(x => x.State is EntityState.Modified or EntityState.Deleted)
+            .ToList();
+        if (changedSnapshots.Count == 0)
+            return;
+
+        var changedSnapshotIds = changedSnapshots
+            .Select(x => x.Entity.Id)
+            .Distinct()
+            .ToArray();
         var protectedSnapshotIds = (await _db.ReleasedSyntheticSourceSupplements.AsNoTracking()
-                .Select(x => x.SourceSnapshotId).ToListAsync(ct))
+                .Where(x => changedSnapshotIds.Contains(x.SourceSnapshotId))
+                .Select(x => x.SourceSnapshotId)
+                .ToListAsync(ct))
             .ToHashSet();
         protectedSnapshotIds.UnionWith(supplements
             .Where(x => x.State is EntityState.Added or EntityState.Unchanged)
             .Select(x => x.Entity.SourceSnapshotId));
 
-        if (_db.ChangeTracker.Entries<GitLabSourceSnapshot>()
-                .Any(x => (x.State is EntityState.Modified or EntityState.Deleted)
-                    && protectedSnapshotIds.Contains(x.Entity.Id)))
+        if (changedSnapshots.Any(x => protectedSnapshotIds.Contains(x.Entity.Id)))
             throw new DomainException(
                 "A source snapshot owned by a released synthetic supplement is immutable historical provenance.");
     }

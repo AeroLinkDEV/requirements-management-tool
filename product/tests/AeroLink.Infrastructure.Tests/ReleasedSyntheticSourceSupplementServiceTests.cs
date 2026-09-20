@@ -171,6 +171,23 @@ public sealed class ReleasedSyntheticSourceSupplementServiceTests
     }
 
     [Fact]
+    public async Task Ordinary_save_does_not_require_the_supplement_table()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var db = new AeroLinkDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        await db.Database.ExecuteSqlRawAsync("DROP TABLE \"released_synthetic_source_supplements\"");
+
+        db.Add(new ProgramRecord("Predecessor schema program", "PREDECESSOR"));
+
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
     public async Task Supplement_snapshot_is_browsing_only_for_later_code_relationships()
     {
         await using var fixture = await Fixture.CreateAsync();
