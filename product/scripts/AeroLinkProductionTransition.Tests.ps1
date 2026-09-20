@@ -76,9 +76,11 @@ function Invoke-AeroLinkCloneValidatedUpgrade {
 function Update-AeroLinkClientDependencies { Event 'Dependencies' }
 function npm.cmd { Event 'ClientBuild'; $global:LASTEXITCODE=0 }
 function Invoke-FakeApiBuild { Event 'ApiBuild'; $global:LASTEXITCODE=0 }
+function Get-AeroLinkTransitionBudget { [pscustomobject]@{ ProductionApiReadinessSeconds=371 } }
 function Start-AeroLinkService {
-    param($Environment)
+    param($Environment, $TimeoutSeconds)
     Event 'ApiStart'
+    if ($TimeoutSeconds -ne 371) { throw 'Production startup did not pass the configured API readiness budget' }
     if ($case.Tunnel -and $Environment.Notifications__BaseUrl -ne 'https://example.invalid') { throw 'Wrong startup origin' }
     $script:started=$true
 }
