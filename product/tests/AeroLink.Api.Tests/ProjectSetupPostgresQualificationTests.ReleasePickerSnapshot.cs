@@ -509,7 +509,9 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             await using var reader = await command.ExecuteReaderAsync();
             if (await reader.ReadAsync())
             {
-                Console.WriteLine($"PICKER_FENCE_WAIT: pid={reader.GetInt64(0)} waitEventType={reader.GetString(1)} query={reader.GetString(2)}");
+                var waitEvent = reader.IsDBNull(1) ? "<none>" : reader.GetString(1);
+                var query = reader.IsDBNull(2) ? "<null>" : reader.GetString(2);
+                Console.WriteLine($"PICKER_FENCE_WAIT: pid={reader.GetInt64(0)} waitEventType={waitEvent} query={query}");
                 return true;
             }
             await Task.Delay(100);
