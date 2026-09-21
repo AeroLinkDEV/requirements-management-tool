@@ -73,15 +73,17 @@ internal static class ManagedDocumentPaging
 
     internal static ReleaseCursorResult DecodeReleaseCursor(string? value, string filterKey)
     {
+        // The raw bound is checked before any whitespace or decoding handling so an oversized input can
+        // never pass as a fresh page request.
+        if (value is not null && value.Length > MaximumEncodedCursorLength) return new(null, InvalidCursor());
         if (string.IsNullOrWhiteSpace(value)) return new(null, null);
-        if (value.Length > MaximumEncodedCursorLength) return new(null, InvalidCursor());
         try
         {
             var encoded = value.Trim().Replace('-', '+').Replace('_', '/');
             encoded += new string('=', (4 - encoded.Length % 4) % 4);
             var cursor = JsonSerializer.Deserialize<ReleaseCursorToken>(Convert.FromBase64String(encoded));
             if (cursor is null || cursor.Version != 2 || cursor.Scope != "link-options" || cursor.FilterKey != filterKey
-                || cursor.SnapshotAt > DateTimeOffset.UtcNow.AddMinutes(1)
+                || cursor.SnapshotAt == default || cursor.SnapshotAt > DateTimeOffset.UtcNow.AddMinutes(1)
                 || cursor.CutoffOrdinal is null or < 0
                 || string.IsNullOrEmpty(cursor.Value) || cursor.Value.Length > MaximumCursorValueLength
                 || cursor.TieBreaker != "0") return new(null, InvalidCursor());

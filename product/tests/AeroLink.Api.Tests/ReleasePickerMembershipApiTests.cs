@@ -193,29 +193,79 @@ public sealed class ReleasePickerMembershipApiTests
             await db.SaveChangesAsync();
         }
 
-        // A pre-validation historical row: 40-character multi-byte label, no canonical identity. Its
-        // fallback SortKey repeats the label twice, producing the largest legitimate cursor payload.
+        // Pre-validation historical rows: 40-character multi-byte labels, no canonical identity. Their
+        // fallback SortKey repeats the label twice, producing the largest legitimate cursor payloads.
         var historicalLabel = new string('é', 40);
         await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(factory.ConnectionString))
         {
             await connection.OpenAsync();
-            await using var command = connection.CreateCommand();
-            command.CommandText = "INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\") VALUES ($id, $p, $v, 1)";
-            command.Parameters.AddWithValue("$id", Guid.NewGuid());
-            command.Parameters.AddWithValue("$p", projectId);
-            command.Parameters.AddWithValue("$v", historicalLabel);
-            await command.ExecuteNonQueryAsync();
+            foreach (var version in new[] { historicalLabel + "1", historicalLabel + "2" })
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\") VALUES ($id, $p, $v, 1)";
+                command.Parameters.AddWithValue("$id", Guid.NewGuid());
+                command.Parameters.AddWithValue("$p", projectId);
+                command.Parameters.AddWithValue("$v", version);
+                await command.ExecuteNonQueryAsync();
+            }
         }
 
-        var pageOne = await PageAsync(client, projectId, pageSize: 1);
-        Assert.Equal(["BUILD-1.0"], DisplayNumbers(pageOne));
+        // Page one ends with the FIRST historical label, so the emitted cursor must carry its large
+        // fallback sort key and still be accepted within the 4096-character bound.
+        var pageOne = await PageAsync(client, projectId, pageSize: 2);
+        Assert.Equal(["BUILD-1.0", $"BUILD-{historicalLabel}1"], DisplayNumbers(pageOne));
         Assert.True(pageOne.GetProperty("hasMore").GetBoolean());
         var cursor = pageOne.GetProperty("nextCursor").GetString()!;
-        Assert.True(cursor.Length <= 4096);
+        Assert.True(cursor.Length <= 4096, $"emitted cursor was {cursor.Length} characters");
 
-        var pageTwo = await PageAsync(client, projectId, pageSize: 1, cursor);
-        Assert.Equal([$"BUILD-{historicalLabel}"], DisplayNumbers(pageTwo));
+        var encoded = cursor.Replace('-', '+').Replace('_', '/');
+        encoded += new string('=', (4 - encoded.Length % 4) % 4);
+        var carriedValue = JsonDocument.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(encoded)))
+            .RootElement.GetProperty("Value").GetString()!;
+        Assert.Contains(historicalLabel, carriedValue);          // the historical sort key is in the cursor
+        Assert.StartsWith("1|", carriedValue);                    // via the legacy fallback grammar
+
+        var pageTwo = await PageAsync(client, projectId, pageSize: 2, cursor);
+        Assert.Equal([$"BUILD-{historicalLabel}2"], DisplayNumbers(pageTwo));
         Assert.False(pageTwo.GetProperty("hasMore").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Oversized_whitespace_and_missing_required_fields_fail_the_v2_contract()
+    {
+        var (projectId, client, factory) = await SeedAsync("PICKER105", ("1.0", true), ("1.5", false), ("2.0", true));
+        using var _ = factory;
+        var pageOne = await PageAsync(client, projectId, pageSize: 1);
+        var cursor = pageOne.GetProperty("nextCursor").GetString()!;
+
+        // Whitespace longer than the raw bound is rejected before being treated as a fresh page request.
+        using var whitespace = await client.GetAsync(
+            $"/api/managed-documents/link-options?projectId={projectId}&artifactType=Release&pageSize=1&cursor={Uri.EscapeDataString(new string(' ', 4097))}");
+        Assert.Equal(HttpStatusCode.BadRequest, whitespace.StatusCode);
+        Assert.Contains("invalid_cursor", await whitespace.Content.ReadAsStringAsync());
+
+        var encoded = cursor.Replace('-', '+').Replace('_', '/');
+        encoded += new string('=', (4 - encoded.Length % 4) % 4);
+        var json = JsonDocument.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(encoded))).RootElement;
+
+        string Reencode(Action<IDictionary<string, string>> mutate)
+        {
+            var fields = json.EnumerateObject().ToDictionary(property => property.Name, property => property.Value.GetRawText());
+            mutate(fields);
+            var rebuilt = "{" + string.Join(',', fields.Select(field => $"\"{field.Key}\":{field.Value}")) + "}";
+            return Convert.ToBase64String(Encoding.UTF8.GetBytes(rebuilt)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        }
+
+        async Task AssertRejectedAsync(string rawCursor)
+        {
+            using var response = await client.GetAsync(
+                $"/api/managed-documents/link-options?projectId={projectId}&artifactType=Release&pageSize=1&cursor={Uri.EscapeDataString(rawCursor)}");
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("invalid_cursor", await response.Content.ReadAsStringAsync());
+        }
+
+        await AssertRejectedAsync(Reencode(fields => fields.Remove("SnapshotAt")));   // missing required field
+        await AssertRejectedAsync(Reencode(fields => fields.Remove("CutoffOrdinal"))); // missing cutoff
     }
 
     [Fact]
@@ -239,8 +289,8 @@ public sealed class ReleasePickerMembershipApiTests
             var second = new SoftwareRelease(projectId, "1.1", false);
             db.AddRange(first, second);
             await db.SaveChangesAsync();
-            // The sequence is global across projects, so absolute values are environment-dependent, and EF's
-            // batch insert order is unspecified; the contract is distinct, positive, database-allocated
+            // SQLite allocates MAX+1 per project inside the fenced write transaction, so absolute values
+            // depend on the project's own history; the contract is distinct, positive, database-allocated
             // values read back after the INSERT.
             Assert.True(first.PickerInsertionOrdinal is > 0);
             Assert.True(second.PickerInsertionOrdinal is > 0);
@@ -260,11 +310,12 @@ public sealed class ReleasePickerMembershipApiTests
             Assert.Equal(ordinalAtInsert, afterWholeEntity.PickerInsertionOrdinal);
         }
 
-        // A failed save followed by a corrected retry allocates a fresh ordinal without harm.
+        // A failed save followed by a corrected retry allocates a fresh per-project ordinal without harm.
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var before = await db.Releases.AsNoTracking().MaxAsync(x => x.PickerInsertionOrdinal);
+            var before = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
+                .MaxAsync(x => x.PickerInsertionOrdinal);
             var conflicting = new SoftwareRelease(projectId, "1.1", false);
             db.Add(conflicting);
             await Assert.ThrowsAsync<AeroLink.Domain.Common.DomainException>(() => db.SaveChangesAsync());

@@ -1,15 +1,15 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 988,
-    "cases": 1128,
+    "tests": 991,
+    "cases": 1131,
     "classes": 157,
-    "hostedTests": 933,
-    "hostedCases": 1051,
-    "nonHostedTests": 37,
-    "nonHostedCases": 51,
-    "unknownHostTests": 18,
-    "unknownHostCases": 26,
+    "hostedTests": 934,
+    "hostedCases": 1052,
+    "nonHostedTests": 38,
+    "nonHostedCases": 52,
+    "unknownHostTests": 19,
+    "unknownHostCases": 27,
     "hostedCandidateTests": 18,
     "hostedCandidateCases": 18,
     "unknownCandidateTests": 8,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 609,
-      "cases": 695,
+      "tests": 611,
+      "cases": 697,
       "unknownCases": 0,
       "classes": 123
     },
@@ -45,8 +45,8 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 44,
-      "cases": 44,
+      "tests": 45,
+      "cases": 45,
       "unknownCases": 0,
       "classes": 19
     },
@@ -12142,6 +12142,20 @@
     },
     {
       "cls": "ReleasePickerMembershipApiTests",
+      "test": "Oversized_whitespace_and_missing_required_fields_fail_the_v2_contract",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 233,
+        "end": 269
+      }
+    },
+    {
+      "cls": "ReleasePickerMembershipApiTests",
       "test": "Release_continuation_freezes_membership_and_a_fresh_traversal_shows_later_builds",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -12170,8 +12184,26 @@
         "factory-services"
       ],
       "sourceLines": {
+        "start": 271,
+        "end": 329
+      }
+    },
+    {
+      "cls": "ReleasePickerMembershipApiTests",
+      "test": "Release_v2_cursor_round_trips_maximum_historical_labels",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
         "start": 175,
-        "end": 226
+        "end": 231
       }
     },
     {
@@ -12198,8 +12230,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 111,
-        "end": 159
+        "start": 170,
+        "end": 218
       }
     },
     {
@@ -12212,8 +12244,22 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 37,
-        "end": 74
+        "start": 96,
+        "end": 133
+      }
+    },
+    {
+      "cls": "ReleasePickerSqliteGuardTests",
+      "test": "Installed_guards_reject_the_full_forbidden_membership_matrix",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 44,
+        "end": 94
       }
     },
     {
@@ -12226,8 +12272,8 @@
       "hosted": "not-hosted",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 76,
-        "end": 109
+        "start": 135,
+        "end": 168
       }
     },
     {

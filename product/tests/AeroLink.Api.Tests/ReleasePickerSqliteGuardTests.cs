@@ -34,6 +34,65 @@ public sealed class ReleasePickerSqliteGuardTests : IDisposable
         await command.ExecuteNonQueryAsync();
     }
 
+    private static async Task<string> ScalarTextAsync(SqliteConnection connection, string sql)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return (string)(await command.ExecuteScalarAsync())!;
+    }
+
+    [Fact]
+    public async Task Installed_guards_reject_the_full_forbidden_membership_matrix()
+    {
+        var projectId = Guid.NewGuid();
+        await using (var setup = CreateContext())
+        {
+            await setup.Database.EnsureCreatedAsync();
+            await InsertRawReleaseAsync(projectId, "1.0");   // allocated by the first install? No: this row
+                                                             // predates the guard, so it becomes the legacy row.
+        }
+
+        await using (var db = CreateContext())
+        {
+            await ReleasePickerSqliteGuard.EnsureInstalledAsync(db);
+            var allocated = new SoftwareRelease(projectId, "1.5", false);
+            db.Add(allocated);
+            await db.SaveChangesAsync();
+            var allocatedOrdinal = allocated.PickerInsertionOrdinal!.Value;
+
+            var connection = (SqliteConnection)db.Database.GetDbConnection();
+            if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync();
+            var legacyId = await ScalarTextAsync(connection, "SELECT CAST(\"Id\" AS TEXT) FROM \"software_releases\" WHERE \"Version\" = '1.0'");
+            var allocatedId = await ScalarTextAsync(connection, "SELECT CAST(\"Id\" AS TEXT) FROM \"software_releases\" WHERE \"Version\" = '1.5'");
+            await using var ordinalCheck = connection.CreateCommand();
+            ordinalCheck.CommandText = $"SELECT \"PickerInsertionOrdinal\" FROM \"software_releases\" WHERE \"Id\" = '{allocatedId}'";
+            Assert.Equal(allocatedOrdinal, await ordinalCheck.ExecuteScalarAsync());
+
+            async Task AssertRejectedAsync(string sql)
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = sql;
+                var rejected = false;
+                try { await command.ExecuteNonQueryAsync(); }
+                catch (SqliteException) { rejected = true; }
+                Assert.True(rejected, "expected the installed guard to reject: " + sql);
+            }
+
+            await AssertRejectedAsync($"INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\", \"PickerInsertionOrdinal\") VALUES ('{Guid.NewGuid()}', '{projectId}', '7.7', 0, 42)");
+            await AssertRejectedAsync($"INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\", \"PickerLegacyCohort\") VALUES ('{Guid.NewGuid()}', '{projectId}', '7.8', 0, 1)");
+            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerInsertionOrdinal\" = 999 WHERE \"Id\" = '{legacyId}'");
+            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerInsertionOrdinal\" = {allocatedOrdinal + 1} WHERE \"Id\" = '{allocatedId}'");
+            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerInsertionOrdinal\" = NULL WHERE \"Id\" = '{allocatedId}'");
+            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerLegacyCohort\" = 0 WHERE \"Id\" = '{legacyId}'");
+            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerLegacyCohort\" = 1 WHERE \"Id\" = '{allocatedId}'");
+
+            // Ordinary lifecycle mutation remains valid on both rows.
+            await using var allowed = connection.CreateCommand();
+            allowed.CommandText = $"UPDATE \"software_releases\" SET \"Version\" = '1.0 (lifecycle)' WHERE \"Id\" = '{legacyId}'";
+            await allowed.ExecuteNonQueryAsync();
+        }
+    }
+
     [Fact]
     public async Task First_install_classifies_existing_rows_as_legacy_and_installs_triggers()
     {
