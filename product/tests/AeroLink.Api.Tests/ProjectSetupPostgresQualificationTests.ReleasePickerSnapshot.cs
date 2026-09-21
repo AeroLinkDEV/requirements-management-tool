@@ -129,7 +129,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         DateTimeOffset moment => "T:" + moment.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture),
         DateTime moment => "D:" + moment.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
         System.IFormattable number => "N:" + number.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
-        string text => "S:" + text.Replace("|", "\\|").Replace(";", "\\;").Replace("\r", "\\r").Replace("\n", "\\n"),
+        string text => "J:" + System.Text.Json.JsonSerializer.Serialize(text),
         _ => "O:" + value
     };
 
@@ -226,6 +226,9 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             // through EF here, so the save-time validator never queries the not-yet-existing column.
             Guid baselineId;
             Guid buildId;
+            string manifestPayload;
+            string manifestHash;
+
             await using (var oldSchema = new AeroLinkDbContext(
                 new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options))
             {
@@ -246,40 +249,55 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 await oldSchema.SaveChangesAsync();
                 buildId = build.Id;
 
-                // Representative stored manifest/signature evidence: a completed release campaign bound to
-                // the release, baseline and build, carrying the release manifest hash and an authorized
-                // approval signature. The campaign is created through the domain constructor; the completed
-                // release state is stamped directly because this fixture emulates an upgraded database.
+                // Representative stored manifest/signature evidence, driven through the existing domain
+                // support: the manifest payload is persisted as a campaign event, its SHA-256 is bound as
+                // the campaign's release hash through the review state machine, and an ElectronicSignature
+                // (domain constructor) signs that exact content hash against the campaign artifact.
+                manifestPayload = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    release = "SW-02.00",
+                    baseline = baselineId,
+                    build = buildId,
+                    contents = new[] { "requirements-baseline:SW-02.00", "provenance-build:SW-02.00" },
+                    recordedBy = "picker.upgrade"
+                });
+                manifestHash = Convert.ToHexString(
+                    System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(manifestPayload))).ToLowerInvariant();
+                Assert.Equal(64, manifestHash.Length);
                 var campaign = new AeroLink.Domain.Releases.ReleaseCampaign(project.Id, releaseId, baselineId,
-                    "Upgrade preservation campaign", "picker.upgrade", DateTimeOffset.UtcNow);
+                    "Upgrade preservation campaign", "picker.upgrade.owner", DateTimeOffset.UtcNow);
+                campaign.StartVerification("picker.upgrade.owner", DateTimeOffset.UtcNow);
+                campaign.SelectVerificationBuild(buildId, "picker.upgrade.owner", DateTimeOffset.UtcNow);
+                campaign.RecordExecutionProgress("ReleaseManifestRecorded", manifestPayload, "picker.upgrade.owner", DateTimeOffset.UtcNow);
+                campaign.BeginReleaseReview("picker.upgrade.owner",
+                    new List<(string Id, string Name)> { ("picker.upgrade.approver", "Picker Upgrade Approver") },
+                    manifestHash, DateTimeOffset.UtcNow);
+                Assert.True(campaign.Approve("picker.upgrade.approver", DateTimeOffset.UtcNow));
+                campaign.Release(buildId, manifestHash, "picker.upgrade.owner", DateTimeOffset.UtcNow);
                 oldSchema.Add(campaign);
                 await oldSchema.SaveChangesAsync();
-                await using (var evidence = new NpgsqlConnection(connection))
-                {
-                    await evidence.OpenAsync();
-                    await using var complete = evidence.CreateCommand();
-                    complete.CommandText = """
-                        UPDATE release_campaigns
-                        SET "State" = 'Released', "ReleaseHash" = @hash, "ReleasedAt" = @at::timestamptz,
-                            "SoftwareBuildId" = @build, "UpdatedAt" = @at::timestamptz
-                        WHERE "Id" = @id
-                        """;
-                    complete.Parameters.AddWithValue("hash", Convert.ToHexString(
-                        System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes("upgrade-preservation-manifest"))).ToLowerInvariant());
-                    complete.Parameters.AddWithValue("at", DateTimeOffset.UtcNow);
-                    complete.Parameters.AddWithValue("build", buildId);
-                    complete.Parameters.AddWithValue("id", campaign.Id);
-                    await complete.ExecuteNonQueryAsync();
-                    await using var approval = evidence.CreateCommand();
-                    approval.CommandText = """
-                        INSERT INTO release_approvals ("Id", "CampaignId", "Cycle", "Position", "ApproverId", "ApproverName", "State", "ApprovedAt")
-                        VALUES (@id, @campaign, 1, 0, 'picker.upgrade.approver', 'Picker Upgrade Approver', 'Approved', @at::timestamptz)
-                        """;
-                    approval.Parameters.AddWithValue("id", Guid.NewGuid());
-                    approval.Parameters.AddWithValue("campaign", campaign.Id);
-                    approval.Parameters.AddWithValue("at", DateTimeOffset.UtcNow);
-                    await approval.ExecuteNonQueryAsync();
-                }
+                oldSchema.Add(new AeroLink.Domain.Identity.ElectronicSignature(
+                    Guid.NewGuid(), "picker.upgrade.signer", "Picker Upgrade Signer", programId,
+                    "ReleaseCampaign", campaign.Id, "SW-02.00", "Release",
+                    "Authorized release of build SW-02.00 against the recorded manifest.",
+                    manifestHash, "127.0.0.1", DateTimeOffset.UtcNow, "ProgramManager",
+                    rationale: "Upgrade preservation fixture signature."));
+                await oldSchema.SaveChangesAsync();
+
+                // The persisted payload, its digest and the signature binding are paired and nonempty.
+                Assert.Equal(manifestHash, campaign.ReleaseHash);
+                Assert.Equal(manifestHash, Convert.ToHexString(
+                    System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(manifestPayload))).ToLowerInvariant());
+                Assert.Equal(1L, await ScalarAsync(connection,
+                    "SELECT COUNT(*) FROM release_campaign_events WHERE \"EventType\" = 'ReleaseManifestRecorded' AND \"Detail\" = @detail",
+                    parameters => parameters.AddWithValue("detail", manifestPayload)));
+                Assert.Equal(1L, await ScalarAsync(connection,
+                    "SELECT COUNT(*) FROM electronic_signatures WHERE \"ArtifactType\" = 'ReleaseCampaign' AND \"ArtifactId\" = @id AND \"ContentHash\" = @hash",
+                    parameters =>
+                    {
+                        parameters.AddWithValue("id", campaign.Id);
+                        parameters.AddWithValue("hash", manifestHash);
+                    }));
             }
 
             // Capture preservation evidence BEFORE the new migration is applied. The release projection is
@@ -289,10 +307,17 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             var buildsBefore = await CaptureTableRowsAsync(connection, "software_builds");
             var campaignsBefore = await CaptureTableRowsAsync(connection, "release_campaigns");
             var approvalsBefore = await CaptureTableRowsAsync(connection, "release_approvals");
+            var eventsBefore = await CaptureTableRowsAsync(connection, "release_campaign_events");
+            var signaturesBefore = await CaptureTableRowsAsync(connection, "electronic_signatures");
             Assert.Equal(1L, await ScalarAsync(connection,
                 "SELECT COUNT(*) FROM release_campaigns WHERE \"ReleaseHash\" IS NOT NULL AND length(\"ReleaseHash\") = 64 AND \"ReleasedAt\" IS NOT NULL"));
             Assert.Equal(1L, await ScalarAsync(connection,
                 "SELECT COUNT(*) FROM release_approvals WHERE \"State\" = 'Approved' AND \"ApprovedAt\" IS NOT NULL"));
+            // The persisted manifest payload text (JSON-encoded in the lossless rendering) and the
+            // signature's bound hash are present pre-migration.
+            Assert.Contains("ReleaseManifestRecorded", eventsBefore);
+            Assert.Contains(System.Text.Json.JsonSerializer.Serialize(manifestPayload), eventsBefore);
+            Assert.Contains(manifestHash, signaturesBefore);
 
             // Apply the new migration; reapplication must be a no-op.
             await using (var upgrade = new AeroLinkDbContext(
@@ -305,12 +330,15 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             }
 
             // Preservation: identical rows (lossless rendering), and every pre-existing release is the
-            // legacy cohort (NULL ordinal).
+            // legacy cohort (NULL ordinal). The stored manifest payload, its hash and the signature
+            // record must be preserved exactly.
             Assert.Equal(releasesBefore, await CaptureReleaseRowsAsync(connection));
             Assert.Equal(baselinesBefore, await CaptureTableRowsAsync(connection, "candidate_baselines"));
             Assert.Equal(buildsBefore, await CaptureTableRowsAsync(connection, "software_builds"));
             Assert.Equal(campaignsBefore, await CaptureTableRowsAsync(connection, "release_campaigns"));
             Assert.Equal(approvalsBefore, await CaptureTableRowsAsync(connection, "release_approvals"));
+            Assert.Equal(eventsBefore, await CaptureTableRowsAsync(connection, "release_campaign_events"));
+            Assert.Equal(signaturesBefore, await CaptureTableRowsAsync(connection, "electronic_signatures"));
             Assert.Equal(0L, await ScalarAsync(connection,
                 "SELECT COUNT(\"PickerInsertionOrdinal\") FROM software_releases"));
             Assert.Equal(3L, await ScalarAsync(connection, "SELECT COUNT(*) FROM software_releases"));
