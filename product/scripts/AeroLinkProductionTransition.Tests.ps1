@@ -33,7 +33,7 @@ function Get-AeroLinkProtectedGitLabDescriptor {
     [pscustomobject]@{
         Configured = $false
         Path = Join-Path $InstallationRoot 'protected-config\gitlab.json'
-        ConfigurationFingerprint = 'unconfigured'
+        Fingerprint = 'unconfigured'
     }
 }
 function Assert-AeroLinkRunningFromProductionSource { [pscustomobject]@{ DelegateTo=$null } }
@@ -90,6 +90,10 @@ function Start-AeroLinkService {
     Event 'ApiStart'
     if ($TimeoutSeconds -ne 371) { throw 'Production startup did not pass the configured API readiness budget' }
     if ($case.Tunnel -and $Environment.Notifications__BaseUrl -ne 'https://example.invalid') { throw 'Wrong startup origin' }
+    if ($Environment.Runtime__GitLabConfigFingerprint -ne 'unconfigured') { throw 'Unconfigured transition did not propagate its runtime configuration fingerprint' }
+    if ($Environment.ContainsKey('AEROLINK_PROTECTED_GITLAB_CONFIG_PATH') -or $Environment.ContainsKey('AEROLINK_PROTECTED_GITLAB_INSTALLATION_ROOT')) {
+        throw 'Unconfigured transition unexpectedly propagated protected GitLab markers'
+    }
     $script:started=$true
 }
 function Get-AeroLinkPortOwner { [pscustomobject]@{ Found=$true; Ambiguous=$false; ProcessId=1234; CommandLine='api'; ExecutablePath='api.exe'; StartedAt='2026-01-01T00:00:00Z' } }
