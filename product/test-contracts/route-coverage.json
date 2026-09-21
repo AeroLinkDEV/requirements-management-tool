@@ -2129,7 +2129,8 @@
       "file": "WorkspaceEndpoints.cs",
       "coveredBy": [
         "ProjectSetupBoundaryRegressionApiTests",
-        "ProjectSetupPostgresQualificationTests"
+        "ProjectSetupPostgresQualificationTests",
+        "ProjectSetupPostgresQualificationTests.ReleasePickerSnapshot"
       ]
     },
     {

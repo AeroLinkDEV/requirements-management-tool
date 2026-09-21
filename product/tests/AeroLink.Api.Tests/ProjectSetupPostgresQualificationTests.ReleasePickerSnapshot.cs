@@ -131,7 +131,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 first.Parameters.AddWithValue("p", projectId);
                 await first.ExecuteNonQueryAsync();
                 await using var historical = raw.CreateCommand();
-                historical.CommandText = "INSERT INTO software_releases (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\") VALUES (@id, @p, '1.5', false)";
+                historical.CommandText = "INSERT INTO software_releases (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\") VALUES (@id, @p, '1.5', true)";
                 historical.Parameters.AddWithValue("id", Guid.NewGuid());
                 historical.Parameters.AddWithValue("p", projectId);
                 await historical.ExecuteNonQueryAsync();
@@ -177,11 +177,13 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 await WalkContinuationAsync(client, projectId, pageOne.GetProperty("nextCursor").GetString()!, continuation);
                 Assert.Equal(["BUILD-1.0", "BUILD-1.5", "BUILD-2.0"], continuation);
 
+                // A build committed after the boundary is invisible to the frozen traversal...
                 await CreateReleaseViaApiAsync(client, projectId, "9.9");
-                var afterInsert = await LinkOptionsPageAsync(client, projectId, pageSize: 1);
-                var frozenWalk = new List<string> { "BUILD-1.0" };
-                await WalkContinuationAsync(client, projectId, afterInsert.GetProperty("nextCursor").GetString()!, frozenWalk);
-                Assert.Equal(["BUILD-1.0", "BUILD-1.5", "BUILD-2.0"], frozenWalk);
+                var refrozen = new List<string> { "BUILD-1.0" };
+                await WalkContinuationAsync(client, projectId, pageOne.GetProperty("nextCursor").GetString()!, refrozen);
+                Assert.Equal(["BUILD-1.0", "BUILD-1.5", "BUILD-2.0"], refrozen);
+
+                // ...and a traversal started after the insert re-establishes the boundary and shows it.
                 var fresh = await LinkOptionsPageAsync(client, projectId, pageSize: 50);
                 Assert.Equal(["BUILD-1.0", "BUILD-1.5", "BUILD-2.0", "BUILD-9.9"], DisplayNumbers(fresh));
             }
@@ -200,15 +202,16 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
                 var projectId = await SeedPickerProjectAsync(factory,
                     $"PICKERSNAP{(isolation == System.Data.IsolationLevel.RepeatableRead ? "RR" : "SER")}");
+                await CreateReleaseViaApiAsync(client, projectId, "1.5");   // in-work successor, ordinal 2
 
-                // Writer A establishes an old MVCC snapshot (max committed ordinal = 1).
+                // Writer A establishes an old MVCC snapshot (max committed ordinal = 2).
                 await using var writerA = new NpgsqlConnection(connection);
                 await writerA.OpenAsync();
                 await using (var snapshot = writerA.CreateCommand())
                 {
                     snapshot.CommandText = "SELECT COALESCE(MAX(\"PickerInsertionOrdinal\"), 0) FROM software_releases WHERE \"ProjectId\" = @p";
                     snapshot.Parameters.AddWithValue("p", projectId);
-                    Assert.Equal(1L, await snapshot.ExecuteScalarAsync());
+                    Assert.Equal(2L, await snapshot.ExecuteScalarAsync());
                 }
                 await using (var openSnapshot = writerA.CreateCommand())
                 {
@@ -219,10 +222,14 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                     await openSnapshot.ExecuteScalarAsync();
                 }
 
-                // Writer B (Read Committed) commits another build, then page one re-fences at the advanced cutoff.
+                // Writer B (Read Committed) commits another build; a page one taken now re-fences at the
+                // advanced cutoff, while the earlier traversal keeps its original boundary.
+                var early = await LinkOptionsPageAsync(client, projectId, pageSize: 1);
+                Assert.Equal(["BUILD-1.0"], DisplayNumbers(early));
+                Assert.True(early.GetProperty("hasMore").GetBoolean());
                 await InsertRawReleaseAsync(connection, projectId, "2.0");
-                var frozen = await LinkOptionsPageAsync(client, projectId, pageSize: 50);
-                Assert.Equal(["BUILD-1.0", "BUILD-2.0"], DisplayNumbers(frozen));
+                var mid = await LinkOptionsPageAsync(client, projectId, pageSize: 1);
+                Assert.Equal(["BUILD-1.0"], DisplayNumbers(mid));
 
                 // Writer A's late INSERT allocates the global nextval (3), never a stale maximum.
                 await using (var insert = writerA.CreateCommand())
@@ -230,7 +237,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                     insert.CommandText = "INSERT INTO software_releases (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\") VALUES (@id, @p, '9.9', false) RETURNING \"PickerInsertionOrdinal\"";
                     insert.Parameters.AddWithValue("id", Guid.NewGuid());
                     insert.Parameters.AddWithValue("p", projectId);
-                    Assert.Equal(3L, await insert.ExecuteScalarAsync());
+                    Assert.Equal(4L, await insert.ExecuteScalarAsync());
                 }
                 await using (var commit = writerA.CreateCommand())
                 {
@@ -238,15 +245,20 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                     await commit.ExecuteNonQueryAsync();
                 }
 
-                // The traversal captured before writer B must not admit either later build.
-                var stale = await LinkOptionsPageAsync(client, projectId, pageSize: 1);
-                var walked = new List<string> { "BUILD-1.0" };
-                await WalkContinuationAsync(client, projectId, stale.GetProperty("nextCursor").GetString()!, walked);
-                Assert.Equal(["BUILD-1.0", "BUILD-2.0"], walked);
+                // The early traversal (boundary before writer B) keeps its original members and excludes
+                // both later builds (2.0 ordinal 3, 9.9 ordinal 4).
+                var earlyWalked = new List<string> { "BUILD-1.0" };
+                await WalkContinuationAsync(client, projectId, early.GetProperty("nextCursor").GetString()!, earlyWalked);
+                Assert.Equal(["BUILD-1.0", "BUILD-1.5"], earlyWalked);
+
+                // The mid traversal (boundary after B, before A) admits B and still excludes A's late build.
+                var midWalked = new List<string> { "BUILD-1.0" };
+                await WalkContinuationAsync(client, projectId, mid.GetProperty("nextCursor").GetString()!, midWalked);
+                Assert.Equal(["BUILD-1.0", "BUILD-1.5", "BUILD-2.0"], midWalked);
 
                 // A traversal started after the commits sees everything in canonical order.
                 var fresh = await LinkOptionsPageAsync(client, projectId, pageSize: 50);
-                Assert.Equal(["BUILD-1.0", "BUILD-2.0", "BUILD-9.9"], DisplayNumbers(fresh));
+                Assert.Equal(["BUILD-1.0", "BUILD-1.5", "BUILD-2.0", "BUILD-9.9"], DisplayNumbers(fresh));
             });
         }
     }

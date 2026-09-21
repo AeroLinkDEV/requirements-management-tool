@@ -173,6 +173,52 @@ public sealed class ReleasePickerMembershipApiTests
     }
 
     [Fact]
+    public async Task Release_v2_cursor_round_trips_maximum_historical_labels()
+    {
+        var factory = new AeroLinkApiFactory();
+        using var _ = factory;
+        var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        Guid projectId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new ProgramRecord("Picker label program", "PICKERLBL");
+            var project = new ProjectRecord(program.Id, "Picker label project", "Software");
+            db.AddRange(program, project);
+            await db.SaveChangesAsync();
+            projectId = project.Id;
+            var release = new SoftwareRelease(projectId, "1.0", true);
+            db.Add(release);
+            await db.SaveChangesAsync();
+        }
+
+        // A pre-validation historical row: 40-character multi-byte label, no canonical identity. Its
+        // fallback SortKey repeats the label twice, producing the largest legitimate cursor payload.
+        var historicalLabel = new string('é', 40);
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(factory.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\") VALUES ($id, $p, $v, 1)";
+            command.Parameters.AddWithValue("$id", Guid.NewGuid());
+            command.Parameters.AddWithValue("$p", projectId);
+            command.Parameters.AddWithValue("$v", historicalLabel);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var pageOne = await PageAsync(client, projectId, pageSize: 1);
+        Assert.Equal(["BUILD-1.0"], DisplayNumbers(pageOne));
+        Assert.True(pageOne.GetProperty("hasMore").GetBoolean());
+        var cursor = pageOne.GetProperty("nextCursor").GetString()!;
+        Assert.True(cursor.Length <= 4096);
+
+        var pageTwo = await PageAsync(client, projectId, pageSize: 1, cursor);
+        Assert.Equal([$"BUILD-{historicalLabel}"], DisplayNumbers(pageTwo));
+        Assert.False(pageTwo.GetProperty("hasMore").GetBoolean());
+    }
+
+    [Fact]
     public async Task Release_ordinal_is_database_owned_across_ef_lifecycle_saves_on_sqlite()
     {
         var factory = new AeroLinkApiFactory();

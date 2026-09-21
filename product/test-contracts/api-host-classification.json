@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 155,
-    "tests": 980,
-    "knownCases": 1120,
+    "classes": 157,
+    "tests": 988,
+    "knownCases": 1128,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -14,9 +14,9 @@
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 60,
-      "tests": 365,
-      "knownCases": 429,
+      "classes": 61,
+      "tests": 370,
+      "knownCases": 434,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -26,9 +26,9 @@
       "unknownCaseTests": 0
     },
     "reusable-host": {
-      "classes": 57,
-      "tests": 348,
-      "knownCases": 394,
+      "classes": 58,
+      "tests": 351,
+      "knownCases": 397,
       "unknownCaseTests": 0
     }
   },
@@ -739,6 +739,18 @@
       "classification": "fresh-host",
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
+        "http-boundary"
+      ]
+    },
+    {
+      "cls": "ReleasePickerMembershipApiTests",
+      "tests": 5,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Host use is unknown for one or more invocations; isolate it until method-level evidence is completed.",
+      "intents": [
+        "ef-translation",
         "http-boundary"
       ]
     },
@@ -1685,6 +1697,18 @@
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "ef-translation"
+      ]
+    },
+    {
+      "cls": "ReleasePickerSqliteGuardTests",
+      "tests": 3,
+      "knownCases": 3,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "ef-translation",
+        "in-process-logic"
       ]
     },
     {

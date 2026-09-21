@@ -1,15 +1,15 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 980,
-    "cases": 1120,
-    "classes": 155,
-    "hostedTests": 931,
-    "hostedCases": 1049,
-    "nonHostedTests": 34,
-    "nonHostedCases": 48,
-    "unknownHostTests": 15,
-    "unknownHostCases": 23,
+    "tests": 988,
+    "cases": 1128,
+    "classes": 157,
+    "hostedTests": 933,
+    "hostedCases": 1051,
+    "nonHostedTests": 37,
+    "nonHostedCases": 51,
+    "unknownHostTests": 18,
+    "unknownHostCases": 26,
     "hostedCandidateTests": 18,
     "hostedCandidateCases": 18,
     "unknownCandidateTests": 8,
@@ -21,18 +21,18 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 605,
-      "cases": 691,
+      "tests": 609,
+      "cases": 695,
       "unknownCases": 0,
-      "classes": 122
+      "classes": 123
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
       "level": "Infrastructure (needs a database, not a host)",
-      "tests": 184,
-      "cases": 198,
+      "tests": 186,
+      "cases": 200,
       "unknownCases": 0,
-      "classes": 67
+      "classes": 69
     },
     "auth-policy": {
       "label": "Authentication / authorization wiring",
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 42,
-      "cases": 42,
+      "tests": 44,
+      "cases": 44,
       "unknownCases": 0,
-      "classes": 18
+      "classes": 19
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -12110,6 +12110,124 @@
       "sourceLines": {
         "start": 24,
         "end": 70
+      }
+    },
+    {
+      "cls": "ReleasePickerMembershipApiTests",
+      "test": "Old_release_v1_cursor_fails_closed_with_a_start_again_path",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 88,
+        "end": 112
+      }
+    },
+    {
+      "cls": "ReleasePickerMembershipApiTests",
+      "test": "Oversized_malformed_and_out_of_contract_cursors_fail_bounded",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 114,
+        "end": 150
+      }
+    },
+    {
+      "cls": "ReleasePickerMembershipApiTests",
+      "test": "Release_continuation_freezes_membership_and_a_fresh_traversal_shows_later_builds",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 62,
+        "end": 86
+      }
+    },
+    {
+      "cls": "ReleasePickerMembershipApiTests",
+      "test": "Release_ordinal_is_database_owned_across_ef_lifecycle_saves_on_sqlite",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 175,
+        "end": 226
+      }
+    },
+    {
+      "cls": "ReleasePickerMembershipApiTests",
+      "test": "Search_binding_page_sizes_and_termination_are_preserved",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "unknown",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 152,
+        "end": 173
+      }
+    },
+    {
+      "cls": "ReleasePickerSqliteGuardTests",
+      "test": "Failed_install_rolls_back_the_whole_first_installation",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 111,
+        "end": 159
+      }
+    },
+    {
+      "cls": "ReleasePickerSqliteGuardTests",
+      "test": "First_install_classifies_existing_rows_as_legacy_and_installs_triggers",
+      "kind": "Fact",
+      "intent": "ef-translation",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 37,
+        "end": 74
+      }
+    },
+    {
+      "cls": "ReleasePickerSqliteGuardTests",
+      "test": "Restart_install_does_not_reclassify_and_remains_idempotent",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "not-hosted",
+      "hostEvidence": [],
+      "sourceLines": {
+        "start": 76,
+        "end": 109
       }
     },
     {
