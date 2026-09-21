@@ -47,15 +47,16 @@ function New-Owner {
     return { param($Port) [pscustomobject]@{ Found = $true; Ambiguous = $false; Attributable = $true; ProcessId = $ProcessId; CommandLine = $CommandLine; ExecutablePath = $ExecutablePath; Detail = "Port $Port is held by PID $ProcessId." } }.GetNewClosure()
 }
 function New-Identity {
-    param([string]$Sha, [string]$Mode)
-    return { param($BaseUri) [pscustomobject]@{ sourceIdentity = $Sha; sourceShortSha = $Sha.Substring(0, 8); mode = $Mode } }.GetNewClosure()
+    param([string]$Sha, [string]$Mode, [string]$GitLabFingerprint = '')
+    return { param($BaseUri) [pscustomobject]@{ sourceIdentity = $Sha; sourceShortSha = $Sha.Substring(0, 8); mode = $Mode; gitLabConfigurationFingerprint = $GitLabFingerprint } }.GetNewClosure()
 }
 $alwaysReady = { param($BaseUri) $true }
 
 function Get-Disposition {
-    param($PortOwnerProbe, $RuntimeProbe, $ReadyProbe = $alwaysReady, [string]$ExpectedMode = 'HOME-PRODUCTION', [AllowNull()][AllowEmptyString()][string]$ExpectedIdentity = $currentSha)
+    param($PortOwnerProbe, $RuntimeProbe, $ReadyProbe = $alwaysReady, [string]$ExpectedMode = 'HOME-PRODUCTION', [AllowNull()][AllowEmptyString()][string]$ExpectedIdentity = $currentSha, [string]$ExpectedGitLabFingerprint = '')
     return Resolve-AeroLinkRuntimeDisposition -Port 5080 -BaseUri 'http://127.0.0.1:5080' `
         -ExpectedMode $ExpectedMode -ExpectedSourceIdentity $ExpectedIdentity -OwnershipFragments $ownership `
+        -ExpectedGitLabConfigurationFingerprint $ExpectedGitLabFingerprint `
         -PortOwnerProbe $PortOwnerProbe -RuntimeProbe $RuntimeProbe -ReadyProbe $ReadyProbe
 }
 
@@ -68,6 +69,13 @@ try {
     # --- Matching owner, mode, source and readiness: the ONLY case that may be reused ---
     $reuse = Get-Disposition -PortOwnerProbe (New-Owner) -RuntimeProbe (New-Identity $currentSha 'HOME-PRODUCTION')
     Assert-True ($reuse.Disposition -eq 'Reuse') 'A matching, ready, owned process in the requested mode may be reused.'
+
+    $gitLabStale = Get-Disposition -PortOwnerProbe (New-Owner) -RuntimeProbe (New-Identity $currentSha 'HOME-PRODUCTION' 'old-fingerprint') `
+        -ExpectedGitLabFingerprint 'new-fingerprint'
+    Assert-True ($gitLabStale.Disposition -eq 'RestartStale') 'A running API with a different protected GitLab fingerprint must be restarted.'
+    $gitLabMatch = Get-Disposition -PortOwnerProbe (New-Owner) -RuntimeProbe (New-Identity $currentSha 'HOME-PRODUCTION' 'same-fingerprint') `
+        -ExpectedGitLabFingerprint 'same-fingerprint'
+    Assert-True ($gitLabMatch.Disposition -eq 'Reuse') 'A running API with the same protected GitLab fingerprint may be reused.'
 
     # Exact source/mode can belong to a different installation. A requested binding is mandatory for reuse,
     # and a contradiction must not become permission to terminate that other installation.

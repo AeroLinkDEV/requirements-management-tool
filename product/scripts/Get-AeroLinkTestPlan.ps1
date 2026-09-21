@@ -315,6 +315,7 @@ function Invoke-ScriptContractSuite {
         'AeroLinkInstallation.Tests.ps1',
         'AeroLinkProductionSource.Tests.ps1',
         'AeroLinkRuntimeIdentity.Tests.ps1',
+        'AeroLinkProtectedConfig.Tests.ps1',
         'AeroLinkUpgrade.Tests.ps1',
         'AeroLinkSmtp4dev.Tests.ps1',
         'Get-AeroLinkTestPlan.Tests.ps1',

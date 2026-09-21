@@ -35,6 +35,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'AeroLinkLaunch.ps1')
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkBootstrap.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkProtectedConfig.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkUpgrade.psm1') -Force
 
@@ -136,6 +137,23 @@ Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1')
 # Import-Module, is idempotent and makes the body's dependencies true at the point of use.
 . (Join-Path $PSScriptRoot 'AeroLinkPrerequisites.ps1')
 . (Join-Path $PSScriptRoot 'AeroLinkLaunch.ps1')
+# Validate connector metadata and ciphertext before taking the transition lease. DPAPI decryption is deliberately
+# deferred until the API child is being created by the direct launcher or transition authority.
+$protectedGitLab = Get-AeroLinkProtectedGitLabDescriptor -InstallationRoot $installation.InstallationRoot
+$connectorEnvironmentNames = @(
+    'ProjectGitLab__BaseUrl', 'ProjectGitLab__ReadAccessToken', 'ProjectGitLab__SyntheticDemoProjectId',
+    'ProjectGitLab__SyntheticDemoRemoteProjectId',
+    'ProjectGitLab__ReleasedSyntheticSourceSupplementScope__ProgramId',
+    'ProjectGitLab__ReleasedSyntheticSourceSupplementScope__ProjectId',
+    'ProjectGitLab__ReleasedSyntheticSourceSupplementScope__ReleaseId',
+    'ProjectGitLab__ReleasedSyntheticSourceSupplementScope__BaselineId',
+    'ProjectGitLab__ReleasedSyntheticSourceSupplementScope__CampaignId',
+    'Runtime__GitLabConfigFingerprint', 'AEROLINK_PROTECTED_GITLAB_CONFIG_PATH',
+    'AEROLINK_PROTECTED_GITLAB_INSTALLATION_ROOT')
+$ambientConnector = @($connectorEnvironmentNames | Where-Object { -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_, 'Process')) })
+if ($ambientConnector.Count -gt 0) {
+    throw 'HOME production found GitLab connector settings in the process environment. Configure the protected GitLab store; no ephemeral connector was started.'
+}
 $lease = Enter-AeroLinkTransition -InstallationRoot $installation.InstallationRoot
 $previousObligation = $env:AEROLINK_PRODUCTION_OBLIGATION
 $obligation = $null
@@ -195,6 +213,7 @@ try {
             'product\scripts\AeroLinkNativeRunner.psm1',
             'product\scripts\AeroLinkBootstrap.psm1',
             'product\scripts\AeroLinkInstallation.psm1',
+            'product\scripts\AeroLinkProtectedConfig.psm1',
             'product\scripts\AeroLinkRuntimeIdentity.psm1',
             'product\scripts\AeroLinkProcessControl.psm1',
             'product\scripts\AeroLinkTransition.psm1',
@@ -219,6 +238,8 @@ if ($bootstrapResult.Action -eq 'Reentered') {
 # will put a public tunnel in front of this process.
 $sourceFingerprint = Get-AeroLinkSourceFingerprint -RepositoryRoot $repositoryRoot
 $instance = Get-AeroLinkInstanceConfig -ProductRoot $productRoot -Mode HomeCanonical -EnsureInstanceId
+$protectedGitLab = Get-AeroLinkProtectedGitLabDescriptor -InstallationRoot $installation.InstallationRoot
+$expectedGitLabConfigurationFingerprint = [string]$protectedGitLab.Fingerprint
 
 # Reaching this machine from another one takes two changes, not one, and the second is the one nobody expects.
 #
@@ -302,6 +323,7 @@ Write-Host "      Checking what is already on $url..." -ForegroundColor Cyan
 $disposition = Resolve-AeroLinkRuntimeDisposition -Port $endpoints.ApiPort -BaseUri $url `
     -ExpectedMode $launcherMode -ExpectedSourceIdentity $sourceFingerprint.Identity `
     -ExpectedInstanceId $instance.InstanceId -ExpectedClassification $instance.Classification `
+    -ExpectedGitLabConfigurationFingerprint $expectedGitLabConfigurationFingerprint `
     -OwnershipFragments @($apiProjectDirectory)
 if ($disposition.Disposition -eq 'Refuse') { throw $disposition.Detail }
 $reuseExisting = ($disposition.Disposition -eq 'Reuse')
@@ -424,10 +446,15 @@ else {
         Runtime__SourceIdentity  = $sourceFingerprint.Identity
         Runtime__Mode            = $launcherMode
         Runtime__SourceRoot      = $repositoryRoot
+        Runtime__GitLabConfigFingerprint = $expectedGitLabConfigurationFingerprint
         Runtime__MainCurrencyPath = Join-Path $productRoot '.local\main-currency.json'
         Instance__Label          = $instance.Label
         Instance__Classification = $instance.Classification
         Instance__InstanceId     = $instance.InstanceId
+    }
+    if ($protectedGitLab.Configured) {
+        $runtimeEnvironment['AEROLINK_PROTECTED_GITLAB_CONFIG_PATH'] = $protectedGitLab.Path
+        $runtimeEnvironment['AEROLINK_PROTECTED_GITLAB_INSTALLATION_ROOT'] = $installation.InstallationRoot
     }
     if ($endpoints.Qualification) { $runtimeEnvironment['ConnectionStrings__AeroLink'] = $endpoints.ConnectionString }
     if ($instance.SnapshotSourceLabel) { $runtimeEnvironment['Instance__SnapshotSourceLabel'] = $instance.SnapshotSourceLabel }
@@ -454,7 +481,7 @@ else {
         -ServiceName 'AeroLink' `
         -TimeoutSeconds (Get-AeroLinkTransitionBudget).ProductionApiReadinessSeconds `
         -Environment $runtimeEnvironment -OnStarted $grantApiAccess `
-        -TransitionReadiness @{ kind = 'api'; port = $endpoints.ApiPort; baseUri = $url; expectedMode = $launcherMode; expectedSourceIdentity = $sourceFingerprint.Identity
+        -TransitionReadiness @{ kind = 'api'; port = $endpoints.ApiPort; baseUri = $url; expectedMode = $launcherMode; expectedSourceIdentity = $sourceFingerprint.Identity; expectedGitLabConfigurationFingerprint = $expectedGitLabConfigurationFingerprint
             expectedInstanceId = $instance.InstanceId; expectedClassification = $instance.Classification } `
         -GrantOperatorAccessArguments @('--urls', $bindUrl)
     $newOwner = Get-AeroLinkPortOwner -Port $endpoints.ApiPort
@@ -464,7 +491,8 @@ else {
     }
     $newDisposition = Resolve-AeroLinkRuntimeDisposition -Port $endpoints.ApiPort -BaseUri $url -ExpectedMode $launcherMode `
         -ExpectedSourceIdentity $sourceFingerprint.Identity -ExpectedInstanceId $instance.InstanceId `
-        -ExpectedClassification $instance.Classification -OwnershipFragments @($apiProjectDirectory)
+        -ExpectedClassification $instance.Classification -ExpectedGitLabConfigurationFingerprint $expectedGitLabConfigurationFingerprint `
+        -OwnershipFragments @($apiProjectDirectory)
     if ($newDisposition.Disposition -ne 'Reuse' -or $newDisposition.ProcessId -ne $newOwner.ProcessId) { throw 'The new API did not prove the expected runtime/installation identity.' }
     if ($effectiveNotificationBaseUrl -and $demoConfig -and $effectiveNotificationBaseUrl -ieq $demoConfig.PublicUrl) {
         Set-AeroLinkRemoteDemoNotificationOriginProof -Config $demoConfig -ExpectedProcess $newOwner

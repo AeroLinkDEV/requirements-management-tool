@@ -729,6 +729,24 @@ controlled-evidence prerequisites. URL changes clear verification; a failed rech
 status while retaining the last-success audit. A concurrent configuration change prevents an older probe from
 overwriting the newer answer. Missing installation settings and remote failures remain explicitly unverified.
 
+For a Windows HOME installation, configure the runtime credential with the supported operator script rather than
+setting process or machine environment variables:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File product/scripts/Configure-AeroLinkProtectedGitLab.ps1 `
+  -ProductRoot 'C:\path\to\AeroLink\product' -BaseUrl 'https://gitlab.com'
+```
+
+The script prompts for the read-only token as a hidden secure value. Optional synthetic display IDs and the exact
+five-value DEC-131 scope can be supplied as non-secret arguments. The script stores an installation-bound DPAPI
+LocalMachine ciphertext outside the repository under the common application-data AeroLink protected-config root,
+with inheritance disabled and FullControl limited to the launcher account, SYSTEM and Administrators. The launcher
+and scheduled transition authority validate the installation binding, owner SID, schema, fingerprint and DACL before
+any transition. They decrypt only in the process that is about to create the API child; the token is absent from
+arguments, transition spool JSON, logs and receipts. A missing protected file leaves GitLab unconfigured. An
+existing malformed, undecryptable or ACL-invalid file fails closed. Restart HOME after changing the protected
+record; the non-secret fingerprint prevents an API with stale connector settings from being reused.
+
 Local handler/capture tests establish request and lifecycle behavior only. Actual service access requires an
 operator-authorized check against the configured installation and target; it must not be inferred from mocks.
 
