@@ -749,9 +749,27 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         modelBuilder.Entity<CertificationEvidenceIndexEntry>(b=>{b.ToTable("certification_evidence_index");b.HasKey(x=>x.Id);b.Property(x=>x.ObjectiveCode).HasMaxLength(80).IsRequired();b.Property(x=>x.ArtifactType).HasMaxLength(80).IsRequired();b.Property(x=>x.EvidenceHash).HasMaxLength(64).IsRequired();b.Property(x=>x.ClaimBoundary).HasMaxLength(2000).IsRequired();b.Property(x=>x.IndexedBy).HasMaxLength(100).IsRequired();b.HasIndex(x=>new{x.ProjectId,x.ObjectiveCode,x.ArtifactType,x.ArtifactId}).IsUnique();});
         modelBuilder.Entity<SoftwareRelease>(b =>
         {
-            b.ToTable("software_releases"); b.HasKey(x => x.Id);
+            b.ToTable("software_releases", tableBuilder =>
+            {
+                tableBuilder.HasTrigger("aerolink_release_picker_supplied_ins");
+                tableBuilder.HasTrigger("aerolink_release_picker_alloc_ins");
+                tableBuilder.HasTrigger("aerolink_release_picker_immutable_upd");
+                if (!Database.IsNpgsql()) tableBuilder.UseSqlReturningClause(false);
+            });
+            b.HasKey(x => x.Id);
             b.Property(x => x.Version).HasMaxLength(40).IsRequired();
             b.Property(x => x.CanonicalIdentity).HasMaxLength(40);
+            // The picker membership ordinal is allocated by the guarded insert trigger inside the shared
+            // project fence. Npgsql's convention would turn ValueGeneratedOnAdd into an identity column that
+            // allocates before the fence, so the strategy is explicitly disabled; SQLite disables RETURNING
+            // for this table so the AFTER-trigger allocation is read back with a follow-up query. Lifecycle
+            // saves never write the column.
+            var pickerOrdinal = b.Property(x => x.PickerInsertionOrdinal);
+            pickerOrdinal.ValueGeneratedOnAdd();
+            pickerOrdinal.Metadata.SetAfterSaveBehavior(Microsoft.EntityFrameworkCore.Metadata.PropertySaveBehavior.Ignore);
+            if (Database.IsNpgsql())
+                pickerOrdinal.Metadata.SetValueGenerationStrategy(
+                    Npgsql.EntityFrameworkCore.PostgreSQL.Metadata.NpgsqlValueGenerationStrategy.None);
             b.HasIndex(x => new { x.ProjectId, x.Version }).IsUnique();
             b.HasIndex(x => new { x.ProjectId, x.CanonicalIdentity }).IsUnique();
             b.HasIndex(x => new { x.ProjectId, x.Id }).IsUnique();

@@ -95,12 +95,16 @@ operator refreshes from page one; they cannot shift records between pages in an 
 cross-filter, or oversized cursors fail closed with `400`. The browser shows the total register size and loads
 additional records on request, while a direct document URL loads the current record independently of its page.
 
-Release relationship targets are an existing exception to the first-page snapshot guarantee: releases have
-no immutable creation timestamp. Their bounded database pages use canonical numeric build identity, retained
-historical text and a stable ID tie-breaker; a concurrently created build may appear after the current cursor,
-and a build inserted before it requires refreshing page one. [Issue #1040](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1040)
-tracks a genuine snapshot boundary. A Problem Report without a target build retains its Project link; an
-explicit target resolves only that exact authorized Project/build and never falls back to a different build.
+Release relationship targets honor the same first-page snapshot guarantee as other relationship targets.
+Candidate membership is frozen by a database-owned, project-fenced insertion watermark that records
+operational insertion order only — it is not a creation timestamp, not a controlled identity, and never
+orders or relabels builds. Pre-upgrade releases are the documented legacy cohort and stay selectable in
+canonical numeric build identity with retained historical text and the stable ID tie-breaker.
+Continuations carry the frozen cutoff and exclude builds committed later, whatever their sort position;
+restarting at page one re-establishes the boundary and shows newly committed builds. Old Release cursors
+without the cutoff fail closed with `400` and a start-again path. A Problem Report without a target build
+retains its Project link; an explicit target resolves only that exact authorized Project/build and never
+falls back to a different build.
 
 Production PostgreSQL indexes cover the Project/type/steward/register orders, document/state/revision heads,
 review assignee/state, check-in time, attachment revision/logical version, relationship revision/time, and event

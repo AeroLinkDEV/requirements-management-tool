@@ -121,7 +121,11 @@ await using (var scope = app.Services.CreateAsyncScope())
             throw new InvalidOperationException("The restored database has not completed the frozen review trace lookup upgrade.");
     }
     else if (db.Database.IsNpgsql()) await db.Database.MigrateAsync();
-    else await db.Database.EnsureCreatedAsync();
+    else
+    {
+        await db.Database.EnsureCreatedAsync();
+        await ReleasePickerSqliteGuard.EnsureInstalledAsync(db);
+    }
     if (!restoreValidationReadOnly && db.Database.IsNpgsql())
     {
         await scope.ServiceProvider.GetRequiredService<SoftwareVerificationCaseMigrationAuthority>().EnsureCompletedAsync();
