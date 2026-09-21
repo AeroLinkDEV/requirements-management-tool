@@ -395,6 +395,7 @@ function Resolve-AeroLinkRuntimeDisposition {
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$OwnershipFragments,
         [string]$ExpectedInstanceId,
         [string]$ExpectedClassification,
+        [string]$ExpectedGitLabConfigurationFingerprint,
         [scriptblock]$PortOwnerProbe,
         [scriptblock]$RuntimeProbe,
         [scriptblock]$ReadyProbe
@@ -432,6 +433,13 @@ function Resolve-AeroLinkRuntimeDisposition {
         $actual = if ($identity.PSObject.Properties['instance'] -and $identity.instance -and $identity.instance.PSObject.Properties[$binding.Property]) { [string]$identity.instance.($binding.Property) } else { '' }
         if (-not [string]::Equals($actual, $binding.Expected, [StringComparison]::OrdinalIgnoreCase)) {
             return [pscustomobject]@{ Disposition = 'Refuse'; ProcessId = $owner.ProcessId; Detail = "The AeroLink listener on port $Port does not prove the expected installation $($binding.Property). Nothing was stopped." }
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedGitLabConfigurationFingerprint)) {
+        $actualFingerprint = if ($identity.PSObject.Properties['gitLabConfigurationFingerprint']) { [string]$identity.gitLabConfigurationFingerprint } else { 'unconfigured' }
+        if (-not [string]::Equals($actualFingerprint, $ExpectedGitLabConfigurationFingerprint, [StringComparison]::OrdinalIgnoreCase)) {
+            return [pscustomobject]@{ Disposition = 'RestartStale'; ProcessId = $owner.ProcessId; Detail = 'The AeroLink process has a different protected GitLab configuration fingerprint, so the connector cannot be reused.' }
         }
     }
 

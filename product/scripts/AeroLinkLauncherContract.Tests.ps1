@@ -96,7 +96,7 @@ Assert-True ([bool]$launcherFilesBlock) 'The production launcher must declare th
 foreach ($module in @(
         'Start-AeroLinkProduction.ps1', 'AeroLinkPrerequisites.ps1', 'AeroLinkLaunch.ps1',
         'AeroLinkNativeRunner.psm1', 'AeroLinkBootstrap.psm1', 'AeroLinkInstallation.psm1',
-        'AeroLinkRuntimeIdentity.psm1', 'AeroLinkUpgrade.psm1',
+        'AeroLinkProtectedConfig.psm1', 'AeroLinkRuntimeIdentity.psm1', 'AeroLinkUpgrade.psm1',
         'AeroLinkProductionSource.psm1', 'AeroLinkRemoteDemo.psm1')) {
     Assert-True ($launcherFilesBlock -match [regex]::Escape($module)) `
         "The re-entry fingerprint omits $module, which is loaded before the source advance - an update to it would leave the old version driving the launch."

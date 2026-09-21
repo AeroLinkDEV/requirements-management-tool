@@ -958,6 +958,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/AeroLinkRuntimeIdentity.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Runtime-identity contract failed.' }
+      - name: Validate the protected GitLab configuration contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkProtectedConfig.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Protected GitLab configuration contract failed.' }
       - name: Validate the database upgrade-orchestration contract
         shell: powershell
         run: |

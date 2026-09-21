@@ -17,6 +17,7 @@
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkNativeRunner.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkInstallation.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkProtectedConfig.psm1') -Force
 
 function Test-HttpEndpoint {
     <#
@@ -149,22 +150,50 @@ function Start-AeroLinkService {
         Wait-HttpEndpoint -Uri $ReadyUri -ServiceName $ServiceName -TimeoutSeconds 30 -SuccessBelow $SuccessBelow
         return
     }
+    $protectedMarkerNames = @('AEROLINK_PROTECTED_GITLAB_CONFIG_PATH', 'AEROLINK_PROTECTED_GITLAB_INSTALLATION_ROOT')
+    $protectedRuntime = $null
+    $protectedConfigPath = if ($Environment -and $Environment.ContainsKey('AEROLINK_PROTECTED_GITLAB_CONFIG_PATH')) { [string]$Environment['AEROLINK_PROTECTED_GITLAB_CONFIG_PATH'] } else { '' }
+    $protectedInstallationRoot = if ($Environment -and $Environment.ContainsKey('AEROLINK_PROTECTED_GITLAB_INSTALLATION_ROOT')) { [string]$Environment['AEROLINK_PROTECTED_GITLAB_INSTALLATION_ROOT'] } else { '' }
+    if ($protectedConfigPath) {
+        $protectedRuntime = Get-AeroLinkProtectedGitLabRuntimeEnvironment -InstallationRoot $protectedInstallationRoot -ConfigPath $protectedConfigPath
+    }
+    $childEnvironment = @{}
     if ($Environment) {
         foreach ($entry in $Environment.GetEnumerator()) {
-            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
+            if ($entry.Key -in $protectedMarkerNames) { continue }
+            $childEnvironment[$entry.Key] = $entry.Value
         }
     }
-    $startedProcess = Start-Process -FilePath $FilePath `
-        -ArgumentList $ArgumentList `
-        -WorkingDirectory $WorkingDirectory `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $StandardOutput `
-        -RedirectStandardError $StandardError -PassThru
-    if ($OnStarted) {
-        try { & $OnStarted $startedProcess }
-        catch {
-            if (-not $startedProcess.HasExited) { $startedProcess.Kill(); $startedProcess.WaitForExit() }
-            throw
+    if ($protectedRuntime) {
+        foreach ($entry in $protectedRuntime.Environment.GetEnumerator()) { $childEnvironment[$entry.Key] = $entry.Value }
+    }
+    $previousEnvironment = @{}
+    $existingEnvironment = [Environment]::GetEnvironmentVariables([EnvironmentVariableTarget]::Process)
+    foreach ($entry in $childEnvironment.GetEnumerator()) {
+        $previousEnvironment[$entry.Key] = [pscustomobject]@{ Present = $existingEnvironment.Contains($entry.Key); Value = $existingEnvironment[$entry.Key] }
+        if ($null -eq $entry.Value) { [Environment]::SetEnvironmentVariable($entry.Key, $null, 'Process') }
+        else { [Environment]::SetEnvironmentVariable($entry.Key, [string]$entry.Value, 'Process') }
+    }
+    try {
+        $startedProcess = Start-Process -FilePath $FilePath `
+            -ArgumentList $ArgumentList `
+            -WorkingDirectory $WorkingDirectory `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $StandardOutput `
+            -RedirectStandardError $StandardError -PassThru
+        if ($OnStarted) {
+            try { & $OnStarted $startedProcess }
+            catch {
+                if (-not $startedProcess.HasExited) { $startedProcess.Kill(); $startedProcess.WaitForExit() }
+                throw
+            }
+        }
+    }
+    finally {
+        foreach ($entry in $previousEnvironment.GetEnumerator()) {
+            if (-not $entry.Value.Present) { [Environment]::SetEnvironmentVariable($entry.Key, $null, 'Process') }
+            elseif ($null -eq $entry.Value.Value) { [Environment]::SetEnvironmentVariable($entry.Key, $null, 'Process') }
+            else { [Environment]::SetEnvironmentVariable($entry.Key, [string]$entry.Value.Value, 'Process') }
         }
     }
     try {
