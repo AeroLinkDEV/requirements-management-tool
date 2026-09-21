@@ -37,6 +37,35 @@ public sealed class CodeRelationshipApiTests
     }
 
     [Fact]
+    public async Task Relationship_read_preserves_the_exact_target_owner_identity()
+    {
+        using var factory = Configure(new AeroLinkApiFactory(), new Remote(_ => new(HttpStatusCode.ServiceUnavailable)));
+        var data = await SeedAsync(factory.Services);
+        var ownerId = Guid.NewGuid();
+        var targetId = Guid.NewGuid();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var target = CodeRelationshipTarget.ForRequirementProposal(targetId, ownerId,
+                "LLR-000001.00 proposal in LLRCR-000002.00");
+            db.GitLabMergeRequestRelationships.Add(new GitLabMergeRequestRelationship(data.ProjectId, data.ReleaseId,
+                "https://gitlab.example", 17, 12, 1200, null, null, "group/project",
+                "https://gitlab.example/group/project/-/merge_requests/12", "Recorded proposal", target,
+                CodeRelationshipMeaning.Addresses, data.UserName, DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        using var client = factory.CreateClient();
+        await SignInAsync(client, data.UserName);
+        using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?releaseId={data.ReleaseId}");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var item = Assert.Single(json.RootElement.GetProperty("items").EnumerateArray());
+        Assert.Equal(targetId, item.GetProperty("targetIdentityId").GetGuid());
+        Assert.Equal(ownerId, item.GetProperty("targetOwnerIdentityId").GetGuid());
+    }
+
+    [Fact]
     public async Task Register_keeps_recorded_identity_when_remote_metadata_is_unavailable()
     {
         using var transport = new Remote(_ => new(HttpStatusCode.ServiceUnavailable));

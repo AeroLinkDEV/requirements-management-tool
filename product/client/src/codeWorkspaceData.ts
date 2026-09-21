@@ -6,7 +6,7 @@ export type MergeRequest = { iid: number; title: string; state: string; draft: b
   sourceBranch?: string; targetBranch?: string; mergeCommitSha?: string; squashMergeCommitSha?: string;
   mergedAt?: string; approvals?: { known: boolean; detail: string; approvedBy: { id: number; username: string; name: string }[] } }
 export type CodeRelationship = { id: string; relationshipKind: string; version: number; isActive: boolean;
-  targetKind: string; targetIdentityId: string; targetDisplaySnapshot: string; meaning: string;
+  targetKind: string; targetIdentityId: string; targetOwnerIdentityId?: string; targetDisplaySnapshot: string; meaning: string;
   sourceSnapshotId?: string; commitSha?: string; path?: string; startLine?: number; endLine?: number;
   mergeRequestIid?: number; recordedBy: string; recordedAt: string; withdrawalRationale?: string;
   mergeRequestUrlSnapshot?: string; mergeRequestTitleSnapshot?: string;

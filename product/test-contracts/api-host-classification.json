@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 155,
-    "tests": 980,
-    "knownCases": 1120,
+    "tests": 981,
+    "knownCases": 1121,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 60,
-      "tests": 365,
-      "knownCases": 429,
+      "tests": 366,
+      "knownCases": 430,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -488,8 +488,8 @@
     },
     {
       "cls": "CodeRelationshipApiTests",
-      "tests": 16,
-      "knownCases": 16,
+      "tests": 17,
+      "knownCases": 17,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",

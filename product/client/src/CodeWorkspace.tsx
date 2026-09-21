@@ -7,18 +7,20 @@ import CodeDemonstrationBanner from './CodeDemonstrationBanner'
 import CodeRelationshipList from './CodeRelationshipList'
 import { codeQuery, mergeRequestState, useCodeRead, type CodePage, type CodeRelationship, type InspectedMergeRequest,
   type MergeRequest, type MetadataObservation, type RegisteredMergeRequest, type TreeEntry, type TreePage } from './codeWorkspaceData'
+import type { ExactTraceArtifact } from './routing'
 import './RequirementsWorkspace.css'
 import './CodeWorkspace.css'
 
 export type CodeWorkspacePage = 'mergeRequests' | 'explorer'
 type Props = { api: string; projectId: string; releaseId: string; readOnly: boolean; page: CodeWorkspacePage;
-  onBack: () => void; onPage: (page: CodeWorkspacePage) => void }
+  onBack: () => void; onPage: (page: CodeWorkspacePage) => void;
+  traceArtifactHref?: (target: ExactTraceArtifact) => string | undefined }
 
 export default function CodeWorkspace(props: Props) {
   return <ScopedCodeWorkspace key={`${props.api}/${props.projectId}/${props.releaseId}/${props.page}`} {...props} />
 }
 
-function ScopedCodeWorkspace({ api, projectId, releaseId, readOnly, page, onBack, onPage }: Props) {
+function ScopedCodeWorkspace({ api, projectId, releaseId, readOnly, page, onBack, onPage, traceArtifactHref }: Props) {
   const [source, setSource] = useState<CodeSource>()
   const [supplement, setSupplement] = useState<CodeSourceSupplement>()
   const currentSource = source?.projectId === projectId && source.releaseId === releaseId ? source : undefined
@@ -38,9 +40,9 @@ function ScopedCodeWorkspace({ api, projectId, releaseId, readOnly, page, onBack
       key={`${projectId}/${releaseId}/${currentSource.demonstration.configurationId}/${currentSource.demonstration.configurationVersion}`}
       {...{ api, projectId }} binding={currentSource.demonstration} />}
     <CodeSourcePanel {...{ api, projectId, releaseId, readOnly }} onSource={setSource} onSupplement={setSupplement} />
-    {page === 'mergeRequests' ? <MergeRequestRegister {...{ api, projectId, releaseId }} readOnly={readOnly || !currentSource?.capabilities?.canSelect} />
+    {page === 'mergeRequests' ? <MergeRequestRegister {...{ api, projectId, releaseId, traceArtifactHref }} readOnly={readOnly || !currentSource?.capabilities?.canSelect} />
       : <SourceExplorer key={currentSource?.selectionEventId ?? `supplement-${supplement?.source.id ?? 'unselected'}`} {...{ api, projectId, releaseId }}
-        readOnly={readOnly || !currentSource?.capabilities?.canSelect} source={browseSource} />}
+        readOnly={readOnly || !currentSource?.capabilities?.canSelect} source={browseSource} traceArtifactHref={traceArtifactHref} />}
     <details className="codeEvidenceSection"><summary>Implementation evidence and build gate</summary>
       <CodeTraceabilityCenter {...{ api, projectId, releaseId, readOnly, onBack }} embedded />
     </details>
@@ -94,7 +96,7 @@ function MergeRequestStatus({ item }: { item?: MergeRequest }) {
   </span>
 }
 
-export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixedTarget, onLinked }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly'> & ArtifactLinkContext) {
+export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixedTarget, onLinked, traceArtifactHref }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly' | 'traceArtifactHref'> & ArtifactLinkContext) {
   const [linking, setLinking] = useState(false)
   const [mode, setMode] = useState<'linked' | 'discover'>('linked')
   const [page, setPage] = useState(1)
@@ -153,7 +155,7 @@ export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixe
         <a href={mr.webUrl} target="_blank" rel="noreferrer">Open in GitLab ↗</a>
         {!readOnly && <p><button ref={linkButton} onClick={() => setLinking(true)}>Link AeroLink artifact</button></p>}
       </> : !detail.loading && !remoteDetail.loading && <p>Current GitLab metadata is unknown. Retained relationships remain readable.</p>}
-      {mode === 'linked' && <CodeRelationshipList {...{ api, projectId, readOnly }} onChanged={() => setRefresh(value => value + 1)} items={[...(detail.value?.mergeRequests ?? []), ...(detail.value?.files ?? [])]} />}
+      {mode === 'linked' && <CodeRelationshipList {...{ api, projectId, readOnly, traceArtifactHref }} onChanged={() => setRefresh(value => value + 1)} items={[...(detail.value?.mergeRequests ?? []), ...(detail.value?.files ?? [])]} />}
     </ControlledArtifactInspector> : <ControlledArtifactInspectorEmpty title="merge request"
       description="Select a merge request to inspect GitLab metadata and recorded AeroLink relationships." />}>
       {loading ? <p role="status">Loading merge requests…</p> : <>
@@ -173,7 +175,7 @@ export function MergeRequestRegister({ api, projectId, releaseId, readOnly, fixe
   </section>
 }
 
-export function SourceExplorer({ api, projectId, releaseId, source, readOnly, fixedTarget, onLinked }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly'> & { source?: CodeSource } & ArtifactLinkContext) {
+export function SourceExplorer({ api, projectId, releaseId, source, readOnly, fixedTarget, onLinked, traceArtifactHref }: Pick<Props, 'api' | 'projectId' | 'releaseId' | 'readOnly' | 'traceArtifactHref'> & { source?: CodeSource } & ArtifactLinkContext) {
   const [linking, setLinking] = useState(false)
   const [linkedOnly, setLinkedOnly] = useState(false)
   const [filePage, setFilePage] = useState(1)
@@ -231,7 +233,7 @@ export function SourceExplorer({ api, projectId, releaseId, source, readOnly, fi
         target="_blank" rel="noreferrer">Open exact file in GitLab ↗</a></p>
       {!readOnly && selectedFileObserved && <button ref={linkButton} onClick={() => setLinking(true)}>Link AeroLink artifact</button>}
       {links.loading && <p>Loading recorded relationships…</p>}{links.error && <p role="alert">{links.error}</p>}
-      {links.value && <CodeRelationshipList {...{ api, projectId, readOnly }} onChanged={() => setRefresh(value => value + 1)} items={links.value.items} empty="No LLR link or other AeroLink relationship is recorded for this file." />}
+      {links.value && <CodeRelationshipList {...{ api, projectId, readOnly, traceArtifactHref }} onChanged={() => setRefresh(value => value + 1)} items={links.value.items} empty="No LLR link or other AeroLink relationship is recorded for this file." />}
       {links.value && links.value.total > 25 && <div className="codePagination">
         <button disabled={linkPage <= 1} onClick={() => setLinkPage(value => value - 1)}>Previous relationship page</button>
         <span>Page {linkPage} · {links.value.total} relationships</span>
