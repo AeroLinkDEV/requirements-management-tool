@@ -146,6 +146,7 @@ let manifestWritten = false
 async function writeManifest(page: Page) {
   if (manifestWritten || !evidenceDir) return
   manifestWritten = true
+  mkdirSync(evidenceDir, { recursive: true })
   const assets = await page.evaluate(() => ({
     stylesheets: [...document.querySelectorAll('link[rel="stylesheet"]')].map(l => l.getAttribute('href')),
     scripts: [...document.querySelectorAll('script[src]')].map(s => s.getAttribute('src')),
