@@ -239,10 +239,12 @@ public sealed class ReleasePickerMembershipApiTests
             var second = new SoftwareRelease(projectId, "1.1", false);
             db.AddRange(first, second);
             await db.SaveChangesAsync();
-            // The sequence is global across projects, so absolute values are environment-dependent; the
-            // contract is a positive, increasing, database-allocated value read back after the INSERT.
+            // The sequence is global across projects, so absolute values are environment-dependent, and EF's
+            // batch insert order is unspecified; the contract is distinct, positive, database-allocated
+            // values read back after the INSERT.
             Assert.True(first.PickerInsertionOrdinal is > 0);
-            Assert.True(second.PickerInsertionOrdinal > first.PickerInsertionOrdinal);
+            Assert.True(second.PickerInsertionOrdinal is > 0);
+            Assert.NotEqual(first.PickerInsertionOrdinal, second.PickerInsertionOrdinal);
             var ordinalAtInsert = second.PickerInsertionOrdinal;
 
             // Ordinary lifecycle save must not touch the membership ordinal.
