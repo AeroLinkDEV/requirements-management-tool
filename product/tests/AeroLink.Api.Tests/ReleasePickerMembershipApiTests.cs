@@ -239,26 +239,30 @@ public sealed class ReleasePickerMembershipApiTests
             var second = new SoftwareRelease(projectId, "1.1", false);
             db.AddRange(first, second);
             await db.SaveChangesAsync();
-            Assert.Equal(1, first.PickerInsertionOrdinal);   // read back from the database after INSERT
-            Assert.Equal(2, second.PickerInsertionOrdinal);
+            // The sequence is global across projects, so absolute values are environment-dependent; the
+            // contract is a positive, increasing, database-allocated value read back after the INSERT.
+            Assert.True(first.PickerInsertionOrdinal is > 0);
+            Assert.True(second.PickerInsertionOrdinal > first.PickerInsertionOrdinal);
+            var ordinalAtInsert = second.PickerInsertionOrdinal;
 
             // Ordinary lifecycle save must not touch the membership ordinal.
             second.MarkReleased(DateTimeOffset.UtcNow);
             await db.SaveChangesAsync();
-            Assert.Equal(2, second.PickerInsertionOrdinal);
+            Assert.Equal(ordinalAtInsert, second.PickerInsertionOrdinal);
 
             // A whole-entity update writes every mapped column yet still leaves the membership ordinal alone.
             var tracked = await db.Releases.SingleAsync(x => x.Id == second.Id);
             db.Update(tracked);
             await db.SaveChangesAsync();
             var afterWholeEntity = await db.Releases.AsNoTracking().SingleAsync(x => x.Id == second.Id);
-            Assert.Equal(2, afterWholeEntity.PickerInsertionOrdinal);
+            Assert.Equal(ordinalAtInsert, afterWholeEntity.PickerInsertionOrdinal);
         }
 
         // A failed save followed by a corrected retry allocates a fresh ordinal without harm.
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var before = await db.Releases.AsNoTracking().MaxAsync(x => x.PickerInsertionOrdinal);
             var conflicting = new SoftwareRelease(projectId, "1.1", false);
             db.Add(conflicting);
             await Assert.ThrowsAsync<AeroLink.Domain.Common.DomainException>(() => db.SaveChangesAsync());
@@ -267,7 +271,7 @@ public sealed class ReleasePickerMembershipApiTests
             var retry = new SoftwareRelease(projectId, "1.2", false);
             db.Add(retry);
             await db.SaveChangesAsync();
-            Assert.Equal(3, retry.PickerInsertionOrdinal);
+            Assert.True(retry.PickerInsertionOrdinal > before);
         }
     }
 }

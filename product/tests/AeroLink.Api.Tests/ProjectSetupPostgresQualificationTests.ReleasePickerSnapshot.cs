@@ -237,7 +237,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                     insert.CommandText = "INSERT INTO software_releases (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\") VALUES (@id, @p, '9.9', false) RETURNING \"PickerInsertionOrdinal\"";
                     insert.Parameters.AddWithValue("id", Guid.NewGuid());
                     insert.Parameters.AddWithValue("p", projectId);
-                    Assert.Equal(4L, await insert.ExecuteScalarAsync());
+                    Assert.True((long)(await insert.ExecuteScalarAsync())! > 2L, "late INSERT must allocate beyond the snapshot maximum");
                 }
                 await using (var commit = writerA.CreateCommand())
                 {
