@@ -10,75 +10,8 @@
    the one responsive surface that precedes that canvas, so release the legacy floor only while it is mounted. */
 body:has(.projectsPage) { min-width: 0; }
 
-.projectsTopBar {
-  height: 72px;
-  background: var(--navy-950);
-  color: white;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, .08), 0 9px 24px rgba(6, 21, 39, .1);
-}
-
-.projectsTopBarInner {
-  width: min(100%, 1600px);
-  height: 100%;
-  margin: 0 auto;
-  padding: 0 40px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  box-sizing: border-box;
-}
-
-.projectsBrand {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  font: 700 21px var(--font-display);
-  letter-spacing: .01em;
-}
-
-/* The logo glyph only. A bare element selector here also claimed the instance badge beside the wordmark and
-   beat it on specificity, so the badge rendered as a 23px accent-coloured heading. This file duplicates the
-   brand block from PortalHeader.css; both were corrected. */
-.projectsBrand > span[aria-hidden="true"] {
-  color: #70d8c9;
-  font-size: 23px;
-  transform: skewX(-10deg);
-}
-
-.projectsAccount {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-}
-
-.projectsAccount > div:not(.personAvatar) {
-  min-width: 135px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.projectsAccount b { font-size: 13px; }
-.projectsAccount small { color: #9fb0c6; font-size: 12px; }
-
-.projectsSecurity,
-.projectsSignOut {
-  min-height: 36px;
-  border: 1px solid #314764;
-  border-radius: 8px;
-  background: transparent;
-  color: #c9d5e3;
-  padding: 7px 11px;
-  font: 650 12px var(--font-body);
-  cursor: pointer;
-}
-
-.projectsSecurity { margin-right: 8px; }
-.projectsSignOut { margin-left: 4px; }
-.projectsSecurity:hover,
-.projectsSignOut:hover { border-color: #66809f; background: rgba(255, 255, 255, .06); color: white; }
-.projectsSecurity:focus-visible,
-.projectsSignOut:focus-visible { outline: 3px solid #74daca; outline-offset: 2px; }
+/* The shared header (top bar, brand, account, sign-out) is owned by PortalHeader.css since #1048/#1054 —
+   duplicating it here let stylesheet order decide which fix won. */
 
 .projectsMain {
   max-width: 1500px;
@@ -367,18 +300,11 @@ body:has(.projectsPage) { min-width: 0; }
 }
 
 @media (max-width: 820px) {
-  .projectsTopBarInner { padding: 0 24px; }
   .projectsMain { padding: 30px 24px 48px; }
   .projectsGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .projectsSecurity { display: none; }
 }
 
 @media (max-width: 560px) {
-  .projectsTopBar { height: auto; min-height: 68px; }
-  .projectsTopBarInner { padding: 11px 18px; }
-  .projectsAccount > div:not(.personAvatar) { display: none; }
-  .projectsBrand b { font-size: 18px; }
-  .projectsSignOut { padding-inline: 9px; }
   .projectsMain { padding: 26px 18px 42px; }
   .projectsMain > header h1 { font-size: 29px; }
   .projectsGrid { grid-template-columns: 1fr; }

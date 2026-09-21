@@ -1,5 +1,14 @@
+/*
+  Single owner of the shared portal header. ProjectsLanding.css used to duplicate this block, so a fix
+  in one file could be undone by stylesheet order; the duplicate is gone and page-specific Projects
+  rules live only in ProjectsLanding.css.
+
+  72px is the comfortable desktop baseline, not an invariant: the bar is content-sized below the
+  baseline, so a wrapped account name, an enlarged text setting, or an opened instance-badge disclosure
+  grows it in flow instead of overflowing it (#1048).
+*/
 .projectsTopBar {
-  height: 72px;
+  min-height: 72px;
   background: var(--navy-950);
   color: white;
   box-shadow: 0 1px 0 rgba(255, 255, 255, .08), 0 9px 24px rgba(6, 21, 39, .1);
@@ -7,19 +16,26 @@
 
 .projectsTopBarInner {
   width: min(100%, 1600px);
-  height: 100%;
+  min-height: 72px;
   margin: 0 auto;
   padding: 0 40px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  /* Deliberate reflow before collision: when the brand and account groups cannot share a row, the
+     account stacks below instead of overflowing the page (Checkpoint B, F01). */
+  flex-wrap: wrap;
+  row-gap: 8px;
   box-sizing: border-box;
 }
 
 .projectsBrand {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 11px;
+  min-width: 0;
   font: 700 21px var(--font-display);
   letter-spacing: .01em;
 }
@@ -28,8 +44,18 @@
    instance badge that now sits beside the wordmark, and beat it on specificity: the badge inherited a 23px
    display glyph size and the brand's accent colour, which looked like a heading rather than a chip. */
 .projectsBrand > span[aria-hidden="true"] { color: #70d8c9; font-size: 23px; transform: skewX(-10deg); }
+/* The account group keeps its default min-width:auto shrink floor: shrinking it below its content
+   minimum made the unshrinkable Sign out button overflow its own box (the measured 561px defect). The
+   wrapping badge absorbs narrow widths instead. */
 .projectsAccount { display: flex; align-items: center; gap: 11px; }
-.projectsAccount > div:not(.personAvatar) { min-width: 135px; display: flex; flex-direction: column; gap: 2px; }
+/* The name/role block shrinks and wraps instead of holding a 135px floor or disappearing at narrow
+   widths: account identity stays readable and reachable down to the narrowest portal width (#1048
+   H04 / #1054 P03), with Sign out always a reachable sibling. */
+.projectsAccount > div:not(.personAvatar) { min-width: min-content; display: flex; flex-direction: column; gap: 2px; }
+/* anywhere, with the row-wrap above as the first response to narrow widths: ordinary values keep their
+   word boundaries, and a genuinely unbroken name or role token still wraps instead of overflowing. */
+.projectsAccount b,
+.projectsAccount small { overflow-wrap: anywhere; }
 .projectsAccount b { font-size: 13px; }
 .projectsAccount small { color: #9fb0c6; font-size: 12px; }
 
@@ -43,6 +69,7 @@
   padding: 7px 11px;
   font: 650 12px var(--font-body);
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .projectsSecurity { margin-right: 8px; }
@@ -58,9 +85,10 @@
 }
 
 @media (max-width: 560px) {
-  .projectsTopBar { height: auto; min-height: 68px; }
+  .projectsTopBar { min-height: 68px; }
   .projectsTopBarInner { padding: 11px 18px; }
-  .projectsAccount > div:not(.personAvatar) { display: none; }
-  .projectsBrand b { font-size: 18px; }
+  /* The wordmark only. A descendant selector here also styled the opened disclosure's field headings
+     at wordmark size (Checkpoint B, F01). */
+  .projectsBrand > b { font-size: 18px; }
   .projectsSignOut { padding-inline: 9px; }
 }

@@ -5,11 +5,13 @@
   HOME CANONICAL is the one that carries weight, so it is the one given colour. A work-laptop or undeclared
   installation is deliberately plainer: it is the ordinary case, and colouring the ordinary case teaches
   people to ignore the colour.
+
+  #1048 moved the diagnostics out of a stacked column that overflowed the fixed header and out of a
+  hover-only tooltip: the closed chip is a one-row summary, and the supplied facts live in a native
+  details panel that keyboard, touch and mouse all open. Long declared labels wrap instead of being
+  pinned with nowrap — the chip grows or wraps in flow rather than overflowing its container.
 */
 .instanceBadge {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 7px;
   margin-left: 14px;
   padding: 4px 9px;
   border: 1px solid #314764;
@@ -23,9 +25,30 @@
   font: 650 12px var(--font-body);
   letter-spacing: .06em;
   text-transform: uppercase;
-  white-space: nowrap;
-  cursor: default;
+  min-width: 0;
+  /* A declared label may be arbitrarily long; the compact summary stays a compact chip and the label
+     wraps inside it instead of widening the header row (Checkpoint A, F02). */
+  max-width: min(260px, 100%);
 }
+
+.instanceBadge summary {
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  /* DEC-049's 24x24 minimum activation target: the summary is the whole tap and click area, so the
+     control itself — in BOTH dimensions, however short the declared label — carries the size. */
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.instanceBadge summary::-webkit-details-marker { display: none; }
+
+/* A declared label may contain unbroken tokens (no spaces, no hyphens). anywhere adds intra-word break
+   opportunities so the label can never escape the capped chip — ordinary words still wrap at their
+   boundaries first. It also collapses the flex child's min-content, which is what let a single long
+   token push past the badge box (Checkpoint B, F01). */
+.instanceBadge summary [data-testid="instance-label"] { overflow-wrap: anywhere; }
 
 .instanceBadge--homecanonical {
   border-color: #3f7f72;
@@ -33,24 +56,11 @@
   color: #9fe4d8;
 }
 
-.instanceBadge--currency {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  max-width: calc(100% - 16px);
-  white-space: normal;
-}
-
 .instanceBadgeCurrency {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   font-weight: 500;
   letter-spacing: normal;
   text-transform: none;
 }
-
-.instanceBadgeCheckAge { color: #9fb0c6; }
 
 .instanceBadgeSnapshot {
   font-style: normal;
@@ -60,20 +70,51 @@
   color: #9fb0c6;
 }
 
+/* The disclosure panel renders in flow: opening it grows the header or the sidebar instead of floating
+   over page content. Facts the server does not supply are absent, and every value wraps — a full-length
+   SHA or a long declared name must never force the surface wider. */
+.instanceBadgePanel {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid #314764;
+  border-radius: 6px;
+  background: var(--navy-950);
+  box-shadow: 0 9px 24px rgba(6, 21, 39, .25);
+  display: grid;
+  gap: 4px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 500;
+  width: max-content;
+  max-width: min(340px, 100%);
+}
+
+/* Each fact flows inline so the value uses the panel's full width: a squeezed flex row broke long values
+   mid-word. overflow-wrap anywhere remains only for genuinely unbreakable tokens such as a full SHA. */
+.instanceBadgePanel > div { line-height: 1.45; }
+
+.instanceBadgePanel b {
+  color: #9fb0c6;
+  font-weight: 650;
+  margin-right: 6px;
+}
+
+.instanceBadgePanel span { overflow-wrap: anywhere; }
+
 @media (max-width: 820px) {
   .instanceBadgeSnapshot { display: none; }
 }
 
 /* The workspace sidebar is a fixed narrow column, so the snapshot suffix is dropped there regardless of
-   viewport width: with it the badge measured 262px against a 160px column and the age was clipped
-   mid-word. The label alone still answers the question the badge exists for, and the tooltip still carries
-   the age for anyone who wants it. */
+   viewport width: the summary row stays one quiet line, and the disclosure still carries the age for
+   anyone who wants it. */
 .brand .instanceBadgeSnapshot { display: none; }
 
-/* At 12px the label alone measured 140px starting 24px in, which is 164px against a 160px column: clipped by
-   four pixels. Measured in a browser against the built stylesheet, not reasoned about — the earlier version
-   of this badge shipped at 23px because a DOM harness said it was fine. Tightening the gutter and the
-   tracking here keeps the readability floor and the column both intact. */
+/* The sidebar column is measured from the live cascade (280px, then 250px, then stacked below 760px), so
+   the panel sizes to the column rather than assuming one width. */
+.brand .instanceBadgePanel { max-width: min(232px, 100%); }
+
+/* Tightened gutter and tracking keep the readability floor and the narrow column both intact. */
 .brand .instanceBadge {
   margin-left: 8px;
   padding: 3px 6px;
@@ -81,6 +122,5 @@
 }
 
 @media (max-width: 560px) {
-  /* The label alone still answers the question the badge exists for. */
   .instanceBadge { margin-left: 9px; padding: 3px 7px; letter-spacing: .04em; }
 }

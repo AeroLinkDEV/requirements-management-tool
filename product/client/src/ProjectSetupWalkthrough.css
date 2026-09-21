@@ -1,3 +1,8 @@
+/* The setup walkthrough is a portal surface like Projects and Software Builds: release the legacy 960px
+   body floor only while it is mounted (#1054). The controlled workspace and the administration centers
+   keep their own width policy; this exemption stops applying the moment a workspace page mounts. */
+body:has(.projectSetupPage) { min-width: 0; }
+
 .projectSetupPage {
   min-height: 100vh;
   background: var(--canvas);
