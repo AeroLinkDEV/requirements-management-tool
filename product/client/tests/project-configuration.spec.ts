@@ -45,7 +45,10 @@ test('Project configuration exposes the effective ladder, history, and nested ap
   await expect(page.getByRole('columnheader', { name: 'When' })).toBeVisible()
   await expect(page.getByText('Keep the empty project at the approved HLR boundary')).toBeVisible()
   await expect(page.getByText('Activated the new project ladder before first project content.')).toBeVisible()
-  await page.locator('details').first().locator('summary').click()
+  // The instance badge in the shared header is itself a details element now, so the history row's
+  // snapshot disclosure is addressed inside its own row rather than as the page's first details.
+  await page.getByRole('row').filter({ hasText: 'Keep the empty project at the approved HLR boundary' })
+    .locator('details').locator('summary').click()
   // Scope the canonical snapshot assertion to the edited revision; older history can contain the same
   // edge and Playwright's substring locator would otherwise match both expanded code blocks.
   await expect(page.getByRole('row').filter({ hasText: 'Keep the empty project at the approved HLR boundary' })

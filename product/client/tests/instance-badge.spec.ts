@@ -206,13 +206,15 @@ test('the Source row shows the full supplied SHA, falls back to the short form, 
       }),
     }))
     await page.goto('/')
-    // An authenticated session from an earlier case goes straight to Projects; a first visit signs in.
-    const username = page.getByLabel('Username')
-    if (await username.isVisible().catch(() => false)) {
-      await username.fill('admin')
+    // Either the login form or an already-authenticated portal must be up before acting; skipping the
+    // wait raced the app boot on slower runners and left the badge unrendered (CI shard failure).
+    await expect(page.getByLabel('Username').or(page.getByRole('button', { name: 'Sign out' }))).toBeVisible()
+    if (await page.getByLabel('Username').isVisible()) {
+      await page.getByLabel('Username').fill('admin')
       await page.getByLabel('Password').fill('AeroLink!2026')
       await page.getByRole('button', { name: /Sign in securely/ }).click()
     }
+    await expect(page.getByRole('heading', { name: /Create your first program|Projects/ })).toBeVisible()
     const badge = page.getByTestId('instance-badge')
     await expect(badge).toBeVisible()
     await badge.locator('summary').click()

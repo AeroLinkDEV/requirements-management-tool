@@ -479,12 +479,14 @@ for (const fixture of externalFixtures) {
     expect(projection.records.some((record) => record.sourceIdentifier.length > 0)).toBeTruthy();
     expect(JSON.stringify(projection)).not.toContain("StorageKey");
     if (fixture.name === "ReqIF root-only") {
-      const facts = page.locator("details").first();
+      // The instance badge in the shared header is a details element now; the source-facts disclosure
+      // lives inside <main>, so scope there — the header badge sits in the banner outside main.
+      const facts = page.locator("main details").first();
       await facts.locator("summary").click();
       await expect(facts).toContainText("The system shall retain the ReqIF source fact.");
     }
     if (fixture.name === "CSV") {
-      const facts = page.locator("details").first();
+      const facts = page.locator("main details").first();
       await facts.locator("summary").click();
       await expect(facts).toContainText("CSV source statement");
     }
