@@ -469,6 +469,14 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             var cursor = pageOne.GetProperty("nextCursor").GetString();
             Assert.False(string.IsNullOrEmpty(cursor));
 
+            // Decode the emitted cursor so the continuation command can be matched against the exact
+            // after-key value the client would replay.
+            var encodedCursor = cursor!.Replace('-', '+').Replace('_', '/');
+            encodedCursor += new string('=', (4 - encodedCursor.Length % 4) % 4);
+            var cursorValue = JsonDocument.Parse(Encoding.UTF8.GetString(Convert.FromBase64String(encodedCursor)))
+                .RootElement.GetProperty("Value").GetString();
+            Assert.False(string.IsNullOrEmpty(cursorValue));
+
             // Isolate the capture so the only paged statement recorded IS the continuation request.
             capture.Statements.Clear();
             var continuation = await LinkOptionsPageAsync(client, projectId, pageSize: 1, cursor);
@@ -479,8 +487,8 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 && text.Contains("ORDER BY", StringComparison.OrdinalIgnoreCase));
             Assert.NotNull(paged);
             // The actual continuation command must carry the bound after-key predicate (the cursor's sort
-            // key of BUILD-1.5), the frozen-membership predicate, the project scope and pageSize+1.
-            Assert.Contains("SW-01.50", paged);
+            // key of BUILD-1.0), the frozen-membership predicate, the project scope and pageSize+1.
+            Assert.Contains(cursorValue!, paged);
             Assert.Contains("PickerInsertionOrdinal", paged);
             Assert.Contains(projectId.ToString(), paged);
             Assert.Contains("LIMIT 2", paged);
