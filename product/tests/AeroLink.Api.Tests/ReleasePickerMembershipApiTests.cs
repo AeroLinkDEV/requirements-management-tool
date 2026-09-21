@@ -193,14 +193,16 @@ public sealed class ReleasePickerMembershipApiTests
             await db.SaveChangesAsync();
         }
 
-        // Pre-validation historical rows: 40-character multi-byte labels, no canonical identity. Their
-        // fallback SortKey repeats the label twice, producing the largest legitimate cursor payloads.
-        var historicalLabel = new string('é', 40);
+        // Pre-validation historical rows: two DISTINCT 40-character multi-byte labels (the mapped
+        // PostgreSQL limit), no canonical identity. Their fallback SortKey repeats the label twice,
+        // producing the largest legitimate cursor payloads.
+        var historicalLabel = new string('é', 39);
         await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(factory.ConnectionString))
         {
             await connection.OpenAsync();
             foreach (var version in new[] { historicalLabel + "1", historicalLabel + "2" })
             {
+                Assert.Equal(40, version.Length);
                 await using var command = connection.CreateCommand();
                 command.CommandText = "INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\") VALUES ($id, $p, $v, 1)";
                 command.Parameters.AddWithValue("$id", Guid.NewGuid());
@@ -211,11 +213,13 @@ public sealed class ReleasePickerMembershipApiTests
         }
 
         // Page one ends with the FIRST historical label, so the emitted cursor must carry its large
-        // fallback sort key and still be accepted within the 4096-character bound.
+        // fallback sort key and still be accepted within the 4096-character bound — while remaining
+        // larger than the retired 640-character cap, which is the regression this guards.
         var pageOne = await PageAsync(client, projectId, pageSize: 2);
         Assert.Equal(["BUILD-1.0", $"BUILD-{historicalLabel}1"], DisplayNumbers(pageOne));
         Assert.True(pageOne.GetProperty("hasMore").GetBoolean());
         var cursor = pageOne.GetProperty("nextCursor").GetString()!;
+        Assert.True(cursor.Length > 640, $"emitted cursor was only {cursor.Length} characters");
         Assert.True(cursor.Length <= 4096, $"emitted cursor was {cursor.Length} characters");
 
         var encoded = cursor.Replace('-', '+').Replace('_', '/');

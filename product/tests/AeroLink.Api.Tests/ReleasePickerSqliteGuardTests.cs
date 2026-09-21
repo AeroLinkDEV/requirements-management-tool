@@ -68,23 +68,31 @@ public sealed class ReleasePickerSqliteGuardTests : IDisposable
             ordinalCheck.CommandText = $"SELECT \"PickerInsertionOrdinal\" FROM \"software_releases\" WHERE \"Id\" = '{allocatedId}'";
             Assert.Equal(allocatedOrdinal, await ordinalCheck.ExecuteScalarAsync());
 
-            async Task AssertRejectedAsync(string sql)
+            async Task AssertRejectedAsync(string sql, string expectedMessageFragment)
             {
                 await using var command = connection.CreateCommand();
                 command.CommandText = sql;
-                var rejected = false;
+                var message = (string?)null;
                 try { await command.ExecuteNonQueryAsync(); }
-                catch (SqliteException) { rejected = true; }
-                Assert.True(rejected, "expected the installed guard to reject: " + sql);
+                catch (SqliteException ex) { message = ex.Message; }
+                Assert.True(message is not null, "expected the installed guard to reject: " + sql);
+                Assert.Contains(expectedMessageFragment, message);
             }
 
-            await AssertRejectedAsync($"INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\", \"PickerInsertionOrdinal\") VALUES ('{Guid.NewGuid()}', '{projectId}', '7.7', 0, 42)");
-            await AssertRejectedAsync($"INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\", \"PickerLegacyCohort\") VALUES ('{Guid.NewGuid()}', '{projectId}', '7.8', 0, 1)");
-            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerInsertionOrdinal\" = 999 WHERE \"Id\" = '{legacyId}'");
-            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerInsertionOrdinal\" = {allocatedOrdinal + 1} WHERE \"Id\" = '{allocatedId}'");
-            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerInsertionOrdinal\" = NULL WHERE \"Id\" = '{allocatedId}'");
-            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerLegacyCohort\" = 0 WHERE \"Id\" = '{legacyId}'");
-            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerLegacyCohort\" = 1 WHERE \"Id\" = '{allocatedId}'");
+            await AssertRejectedAsync($"INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\", \"PickerInsertionOrdinal\") VALUES ('{Guid.NewGuid()}', '{projectId}', '7.7', 0, 42)",
+                "picker insertion ordinal and cohort flag are database-owned");
+            await AssertRejectedAsync($"INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\", \"PickerLegacyCohort\") VALUES ('{Guid.NewGuid()}', '{projectId}', '7.8', 0, 1)",
+                "picker insertion ordinal and cohort flag are database-owned");
+            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerInsertionOrdinal\" = 999 WHERE \"Id\" = '{legacyId}'",
+                "picker insertion membership is immutable");
+            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerInsertionOrdinal\" = {allocatedOrdinal + 1} WHERE \"Id\" = '{allocatedId}'",
+                "picker insertion membership is immutable");
+            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerInsertionOrdinal\" = NULL WHERE \"Id\" = '{allocatedId}'",
+                "picker insertion membership is immutable");
+            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerLegacyCohort\" = 0 WHERE \"Id\" = '{legacyId}'",
+                "picker insertion membership is immutable");
+            await AssertRejectedAsync($"UPDATE \"software_releases\" SET \"PickerLegacyCohort\" = 1 WHERE \"Id\" = '{allocatedId}'",
+                "picker insertion membership is immutable");
 
             // Ordinary lifecycle mutation remains valid on both rows.
             await using var allowed = connection.CreateCommand();

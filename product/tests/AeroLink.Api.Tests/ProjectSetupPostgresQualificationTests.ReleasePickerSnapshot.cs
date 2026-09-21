@@ -76,7 +76,11 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         await command.ExecuteNonQueryAsync();
     }
 
-    /// <summary>Serializes every column of every row so pre/post-migration byte preservation is comparable.</summary>
+    /// <summary>
+    /// Serializes rows losslessly for byte-preservation comparison: typed renderings (base64 for byte
+    /// arrays, UTC ticks for moments, invariant culture for numbers) rather than ToString(), whose
+    /// byte-array type names and culture-sensitive formatting are not preservation evidence.
+    /// </summary>
     private static async Task<string> CaptureTableRowsAsync(string connection, string table)
     {
         await using var c = new NpgsqlConnection(connection);
@@ -108,17 +112,26 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             for (var field = 0; field < reader.FieldCount; field++)
             {
                 rows.Append(reader.GetName(field)).Append('=');
-                rows.Append(reader.IsDBNull(field)
-                    ? "<null>"
-                    : reader.GetFieldType(field) == typeof(DateTimeOffset)
-                        ? reader.GetFieldValue<DateTimeOffset>(field).ToString("O")
-                        : reader.GetValue(field).ToString()?.Replace("|", "\\|"));
+                rows.Append(RenderValue(reader.IsDBNull(field) ? DBNull.Value : reader.GetValue(field)));
                 rows.Append('|');
             }
             rows.Append(';');
         }
         return rows.ToString();
     }
+
+    private static string RenderValue(object value) => value switch
+    {
+        DBNull => "<null>",
+        byte[] bytes => "b64:" + Convert.ToBase64String(bytes),
+        Guid guid => "G:" + guid.ToString("D"),
+        bool flag => "B:" + (flag ? "1" : "0"),
+        DateTimeOffset moment => "T:" + moment.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        DateTime moment => "D:" + moment.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        System.IFormattable number => "N:" + number.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+        string text => "S:" + text.Replace("|", "\\|").Replace(";", "\\;").Replace("\r", "\\r").Replace("\n", "\\n"),
+        _ => "O:" + value
+    };
 
     private static async Task<long> ScalarAsync(string connection, string sql, Action<NpgsqlParameterCollection>? bind = null)
     {
@@ -212,6 +225,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             // software build (provenance) bound to the released successor. No SoftwareRelease is added
             // through EF here, so the save-time validator never queries the not-yet-existing column.
             Guid baselineId;
+            Guid buildId;
             await using (var oldSchema = new AeroLinkDbContext(
                 new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options))
             {
@@ -226,9 +240,46 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 oldSchema.Add(baseline);
                 await oldSchema.SaveChangesAsync();
                 baselineId = baseline.Id;
-                oldSchema.Add(new AeroLink.Domain.Programs.SoftwareBuild(project.Id, releaseId, baselineId,
-                    "SW-02.00", "Upgrade preservation provenance build.", "picker.upgrade", DateTimeOffset.UtcNow));
+                var build = new AeroLink.Domain.Programs.SoftwareBuild(project.Id, releaseId, baselineId,
+                    "SW-02.00", "Upgrade preservation provenance build.", "picker.upgrade", DateTimeOffset.UtcNow);
+                oldSchema.Add(build);
                 await oldSchema.SaveChangesAsync();
+                buildId = build.Id;
+
+                // Representative stored manifest/signature evidence: a completed release campaign bound to
+                // the release, baseline and build, carrying the release manifest hash and an authorized
+                // approval signature. The campaign is created through the domain constructor; the completed
+                // release state is stamped directly because this fixture emulates an upgraded database.
+                var campaign = new AeroLink.Domain.Releases.ReleaseCampaign(project.Id, releaseId, baselineId,
+                    "Upgrade preservation campaign", "picker.upgrade", DateTimeOffset.UtcNow);
+                oldSchema.Add(campaign);
+                await oldSchema.SaveChangesAsync();
+                await using (var evidence = new NpgsqlConnection(connection))
+                {
+                    await evidence.OpenAsync();
+                    await using var complete = evidence.CreateCommand();
+                    complete.CommandText = """
+                        UPDATE release_campaigns
+                        SET "State" = 'Released', "ReleaseHash" = @hash, "ReleasedAt" = @at::timestamptz,
+                            "SoftwareBuildId" = @build, "UpdatedAt" = @at::timestamptz
+                        WHERE "Id" = @id
+                        """;
+                    complete.Parameters.AddWithValue("hash", Convert.ToHexString(
+                        System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes("upgrade-preservation-manifest"))).ToLowerInvariant());
+                    complete.Parameters.AddWithValue("at", DateTimeOffset.UtcNow);
+                    complete.Parameters.AddWithValue("build", buildId);
+                    complete.Parameters.AddWithValue("id", campaign.Id);
+                    await complete.ExecuteNonQueryAsync();
+                    await using var approval = evidence.CreateCommand();
+                    approval.CommandText = """
+                        INSERT INTO release_approvals ("Id", "CampaignId", "Cycle", "Position", "ApproverId", "ApproverName", "State", "ApprovedAt")
+                        VALUES (@id, @campaign, 1, 0, 'picker.upgrade.approver', 'Picker Upgrade Approver', 'Approved', @at::timestamptz)
+                        """;
+                    approval.Parameters.AddWithValue("id", Guid.NewGuid());
+                    approval.Parameters.AddWithValue("campaign", campaign.Id);
+                    approval.Parameters.AddWithValue("at", DateTimeOffset.UtcNow);
+                    await approval.ExecuteNonQueryAsync();
+                }
             }
 
             // Capture preservation evidence BEFORE the new migration is applied. The release projection is
@@ -236,6 +287,12 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             var releasesBefore = await CaptureReleaseRowsAsync(connection);
             var baselinesBefore = await CaptureTableRowsAsync(connection, "candidate_baselines");
             var buildsBefore = await CaptureTableRowsAsync(connection, "software_builds");
+            var campaignsBefore = await CaptureTableRowsAsync(connection, "release_campaigns");
+            var approvalsBefore = await CaptureTableRowsAsync(connection, "release_approvals");
+            Assert.Equal(1L, await ScalarAsync(connection,
+                "SELECT COUNT(*) FROM release_campaigns WHERE \"ReleaseHash\" IS NOT NULL AND length(\"ReleaseHash\") = 64 AND \"ReleasedAt\" IS NOT NULL"));
+            Assert.Equal(1L, await ScalarAsync(connection,
+                "SELECT COUNT(*) FROM release_approvals WHERE \"State\" = 'Approved' AND \"ApprovedAt\" IS NOT NULL"));
 
             // Apply the new migration; reapplication must be a no-op.
             await using (var upgrade = new AeroLinkDbContext(
@@ -247,10 +304,13 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 Assert.Empty(await upgrade.Database.GetPendingMigrationsAsync());
             }
 
-            // Preservation: identical rows, and every pre-existing release is the legacy cohort (NULL ordinal).
+            // Preservation: identical rows (lossless rendering), and every pre-existing release is the
+            // legacy cohort (NULL ordinal).
             Assert.Equal(releasesBefore, await CaptureReleaseRowsAsync(connection));
             Assert.Equal(baselinesBefore, await CaptureTableRowsAsync(connection, "candidate_baselines"));
             Assert.Equal(buildsBefore, await CaptureTableRowsAsync(connection, "software_builds"));
+            Assert.Equal(campaignsBefore, await CaptureTableRowsAsync(connection, "release_campaigns"));
+            Assert.Equal(approvalsBefore, await CaptureTableRowsAsync(connection, "release_approvals"));
             Assert.Equal(0L, await ScalarAsync(connection,
                 "SELECT COUNT(\"PickerInsertionOrdinal\") FROM software_releases"));
             Assert.Equal(3L, await ScalarAsync(connection, "SELECT COUNT(*) FROM software_releases"));
@@ -316,24 +376,29 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             Assert.Equal(0L, await ScalarAsync(connection,
                 "SELECT COUNT(\"PickerInsertionOrdinal\") FROM software_releases WHERE \"Version\" = '0.5'"));
 
-            async Task AssertRejectedAsync(string sql)
+            async Task AssertRejectedAsync(string sql, string expectedMessageFragment)
             {
                 await using var c = new NpgsqlConnection(connection);
                 await c.OpenAsync();
                 await using var command = c.CreateCommand();
                 command.CommandText = sql;
-                var rejected = false;
+                var message = (string?)null;
                 try { await command.ExecuteNonQueryAsync(); }
-                catch (PostgresException) { rejected = true; }
-                Assert.True(rejected, "expected the database guard to reject: " + sql);
+                catch (PostgresException ex) { message = ex.MessageText; }
+                Assert.True(message is not null, "expected the database guard to reject: " + sql);
+                Assert.Contains(expectedMessageFragment, message);
             }
 
             var legacyRow = "SELECT \"Id\" FROM software_releases WHERE \"Version\" = '0.5'";
             var allocatedRow = "SELECT \"Id\" FROM software_releases WHERE \"Version\" = '1.0'";
-            await AssertRejectedAsync($"INSERT INTO software_releases (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\", \"PickerInsertionOrdinal\") VALUES ('{Guid.NewGuid()}', '{projectId}', '7.7', false, 42)");
-            await AssertRejectedAsync($"UPDATE software_releases SET \"PickerInsertionOrdinal\" = 999 WHERE \"Id\" = ({legacyRow})");
-            await AssertRejectedAsync($"UPDATE software_releases SET \"PickerInsertionOrdinal\" = 999 WHERE \"Id\" = ({allocatedRow})");
-            await AssertRejectedAsync($"UPDATE software_releases SET \"PickerInsertionOrdinal\" = NULL WHERE \"Id\" = ({allocatedRow})");
+            await AssertRejectedAsync($"INSERT INTO software_releases (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\", \"PickerInsertionOrdinal\") VALUES ('{Guid.NewGuid()}', '{projectId}', '7.7', false, 42)",
+                "picker insertion ordinal is database-allocated");
+            await AssertRejectedAsync($"UPDATE software_releases SET \"PickerInsertionOrdinal\" = 999 WHERE \"Id\" = ({legacyRow})",
+                "picker insertion membership is immutable");
+            await AssertRejectedAsync($"UPDATE software_releases SET \"PickerInsertionOrdinal\" = 999 WHERE \"Id\" = ({allocatedRow})",
+                "picker insertion membership is immutable");
+            await AssertRejectedAsync($"UPDATE software_releases SET \"PickerInsertionOrdinal\" = NULL WHERE \"Id\" = ({allocatedRow})",
+                "picker insertion membership is immutable");
 
             // Ordinary lifecycle mutation remains valid and the legacy cohort keeps its NULL membership.
             await InsertRawReleaseAsync(connection, projectId, "1.2", isReleased: true);
@@ -390,26 +455,56 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             var client = factory.CreateClient();
             await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
             var projectId = await SeedPickerProjectAsync(factory, "PICKERSQL");
-            var pageOne = await LinkOptionsPageAsync(client, projectId, pageSize: 1);
-            await LinkOptionsPageAsync(client, projectId, pageSize: 1, pageOne.GetProperty("nextCursor").GetString());
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                db.AddRange(new SoftwareRelease(projectId, "1.5", false), new SoftwareRelease(projectId, "2.0", true));
+                await db.SaveChangesAsync();
+            }
 
-            // The paged membership statement IS the endpoint's actual command: entity projection, computed
-            // canonical keyset, the frozen-membership predicate, and Take(pageSize+1) — with parameters
-            // inlined so the EXPLAIN below runs the exact executed text.
+            // Page one over a representative nonterminal set: its cursor binds the continuation.
+            var pageOne = await LinkOptionsPageAsync(client, projectId, pageSize: 1);
+            Assert.Equal(["BUILD-1.0"], DisplayNumbers(pageOne));
+            Assert.True(pageOne.GetProperty("hasMore").GetBoolean());
+            var cursor = pageOne.GetProperty("nextCursor").GetString();
+            Assert.False(string.IsNullOrEmpty(cursor));
+
+            // Isolate the capture so the only paged statement recorded IS the continuation request.
+            capture.Statements.Clear();
+            var continuation = await LinkOptionsPageAsync(client, projectId, pageSize: 1, cursor);
+            Assert.Equal(["BUILD-1.5"], DisplayNumbers(continuation));
+
             var paged = capture.Statements.FirstOrDefault(text =>
                 text.Contains("PickerInsertionOrdinal", StringComparison.Ordinal)
                 && text.Contains("ORDER BY", StringComparison.OrdinalIgnoreCase));
             Assert.NotNull(paged);
+            // The actual continuation command must carry the bound after-key predicate (the cursor's sort
+            // key of BUILD-1.5), the frozen-membership predicate, the project scope and pageSize+1.
+            Assert.Contains("SW-01.50", paged);
+            Assert.Contains("PickerInsertionOrdinal", paged);
+            Assert.Contains(projectId.ToString(), paged);
+            Assert.Contains("LIMIT 2", paged);
             Console.WriteLine("PICKER_SQL_PAGED: " + paged);
-            Assert.True(paged!.Length <= 16_000, "unexpectedly large generated command");
 
             await using var explain = new NpgsqlConnection(connection);
             await explain.OpenAsync();
             await using var command = explain.CreateCommand();
             command.CommandText = "EXPLAIN (ANALYZE ON, COSTS ON, TIMING OFF) " + paged;
-            await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-                Console.WriteLine("PICKER_PLAN: " + reader.GetString(0));
+            var plan = new StringBuilder();
+            await using (var reader = await command.ExecuteReaderAsync())
+            {
+                while (await reader.ReadAsync())
+                {
+                    plan.AppendLine(reader.GetString(0));
+                    Console.WriteLine("PICKER_PLAN: " + reader.GetString(0));
+                }
+            }
+
+            // Retain the complete multiline SQL and plan when an evidence directory is supplied.
+            var evidencePath = Environment.GetEnvironmentVariable("AEROLINK_PICKER_SQL_EVIDENCE");
+            if (evidencePath is not null)
+                await File.WriteAllTextAsync(Path.Combine(evidencePath, "picker-continuation-sql-plan.txt"),
+                    paged + Environment.NewLine + Environment.NewLine + plan.ToString(), CancellationToken.None);
         });
     }
 
