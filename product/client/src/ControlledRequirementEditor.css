@@ -375,18 +375,24 @@ html .approvedWording > small {
   font-weight: 700;
 }
 
-/* Scoped to the controlled requirement/procedure editor, which is the surface this was written for.
-   Unscoped, `.richEditor { … !important }` reached every rich editor in the product: `.richEditor` is
+/* No font of its own. A requirement or procedure is authored in the same body face as every other
+   field in the product, which is the decision this settles.
+
+   The history is worth keeping, because the rule caused real damage twice over. It was
+   `.richEditor { font: 400 13px/1.55 Consolas, monospace !important }` with no scope: `.richEditor` is
    RichContent.css's shared class and the client builds one stylesheet (vite.config.ts
-   `cssCodeSplit: false`). The `font` shorthand sets the family on the container, so a Problem Report's
-   field label, hint and typed text all inherited Consolas — a monospace editor on a surface that is
-   DM Sans everywhere else. Whether this editor should keep Consolas at all is a separate product
-   decision; scoping settles the leak without prejudging it, and these two surfaces render exactly as
-   they did before. `!important` is no longer needed — the container-scoped selector already outranks
-   RichContent.css's `.richEditor`. */
+   `cssCodeSplit: false`), so it reached every rich editor in the product — and because `font` is a
+   shorthand it set the family on the container, so a Problem Report's field label, hint and typed text
+   all inherited Consolas too. #1068 scoped it here without prejudging whether this surface wanted
+   monospace at all. It does not, so the declaration is gone rather than rewritten: with nothing
+   overriding it the editor inherits the page's DM Sans and matches RichContent.css's own sizing,
+   which is what every other rich editor already renders at.
+
+   Only the rich content editor changes. `.statementEditor` and `.controlledPreview pre` keep their
+   Georgia, which is a deliberate reading face for controlled requirement prose and a different choice
+   from the monospace this rule carried. */
 .controlledEditor .richEditor {
   min-height: 118px;
-  font: 400 13px/1.55 Consolas, monospace;
 }
 
 .controlledPreview {
