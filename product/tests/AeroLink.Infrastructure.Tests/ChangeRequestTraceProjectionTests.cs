@@ -371,6 +371,55 @@ public sealed class ChangeRequestTraceProjectionTests
     }
 
     [Fact]
+    public async Task Projects_active_recorded_code_references_on_exact_change_and_owning_proposal_without_accepting_them()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var root = new SystemChangeRequest("SRCR-07867", 0, fixture.Project.Id, fixture.Release.Id,
+            "Recorded Code context", "P", "A", "S", "author", fixture.Now);
+        var proposal = root.AddRequirementChange("author", "SYSR-07867", 0, RequirementLevel.System,
+            RequirementChangeKind.Modify, "A requirement proposal", "Statement", "Rationale", fixture.Now,
+            allowIncomplete: true);
+        var changeTarget = CodeRelationshipTarget.ForChangeRequestRevision(root.Id, root.Revision,
+            root.DisplayNumber);
+        var proposalTarget = CodeRelationshipTarget.ForRequirementProposal(proposal.Id, root.Id,
+            "SYSR-07867 proposal");
+        var mergeRequest = new GitLabMergeRequestRelationship(fixture.Project.Id, fixture.Release.Id,
+            "https://gitlab.example", 42, 12, 120, null, null, "aerolink/requirements",
+            "https://gitlab.example/aerolink/requirements/-/merge_requests/12", "Review exact change",
+            changeTarget, CodeRelationshipMeaning.RelatedContext, "code.reviewer", fixture.Now);
+        var proposalMergeRequest = new GitLabMergeRequestRelationship(fixture.Project.Id, fixture.Release.Id,
+            "https://gitlab.example", 42, 13, 130, null, null, "aerolink/requirements",
+            "https://gitlab.example/aerolink/requirements/-/merge_requests/13", "Review exact proposal",
+            proposalTarget, CodeRelationshipMeaning.Addresses, "code.reviewer", fixture.Now);
+        var withdrawnMergeRequest = new GitLabMergeRequestRelationship(fixture.Project.Id, fixture.Release.Id,
+            "https://gitlab.example", 42, 14, 140, null, null, "aerolink/requirements",
+            "https://gitlab.example/aerolink/requirements/-/merge_requests/14", "Withdrawn reference",
+            changeTarget, CodeRelationshipMeaning.RelatedContext, "code.reviewer", fixture.Now);
+        withdrawnMergeRequest.Withdraw(withdrawnMergeRequest.Version, "code.reviewer",
+            "The Code reference was withdrawn.", fixture.Now);
+        fixture.Db.AddRange(root, mergeRequest, proposalMergeRequest, withdrawnMergeRequest);
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await ChangeRequestTraceProjection.ForChangeRequestAsync(
+            fixture.Db, fixture.Project.Id, root.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
+
+        Assert.NotNull(result);
+        var rootNode = Assert.Single(result!.Nodes, x => x.Kind == "ChangeRequest" && x.Id == root.Id);
+        Assert.Equal(new[] { mergeRequest.Id, proposalMergeRequest.Id }.OrderBy(x => x),
+            rootNode.RecordedCodeReferences!.Select(x => x.Id).OrderBy(x => x));
+        Assert.DoesNotContain(rootNode.RecordedCodeReferences!, x => x.Id == withdrawnMergeRequest.Id);
+        var exactProposal = Assert.Single(rootNode.RecordedCodeReferences!, x => x.Id == proposalMergeRequest.Id);
+        Assert.Equal(CodeRelationshipTargetKind.RequirementProposal, exactProposal.TargetKind);
+        Assert.Equal(proposal.Id, exactProposal.TargetIdentityId);
+        Assert.Equal(root.Id, exactProposal.TargetOwnerIdentityId);
+        var referenceNode = Assert.Single(result.Nodes,
+            x => x.Kind == "RecordedCodeRelationship" && x.Id == proposalMergeRequest.Id);
+        Assert.Equal("Reference recorded", referenceNode.State);
+        Assert.Equal(proposalMergeRequest.Id, referenceNode.RecordedCodeReference!.Id);
+        Assert.DoesNotContain(result.Nodes, x => x.Kind is "CodeTraceability" or "CodeEvidenceSet");
+    }
+
+    [Fact]
     public async Task Register_state_uses_a_fixed_set_based_query_shape_for_fifty_rows()
     {
         await using var fixture = await Fixture.CreateAsync();

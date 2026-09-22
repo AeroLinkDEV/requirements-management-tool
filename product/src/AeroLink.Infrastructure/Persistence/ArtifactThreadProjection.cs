@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
@@ -73,7 +74,8 @@ public sealed record ArtifactThreadNode(
     string? ExecutedBy = null,
     DateTimeOffset? ExecutedAt = null,
     DateTimeOffset? RecordedAt = null,
-    IReadOnlyList<ArtifactThreadEvidence>? Evidence = null);
+    IReadOnlyList<ArtifactThreadEvidence>? Evidence = null,
+    IReadOnlyList<RecordedCodeRelationship>? RecordedCodeReferences = null);
 
 /// <summary>
 /// One recorded relationship between two thread nodes.
@@ -118,7 +120,8 @@ public sealed record ArtifactThreadResult(
     Guid FocalId,
     IReadOnlyList<ArtifactThreadNode> Nodes,
     IReadOnlyList<ArtifactThreadEdge> Edges,
-    ArtifactThreadVerification Verification);
+    ArtifactThreadVerification Verification,
+    bool RecordedCodeReferencesComplete = true);
 
 /// <summary>
 /// The exact-revision chain behind #880 §5.3, rooted on any of the five focal kinds of §4.4.
@@ -160,6 +163,7 @@ public static class ArtifactThreadProjection
     // The vocabulary ChangeRequestTraceProjection already uses for a controlled test change package. A
     // TestChangeReview is a different aggregate from a SystemChangeRequest and must not be dressed as one.
     private const string KindTestChangeRequest = "TestChangeRequest";
+    private const int MaximumRecordedCodeReferences = 1000;
 
     /// <summary>
     /// A link is suspect when it carries a lifecycle that is not yet Closed.
@@ -233,6 +237,8 @@ public static class ArtifactThreadProjection
             {
                 IsFocal = existing.IsFocal || node.IsFocal,
                 Evidence = node.Evidence is { Count: > 0 } ? node.Evidence : existing.Evidence,
+                RecordedCodeReferences = node.RecordedCodeReferences is { Count: > 0 }
+                    ? node.RecordedCodeReferences : existing.RecordedCodeReferences,
             };
         }
 
@@ -256,7 +262,7 @@ public static class ArtifactThreadProjection
         // narrows that to exactly one. This is the fact that keeps two builds' run histories apart.
         var scoped = await db.SoftwareBuilds.AsNoTracking()
             .Where(x => x.BaselineId == baselineId && x.ProjectId == projectId)
-            .Select(x => new { x.Id, x.BuildNumber, x.Description, x.State })
+            .Select(x => new { x.Id, x.ReleaseId, x.BuildNumber, x.Description, x.State })
             .ToListAsync(ct);
         if (buildId is Guid named)
         {
@@ -264,6 +270,7 @@ public static class ArtifactThreadProjection
             if (scoped.Count == 0) return null;
         }
         IReadOnlyCollection<Guid> buildIds = scoped.Select(x => x.Id).ToHashSet();
+        IReadOnlyCollection<Guid> releaseIds = scoped.Select(x => x.ReleaseId).Distinct().ToHashSet();
         IReadOnlyDictionary<Guid, (string BuildNumber, string Description, SoftwareBuildState State)> builds =
             scoped.ToDictionary(x => x.Id, x => (x.BuildNumber, x.Description, x.State));
 
@@ -288,6 +295,7 @@ public static class ArtifactThreadProjection
             if (anchorBuild is Guid anchored && buildIds.Contains(anchored))
             {
                 buildIds = [anchored];
+                releaseIds = [scoped.Single(x => x.Id == anchored).ReleaseId];
                 builds = builds.Where(x => x.Key == anchored).ToDictionary(x => x.Key, x => x.Value);
             }
         }
@@ -307,8 +315,46 @@ public static class ArtifactThreadProjection
             requirementWalk.VerificationSources, anchors, focalKind, focalId, buildIds, builds, acc,
             policies ?? new EffectiveProjectLadderPolicyResolver(db), ct);
 
+        // Keep this read inside the exact nodes and release context already admitted to the thread. Problem
+        // Report relationships target immutable snapshots, while this thread carries live report identities;
+        // proposal and snapshot links are therefore omitted unless their exact target nodes are present.
+        var targetAddresses = acc.Nodes.Values.Select(node => node.Kind switch
+            {
+                KindChangeRequest when node.Revision is int revision => new CodeRelationshipExactTargetAddress(
+                    CodeRelationshipTargetKind.ChangeRequestRevision, node.Id, null, revision),
+                KindRequirement when node.ArtifactId is Guid artifactId && node.Revision is int revision => new CodeRelationshipExactTargetAddress(
+                    CodeRelationshipTargetKind.RequirementRevision, node.Id, artifactId, revision),
+                _ => null,
+            })
+            .Where(address => address is not null)
+            .Select(address => address!)
+            .Distinct()
+            .ToArray();
+        var recordedCode = await RecordedCodeRelationshipProjection.ReadAsync(db, projectId,
+            targetAddresses, releaseIds, MaximumRecordedCodeReferences, budget: null, ct);
+        if (!recordedCode.LimitExceeded)
+        {
+            var byExactTarget = recordedCode.Relationships
+                .GroupBy(x => new CodeRelationshipExactTargetAddress(
+                    x.TargetKind, x.TargetIdentityId, x.TargetOwnerIdentityId, x.TargetRevisionNumber))
+                .ToDictionary(group => group.Key, group => (IReadOnlyList<RecordedCodeRelationship>)group.ToArray());
+            foreach (var node in acc.Nodes.Values.ToArray())
+            {
+                var address = node.Kind switch
+                {
+                    KindChangeRequest when node.Revision is int revision => new CodeRelationshipExactTargetAddress(
+                        CodeRelationshipTargetKind.ChangeRequestRevision, node.Id, null, revision),
+                    KindRequirement when node.ArtifactId is Guid artifactId && node.Revision is int revision => new CodeRelationshipExactTargetAddress(
+                        CodeRelationshipTargetKind.RequirementRevision, node.Id, artifactId, revision),
+                    _ => null,
+                };
+                if (address is not null && byExactTarget.TryGetValue(address, out var references))
+                    acc.Nodes[node.Id] = node with { RecordedCodeReferences = references };
+            }
+        }
+
         return new ArtifactThreadResult(projectId, baselineId, buildId, focalKind.ToString(), focalId,
-            [.. acc.Nodes.Values], acc.Edges, verification);
+            [.. acc.Nodes.Values], acc.Edges, verification, RecordedCodeReferencesComplete: !recordedCode.LimitExceeded);
     }
 
     /// <summary>

@@ -39,8 +39,11 @@ public static partial class ChangeRequestTraceProjection
         public HashSet<Guid> Requirements { get; } = [];
         public HashSet<Guid> Code { get; } = [];
         public HashSet<Guid> CodeEvidence { get; } = [];
+        public HashSet<Guid> RecordedCodeRelationships { get; } = [];
         public HashSet<Guid> Reports { get; } = [];
-        public int Count => Changes.Count + Reviews.Count + Requirements.Count + Code.Count + CodeEvidence.Count + Reports.Count;
+        public int Count => Changes.Count + Reviews.Count + Requirements.Count + Code.Count + CodeEvidence.Count
+            + RecordedCodeRelationships.Count + Reports.Count;
+        public int MaximumNodes { get; set; } = TraceReadBudget.MaximumNodes;
         public bool Truncated { get; set; }
     }
 
@@ -59,6 +62,7 @@ public static partial class ChangeRequestTraceProjection
         int ceiling, TraceReadBudget budget, CancellationToken ct)
     {
         var scope = new TraceScope();
+        scope.MaximumNodes = ceiling;
         var changes = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId && x.TargetReleaseId == releaseId);
         var reviews = db.TestChangeReviews.AsNoTracking().Where(x => x.ProjectId == projectId && x.ReleaseId == releaseId);
         await SelectAsync(scope.Changes, changes.OrderBy(x => x.BaseNumber)

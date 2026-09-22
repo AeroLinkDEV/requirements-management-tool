@@ -7,6 +7,7 @@ import {
   artifactThreadUrl,
   parseArtifactThread,
 } from "../src/artifactThreadContract"
+import { readRecordedCodeRelationship, recordedCodeSourceHref } from "../src/recordedCodeRelationship"
 
 /**
  * The client seam for the slice 5A artifact-thread read.
@@ -97,6 +98,102 @@ test("a production-shaped response carrying every supported kind is accepted", (
     "Build", "Case", "ChangeRequest", "Execution", "ProblemReport", "Procedure", "Requirement", "TestChangeRequest",
   ])
   expect(thread.edges).toHaveLength(7)
+})
+
+test("recorded Code references preserve their exact target and completeness without becoming accepted evidence", () => {
+  const reference = {
+    id: '99999999-9999-4999-8999-999999999999', relationshipKind: 'MergeRequest', version: 2,
+    isActive: true, releaseId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', releaseVersion: '1.6',
+    meaning: 'RelatedContext', recordedBy: 'reviewer', recordedAt: '2026-09-21T12:00:00Z',
+    targetKind: 'RequirementRevision', targetIdentityId: SYSTEM_REVISION,
+    targetOwnerIdentityId: '99999999-9999-4999-8999-999999999998', targetRevisionNumber: 3,
+    targetStableIdentity: `RequirementRevision:${SYSTEM_REVISION}`, targetDisplaySnapshot: 'SYSR-97001.03',
+    instanceBaseUrl: 'https://gitlab.example', remoteProjectId: 42, repositoryPathSnapshot: 'aerolink/source',
+    mergeRequestIid: 12, mergeRequestUrlSnapshot: 'https://gitlab.example/aerolink/source/-/merge_requests/12',
+    mergeRequestTitleSnapshot: 'Stored title',
+  }
+  const body = response({
+    recordedCodeReferencesComplete: false,
+    nodes: response().nodes.map(node => node.id === SYSTEM_REVISION
+      ? { ...node, recordedCodeReferences: [reference] }
+      : node),
+  })
+  const result = parseArtifactThread(body)
+  expect(result.ok).toBe(true)
+  if (!result.ok) return
+  const exact = result.thread.nodes.find(node => node.id === SYSTEM_REVISION)!
+  expect(result.thread.recordedCodeReferencesComplete).toBe(false)
+  expect(exact.recordedCodeReferences).toEqual([reference])
+  expect(exact.evidence).toEqual([])
+})
+
+const exactFileReference = (overrides: Record<string, unknown> = {}) => ({
+  id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', relationshipKind: 'File', version: 2, isActive: true,
+  releaseId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', releaseVersion: '1.6', meaning: 'RelatedContext',
+  recordedBy: 'reviewer', recordedAt: '2026-09-21T12:00:00Z', targetKind: 'ProblemReportRevision',
+  targetIdentityId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', targetOwnerIdentityId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  targetRevisionNumber: 1, targetStableIdentity: 'ProblemReportRevision:cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  targetDisplaySnapshot: 'PR-97001.01', instanceBaseUrl: 'https://gitlab.example', remoteProjectId: 42,
+  repositoryPathSnapshot: 'aerolink/source', sourceSnapshotId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+  sourceSelectionEventId: null, commitSha: 'a'.repeat(40), path: 'src/route.c', startLine: 3, endLine: 12,
+  ...overrides,
+})
+
+test('a File relationship links to its exact stored commit, path, and ordered line range', () => {
+  const reference = readRecordedCodeRelationship(exactFileReference())
+  expect(reference).toBeDefined()
+  expect(recordedCodeSourceHref(reference!)).toBe(
+    `https://gitlab.example/aerolink/source/-/blob/${'a'.repeat(40)}/src/route.c#L3-L12`,
+  )
+})
+
+test('malformed and unknown Code relationship snapshots fail closed before an external link is built', () => {
+  const invalidSnapshots = [
+    exactFileReference({ sourceSnapshotId: null }),
+    exactFileReference({ commitSha: '../unsafe' }),
+    exactFileReference({ path: '../unsafe.c' }),
+    exactFileReference({ startLine: 12, endLine: 3 }),
+    exactFileReference({ targetIdentityId: 'not-an-exact-id' }),
+    exactFileReference({ targetRevisionNumber: null }),
+    exactFileReference({ targetStableIdentity: 'ProblemReportRevision:another-snapshot' }),
+    exactFileReference({ targetOwnerIdentityId: null }),
+    exactFileReference({ targetKind: 'CurrentRequirement' }),
+    exactFileReference({ relationshipKind: 'FutureGitRecord' }),
+  ]
+  for (const raw of invalidSnapshots) {
+    expect(readRecordedCodeRelationship(raw)).toBeUndefined()
+    expect(recordedCodeSourceHref(raw)).toBeUndefined()
+  }
+})
+
+test('supported target kinds keep their required exact revision and owner context', () => {
+  const cases = [
+    exactFileReference({
+      targetKind: 'RequirementRevision',
+      targetStableIdentity: 'RequirementRevision:cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    }),
+    exactFileReference({
+      targetKind: 'ChangeRequestRevision', targetOwnerIdentityId: null,
+      targetStableIdentity: 'ChangeRequestRevision:cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    }),
+    exactFileReference({
+      targetKind: 'RequirementProposal', targetRevisionNumber: null,
+      targetStableIdentity: 'RequirementProposal:cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    }),
+  ]
+
+  for (const reference of cases) expect(readRecordedCodeRelationship(reference)).toBeDefined()
+})
+
+test('a malformed recorded Code snapshot refuses the artifact thread instead of dropping only that reference', () => {
+  const body = response({
+    nodes: response().nodes.map(node => node.id === SYSTEM_REVISION
+      ? { ...node, recordedCodeReferences: [{ id: 'bad', targetKind: 'CurrentRequirement' }] }
+      : node),
+  })
+  const result = parseArtifactThread(body)
+  expect(result.ok).toBe(false)
+  if (!result.ok) expect(result.reason).toContain('exact snapshot contract')
 })
 
 test("there are exactly six lanes and the last one is RESULT · BUILD", () => {

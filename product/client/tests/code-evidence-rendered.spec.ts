@@ -1,5 +1,50 @@
 import { expect, test, type Page } from '@playwright/test'
 
+test('loading, prerequisite, zero-obligation and incomplete evaluated gates remain distinct', async ({ page }) => {
+  const responses = {
+    waiting: {
+      build: { version: '1.6', readOnly: false }, evaluationState: 'WaitingForPrerequisite',
+      waiting: { detail: 'Waiting for a materialized baseline.', action: 'Materialize the campaign baseline first.', recordedCount: 0 },
+      summary: null, requirements: [],
+    },
+    zero: {
+      build: { version: '1.6', readOnly: false }, evaluationState: 'Evaluated',
+      summary: { required: 0, mapped: 0, missing: 0, percent: 100, gateComplete: true }, requirements: [],
+    },
+    nonzero: {
+      build: { version: '1.6', readOnly: false }, evaluationState: 'Evaluated',
+      summary: { required: 1, mapped: 0, missing: 1, percent: 0, gateComplete: false },
+      requirements: [{ artifactId: 'artifact-one', revisionId: 'revision-one', displayNumber: 'LLR-00001.01', statement: 'Retain the route.' }],
+    },
+  }
+  let current: keyof typeof responses = 'waiting'
+  await page.route('**/api/code-traceability?**', async route => {
+    await new Promise(resolve => setTimeout(resolve, 180))
+    await route.fulfill({ json: responses[current] })
+  })
+
+  await page.goto('/tests/fixtures/code-evidence.html')
+  await expect(page.getByRole('heading', { name: 'Loading code traceability' })).toBeVisible()
+  const gate = page.locator('.codeGate')
+  await expect(gate.getByRole('heading', { name: 'Not evaluated yet' })).toBeVisible()
+  await expect(gate).not.toContainText('%')
+
+  current = 'zero'
+  await page.reload()
+  await expect(gate.getByRole('heading', { name: 'No exact requirement revisions owe evidence in this build scope' })).toBeVisible()
+  await expect(gate).toContainText('This evaluated build scope has no exact requirement revisions requiring implementation evidence.')
+  await expect(gate).not.toContainText('complete')
+  await expect(gate).not.toContainText('100%')
+  await expect(gate).not.toHaveClass(/complete/)
+  await expect(gate.locator('strong')).toHaveText('—')
+
+  current = 'nonzero'
+  await page.reload()
+  await expect(gate.getByRole('heading', { name: '0 of 1 exact requirement revisions mapped' })).toBeVisible()
+  await expect(gate).toContainText('1 requirement revision still needs a GitLab merge or a justified no-code decision.')
+  await expect(gate).toContainText('0%')
+})
+
 async function acceptanceFixture(page: Page, repositoryAvailable = true) {
   await page.route('**/api/code-traceability?**', route => route.fulfill({ json: {
     campaignBaselineId: 'baseline-one', build: { version: '1.6', readOnly: false }, evaluationState: 'Evaluated',

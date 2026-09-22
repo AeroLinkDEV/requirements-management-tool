@@ -5,3 +5,5 @@
 .codeGate.waiting { border-color: #d6c186; background: #fffaf0; }
 .codeGate.waiting strong { color: #a97716; }
 .codeGateAction { margin: 4px 0 0; color: var(--ink-600); font-size: 12px; line-height: 1.45; }
+.codeGate.noObligation { border: 1px solid #c5cfda; background: #f7f9fb; }
+.codeGate.noObligation strong { color: #617288; font-size: 20px; }

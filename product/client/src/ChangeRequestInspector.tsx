@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { ControlledArtifactInspector } from './ControlledArtifactExplorer'
 import ExactArtifactLink from './ExactArtifactLink'
 import ArtifactCodeRelationships from './ArtifactCodeRelationships'
+import { RecordedCodeReferenceCard } from './RecordedCodeReference'
+import type { RecordedCodeRelationship } from './recordedCodeRelationship'
 import { PersonName } from './People'
 import { formatEvidentiaryDateTime, formatOrdinaryDateTime, stateLabel } from './presentation'
 import { traceProvenanceLabel } from './tracePresentation'
@@ -20,6 +22,8 @@ type TraceNode = {
   level?: string | null
   buildVersion?: string | null
   artifactId?: string | null
+  recordedCodeReference?: RecordedCodeRelationship | null
+  recordedCodeReferences?: RecordedCodeRelationship[] | null
 }
 type Provenance = {
   kind: string
@@ -263,5 +267,7 @@ function TraceEdgeCard({ edge, node, otherKind, href }: { edge: TraceEdge; node?
   return <TraceRelation label={node ? nodeLabel(node) : 'Exact connected artifact'} href={href}
     title={node?.title || 'Exact connected controlled artifact'} detail={`${node?.kind ?? otherKind}${node?.state ? ` · ${stateLabel(node.state)}` : ''}${node?.level ? ` · ${node.level}` : ''}${node?.buildVersion ? ` · Build ${node.buildVersion}` : ''}`}>
     <div className="traceProvenance">{edge.provenance.map((fact, index) => <span key={`${fact.kind}-${index}`}><b>{traceProvenanceLabel(fact.kind)}</b>{fact.isLive === false ? ' · Historical evidence' : ''}{fact.rationale ? ` · ${fact.rationale}` : ''}{fact.status ? ` · ${fact.status}` : ''}</span>)}</div>
+    {node?.recordedCodeReference ? <RecordedCodeReferenceCard reference={node.recordedCodeReference} /> : null}
+    {node?.recordedCodeReferences?.map(reference => <RecordedCodeReferenceCard key={reference.id} reference={reference} />)}
   </TraceRelation>
 }

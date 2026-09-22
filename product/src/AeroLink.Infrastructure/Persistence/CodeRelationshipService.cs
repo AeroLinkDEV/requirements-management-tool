@@ -50,6 +50,46 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
         if (total > 10_000)
             throw new DomainException("The relationship result exceeds the bounded read limit; narrow the release, target or kind filter.");
 
+        var items = await ReadUnionRowsAsync(mergeQuery, fileQuery, kind, (page - 1) * pageSize,
+            pageSize, maximumRows: null, budget: null, ct);
+        return new(page, pageSize, total, items);
+    }
+
+    /// <summary>
+    /// Reads active Code relationships for an already selected set of exact target identities. The scalar
+    /// UNION is shared with the paged Code register so consumers do not build per-target reads or resolve
+    /// current display data in place of the stored target snapshots.
+    /// </summary>
+    internal async Task<ActiveCodeRelationshipTargetRead> ReadActiveForTargetsAsync(
+        Guid projectId, IReadOnlyCollection<CodeRelationshipExactTargetAddress> targets,
+        IReadOnlyCollection<Guid>? releaseIds, int maximumRows, TraceReadBudget? budget, CancellationToken ct)
+    {
+        if (projectId == Guid.Empty || maximumRows < 0) throw new ArgumentOutOfRangeException(nameof(maximumRows));
+        if (targets.Count == 0 || releaseIds is { Count: 0 }) return new([], false);
+        var identityIds = targets.Select(x => x.IdentityId).Where(x => x != Guid.Empty).Distinct().ToArray();
+        if (identityIds.Length == 0) return new([], false);
+        var scopedReleases = releaseIds?.Distinct().ToArray();
+        var mergeQuery = db.GitLabMergeRequestRelationships.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && x.IsActive && identityIds.Contains(x.TargetIdentityId)
+                && (scopedReleases == null || scopedReleases.Contains(x.ReleaseId)));
+        var fileQuery = db.GitLabFileRelationships.AsNoTracking()
+            .Where(x => x.ProjectId == projectId && x.IsActive && identityIds.Contains(x.TargetIdentityId)
+                && (scopedReleases == null || scopedReleases.Contains(x.ReleaseId)));
+        var candidates = await ReadUnionRowsAsync(mergeQuery, fileQuery, kind: null, skip: null, take: null,
+            maximumRows, budget, ct);
+        var exact = targets.ToHashSet();
+        var matches = candidates.Where(row => exact.Contains(new CodeRelationshipExactTargetAddress(
+            row.TargetKind, row.TargetIdentityId, row.TargetOwnerIdentityId, row.TargetRevisionNumber)))
+            .ToArray();
+        return new(matches, candidates.Count > maximumRows);
+    }
+
+    private async Task<IReadOnlyList<CodeRelationshipReadRow>> ReadUnionRowsAsync(
+        IQueryable<GitLabMergeRequestRelationship> mergeQuery,
+        IQueryable<GitLabFileRelationship> fileQuery,
+        CodeRelationshipKind? kind, int? skip, int? take, int? maximumRows,
+        TraceReadBudget? budget, CancellationToken ct)
+    {
         // Keep the set operation ahead of the final record projection. EF Core can translate
         // this common scalar shape to UNION ALL on PostgreSQL; projecting each entity directly
         // to the record before Concat is rejected by the relational translator.
@@ -58,7 +98,7 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
             Id = x.Id, RelationshipKind = x.RelationshipKind, ProjectId = x.ProjectId, ReleaseId = x.ReleaseId,
             InstanceBaseUrl = x.InstanceBaseUrl, RemoteProjectId = x.RemoteProjectId, IsActive = x.IsActive,
             Version = x.Version, TargetKind = x.TargetKind, TargetIdentityId = x.TargetIdentityId,
-            TargetOwnerIdentityId = x.TargetOwnerIdentityId,
+            TargetOwnerIdentityId = x.TargetOwnerIdentityId, TargetRevisionNumber = x.TargetRevisionNumber,
             TargetStableIdentity = x.TargetStableIdentity, TargetDisplaySnapshot = x.TargetDisplaySnapshot,
             Meaning = x.Meaning, RecordedBy = x.RecordedBy, RecordedAt = x.RecordedAt,
             WithdrawnAt = x.WithdrawnAt, WithdrawnBy = x.WithdrawnBy, WithdrawalRationale = x.WithdrawalRationale,
@@ -74,7 +114,7 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
             Id = x.Id, RelationshipKind = x.RelationshipKind, ProjectId = x.ProjectId, ReleaseId = x.ReleaseId,
             InstanceBaseUrl = x.InstanceBaseUrl, RemoteProjectId = x.RemoteProjectId, IsActive = x.IsActive,
             Version = x.Version, TargetKind = x.TargetKind, TargetIdentityId = x.TargetIdentityId,
-            TargetOwnerIdentityId = x.TargetOwnerIdentityId,
+            TargetOwnerIdentityId = x.TargetOwnerIdentityId, TargetRevisionNumber = x.TargetRevisionNumber,
             TargetStableIdentity = x.TargetStableIdentity, TargetDisplaySnapshot = x.TargetDisplaySnapshot,
             Meaning = x.Meaning, RecordedBy = x.RecordedBy, RecordedAt = x.RecordedAt,
             WithdrawnAt = x.WithdrawnAt, WithdrawnBy = x.WithdrawnBy, WithdrawalRationale = x.WithdrawalRationale,
@@ -91,41 +131,34 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
             CodeRelationshipKind.File => fileRows,
             _ => mergeRows.Concat(fileRows)
         };
-        CodeRelationshipReadRow[] items;
+        var query = combined;
+        if (!db.Database.IsSqlite())
+        {
+            query = query.OrderByDescending(x => x.RecordedAt).ThenBy(x => x.Id);
+            if (skip.HasValue) query = query.Skip(skip.Value);
+            if (take.HasValue) query = query.Take(take.Value);
+        }
+        if (maximumRows.HasValue) query = query.Take(maximumRows.Value + 1);
+        var scalarRows = budget is null
+            ? await query.ToListAsync(ct)
+            : await budget.ReadAsync(query, ct);
+        var rows = scalarRows.Select(x => new CodeRelationshipReadRow(
+            x.Id, x.RelationshipKind, x.ProjectId, x.ReleaseId, x.InstanceBaseUrl, x.RemoteProjectId,
+            x.IsActive, x.Version, x.TargetKind, x.TargetIdentityId, x.TargetOwnerIdentityId,
+            x.TargetRevisionNumber, x.TargetStableIdentity, x.TargetDisplaySnapshot, x.Meaning,
+            x.RecordedBy, x.RecordedAt, x.WithdrawnAt, x.WithdrawnBy, x.WithdrawalRationale,
+            x.ReAddedBy, x.ReAddedAt, x.SourceSnapshotId, x.SourceSelectionEventId,
+            x.MergeRequestIid, x.MergeRequestId, x.MergeRequestUrlSnapshot, x.MergeRequestTitleSnapshot,
+            x.CommitSha, x.Path, x.StartLine, x.EndLine, x.FileMergeRequestIid, x.RepositoryPathSnapshot)).ToArray();
         if (db.Database.IsSqlite())
         {
-            // SQLite stores DateTimeOffset values as text and intentionally rejects ordering by them.
-            // The bounded load preserves the same global ordering used by PostgreSQL without silently
-            // truncating a later page.
-            var all = (await combined.ToListAsync(ct)).Select(x => new CodeRelationshipReadRow(
-                x.Id, x.RelationshipKind, x.ProjectId, x.ReleaseId, x.InstanceBaseUrl, x.RemoteProjectId,
-                x.IsActive, x.Version, x.TargetKind, x.TargetIdentityId, x.TargetOwnerIdentityId,
-                x.TargetStableIdentity,
-                x.TargetDisplaySnapshot, x.Meaning, x.RecordedBy, x.RecordedAt, x.WithdrawnAt, x.WithdrawnBy,
-                x.WithdrawalRationale, x.ReAddedBy, x.ReAddedAt, x.SourceSnapshotId, x.SourceSelectionEventId,
-                x.MergeRequestIid, x.MergeRequestId, x.MergeRequestUrlSnapshot, x.MergeRequestTitleSnapshot,
-                x.CommitSha, x.Path, x.StartLine, x.EndLine, x.FileMergeRequestIid, x.RepositoryPathSnapshot)).ToList();
-            items = all.OrderByDescending(x => x.RecordedAt).ThenBy(x => x.Id)
-                .Skip((page - 1) * pageSize).Take(pageSize).ToArray();
+            // SQLite stores DateTimeOffset as text and rejects database ordering. A normal register read is
+            // already bounded to 10,000 rows by its caller; target projections cap before this ordering.
+            var ordered = rows.OrderByDescending(x => x.RecordedAt).ThenBy(x => x.Id);
+            if (skip.HasValue) ordered = ordered.Skip(skip.Value).OrderByDescending(x => x.RecordedAt).ThenBy(x => x.Id);
+            return (take.HasValue ? ordered.Take(take.Value) : ordered).ToArray();
         }
-        else
-        {
-            // Order and page the scalar UNION before constructing the read DTO. PostgreSQL cannot
-            // translate ordering over a client-side record constructor, while the scalar shape is
-            // fully translatable and preserves one global chronology across both relationship kinds.
-            var pageRows = await combined
-                .OrderByDescending(x => x.RecordedAt).ThenBy(x => x.Id)
-                .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
-            items = pageRows.Select(x => new CodeRelationshipReadRow(
-                x.Id, x.RelationshipKind, x.ProjectId, x.ReleaseId, x.InstanceBaseUrl, x.RemoteProjectId,
-                x.IsActive, x.Version, x.TargetKind, x.TargetIdentityId, x.TargetOwnerIdentityId,
-                x.TargetStableIdentity,
-                x.TargetDisplaySnapshot, x.Meaning, x.RecordedBy, x.RecordedAt, x.WithdrawnAt, x.WithdrawnBy,
-                x.WithdrawalRationale, x.ReAddedBy, x.ReAddedAt, x.SourceSnapshotId, x.SourceSelectionEventId,
-                x.MergeRequestIid, x.MergeRequestId, x.MergeRequestUrlSnapshot, x.MergeRequestTitleSnapshot,
-                x.CommitSha, x.Path, x.StartLine, x.EndLine, x.FileMergeRequestIid, x.RepositoryPathSnapshot)).ToArray();
-        }
-        return new(page, pageSize, total, items);
+        return rows;
     }
 
     public async Task<IReadOnlyList<GitLabCodeRelationshipEvent>> ReadHistoryAsync(Guid projectId,
@@ -372,7 +405,8 @@ public sealed record CodeRelationshipPage(int Page, int PageSize, int Total,
 
 public sealed record CodeRelationshipReadRow(Guid Id, CodeRelationshipKind RelationshipKind,
     Guid ProjectId, Guid ReleaseId, string InstanceBaseUrl, long RemoteProjectId, bool IsActive, long Version,
-    CodeRelationshipTargetKind TargetKind, Guid TargetIdentityId, Guid? TargetOwnerIdentityId, string TargetStableIdentity,
+    CodeRelationshipTargetKind TargetKind, Guid TargetIdentityId, Guid? TargetOwnerIdentityId,
+    int? TargetRevisionNumber, string TargetStableIdentity,
     string TargetDisplaySnapshot, CodeRelationshipMeaning Meaning, string RecordedBy, DateTimeOffset RecordedAt,
     DateTimeOffset? WithdrawnAt, string? WithdrawnBy, string? WithdrawalRationale, string? ReAddedBy,
     DateTimeOffset? ReAddedAt, Guid? SourceSnapshotId, Guid? SourceSelectionEventId, int? MergeRequestIid,

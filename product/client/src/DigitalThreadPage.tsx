@@ -378,7 +378,7 @@ export default function DigitalThreadPage({
   }, [api, attempt, projectId, releaseId])
 
   const register = useMemo(
-    () => (network?.nodes ?? []).filter(node => node.kind !== "ProblemReport"),
+    () => (network?.nodes ?? []).filter(node => node.kind === "ChangeRequest" || node.kind === "TestChangeRequest"),
     [network],
   )
   const opened = useMemo(

@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Documents;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using Microsoft.EntityFrameworkCore;
@@ -16,7 +17,8 @@ public sealed record ProblemReportImpactArtifact(
     string State,
     string TargetBuild,
     string Relationship,
-    string Detail);
+    string Detail,
+    RecordedCodeRelationship? CodeReference = null);
 
 /// <summary>One row of the impact assessment, with whatever evidence has arrived under it.</summary>
 public sealed record ProblemReportImpactArea(
@@ -26,7 +28,8 @@ public sealed record ProblemReportImpactArea(
     bool HasArtifactSlot,
     IReadOnlyList<string> ArtifactTypes,
     string? Mismatch,
-    IReadOnlyList<ProblemReportImpactArtifact> Artifacts);
+    IReadOnlyList<ProblemReportImpactArtifact> Artifacts,
+    string? Notice = null);
 
 /// <summary>
 /// The engineering evidence that has arrived under each impact answer.
@@ -44,6 +47,8 @@ public sealed record ProblemReportImpactArea(
 /// </summary>
 public sealed class ProblemReportImpactProjection(AeroLinkDbContext db)
 {
+    private const int MaximumRecordedCodeTargets = 1000;
+    private const int MaximumRecordedCodeReferences = 500;
     /// <summary>
     /// The eight assessed areas, their labels, and what may stand as evidence under each.
     ///
@@ -82,13 +87,14 @@ public sealed class ProblemReportImpactProjection(AeroLinkDbContext db)
         var changeRequests = changeRequestIds.Count == 0
             ? []
             : await db.SystemChangeRequests.AsNoTracking().Include(item => item.RequirementChanges)
-                .Where(item => changeRequestIds.Contains(item.Id)).ToListAsync(ct);
+                .Where(item => item.ProjectId == report.ProjectId && changeRequestIds.Contains(item.Id)).ToListAsync(ct);
+        var ownedChangeRequestIds = changeRequests.Select(item => item.Id).ToArray();
 
         // One lookup for every build any of this evidence targets, rather than one per artifact.
         var releaseIds = changeRequests.Select(item => item.TargetReleaseId).Distinct().ToList();
         var releases = releaseIds.Count == 0
             ? new Dictionary<Guid, string>()
-            : await db.Releases.AsNoTracking().Where(item => releaseIds.Contains(item.Id))
+            : await db.Releases.AsNoTracking().Where(item => item.ProjectId == report.ProjectId && releaseIds.Contains(item.Id))
                 .ToDictionaryAsync(item => item.Id, item => item.Version, ct);
 
         // A requirement change names its requirement by base number, not by id, so the artifacts are
@@ -178,6 +184,92 @@ public sealed class ProblemReportImpactProjection(AeroLinkDbContext db)
             }
         }
 
+        // Contextual MR/file relationships are a separate fact from accepted evidence above. Their targets
+        // are admitted only through this report's exact linked CRs, exact requirement revisions authored by
+        // those CRs, or immutable snapshots owned by this report. In particular, a proposal remains attached
+        // to its owning CR and a report reference remains attached to its exact ProblemReportRevision row.
+        var reportSnapshots = await db.ProblemReportRevisions.AsNoTracking()
+            .Where(x => x.ProblemReportId == report.Id)
+            .OrderBy(x => x.Revision).ThenBy(x => x.Id)
+            .Take(MaximumRecordedCodeTargets + 1)
+            .Select(x => new { x.Id, x.ProblemReportId, x.Revision })
+            .ToListAsync(ct);
+        // Build the complete target address set through bounded database reads. The linked change requests
+        // above still supply the impact panel's existing live artifact detail, but their potentially large
+        // proposal collections are not used to form the separate recorded-reference set or its budget.
+        var changeRequestTargets = ownedChangeRequestIds.Length == 0
+            ? []
+            : await db.SystemChangeRequests.AsNoTracking()
+                .Where(x => x.ProjectId == report.ProjectId && ownedChangeRequestIds.Contains(x.Id))
+                .OrderBy(x => x.Id)
+                .Take(MaximumRecordedCodeTargets + 1)
+                .Select(x => new { x.Id, x.Revision })
+                .ToListAsync(ct);
+        var proposalTargets = ownedChangeRequestIds.Length == 0
+            ? []
+            : await (from proposal in db.RequirementChanges.AsNoTracking()
+                     join owner in db.SystemChangeRequests.AsNoTracking() on proposal.ChangeRequestId equals owner.Id
+                     where owner.ProjectId == report.ProjectId && ownedChangeRequestIds.Contains(owner.Id)
+                     orderby proposal.Id
+                     select new { ProposalId = proposal.Id, OwnerId = owner.Id })
+                .Take(MaximumRecordedCodeTargets + 1).ToListAsync(ct);
+        var exactRequirementRevisions = ownedChangeRequestIds.Length == 0
+            ? []
+            : await (from revision in db.RequirementRevisions.AsNoTracking()
+                     join artifact in db.Requirements.AsNoTracking() on revision.ArtifactId equals artifact.Id
+                     where artifact.ProjectId == report.ProjectId
+                         && revision.SourceChangeRequestId != null
+                         && ownedChangeRequestIds.Contains(revision.SourceChangeRequestId.Value)
+                     orderby revision.Id
+                     select new { revision.Id, revision.ArtifactId, revision.Revision })
+                .Take(MaximumRecordedCodeTargets + 1).ToListAsync(ct);
+        var targetCount = reportSnapshots.Count + changeRequestTargets.Count
+            + proposalTargets.Count + exactRequirementRevisions.Count;
+        var inputsWithinLimit = targetCount <= MaximumRecordedCodeTargets;
+        var recordedTargets = new List<CodeRelationshipExactTargetAddress>(
+            inputsWithinLimit ? targetCount : 0);
+        if (inputsWithinLimit)
+        {
+            recordedTargets.AddRange(reportSnapshots.Select(x => new CodeRelationshipExactTargetAddress(
+                CodeRelationshipTargetKind.ProblemReportRevision, x.Id, x.ProblemReportId, x.Revision)));
+            recordedTargets.AddRange(changeRequestTargets.Select(x => new CodeRelationshipExactTargetAddress(
+                CodeRelationshipTargetKind.ChangeRequestRevision, x.Id, null, x.Revision)));
+            recordedTargets.AddRange(proposalTargets.Select(x => new CodeRelationshipExactTargetAddress(
+                CodeRelationshipTargetKind.RequirementProposal, x.ProposalId, x.OwnerId, null)));
+            recordedTargets.AddRange(exactRequirementRevisions.Select(x => new CodeRelationshipExactTargetAddress(
+                CodeRelationshipTargetKind.RequirementRevision, x.Id, x.ArtifactId, x.Revision)));
+        }
+        var recordedCode = inputsWithinLimit
+            ? await RecordedCodeRelationshipProjection.ReadAsync(db, report.ProjectId, recordedTargets,
+                releaseIds: null, MaximumRecordedCodeReferences, budget: null, ct)
+            : new RecordedCodeRelationshipProjectionResult([], LimitExceeded: true);
+        var recordedReferencesComplete = inputsWithinLimit && !recordedCode.LimitExceeded;
+        if (recordedReferencesComplete)
+            foreach (var relationship in recordedCode.Relationships)
+            {
+                var target = relationship.TargetKind switch
+                {
+                    CodeRelationshipTargetKind.ProblemReportRevision => "Problem Report snapshot",
+                    CodeRelationshipTargetKind.ChangeRequestRevision => "change request revision",
+                    CodeRelationshipTargetKind.RequirementProposal => "requirement proposal",
+                    CodeRelationshipTargetKind.RequirementRevision => "requirement revision",
+                    _ => "exact target",
+                };
+                var source = relationship.RelationshipKind == CodeRelationshipKind.MergeRequest
+                    ? $"MR !{relationship.MergeRequestIid} · {relationship.MergeRequestTitleSnapshot}"
+                    : $"{relationship.Path}{(relationship.StartLine is int start && relationship.EndLine is int end ? $" · lines {start}–{end}" : string.Empty)} · commit {relationship.CommitSha}";
+                var owner = relationship.TargetOwnerIdentityId is Guid ownerId ? $" · owner {ownerId}" : string.Empty;
+                var revision = relationship.TargetRevisionNumber is int revisionNumber ? $" revision {revisionNumber}" : string.Empty;
+                var detail = $"Reference recorded to {target} {relationship.TargetDisplaySnapshot}{revision}{owner}. {source}. Build {relationship.ReleaseVersion} · {relationship.RepositoryPathSnapshot}.";
+                buckets["Code"].Add(new ProblemReportImpactArtifact("GitLabReference", relationship.Id,
+                    relationship.RelationshipKind == CodeRelationshipKind.MergeRequest
+                        ? $"MR !{relationship.MergeRequestIid}"
+                        : relationship.Path ?? "Recorded file",
+                    relationship.MergeRequestTitleSnapshot ?? relationship.Path ?? "Recorded Code reference",
+                    "Reference recorded", relationship.ReleaseVersion, relationship.Meaning.ToString(), detail,
+                    relationship));
+            }
+
         // A document reaches the report either directly or through one of its change requests.
         var documentTargets = changeRequestIds.Append(report.Id).ToList();
         foreach (var link in await db.ManagedDocumentLinks.AsNoTracking()
@@ -193,7 +285,10 @@ public sealed class ProblemReportImpactProjection(AeroLinkDbContext db)
                 .Select(group => group.First()).ToList();
             var assessment = assessments.TryGetValue(area.Key, out var value) ? value : "Unknown";
             return new ProblemReportImpactArea(area.Key, area.Label, assessment,
-                area.Types.Length > 0, area.Types, Mismatch(area.Label, assessment, artifacts.Count), artifacts);
+                area.Types.Length > 0, area.Types, Mismatch(area.Label, assessment, artifacts.Count), artifacts,
+                area.Key == "Code" && !recordedReferencesComplete
+                    ? "Recorded Code references exceed the bounded panel limit; no partial reference set is shown."
+                    : null);
         }).ToList();
     }
 
