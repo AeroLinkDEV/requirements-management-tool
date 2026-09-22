@@ -29,9 +29,11 @@ public sealed class ReleasePickerSqliteGuardTests : IDisposable
         await db.Database.OpenConnectionAsync();
         var connection = (SqliteConnection)db.Database.GetDbConnection();
         await using var command = connection.CreateCommand();
+        // Guid parameters are bound as Guid values: the provider stores their UPPERCASE text, exactly
+        // what EF's own Guid bindings produce, so raw fixture rows stay inside the EF project identity.
         command.CommandText = "INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\") VALUES ($id, $p, $v, 0)";
-        command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString());
-        command.Parameters.AddWithValue("$p", projectId.ToString());
+        command.Parameters.AddWithValue("$id", Guid.NewGuid());
+        command.Parameters.AddWithValue("$p", projectId);
         command.Parameters.AddWithValue("$v", version);
         await command.ExecuteNonQueryAsync();
     }
@@ -72,24 +74,48 @@ public sealed class ReleasePickerSqliteGuardTests : IDisposable
         // Copy/restart: a guarded database file becomes the template for a NEW API host. The host must
         // start through Program.cs from the copied file (the guard is never invoked manually here), serve
         // the copied rows with their classification and ordinals unchanged, and keep allocating membership.
+        // Template connections are NONPOOLED: a pooled handle would keep the -wal file alive after the
+        // checkpoint, and the factory seam deliberately refuses any WAL file.
         var projectId = Guid.NewGuid();
         var templatePath = Path.Combine(Path.GetTempPath(), $"picker-guard-template-{Guid.NewGuid():N}.db");
+        var templateConnectionString = $"Data Source={templatePath};Pooling=False";
         await using (var setup = new AeroLinkDbContext(
-            new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={templatePath}").Options))
+            new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(templateConnectionString).Options))
         {
             await setup.Database.EnsureCreatedAsync();
+            // Convert the fresh database out of WAL mode immediately: the template must copy as a single
+            // file, and DELETE journaling means no -wal can persist past the final close.
+            await setup.Database.OpenConnectionAsync();
+            await using (var journal = setup.Database.GetDbConnection().CreateCommand())
+            {
+                journal.CommandText = "PRAGMA journal_mode=DELETE;";
+                await journal.ExecuteNonQueryAsync();
+            }
+            await setup.Database.CloseConnectionAsync();
+            // Raw fixtures bind Guid parameters as Guid values: the provider stores their UPPERCASE text,
+            // exactly what EF's own Guid bindings produce, so the legacy row stays inside the project.
             await InsertRawReleaseIntoAsync(templatePath, projectId, "1.0");
             await ReleasePickerSqliteGuard.EnsureInstalledAsync(setup);
             var allocated = new SoftwareRelease(projectId, "1.5", false);
             setup.Add(allocated);
             await setup.SaveChangesAsync();
-            // Checkpoint and close so the template has no unmerged -wal: the factory seam refuses those.
+            // Reassert DELETE journaling and checkpoint before closing: the template must copy as one file.
             await setup.Database.OpenConnectionAsync();
             var connection = (SqliteConnection)setup.Database.GetDbConnection();
-            await using var checkpoint = connection.CreateCommand();
-            checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
-            await checkpoint.ExecuteNonQueryAsync();
+            await using (var journal = connection.CreateCommand())
+            {
+                journal.CommandText = "PRAGMA journal_mode=DELETE;";
+                await journal.ExecuteNonQueryAsync();
+            }
+            await using (var checkpoint = connection.CreateCommand())
+            {
+                checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+                await checkpoint.ExecuteNonQueryAsync();
+            }
+            await setup.Database.CloseConnectionAsync();
         }
+        Console.WriteLine($"PICKER_WAL_DEBUG files=[{string.Join(',', Directory.GetFiles(Path.GetDirectoryName(templatePath)!, Path.GetFileName(templatePath) + "*").Select(f => Path.GetFileName(f)))}]");
+        Assert.False(File.Exists(templatePath + "-wal"), "the template must be fully checkpointed before copying");
 
         try
         {
@@ -116,7 +142,8 @@ public sealed class ReleasePickerSqliteGuardTests : IDisposable
                 Assert.Equal(1L, reader.GetInt64(2));
             }
 
-            // Host-backed read through the real endpoint, then a new insertion with correct allocation.
+            // Host-backed read through the real endpoint returns BOTH rows (legacy and allocated), then a
+            // new insertion through the served host allocates the next ordinal.
             var pickerPage = await copiedClient.GetFromJsonAsync<System.Text.Json.JsonElement>(
                 $"/api/managed-documents/link-options?projectId={projectId}&artifactType=Release&pageSize=50");
             var displayed = pickerPage.GetProperty("items").EnumerateArray()
@@ -145,8 +172,9 @@ public sealed class ReleasePickerSqliteGuardTests : IDisposable
         await connection.OpenAsync();
         await using var command = connection.CreateCommand();
         command.CommandText = "INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\") VALUES ($id, $p, $v, 0)";
-        command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString());
-        command.Parameters.AddWithValue("$p", projectId.ToString());
+        // Guid parameters are bound as Guid values so the stored text matches EF's UPPERCASE representation.
+        command.Parameters.AddWithValue("$id", Guid.NewGuid());
+        command.Parameters.AddWithValue("$p", projectId);
         command.Parameters.AddWithValue("$v", version);
         await command.ExecuteNonQueryAsync();
     }

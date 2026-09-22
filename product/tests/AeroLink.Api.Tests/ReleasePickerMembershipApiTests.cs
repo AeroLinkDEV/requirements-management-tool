@@ -374,7 +374,7 @@ public sealed class ReleasePickerMembershipApiTests
     [Fact]
     public async Task Foreign_project_picker_reads_and_relationship_writes_are_refused()
     {
-        var factory = new AeroLinkApiFactory();
+        using var factory = new AeroLinkApiFactory();
         var admin = factory.CreateClient();
         await ProblemReportApiTests.BootstrapAndLoginAsync(admin);
         Guid memberProjectId, foreignProjectId, foreignReleaseId, documentId, revisionId, userId, programId;
