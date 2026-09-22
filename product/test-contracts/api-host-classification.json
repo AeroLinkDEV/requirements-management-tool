@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 155,
-    "tests": 984,
-    "knownCases": 1124,
+    "tests": 985,
+    "knownCases": 1125,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 60,
-      "tests": 366,
-      "knownCases": 430,
+      "tests": 367,
+      "knownCases": 431,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -514,6 +514,19 @@
       ]
     },
     {
+      "cls": "ProblemReportApiTests",
+      "tests": 14,
+      "knownCases": 15,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "SecurityBoundaryTests",
       "tests": 14,
       "knownCases": 14,
@@ -526,19 +539,6 @@
         "filesystem",
         "http-boundary",
         "in-process-logic"
-      ]
-    },
-    {
-      "cls": "ProblemReportApiTests",
-      "tests": 13,
-      "knownCases": 14,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
-      "intents": [
-        "auth-policy",
-        "ef-translation",
-        "http-boundary"
       ]
     },
     {
