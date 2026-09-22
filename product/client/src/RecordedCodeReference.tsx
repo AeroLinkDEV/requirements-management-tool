@@ -8,21 +8,35 @@ import {
 } from './recordedCodeRelationship'
 import './RecordedCodeReference.css'
 
+function RecordedCodeReferenceUnavailable() {
+  return (
+    <article className="recordedCodeReference">
+      <div className="recordedCodeReferenceHead">
+        <b>Recorded Code reference unavailable</b>
+        <span>Not accepted implementation evidence</span>
+      </div>
+      <span className="recordedCodeReferenceUnavailable" role="status">
+        Its exact target or stored source snapshot cannot be safely interpreted.
+      </span>
+    </article>
+  )
+}
+
+/** Renders an untrusted API collection without assuming it is an array or that its entries have IDs. */
+export function RecordedCodeReferenceList({ references }: { references: unknown }) {
+  if (references === undefined || references === null) return null
+  if (!Array.isArray(references)) return <RecordedCodeReferenceUnavailable />
+
+  return <>
+    {references.map((reference: unknown, index: number) => (
+      <RecordedCodeReferenceCard key={index} reference={reference} />
+    ))}
+  </>
+}
+
 export function RecordedCodeReferenceCard({ reference: rawReference }: { reference: unknown }) {
   const reference: RecordedCodeRelationship | undefined = readRecordedCodeRelationship(rawReference)
-  if (!reference) {
-    return (
-      <article className="recordedCodeReference">
-        <div className="recordedCodeReferenceHead">
-          <b>Recorded Code reference unavailable</b>
-          <span>Not accepted implementation evidence</span>
-        </div>
-        <span className="recordedCodeReferenceUnavailable" role="status">
-          Its exact target or stored source snapshot cannot be safely interpreted.
-        </span>
-      </article>
-    )
-  }
+  if (!reference) return <RecordedCodeReferenceUnavailable />
 
   const href = recordedCodeSourceHref(reference)
   const title = recordedCodeSourceTitle(reference)

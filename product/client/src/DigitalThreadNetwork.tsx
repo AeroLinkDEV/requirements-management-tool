@@ -29,7 +29,7 @@ import {
   pillFor,
   resolveDock,
 } from "./changeNetworkPresentation"
-import { RecordedCodeReferenceCard } from "./RecordedCodeReference"
+import { RecordedCodeReferenceCard, RecordedCodeReferenceList } from "./RecordedCodeReference"
 import "./DigitalThreadNetwork.css"
 
 /** Where the detail panel sits. `auto` picks the side with less linked content. */
@@ -427,9 +427,7 @@ export default function DigitalThreadNetwork({
               {node.recordedCodeReference ? (
                 <RecordedCodeReferenceCard reference={node.recordedCodeReference} />
               ) : null}
-              {node.recordedCodeReferences?.map(reference => (
-                <RecordedCodeReferenceCard key={reference.id} reference={reference} />
-              ))}
+              <RecordedCodeReferenceList references={node.recordedCodeReferences} />
               {(node.kind === "ChangeRequest" || node.kind === "TestChangeRequest") && onOpenChange ? (
                 <div className="dtnCardActs">
                   <button

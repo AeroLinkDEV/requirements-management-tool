@@ -41,7 +41,7 @@ export type NetworkNode = {
   /** Present on TestChangeRequest nodes only. */
   verification?: NetworkVerification | null
   recordedCodeReference?: import('./recordedCodeRelationship').RecordedCodeRelationship | null
-  recordedCodeReferences?: import('./recordedCodeRelationship').RecordedCodeRelationship[] | null
+  recordedCodeReferences?: unknown
 }
 
 export type NetworkEdge = {

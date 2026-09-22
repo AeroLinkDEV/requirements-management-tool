@@ -286,6 +286,20 @@ const openedTcr: NetworkNode = {
 
 const params = new URLSearchParams(window.location.search)
 const scenario = params.get("case") ?? "requirement"
+const malformedReferenceScenario = scenario === "recorded-reference-null" || scenario === "recorded-reference-object"
+const malformedReferenceValue = scenario === "recorded-reference-null"
+  ? [null]
+  : { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", relationshipKind: "MergeRequest", version: 1,
+      isActive: true, releaseId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", releaseVersion: "1.6",
+      meaning: "RelatedContext", recordedBy: "reviewer", recordedAt: "2026-09-21T12:00:00Z",
+      targetKind: "ChangeRequestRevision", targetIdentityId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      targetRevisionNumber: 1, targetStableIdentity: "ChangeRequestRevision:cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      targetDisplaySnapshot: "SRCR-00100.00", instanceBaseUrl: "https://gitlab.example", remoteProjectId: 42,
+      repositoryPathSnapshot: "aerolink/source", mergeRequestUrlSnapshot: "https://gitlab.example/aerolink/source/-/merge_requests/12",
+      mergeRequestIid: 12, mergeRequestId: 1200, mergeRequestTitleSnapshot: "Stored source record" }
+const fixtureOpened = malformedReferenceScenario
+  ? { ...opened, recordedCodeReferences: malformedReferenceValue }
+  : opened
 const mixedVerification: ProposalContent = {
   ...requirementModify,
   covering: [...requirementModify.covering, {
@@ -296,8 +310,8 @@ const mixedVerification: ProposalContent = {
 }
 
 const shared = {
-  opened,
-  register: [opened, sibling],
+  opened: fixtureOpened,
+  register: [fixtureOpened, sibling],
   orderedLevels: ["System", "HighLevel", "LowLevel"] as const,
   onOpenChange: (node: NetworkNode) => {
     // Recorded on the document so a spec can prove the callback fired without a production route.
