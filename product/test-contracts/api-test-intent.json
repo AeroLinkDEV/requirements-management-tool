@@ -7810,6 +7810,24 @@
     },
     {
       "cls": "ProblemReportApiTests",
+      "test": "A_closure_significant_change_withdraws_the_basis_and_records_why_without_moving_the_report",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 538,
+        "end": 583
+      }
+    },
+    {
+      "cls": "ProblemReportApiTests",
       "test": "A_forward_transition_without_a_rationale_records_none",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -7821,8 +7839,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 502,
-        "end": 531
+        "start": 507,
+        "end": 536
       }
     },
     {
@@ -7841,24 +7859,6 @@
       "sourceLines": {
         "start": 345,
         "end": 399
-      }
-    },
-    {
-      "cls": "ProblemReportApiTests",
-      "test": "Automatic_waiting_invalidation_records_a_truthful_backward_rationale",
-      "kind": "Fact",
-      "intent": "http-boundary",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction",
-        "factory-client",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 533,
-        "end": 570
       }
     },
     {
@@ -7892,8 +7892,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 602,
-        "end": 615
+        "start": 616,
+        "end": 629
       }
     },
     {
@@ -7982,8 +7982,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 572,
-        "end": 600
+        "start": 585,
+        "end": 614
       }
     },
     {
@@ -8000,7 +8000,7 @@
       ],
       "sourceLines": {
         "start": 401,
-        "end": 431
+        "end": 436
       }
     },
     {
@@ -8016,8 +8016,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 632,
-        "end": 651
+        "start": 646,
+        "end": 665
       }
     },
     {
@@ -8033,8 +8033,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 433,
-        "end": 500
+        "start": 438,
+        "end": 505
       }
     },
     {
@@ -8050,8 +8050,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 617,
-        "end": 630
+        "start": 631,
+        "end": 644
       }
     },
     {
@@ -9207,8 +9207,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 576,
-        "end": 634
+        "start": 588,
+        "end": 646
       }
     },
     {
@@ -9225,8 +9225,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 683,
-        "end": 753
+        "start": 695,
+        "end": 765
       }
     },
     {
@@ -9242,8 +9242,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 547,
-        "end": 574
+        "start": 559,
+        "end": 586
       }
     },
     {
@@ -9259,8 +9259,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 447,
-        "end": 491
+        "start": 457,
+        "end": 503
       }
     },
     {
@@ -9276,8 +9276,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 493,
-        "end": 545
+        "start": 505,
+        "end": 557
       }
     },
     {
@@ -9295,7 +9295,7 @@
       ],
       "sourceLines": {
         "start": 290,
-        "end": 415
+        "end": 422
       }
     },
     {
@@ -9328,8 +9328,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 417,
-        "end": 445
+        "start": 424,
+        "end": 455
       }
     },
     {
@@ -9345,8 +9345,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 755,
-        "end": 775
+        "start": 767,
+        "end": 787
       }
     },
     {
@@ -9362,8 +9362,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 636,
-        "end": 681
+        "start": 648,
+        "end": 693
       }
     },
     {

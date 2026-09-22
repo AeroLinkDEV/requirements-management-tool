@@ -119,6 +119,7 @@ public sealed class ProblemReportLinkServiceTests
 
             await service.ReplaceDraftChangeRequestLinksAsync(substantiveChange, [substantive.Id], "engineer", now.AddMinutes(8), default);
             await db.SaveChangesAsync();
+            substantive.BeginImplementation("engineer", now.AddMinutes(9));
             substantive.BeginInvestigation("engineer", "Confirmed analysis", "Root cause", "Effect", "", now.AddMinutes(9));
             db.ProblemReportRevisions.Add(new ProblemReportRevision(substantive.Id, substantive.Revision,
                 "InvestigationRecorded", "engineer", substantive.CanonicalHash(), substantive.CanonicalSnapshot(),
@@ -277,6 +278,7 @@ public sealed class ProblemReportLinkServiceTests
                 "The corrective link set must stay exact.", "", "engineer", now, targetReleaseId: release.Id, category: ProblemReportCategory.CodeFunctional);
             report.ReadyForSccb("engineer", now.AddMinutes(1));
             report.OpenBySccb("sccb", now.AddMinutes(2));
+            report.BeginImplementation("engineer", now.AddMinutes(3));
             report.BeginInvestigation("engineer", "Analysis", "Cause", "Effect", "", now.AddMinutes(3));
             report.ProposeResolution("engineer", "Correct it", now.AddMinutes(4));
             var executionId = Guid.NewGuid();
@@ -328,6 +330,7 @@ public sealed class ProblemReportLinkServiceTests
                 "Closed relationships must not drift.", "", "engineer", now, targetReleaseId: release.Id, category: ProblemReportCategory.CodeFunctional);
             report.ReadyForSccb("engineer", now.AddMinutes(1));
             report.OpenBySccb("sccb", now.AddMinutes(2));
+            report.BeginImplementation("engineer", now.AddMinutes(3));
             report.BeginInvestigation("engineer", "Analysis", "Cause", "Effect", "", now.AddMinutes(3));
             report.ProposeResolution("engineer", "Correction", now.AddMinutes(4));
             report.RecordResolutionVerification("engineer", Guid.NewGuid(), now.AddMinutes(5));

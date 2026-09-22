@@ -48,6 +48,7 @@ public sealed class ProblemReportClosureVerificationPolicyTests
                 targetReleaseId: targetRelease.Id, responsibleEngineerId: "engineer", category: ProblemReportCategory.CodeFunctional);
             report.ReadyForSccb("engineer", start.AddMinutes(2));
             report.OpenBySccb("sccb", start.AddMinutes(3));
+            report.BeginImplementation("engineer", start.AddMinutes(4));
             report.BeginInvestigation("engineer", "Analysis", "Cause", "Effect", "", start.AddMinutes(4));
             report.ProposeResolution("engineer", "Correct and retest", start.AddMinutes(5));
             var successor = new TestExecution(project.Id, revision1.Id, targetBuild.Id, failure.Id, TestOutcome.Pass,
@@ -56,6 +57,7 @@ public sealed class ProblemReportClosureVerificationPolicyTests
                 targetReleaseId: targetRelease.Id, responsibleEngineerId: "engineer", category: ProblemReportCategory.CodeFunctional);
             manual.ReadyForSccb("engineer", start.AddMinutes(2));
             manual.OpenBySccb("sccb", start.AddMinutes(3));
+            manual.BeginImplementation("engineer", start.AddMinutes(4));
             manual.BeginInvestigation("engineer", "Analysis", "Cause", "Effect", "", start.AddMinutes(4));
             manual.ProposeResolution("engineer", "Correct and verify", start.AddMinutes(5));
             var manualPass = new TestExecution(project.Id, revision1.Id, targetBuild.Id, null, TestOutcome.Pass,

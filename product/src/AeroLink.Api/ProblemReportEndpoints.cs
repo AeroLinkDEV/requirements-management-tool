@@ -348,7 +348,9 @@ public static class ProblemReportEndpoints
         var waivers = (await db.ReadinessWaivers.AsNoTracking().Where(x => x.ProjectId == report.ProjectId
             && x.BlockerType == "ProblemReportReleaseBlocker" && x.BlockerId == report.Id).ToListAsync(ct))
             .OrderByDescending(x => x.CreatedAt).ToList();
-        var canApproveSqaClosure = report.State == ProblemReportState.WaitingForSqaToClose
+        var closureBasisStands = await ClosureBasisStandsAsync(report, db, ct);
+        var closureBasisWithdrawn = report.State == ProblemReportState.WaitingForSqaToClose && !closureBasisStands;
+        var canApproveSqaClosure = closureBasisStands
             && await HasCurrentSqaClosureAuthorityAsync(report, http, db, identity, ct)
             && !string.Equals(http.UserAccount().UserName, report.ReportedBy, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(http.UserAccount().UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase);
@@ -388,6 +390,7 @@ public static class ProblemReportEndpoints
             new
             {
                 canApproveSqaClosure,
+                closureBasisWithdrawn,
                 availableTransitions = transitions,
                 canRevive,
                 reviveTargetState = canRevive ? reviveTarget : null,
@@ -451,7 +454,7 @@ public static class ProblemReportEndpoints
             snapshotId = row.Id, historicalReadOnly = true, historicalLegacyType = parsed.Value.LegacyType,
             capabilities = new
             {
-                canApproveSqaClosure = false, canApproveReleaseWaiver = false, canReassignOwner = false,
+                canApproveSqaClosure = false, closureBasisWithdrawn = false, canApproveReleaseWaiver = false, canReassignOwner = false,
                 canRecoverOwner = false, canRevive = false, availableTransitions = Array.Empty<object>(),
             }, duplicateDiagnostic = (object?)null, impactAreas = Array.Empty<object>(),
             relatedReports = Array.Empty<object>(), links = Array.Empty<object>(),
@@ -530,14 +533,15 @@ public static class ProblemReportEndpoints
             var actor = http.UserAccount(); var now = DateTimeOffset.UtcNow;
             var fromState = ProblemReportTransitionPolicy.Canonical(report.State);
             var wasAwaitingClosure = fromState == ProblemReportState.WaitingForSqaToClose;
+            var hadClosureBasis = report.HasClosureBasis();
             report.Retarget(actor.UserName, request.TargetReleaseId, now);
             var existing = await db.ProblemReportLinks.Where(x => x.ProblemReportId == id && x.ArtifactType == "Release" && x.Relationship == ProblemReportRelationshipPolicy.BuildScope).ToListAsync(ct);
             db.ProblemReportLinks.RemoveRange(existing);
             db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateControlled(id, "Release", request.TargetReleaseId,
                 ProblemReportRelationshipPolicy.BuildScope, ProblemReportRelationshipProducer.TargetBuildWorkflow, actor.UserName, now));
             var targetState = ProblemReportTransitionPolicy.Canonical(report.State);
-            var relationshipRationale = wasAwaitingClosure
-                ? "Target build correction invalidated the prior closure evidence."
+            var relationshipRationale = hadClosureBasis
+                ? "Target build correction withdrew the closure basis."
                 : null;
             await AddRevisionAsync(db, report, "TargetBuildChanged", actor.UserName, now, ct,
                 fromState: fromState, toState: targetState, rationale: relationshipRationale, actorDisplayName: actor.DisplayName);
@@ -630,7 +634,10 @@ public static class ProblemReportEndpoints
         var decision = await new ProblemReportClosureVerificationPolicy(db).ValidateAsync(report, execution, ct);
         if (!decision.Accepted)
             return Results.Conflict(new { error = decision.Error, code = decision.Code });
-        return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ResolutionVerified", (item, actor, now) => item.RecordResolutionVerification(actor.UserName, execution.Id, now),
+        // The person sending this report to SQA, on this result, confirmed it (#1088). It is never a side
+        // effect of recording the result, so it carries their reason like any other transition (DEC-132).
+        return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ResolutionVerified", (item, actor, now) => item.RecordResolutionVerification(actor.UserName, execution.Id, now, request.Rationale),
+            rationale: request.Rationale,
             link: (actor, now) => ProblemReportRelationshipPolicy.CreateControlled(report.Id, "TestExecution", execution.Id,
                 ProblemReportRelationshipPolicy.ResolutionVerification, ProblemReportRelationshipProducer.ResolutionVerificationWorkflow, actor.UserName, now),
             afterMutation: async (item, actor, now, resolutionLink, _, token) =>
@@ -786,7 +793,7 @@ public static class ProblemReportEndpoints
                     ProblemReportRelationshipProducer.RelatedProblemReportWorkflow, actor.UserName, now));
                 var toState = ProblemReportTransitionPolicy.Canonical(subject.State);
                 var rationale = invalidated
-                    ? "Relating another Problem Report invalidated the prior closure evidence."
+                    ? "Relating another Problem Report withdrew the closure basis."
                     : null;
                 await AddRevisionAsync(db, subject, "RelatedProblemReportLinked", actor.UserName, now, ct,
                     detail: $"Related to {other.DisplayNumber}.",
@@ -833,7 +840,7 @@ public static class ProblemReportEndpoints
                 var invalidated = subject.PrepareControlledRelationshipChange(actor.UserName, now);
                 var toState = ProblemReportTransitionPolicy.Canonical(subject.State);
                 var rationale = invalidated
-                    ? "Removing a related Problem Report invalidated the prior closure evidence."
+                    ? "Removing a related Problem Report withdrew the closure basis."
                     : null;
                 await AddRevisionAsync(db, subject, "RelatedProblemReportUnlinked", actor.UserName, now, ct,
                     detail: $"No longer related to {other.DisplayNumber}.",
@@ -867,11 +874,12 @@ public static class ProblemReportEndpoints
             var now = DateTimeOffset.UtcNow; var actor = http.UserAccount();
             var fromState = ProblemReportTransitionPolicy.Canonical(report.State);
             var wasAwaitingClosure = fromState == ProblemReportState.WaitingForSqaToClose;
+            var hadClosureBasis = await ClosureBasisStandsAsync(report, db, ct);
             report.RecordContextLink(actor.UserName, now);
             db.ProblemReportLinks.Add(ProblemReportRelationshipPolicy.CreateGenericContext(report.Id, canonicalType, request.ArtifactId, relationship!, actor.UserName, now));
             var targetState = ProblemReportTransitionPolicy.Canonical(report.State);
-            var relationshipRationale = wasAwaitingClosure
-                ? "Contextual relationship change invalidated the prior closure evidence."
+            var relationshipRationale = hadClosureBasis
+                ? "Contextual relationship change withdrew the closure basis."
                 : null;
             await AddRevisionAsync(db, report, "ContextArtifactLinked", actor.UserName, now, ct,
                 fromState: fromState, toState: targetState, rationale: relationshipRationale, actorDisplayName: actor.DisplayName);
@@ -1000,11 +1008,15 @@ public static class ProblemReportEndpoints
             var now = DateTimeOffset.UtcNow; var actor = http.UserAccount();
             var fromState = ProblemReportTransitionPolicy.Canonical(report.State);
             var wasAwaitingClosure = report.State == ProblemReportState.WaitingForSqaToClose;
+            var hadClosureBasis = report.HasClosureBasis();
             action(report, actor, now);
             ProblemReportLink? createdLink = null;
             if (link is not null) { createdLink = link(actor, now); db.ProblemReportLinks.Add(createdLink); }
             var toState = ProblemReportTransitionPolicy.Canonical(report.State);
             var transitionRationale = LifecycleTransitionRationale(eventType, fromState, toState, rationale ?? detail);
+            // The report stays where it was (#1088), so the record has to say what the change cost it.
+            if (hadClosureBasis && fromState == toState && !report.HasClosureBasis())
+                transitionRationale ??= ClosureBasisWithdrawnRationale(eventType);
             var revision = await AddRevisionAsync(db, report, eventType, actor.UserName, now, ct, detail,
                 fromState, toState, transitionRationale, actorDisplayName: actor.DisplayName);
             if (wasAwaitingClosure && report.ResolutionVerificationExecutionId is null)
@@ -1034,21 +1046,23 @@ public static class ProblemReportEndpoints
         db.ProblemReportRevisions.Add(revision); return revision;
     }
 
+    private static string ClosureBasisWithdrawnRationale(string eventType) => (eventType switch
+    {
+        "ResponsibleEngineerReassigned" => "The responsible-engineer change",
+        "ReleaseBlockerRaised" => "Raising the release blocker",
+        "ReleaseBlockerCleared" => "Clearing the release blocker",
+        "ReleaseBlockerWaiverApproved" => "The release-waiver decision",
+        "ReleaseBlockerWaiverRevoked" => "Revoking the release waiver",
+        _ => $"The {eventType} change",
+    }) + " withdrew the closure basis. SQA cannot close this report until it is returned to Verifying and sent again.";
+
     private static string? LifecycleTransitionRationale(string eventType, ProblemReportState from,
         ProblemReportState to, string? supplied)
     {
         if (from == to || !ProblemReportTransitionPolicy.RequiresRationale(from, to)) return supplied;
         if (!string.IsNullOrWhiteSpace(supplied)) return supplied.Trim();
-        if (from == ProblemReportState.WaitingForSqaToClose && to == ProblemReportState.Verifying)
-            return eventType switch
-            {
-                "ResponsibleEngineerReassigned" => "The responsible-engineer change invalidated the prior closure basis and returned the report to Verifying.",
-                "ReleaseBlockerRaised" => "Raising the release blocker invalidated the prior closure basis and returned the report to Verifying.",
-                "ReleaseBlockerCleared" => "Clearing the release blocker invalidated the prior closure basis and returned the report to Verifying.",
-                "ReleaseBlockerWaiverApproved" => "The release-waiver decision invalidated the prior closure basis and returned the report to Verifying.",
-                "ReleaseBlockerWaiverRevoked" => "Revoking the release waiver invalidated the prior closure basis and returned the report to Verifying.",
-                _ => $"The {eventType} change invalidated the prior closure basis and returned the report to Verifying.",
-            };
+        // No change here moves the report on its own any more (#1088), so a required rationale always comes
+        // from the person making the transition. This remains only as a fallback, never as a stand-in reason.
         return $"The {eventType} change moved the report from {from} to {to}.";
     }
 
@@ -1236,9 +1250,16 @@ public static class ProblemReportEndpoints
     {
         var sccb = await HasSccbOpeningAuthorityAsync(report, actor, db, ct);
         var sqa = await HasCurrentSqaClosureAuthorityAsync(report, actor, db, identity, ct);
+        var basisStands = await ClosureBasisStandsAsync(report, db, ct);
         var transitions = new List<TransitionOption>();
         foreach (var target in ProblemReportTransitionPolicy.AllowedTargets(report.State))
         {
+            // Into SQA only on a chosen passing result, through /verify, never as a bare state change; and
+            // out to Closed only while that result still stands (#1088).
+            if (report.State == ProblemReportState.Verifying && target == ProblemReportState.WaitingForSqaToClose)
+                continue;
+            if (target == ProblemReportState.Closed && !basisStands)
+                continue;
             var permitted = ProblemReportTransitionPolicy.IsSccbOpening(report.State, target) ? sccb
                 : ProblemReportTransitionPolicy.IsSqaOnly(report.State, target) ? sqa
                 : true;
@@ -1251,6 +1272,23 @@ public static class ProblemReportEndpoints
                     ProblemReportTransitionPolicy.RequiresRationale(report.State, target)));
         }
         return transitions;
+    }
+
+    /// <summary>
+    /// Whether a report waiting on SQA still stands on the passing result it was sent on (#1088). A later
+    /// change withdraws that basis without moving the report: the domain clears the execution for field and
+    /// assignment changes, and a controlled link change invalidates the pending candidate. Either one leaves
+    /// the report unclosable until a person returns it to Verifying. A report from before closure candidates
+    /// existed has none, and stands on its execution alone, as closure approval already treats it.
+    /// </summary>
+    private static async Task<bool> ClosureBasisStandsAsync(ProblemReport report, AeroLinkDbContext db, CancellationToken ct)
+    {
+        if (!report.HasClosureBasis()) return false;
+        var latest = await db.ProblemReportClosureCandidates.AsNoTracking()
+            .Where(item => item.ProblemReportId == report.Id && item.ReportRevision == report.Revision)
+            .OrderByDescending(item => item.Sequence).Select(item => (ProblemReportClosureCandidateState?)item.State)
+            .FirstOrDefaultAsync(ct);
+        return latest is null or ProblemReportClosureCandidateState.Pending;
     }
 
     /// <summary>
@@ -1673,7 +1711,7 @@ public static class ProblemReportEndpoints
     private sealed record CreateProblemReportFromExecutionRequest(Guid? ReleaseId, string? Title, string? Problem, string? Analysis, string? Classification, ProblemReportSeverity? Severity, ProblemReportPriority? Priority, string? AffectedConfiguration, ProblemReportCategory? Category = null);
     private sealed record InvestigationRequest(long? ExpectedVersion, string Analysis, string? RootCause, string? Effects, string? Containment);
     private sealed record ResolutionRequest(long? ExpectedVersion, string CorrectiveAction);
-    private sealed record VerificationRequest(long? ExpectedVersion, Guid TestExecutionId);
+    private sealed record VerificationRequest(long? ExpectedVersion, Guid TestExecutionId, string? Rationale = null);
     private sealed record ClosureApprovalRequest(long? ExpectedVersion);
     private sealed record DispositionRequest(long? ExpectedVersion, ProblemReportDisposition Disposition, string Rationale, Guid? DuplicateOfId);
     private sealed record ReopenRequest(long? ExpectedVersion, string Rationale);
