@@ -1025,7 +1025,7 @@ function Start-AeroLinkRemoteDemoNgrok {
         }
         $tunnel = [pscustomobject]@{ Id = [int]$response.processId; StartedAt = [string]$response.startedAt; Image = [string]$response.image }
         $tunnel | Add-Member -MemberType ScriptProperty -Name HasExited -Value {
-            [AeroLink.TransitionV1.Kernel]::Classify($this.Id, (ConvertTo-AeroLinkUtcIso $this.StartedAt), $this.Image) -ne 'RunningMatch'
+            [AeroLink.TransitionV2.Kernel]::Classify($this.Id, (ConvertTo-AeroLinkUtcIso $this.StartedAt), $this.Image) -ne 'RunningMatch'
         }
         $tunnel | Add-Member -MemberType ScriptMethod -Name Kill -Value {
             if (-not $this.HasExited) {

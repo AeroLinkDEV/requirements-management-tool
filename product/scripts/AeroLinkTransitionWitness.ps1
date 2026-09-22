@@ -28,7 +28,7 @@ param(
 #>
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransitionKernel.psm1') -DisableNameChecking
-$K = [AeroLink.TransitionV1.Kernel]
+$K = [AeroLink.TransitionV2.Kernel]
 $faults = @($FaultInjection -split '\+' | Where-Object { $_ })
 
 # A liveness PROBE holds this file for an instant; retry briefly rather than mistake a probe for a rival.

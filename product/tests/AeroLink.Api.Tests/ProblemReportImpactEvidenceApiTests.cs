@@ -1,10 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using AeroLink.Domain.Baselines;
+using AeroLink.Domain.ChangeControl;
+using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
+using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Releases;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -217,5 +222,130 @@ public sealed class ProblemReportImpactEvidenceApiTests
         var artifact = Assert.Single(Area(await client.GetFromJsonAsync<JsonElement>(
             $"/api/problem-reports/{id}"), "SystemRequirements").GetProperty("artifacts").EnumerateArray());
         Assert.Equal("Withdrawn", artifact.GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task Code_impact_keeps_report_snapshot_proposal_owner_and_requirement_revision_exact()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId) = await SeedAsync(factory);
+        var reportId = await RaiseAsync(client, projectId, releaseId, "{\"Code\":\"Yes\"}");
+        var beforeVersion = (await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}"))
+            .GetProperty("version").GetInt64();
+        var now = DateTimeOffset.UtcNow;
+        Guid reportSnapshotId;
+        Guid changeRequestId;
+        Guid proposalId;
+        Guid requirementRevisionId;
+        Guid requirementArtifactId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
+            var snapshot = await db.ProblemReportRevisions.Where(x => x.ProblemReportId == reportId)
+                .OrderByDescending(x => x.Revision).ThenBy(x => x.Id).FirstAsync();
+            var change = new SystemChangeRequest("SRCR-10231", 0, projectId, releaseId,
+                "Exact Problem Report reference", "Problem", "Analysis", "Solution", "problem-report-member", now);
+            var proposal = change.AddRequirementChange("problem-report-member", "SYSR-10231", 0,
+                RequirementLevel.System, RequirementChangeKind.Modify, "Recorded proposal", "Statement", "Rationale",
+                now, allowIncomplete: true);
+            var baseline = new CandidateBaseline("SW-10231", 0, projectId, releaseId, null,
+                "Reference projection baseline", "problem-report-member", now);
+            var requirement = new RequirementArtifact(projectId, "SYSR-10231", RequirementLevel.System, now);
+            var revision = new RequirementRevision(requirement.Id, 0, "Exact materialized requirement revision.",
+                "Rationale", "Test", RequirementRevisionState.Active, change.Id, baseline.Id, now);
+            var targetSnapshot = CodeRelationshipTarget.ForProblemReportSnapshot(snapshot.Id, reportId,
+                snapshot.Revision, report.DisplayNumber);
+            var targetChange = CodeRelationshipTarget.ForChangeRequestRevision(change.Id, change.Revision,
+                change.DisplayNumber);
+            var targetProposal = CodeRelationshipTarget.ForRequirementProposal(proposal.Id, change.Id,
+                "SYSR-10231 proposal");
+            var targetRevision = CodeRelationshipTarget.ForRequirementRevision(revision.Id, requirement.Id,
+                revision.Revision, "SYSR-10231.00");
+            static GitLabMergeRequestRelationship Merge(Guid project, Guid release, int iid,
+                CodeRelationshipTarget target, DateTimeOffset recordedAt) => new(project, release,
+                "https://gitlab.example", 42, iid, iid * 10L, null, null, "aerolink/requirements",
+                $"https://gitlab.example/aerolink/requirements/-/merge_requests/{iid}", $"Exact reference {iid}",
+                target, CodeRelationshipMeaning.RelatedContext, "problem-report-member", recordedAt);
+            var seededReferences = new[]
+            {
+                Merge(projectId, releaseId, 21, targetSnapshot, now),
+                Merge(projectId, releaseId, 22, targetChange, now),
+                Merge(projectId, releaseId, 23, targetProposal, now),
+                Merge(projectId, releaseId, 24, targetRevision, now),
+            };
+            db.AddRange(change, proposal, baseline, requirement, revision,
+                new ProblemReportLink(report.Id, "ChangeRequest", change.Id, "related to", "problem-report-member", now));
+            db.AddRange(seededReferences);
+            await db.SaveChangesAsync();
+            reportSnapshotId = snapshot.Id;
+            changeRequestId = change.Id;
+            proposalId = proposal.Id;
+            requirementRevisionId = revision.Id;
+            requirementArtifactId = requirement.Id;
+        }
+
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        var codeArea = Area(detail, "Code");
+        var returnedReferences = codeArea.GetProperty("artifacts").EnumerateArray()
+            .Select(x => x.GetProperty("codeReference")).Where(x => x.ValueKind == JsonValueKind.Object).ToList();
+
+        Assert.Equal(4, returnedReferences.Count);
+        var reportReference = Assert.Single(returnedReferences, x => x.GetProperty("targetKind").GetString() == "ProblemReportRevision");
+        Assert.Equal(reportSnapshotId.ToString(), reportReference.GetProperty("targetIdentityId").GetString());
+        Assert.Equal(reportId.ToString(), reportReference.GetProperty("targetOwnerIdentityId").GetString());
+        var changeReference = Assert.Single(returnedReferences, x => x.GetProperty("targetKind").GetString() == "ChangeRequestRevision");
+        Assert.Equal(changeRequestId.ToString(), changeReference.GetProperty("targetIdentityId").GetString());
+        var proposalReference = Assert.Single(returnedReferences, x => x.GetProperty("targetKind").GetString() == "RequirementProposal");
+        Assert.Equal(proposalId.ToString(), proposalReference.GetProperty("targetIdentityId").GetString());
+        Assert.Equal(changeRequestId.ToString(), proposalReference.GetProperty("targetOwnerIdentityId").GetString());
+        var revisionReference = Assert.Single(returnedReferences, x => x.GetProperty("targetKind").GetString() == "RequirementRevision");
+        Assert.Equal(requirementRevisionId.ToString(), revisionReference.GetProperty("targetIdentityId").GetString());
+        Assert.Equal(requirementArtifactId.ToString(), revisionReference.GetProperty("targetOwnerIdentityId").GetString());
+        Assert.Equal(beforeVersion, detail.GetProperty("version").GetInt64());
+        Assert.Null(codeArea.GetProperty("notice").GetString());
+    }
+
+    [Fact]
+    public async Task Code_impact_overflow_withholds_the_entire_recorded_reference_set()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        var (projectId, releaseId) = await SeedAsync(factory);
+        var reportId = await RaiseAsync(client, projectId, releaseId, "{\"Code\":\"Yes\"}");
+        var now = DateTimeOffset.UtcNow;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var report = await db.ProblemReports.SingleAsync(x => x.Id == reportId);
+            var change = new SystemChangeRequest("SRCR-10232", 0, projectId, releaseId,
+                "Bound recorded references", "Problem", "Analysis", "Solution", "problem-report-member", now);
+            for (var index = 0; index < 1000; index++)
+                change.AddRequirementChange("problem-report-member", $"SYSR-{90000 + index:D5}", 0,
+                    RequirementLevel.System, RequirementChangeKind.Introduce, $"Proposed requirement {index}",
+                    "Bounded projection test", "Inspection", now);
+            var target = CodeRelationshipTarget.ForChangeRequestRevision(change.Id, change.Revision,
+                change.DisplayNumber);
+            var candidateReference = new GitLabMergeRequestRelationship(projectId, releaseId,
+                "https://gitlab.example", 42, 31, 310L, null, null, "aerolink/requirements",
+                "https://gitlab.example/aerolink/requirements/-/merge_requests/31", "Must not be partially shown",
+                target, CodeRelationshipMeaning.RelatedContext, "problem-report-member", now);
+            db.AddRange(change, new ProblemReportLink(report.Id, "ChangeRequest", change.Id,
+                "related to", "problem-report-member", now), candidateReference);
+            await db.SaveChangesAsync();
+        }
+
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        var codeArea = Area(detail, "Code");
+
+        Assert.Contains("bounded panel limit", codeArea.GetProperty("notice").GetString(),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(codeArea.GetProperty("artifacts").EnumerateArray(), artifact =>
+            artifact.GetProperty("artifactType").GetString() == "GitLabReference"
+            || (artifact.TryGetProperty("codeReference", out var reference)
+                && reference.ValueKind == JsonValueKind.Object));
     }
 }

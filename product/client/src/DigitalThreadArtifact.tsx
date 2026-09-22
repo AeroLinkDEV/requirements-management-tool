@@ -6,6 +6,7 @@ import DigitalThreadTable, {
   type ThreadRepresentation,
 } from "./DigitalThreadTable"
 import ExactArtifactLink from "./ExactArtifactLink"
+import { RecordedCodeReferenceCard } from "./RecordedCodeReference"
 import { type CanvasNode, resolveDockByLane, trace } from "./digitalThreadGeometry"
 import { usePanelDock } from "./digitalThreadPanelDock"
 import { stateLabel } from "./presentation"
@@ -469,6 +470,15 @@ export default function DigitalThreadArtifact({
                 </div>
               ) : null}
 
+              {node.recordedCodeReferences.length ? (
+                <div className="dtaEvidence">
+                  <p className="dtaEyebrow">RECORDED CODE REFERENCES</p>
+                  {node.recordedCodeReferences.map(reference => (
+                    <RecordedCodeReferenceCard key={reference.id} reference={reference} />
+                  ))}
+                </div>
+              ) : null}
+
               {relations.length ? (
                 <p className="dtaNote">
                   {relations.length === 1 ? "A relationship is" : `${relations.length} relationships are`}{" "}
@@ -549,6 +559,11 @@ export default function DigitalThreadArtifact({
         <p className="dtaApplicability" role="status">
           {thread?.verification.reason ??
             "This requirement level has no verification discipline, so this thread has no test case, procedure or result."}
+        </p>
+      ) : null}
+      {thread && !thread.recordedCodeReferencesComplete ? (
+        <p className="dtaApplicability" role="status">
+          Recorded Code references exceed this thread&rsquo;s display limit; no partial reference set is shown.
         </p>
       ) : null}
 

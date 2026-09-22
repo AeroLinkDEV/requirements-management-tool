@@ -119,7 +119,7 @@ if ($Probe) {
 # supposed to be. The record is therefore written LAST, after the disposable twin is proven unregistered and
 # every probe this driver ever saw is proven gone; a cleanup or query failure withholds the record instead of
 # leaving a consumable Qualified beside a nonzero exit.
-$K = [AeroLink.TransitionV1.Kernel]
+$K = [AeroLink.TransitionV2.Kernel]
 if ([string]::IsNullOrWhiteSpace($ProbeStateRoot)) { $ProbeStateRoot = Join-Path $InstallationRoot 'qualification-probe-state' }
 $ProbeStateRoot = [IO.Path]::GetFullPath($ProbeStateRoot).TrimEnd('\')
 New-Item -ItemType Directory -Path $ProbeStateRoot -Force | Out-Null

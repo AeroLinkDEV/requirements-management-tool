@@ -228,6 +228,24 @@ const chosen = scenario === "dense" ? denseProjection
   : scenario === "verification-identity" ? verificationIdentityProjection
   : projection
 
+const malformedReferenceScenario = scenario === "recorded-reference-null" || scenario === "recorded-reference-object"
+const malformedReferenceValue = scenario === "recorded-reference-null"
+  ? [null]
+  : { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", relationshipKind: "MergeRequest", version: 1,
+      isActive: true, releaseId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", releaseVersion: "1.6",
+      meaning: "RelatedContext", recordedBy: "reviewer", recordedAt: "2026-09-21T12:00:00Z",
+      targetKind: "ChangeRequestRevision", targetIdentityId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      targetRevisionNumber: 1, targetStableIdentity: "ChangeRequestRevision:cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      targetDisplaySnapshot: "SRCR-00039.00", instanceBaseUrl: "https://gitlab.example", remoteProjectId: 42,
+      repositoryPathSnapshot: "aerolink/source", mergeRequestUrlSnapshot: "https://gitlab.example/aerolink/source/-/merge_requests/12",
+      mergeRequestIid: 12, mergeRequestId: 1200, mergeRequestTitleSnapshot: "Stored source record" }
+const malformedReferenceProjection: NetworkProjection = {
+  ...projection,
+  nodes: projection.nodes.map(candidate => candidate.id === "pr-1"
+    ? { ...candidate, recordedCodeReferences: malformedReferenceValue }
+    : candidate),
+}
+
 /**
  * #1016 S13A. The real adapter and the real router, wired exactly as the page wires them.
  *
@@ -249,8 +267,9 @@ const representation = new URLSearchParams(window.location.search).get("view") =
 
 createRoot(document.getElementById("root")!).render(
   scenario === "scope" ? <ScopeHarness projection={chosen} /> : <DigitalThreadNetwork
-    projection={chosen}
+    projection={malformedReferenceScenario ? malformedReferenceProjection : chosen}
     buildLabel="Build 1.6"
+    focalId={malformedReferenceScenario ? "pr-1" : undefined}
     hrefFor={hrefFor}
     representation={representation}
   />,

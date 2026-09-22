@@ -2,6 +2,7 @@ using static AeroLink.Infrastructure.Persistence.FrozenReviewTraceParser;
 using System.Text.Json;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
@@ -48,7 +49,11 @@ public sealed record ChangeRequestTraceNode(
     Guid? ArtifactId = null,
     IReadOnlyList<Guid>? BaselineMembershipIds = null,
     /// <summary>Present only on TestChangeRequest nodes; null everywhere else.</summary>
-    ChangeRequestTraceVerification? Verification = null);
+    ChangeRequestTraceVerification? Verification = null,
+    /// <summary>Present only on RecordedCodeRelationship nodes; never accepted implementation evidence.</summary>
+    RecordedCodeRelationship? RecordedCodeReference = null,
+    /// <summary>Active recorded Code references attached to this exact target node; separate from accepted evidence.</summary>
+    IReadOnlyList<RecordedCodeRelationship>? RecordedCodeReferences = null);
 
 /// <summary>One provenance fact carried by a composed trace edge.</summary>
 public sealed record ChangeRequestTraceProvenance(
@@ -603,6 +608,83 @@ public static partial class ChangeRequestTraceProjection
                 "CodeEvidenceSet", "RequirementCodeEvidence");
             edge.Provenance.Add(new("CodeEvidenceDispositionSet", set.Id));
             edge.Provenance.Add(new("CodeEvidenceCurrentSelector", current.Selector!.Id));
+            edgeBuilders.Add(edge);
+        }
+
+        // Recorded MR/file links are contextual relationships, not accepted implementation evidence. Match
+        // only exact targets already admitted by this frontier. Requirement proposals retain their owning CR
+        // identity and remain proposals; they are never replaced with a materialized/current requirement.
+        var recordedTargets = allCr.Select(x => new CodeRelationshipExactTargetAddress(
+                CodeRelationshipTargetKind.ChangeRequestRevision, x.Id, null, x.Revision))
+            .Concat(requirementRevisions.Select(x => new CodeRelationshipExactTargetAddress(
+                CodeRelationshipTargetKind.RequirementRevision, x.Id, x.ArtifactId, x.Revision)))
+            .ToList();
+        var remainingReferenceNodes = Math.Max(0, scope.MaximumNodes - scope.Count);
+        var proposalTargetQuery = from proposal in db.RequirementChanges.AsNoTracking()
+            join owner in db.SystemChangeRequests.AsNoTracking() on proposal.ChangeRequestId equals owner.Id
+            where owner.ProjectId == projectId && crIds.Contains(owner.Id)
+            orderby proposal.Id
+            select new { ProposalId = proposal.Id, OwnerId = owner.Id };
+        var proposalTargets = await budget.ReadAsync(proposalTargetQuery.Take(remainingReferenceNodes + 1), ct);
+        var proposalTargetLimitExceeded = proposalTargets.Count > remainingReferenceNodes;
+        if (proposalTargetLimitExceeded)
+        {
+            if (!isNetwork) throw new TraceWorkLimitException();
+            scope.Truncated = true;
+            proposalTargets = proposalTargets.Take(remainingReferenceNodes).ToList();
+        }
+        recordedTargets.AddRange(proposalTargets.Select(x => new CodeRelationshipExactTargetAddress(
+            CodeRelationshipTargetKind.RequirementProposal, x.ProposalId, x.OwnerId, null)));
+        var recordedProjection = await RecordedCodeRelationshipProjection.ReadAsync(db, projectId,
+            recordedTargets, isNetwork ? [networkReleaseId!.Value] : null, remainingReferenceNodes, budget, ct);
+        if (recordedProjection.LimitExceeded && !isNetwork) throw new TraceWorkLimitException();
+        if (recordedProjection.LimitExceeded) scope.Truncated = true;
+        var recordedRelationships = recordedProjection.Relationships
+            .Take(recordedProjection.LimitExceeded ? remainingReferenceNodes : int.MaxValue)
+            .ToList();
+        scope.RecordedCodeRelationships.UnionWith(recordedRelationships.Select(x => x.Id));
+        if (!isNetwork && scope.Count > TraceReadBudget.MaximumNodes) throw new TraceWorkLimitException();
+
+        foreach (var relationship in recordedRelationships)
+        {
+            var target = relationship.TargetKind switch
+            {
+                CodeRelationshipTargetKind.ChangeRequestRevision when byCr.TryGetValue(relationship.TargetIdentityId, out var change)
+                    => (Id: change.Id, Kind: "ChangeRequest", Level: ChangeRequestLevel(change)?.ToString()),
+                CodeRelationshipTargetKind.RequirementRevision when requirementRevisions.FirstOrDefault(x => x.Id == relationship.TargetIdentityId) is { } revision
+                    => (Id: revision.Id, Kind: "RequirementRevision", Level: revision.Level.ToString()),
+                CodeRelationshipTargetKind.RequirementProposal when relationship.TargetOwnerIdentityId is Guid ownerId && byCr.TryGetValue(ownerId, out var owner)
+                    => (Id: owner.Id, Kind: "ChangeRequest", Level: ChangeRequestLevel(owner)?.ToString()),
+                _ => default,
+            };
+            if (target.Id == Guid.Empty || !nodes.ContainsKey((target.Kind, target.Id))) continue;
+            var targetKey = (target.Kind, target.Id);
+            var targetNode = nodes[targetKey];
+            nodes[targetKey] = targetNode with
+            {
+                RecordedCodeReferences = (targetNode.RecordedCodeReferences ?? [])
+                    .Append(relationship)
+                    .OrderByDescending(x => x.RecordedAt)
+                    .ThenBy(x => x.Id)
+                    .ToArray(),
+            };
+            var label = relationship.RelationshipKind == CodeRelationshipKind.MergeRequest
+                ? relationship.MergeRequestIid is int iid ? $"MR !{iid}" : "Recorded merge request"
+                : relationship.Path ?? "Recorded file";
+            var title = relationship.RelationshipKind == CodeRelationshipKind.MergeRequest
+                ? relationship.MergeRequestTitleSnapshot
+                : relationship.StartLine is int start && relationship.EndLine is int end
+                    ? $"{relationship.Path} · lines {start}–{end}"
+                    : relationship.Path;
+            nodes[("RecordedCodeRelationship", relationship.Id)] = new(
+                relationship.Id, "RecordedCodeRelationship", label, title, "Reference recorded", projectId,
+                relationship.ReleaseId, relationship.ReleaseVersion, null, target.Level,
+                RecordedCodeReference: relationship);
+            var edge = new EdgeBuilder(target.Id, target.Kind, relationship.Id,
+                "RecordedCodeRelationship", "RecordedCodeReference");
+            edge.Provenance.Add(new("RecordedCodeRelationship", relationship.Id,
+                BuildId: relationship.ReleaseId, BuildVersion: relationship.ReleaseVersion,
+                Status: "Reference recorded; not accepted implementation evidence."));
             edgeBuilders.Add(edge);
         }
 

@@ -375,9 +375,18 @@ html .approvedWording > small {
   font-weight: 700;
 }
 
-.richEditor {
-  min-height: 118px !important;
-  font: 400 13px/1.55 Consolas, monospace !important;
+/* Scoped to the controlled requirement/procedure editor, which is the surface this was written for.
+   Unscoped, `.richEditor { … !important }` reached every rich editor in the product: `.richEditor` is
+   RichContent.css's shared class and the client builds one stylesheet (vite.config.ts
+   `cssCodeSplit: false`). The `font` shorthand sets the family on the container, so a Problem Report's
+   field label, hint and typed text all inherited Consolas — a monospace editor on a surface that is
+   DM Sans everywhere else. Whether this editor should keep Consolas at all is a separate product
+   decision; scoping settles the leak without prejudging it, and these two surfaces render exactly as
+   they did before. `!important` is no longer needed — the container-scoped selector already outranks
+   RichContent.css's `.richEditor`. */
+.controlledEditor .richEditor {
+  min-height: 118px;
+  font: 400 13px/1.55 Consolas, monospace;
 }
 
 .controlledPreview {

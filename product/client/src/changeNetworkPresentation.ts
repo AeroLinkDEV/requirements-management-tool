@@ -40,6 +40,8 @@ export type NetworkNode = {
   artifactId?: string | null
   /** Present on TestChangeRequest nodes only. */
   verification?: NetworkVerification | null
+  recordedCodeReference?: import('./recordedCodeRelationship').RecordedCodeRelationship | null
+  recordedCodeReferences?: unknown
 }
 
 export type NetworkEdge = {
@@ -223,6 +225,7 @@ export const isUnnumberedAssessment = (node: NetworkNode): boolean =>
 /** The short square badge on a card. Says the level, which the identifier alone does not reliably carry. */
 export const badgeOf = (node: NetworkNode): string => {
   if (node.kind === "ProblemReport") return "PR"
+  if (node.kind === "RecordedCodeRelationship") return "CODE"
   // An assessment raised against an approved change is not a controlled test change request and must not
   // wear its badge: a reader scanning for TCRs would count work that has not been raised. The node kind,
   // its edges and its id are unchanged — this is the badge only.
@@ -285,6 +288,7 @@ export const pillFor = (state?: string | null): Pill => {
 
 /** Badge tints, keyed on lane so a card reads its level before its text is legible. */
 export const badgeTintFor = (node: NetworkNode): Pill => {
+  if (node.kind === "RecordedCodeRelationship") return { background: "#e9edf2", color: "#4f6379" }
   const group = groupOf(node)
   if (group === "pr") return { background: "#eef1f6", color: "#566579" }
   if (group === "ver") return { background: "#e8f4ef", color: "#28735f" }

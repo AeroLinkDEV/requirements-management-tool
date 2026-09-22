@@ -29,6 +29,7 @@ import {
   pillFor,
   resolveDock,
 } from "./changeNetworkPresentation"
+import { RecordedCodeReferenceCard, RecordedCodeReferenceList } from "./RecordedCodeReference"
 import "./DigitalThreadNetwork.css"
 
 /** Where the detail panel sits. `auto` picks the side with less linked content. */
@@ -423,7 +424,11 @@ export default function DigitalThreadNetwork({
                   <b>{node.buildVersion}</b>
                 </div>
               ) : null}
-              {node.kind !== "ProblemReport" && onOpenChange ? (
+              {node.recordedCodeReference ? (
+                <RecordedCodeReferenceCard reference={node.recordedCodeReference} />
+              ) : null}
+              <RecordedCodeReferenceList references={node.recordedCodeReferences} />
+              {(node.kind === "ChangeRequest" || node.kind === "TestChangeRequest") && onOpenChange ? (
                 <div className="dtnCardActs">
                   <button
                     type="button"
@@ -700,7 +705,7 @@ export default function DigitalThreadNetwork({
               )
             })}
             <div className="dtnPanelActions">
-              {selected.kind !== "ProblemReport" && onOpenChange ? (
+              {(selected.kind === "ChangeRequest" || selected.kind === "TestChangeRequest") && onOpenChange ? (
                 <button type="button" className="is-primary" onClick={() => onOpenChange(selected)}>
                   Open this change
                 </button>

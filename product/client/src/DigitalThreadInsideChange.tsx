@@ -16,6 +16,7 @@ import {
 } from "./digitalThreadGeometry"
 import { stateLabel } from "./presentation"
 import { type NetworkNode, badgeOf, badgeTintFor, levelBadge, pillFor } from "./changeNetworkPresentation"
+import { RecordedCodeReferenceList } from "./RecordedCodeReference"
 import {
   TYPE_FILTERS,
   TYPE_LABELS,
@@ -484,6 +485,7 @@ export default function DigitalThreadInsideChange({
             <div className="dticTitle" data-density="title">
               {node.title}
             </div>
+            {isOpen ? <RecordedCodeReferenceList references={node.recordedCodeReferences} /> : null}
             {isOpen ? <p className="dticMeta">Open in this view</p> : null}
           </div>
         )
@@ -1033,6 +1035,7 @@ export default function DigitalThreadInsideChange({
                   <b>{row.value}</b>
                 </div>
               ))}
+              {selectedCard.kind === "register" ? <RecordedCodeReferenceList references={selectedCard.node.recordedCodeReferences} /> : null}
             </section>
             {/* The whole traced web, not the first hop. Deeper records show their hop count and a dashed
                 border, and every row re-centres the board on that record. */}
