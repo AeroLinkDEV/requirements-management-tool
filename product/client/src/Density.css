@@ -78,6 +78,8 @@ html .signalRow,
 html .reqTable article,
 html .traceList > article,
 html .userTable > article,
+html .prList > button,
+html .prHistoricalAttachments article,
 html .workQueue > article {
   padding-block: var(--space-row-block);
 }
@@ -103,7 +105,19 @@ html .verificationCard,
 html .workspaceCard,
 html .gateGrid article,
 html .metrics button,
-html .workMetrics article {
+html .workMetrics article,
+/* The Problem Report centre used to reach density through `.impactRow` alone, so switching to compact
+   compressed one row family on that page and left every card at comfortable spacing. */
+html .prMetrics article,
+html .prNarrative article,
+html .prIdentity > div,
+html .prImpactPanel,
+html .prSupportingFiles,
+html .prEvidence,
+html .prTimeline,
+html .prFlow,
+html .prImpact,
+html .prCorrective {
   padding-block: var(--space-card-block);
 }
 
