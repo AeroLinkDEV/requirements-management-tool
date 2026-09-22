@@ -109,6 +109,7 @@ html .workMetrics article,
 /* The Problem Report centre used to reach density through `.impactRow` alone, so switching to compact
    compressed one row family on that page and left every card at comfortable spacing. */
 html .prMetrics article,
+html .prNarrative,
 html .prNarrative article,
 html .prIdentity > div,
 html .prImpactPanel,

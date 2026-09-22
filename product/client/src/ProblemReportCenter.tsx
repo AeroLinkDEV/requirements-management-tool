@@ -6,7 +6,7 @@ import ProblemReportStateHeader from "./ProblemReportStateHeader";
 import { stateLabel } from "./problemReportLifecycle";
 import { PersonName } from "./People";
 import { RichContentEditor, RichContentView } from "./RichContent";
-import { emptyRichContent, toPlainText } from "./richContentModel";
+import { emptyRichContent, hasContent, toPlainText } from "./richContentModel";
 import ControlledProblemReportEditor from "./ControlledProblemReportEditor";
 import ControlledAttachments from "./ControlledAttachments";
 import ProblemReportCategoryPicker, { CategoryTile } from "./ProblemReportCategoryPicker";
@@ -899,6 +899,78 @@ export default function ProblemReportCenter({
     }
   };
   const latestClosureCandidate = selected?.closureCandidates?.[0];
+  /**
+   * Every authored field on the record, in reading order, split by whether it holds anything.
+   *
+   * `analysis` appears here for the first time. It is authored in the checkout editor, carried by the
+   * API and stored on the record, and the record view has never rendered it — so an author's analysis
+   * was invisible to every reviewer of the report.
+   *
+   * A field's emptiness is decided by `hasContent`, not by whether its text is blank: a field holding
+   * only a figure or only a table has content and no text, and reporting it as unfilled would hide the
+   * evidence attached to it.
+   *
+   * Workaround keeps its own wording when empty. Empty is a real answer there — it means no workaround
+   * has been found — which is not the same claim as a field nobody has reached yet.
+   */
+  const narrative = useMemo(() => {
+    const fields = selected
+      ? [
+          {
+            label: "Problem description",
+            rich: selected.problemRich,
+            plain: selected.problem,
+            whenEmpty: "Not yet recorded",
+          },
+          {
+            label: "Additional information",
+            rich: selected.additionalInformationRich,
+            plain: selected.additionalInformation,
+            whenEmpty: "Not yet provided",
+          },
+          {
+            label: "Analysis",
+            rich: selected.analysisRich,
+            plain: selected.analysis,
+            whenEmpty: "Not yet recorded",
+          },
+          {
+            label: "Root cause",
+            rich: selected.rootCauseRich,
+            plain: selected.rootCause,
+            whenEmpty: "Not yet determined",
+          },
+          {
+            label: "Effects",
+            rich: selected.effectsRich,
+            plain: selected.effects,
+            whenEmpty: "Not yet recorded",
+          },
+          {
+            label: "Containment",
+            rich: selected.containmentRich,
+            plain: selected.containment,
+            whenEmpty: "Not yet recorded",
+          },
+          {
+            label: "Workaround",
+            rich: selected.workaroundRich,
+            plain: selected.workaround,
+            whenEmpty: "None recorded",
+          },
+          {
+            label: "Corrective-action narrative",
+            rich: selected.correctiveActionRich,
+            plain: selected.correctiveAction,
+            whenEmpty: "Not yet recorded",
+          },
+        ]
+      : [];
+    const filled = (field: (typeof fields)[number]) =>
+      hasContent(field.rich) || (field.plain ?? "").trim().length > 0;
+    return { answered: fields.filter(filled), unfilled: fields.filter((field) => !filled(field)) };
+  }, [selected]);
+
   const closurePackages = (selected?.closureCandidates ?? []).filter(
     (candidate) => candidate.state === "Approved" || candidate.state === "LegacyUnavailable",
   );
@@ -1540,91 +1612,39 @@ export default function ProblemReportCenter({
                       Revive &amp; edit
                     </button>
                   )}
+                  {/* The whole authored record, in the order a reviewer reads it.
+
+                      Every field stays on the page whether or not it is filled: a controlled record
+                      shows what it holds, including what it does not hold yet. Hierarchy comes from
+                      size and weight instead — an answered field is prose at reading size under its
+                      label, an unfilled one a compact label/value row. Nothing is hidden, and the
+                      unfilled rows stay at --ink-500 on --surface rather than being greyed past the
+                      contrast floor.
+
+                      These were seven equal-weight boxes in a two-column grid, so on a young report
+                      the two fields anybody came to read carried exactly the weight of five saying
+                      nothing yet. */}
                   <section className="prNarrative">
-                    <article>
-                      <small>PROBLEM DESCRIPTION</small>
-                      {selected.problemRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.problemRich}
-                          empty={selected.problem}
-                        />
-                      ) : (
-                        <p>{selected.problem}</p>
-                      )}
-                    </article>
-                    <article>
-                      <small>ADDITIONAL INFORMATION</small>
-                      {selected.additionalInformationRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.additionalInformationRich}
-                          empty={selected.additionalInformation}
-                        />
-                      ) : (
-                        <p>{selected.additionalInformation || "Not yet provided."}</p>
-                      )}
-                    </article>
-                    <article>
-                      <small>ROOT CAUSE</small>
-                      {selected.rootCauseRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.rootCauseRich}
-                          empty={selected.rootCause}
-                        />
-                      ) : (
-                        <p>{selected.rootCause || "Not yet determined."}</p>
-                      )}
-                    </article>
-                    <article>
-                      <small>EFFECTS</small>
-                      {selected.effectsRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.effectsRich}
-                          empty={selected.effects}
-                        />
-                      ) : (
-                        <p>{selected.effects || "Not yet recorded."}</p>
-                      )}
-                    </article>
-                    <article>
-                      <small>CONTAINMENT</small>
-                      {selected.containmentRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.containmentRich}
-                          empty={selected.containment}
-                        />
-                      ) : (
-                        <p>{selected.containment || "Not yet recorded."}</p>
-                      )}
-                    </article>
-                    <article>
-                      <small>WORKAROUND</small>
-                      {selected.workaroundRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.workaroundRich}
-                          empty={selected.workaround}
-                        />
-                      ) : (
-                        <p>{selected.workaround || "None recorded."}</p>
-                      )}
-                    </article>
-                    <article>
-                      <small>HUMAN CORRECTIVE-ACTION NARRATIVE</small>
-                      {selected.correctiveActionRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.correctiveActionRich}
-                          empty={selected.correctiveAction}
-                        />
-                      ) : (
-                        <p>{selected.correctiveAction || "Not yet recorded."}</p>
-                      )}
-                    </article>
+                    {narrative.answered.map((field) => (
+                      <article key={field.label}>
+                        <small>{field.label}</small>
+                        {field.rich ? (
+                          <RichContentView api={api} value={field.rich} empty={field.plain} />
+                        ) : (
+                          <p>{field.plain}</p>
+                        )}
+                      </article>
+                    ))}
+                    {narrative.unfilled.length > 0 && (
+                      <div className="prNarrativeUnfilled">
+                        {narrative.unfilled.map((field) => (
+                          <div key={field.label}>
+                            <span>{field.label}</span>
+                            <em>{field.whenEmpty}</em>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </section>
                   {selected.disposition && selected.disposition !== "Fixed" && (
                     <section className="prDispositionDecision" aria-label="Controlled disposition">

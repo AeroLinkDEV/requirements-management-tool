@@ -270,34 +270,64 @@
   line-height: 1.4;
 }
 
-/* Narrative fields: cards on the canvas, rather than white panes on white divided by a hairline. The
-   single-column reading hierarchy that separates answered from unanswered fields needs markup changes
-   and belongs with the state-header work, not with this stylesheet-scoped change. */
+/* The authored record: one card, sections divided by a rule.
+
+   Every field is on the page whether or not it is filled, so the hierarchy has to come from type
+   rather than from hiding anything. An answered field is prose at reading size under its label; an
+   unfilled one is a compact label/value row in the block at the end. Both stay at --ink-500 or darker,
+   so the quiet rows are still above the contrast floor rather than greyed past it.
+
+   This was seven equal-weight boxes in a two-column grid on a white pane, which gave a field saying
+   "None recorded" exactly the weight of the problem description. */
 .prNarrative {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
   margin: 23px 0;
-}
-.prNarrative article {
-  min-height: 94px;
-  padding: 16px;
+  padding: 2px 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);
   box-shadow: var(--shadow-soft);
 }
+.prNarrative article { padding: 14px 0; }
+.prNarrative article + article,
+.prNarrativeUnfilled { border-top: 1px solid var(--line); }
 .prNarrative small {
+  display: block;
   color: var(--ink-500);
   font-size: var(--text-xs);
   font-weight: var(--weight-strong);
   letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 .prNarrative p {
-  margin: 8px 0 0;
+  margin: 7px 0 0;
+  /* Prose stops at a readable measure instead of running the full width of a 1080px pane. */
+  max-width: 80ch;
   color: var(--ink-900);
   font-size: var(--text-body);
   line-height: var(--leading-body, 1.55);
+}
+
+.prNarrativeUnfilled { display: grid; }
+.prNarrativeUnfilled > div {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 11px 0;
+}
+.prNarrativeUnfilled > div + div { border-top: 1px solid var(--line); }
+.prNarrativeUnfilled span {
+  flex: 0 0 300px;
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.prNarrativeUnfilled em { color: var(--ink-500); font-size: var(--text-sm); font-style: normal; }
+@media (max-width: 760px) {
+  .prNarrativeUnfilled > div { flex-direction: column; gap: 4px; }
+  .prNarrativeUnfilled span { flex: 0 0 auto; }
 }
 
 .prFlow {
@@ -472,7 +502,6 @@
   .prWorkspace > aside { border-right: 0; border-bottom: 1px solid var(--line); }
   .prList { max-height: 280px; }
   .prDetail { padding: 20px; }
-  .prNarrative,
   .prLinks { grid-template-columns: 1fr; }
   .prDetailHead { align-items: flex-start; flex-direction: column; }
   .prFlow textarea,
@@ -481,7 +510,6 @@
 
 /* Draft state sits with the action it protects, not floating above the form. */
 .prCreateFoot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.prNarrative article:has(.richImageRow) { grid-column: 1 / -1; }
 .prFlow .draftState { align-self: start; }
 .problemReportsPage[data-read-only="true"] .prFlow { display: none; }
 
