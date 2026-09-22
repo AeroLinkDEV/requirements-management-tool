@@ -12,15 +12,211 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransitionKernel.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransitionAuthority.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransition.psm1') -Force
-$K = [AeroLink.TransitionV1.Kernel]
+$K = [AeroLink.TransitionV2.Kernel]
 $failures = [System.Collections.Generic.List[string]]::new()
 $passed = 0
 function Check([bool]$Condition, [string]$Message) { if ($Condition) { $script:passed++ } else { $script:failures.Add($Message) } }
+
+# Inspect the exact token/DACL facts used by the restricted process creator. The baseline token deliberately uses
+# the same CreateRestrictedToken flags/SIDs as the kernel, but leaves its default DACL untouched so the test can
+# prove that the repair only appends PostgreSQL's one user ACE.
+Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+
+namespace AeroLink.TransitionTests {
+    [StructLayout(LayoutKind.Sequential)] struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
+    [StructLayout(LayoutKind.Sequential)] struct AclSizeInformation { public uint AceCount, AclBytesInUse, AclBytesFree; }
+    [StructLayout(LayoutKind.Sequential)] struct Luid { public uint LowPart; public int HighPart; }
+    public sealed class DaclAceFact { public byte Type, Flags; public uint Mask; public string Sid, Bytes; }
+    public static class TokenProbe {
+        [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+        [DllImport("kernel32.dll", SetLastError=true)] public static extern bool CloseHandle(IntPtr handle);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetTokenInformation(IntPtr token, int cls, IntPtr info, int length, out int returned);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool CreateRestrictedToken(IntPtr existing, uint flags, int disableCount, SidAndAttributes[] disable,
+            int deleteCount, IntPtr deletePrivileges, int restrictCount, IntPtr restrict, out IntPtr newToken);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool ConvertStringSidToSidW([MarshalAs(UnmanagedType.LPWStr)] string sid, out IntPtr value);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetAclInformation(IntPtr acl, out AclSizeInformation info, int length, int infoClass);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool IsValidAcl(IntPtr acl);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetAce(IntPtr acl, int index, out IntPtr ace);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern uint GetLengthSid(IntPtr sid);
+        [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool LookupPrivilegeValueW(string system, string name, out Luid value);
+        static IntPtr ReadTokenInfo(IntPtr token, int cls) {
+            int length;
+            bool first = GetTokenInformation(token, cls, IntPtr.Zero, 0, out length);
+            int error = Marshal.GetLastWin32Error();
+            if (first || error != 122 || length <= 0) throw new Win32Exception(error);
+            IntPtr value = Marshal.AllocHGlobal(length);
+            if (!GetTokenInformation(token, cls, value, length, out length)) {
+                error = Marshal.GetLastWin32Error(); Marshal.FreeHGlobal(value); throw new Win32Exception(error);
+            }
+            return value;
+        }
+        static string SidValue(IntPtr sid) {
+            if (sid == IntPtr.Zero) throw new InvalidOperationException("A token security identifier is missing.");
+            uint length = GetLengthSid(sid);
+            if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+            byte[] bytes = new byte[length]; Marshal.Copy(sid, bytes, 0, bytes.Length);
+            return new SecurityIdentifier(bytes, 0).Value;
+        }
+        public static IntPtr OpenCurrentToken() {
+            IntPtr token;
+            if (!OpenProcessToken(GetCurrentProcess(), 0x0008, out token)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            return token;
+        }
+        public static IntPtr CreateBaselineRestrictedToken() {
+            IntPtr original = IntPtr.Zero, admins = IntPtr.Zero, powerUsers = IntPtr.Zero, restricted = IntPtr.Zero;
+            try {
+                if (!OpenProcessToken(GetCurrentProcess(), 0x0002 | 0x0001 | 0x0008 | 0x0080, out original)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                if (!ConvertStringSidToSidW("S-1-5-32-544", out admins) || !ConvertStringSidToSidW("S-1-5-32-547", out powerUsers)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                SidAndAttributes[] disable = new SidAndAttributes[2]; disable[0].Sid = admins; disable[1].Sid = powerUsers;
+                if (!CreateRestrictedToken(original, 0x1, 2, disable, 0, IntPtr.Zero, 0, IntPtr.Zero, out restricted)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                IntPtr result = restricted; restricted = IntPtr.Zero; return result;
+            } finally {
+                if (restricted != IntPtr.Zero) CloseHandle(restricted);
+                if (original != IntPtr.Zero) CloseHandle(original);
+                if (admins != IntPtr.Zero) LocalFree(admins);
+                if (powerUsers != IntPtr.Zero) LocalFree(powerUsers);
+            }
+        }
+        [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr value);
+        public static DaclAceFact[] GetDefaultDacl(IntPtr token) {
+            IntPtr infoBuffer = IntPtr.Zero;
+            try {
+                infoBuffer = ReadTokenInfo(token, 6); IntPtr acl = Marshal.ReadIntPtr(infoBuffer);
+                if (acl == IntPtr.Zero || !IsValidAcl(acl)) throw new InvalidOperationException("TokenDefaultDacl is null or invalid.");
+                AclSizeInformation info;
+                if (!GetAclInformation(acl, out info, Marshal.SizeOf(typeof(AclSizeInformation)), 2)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                DaclAceFact[] result = new DaclAceFact[checked((int)info.AceCount)];
+                for (int index = 0; index < result.Length; index++) {
+                    IntPtr ace;
+                    if (!GetAce(acl, index, out ace)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                    int length = unchecked((ushort)Marshal.ReadInt16(ace, 2));
+                    if (length < 4) throw new InvalidOperationException("TokenDefaultDacl contains an invalid ACE.");
+                    byte[] bytes = new byte[length]; Marshal.Copy(ace, bytes, 0, length);
+                    DaclAceFact fact = new DaclAceFact { Type = bytes[0], Flags = bytes[1], Bytes = BitConverter.ToString(bytes) };
+                    if (fact.Type == 0) {
+                        if (length < 20) throw new InvalidOperationException("ACCESS_ALLOWED_ACE is too short.");
+                        fact.Mask = BitConverter.ToUInt32(bytes, 4); fact.Sid = SidValue(IntPtr.Add(ace, 8));
+                    }
+                    result[index] = fact;
+                }
+                return result;
+            } finally { if (infoBuffer != IntPtr.Zero) Marshal.FreeHGlobal(infoBuffer); }
+        }
+        public static string GetUserSid(IntPtr token) {
+            IntPtr info = IntPtr.Zero;
+            try { info = ReadTokenInfo(token, 1); return SidValue(Marshal.ReadIntPtr(info)); }
+            finally { if (info != IntPtr.Zero) Marshal.FreeHGlobal(info); }
+        }
+        public static string GetIntegritySid(IntPtr token) {
+            IntPtr info = IntPtr.Zero;
+            try { info = ReadTokenInfo(token, 25); return SidValue(Marshal.ReadIntPtr(info)); }
+            finally { if (info != IntPtr.Zero) Marshal.FreeHGlobal(info); }
+        }
+        public static string[] GetGroups(IntPtr token) {
+            IntPtr info = IntPtr.Zero;
+            try {
+                info = ReadTokenInfo(token, 2); int count = Marshal.ReadInt32(info);
+                int start = IntPtr.Size == 8 ? 8 : 4, stride = Marshal.SizeOf(typeof(SidAndAttributes));
+                string[] result = new string[count];
+                for (int i = 0; i < count; i++) {
+                    IntPtr entry = IntPtr.Add(info, start + i * stride), sid = Marshal.ReadIntPtr(entry);
+                    uint attrs = unchecked((uint)Marshal.ReadInt32(entry, IntPtr.Size));
+                    result[i] = SidValue(sid) + "|" + attrs.ToString("X8");
+                }
+                Array.Sort(result, StringComparer.Ordinal); return result;
+            } finally { if (info != IntPtr.Zero) Marshal.FreeHGlobal(info); }
+        }
+        public static string[] GetPrivileges(IntPtr token) {
+            IntPtr info = IntPtr.Zero;
+            try {
+                info = ReadTokenInfo(token, 3); int count = Marshal.ReadInt32(info); string[] result = new string[count];
+                for (int i = 0; i < count; i++) {
+                    int entry = 4 + i * 12; uint low = unchecked((uint)Marshal.ReadInt32(info, entry));
+                    int high = Marshal.ReadInt32(info, entry + 4); uint attrs = unchecked((uint)Marshal.ReadInt32(info, entry + 8));
+                    result[i] = high.ToString("X8") + ":" + low.ToString("X8") + "|" + attrs.ToString("X8");
+                }
+                Array.Sort(result, StringComparer.Ordinal); return result;
+            } finally { if (info != IntPtr.Zero) Marshal.FreeHGlobal(info); }
+        }
+        public static string GetChangeNotifyLuid() {
+            Luid value; if (!LookupPrivilegeValueW(null, "SeChangeNotifyPrivilege", out value)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            return value.HighPart.ToString("X8") + ":" + value.LowPart.ToString("X8");
+        }
+    }
+}
+'@
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ('al-tx-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path $root -Force | Out-Null
 $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $owned = [System.Collections.Generic.List[object]]::new()
+
+# PostgreSQL's restricted token repair may add one inheritable grant for the token user, but must preserve the
+# exact pre-existing ACE sequence and must not widen the restricted token's groups, privileges or integrity.
+$tokenProbe = [AeroLink.TransitionTests.TokenProbe]
+$baselineRestrictedToken = [IntPtr]::Zero
+$repairedRestrictedToken = [IntPtr]::Zero
+try {
+    $baselineRestrictedToken = $tokenProbe::CreateBaselineRestrictedToken()
+    $method = $K.GetMethod('RestrictedAdministratorsToken', [Reflection.BindingFlags]::Static -bor [Reflection.BindingFlags]::NonPublic)
+    Check ($null -ne $method) 'DACL1: the kernel restricted-token factory must remain available for native qualification.'
+    if ($null -ne $method) {
+        $repairedRestrictedToken = [IntPtr]$method.Invoke($null, [object[]]@())
+        $baselineAces = @($tokenProbe::GetDefaultDacl($baselineRestrictedToken))
+        $repairedAces = @($tokenProbe::GetDefaultDacl($repairedRestrictedToken))
+        Check ($repairedAces.Count -eq ($baselineAces.Count + 1)) 'DACL2: the repair must append exactly one ACE.'
+        if ($repairedAces.Count -eq ($baselineAces.Count + 1)) {
+            $prefixMatches = $true
+            for ($index = 0; $index -lt $baselineAces.Count; $index++) {
+                if ($baselineAces[$index].Bytes -cne $repairedAces[$index].Bytes) { $prefixMatches = $false; break }
+            }
+            Check $prefixMatches 'DACL3: every pre-existing ACE must retain its exact bytes and order.'
+            $addedAce = $repairedAces[-1]
+            $userSid = $tokenProbe::GetUserSid($repairedRestrictedToken)
+            Check ($addedAce.Type -eq 0 -and $addedAce.Flags -eq 1 -and $addedAce.Mask -eq 0x10000000 -and $addedAce.Sid -ceq $userSid) `
+                'DACL4: the sole final ACE must grant only the restricted token user OBJECT_INHERIT and GENERIC_ALL.'
+        }
+
+        $baselineGroups = @($tokenProbe::GetGroups($baselineRestrictedToken))
+        $repairedGroups = @($tokenProbe::GetGroups($repairedRestrictedToken))
+        Check (($baselineGroups -join "`n") -ceq ($repairedGroups -join "`n")) 'DACL5: the DACL repair must leave every restricted group SID and attribute unchanged.'
+        $groupFacts = @{}
+        foreach ($fact in $repairedGroups) {
+            $parts = $fact.Split('|')
+            $groupFacts[$parts[0]] = [Convert]::ToUInt32($parts[1], 16)
+        }
+        foreach ($sid in @('S-1-5-32-544', 'S-1-5-32-547')) {
+            if ($groupFacts.ContainsKey($sid)) {
+                $attributes = [uint32]$groupFacts[$sid]
+                Check (($attributes -band 0x10) -ne 0 -and ($attributes -band 0x4) -eq 0) "DACL6: restricted group $sid must remain deny-only, not enabled."
+            }
+        }
+        $baselinePrivileges = @($tokenProbe::GetPrivileges($baselineRestrictedToken))
+        $repairedPrivileges = @($tokenProbe::GetPrivileges($repairedRestrictedToken))
+        Check (($baselinePrivileges -join "`n") -ceq ($repairedPrivileges -join "`n")) 'DACL7: the DACL repair must leave every restricted privilege and attribute unchanged.'
+        $changeNotify = $tokenProbe::GetChangeNotifyLuid()
+        $enabledPrivileges = @($repairedPrivileges | Where-Object {
+            ([Convert]::ToUInt32(($_ -split '\|')[1], 16) -band 0x2) -ne 0
+        })
+        Check ($enabledPrivileges.Count -eq 1 -and ($enabledPrivileges[0] -split '\|')[0] -ceq $changeNotify) `
+            'DACL8: DISABLE_MAX_PRIVILEGE must remain in force with no enabled privilege except SeChangeNotifyPrivilege.'
+        Check ($tokenProbe::GetIntegritySid($baselineRestrictedToken) -ceq $tokenProbe::GetIntegritySid($repairedRestrictedToken)) `
+            'DACL9: the DACL repair must leave the restricted token integrity SID unchanged.'
+        Check ($tokenProbe::GetUserSid($baselineRestrictedToken) -ceq $tokenProbe::GetUserSid($repairedRestrictedToken)) `
+            'DACL10: the repair must target the existing restricted-token user SID.'
+    }
+}
+catch { $script:failures.Add("DACL token contract could not be proven: $($_.Exception.GetType().Name)") }
+finally {
+    if ($repairedRestrictedToken -ne [IntPtr]::Zero) { [void]$tokenProbe::CloseHandle($repairedRestrictedToken) }
+    if ($baselineRestrictedToken -ne [IntPtr]::Zero) { [void]$tokenProbe::CloseHandle($baselineRestrictedToken) }
+}
+
 function Own([int]$ProcessId) {
     if ($ProcessId -le 0) { return }
     $identity = Get-AeroLinkProcessIdentityRecord -ProcessId $ProcessId
@@ -102,7 +298,7 @@ function Invoke-TestChain {
     }
     finally { Exit-AeroLinkTransition -Lease $lease }
 }
-function Test-Alive($Launch) { $Launch -and [AeroLink.TransitionV1.Kernel]::Classify([int]$Launch.processId, [string]$Launch.startedAt, [string]$Launch.image) -eq 'RunningMatch' }
+function Test-Alive($Launch) { $Launch -and [AeroLink.TransitionV2.Kernel]::Classify([int]$Launch.processId, [string]$Launch.startedAt, [string]$Launch.image) -eq 'RunningMatch' }
 
 try {
     # ---------------------------------------------------------------------------------------------------------
@@ -154,7 +350,7 @@ try {
     # ---------------------------------------------------------------------------------------------------------
     $t5 = Invoke-TestChain -Name 't5' -Faults @{ WorkerSeconds = 120; DieWithoutOutcome = $true }
     Check ($t5.Decision -eq 'ChainFailed') "T5: a delegate that dies without an outcome fails the chain (got $($t5.Decision))."
-    Check ($t5.PSObject.Properties['WorkerPid'] -and [AeroLink.TransitionV1.Kernel]::Classify($t5.WorkerPid, 'x', 'x') -ne 'RunningDifferent' -or $true) 'T5: fixture sanity.'
+    Check ($t5.PSObject.Properties['WorkerPid'] -and [AeroLink.TransitionV2.Kernel]::Classify($t5.WorkerPid, 'x', 'x') -ne 'RunningDifferent' -or $true) 'T5: fixture sanity.'
     Check ($t5.PSObject.Properties['WorkerPid'] -and (Get-Process -Id $t5.WorkerPid -ErrorAction SilentlyContinue) -eq $null) 'T5: the unleased transient worker is collected with the attempt.'
     Check ([bool]$t5.Outcome.cleanup.transitionContainmentProven -and $t5.Outcome.recovery.admissible) 'T5: a safely collected failure is admissible for recovery.'
     Check ($t5.RestorationRequired) 'T5: mutation began and the role was never restored, so restoration is owed.'
@@ -243,7 +439,7 @@ try {
     $heldJob = $K::CreateJob($jobName, $K::LimitKillOnClose, $K::QueryOnlySddl())
     Write-AeroLinkTransitionEvent -Path (Get-AeroLinkAttemptPaths $attemptRoot).JobEvents -Record ([ordered]@{ type = 'Created'; jobName = $jobName; at = (Get-Date).ToUniversalTime().ToString('o') })
     Write-AeroLinkTransitionEvent -Path (Get-AeroLinkAttemptPaths $attemptRoot).JobEvents -Record ([ordered]@{ type = 'Armed'; jobName = $jobName; witnessDir = (Join-Path $attemptRoot 'witness'); at = (Get-Date).ToUniversalTime().ToString('o') })
-    $spec = New-Object AeroLink.TransitionV1.LaunchSpec
+    $spec = New-Object AeroLink.TransitionV2.LaunchSpec
     $spec.CommandLine = '"' + $env:ComSpec + '" /c ping -n 120 127.0.0.1 > nul'
     $member = $K::Launch($heldJob, $spec); $K::Resume($member); Own $member.ProcessId
     $blocked = Test-AeroLinkInstallationAdmission -InstallationRoot $t11
@@ -885,7 +1081,7 @@ exit 0
 }
 catch { $failures.Add("Suite error: $($_.Exception.Message) @ $($_.InvocationInfo.PositionMessage) :: $($_.ScriptStackTrace)") }
 finally {
-    $K2 = [AeroLink.TransitionV1.Kernel]
+    $K2 = [AeroLink.TransitionV2.Kernel]
     foreach ($identity in $owned) {
         if ($K2::Classify($identity.ProcessId, $identity.StartedAtUtc, $identity.ImagePath) -eq 'RunningMatch') { try { Stop-Process -Id $identity.ProcessId -Force } catch { } }
     }

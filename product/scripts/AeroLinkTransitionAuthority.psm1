@@ -88,11 +88,11 @@ function Get-AeroLinkUtcNow { return (Get-Date).ToUniversalTime().ToString('o') 
 function Start-AeroLinkTransitionWitness {
     param([Parameter(Mandatory)][string]$Dir, [int]$ReadyTimeoutSeconds = 60, [switch]$Breakaway, [string]$FaultInjection = '')
     New-Item -ItemType Directory -Path $Dir -Force | Out-Null
-    $K = [AeroLink.TransitionV1.Kernel]
+    $K = [AeroLink.TransitionV2.Kernel]
     $me = Get-AeroLinkProcessIdentityRecord -ProcessId $PID
     if (-not $me) { throw "WitnessUnavailable: this owner's own identity could not be read, so it cannot be monitored." }
     $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $spec = New-Object AeroLink.TransitionV1.LaunchSpec
+    $spec = New-Object AeroLink.TransitionV2.LaunchSpec
     $spec.CommandLine = '"' + $powershell + '" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'AeroLinkTransitionWitness.ps1') +
         '" -Dir "' + $Dir + '" -OwnerPid ' + $PID + ' -OwnerStartedAt ' + $me.StartedAtUtc + ' -OwnerImage "' + $me.ImagePath + '"'
     if ($FaultInjection) { $spec.CommandLine += ' -FaultInjection ' + $FaultInjection }
@@ -130,7 +130,7 @@ function Register-AeroLinkWitnessJob {
     param([Parameter(Mandatory)]$Witness, [Parameter(Mandatory)][IntPtr]$Job, [Parameter(Mandatory)][string]$JobName,
         [Parameter(Mandatory)][ValidateSet('staging', 'transition')][string]$Kind, [Parameter(Mandatory)][string]$ReceiptPath,
         [string]$AttemptId = '', [int]$AckTimeoutSeconds = 20)
-    $K = [AeroLink.TransitionV1.Kernel]
+    $K = [AeroLink.TransitionV2.Kernel]
     if ((Test-AeroLinkLockHolderAlive -Path (Join-Path $Witness.Dir 'witness.lock')) -ne 'Alive') { throw 'WitnessUnavailable: the completion witness is not alive.' }
     $remote = $K::DuplicateInto($Job, $Witness.Staged.Process)
     Write-AeroLinkTransitionEvent -Path (Join-Path $Witness.Dir 'jobs.jsonl') -Record ([ordered]@{ jobName = $JobName; handle = $remote; kind = $Kind; receiptPath = $ReceiptPath; attemptId = $AttemptId })
@@ -146,7 +146,7 @@ function Register-AeroLinkWitnessJob {
 
 function Stop-AeroLinkTransitionWitness {
     param([Parameter(Mandatory)]$Witness)
-    $K = [AeroLink.TransitionV1.Kernel]
+    $K = [AeroLink.TransitionV2.Kernel]
     Publish-AeroLinkJsonAtomic -Path (Join-Path $Witness.Dir 'release.json') -Value ([ordered]@{ at = (Get-AeroLinkUtcNow) })
     if ($K::WaitHandle($Witness.Staged.Process, 20000) -ne 0) { [void]$K::TerminateChecked($Witness.Staged, 5000) }
     $K::Close($Witness.Staged)
@@ -165,7 +165,7 @@ function Get-AeroLinkWitnessState {
 
 function New-AeroLinkTransitionJob {
     param([Parameter(Mandatory)][string]$AttemptRoot, [Parameter(Mandatory)][string]$AttemptId, [Parameter(Mandatory)]$Witness)
-    $K = [AeroLink.TransitionV1.Kernel]
+    $K = [AeroLink.TransitionV2.Kernel]
     $paths = Get-AeroLinkAttemptPaths $AttemptRoot
     $jobName = 'Global\AeroLinkTransition-' + $AttemptId
     # The NAME is durable before the object exists, so a later reader can always look for it.
@@ -186,7 +186,7 @@ function New-AeroLinkTransitionJob {
 function Complete-AeroLinkTransitionJob {
     <# Normal completion: terminate, observe zero through the held handle, publish, THEN close. #>
     param([Parameter(Mandatory)]$Job, [Parameter(Mandatory)][string]$AttemptRoot, [Parameter(Mandatory)][string]$AttemptId, [int]$TimeoutSeconds = 30)
-    $K = [AeroLink.TransitionV1.Kernel]
+    $K = [AeroLink.TransitionV2.Kernel]
     $before = $K::Members($Job.Handle)
     $discovered = @($before.ProcessIds | ForEach-Object { Get-AeroLinkIdentityEntry $_ })
     $K::Terminate($Job.Handle)
@@ -238,7 +238,7 @@ function Get-AeroLinkTransitionQuiescence {
         never armed / never created / collided -> Quiescent: members are only created after arming
     #>
     param([Parameter(Mandatory)][string]$AttemptRoot, [Parameter(Mandatory)][string]$AttemptId, [switch]$Recover, [int]$RecoverTimeoutSeconds = 30)
-    $K = [AeroLink.TransitionV1.Kernel]
+    $K = [AeroLink.TransitionV2.Kernel]
     $paths = Get-AeroLinkAttemptPaths $AttemptRoot
     $out = { param($State, $Detail, $Discovered = @()) [pscustomobject]@{ State = $State; Detail = $Detail; Discovered = @($Discovered) } }
 
@@ -441,7 +441,7 @@ function Get-AeroLinkPidReuseEvidence {
 
 function Get-AeroLinkHealthOfIdentity {
     param([int]$ProcessId, [AllowNull()]$StartedAt, [AllowNull()]$Image)
-    $state = [AeroLink.TransitionV1.Kernel]::Classify($ProcessId, (ConvertTo-AeroLinkUtcIso $StartedAt), [string]$Image)
+    $state = [AeroLink.TransitionV2.Kernel]::Classify($ProcessId, (ConvertTo-AeroLinkUtcIso $StartedAt), [string]$Image)
     switch -Wildcard ($state) {
         'RunningMatch' { return @('Running', "pid $ProcessId is running with its recorded identity") }
         'Gone' { return @('ProvenStopped', "pid $ProcessId is proven stopped") }
@@ -653,7 +653,7 @@ function Test-AeroLinkRoleReadiness {
 function Stop-AeroLinkStagingJob {
     # Terminate, then OBSERVE zero members through the handle still held. The observation is the evidence.
     param([Parameter(Mandatory)][IntPtr]$Job, [int]$TimeoutSeconds = 20)
-    $K = [AeroLink.TransitionV1.Kernel]
+    $K = [AeroLink.TransitionV2.Kernel]
     try {
         $before = $K::Members($Job)
         $K::Terminate($Job)
@@ -729,7 +729,7 @@ function Invoke-AeroLinkAuthorityPump {
         [ValidateSet('None', 'AfterAcceptedEvent', 'AfterStagingRegistered', 'AfterCreated', 'AfterResumed', 'AfterReady', 'AfterCommitting', 'AfterClear', 'AfterRegistered')][string]$DieAt = 'None',
         [ValidateSet('None', 'Create', 'Resume', 'ReadinessThrows', 'Clear', 'RegisterWrite')][string]$InjectFailure = 'None'
     )
-    $K = [AeroLink.TransitionV1.Kernel]
+    $K = [AeroLink.TransitionV2.Kernel]
     if (-not (Test-Path -LiteralPath $Spool)) { return }
     New-Item -ItemType Directory -Path (Join-Path $Spool 'ready') -Force | Out-Null
     $seam = { param($Here) if ($DieAt -eq $Here) { [Environment]::Exit(90) } }
@@ -819,7 +819,7 @@ function Invoke-AeroLinkAuthorityPump {
                 $nonce = [guid]::NewGuid().ToString('N')
                 $marker = Join-Path $p.ReadyDir "$requestId.$nonce.json"
                 $arguments = ([string](Get-AeroLinkProperty $launch 'arguments' '')).Replace('{READY_FILE}', $marker).Replace('{READY_NONCE}', $nonce).Replace('{REQUEST_ID}', $requestId)
-                $spec = New-Object AeroLink.TransitionV1.LaunchSpec
+                $spec = New-Object AeroLink.TransitionV2.LaunchSpec
                 $spec.CommandLine = '"' + $filePath + '"' + $(if ($arguments) { ' ' + $arguments } else { '' })
                 if ($InjectFailure -eq 'Create') { $spec.CommandLine = '"C:\definitely\not\here\' + $policy.Image + '"' }
                 $spec.WorkingDirectory = [string](Get-AeroLinkProperty $launch 'workingDirectory' '')
@@ -1043,7 +1043,7 @@ function Get-AeroLinkLaunchContextDescriptor {
         $canonical = (@($Override.Keys | Sort-Object | ForEach-Object { "$_=$($Override[$_])" }) -join ';')
         return [pscustomobject]@{ Valid = $true; Reason = 'injected by the contract suite'; Descriptor = $Override; DescriptorHash = (Get-AeroLinkSha256Text $canonical); Attestation = $null }
     }
-    $K = [AeroLink.TransitionV1.Kernel]
+    $K = [AeroLink.TransitionV2.Kernel]
     $fail = { param($why) [pscustomobject]@{ Valid = $false; Reason = $why; Descriptor = $null; DescriptorHash = ''; Attestation = $null } }
     try {
         $me = Get-AeroLinkProcessIdentityRecord -ProcessId $PID
@@ -1095,7 +1095,7 @@ function Get-AeroLinkLaunchContextDescriptor {
             contextKind = $kind
             contextName = $name
             definitionHash = $definition
-            placementProtocol = [AeroLink.TransitionV1.Kernel]::PlacementProtocol
+            placementProtocol = [AeroLink.TransitionV2.Kernel]::PlacementProtocol
             kernelSourceHash = Get-AeroLinkTransitionKernelSourceHash
             hostImage = $me.ImagePath.ToLowerInvariant()
             principalSid = $token.UserSid
@@ -1121,7 +1121,7 @@ function Get-AeroLinkQualificationPath {
 function Test-AeroLinkLaunchContextQualification {
     <# { Supported, Detail, Descriptor, DescriptorHash, BreakawayPermittedByImmediateJob, Context } #>
     param([Parameter(Mandatory)][string]$InstallationRoot, [hashtable]$DescriptorOverride)
-    $K = [AeroLink.TransitionV1.Kernel]
+    $K = [AeroLink.TransitionV2.Kernel]
     $context = Get-AeroLinkLaunchContextDescriptor -Override $DescriptorOverride
     $breakaway = $false
     try { if ($K::InJob(0, [IntPtr]::Zero)) { $breakaway = (($K::LimitFlags([IntPtr]::Zero) -band ($K::LimitBreakawayOk -bor $K::LimitSilentBreakawayOk)) -ne 0) } } catch { }
@@ -1397,7 +1397,7 @@ function Invoke-AeroLinkTransitionChain {
         # Contract-suite seams.
         [string]$AuthorityDieAt = 'None', [string]$WitnessFault = '', [hashtable]$Faults = @{}
     )
-    $K = [AeroLink.TransitionV1.Kernel]
+    $K = [AeroLink.TransitionV2.Kernel]
     $attemptRoot = Join-Path (Get-AeroLinkTransitionStateRoot -InstallationRoot $InstallationRoot) $AttemptId
     $paths = Get-AeroLinkAttemptPaths $attemptRoot
     New-Item -ItemType Directory -Path $attemptRoot, $paths.Spool, $paths.Logs -Force | Out-Null
@@ -1454,7 +1454,7 @@ function Invoke-AeroLinkTransitionChain {
         }
         $delegateOut = Join-Path $paths.Logs 'delegate.stdout.log'
         $delegateErr = Join-Path $paths.Logs 'delegate.stderr.log'
-        $spec = New-Object AeroLink.TransitionV1.LaunchSpec
+        $spec = New-Object AeroLink.TransitionV2.LaunchSpec
         $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $spec.CommandLine = '"' + $powershell + '" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $DelegateScript + '" -HandoffFile "' + $paths.Handoff + '" -Phase Delegate'
         $spec.StandardOutputPath = $delegateOut; $spec.StandardErrorPath = $delegateErr
