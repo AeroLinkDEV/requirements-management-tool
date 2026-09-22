@@ -221,11 +221,52 @@ const verificationIdentityProjection: NetworkProjection = {
   truncated: false,
   orderedLevels: ["System"],
 }
+const recordedFileReference = {
+  id: "44444444-4444-4444-8444-444444444444",
+  relationshipKind: "File",
+  version: 1,
+  isActive: true,
+  releaseId: projection.releaseId,
+  releaseVersion: "1.6",
+  meaning: "RelatedContext",
+  recordedBy: "code.reviewer",
+  recordedAt: "2026-09-21T12:00:00Z",
+  reAddedBy: null,
+  reAddedAt: null,
+  targetKind: "RequirementProposal",
+  targetIdentityId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  targetOwnerIdentityId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  targetRevisionNumber: null,
+  targetStableIdentity: "RequirementProposal:cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  targetDisplaySnapshot: "SYSR-07867 proposal in SRCR-07867.00",
+  instanceBaseUrl: "https://gitlab.example",
+  remoteProjectId: 42,
+  repositoryPathSnapshot: "aerolink/requirements",
+  sourceSnapshotId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  sourceSelectionEventId: null,
+  mergeRequestIid: null,
+  mergeRequestId: null,
+  mergeRequestUrlSnapshot: null,
+  mergeRequestTitleSnapshot: null,
+  commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  path: "src/flight_plan.c",
+  startLine: 4,
+  endLine: 12,
+  fileMergeRequestIid: null,
+}
+const recordedFileProjection: NetworkProjection = {
+  ...projection,
+  nodes: projection.nodes.map(candidate => candidate.id === "sys-1"
+    ? { ...candidate, recordedCodeReferences: [recordedFileReference] }
+    : candidate),
+}
+
 const chosen = scenario === "dense" ? denseProjection
   : scenario === "hover" || scenario === "scope" ? hoverProjection
   : scenario === "reveal" ? revealProjection
   : scenario === "server" ? serverChainProjection
   : scenario === "verification-identity" ? verificationIdentityProjection
+  : scenario === "recorded-reference-file" ? recordedFileProjection
   : projection
 
 const malformedReferenceScenario = scenario === "recorded-reference-null" || scenario === "recorded-reference-object"
@@ -269,7 +310,7 @@ createRoot(document.getElementById("root")!).render(
   scenario === "scope" ? <ScopeHarness projection={chosen} /> : <DigitalThreadNetwork
     projection={malformedReferenceScenario ? malformedReferenceProjection : chosen}
     buildLabel="Build 1.6"
-    focalId={malformedReferenceScenario ? "pr-1" : undefined}
+    focalId={malformedReferenceScenario ? "pr-1" : scenario === "recorded-reference-file" ? "sys-1" : undefined}
     hrefFor={hrefFor}
     representation={representation}
   />,

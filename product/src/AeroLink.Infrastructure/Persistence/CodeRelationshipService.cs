@@ -123,7 +123,14 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
             MergeRequestId = (long?)null, MergeRequestUrlSnapshot = (string?)null,
             MergeRequestTitleSnapshot = (string?)null, CommitSha = (string?)x.CommitSha, Path = (string?)x.Path,
             StartLine = x.StartLine, EndLine = x.EndLine, FileMergeRequestIid = x.MergeRequestIid,
-            RepositoryPathSnapshot = (string?)null
+            // A file relationship pins its source snapshot, which is the durable owner of the repository path.
+            // Resolve that exact, project-scoped identity instead of consulting today's repository configuration.
+            RepositoryPathSnapshot = db.GitLabSourceSnapshots.AsNoTracking()
+                .Where(snapshot => snapshot.ProjectId == x.ProjectId && snapshot.Id == x.SourceSnapshotId
+                    && snapshot.InstanceBaseUrl == x.InstanceBaseUrl && snapshot.RemoteProjectId == x.RemoteProjectId
+                    && snapshot.CommitSha == x.CommitSha)
+                .Select(snapshot => (string?)snapshot.PathWithNamespace)
+                .FirstOrDefault()
         });
         var combined = kind switch
         {

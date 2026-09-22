@@ -40,6 +40,23 @@ async function mockInspectorApi(page: Page, references: unknown) {
   } }))
 }
 
+test('change network renders a proposal file reference from its stored source snapshot', async ({ page }) => {
+  const pageErrors: string[] = []
+  page.on('pageerror', error => pageErrors.push(error.message))
+  await page.goto('/tests/fixtures/change-network.html?case=recorded-reference-file')
+
+  const selected = page.locator('.dtCanvasNode.is-selected')
+  await expect(selected).toHaveCount(1)
+  const reference = selected.locator('.recordedCodeReference')
+  await expect(reference).toHaveCount(1)
+  await expect(reference).toContainText('Not accepted implementation evidence')
+  await expect(reference.locator('.recordedCodeReferenceTarget'))
+    .toHaveText('exact requirement proposal: SYSR-07867 proposal in SRCR-07867.00')
+  await expect(reference.getByRole('link', { name: 'Open stored GitLab reference ↗' }))
+    .toHaveAttribute('href', 'https://gitlab.example/aerolink/requirements/-/blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/src/flight_plan.c#L4-L12')
+  expect(pageErrors).toEqual([])
+})
+
 for (const scenario of scenarios) {
   test(`change network refuses ${scenario} reference collection`, async ({ page }) => {
     const pageErrors: string[] = []
