@@ -545,9 +545,38 @@ export function exactTraceArtifactPath(context: RouteContext, node: ExactTraceAr
 
   if (node.kind === 'RequirementRevision') {
     if (!identifier(node.artifactId)) return undefined;
-    const discipline = node.level === 'HighLevel' || node.level === 'LowLevel' ? 'software' : 'system';
+    const software = node.level === 'HighLevel' || node.level === 'LowLevel'
+      || display.startsWith('HLR-') || display.startsWith('LLR-');
+    const system = node.level === 'System' || display.startsWith('SYSR-');
+    if (!software && !system) return undefined;
+    const discipline = software ? 'software' : 'system';
     const path = routePath(scoped, 'requirements', discipline, node.artifactId);
     return `${path}&requirementRevisionId=${encodeURIComponent(node.id)}`;
+  }
+
+  if (node.kind === 'RequirementProposal') {
+    // A proposal is not a controlled requirement revision. Its exact destination is the owning CR, with
+    // the proposal identity carried separately so the CR page can focus the same draft/proposal row. The
+    // owner display is part of the immutable relationship snapshot; if it cannot identify the CR scope,
+    // refuse rather than guessing a System or Software workspace.
+    if (!identifier(node.artifactId) || !identifier(node.displayNumber)) return undefined;
+    const ownerDisplay = node.displayNumber.split(/\s+in\s+/i).at(-1)?.trim().toUpperCase() ?? '';
+    const discipline = ownerDisplay.startsWith('HLRCR-') || ownerDisplay.startsWith('LLRCR-')
+      ? 'software'
+      : ownerDisplay.startsWith('SRCR-') || ownerDisplay.startsWith('ICDCR-')
+        ? 'system'
+        : undefined;
+    if (!discipline) return undefined;
+    const path = routePath(scoped, 'scr', discipline, node.artifactId);
+    return `${path}?proposalId=${encodeURIComponent(node.id)}`;
+  }
+
+  if (node.kind === 'ProblemReportRevision') {
+    // The relationship stores the immutable ProblemReportRevision identity and its owning report identity.
+    // Opening the report aggregate would silently resolve a newer snapshot, so only the snapshot route is
+    // valid here.
+    if (!identifier(node.artifactId)) return undefined;
+    return problemReportSnapshotPath(scoped, node.artifactId, node.id);
   }
 
   if (node.kind === 'TestProcedure' || node.kind === 'TestCase') {

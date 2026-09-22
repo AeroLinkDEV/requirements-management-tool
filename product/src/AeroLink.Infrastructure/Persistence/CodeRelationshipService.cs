@@ -58,6 +58,7 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
             Id = x.Id, RelationshipKind = x.RelationshipKind, ProjectId = x.ProjectId, ReleaseId = x.ReleaseId,
             InstanceBaseUrl = x.InstanceBaseUrl, RemoteProjectId = x.RemoteProjectId, IsActive = x.IsActive,
             Version = x.Version, TargetKind = x.TargetKind, TargetIdentityId = x.TargetIdentityId,
+            TargetOwnerIdentityId = x.TargetOwnerIdentityId,
             TargetStableIdentity = x.TargetStableIdentity, TargetDisplaySnapshot = x.TargetDisplaySnapshot,
             Meaning = x.Meaning, RecordedBy = x.RecordedBy, RecordedAt = x.RecordedAt,
             WithdrawnAt = x.WithdrawnAt, WithdrawnBy = x.WithdrawnBy, WithdrawalRationale = x.WithdrawalRationale,
@@ -73,6 +74,7 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
             Id = x.Id, RelationshipKind = x.RelationshipKind, ProjectId = x.ProjectId, ReleaseId = x.ReleaseId,
             InstanceBaseUrl = x.InstanceBaseUrl, RemoteProjectId = x.RemoteProjectId, IsActive = x.IsActive,
             Version = x.Version, TargetKind = x.TargetKind, TargetIdentityId = x.TargetIdentityId,
+            TargetOwnerIdentityId = x.TargetOwnerIdentityId,
             TargetStableIdentity = x.TargetStableIdentity, TargetDisplaySnapshot = x.TargetDisplaySnapshot,
             Meaning = x.Meaning, RecordedBy = x.RecordedBy, RecordedAt = x.RecordedAt,
             WithdrawnAt = x.WithdrawnAt, WithdrawnBy = x.WithdrawnBy, WithdrawalRationale = x.WithdrawalRationale,
@@ -97,7 +99,8 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
             // truncating a later page.
             var all = (await combined.ToListAsync(ct)).Select(x => new CodeRelationshipReadRow(
                 x.Id, x.RelationshipKind, x.ProjectId, x.ReleaseId, x.InstanceBaseUrl, x.RemoteProjectId,
-                x.IsActive, x.Version, x.TargetKind, x.TargetIdentityId, x.TargetStableIdentity,
+                x.IsActive, x.Version, x.TargetKind, x.TargetIdentityId, x.TargetOwnerIdentityId,
+                x.TargetStableIdentity,
                 x.TargetDisplaySnapshot, x.Meaning, x.RecordedBy, x.RecordedAt, x.WithdrawnAt, x.WithdrawnBy,
                 x.WithdrawalRationale, x.ReAddedBy, x.ReAddedAt, x.SourceSnapshotId, x.SourceSelectionEventId,
                 x.MergeRequestIid, x.MergeRequestId, x.MergeRequestUrlSnapshot, x.MergeRequestTitleSnapshot,
@@ -115,7 +118,8 @@ public sealed class CodeRelationshipService(AeroLinkDbContext db)
                 .Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(ct);
             items = pageRows.Select(x => new CodeRelationshipReadRow(
                 x.Id, x.RelationshipKind, x.ProjectId, x.ReleaseId, x.InstanceBaseUrl, x.RemoteProjectId,
-                x.IsActive, x.Version, x.TargetKind, x.TargetIdentityId, x.TargetStableIdentity,
+                x.IsActive, x.Version, x.TargetKind, x.TargetIdentityId, x.TargetOwnerIdentityId,
+                x.TargetStableIdentity,
                 x.TargetDisplaySnapshot, x.Meaning, x.RecordedBy, x.RecordedAt, x.WithdrawnAt, x.WithdrawnBy,
                 x.WithdrawalRationale, x.ReAddedBy, x.ReAddedAt, x.SourceSnapshotId, x.SourceSelectionEventId,
                 x.MergeRequestIid, x.MergeRequestId, x.MergeRequestUrlSnapshot, x.MergeRequestTitleSnapshot,
@@ -368,7 +372,7 @@ public sealed record CodeRelationshipPage(int Page, int PageSize, int Total,
 
 public sealed record CodeRelationshipReadRow(Guid Id, CodeRelationshipKind RelationshipKind,
     Guid ProjectId, Guid ReleaseId, string InstanceBaseUrl, long RemoteProjectId, bool IsActive, long Version,
-    CodeRelationshipTargetKind TargetKind, Guid TargetIdentityId, string TargetStableIdentity,
+    CodeRelationshipTargetKind TargetKind, Guid TargetIdentityId, Guid? TargetOwnerIdentityId, string TargetStableIdentity,
     string TargetDisplaySnapshot, CodeRelationshipMeaning Meaning, string RecordedBy, DateTimeOffset RecordedAt,
     DateTimeOffset? WithdrawnAt, string? WithdrawnBy, string? WithdrawalRationale, string? ReAddedBy,
     DateTimeOffset? ReAddedAt, Guid? SourceSnapshotId, Guid? SourceSelectionEventId, int? MergeRequestIid,

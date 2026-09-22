@@ -24,7 +24,7 @@ async function mockWorkspace(page: Page, demonstration?: typeof demoBinding) {
       metadata: { iid: 3, title: 'Retain valid flight plan', state: 'merged', draft: false, sourceBranch: 'retain-state', targetBranch: 'main',
         webUrl: 'https://gitlab.example/demo/fms/-/merge_requests/3', approvals: { known: false, approvedBy: [], detail: 'Unavailable' } },
       mergeRequests: [{ id: 'edge-one', relationshipKind: 'MergeRequest', version: 4, isActive: true, capabilities: { canWithdraw: true, canReAdd: false }, targetKind: 'ChangeRequestRevision',
-        targetDisplaySnapshot: 'LLRCR-00001.00', meaning: 'Addresses', recordedBy: 'engineer', recordedAt: '2026-09-19T12:00:00Z' }], files: [] }
+        targetIdentityId: 'change-request-one', targetDisplaySnapshot: 'LLRCR-00001.00', meaning: 'Addresses', recordedBy: 'engineer', recordedAt: '2026-09-19T12:00:00Z' }], files: [] }
     else if (path.endsWith('/code/source/source-one/tree')) {
       expect(url.searchParams.get('commit')).toBe(sha)
       expect(url.pathname).toContain('/code/source/source-one/tree')
@@ -46,7 +46,7 @@ test('linked register pages recorded identities and keeps unknown approvals expl
   await page.goto('/tests/fixtures/code-workspace.html')
   await page.getByRole('button', { name: '!3', exact: true }).click()
   await expect(page.getByText('GitLab approvals unknown')).toBeVisible()
-  await expect(page.getByText('LLRCR-00001.00')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'LLRCR-00001.00', exact: true })).toHaveAttribute('href', /\/software\/change-requests\/change-request-one$/)
   await expect(page.getByRole('region', { name: 'Synthetic demonstration' })).toHaveCount(0)
   await page.screenshot({ path: testInfo.outputPath('merge-request-register.png'), fullPage: true })
   await page.getByRole('button', { name: 'Next page', exact: true }).click()

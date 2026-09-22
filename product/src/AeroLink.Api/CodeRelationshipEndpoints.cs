@@ -337,6 +337,7 @@ public static class CodeRelationshipEndpoints
     {
         x.Id, relationshipKind = x.RelationshipKind.ToString(), x.ProjectId, x.ReleaseId, x.InstanceBaseUrl,
         x.RemoteProjectId, x.IsActive, x.Version, targetKind = x.TargetKind.ToString(), x.TargetIdentityId,
+        x.TargetOwnerIdentityId,
         x.TargetStableIdentity, x.TargetDisplaySnapshot, meaning = x.Meaning.ToString(), x.RecordedBy, x.RecordedAt,
         x.WithdrawnAt, x.WithdrawnBy, x.WithdrawalRationale, x.ReAddedBy, x.ReAddedAt, x.SourceSnapshotId,
         x.SourceSelectionEventId, mergeRequestIid = x.RelationshipKind == CodeRelationshipKind.File ? x.FileMergeRequestIid : x.MergeRequestIid,
@@ -349,6 +350,7 @@ public static class CodeRelationshipEndpoints
     {
         x.Id, relationshipKind = x.RelationshipKind.ToString(), x.ProjectId, x.ReleaseId, x.InstanceBaseUrl,
         x.RemoteProjectId, x.IsActive, x.Version, targetKind = x.TargetKind.ToString(), x.TargetIdentityId,
+        x.TargetOwnerIdentityId,
         x.TargetStableIdentity, x.TargetDisplaySnapshot, meaning = x.Meaning.ToString(), x.RecordedBy, x.RecordedAt,
         x.WithdrawnAt, x.WithdrawnBy, x.WithdrawalRationale, x.ReAddedBy, x.ReAddedAt, x.SourceSnapshotId,
         x.SourceSelectionEventId, mergeRequestIid = x.MergeRequestIid, x.MergeRequestId, x.MergeRequestUrlSnapshot,
@@ -361,6 +363,7 @@ public static class CodeRelationshipEndpoints
     {
         x.Id, relationshipKind = x.RelationshipKind.ToString(), x.ProjectId, x.ReleaseId, x.InstanceBaseUrl,
         x.RemoteProjectId, x.IsActive, x.Version, targetKind = x.TargetKind.ToString(), x.TargetIdentityId,
+        x.TargetOwnerIdentityId,
         x.TargetStableIdentity, x.TargetDisplaySnapshot, meaning = x.Meaning.ToString(), x.RecordedBy, x.RecordedAt,
         x.WithdrawnAt, x.WithdrawnBy, x.WithdrawalRationale, x.ReAddedBy, x.ReAddedAt, x.SourceSnapshotId,
         x.SourceSelectionEventId, mergeRequestId = (long?)null,

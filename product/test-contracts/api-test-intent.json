@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 980,
-    "cases": 1120,
+    "tests": 981,
+    "cases": 1121,
     "classes": 155,
-    "hostedTests": 931,
-    "hostedCases": 1049,
+    "hostedTests": 932,
+    "hostedCases": 1050,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 15,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 605,
-      "cases": 691,
+      "tests": 606,
+      "cases": 692,
       "unknownCases": 0,
       "classes": 122
     },
@@ -3894,8 +3894,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 197,
-        "end": 222
+        "start": 226,
+        "end": 251
       }
     },
     {
@@ -3912,8 +3912,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 393,
-        "end": 455
+        "start": 422,
+        "end": 484
       }
     },
     {
@@ -3926,8 +3926,8 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 457,
-        "end": 475
+        "start": 486,
+        "end": 504
       }
     },
     {
@@ -3944,8 +3944,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 374,
-        "end": 391
+        "start": 403,
+        "end": 420
       }
     },
     {
@@ -3962,8 +3962,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 224,
-        "end": 262
+        "start": 253,
+        "end": 291
       }
     },
     {
@@ -3980,8 +3980,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 353,
-        "end": 372
+        "start": 382,
+        "end": 401
       }
     },
     {
@@ -4016,8 +4016,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 164,
-        "end": 195
+        "start": 193,
+        "end": 224
       }
     },
     {
@@ -4034,8 +4034,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 70,
-        "end": 117
+        "start": 99,
+        "end": 146
       }
     },
     {
@@ -4052,8 +4052,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 39,
-        "end": 68
+        "start": 68,
+        "end": 97
       }
     },
     {
@@ -4070,8 +4070,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 645,
-        "end": 669
+        "start": 674,
+        "end": 698
       }
     },
     {
@@ -4088,8 +4088,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 294,
-        "end": 351
+        "start": 323,
+        "end": 380
       }
     },
     {
@@ -4106,8 +4106,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 264,
-        "end": 292
+        "start": 293,
+        "end": 321
       }
     },
     {
@@ -4124,8 +4124,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 620,
-        "end": 643
+        "start": 649,
+        "end": 672
       }
     },
     {
@@ -4142,8 +4142,26 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 595,
-        "end": 618
+        "start": 624,
+        "end": 647
+      }
+    },
+    {
+      "cls": "CodeRelationshipApiTests",
+      "test": "Relationship_read_preserves_the_exact_target_owner_identity",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 39,
+        "end": 66
       }
     },
     {
@@ -4160,8 +4178,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 119,
-        "end": 162
+        "start": 148,
+        "end": 191
       }
     },
     {
