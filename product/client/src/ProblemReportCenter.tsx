@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import type { AuthUser } from "./IdentityCenter";
 import PersonPicker from "./PersonPicker";
 import ProblemReportCodeRelationships from "./ProblemReportCodeRelationships";
+import ProblemReportStateHeader from "./ProblemReportStateHeader";
+import { stateLabel } from "./problemReportLifecycle";
 import { PersonName } from "./People";
 import { RichContentEditor, RichContentView } from "./RichContent";
 import { emptyRichContent, toPlainText } from "./richContentModel";
@@ -274,17 +276,6 @@ const spaced = (value: string) =>
           .replace(/([a-z])([A-Z])/g, "$1 $2")
           .replace("Sqa", "SQA")
           .replace("Sccb", "SCCB");
-const transitionLabel = (state: string) =>
-  ({
-    ReadyForSccb: "Ready for SCCB",
-    Open: "Open",
-    Implementing: "Start implementing",
-    Verifying: "Move to Verifying",
-    WaitingForSqaToClose: "Waiting for SQA to Close",
-    Closed: "Close Problem Report",
-    Rejected: "Reject Problem Report",
-    Draft: "Return to Draft",
-  })[state] ?? `Move to ${spaced(state)}`;
 const revisionEvidence = (
   revision: Revision,
 ):
@@ -1175,6 +1166,40 @@ export default function ProblemReportCenter({
                   Download PDF
                 </a>
               </nav>
+              {/* Above the tabs on purpose: the state and the next action belong to the record, not to
+                  the Record tab, and a reader on Code or History needs them just as much. This was the
+                  last section of the Record tab, so reaching the only thing to do next meant scrolling
+                  past the whole narrative first. */}
+              {!isHistorical && (
+                <ProblemReportStateHeader
+                  state={selected.state}
+                  version={selected.version}
+                  owner={
+                    <PersonName
+                      userName={selected.responsibleEngineerId}
+                      displayName={selected.responsibleEngineerDisplayName ?? undefined}
+                    />
+                  }
+                  transitions={selected.capabilities?.availableTransitions ?? []}
+                  busy={busy}
+                  isReleaseBlocker={selected.isReleaseBlocker}
+                  waived={selected.waived}
+                  canToggleBlocker={
+                    isOwner && !["Closed", ...terminalDispositions].includes(selected.state)
+                  }
+                  showClosureResult={selected.state === "Verifying"}
+                  dispositionRationale={selected.dispositionRationale}
+                  onTransition={requestTransition}
+                  onReject={() => setShowDisposition(true)}
+                  onToggleBlocker={() =>
+                    void action("blocker", {
+                      isReleaseBlocker: !selected.isReleaseBlocker,
+                      waiverRationale: "",
+                    })
+                  }
+                  onClosureResult={() => void openCorrectiveAction()}
+                />
+              )}
               <nav className="prTabs" aria-label="Problem Report sections">
                 <button className={tab === "code" ? "active" : ""} onClick={() => setTab("code")}>
                   Code
@@ -1711,9 +1736,10 @@ export default function ProblemReportCenter({
                   {!isHistorical && (
                     <section className="prFlow">
                       <div>
-                        <h3>Lifecycle action</h3>
+                        <h3>Controlled authority</h3>
                         <p>
-                          {spaced(selected.state)} · controlled version {selected.version}
+                          Independent decisions recorded against this report. The lifecycle itself
+                          is at the top of the record.
                         </p>
                       </div>
                       {noteDraft.offered && (
@@ -1747,34 +1773,17 @@ export default function ProblemReportCenter({
                             </span>
                           </div>
                         )}
-                      {selected.capabilities?.availableTransitions?.map((transition) => (
-                        <button
-                          key={transition.state}
-                          disabled={busy}
-                          onClick={() =>
-                            requestTransition(transition.state, transition.requiresRationale)
-                          }
-                        >
-                          {transitionLabel(transition.state)}
-                          {transition.requiresRationale ? " …" : " →"}
-                        </button>
-                      ))}
-                      {selected.state === "Verifying" && (
-                        <button onClick={() => void openCorrectiveAction()}>
-                          Select closure-supporting test result →
-                        </button>
-                      )}
-                      {selected.capabilities?.availableTransitions?.some(
-                        (transition) => transition.state === "Rejected",
-                      ) && (
-                        <button
-                          className="quiet"
-                          disabled={busy}
-                          onClick={() => setShowDisposition(true)}
-                        >
-                          Reject…
-                        </button>
-                      )}
+                      {/* Every transition, the closure-supporting result picker and the reject control
+                          moved to ProblemReportStateHeader at the top of the record. Two of the
+                          controls that used to sit here duplicated others: `Move backward…` acted on
+                          whichever of Draft or Verifying came first in availableTransitions, which was
+                          already offered by name, and a plain `Rejected` transition sat beside the
+                          control that opens the disposition dialog — only the latter collects the
+                          disposition a rejection requires. The header offers each backward target by
+                          name and routes rejection through the disposition dialog alone.
+
+                          What remains here is the independent release-waiver decision, which is not a
+                          lifecycle transition: it is a separate authority recorded against the report. */}
                       {selected.capabilities?.canApproveReleaseWaiver && (
                         <details className="prAdmin">
                           <summary>Approve independent release waiver</summary>
@@ -1823,39 +1832,6 @@ export default function ProblemReportCenter({
                             Revoke active waiver
                           </button>
                         )}
-                      {selected.capabilities?.availableTransitions?.some(
-                        (transition) =>
-                          transition.state === "Draft" || transition.state === "Verifying",
-                      ) && (
-                        <button
-                          className="quiet"
-                          disabled={busy}
-                          onClick={() => {
-                            const transition = selected.capabilities?.availableTransitions?.find(
-                              (item) => item.state === "Draft" || item.state === "Verifying",
-                            );
-                            if (transition) requestTransition(transition.state, true);
-                          }}
-                        >
-                          Move backward…
-                        </button>
-                      )}
-                      {isOwner && !["Closed", ...terminalDispositions].includes(selected.state) && (
-                        <button
-                          className="quiet"
-                          disabled={busy}
-                          onClick={() =>
-                            void action("blocker", {
-                              isReleaseBlocker: !selected.isReleaseBlocker,
-                              waiverRationale: "",
-                            })
-                          }
-                        >
-                          {selected.isReleaseBlocker
-                            ? "Clear release blocker"
-                            : "Raise release blocker"}
-                        </button>
-                      )}
                     </section>
                   )}
                 </>
@@ -2056,7 +2032,7 @@ export default function ProblemReportCenter({
             </button>
             <p>CONTROLLED LIFECYCLE TRANSITION</p>
             <h2>
-              {transitionLabel(transitionTarget)} · {selected.displayNumber}
+              Move to {stateLabel(transitionTarget)} · {selected.displayNumber}
             </h2>
             <p>
               Backward transitions require a nonblank rationale and are retained in immutable
@@ -2072,7 +2048,7 @@ export default function ProblemReportCenter({
               />
             </label>
             <button className="primaryAction" disabled={busy || !reopenRationale.trim()}>
-              {transitionLabel(transitionTarget)} →
+              Move to {stateLabel(transitionTarget)} →
             </button>
           </form>
         </div>

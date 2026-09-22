@@ -214,7 +214,7 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await expect(page.locator('.prState')).toHaveText('Verifying')
   await expect(page.getByRole('status')).toContainText('Closure verification invalidated')
   await expect(page.getByRole('status')).toContainText('Record a new passing successor result')
-  await expect(page.getByRole('button', { name: /Close Problem Report/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /Move to Closed/ })).toHaveCount(0)
   await page.getByRole('button', { name: /History/ }).click()
   await expect(page.locator('.prTimeline').getByText('Closure Verification Invalidated By Change')).toBeVisible()
 
@@ -257,7 +257,7 @@ test("a corrective action opens Test Results, names the report, and survives a r
     await selectProgram(page, 'Flight Management System Live Program')
     await page.goto(reportAddress, { waitUntil: 'load' })
     await expect(page.locator('.prState')).toHaveText('Waiting for SQA to Close', { timeout: 30_000 })
-    await expect(page.getByRole('button', { name: /Close Problem Report/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /Move to Closed/ })).toHaveCount(0)
     await expect(page.getByText('Approve independent release waiver')).toHaveCount(expectedWaiverActions)
   }
 
@@ -266,7 +266,7 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await selectProgram(page, 'Flight Management System Live Program')
   await page.goto(reportAddress, { waitUntil: 'load' })
   await expect(page.locator('.prState')).toHaveText('Waiting for SQA to Close', { timeout: 30_000 })
-  await page.getByRole('button', { name: /Close Problem Report/ }).click()
+  await page.getByRole('button', { name: /Move to Closed/ }).click()
   await expect(page.locator('.prState')).toHaveText('Closed')
   await page.getByRole('button', { name: /History/ }).click()
   await expect(page.locator('.prTimeline').getByText('Closure Verification Invalidated By Change')).toBeVisible()

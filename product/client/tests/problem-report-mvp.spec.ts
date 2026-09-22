@@ -32,7 +32,7 @@ test('an engineer creates a structured Draft PR and advances it through the SCCB
   // The three areas answered Yes, each beside the area it answers rather than in a separate grid.
   await expect(impact.locator('.impactPill.yes')).toHaveCount(3)
 
-  await page.locator('.prFlow').getByRole('button', { name: 'Ready for SCCB →', exact: true }).click()
+  await page.locator('.prStateHeader').getByRole('button', { name: 'Move to Ready for SCCB →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Ready for SCCB')
   // SCCB opening is restricted to the explicit opening-authority roles; an administrator's Project access
   // is not a substitute for that authority.
@@ -47,7 +47,7 @@ test('an engineer creates a structured Draft PR and advances it through the SCCB
   await expect(page.locator('.prState')).toHaveText('Ready for SCCB')
   await page.locator('.prFlow').getByRole('button', { name: 'Open →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Open')
-  await page.getByRole('button', { name: 'Start implementing' }).click()
+  await page.getByRole('button', { name: 'Move to Implementing →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Implementing')
 
   await page.getByRole('button', { name: /History/ }).click()
@@ -88,7 +88,7 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   // The transition must settle on the server before the identity switch: login() navigates the page away,
   // and an in-flight transition request caught mid-navigation is aborted, leaving the record a Draft for
   // whoever opens it next. (#793)
-  await page.locator('.prFlow').getByRole('button', { name: 'Ready for SCCB →', exact: true }).click()
+  await page.locator('.prStateHeader').getByRole('button', { name: 'Move to Ready for SCCB →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Ready for SCCB')
   await login(page, 'systems.lead', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
