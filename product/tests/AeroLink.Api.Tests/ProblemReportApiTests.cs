@@ -446,7 +446,7 @@ public sealed class ProblemReportApiTests
         var version = createdBody.GetProperty("version").GetInt64();
 
         using var ready = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/transition",
-            new { expectedVersion = version, targetState = "ReadyForSccb", rationale = "Forward-edge rationale is not part of the lifecycle record." });
+            new { expectedVersion = version, targetState = "ReadyForSccb", rationale = "Containment is written up, so the SCCB can decide." });
         Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
         version = (await ready.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
 
@@ -481,10 +481,15 @@ public sealed class ProblemReportApiTests
 
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
         Assert.Equal("Rejected", detail.GetProperty("state").GetString());
+        // A reason given for a forward move is kept, not dropped. This asserted the opposite until the
+        // product decided that the reasoning behind any lifecycle decision belongs on the record: the
+        // rationale was nulled at the API boundary for every edge that did not demand one, so why a
+        // report went to the SCCB was lost while why it came back was retained. It stays optional —
+        // `a_forward_transition_without_a_rationale_records_none` covers the empty case.
         Assert.Contains(detail.GetProperty("revisions").EnumerateArray(), revision =>
             revision.GetProperty("fromState").GetString() == "Draft"
             && revision.GetProperty("toState").GetString() == "ReadyForSccb"
-            && string.IsNullOrWhiteSpace(revision.GetProperty("rationale").GetString()));
+            && revision.GetProperty("rationale").GetString() == "Containment is written up, so the SCCB can decide.");
         Assert.Contains(detail.GetProperty("revisions").EnumerateArray(), revision =>
             revision.GetProperty("fromState").GetString() == "Implementing"
             && revision.GetProperty("toState").GetString() == "Open"
@@ -492,6 +497,37 @@ public sealed class ProblemReportApiTests
         Assert.Contains(detail.GetProperty("revisions").EnumerateArray(), revision =>
             revision.GetProperty("toState").GetString() == "Rejected"
             && revision.GetProperty("rationale").GetString() == "The reported behavior is not reproducible.");
+    }
+
+    [Fact]
+    public async Task A_forward_transition_without_a_rationale_records_none()
+    {
+        // Optional means optional. A routine move with nothing to say records no rationale rather than
+        // an empty one, so a reader can tell "no reason was given" from "a reason was given and lost".
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await BootstrapAndLoginAsync(client);
+        var projectId = await SeedProjectAsync(factory);
+
+        using var created = await client.PostAsJsonAsync("/api/problem-reports", new
+        {
+            category = "CodeFunctional",
+            projectId,
+            title = "Silent forward move",
+            problem = "A routine move needs no explanation.",
+        });
+        var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var reportId = createdBody.GetProperty("id").GetGuid();
+        var version = createdBody.GetProperty("version").GetInt64();
+
+        using var ready = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/transition",
+            new { expectedVersion = version, targetState = "ReadyForSccb" });
+        Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
+
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
+        Assert.Contains(detail.GetProperty("revisions").EnumerateArray(), revision =>
+            revision.GetProperty("toState").GetString() == "ReadyForSccb"
+            && string.IsNullOrWhiteSpace(revision.GetProperty("rationale").GetString()));
     }
 
     [Fact]

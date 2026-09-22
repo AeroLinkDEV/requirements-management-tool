@@ -1,0 +1,306 @@
+/* The state header: where the record is in its lifecycle, and the one thing to do next.
+
+   A card on the detail pane's canvas, like every other panel there. Tokens only — see the contract at
+   the top of ProblemReportCenter.css. Semantic status colours stay literal and always carry their own
+   text, so no state is conveyed by colour alone. */
+
+.prStateHeader {
+  display: grid;
+  gap: 16px;
+  margin: 0 0 14px;
+  padding: 17px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  /* The rail adapts to this card, not to the window. The detail pane is roughly `viewport - 726px`,
+     so at a 1280px viewport it is about 520px wide while every viewport media query still reports a
+     wide screen — which is how seven labelled steps ended up overlapping each other on a perfectly
+     ordinary laptop. See #1075 for the same fault elsewhere on this page. */
+  container-type: inline-size;
+  container-name: prstate;
+}
+
+.prStateLine {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.prStateEyebrow {
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.08em;
+}
+.prStateNow {
+  color: var(--ink-900);
+  font: var(--weight-strong) var(--text-lg) var(--font-display);
+}
+.prStateMeta { color: var(--ink-500); font-size: var(--text-sm); }
+.prStateOwner { margin-left: auto; color: var(--ink-500); font-size: var(--text-xs); }
+
+/* The rail. Seven equal columns, so a step's label sits under its own mark at any width the pane has. */
+.prRail {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.prRailStep {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  /* Labels are centred in their own column and would otherwise touch their neighbours. */
+  padding-inline: 4px;
+}
+.prRailTrack { display: flex; align-items: center; width: 100%; }
+.prRailBefore,
+.prRailAfter { flex-grow: 1; height: 2px; background: var(--line); }
+/* The first and last steps have no incoming/outgoing segment to draw. */
+.prRailStep:first-child .prRailBefore,
+.prRailStep:last-child .prRailAfter { background: transparent; }
+.prRailMark {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--teal-700);
+}
+.prRailLabel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+  line-height: 1.3;
+  text-align: center;
+}
+.prRailLabel em { font-style: normal; font-weight: var(--weight-strong); color: var(--teal-700); }
+
+/* Completed: filled tint plus a check, so the state is not read from colour alone. */
+.prRailStep.done .prRailMark { border-color: var(--teal-100); background: var(--teal-100); }
+.prRailStep.done .prRailBefore,
+.prRailStep.done .prRailAfter { background: var(--teal-600); }
+.prRailStep.done .prRailLabel { color: var(--ink-700); }
+/* The segment entering the current step is complete; the one leaving it is not. */
+.prRailStep.current .prRailBefore { background: var(--teal-600); }
+.prRailStep.current .prRailMark {
+  width: 30px;
+  height: 30px;
+  border-color: var(--teal-700);
+  background: var(--teal-700);
+  box-shadow: 0 0 0 4px var(--teal-100);
+}
+.prRailStep.current .prRailMark:after {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+}
+.prRailStep.current .prRailLabel { color: var(--ink-900); font-weight: var(--weight-bold); }
+
+.prStatePrereq {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+  color: var(--ink-700);
+  font-size: var(--text-sm);
+}
+.prStatePrereq > span { flex-grow: 1; }
+
+/* One row, one primary. The old section put every transition in a wrapping flex row at equal weight;
+   a fifth control is what made it wrap, so a state-specific prerequisite gets its own row above rather
+   than a button in here. */
+.prStateActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.prStateSpacer { flex-grow: 1; }
+
+.prStatePrimary,
+.prStateQuiet,
+.prStateDanger,
+.prBackward > summary {
+  min-height: var(--control-height, 40px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-700);
+  font: var(--weight-strong) var(--text-control) var(--font-body);
+  cursor: pointer;
+}
+.prStatePrimary {
+  padding: 10px 16px;
+  border-color: var(--teal-700);
+  background: var(--teal-700);
+  color: var(--surface);
+  font-size: var(--text-body);
+}
+.prStatePrimary:hover:not(:disabled) { background: var(--teal-600); border-color: var(--teal-600); }
+.prStateQuiet:hover:not(:disabled),
+.prBackward > summary:hover { background: var(--surface-subtle); }
+.prStateDanger { border-color: #d9a7ad; color: #a93744; }
+.prStateDanger:hover:not(:disabled) { background: #fdf6f7; }
+.prStatePrimary:disabled,
+.prStateQuiet:disabled,
+.prStateDanger:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.prStateLink {
+  min-height: var(--control-height-sm, 36px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--teal-700);
+  font: var(--weight-strong) var(--text-sm) var(--font-body);
+  cursor: pointer;
+}
+.prStateLink:hover:not(:disabled) { text-decoration: underline; }
+
+/* Backward moves, by name. A disclosure rather than a popup: keyboard reachable with no focus
+   management of our own, and it cannot trap a reader inside it. */
+.prBackward { position: relative; }
+.prBackward > summary { list-style: none; }
+.prBackward > summary::-webkit-details-marker { display: none; }
+.prBackward > summary:after { content: "▾"; color: var(--ink-500); }
+.prBackward[open] > summary { background: var(--surface-subtle); }
+.prBackward > div {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  gap: 2px;
+  min-width: 230px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: 0 12px 30px rgba(17, 35, 58, 0.16);
+}
+.prBackward > div button {
+  min-height: var(--control-height-sm, 36px);
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-900);
+  font: var(--weight-medium) var(--text-control) var(--font-body);
+  text-align: left;
+  cursor: pointer;
+}
+.prBackward > div button:hover:not(:disabled) { background: var(--surface-subtle); }
+.prBackward > div button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* The working note. Folded away, because it is a scratch pad for whoever is about to move the report,
+   not something a reader of the record needs in front of them. */
+.prStateNote > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--teal-700);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+  cursor: pointer;
+}
+.prStateNote > div { display: grid; gap: 8px; margin-top: 10px; }
+.prStateNote label {
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.prStateNote textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-900);
+  font: inherit;
+  font-size: var(--text-control);
+  line-height: var(--leading-body, 1.55);
+  resize: vertical;
+}
+.prStateNote textarea:focus-visible { outline: 2px solid var(--teal-600); outline-offset: 1px; }
+/* Says plainly that this text is not the record. A field that autosaves and is then not submitted has
+   to admit that, or it reads as evidence it never becomes. */
+.prStateNote p {
+  margin: 0;
+  max-width: 76ch;
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body, 1.5);
+}
+
+/* Off the lifecycle: rejected, and terminal. No rail, because nothing progressed along one. */
+.prStateOffPath {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-left: 3px solid #a93744;
+}
+.prStateOffPathBody { display: grid; gap: 9px; min-width: 0; }
+.prStateTerminal {
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  background: #fbecee;
+  color: #8f2733;
+  font-size: var(--text-control);
+  font-weight: var(--weight-bold);
+}
+.prStateRationale {
+  margin: 0;
+  max-width: 70ch;
+  color: var(--ink-700);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body, 1.5);
+}
+.prStateOffPath .prStateActions { padding-top: 0; border-top: 0; }
+
+/* Seven labelled columns need roughly 620px. Below that the marks stay a row and only the current
+   step keeps its label — which costs nothing, because the state is spelled out in words directly
+   above the rail. The names of the other six are not load-bearing; the position is.
+
+   This is a container query on purpose. As a `@media (max-width: 1050px)` rule it never fired where
+   it was needed: the pane is about 520px at a 1280px viewport, so the window was always "wide" and
+   the labels overlapped each other instead. */
+@container prstate (max-width: 620px) {
+  .prRailStep:not(.current) .prRailLabel { font-size: 0; }
+  .prRailStep:not(.current) .prRailLabel em { font-size: var(--text-xs); }
+  .prRailStep.current .prRailLabel { font-size: var(--text-xs); }
+}
+
+/* Where container queries are unavailable, fall back to the viewport rather than leaving the labels
+   to collide. Wrong unit of measure, but better than nothing on an old engine. */
+@supports not (container-type: inline-size) {
+  @media (max-width: 1500px) {
+    .prRailStep:not(.current) .prRailLabel { font-size: 0; }
+    .prRailStep:not(.current) .prRailLabel em { font-size: var(--text-xs); }
+  }
+}
+@media (max-width: 760px) {
+  .prStateOffPath { grid-template-columns: minmax(0, 1fr); }
+  .prStateOwner { margin-left: 0; }
+}

@@ -139,6 +139,19 @@ export function readBlocks(stored: string | undefined | null): RichBlock[] {
 export const writeBlocks = (blocks: RichBlock[]) => JSON.stringify({ blocks });
 
 /**
+ * Whether an authored field holds anything a reader would call content.
+ *
+ * Deliberately not `toPlainText(stored).trim() !== ''`: a field holding only a figure, or only a table
+ * of values, has content and no text. Reading emptiness off the text alone would report such a field as
+ * unanswered and hide the evidence someone attached to it.
+ */
+export function hasContent(stored: string | undefined | null): boolean {
+  return readBlocks(stored).some((block) =>
+    block.type === "paragraph" ? block.text.trim().length > 0 : true,
+  );
+}
+
+/**
  * The text exactly as it was typed, for a plain-text editor bound to this model.
  *
  * Distinct from `toPlainText` because an editor and a summary want opposite things. A summary should be

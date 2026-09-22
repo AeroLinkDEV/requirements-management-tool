@@ -21,7 +21,11 @@
 .prRelatedPicker { margin-top: 13px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-subtle); }
 .prRelatedEmpty { margin: 10px 0 0; color: var(--ink-500); font-size: var(--text-sm); }
 
-.prRelatedList { display: grid; gap: 8px; margin-top: 13px; }
+/* A container, so the rows below size against this list rather than against the window. These sit in
+   the Problem Report detail pane, which is far narrower than the viewport it shares a page with: at a
+   1280px window the pane is a few hundred pixels while `max-width: 760px` still reports a wide screen,
+   so the stacked layout never arrived where it was needed. */
+.prRelatedList { display: grid; gap: 8px; margin-top: 13px; container-type: inline-size; container-name: prrelated; }
 .prRelatedCard { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
 .prRelatedOpen {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 11px; align-items: center;
@@ -49,6 +53,11 @@
 }
 .prRelatedUnlink:disabled { opacity: .55; cursor: not-allowed; }
 
+@container prrelated (max-width: 520px) {
+  .prRelatedCard { grid-template-columns: 1fr; }
+  .prRelatedState { justify-content: flex-start; }
+}
+/* Kept for a genuinely small screen, and for an engine without container queries. */
 @media (max-width: 760px) {
   .prRelatedCard { grid-template-columns: 1fr; }
   .prRelatedState { justify-content: flex-start; }

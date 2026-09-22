@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 998,
-    "cases": 1138,
+    "tests": 999,
+    "cases": 1139,
     "classes": 157,
-    "hostedTests": 941,
-    "hostedCases": 1059,
+    "hostedTests": 942,
+    "hostedCases": 1060,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 23,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 615,
-      "cases": 701,
+      "tests": 616,
+      "cases": 702,
       "unknownCases": 0,
       "classes": 123
     },
@@ -7810,6 +7810,23 @@
     },
     {
       "cls": "ProblemReportApiTests",
+      "test": "A_forward_transition_without_a_rationale_records_none",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client"
+      ],
+      "sourceLines": {
+        "start": 502,
+        "end": 531
+      }
+    },
+    {
+      "cls": "ProblemReportApiTests",
       "test": "A_problem_report_can_drive_each_engineering_change_request_type",
       "kind": "Theory",
       "intent": "http-boundary",
@@ -7840,8 +7857,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 497,
-        "end": 534
+        "start": 533,
+        "end": 570
       }
     },
     {
@@ -7875,8 +7892,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 566,
-        "end": 579
+        "start": 602,
+        "end": 615
       }
     },
     {
@@ -7965,8 +7982,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 536,
-        "end": 564
+        "start": 572,
+        "end": 600
       }
     },
     {
@@ -7999,8 +8016,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 596,
-        "end": 615
+        "start": 632,
+        "end": 651
       }
     },
     {
@@ -8017,7 +8034,7 @@
       ],
       "sourceLines": {
         "start": 433,
-        "end": 495
+        "end": 500
       }
     },
     {
@@ -8033,8 +8050,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 581,
-        "end": 594
+        "start": 617,
+        "end": 630
       }
     },
     {

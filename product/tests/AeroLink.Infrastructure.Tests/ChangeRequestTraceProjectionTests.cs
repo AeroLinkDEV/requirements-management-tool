@@ -397,26 +397,64 @@ public sealed class ChangeRequestTraceProjectionTests
             changeTarget, CodeRelationshipMeaning.RelatedContext, "code.reviewer", fixture.Now);
         withdrawnMergeRequest.Withdraw(withdrawnMergeRequest.Version, "code.reviewer",
             "The Code reference was withdrawn.", fixture.Now);
-        fixture.Db.AddRange(root, mergeRequest, proposalMergeRequest, withdrawnMergeRequest);
+        var repositoryConfiguration = new ProjectRepositoryConfiguration(fixture.Project.Id,
+            ProjectRepositorySetupMode.ConnectNow, "GitLab", "https://gitlab.example/aerolink/requirements",
+            "code.reviewer", fixture.Now);
+        repositoryConfiguration.RecordVerification("code.reviewer", fixture.Now, 42, "aerolink/requirements");
+        fixture.Db.Add(repositoryConfiguration);
         await fixture.Db.SaveChangesAsync();
+        var sourceSnapshot = new GitLabSourceSnapshot(fixture.Project.Id, repositoryConfiguration.Id,
+            "https://gitlab.example", 42, "aerolink/requirements", new('a', 40), "main", "code.reviewer",
+            fixture.Now, repositoryConfiguration.Version);
+        fixture.Db.Add(sourceSnapshot);
+        await fixture.Db.SaveChangesAsync();
+        var proposalFile = new GitLabFileRelationship(fixture.Project.Id, fixture.Release.Id,
+            "https://gitlab.example", 42, sourceSnapshot.Id, null, sourceSnapshot.CommitSha,
+            "src/flight_plan.c", 4, 12, 13, proposalTarget, CodeRelationshipMeaning.RelatedContext,
+            "code.reviewer", fixture.Now);
+        fixture.Db.AddRange(root, mergeRequest, proposalMergeRequest, withdrawnMergeRequest, proposalFile);
+        await fixture.Db.SaveChangesAsync();
+
+        // A source snapshot remains the owner of its path if the mutable project connection later changes.
+        repositoryConfiguration.Configure(repositoryConfiguration.Version, ProjectRepositorySetupMode.ConnectNow,
+            "GitLab", "https://gitlab.example/current/repository", "code.reviewer", fixture.Now);
+        repositoryConfiguration.RecordVerification("code.reviewer", fixture.Now, 77, "current/repository");
+        await fixture.Db.SaveChangesAsync();
+        Assert.NotEqual(sourceSnapshot.PathWithNamespace, repositoryConfiguration.RemotePathWithNamespace);
 
         var result = await ChangeRequestTraceProjection.ForChangeRequestAsync(
             fixture.Db, fixture.Project.Id, root.Id, LegacyLadderPolicy.Instance, CancellationToken.None);
 
         Assert.NotNull(result);
         var rootNode = Assert.Single(result!.Nodes, x => x.Kind == "ChangeRequest" && x.Id == root.Id);
-        Assert.Equal(new[] { mergeRequest.Id, proposalMergeRequest.Id }.OrderBy(x => x),
-            rootNode.RecordedCodeReferences!.Select(x => x.Id).OrderBy(x => x));
+        var expectedRelationshipIds = new[] { mergeRequest.Id, proposalMergeRequest.Id, proposalFile.Id }.OrderBy(x => x);
+        Assert.Equal(expectedRelationshipIds, rootNode.RecordedCodeReferences!.Select(x => x.Id).OrderBy(x => x));
         Assert.DoesNotContain(rootNode.RecordedCodeReferences!, x => x.Id == withdrawnMergeRequest.Id);
         var exactProposal = Assert.Single(rootNode.RecordedCodeReferences!, x => x.Id == proposalMergeRequest.Id);
         Assert.Equal(CodeRelationshipTargetKind.RequirementProposal, exactProposal.TargetKind);
         Assert.Equal(proposal.Id, exactProposal.TargetIdentityId);
         Assert.Equal(root.Id, exactProposal.TargetOwnerIdentityId);
+        var exactFile = Assert.Single(rootNode.RecordedCodeReferences!, x => x.Id == proposalFile.Id);
+        Assert.Equal(CodeRelationshipTargetKind.RequirementProposal, exactFile.TargetKind);
+        Assert.Equal(proposal.Id, exactFile.TargetIdentityId);
+        Assert.Equal(root.Id, exactFile.TargetOwnerIdentityId);
+        Assert.Equal(sourceSnapshot.Id, exactFile.SourceSnapshotId);
+        Assert.Equal(sourceSnapshot.PathWithNamespace, exactFile.RepositoryPathSnapshot);
         var referenceNode = Assert.Single(result.Nodes,
             x => x.Kind == "RecordedCodeRelationship" && x.Id == proposalMergeRequest.Id);
         Assert.Equal("Reference recorded", referenceNode.State);
         Assert.Equal(proposalMergeRequest.Id, referenceNode.RecordedCodeReference!.Id);
         Assert.DoesNotContain(result.Nodes, x => x.Kind is "CodeTraceability" or "CodeEvidenceSet");
+
+        var network = await ChangeRequestTraceProjection.ForBuildAsync(fixture.Db, fixture.Project.Id,
+            fixture.Release.Id, LegacyLadderPolicy.Instance, 100, CancellationToken.None);
+        var networkCrNode = Assert.Single(network.Nodes, x => x.Kind == "ChangeRequest" && x.Id == root.Id);
+        Assert.Equal(expectedRelationshipIds, networkCrNode.RecordedCodeReferences!.Select(x => x.Id).OrderBy(x => x));
+        var networkFile = Assert.Single(networkCrNode.RecordedCodeReferences!, x => x.Id == proposalFile.Id);
+        Assert.Equal(CodeRelationshipTargetKind.RequirementProposal, networkFile.TargetKind);
+        Assert.Equal(proposal.Id, networkFile.TargetIdentityId);
+        Assert.Equal(root.Id, networkFile.TargetOwnerIdentityId);
+        Assert.Equal(sourceSnapshot.PathWithNamespace, networkFile.RepositoryPathSnapshot);
     }
 
     [Fact]

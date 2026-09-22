@@ -215,7 +215,7 @@ test('a lifecycle action refresh cannot drag the pane back to the record that wa
   )
 
   // The acted-on record transitions; its re-fetch is held back before it can apply.
-  await page.locator('.prFlow').getByRole('button', { name: 'Ready for SCCB →', exact: true }).click()
+  await page.locator('.prStateHeader').getByRole('button', { name: 'Move to Ready for SCCB →', exact: true }).click()
   await page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/transition'))
   await expect.poll(() => parkedUrls.length, 'the action refresh re-asked for the acted-on record').toBeGreaterThan(0)
 
