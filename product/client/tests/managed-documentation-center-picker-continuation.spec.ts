@@ -42,9 +42,15 @@ test('the build picker freezes membership across pages and links the exact selec
   await apiLogin(request, 'admin')
 
   // A test-owned Program/Project/document per attempt keeps repetitions and the shared showcase isolated.
+  // The steward is a dedicated non-administrator member (administrator status is not document-authoring
+  // authority): the fixture rotates the steward's password to the shared suite password so the UI journey
+  // can sign in as the responsible owner, whose relationship authority the product recognizes.
   const attempt = Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36)
-  const programCode = `PCK${attempt.toUpperCase()}`
-  const acronym = `PCK${attempt.slice(-4).toUpperCase()}`
+  const programCode = `PCK${attempt.toUpperCase()}`.slice(0, 20)
+  const acronymSuffix = Array.from({ length: 4 }, () =>
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)]).join('')
+  const acronym = `PCK${acronymSuffix}`
+  const stewardUserName = `picker.author.${attempt}`
   const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, {
     data: {
       programName: `Picker Continuation ${attempt}`,
@@ -66,10 +72,40 @@ test('the build picker freezes membership across pages and links the exact selec
   const meResponse = await request.get(`${apiBase}/api/auth/me`)
   expect(meResponse.ok(), await meResponse.text()).toBeTruthy()
   const adminUserId = (await meResponse.json() as { id: string }).id
-  const grantResponse = await request.post(`${apiBase}/api/admin/users/${adminUserId}/memberships`, {
+
+  const authorResponse = await request.post(`${apiBase}/api/admin/users`, {
+    data: {
+      userName: stewardUserName,
+      displayName: `Picker Author ${attempt}`,
+      email: `${stewardUserName}@example.test`,
+      temporaryPassword: `Picker-Author!${attempt}`,
+    },
+  })
+  expect(authorResponse.ok(), await authorResponse.text()).toBeTruthy()
+  const authorUserId = (await authorResponse.json() as { id: string }).id
+
+  const grantResponse = await request.post(`${apiBase}/api/admin/users/${authorUserId}/memberships`, {
     data: { programId, role: 'Engineer' },
   })
   expect(grantResponse.ok(), await grantResponse.text()).toBeTruthy()
+
+  // The steward rotates the temporary password to the shared suite password (rotation revokes all
+  // sessions and swaps this request context's cookie to the steward, so the subsequent document
+  // creation happens with steward identity).
+  const tempLogin = await request.post(`${apiBase}/api/auth/login`, {
+    data: { userName: stewardUserName, password: `Picker-Author!${attempt}` },
+  })
+  expect(tempLogin.ok(), await tempLogin.text()).toBeTruthy()
+  const rotate = await request.post(`${apiBase}/api/auth/password`, {
+    data: { currentPassword: `Picker-Author!${attempt}`, newPassword: 'AeroLink!2026' },
+  })
+  expect(rotate.status(), await rotate.text()).toBe(204)
+
+  // Rotation revoked every session (including this context's cookie): sign in again as the steward.
+  const stewardLogin = await request.post(`${apiBase}/api/auth/login`, {
+    data: { userName: stewardUserName, password: 'AeroLink!2026' },
+  })
+  expect(stewardLogin.ok(), await stewardLogin.text()).toBeTruthy()
 
   const documentResponse = await request.post(`${apiBase}/api/managed-documents`, {
     data: {
@@ -77,7 +113,7 @@ test('the build picker freezes membership across pages and links the exact selec
       acronym,
       documentType: 'Software Configuration Management Plan',
       title: `Picker continuation ${attempt}`,
-      ownerId: 'admin',
+      ownerId: stewardUserName,
       formalChangeSummary: 'Picker continuation journey fixture.',
       operationKey: crypto.randomUUID(),
     },
@@ -91,7 +127,7 @@ test('the build picker freezes membership across pages and links the exact selec
     seedInWorkBuild(projectId, `2.${String(index).padStart(2, '0')}`)
   }
 
-  await login(page, 'admin', { openProject: false })
+  await login(page, stewardUserName, { openProject: false })
   await page.goto(`/programs/${programId}/projects/${projectId}/documentation-center`)
   await expect(page.getByRole('heading', { name: 'Documentation Center' })).toBeVisible()
   await page.getByRole('button', { name: new RegExp(`^${acronym} `) }).click()
