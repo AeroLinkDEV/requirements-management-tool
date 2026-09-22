@@ -761,7 +761,7 @@
       "knownCases": 5,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
-      "reason": "Host use is unknown for one or more invocations; isolate it until method-level evidence is completed.",
+      "reason": "Customizes host state (factory-host-options); sharing could change the subject or leak configuration.",
       "intents": [
         "ef-translation",
         "filesystem",
