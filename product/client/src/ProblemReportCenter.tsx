@@ -782,22 +782,33 @@ export default function ProblemReportCenter({
     }
   };
   const [transitionTarget, setTransitionTarget] = useState("");
+  const [transitionNeedsRationale, setTransitionNeedsRationale] = useState(false);
+  /**
+   * A forward move stays one click unless there is something to record with it.
+   *
+   * The server keeps a rationale on every transition now, not only where one is demanded, so a reason
+   * written for this move is permanent. What must never happen is text being submitted that nobody
+   * confirmed for this particular decision — so a drafted note opens the dialog rather than riding
+   * along silently, and a reader who has written nothing is not asked for anything.
+   */
   const requestTransition = (target: string, requiresRationale: boolean) => {
-    if (requiresRationale) {
+    if (requiresRationale || note.trim()) {
       setTransitionTarget(target);
-      // The working note is a draft of exactly this text, so it opens the dialog already written.
-      // Still editable, and still the dialog's value that is submitted — the note is never sent.
+      setTransitionNeedsRationale(requiresRationale);
       setReopenRationale(note.trim());
       setShowReopen(true);
     } else void action("transition", { targetState: target });
   };
   const submitReopen = async (event: FormEvent) => {
     event.preventDefault();
-    if (!reopenRationale.trim() || !transitionTarget) return;
+    if (!transitionTarget) return;
+    // Required on the edges the policy demands it for; optional on the rest, where an empty field is a
+    // real answer and is sent as no rationale rather than as an empty one.
+    if (transitionNeedsRationale && !reopenRationale.trim()) return;
     if (
       await action("transition", {
         targetState: transitionTarget,
-        rationale: reopenRationale.trim(),
+        rationale: reopenRationale.trim() || undefined,
       })
     ) {
       spendNote();
@@ -1307,8 +1318,9 @@ export default function ProblemReportCenter({
                           placeholder="Why this report is about to move — drafted here, submitted in the dialog."
                         />
                         <p>
-                          Kept in this browser until you use it. It is not part of the controlled
-                          record: what the record keeps is the rationale you confirm in the dialog.
+                          Kept in this browser until you move the report. It then opens the
+                          transition dialog, and whatever you confirm there is retained in immutable
+                          history against that exact transition.
                         </p>
                         {note.trim() && (
                           <AutosaveState
@@ -2101,19 +2113,25 @@ export default function ProblemReportCenter({
               Move to {stateLabel(transitionTarget)} · {selected.displayNumber}
             </h2>
             <p>
-              Backward transitions require a nonblank rationale and are retained in immutable
-              history.
+              {transitionNeedsRationale
+                ? "Backward transitions require a nonblank rationale."
+                : "A rationale is optional for this transition."}{" "}
+              Whatever is written here is retained in immutable history, against this exact
+              transition.
             </p>
             <label>
-              Rationale
+              {transitionNeedsRationale ? "Rationale" : "Rationale (optional)"}
               <textarea
-                required
+                required={transitionNeedsRationale}
                 value={reopenRationale}
                 onChange={(event) => setReopenRationale(event.target.value)}
                 placeholder="Explain the engineering basis for this transition."
               />
             </label>
-            <button className="primaryAction" disabled={busy || !reopenRationale.trim()}>
+            <button
+              className="primaryAction"
+              disabled={busy || (transitionNeedsRationale && !reopenRationale.trim())}
+            >
               Move to {stateLabel(transitionTarget)} →
             </button>
           </form>

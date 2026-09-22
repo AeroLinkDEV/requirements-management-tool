@@ -2,12 +2,14 @@ import { expect, test, type Page } from "@playwright/test";
 import { chooseCategory, login, selectProgram } from "./auth";
 
 /**
- * The working note is a draft of the rationale a backward move or a rejection will ask for.
+ * The working note is a draft of the reason for the lifecycle decision about to be made.
  *
- * It is deliberately not part of the controlled record. The server keeps free text only where a
- * transition requires a rationale and discards it everywhere else, so what these journeys hold is the
- * honest version of the promise the field makes: the note survives in this browser, it arrives in the
- * dialog, and what the record keeps is the rationale confirmed there — never the note itself.
+ * The note lives in this browser until the report is moved; what is confirmed in the transition dialog
+ * is what the record keeps, permanently, against that exact transition. A rationale is required on the
+ * edges the policy demands it for and optional on the rest, and is now retained either way.
+ *
+ * The distinction these journeys hold is that nothing is recorded that nobody confirmed for the
+ * decision being made: a drafted note opens the dialog rather than riding along with the action.
  *
  * Before this, `note` existed with an autosave, a restore offer and a save indicator, and nothing on
  * the page could write to it (#1074).
@@ -50,7 +52,7 @@ const openNote = async (page: Page) => {
   await expect(noteBox(page)).toBeVisible();
 };
 
-test("a working note can be written, and says it is not the record", async ({ page }) => {
+test("a working note can be written, and says where its text goes", async ({ page }) => {
   test.setTimeout(240_000);
   await openProblemReports(page);
   await createIsolatedDraft(page, `Working note field ${Date.now()}`);
@@ -61,8 +63,9 @@ test("a working note can be written, and says it is not the record", async ({ pa
   await noteBox(page).fill("The SCCB wants the containment section before this moves.");
   await expect(noteBox(page)).toHaveValue(/containment section/);
 
-  // A field that autosaves and is never submitted has to admit that, or it reads as evidence.
-  await expect(header(page)).toContainText("not part of the controlled record");
+  // A field that autosaves has to say where its text goes and what becomes of it.
+  await expect(header(page)).toContainText("Kept in this browser until you move the report");
+  await expect(header(page)).toContainText("retained in immutable history");
 });
 
 test("the note survives a reload of the same report, in this browser", async ({ page }) => {
@@ -97,7 +100,7 @@ test("the note survives a reload of the same report, in this browser", async ({ 
   await expect(noteBox(page)).toHaveValue(text);
 });
 
-test("the note arrives in the rationale dialog, and the dialog is what is submitted", async ({
+test("a drafted note is confirmed in the dialog and kept in immutable history", async ({
   page,
 }) => {
   test.setTimeout(240_000);
@@ -108,29 +111,43 @@ test("the note arrives in the rationale dialog, and the dialog is what is submit
   const drafted = "Drafted before the move was made.";
   await noteBox(page).fill(drafted);
 
+  // A drafted note opens the dialog even on a forward move, which needs no rationale. Nothing is
+  // recorded that nobody confirmed for the decision being made.
   await header(page).getByRole("button", { name: /Move to Ready for SCCB/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Backward Problem Report transition" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel(/Rationale/)).toHaveValue(drafted);
+  // Optional here, and it says so rather than demanding text for a routine move.
+  await expect(dialog).toContainText("optional");
+
+  const confirmed = `${drafted} Confirmed on the way to SCCB.`;
+  await dialog.getByLabel(/Rationale/).fill(confirmed);
+  await dialog.getByRole("button", { name: /Move to Ready for SCCB/ }).click();
   const currentStep = header(page).getByRole("list").locator('[aria-current="step"]');
   await expect(currentStep).toContainText("Ready for SCCB");
 
-  // A forward move does not spend the note. Only a transition that submits its text does, or drafting
-  // a rationale would be destroyed by any unrelated action taken first.
+  // Permanent, against this exact transition — the reason a forward move happened used to be dropped
+  // at the API boundary and the record kept only the actor and the timestamp.
+  const tabs = page.getByRole("navigation", { name: "Problem Report sections" });
+  await tabs.getByRole("button", { name: /^History/ }).click();
+  await expect(page.locator(".prTimeline")).toContainText("Confirmed on the way to SCCB.");
+
+  // Spent once submitted, so it cannot be attached to a later, unrelated decision.
+  await tabs.getByRole("button", { name: /^Record/ }).click();
   await openNote(page);
-  await expect(noteBox(page)).toHaveValue(drafted);
+  await expect(noteBox(page)).toHaveValue("");
+});
 
-  // Ready for SCCB -> Draft requires a rationale, and the draft is already in the field.
-  const menu = header(page).locator("details.prBackward");
-  await menu.locator("summary").click();
-  await menu.getByRole("button", { name: /^Draft/ }).click();
-  const dialog = page.getByRole("dialog", { name: "Backward Problem Report transition" });
-  await expect(dialog.getByLabel("Rationale")).toHaveValue(drafted);
+test("a forward move with nothing drafted stays one click", async ({ page }) => {
+  test.setTimeout(240_000);
+  await openProblemReports(page);
+  await createIsolatedDraft(page, `Working note absent ${Date.now()}`);
 
-  // Editable there, and the dialog's value is what the record keeps — the note is never sent.
-  const confirmed = `${drafted} Revised in the dialog.`;
-  await dialog.getByLabel("Rationale").fill(confirmed);
-  await dialog.getByRole("button", { name: /Move to Draft/ }).click();
-  await expect(currentStep).toContainText("Draft");
-
-  const history = page.getByRole("navigation", { name: "Problem Report sections" });
-  await history.getByRole("button", { name: /^History/ }).click();
-  await expect(page.locator(".prTimeline")).toContainText("Revised in the dialog.");
+  // No note, no dialog. Optional means a reader who has written nothing is never asked for anything.
+  await header(page).getByRole("button", { name: /Move to Ready for SCCB/ }).click();
+  const currentStep = header(page).getByRole("list").locator('[aria-current="step"]');
+  await expect(currentStep).toContainText("Ready for SCCB");
+  await expect(
+    page.getByRole("dialog", { name: "Backward Problem Report transition" }),
+  ).toHaveCount(0);
 });
