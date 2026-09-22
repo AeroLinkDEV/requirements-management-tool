@@ -1871,122 +1871,131 @@ export default function ProblemReportCenter({
       </section>
       {showCreate && (
         <div className="prModal" role="dialog" aria-label="Record a problem">
+          {/* Head, scrolling body, pinned foot — the same three-row shape as the checkout editor in
+              ControlledProblemReportEditor. The create form used to be one scrolling column with the
+              footer as its last child, so the author had to scroll past the whole record to reach
+              Save while the checkout editor kept its controls in view. Two entry points to the same
+              record should not disagree about where the save control lives. */}
           <form className="prCreateWhole" onSubmit={createReport}>
-            <button
-              type="button"
-              className="close"
-              aria-label="Close"
-              onClick={() => setShowCreate(false)}
-            >
-              ×
-            </button>
-            <p>NEW PROBLEM REPORT</p>
-            <h2>Save Draft PR</h2>
-            {createDraft.offered && (
-              <DraftRestore
-                savedAt={createDraft.offered.savedAt}
-                description="An unfinished Problem Report is available in this browser."
-                onRestore={() => {
-                  setCreate(createDraft.offered!.value);
-                  createDraft.restore();
-                }}
-                onDiscard={createDraft.discard}
-              />
-            )}
-            <label>
-              Title
-              <input
-                required
-                value={create.title}
-                onChange={(e) => setCreate({ ...create, title: e.target.value })}
-              />
-            </label>
-            <RichContentEditor
-              api={api}
-              projectId={projectId}
-              label="Problem Description"
-              value={create.problemRich}
-              documentLike
-              showDocumentGuidance
-              onUploadingChange={onCreateUploadingChange}
-              placeholder="Describe the problem and its observed effect."
-              onChange={(value) => setCreate({ ...create, problemRich: value })}
-            />
-            <RichContentEditor
-              api={api}
-              projectId={projectId}
-              label="Additional Information"
-              value={create.additionalInformationRich}
-              documentLike
-              onUploadingChange={onCreateUploadingChange}
-              onChange={(value) => setCreate({ ...create, additionalInformationRich: value })}
-            />
-            {PROBLEM_REPORT_NARRATIVE.map((field) => (
+            <header className="prEditorHead">
+              <button
+                type="button"
+                className="close"
+                aria-label="Close"
+                onClick={() => setShowCreate(false)}
+              >
+                ×
+              </button>
+              <p>NEW PROBLEM REPORT</p>
+              <h2>Save Draft PR</h2>
+            </header>
+            <div className="prEditorBody">
+              {createDraft.offered && (
+                <DraftRestore
+                  savedAt={createDraft.offered.savedAt}
+                  description="An unfinished Problem Report is available in this browser."
+                  onRestore={() => {
+                    setCreate(createDraft.offered!.value);
+                    createDraft.restore();
+                  }}
+                  onDiscard={createDraft.discard}
+                />
+              )}
+              <label>
+                Title
+                <input
+                  required
+                  value={create.title}
+                  onChange={(e) => setCreate({ ...create, title: e.target.value })}
+                />
+              </label>
               <RichContentEditor
-                key={field.key}
                 api={api}
                 projectId={projectId}
-                label={field.label}
-                value={create[field.key]}
+                label="Problem Description"
+                value={create.problemRich}
+                documentLike
+                showDocumentGuidance
+                onUploadingChange={onCreateUploadingChange}
+                placeholder="Describe the problem and its observed effect."
+                onChange={(value) => setCreate({ ...create, problemRich: value })}
+              />
+              <RichContentEditor
+                api={api}
+                projectId={projectId}
+                label="Additional Information"
+                value={create.additionalInformationRich}
                 documentLike
                 onUploadingChange={onCreateUploadingChange}
-                onChange={(value) => setCreate({ ...create, [field.key]: value })}
+                onChange={(value) => setCreate({ ...create, additionalInformationRich: value })}
               />
-            ))}
-            <fieldset className="prImpactEditor">
-              <legend>Impact matrix</legend>
-              {impactFields.map(([key, label]) => (
-                <label key={key}>
-                  {label}
+              {PROBLEM_REPORT_NARRATIVE.map((field) => (
+                <RichContentEditor
+                  key={field.key}
+                  api={api}
+                  projectId={projectId}
+                  label={field.label}
+                  value={create[field.key]}
+                  documentLike
+                  onUploadingChange={onCreateUploadingChange}
+                  onChange={(value) => setCreate({ ...create, [field.key]: value })}
+                />
+              ))}
+              <fieldset className="prImpactEditor">
+                <legend>Impact matrix</legend>
+                {impactFields.map(([key, label]) => (
+                  <label key={key}>
+                    {label}
+                    <select
+                      aria-label={label}
+                      value={create.impacts[key]}
+                      onChange={(e) =>
+                        setCreate({
+                          ...create,
+                          impacts: { ...create.impacts, [key]: e.target.value as ImpactValue },
+                        })
+                      }
+                    >
+                      {["Unknown", "No", "Yes"].map((value) => (
+                        <option key={value}>{value}</option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </fieldset>
+              <label>
+                Category
+                <ProblemReportCategoryPicker
+                  api={api}
+                  value={create.category}
+                  required
+                  onChange={(value) => setCreate({ ...create, category: value })}
+                />
+              </label>
+              <div className="prFormGrid">
+                <label>
+                  Severity
                   <select
-                    aria-label={label}
-                    value={create.impacts[key]}
-                    onChange={(e) =>
-                      setCreate({
-                        ...create,
-                        impacts: { ...create.impacts, [key]: e.target.value as ImpactValue },
-                      })
-                    }
+                    value={create.severity}
+                    onChange={(e) => setCreate({ ...create, severity: e.target.value })}
                   >
-                    {["Unknown", "No", "Yes"].map((value) => (
-                      <option key={value}>{value}</option>
+                    {["Critical", "High", "Major", "Minor", "Trivial"].map((x) => (
+                      <option key={x}>{x}</option>
                     ))}
                   </select>
                 </label>
-              ))}
-            </fieldset>
-            <label>
-              Category
-              <ProblemReportCategoryPicker
-                api={api}
-                value={create.category}
-                required
-                onChange={(value) => setCreate({ ...create, category: value })}
-              />
-            </label>
-            <div className="prFormGrid">
-              <label>
-                Severity
-                <select
-                  value={create.severity}
-                  onChange={(e) => setCreate({ ...create, severity: e.target.value })}
-                >
-                  {["Critical", "High", "Major", "Minor", "Trivial"].map((x) => (
-                    <option key={x}>{x}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Priority
-                <select
-                  value={create.priority}
-                  onChange={(e) => setCreate({ ...create, priority: e.target.value })}
-                >
-                  {["Urgent", "High", "Normal", "Low"].map((x) => (
-                    <option key={x}>{x}</option>
-                  ))}
-                </select>
-              </label>
+                <label>
+                  Priority
+                  <select
+                    value={create.priority}
+                    onChange={(e) => setCreate({ ...create, priority: e.target.value })}
+                  >
+                    {["Urgent", "High", "Normal", "Low"].map((x) => (
+                      <option key={x}>{x}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </div>
             <div className="prCreateFoot">
               {createUploadsPending > 0 && (
