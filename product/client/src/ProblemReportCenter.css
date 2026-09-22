@@ -85,7 +85,14 @@
 
 .prWorkspace {
   display: grid;
-  grid-template-columns: 390px minmax(0, 1fr);
+  /* The queue gives ground to the record it exists to open.
+
+     This was a flat `390px`, narrowing to 330px only below a 1050px viewport — which a 1280px laptop
+     never reaches. The detail pane is whatever is left after 248px of sidebar, 88px of page padding
+     and this column, so at 1280px the queue held 390px and the record got 520px: a list nearly as wide
+     as the thing it lists. The clamp keeps 390px wherever there is room for it and gives the record
+     the difference where there is not, without dropping the queue below a usable 300px. */
+  grid-template-columns: clamp(300px, 26%, 390px) minmax(0, 1fr);
   min-height: 620px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
@@ -218,7 +225,18 @@
   padding: 26px 30px;
   overflow: auto;
   background: var(--canvas);
+  /* Everything in here sizes against this pane, not against the window.
+
+     The pane is what is left of the page after the sidebar, the page padding and the queue column, so
+     it is far narrower than the viewport that the media queries below were written against: at 1280px
+     the window is "wide" while the pane is a few hundred pixels. Every responsive fallback aimed at
+     this content therefore never fired where it was needed, and the columns stayed at their widest
+     while the space ran out. The viewport rules are kept for the genuinely small-screen case; these
+     container rules are the ones that do the work on a desktop. */
+  container-type: inline-size;
+  container-name: prdetail;
 }
+
 .prDetailHead > div > p,
 .prEditorHead > p,
 .prModal > form > p {
@@ -1036,3 +1054,25 @@
    ProblemReportCategoryPicker) went on rendering 10 to 11.5px text underneath it. Those are fixed at
    source now, so the allow-list has nothing left to hold up and is gone. Keep reaching for the tokens
    and it cannot come back. */
+
+/* Pane-width rules, last on purpose.
+
+   A container query carries no specificity of its own, so these have to come after the rules they
+   override or they simply lose. Placed next to .prDetail they were beaten by .prIdentity and
+   .prImpactGrid further down the file, and the columns never collapsed — the measurement said three
+   columns at every width, which is how this was caught rather than shipped. */
+/* Three or four columns of metadata stop fitting long before a phone. */
+@container prdetail (max-width: 720px) {
+  .prIdentity { grid-template-columns: 1fr 1fr; }
+  .prImpactGrid { grid-template-columns: 1fr 1fr; }
+  .prLinks { grid-template-columns: 1fr; }
+  .prSupportingFiles .prSectionHeading { display: block; }
+  .prSupportingFiles .prSectionHeading p { margin-top: 4px; }
+  .prDispositionDecision { flex-direction: column; }
+  .prDispositionDecision > div:last-child { align-items: flex-start; }
+}
+@container prdetail (max-width: 480px) {
+  .prIdentity,
+  .prImpactGrid { grid-template-columns: 1fr; }
+  .prDetailHead { align-items: flex-start; flex-direction: column; }
+}
