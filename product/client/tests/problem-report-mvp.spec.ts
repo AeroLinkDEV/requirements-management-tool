@@ -45,7 +45,7 @@ test('an engineer creates a structured Draft PR and advances it through the SCCB
   // The pane has to show this record at Ready for SCCB before the click, so a detail response for another
   // record arriving late cannot turn the Open click into a different record's lifecycle action. (#793)
   await expect(page.locator('.prState')).toHaveText('Ready for SCCB')
-  await page.locator('.prFlow').getByRole('button', { name: 'Open →', exact: true }).click()
+  await page.locator('.prStateHeader').getByRole('button', { name: 'Move to Open →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Open')
   await page.getByRole('button', { name: 'Move to Implementing →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Implementing')
@@ -98,7 +98,7 @@ test('an Open Problem Report is checked out, corrected, and the correction survi
   // As above: pin the pane to this record at Ready for SCCB before the Open click. (#793)
   await expect(page.getByRole('heading', { name: `Autopilot disconnect tone lags ${stamp}` })).toBeVisible()
   await expect(page.locator('.prState')).toHaveText('Ready for SCCB')
-  await page.locator('.prFlow').getByRole('button', { name: 'Open →', exact: true }).click()
+  await page.locator('.prStateHeader').getByRole('button', { name: 'Move to Open →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Open')
 
   // SCCB authority opened the report; its assigned owner performs the controlled edit.

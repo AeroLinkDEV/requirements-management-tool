@@ -4,18 +4,29 @@ import { chooseCategory, login, selectProgram } from "./auth";
 /**
  * The state header is the answer to "where is this report, and what do I do next".
  *
- * These journeys hold it to the domain's transition policy rather than to whatever the component
- * happens to render. The expected sets below are
- * `ProblemReportTransitionPolicy.AllowedTargets` written out: if the policy changes, one of these fails
- * and the header has to be brought back in line, which is the point. A spec that only asserted "a
- * backward menu exists" would pass no matter which states it offered, and offering a state the policy
- * refuses is precisely the failure that matters on a controlled record.
+ * Two things it must get right, and they are different:
  *
- * Rejection is deliberately never asserted as a plain transition. It requires a disposition, so the only
- * control that may perform it is the one that opens the disposition dialog.
+ * 1. **Position.** The rail is `ProblemReportTransitionPolicy.CanonicalStates` and the marked step is
+ *    the report's state. That is fixed, so it is asserted exactly.
+ * 2. **Classification.** Whatever the server offers has to land in the right control: a state earlier
+ *    on the rail belongs in the backward menu, a later one is the primary action, and `Rejected` is
+ *    never a plain transition because it requires a disposition.
+ *
+ * What these journeys deliberately do **not** assert is *which* transitions are offered at a given
+ * state. `AllowedTargets` is the state graph; it is not authorization. `ReadyForSccb -> Open` is an
+ * SCCB opening and is restricted to `SccbOpeningRoles`, so a signed-in actor without one of those
+ * roles is correctly offered no forward action there at all. An earlier version of this spec asserted
+ * the graph edge as though it were an offered action and failed against a correct header — the exact
+ * confusion `problemReportLifecycle.ts` warns about. The server decides what is offered; the header is
+ * only responsible for putting what it is given in the right place.
+ *
+ * Each journey names its own record with a run-unique stamp and isolates it with the queue's search,
+ * so nothing depends on queue position or on records other journeys left behind.
  */
 
 const header = (page: Page) => page.getByRole("region", { name: "Problem Report lifecycle" });
+const rail = (page: Page) => header(page).getByRole("list");
+const currentStep = (page: Page) => rail(page).locator('[aria-current="step"]');
 
 const openProblemReports = async (page: Page) => {
   await login(page, "admin", { openProject: false });
@@ -24,7 +35,8 @@ const openProblemReports = async (page: Page) => {
   await page.goto(new URL(`${root}/problem-reports`, page.url()).toString(), { waitUntil: "load" });
 };
 
-const createDraft = async (page: Page, title: string) => {
+/** Creates a Draft and leaves the queue filtered to it alone, so the pane cannot be showing another. */
+const createIsolatedDraft = async (page: Page, title: string) => {
   await page.getByRole("button", { name: "+ Record problem" }).click();
   const dialog = page.getByRole("dialog", { name: "Record a problem" });
   await dialog.getByLabel("Title").fill(title);
@@ -34,98 +46,100 @@ const createDraft = async (page: Page, title: string) => {
   await chooseCategory(dialog, "Code Issue — Functional Impact");
   await dialog.getByRole("button", { name: "Save Draft PR" }).click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
+
+  await page.getByLabel("Search").fill(title);
+  await page.getByRole("button", { name: "Apply filters" }).click();
+  await expect(page.locator(".prList > button")).toHaveCount(1, { timeout: 30_000 });
+  await page.locator(".prList > button").first().click();
+  await expect(page.locator(".prDetail h2")).toHaveText(title);
 };
 
-/**
- * Moves the selected report one state forward through the header's primary action, and proves the move
- * landed by reading the marked step — not by finding the target's name somewhere in the rail, which is
- * printed for every state whether or not the report is in it.
- */
-const moveForward = async (page: Page, target: string) => {
-  const action = header(page).getByRole("button", { name: new RegExp(`Move to ${target}`) });
-  await expect(action).toBeEnabled();
-  await action.click();
-  // Forward edges on the happy path carry no rationale requirement, so no dialog is expected.
-  const currentStep = header(page).getByRole("list").locator('[aria-current="step"]');
-  await expect(currentStep).toContainText(target);
-};
+const RAIL_LABELS = [
+  "Draft",
+  "Ready for SCCB",
+  "Open",
+  "Implementing",
+  "Verifying",
+  "Waiting for SQA to Close",
+  "Closed",
+];
 
-test("the rail names the current state, and only the states the policy allows", async ({ page }) => {
+test("the rail is the canonical lifecycle, and marks where this report is", async ({ page }) => {
   test.setTimeout(240_000);
   await openProblemReports(page);
-  const title = `State header rail ${Date.now()}`;
-  await createDraft(page, title);
+  await createIsolatedDraft(page, `State header rail ${Date.now()}`);
 
-  const rail = header(page).getByRole("list");
-  // All seven canonical states are named, and Rejected is not among them: it is terminal and off-path,
-  // so it never occupies a rail position.
-  await expect(rail.getByRole("listitem")).toHaveCount(7);
-  for (const state of [
-    "Draft",
-    "Ready for SCCB",
-    "Open",
-    "Implementing",
-    "Verifying",
-    "Waiting for SQA to Close",
-    "Closed",
-  ]) {
-    await expect(rail.getByRole("listitem").filter({ hasText: state }).first()).toBeVisible();
+  await expect(rail(page).getByRole("listitem")).toHaveCount(RAIL_LABELS.length);
+  for (const label of RAIL_LABELS) {
+    await expect(rail(page).getByRole("listitem").filter({ hasText: label }).first()).toBeVisible();
   }
-  await expect(rail.getByRole("listitem").filter({ hasText: "Rejected" })).toHaveCount(0);
+  // Rejected is terminal and off-path: it never occupies a rail position, because a rejected report
+  // did not progress along the lifecycle to get there.
+  await expect(rail(page).getByRole("listitem").filter({ hasText: "Rejected" })).toHaveCount(0);
 
-  // The current step is marked for assistive technology and spelled out in text, not by colour alone.
-  const currentStep = rail.locator('[aria-current="step"]');
-  await expect(currentStep).toHaveCount(1);
-  await expect(currentStep).toContainText("Draft");
-  await expect(currentStep).toContainText("Current");
+  // Marked for assistive technology and spelled out in text, never by colour alone.
+  await expect(currentStep(page)).toHaveCount(1);
+  await expect(currentStep(page)).toContainText("Draft");
+  await expect(currentStep(page)).toContainText("Current");
   await expect(header(page)).toContainText("step 1 of 7");
-
-  // AllowedTargets(Draft) is [ReadyForSccb, Rejected]. So: one forward action, no backward menu, and a
-  // reject control that is not a plain transition.
-  await expect(header(page).getByRole("button", { name: /Move to Ready for SCCB/ })).toBeVisible();
-  await expect(header(page).getByText("Move backward")).toHaveCount(0);
-  await expect(header(page).getByRole("button", { name: "Reject…" })).toBeVisible();
-  await expect(header(page).getByRole("button", { name: "Rejected" })).toHaveCount(0);
 });
 
-test("backward targets are offered by name, matching the policy for the current state", async ({
-  page,
-}) => {
+test("rejecting is never a plain transition", async ({ page }) => {
   test.setTimeout(240_000);
   await openProblemReports(page);
-  const title = `State header backward ${Date.now()}`;
-  await createDraft(page, title);
+  await createIsolatedDraft(page, `State header reject ${Date.now()}`);
 
-  await moveForward(page, "Ready for SCCB");
+  // It requires a disposition, so the only control that may perform it is the one that collects one.
+  // A plain `Rejected` transition button sitting beside that control is the duplicate this replaced.
+  await expect(header(page).getByRole("button", { name: "Reject…" })).toBeVisible();
+  await expect(header(page).getByRole("button", { name: "Rejected", exact: true })).toHaveCount(0);
+  await expect(header(page).getByRole("button", { name: /Move to Rejected/ })).toHaveCount(0);
+});
+
+test("offers are classified by where they sit on the rail", async ({ page }) => {
+  test.setTimeout(240_000);
+  await openProblemReports(page);
+  await createIsolatedDraft(page, `State header classify ${Date.now()}`);
+
+  // From Draft the only forward offer is Ready for SCCB, and there is nothing behind it.
+  await expect(header(page).getByRole("button", { name: /Move to Ready for SCCB/ })).toBeVisible();
+  await expect(header(page).locator("details.prBackward")).toHaveCount(0);
+
+  await header(page).getByRole("button", { name: /Move to Ready for SCCB/ }).click();
+  await expect(currentStep(page)).toContainText("Ready for SCCB");
   await expect(header(page)).toContainText("step 2 of 7");
 
-  // AllowedTargets(ReadyForSccb) is [Open, Draft, Rejected]: Open forward, Draft backward.
-  await expect(header(page).getByRole("button", { name: /Move to Open/ })).toBeVisible();
+  // Now something is behind it, and every entry in the menu must name a state that really is earlier
+  // on the rail — the old control guessed a target from the order of availableTransitions instead.
   const menu = header(page).locator("details.prBackward");
   await expect(menu).toBeVisible();
   await menu.locator("summary").click();
   const earlier = menu.getByRole("group", { name: "Earlier states" });
-  await expect(earlier.getByRole("button")).toHaveCount(1);
-  // Named, so the reader chooses the state. This used to act on whichever of Draft or Verifying came
-  // first in availableTransitions, which is list order, not a decision.
-  await expect(earlier.getByRole("button", { name: /^Draft/ })).toBeVisible();
+  const offered = await earlier.getByRole("button").allInnerTexts();
+  expect(offered.length).toBeGreaterThan(0);
+  const currentIndex = RAIL_LABELS.indexOf("Ready for SCCB");
+  for (const entry of offered) {
+    const label = entry.replace(/…$/, "").trim();
+    expect(RAIL_LABELS).toContain(label);
+    expect(RAIL_LABELS.indexOf(label)).toBeLessThan(currentIndex);
+  }
 
-  await moveForward(page, "Open");
-  await expect(header(page)).toContainText("step 3 of 7");
-  // AllowedTargets(Open) is [Implementing, ReadyForSccb, Draft, Rejected]: two backward targets now.
-  await expect(header(page).getByRole("button", { name: /Move to Implementing/ })).toBeVisible();
-  await menu.locator("summary").click();
-  await expect(earlier.getByRole("button")).toHaveCount(2);
-  await expect(earlier.getByRole("button", { name: /^Ready for SCCB/ })).toBeVisible();
-  await expect(earlier.getByRole("button", { name: /^Draft/ })).toBeVisible();
+  // Whatever forward action is offered — the server may withhold it, since opening an SCCB report is
+  // role-restricted — it must name a state ahead of this one, never behind it.
+  const forward = header(page).getByRole("button", { name: /^Move to / });
+  for (const text of await forward.allInnerTexts()) {
+    const label = text.replace(/^Move to /, "").replace(/[…→]\s*$/, "").trim();
+    expect(RAIL_LABELS.indexOf(label)).toBeGreaterThan(currentIndex);
+  }
 });
 
 test("a backward move collects its rationale before it is performed", async ({ page }) => {
   test.setTimeout(240_000);
   await openProblemReports(page);
-  const title = `State header rationale ${Date.now()}`;
-  await createDraft(page, title);
-  await moveForward(page, "Ready for SCCB");
+  await createIsolatedDraft(page, `State header rationale ${Date.now()}`);
+
+  await header(page).getByRole("button", { name: /Move to Ready for SCCB/ }).click();
+  await expect(currentStep(page)).toContainText("Ready for SCCB");
 
   const menu = header(page).locator("details.prBackward");
   await menu.locator("summary").click();
@@ -138,23 +152,24 @@ test("a backward move collects its rationale before it is performed", async ({ p
   await dialog.getByLabel("Rationale").fill("The SCCB asked for the containment section first.");
   await dialog.getByRole("button", { name: /Move to Draft/ }).click();
 
+  await expect(currentStep(page)).toContainText("Draft");
   await expect(header(page)).toContainText("step 1 of 7");
-  const currentStep = header(page).getByRole("list").locator('[aria-current="step"]');
-  await expect(currentStep).toContainText("Draft");
 });
 
 test("the state and its next action stay visible on every tab", async ({ page }) => {
   test.setTimeout(240_000);
   await openProblemReports(page);
-  const title = `State header tabs ${Date.now()}`;
-  await createDraft(page, title);
+  await createIsolatedDraft(page, `State header tabs ${Date.now()}`);
 
   // The header belongs to the record, not to the Record tab. It used to be the last section of that
   // tab, so a reader on Code or History could not see the state or reach the next action at all.
   for (const tab of ["Code", "Record", "History"]) {
-    await page.getByRole("navigation", { name: "Problem Report sections" }).getByRole("button", { name: new RegExp(`^${tab}`) }).click();
+    await page
+      .getByRole("navigation", { name: "Problem Report sections" })
+      .getByRole("button", { name: new RegExp(`^${tab}`) })
+      .click();
     await expect(header(page)).toBeVisible();
-    await expect(header(page)).toContainText("Draft");
+    await expect(currentStep(page)).toContainText("Draft");
     await expect(header(page).getByRole("button", { name: /Move to Ready for SCCB/ })).toBeVisible();
   }
 });

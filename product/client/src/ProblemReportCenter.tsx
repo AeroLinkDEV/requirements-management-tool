@@ -1753,47 +1753,55 @@ export default function ProblemReportCenter({
                       hrefFor={problemReportHref}
                     />
                   )}
-                  {!isHistorical && (
-                    <section className="prFlow">
-                      <div>
-                        <h3>Controlled authority</h3>
-                        <p>
-                          Independent decisions recorded against this report. The lifecycle itself
-                          is at the top of the record.
-                        </p>
-                      </div>
-                      {noteDraft.offered && (
-                        <DraftRestore
-                          savedAt={noteDraft.offered.savedAt}
-                          description="Unsubmitted notes are available in this browser."
-                          onRestore={() => {
-                            setNote(noteDraft.offered!.value);
-                            noteDraft.restore();
-                          }}
-                          onDiscard={noteDraft.discard}
-                        />
-                      )}{" "}
-                      {note.trim() && (
-                        <AutosaveState
-                          status={noteDraft.status}
-                          savedAt={noteDraft.savedAt}
-                          where="this browser"
-                        />
-                      )}
-                      {selected.state === "Verifying" &&
-                        latestClosureCandidate?.state === "Invalidated" && (
-                          <div className="prClosureInvalidated" role="status">
-                            <b>Closure verification invalidated</b>
-                            <span>
-                              {spaced(
-                                latestClosureCandidate.invalidationReason ?? "controlled change",
-                              )}{" "}
-                              changed the reviewed closure basis. Record a new passing successor
-                              result before SQA closure.
-                            </span>
-                          </div>
+                  {/* Only when it has something to hold. Once the transitions moved to the state
+                      header this section was left with the release-waiver decision and two notices,
+                      none of which apply to most reports — so an unconditional render put a titled,
+                      empty panel on nearly every record. */}
+                  {!isHistorical &&
+                    (selected.capabilities?.canApproveReleaseWaiver ||
+                      noteDraft.offered ||
+                      (selected.state === "Verifying" &&
+                        latestClosureCandidate?.state === "Invalidated")) && (
+                      <section className="prFlow">
+                        <div>
+                          <h3>Controlled authority</h3>
+                          <p>
+                            Independent decisions recorded against this report. The lifecycle itself
+                            is at the top of the record.
+                          </p>
+                        </div>
+                        {noteDraft.offered && (
+                          <DraftRestore
+                            savedAt={noteDraft.offered.savedAt}
+                            description="Unsubmitted notes are available in this browser."
+                            onRestore={() => {
+                              setNote(noteDraft.offered!.value);
+                              noteDraft.restore();
+                            }}
+                            onDiscard={noteDraft.discard}
+                          />
+                        )}{" "}
+                        {note.trim() && (
+                          <AutosaveState
+                            status={noteDraft.status}
+                            savedAt={noteDraft.savedAt}
+                            where="this browser"
+                          />
                         )}
-                      {/* Every transition, the closure-supporting result picker and the reject control
+                        {selected.state === "Verifying" &&
+                          latestClosureCandidate?.state === "Invalidated" && (
+                            <div className="prClosureInvalidated" role="status">
+                              <b>Closure verification invalidated</b>
+                              <span>
+                                {spaced(
+                                  latestClosureCandidate.invalidationReason ?? "controlled change",
+                                )}{" "}
+                                changed the reviewed closure basis. Record a new passing successor
+                                result before SQA closure.
+                              </span>
+                            </div>
+                          )}
+                        {/* Every transition, the closure-supporting result picker and the reject control
                           moved to ProblemReportStateHeader at the top of the record. Two of the
                           controls that used to sit here duplicated others: `Move backward…` acted on
                           whichever of Draft or Verifying came first in availableTransitions, which was
@@ -1804,56 +1812,56 @@ export default function ProblemReportCenter({
 
                           What remains here is the independent release-waiver decision, which is not a
                           lifecycle transition: it is a separate authority recorded against the report. */}
-                      {selected.capabilities?.canApproveReleaseWaiver && (
-                        <details className="prAdmin">
-                          <summary>Approve independent release waiver</summary>
-                          <div>
-                            <label>
-                              Waiver rationale
-                              <textarea
-                                value={waiverRationale}
-                                onChange={(event) => setWaiverRationale(event.target.value)}
-                              />
-                            </label>
-                            <label>
-                              Expiry date
-                              <input
-                                type="date"
-                                value={waiverExpiry}
-                                onChange={(event) => setWaiverExpiry(event.target.value)}
-                              />
-                            </label>
+                        {selected.capabilities?.canApproveReleaseWaiver && (
+                          <details className="prAdmin">
+                            <summary>Approve independent release waiver</summary>
+                            <div>
+                              <label>
+                                Waiver rationale
+                                <textarea
+                                  value={waiverRationale}
+                                  onChange={(event) => setWaiverRationale(event.target.value)}
+                                />
+                              </label>
+                              <label>
+                                Expiry date
+                                <input
+                                  type="date"
+                                  value={waiverExpiry}
+                                  onChange={(event) => setWaiverExpiry(event.target.value)}
+                                />
+                              </label>
+                              <button
+                                disabled={busy || !waiverRationale.trim() || !waiverExpiry}
+                                onClick={() =>
+                                  void action("release-waiver", {
+                                    rationale: waiverRationale,
+                                    expiresAt: new Date(`${waiverExpiry}T23:59:59Z`).toISOString(),
+                                  })
+                                }
+                              >
+                                Approve controlled waiver
+                              </button>
+                            </div>
+                          </details>
+                        )}
+                        {selected.activeReleaseWaiver &&
+                          selected.capabilities?.releaseWaiverAuthority && (
                             <button
-                              disabled={busy || !waiverRationale.trim() || !waiverExpiry}
+                              className="quiet"
+                              disabled={busy}
                               onClick={() =>
-                                void action("release-waiver", {
-                                  rationale: waiverRationale,
-                                  expiresAt: new Date(`${waiverExpiry}T23:59:59Z`).toISOString(),
-                                })
+                                void action(
+                                  `release-waiver/${selected.activeReleaseWaiver!.id}/revoke`,
+                                  { reason: "Waiver revoked by current release authority." },
+                                )
                               }
                             >
-                              Approve controlled waiver
+                              Revoke active waiver
                             </button>
-                          </div>
-                        </details>
-                      )}
-                      {selected.activeReleaseWaiver &&
-                        selected.capabilities?.releaseWaiverAuthority && (
-                          <button
-                            className="quiet"
-                            disabled={busy}
-                            onClick={() =>
-                              void action(
-                                `release-waiver/${selected.activeReleaseWaiver!.id}/revoke`,
-                                { reason: "Waiver revoked by current release authority." },
-                              )
-                            }
-                          >
-                            Revoke active waiver
-                          </button>
-                        )}
-                    </section>
-                  )}
+                          )}
+                      </section>
+                    )}
                 </>
               )}
             </>

@@ -338,6 +338,10 @@ test('a failed route restoration cannot leave the previous Problem Report action
   await expect(page).toHaveURL(new RegExp(firstId))
   await expect(page.locator('.workspaceError')).toBeVisible({ timeout: 30_000 })
   await expect(page.getByRole('heading', { name: secondTitle })).toHaveCount(0)
+  // No lifecycle controls may be showing for a record that failed to load. The transitions live in
+  // the state header now, so it carries this assertion; `.prFlow` stays beside it because a count of
+  // zero there alone would pass even with a stale header on screen.
+  await expect(page.locator('.prStateHeader')).toHaveCount(0)
   await expect(page.locator('.prFlow')).toHaveCount(0)
 
   await page.unroute(failFirst)
