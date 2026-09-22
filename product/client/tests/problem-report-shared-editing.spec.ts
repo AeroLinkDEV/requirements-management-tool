@@ -34,7 +34,7 @@ test('a Project member who does not own a Verifying Problem Report can still cor
   await chooseCategory(raise, 'Code Issue — Functional Impact')
   await raise.getByRole('button', { name: 'Save Draft PR' }).click()
   await expect(page.locator('.prState')).toHaveText('Draft')
-  await page.locator('.prFlow').getByRole('button', { name: 'Ready for SCCB →', exact: true }).click()
+  await page.locator('.prStateHeader').getByRole('button', { name: 'Move to Ready for SCCB →', exact: true }).click()
   // Asserted here so a refused transition is reported where it happened, rather than as a button that
   // never appears three steps later.
   await expect(page.locator('.prState')).toHaveText('Ready for SCCB', { timeout: 30_000 })
@@ -54,11 +54,11 @@ test('a Project member who does not own a Verifying Problem Report can still cor
   // detail view still catching up across the identity switch could race a click that fired anyway, leaving
   // the DOM stale while the server moved on (the #793 signature).
   await expect(page.locator('.prState')).toHaveText('Ready for SCCB', { timeout: 30_000 })
-  await page.locator('.prFlow').getByRole('button', { name: 'Open →', exact: true }).click()
+  await page.locator('.prStateHeader').getByRole('button', { name: 'Move to Open →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Open')
-  await page.locator('.prFlow').getByRole('button', { name: 'Start implementing →', exact: true }).click()
+  await page.locator('.prStateHeader').getByRole('button', { name: 'Move to Implementing →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Implementing')
-  await page.locator('.prFlow').getByRole('button', { name: 'Move to Verifying →', exact: true }).click()
+  await page.locator('.prStateHeader').getByRole('button', { name: 'Move to Verifying →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Verifying')
 
   // The reported case, exactly: a report in Verifying, opened by somebody who does not own it.

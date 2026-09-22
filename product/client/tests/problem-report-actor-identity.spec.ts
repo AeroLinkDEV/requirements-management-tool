@@ -38,7 +38,7 @@ test('a Problem Report history names an actor the demo registry does not contain
   await expect(page.getByRole('heading', { name: title })).toBeVisible()
 
   // One controlled transition, so the history has an event this account actually performed.
-  await page.locator('.prFlow').getByRole('button', { name: 'Ready for SCCB →', exact: true }).click()
+  await page.locator('.prStateHeader').getByRole('button', { name: 'Move to Ready for SCCB →', exact: true }).click()
   await expect(page.locator('.prState')).toHaveText('Ready for SCCB')
 
   await page.getByRole('button', { name: /History/ }).click()

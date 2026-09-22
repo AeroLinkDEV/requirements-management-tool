@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import type { AuthUser } from "./IdentityCenter";
 import PersonPicker from "./PersonPicker";
 import ProblemReportCodeRelationships from "./ProblemReportCodeRelationships";
+import ProblemReportStateHeader from "./ProblemReportStateHeader";
+import { stateLabel } from "./problemReportLifecycle";
 import { PersonName } from "./People";
 import { RichContentEditor, RichContentView } from "./RichContent";
-import { emptyRichContent, toPlainText } from "./richContentModel";
+import { emptyRichContent, hasContent, toPlainText } from "./richContentModel";
 import ControlledProblemReportEditor from "./ControlledProblemReportEditor";
 import ControlledAttachments from "./ControlledAttachments";
 import ProblemReportCategoryPicker, { CategoryTile } from "./ProblemReportCategoryPicker";
@@ -274,17 +276,6 @@ const spaced = (value: string) =>
           .replace(/([a-z])([A-Z])/g, "$1 $2")
           .replace("Sqa", "SQA")
           .replace("Sccb", "SCCB");
-const transitionLabel = (state: string) =>
-  ({
-    ReadyForSccb: "Ready for SCCB",
-    Open: "Open",
-    Implementing: "Start implementing",
-    Verifying: "Move to Verifying",
-    WaitingForSqaToClose: "Waiting for SQA to Close",
-    Closed: "Close Problem Report",
-    Rejected: "Reject Problem Report",
-    Draft: "Return to Draft",
-  })[state] ?? `Move to ${spaced(state)}`;
 const revisionEvidence = (
   revision: Revision,
 ):
@@ -908,6 +899,78 @@ export default function ProblemReportCenter({
     }
   };
   const latestClosureCandidate = selected?.closureCandidates?.[0];
+  /**
+   * Every authored field on the record, in reading order, split by whether it holds anything.
+   *
+   * `analysis` appears here for the first time. It is authored in the checkout editor, carried by the
+   * API and stored on the record, and the record view has never rendered it — so an author's analysis
+   * was invisible to every reviewer of the report.
+   *
+   * A field's emptiness is decided by `hasContent`, not by whether its text is blank: a field holding
+   * only a figure or only a table has content and no text, and reporting it as unfilled would hide the
+   * evidence attached to it.
+   *
+   * Workaround keeps its own wording when empty. Empty is a real answer there — it means no workaround
+   * has been found — which is not the same claim as a field nobody has reached yet.
+   */
+  const narrative = useMemo(() => {
+    const fields = selected
+      ? [
+          {
+            label: "Problem description",
+            rich: selected.problemRich,
+            plain: selected.problem,
+            whenEmpty: "Not yet recorded",
+          },
+          {
+            label: "Additional information",
+            rich: selected.additionalInformationRich,
+            plain: selected.additionalInformation,
+            whenEmpty: "Not yet provided",
+          },
+          {
+            label: "Analysis",
+            rich: selected.analysisRich,
+            plain: selected.analysis,
+            whenEmpty: "Not yet recorded",
+          },
+          {
+            label: "Root cause",
+            rich: selected.rootCauseRich,
+            plain: selected.rootCause,
+            whenEmpty: "Not yet determined",
+          },
+          {
+            label: "Effects",
+            rich: selected.effectsRich,
+            plain: selected.effects,
+            whenEmpty: "Not yet recorded",
+          },
+          {
+            label: "Containment",
+            rich: selected.containmentRich,
+            plain: selected.containment,
+            whenEmpty: "Not yet recorded",
+          },
+          {
+            label: "Workaround",
+            rich: selected.workaroundRich,
+            plain: selected.workaround,
+            whenEmpty: "None recorded",
+          },
+          {
+            label: "Corrective-action narrative",
+            rich: selected.correctiveActionRich,
+            plain: selected.correctiveAction,
+            whenEmpty: "Not yet recorded",
+          },
+        ]
+      : [];
+    const filled = (field: (typeof fields)[number]) =>
+      hasContent(field.rich) || (field.plain ?? "").trim().length > 0;
+    return { answered: fields.filter(filled), unfilled: fields.filter((field) => !filled(field)) };
+  }, [selected]);
+
   const closurePackages = (selected?.closureCandidates ?? []).filter(
     (candidate) => candidate.state === "Approved" || candidate.state === "LegacyUnavailable",
   );
@@ -1175,6 +1238,40 @@ export default function ProblemReportCenter({
                   Download PDF
                 </a>
               </nav>
+              {/* Above the tabs on purpose: the state and the next action belong to the record, not to
+                  the Record tab, and a reader on Code or History needs them just as much. This was the
+                  last section of the Record tab, so reaching the only thing to do next meant scrolling
+                  past the whole narrative first. */}
+              {!isHistorical && (
+                <ProblemReportStateHeader
+                  state={selected.state}
+                  version={selected.version}
+                  owner={
+                    <PersonName
+                      userName={selected.responsibleEngineerId}
+                      displayName={selected.responsibleEngineerDisplayName ?? undefined}
+                    />
+                  }
+                  transitions={selected.capabilities?.availableTransitions ?? []}
+                  busy={busy}
+                  isReleaseBlocker={selected.isReleaseBlocker}
+                  waived={selected.waived}
+                  canToggleBlocker={
+                    isOwner && !["Closed", ...terminalDispositions].includes(selected.state)
+                  }
+                  showClosureResult={selected.state === "Verifying"}
+                  dispositionRationale={selected.dispositionRationale}
+                  onTransition={requestTransition}
+                  onReject={() => setShowDisposition(true)}
+                  onToggleBlocker={() =>
+                    void action("blocker", {
+                      isReleaseBlocker: !selected.isReleaseBlocker,
+                      waiverRationale: "",
+                    })
+                  }
+                  onClosureResult={() => void openCorrectiveAction()}
+                />
+              )}
               <nav className="prTabs" aria-label="Problem Report sections">
                 <button className={tab === "code" ? "active" : ""} onClick={() => setTab("code")}>
                   Code
@@ -1515,91 +1612,39 @@ export default function ProblemReportCenter({
                       Revive &amp; edit
                     </button>
                   )}
+                  {/* The whole authored record, in the order a reviewer reads it.
+
+                      Every field stays on the page whether or not it is filled: a controlled record
+                      shows what it holds, including what it does not hold yet. Hierarchy comes from
+                      size and weight instead — an answered field is prose at reading size under its
+                      label, an unfilled one a compact label/value row. Nothing is hidden, and the
+                      unfilled rows stay at --ink-500 on --surface rather than being greyed past the
+                      contrast floor.
+
+                      These were seven equal-weight boxes in a two-column grid, so on a young report
+                      the two fields anybody came to read carried exactly the weight of five saying
+                      nothing yet. */}
                   <section className="prNarrative">
-                    <article>
-                      <small>PROBLEM DESCRIPTION</small>
-                      {selected.problemRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.problemRich}
-                          empty={selected.problem}
-                        />
-                      ) : (
-                        <p>{selected.problem}</p>
-                      )}
-                    </article>
-                    <article>
-                      <small>ADDITIONAL INFORMATION</small>
-                      {selected.additionalInformationRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.additionalInformationRich}
-                          empty={selected.additionalInformation}
-                        />
-                      ) : (
-                        <p>{selected.additionalInformation || "Not yet provided."}</p>
-                      )}
-                    </article>
-                    <article>
-                      <small>ROOT CAUSE</small>
-                      {selected.rootCauseRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.rootCauseRich}
-                          empty={selected.rootCause}
-                        />
-                      ) : (
-                        <p>{selected.rootCause || "Not yet determined."}</p>
-                      )}
-                    </article>
-                    <article>
-                      <small>EFFECTS</small>
-                      {selected.effectsRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.effectsRich}
-                          empty={selected.effects}
-                        />
-                      ) : (
-                        <p>{selected.effects || "Not yet recorded."}</p>
-                      )}
-                    </article>
-                    <article>
-                      <small>CONTAINMENT</small>
-                      {selected.containmentRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.containmentRich}
-                          empty={selected.containment}
-                        />
-                      ) : (
-                        <p>{selected.containment || "Not yet recorded."}</p>
-                      )}
-                    </article>
-                    <article>
-                      <small>WORKAROUND</small>
-                      {selected.workaroundRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.workaroundRich}
-                          empty={selected.workaround}
-                        />
-                      ) : (
-                        <p>{selected.workaround || "None recorded."}</p>
-                      )}
-                    </article>
-                    <article>
-                      <small>HUMAN CORRECTIVE-ACTION NARRATIVE</small>
-                      {selected.correctiveActionRich ? (
-                        <RichContentView
-                          api={api}
-                          value={selected.correctiveActionRich}
-                          empty={selected.correctiveAction}
-                        />
-                      ) : (
-                        <p>{selected.correctiveAction || "Not yet recorded."}</p>
-                      )}
-                    </article>
+                    {narrative.answered.map((field) => (
+                      <article key={field.label}>
+                        <small>{field.label}</small>
+                        {field.rich ? (
+                          <RichContentView api={api} value={field.rich} empty={field.plain} />
+                        ) : (
+                          <p>{field.plain}</p>
+                        )}
+                      </article>
+                    ))}
+                    {narrative.unfilled.length > 0 && (
+                      <div className="prNarrativeUnfilled">
+                        {narrative.unfilled.map((field) => (
+                          <div key={field.label}>
+                            <span>{field.label}</span>
+                            <em>{field.whenEmpty}</em>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </section>
                   {selected.disposition && selected.disposition !== "Fixed" && (
                     <section className="prDispositionDecision" aria-label="Controlled disposition">
@@ -1708,156 +1753,115 @@ export default function ProblemReportCenter({
                       hrefFor={problemReportHref}
                     />
                   )}
-                  {!isHistorical && (
-                    <section className="prFlow">
-                      <div>
-                        <h3>Lifecycle action</h3>
-                        <p>
-                          {spaced(selected.state)} · controlled version {selected.version}
-                        </p>
-                      </div>
-                      {noteDraft.offered && (
-                        <DraftRestore
-                          savedAt={noteDraft.offered.savedAt}
-                          description="Unsubmitted notes are available in this browser."
-                          onRestore={() => {
-                            setNote(noteDraft.offered!.value);
-                            noteDraft.restore();
-                          }}
-                          onDiscard={noteDraft.discard}
-                        />
-                      )}{" "}
-                      {note.trim() && (
-                        <AutosaveState
-                          status={noteDraft.status}
-                          savedAt={noteDraft.savedAt}
-                          where="this browser"
-                        />
-                      )}
-                      {selected.state === "Verifying" &&
-                        latestClosureCandidate?.state === "Invalidated" && (
-                          <div className="prClosureInvalidated" role="status">
-                            <b>Closure verification invalidated</b>
-                            <span>
-                              {spaced(
-                                latestClosureCandidate.invalidationReason ?? "controlled change",
-                              )}{" "}
-                              changed the reviewed closure basis. Record a new passing successor
-                              result before SQA closure.
-                            </span>
-                          </div>
+                  {/* Only when it has something to hold. Once the transitions moved to the state
+                      header this section was left with the release-waiver decision and two notices,
+                      none of which apply to most reports — so an unconditional render put a titled,
+                      empty panel on nearly every record. */}
+                  {!isHistorical &&
+                    (selected.capabilities?.canApproveReleaseWaiver ||
+                      noteDraft.offered ||
+                      (selected.state === "Verifying" &&
+                        latestClosureCandidate?.state === "Invalidated")) && (
+                      <section className="prFlow">
+                        <div>
+                          <h3>Controlled authority</h3>
+                          <p>
+                            Independent decisions recorded against this report. The lifecycle itself
+                            is at the top of the record.
+                          </p>
+                        </div>
+                        {noteDraft.offered && (
+                          <DraftRestore
+                            savedAt={noteDraft.offered.savedAt}
+                            description="Unsubmitted notes are available in this browser."
+                            onRestore={() => {
+                              setNote(noteDraft.offered!.value);
+                              noteDraft.restore();
+                            }}
+                            onDiscard={noteDraft.discard}
+                          />
+                        )}{" "}
+                        {note.trim() && (
+                          <AutosaveState
+                            status={noteDraft.status}
+                            savedAt={noteDraft.savedAt}
+                            where="this browser"
+                          />
                         )}
-                      {selected.capabilities?.availableTransitions?.map((transition) => (
-                        <button
-                          key={transition.state}
-                          disabled={busy}
-                          onClick={() =>
-                            requestTransition(transition.state, transition.requiresRationale)
-                          }
-                        >
-                          {transitionLabel(transition.state)}
-                          {transition.requiresRationale ? " …" : " →"}
-                        </button>
-                      ))}
-                      {selected.state === "Verifying" && (
-                        <button onClick={() => void openCorrectiveAction()}>
-                          Select closure-supporting test result →
-                        </button>
-                      )}
-                      {selected.capabilities?.availableTransitions?.some(
-                        (transition) => transition.state === "Rejected",
-                      ) && (
-                        <button
-                          className="quiet"
-                          disabled={busy}
-                          onClick={() => setShowDisposition(true)}
-                        >
-                          Reject…
-                        </button>
-                      )}
-                      {selected.capabilities?.canApproveReleaseWaiver && (
-                        <details className="prAdmin">
-                          <summary>Approve independent release waiver</summary>
-                          <div>
-                            <label>
-                              Waiver rationale
-                              <textarea
-                                value={waiverRationale}
-                                onChange={(event) => setWaiverRationale(event.target.value)}
-                              />
-                            </label>
-                            <label>
-                              Expiry date
-                              <input
-                                type="date"
-                                value={waiverExpiry}
-                                onChange={(event) => setWaiverExpiry(event.target.value)}
-                              />
-                            </label>
+                        {selected.state === "Verifying" &&
+                          latestClosureCandidate?.state === "Invalidated" && (
+                            <div className="prClosureInvalidated" role="status">
+                              <b>Closure verification invalidated</b>
+                              <span>
+                                {spaced(
+                                  latestClosureCandidate.invalidationReason ?? "controlled change",
+                                )}{" "}
+                                changed the reviewed closure basis. Record a new passing successor
+                                result before SQA closure.
+                              </span>
+                            </div>
+                          )}
+                        {/* Every transition, the closure-supporting result picker and the reject control
+                          moved to ProblemReportStateHeader at the top of the record. Two of the
+                          controls that used to sit here duplicated others: `Move backward…` acted on
+                          whichever of Draft or Verifying came first in availableTransitions, which was
+                          already offered by name, and a plain `Rejected` transition sat beside the
+                          control that opens the disposition dialog — only the latter collects the
+                          disposition a rejection requires. The header offers each backward target by
+                          name and routes rejection through the disposition dialog alone.
+
+                          What remains here is the independent release-waiver decision, which is not a
+                          lifecycle transition: it is a separate authority recorded against the report. */}
+                        {selected.capabilities?.canApproveReleaseWaiver && (
+                          <details className="prAdmin">
+                            <summary>Approve independent release waiver</summary>
+                            <div>
+                              <label>
+                                Waiver rationale
+                                <textarea
+                                  value={waiverRationale}
+                                  onChange={(event) => setWaiverRationale(event.target.value)}
+                                />
+                              </label>
+                              <label>
+                                Expiry date
+                                <input
+                                  type="date"
+                                  value={waiverExpiry}
+                                  onChange={(event) => setWaiverExpiry(event.target.value)}
+                                />
+                              </label>
+                              <button
+                                disabled={busy || !waiverRationale.trim() || !waiverExpiry}
+                                onClick={() =>
+                                  void action("release-waiver", {
+                                    rationale: waiverRationale,
+                                    expiresAt: new Date(`${waiverExpiry}T23:59:59Z`).toISOString(),
+                                  })
+                                }
+                              >
+                                Approve controlled waiver
+                              </button>
+                            </div>
+                          </details>
+                        )}
+                        {selected.activeReleaseWaiver &&
+                          selected.capabilities?.releaseWaiverAuthority && (
                             <button
-                              disabled={busy || !waiverRationale.trim() || !waiverExpiry}
+                              className="quiet"
+                              disabled={busy}
                               onClick={() =>
-                                void action("release-waiver", {
-                                  rationale: waiverRationale,
-                                  expiresAt: new Date(`${waiverExpiry}T23:59:59Z`).toISOString(),
-                                })
+                                void action(
+                                  `release-waiver/${selected.activeReleaseWaiver!.id}/revoke`,
+                                  { reason: "Waiver revoked by current release authority." },
+                                )
                               }
                             >
-                              Approve controlled waiver
+                              Revoke active waiver
                             </button>
-                          </div>
-                        </details>
-                      )}
-                      {selected.activeReleaseWaiver &&
-                        selected.capabilities?.releaseWaiverAuthority && (
-                          <button
-                            className="quiet"
-                            disabled={busy}
-                            onClick={() =>
-                              void action(
-                                `release-waiver/${selected.activeReleaseWaiver!.id}/revoke`,
-                                { reason: "Waiver revoked by current release authority." },
-                              )
-                            }
-                          >
-                            Revoke active waiver
-                          </button>
-                        )}
-                      {selected.capabilities?.availableTransitions?.some(
-                        (transition) =>
-                          transition.state === "Draft" || transition.state === "Verifying",
-                      ) && (
-                        <button
-                          className="quiet"
-                          disabled={busy}
-                          onClick={() => {
-                            const transition = selected.capabilities?.availableTransitions?.find(
-                              (item) => item.state === "Draft" || item.state === "Verifying",
-                            );
-                            if (transition) requestTransition(transition.state, true);
-                          }}
-                        >
-                          Move backward…
-                        </button>
-                      )}
-                      {isOwner && !["Closed", ...terminalDispositions].includes(selected.state) && (
-                        <button
-                          className="quiet"
-                          disabled={busy}
-                          onClick={() =>
-                            void action("blocker", {
-                              isReleaseBlocker: !selected.isReleaseBlocker,
-                              waiverRationale: "",
-                            })
-                          }
-                        >
-                          {selected.isReleaseBlocker
-                            ? "Clear release blocker"
-                            : "Raise release blocker"}
-                        </button>
-                      )}
-                    </section>
-                  )}
+                          )}
+                      </section>
+                    )}
                 </>
               )}
             </>
@@ -2056,7 +2060,7 @@ export default function ProblemReportCenter({
             </button>
             <p>CONTROLLED LIFECYCLE TRANSITION</p>
             <h2>
-              {transitionLabel(transitionTarget)} · {selected.displayNumber}
+              Move to {stateLabel(transitionTarget)} · {selected.displayNumber}
             </h2>
             <p>
               Backward transitions require a nonblank rationale and are retained in immutable
@@ -2072,7 +2076,7 @@ export default function ProblemReportCenter({
               />
             </label>
             <button className="primaryAction" disabled={busy || !reopenRationale.trim()}>
-              {transitionLabel(transitionTarget)} →
+              Move to {stateLabel(transitionTarget)} →
             </button>
           </form>
         </div>

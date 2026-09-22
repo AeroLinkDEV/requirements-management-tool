@@ -59,9 +59,11 @@ test('Problem Report lifecycle controls expose canonical states, rationale gates
   await expect(page.locator('.prState')).toHaveText('Open')
 
   // Open -> Draft is a backward transition and must be explained before the server accepts it.
-  await page.getByRole('button', { name: 'Move backward…' }).click()
+  const backwardMenu = page.locator('.prStateHeader details.prBackward')
+  await backwardMenu.locator('summary').click()
+  await backwardMenu.getByRole('button', { name: /^Draft/ }).click()
   const backward = page.getByRole('dialog', { name: 'Backward Problem Report transition' })
-  const backwardAction = backward.getByRole('button', { name: /Return to Draft/ })
+  const backwardAction = backward.getByRole('button', { name: /Move to Draft/ })
   await expect(backwardAction).toBeDisabled()
   const backwardRationale = `The original triage needs to be reopened ${stamp}`
   await backward.getByLabel('Rationale').fill(backwardRationale)
