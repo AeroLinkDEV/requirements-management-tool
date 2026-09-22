@@ -13,6 +13,12 @@
   border-radius: var(--radius-md);
   background: var(--surface);
   box-shadow: var(--shadow-soft);
+  /* The rail adapts to this card, not to the window. The detail pane is roughly `viewport - 726px`,
+     so at a 1280px viewport it is about 520px wide while every viewport media query still reports a
+     wide screen — which is how seven labelled steps ended up overlapping each other on a perfectly
+     ordinary laptop. See #1075 for the same fault elsewhere on this page. */
+  container-type: inline-size;
+  container-name: prstate;
 }
 
 .prStateLine {
@@ -42,7 +48,15 @@
   padding: 0;
   list-style: none;
 }
-.prRailStep { display: flex; flex-direction: column; align-items: center; gap: 7px; min-width: 0; }
+.prRailStep {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  /* Labels are centred in their own column and would otherwise touch their neighbours. */
+  padding-inline: 4px;
+}
 .prRailTrack { display: flex; align-items: center; width: 100%; }
 .prRailBefore,
 .prRailAfter { flex-grow: 1; height: 2px; background: var(--line); }
@@ -222,11 +236,26 @@
 }
 .prStateOffPath .prStateActions { padding-top: 0; border-top: 0; }
 
-@media (max-width: 1050px) {
-  /* Seven labelled columns stop fitting well before the pane does. The marks stay a row; the labels
-     shrink to the current one, which is the answer to "where is this" that the rail exists to give. */
+/* Seven labelled columns need roughly 620px. Below that the marks stay a row and only the current
+   step keeps its label — which costs nothing, because the state is spelled out in words directly
+   above the rail. The names of the other six are not load-bearing; the position is.
+
+   This is a container query on purpose. As a `@media (max-width: 1050px)` rule it never fired where
+   it was needed: the pane is about 520px at a 1280px viewport, so the window was always "wide" and
+   the labels overlapped each other instead. */
+@container prstate (max-width: 620px) {
   .prRailStep:not(.current) .prRailLabel { font-size: 0; }
   .prRailStep:not(.current) .prRailLabel em { font-size: var(--text-xs); }
+  .prRailStep.current .prRailLabel { font-size: var(--text-xs); }
+}
+
+/* Where container queries are unavailable, fall back to the viewport rather than leaving the labels
+   to collide. Wrong unit of measure, but better than nothing on an old engine. */
+@supports not (container-type: inline-size) {
+  @media (max-width: 1500px) {
+    .prRailStep:not(.current) .prRailLabel { font-size: 0; }
+    .prRailStep:not(.current) .prRailLabel em { font-size: var(--text-xs); }
+  }
 }
 @media (max-width: 760px) {
   .prStateOffPath { grid-template-columns: minmax(0, 1fr); }
