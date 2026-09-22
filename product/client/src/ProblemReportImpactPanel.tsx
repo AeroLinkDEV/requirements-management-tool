@@ -1,4 +1,6 @@
 import { artifactAcronym } from "./presentation";
+import { RecordedCodeReferenceCard } from "./RecordedCodeReference";
+import type { RecordedCodeRelationship } from "./recordedCodeRelationship";
 import "./ProblemReportImpactPanel.css";
 
 /**
@@ -23,6 +25,7 @@ export type ImpactArtifact = {
   targetBuild: string;
   relationship: string;
   detail: string;
+  codeReference?: RecordedCodeRelationship | null;
 };
 
 export type ImpactArea = {
@@ -33,6 +36,7 @@ export type ImpactArea = {
   artifactTypes: string[];
   mismatch?: string | null;
   artifacts: ImpactArtifact[];
+  notice?: string | null;
 };
 
 const destinationKind = (type: string) => ({
@@ -73,7 +77,7 @@ function ArtifactRow({ artifact, onOpen }: {
     ? <button type="button" className="impactArtifact" onClick={() => onOpen(kind, artifact.artifactId, artifact.identifier)}>{body}</button>
     // Read-only by nature: GitLab remains authoritative for its own records, and this is only the
     // controlled thread to them.
-    : <article className="impactArtifact readOnly">{body}</article>;
+    : <article className="impactArtifact readOnly">{body}{artifact.codeReference && <RecordedCodeReferenceCard reference={artifact.codeReference} />}</article>;
 }
 
 export default function ProblemReportImpactPanel({ areas, narrative, onOpen }: {
@@ -100,6 +104,7 @@ export default function ProblemReportImpactPanel({ areas, narrative, onOpen }: {
               <span className={`impactPill ${assessmentTone(area.assessment)}`}>{assessmentWords(area.assessment)}</span>
             </div>
             <div className="impactSlot">
+              {area.notice && <p className="impactMismatch" role="status">{area.notice}</p>}
               {area.mismatch && (
                 // Both halves are shown and the disagreement is named. Hiding the link would make the
                 // record assert something untrue; changing the answer would put words in an engineer's

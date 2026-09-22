@@ -409,6 +409,29 @@ const branchingThread = () => {
   })
 }
 
+const recordedCodeReference = {
+  id: "acacacac-acac-4aca-8aca-acacacacacac", relationshipKind: "MergeRequest", version: 1,
+  isActive: true, releaseId: "b1b1b1b1-b1b1-41b1-81b1-b1b1b1b1b1b1", releaseVersion: "1.6",
+  meaning: "RelatedContext", recordedBy: "review.engineer", recordedAt: "2026-09-21T12:00:00Z",
+  targetKind: "RequirementRevision", targetIdentityId: HLR_REQ,
+  targetOwnerIdentityId: "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a", targetRevisionNumber: 2,
+  targetStableIdentity: `RequirementRevision:${HLR_REQ}`, targetDisplaySnapshot: "HLR-000075.02",
+  instanceBaseUrl: "https://gitlab.example", remoteProjectId: 42, repositoryPathSnapshot: "aerolink/source",
+  mergeRequestIid: 12, mergeRequestUrlSnapshot: "https://gitlab.example/aerolink/source/-/merge_requests/12",
+  mergeRequestTitleSnapshot: "Preserve the recorded HLR behavior",
+}
+
+const recordedCodeThread = (complete: boolean) => {
+  const thread = highLevelThread(HLR_REQ, "Requirement")
+  return {
+    ...thread,
+    recordedCodeReferencesComplete: complete,
+    nodes: (thread.nodes as Node[]).map(candidate => candidate.id === HLR_REQ
+      ? { ...candidate, recordedCodeReferences: [recordedCodeReference] }
+      : candidate),
+  }
+}
+
 const scenario = new URLSearchParams(window.location.search).get("case") ?? "hlr"
 
 const responses: Record<string, unknown> = {
@@ -424,6 +447,8 @@ const responses: Record<string, unknown> = {
   dense: denseThread(),
   crowded: crowdedThread(),
   branching: branchingThread(),
+  "recorded-code": recordedCodeThread(true),
+  "recorded-code-incomplete": recordedCodeThread(false),
   loading: null,
   error: null,
 }

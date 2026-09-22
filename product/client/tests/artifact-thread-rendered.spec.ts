@@ -285,6 +285,40 @@ test.describe("evidence", () => {
   })
 })
 
+test.describe("recorded Code references", () => {
+  test("shows the stored source link and target snapshot as context, never as accepted evidence", async ({ page }) => {
+    await open(page, "recorded-code")
+
+    const reference = page.locator(".dtaCard.is-focal .recordedCodeReference")
+    await expect(reference).toHaveCount(1)
+    await expect(reference).toContainText("HLR-000075.02")
+    await expect(reference).toContainText("Reference recorded")
+    await expect(reference).toContainText("Not accepted implementation evidence")
+    await expect(reference.getByRole("link", { name: "Open stored GitLab reference ↗" }))
+      .toHaveAttribute("href", "https://gitlab.example/aerolink/source/-/merge_requests/12")
+  })
+
+  test("Digital Thread and Problem Report callers fail closed on unknown targets, kinds, and missing file snapshots", async ({ page }) => {
+    for (const [scenario, surface] of [
+      ["unknown-target", "network"],
+      ["unknown-relationship", "impact"],
+      ["missing-source-snapshot", "impact"],
+    ]) {
+      await page.goto(`/tests/fixtures/recorded-code-reference.html?case=${scenario}&surface=${surface}`)
+      await expect(page.locator(".recordedCodeReference")).toHaveCount(1)
+      await expect(page.getByRole("status")).toContainText("cannot be safely interpreted")
+      await expect(page.getByRole("link")).toHaveCount(0)
+    }
+  })
+
+  test("states when the bounded projection cannot show a complete reference set", async ({ page }) => {
+    await open(page, "recorded-code-incomplete")
+
+    await expect(page.locator(".dtaApplicability").filter({ hasText: "Recorded Code references exceed" }))
+      .toContainText("no partial reference set is shown")
+  })
+})
+
 test.describe("suspectness", () => {
   test("a server-stated suspect link looks different from a settled one, and says so", async ({ page }) => {
     await open(page, "hlr")

@@ -111,6 +111,7 @@ export type ArtifactThreadNode = {
   executedAt?: string | null
   recordedAt?: string | null
   evidence: readonly ArtifactThreadEvidence[]
+  recordedCodeReferences: readonly RecordedCodeRelationship[]
 }
 
 /** One recorded relationship. `relation` and `isSuspect` are server statements, carried unchanged. */
@@ -135,6 +136,7 @@ export type ArtifactThread = {
   nodes: readonly ArtifactThreadNode[]
   edges: readonly ArtifactThreadEdge[]
   verification: ArtifactThreadVerification
+  recordedCodeReferencesComplete: boolean
 }
 
 /** What the read needs. `baselineId` is required because §8.2 makes these views build-scoped. */
@@ -235,6 +237,15 @@ const readEvidence = (raw: unknown, nodeId: string): ArtifactThreadEvidence[] =>
   })
 }
 
+const readRecordedCodeReferences = (raw: unknown, nodeId: string): RecordedCodeRelationship[] => {
+  if (raw === null || raw === undefined) return []
+  if (!Array.isArray(raw)) fail(`Recorded Code references on node ${nodeId} were not a list.`)
+  return (raw as unknown[]).map(candidate => {
+    const reference = readRecordedCodeRelationship(candidate)
+    return reference ?? fail(`A recorded Code reference on node ${nodeId} did not match its exact snapshot contract.`)
+  })
+}
+
 const readNode = (candidate: unknown): ArtifactThreadNode => {
   if (!isRecord(candidate)) return fail('An artifact thread node was not an object.')
 
@@ -270,6 +281,7 @@ const readNode = (candidate: unknown): ArtifactThreadNode => {
     executedAt: optionalText(candidate.executedAt, `The execution time on node ${id}`),
     recordedAt: optionalText(candidate.recordedAt, `The recorded time on node ${id}`),
     evidence: readEvidence(candidate.evidence, id),
+    recordedCodeReferences: readRecordedCodeReferences(candidate.recordedCodeReferences, id),
   }
 }
 
@@ -296,6 +308,9 @@ export const parseArtifactThread = (raw: unknown): ArtifactThreadParse => {
     const projectId = requiredText(body.projectId, 'The artifact thread project')
     const baselineId = requiredText(body.baselineId, 'The artifact thread baseline')
     const buildId = optionalText(body.buildId, 'The artifact thread build')
+    const recordedCodeReferencesComplete = body.recordedCodeReferencesComplete === undefined
+      ? true
+      : requiredBoolean(body.recordedCodeReferencesComplete, 'Recorded Code-reference completeness')
     const focalId = requiredText(body.focalId, 'The artifact thread focal identity')
 
     const focalKind = body.focalKind
@@ -372,6 +387,7 @@ export const parseArtifactThread = (raw: unknown): ArtifactThreadParse => {
         nodes,
         edges,
         verification: applicability,
+        recordedCodeReferencesComplete,
       },
     }
   } catch (error) {
@@ -405,3 +421,4 @@ export const artifactThreadLaneGroups = (thread: ArtifactThread): ArtifactThread
 /** The focal node, which `parseArtifactThread` has already proven to be present exactly once. */
 export const artifactThreadFocalNode = (thread: ArtifactThread): ArtifactThreadNode =>
   thread.nodes.find(node => node.isFocal)!
+import { readRecordedCodeRelationship, type RecordedCodeRelationship } from './recordedCodeRelationship'

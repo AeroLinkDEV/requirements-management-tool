@@ -1,0 +1,9 @@
+.recordedCodeReference { display: grid; gap: 4px; margin-top: 8px; border: 1px solid #d8e0e8; border-left: 3px solid #71869d; border-radius: 7px; background: #f7f9fb; padding: 8px 9px; color: #33485f; font-size: 11px; line-height: 1.4; }
+.recordedCodeReferenceHead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 9px; }
+.recordedCodeReferenceHead b { color: #36506b; }
+.recordedCodeReferenceHead span,
+.recordedCodeReference small,
+.recordedCodeReferenceUnavailable { color: #718096; font-size: 10px; }
+.recordedCodeReference p { margin: 0; overflow-wrap: anywhere; }
+.recordedCodeReferenceTitle { color: #50647a; }
+.recordedCodeReference a { width: fit-content; color: #175d82; font-weight: 650; overflow-wrap: anywhere; }

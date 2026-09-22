@@ -65,6 +65,42 @@ public sealed class ChangeRequestTraceWorkLimitTests
     }
 
     [Fact]
+    public async Task Rooted_trace_refuses_proposal_targets_over_the_remaining_reference_node_budget()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var root = fixture.CreateChangeRequest("SRCR-14000");
+        for (var index = 0; index < 1000; index++)
+            root.AddRequirementChange("author", $"SYSR-{10000 + index:D5}", 0,
+                RequirementLevel.System, RequirementChangeKind.Introduce,
+                $"Bounded proposal {index}", "A trace work-limit fixture.", "Inspection", fixture.Now);
+        fixture.Db.Add(root);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+
+        await Assert.ThrowsAsync<TraceWorkLimitException>(() => ChangeRequestTraceProjection.ForChangeRequestAsync(
+            fixture.Db, fixture.Project.Id, root.Id, LegacyLadderPolicy.Instance, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Build_network_marks_proposal_targets_beyond_the_remaining_reference_node_budget_as_truncated()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var root = fixture.CreateChangeRequest("SRCR-14001");
+        root.AddRequirementChange("author", "SYSR-10000", 0, RequirementLevel.System,
+            RequirementChangeKind.Introduce, "One bounded proposal", "A trace work-limit fixture.", "Inspection", fixture.Now);
+        fixture.Db.Add(root);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+
+        var network = await ChangeRequestTraceProjection.ForBuildAsync(
+            fixture.Db, fixture.Project.Id, fixture.Release.Id, LegacyLadderPolicy.Instance, 1, CancellationToken.None);
+
+        Assert.True(network.Truncated);
+        var onlyNode = Assert.Single(network.Nodes);
+        Assert.Equal(root.Id, onlyNode.Id);
+    }
+
+    [Fact]
     public async Task Rooted_trace_rejects_more_than_twenty_thousand_relation_rows_before_materializing_the_network()
     {
         await using var fixture = await Fixture.CreateAsync();

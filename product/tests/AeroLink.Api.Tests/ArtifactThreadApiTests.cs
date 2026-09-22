@@ -4,12 +4,14 @@ using System.Text.Json;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Integrations;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
@@ -926,6 +928,69 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     private static List<JsonElement> Nodes(JsonElement thread, string kind) =>
         thread.GetProperty("nodes").EnumerateArray()
             .Where(x => x.GetProperty("kind").GetString() == kind).ToList();
+
+    [Fact]
+    public async Task Exact_active_code_references_are_included_only_for_the_admitted_target_revision_and_release()
+    {
+        var world = await SeedAsync(_host.Factory);
+        Guid exactReferenceId;
+        Guid wrongRevisionReferenceId;
+        Guid wrongReleaseReferenceId;
+        Guid withdrawnReferenceId;
+        using (var scope = _host.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var revision = await db.RequirementRevisions.SingleAsync(x => x.Id == world.HighLevelRevisionId);
+            var releaseId = await db.SoftwareBuilds.Where(x => x.Id == world.BuildId)
+                .Select(x => x.ReleaseId).SingleAsync();
+            var exactTarget = CodeRelationshipTarget.ForRequirementRevision(revision.Id, revision.ArtifactId,
+                revision.Revision, "HLR-97001.00");
+            var exact = new GitLabMergeRequestRelationship(world.ProjectId, releaseId, "https://gitlab.example",
+                42, 12, 120, null, null, "aerolink/requirements",
+                "https://gitlab.example/aerolink/requirements/-/merge_requests/12", "Exact target change",
+                exactTarget, CodeRelationshipMeaning.Addresses, world.Member, DateTimeOffset.UtcNow);
+            var wrongRevisionTarget = new CodeRelationshipTarget(CodeRelationshipTargetKind.RequirementRevision,
+                revision.Id, revision.ArtifactId, revision.Revision + 1, exactTarget.StableIdentity,
+                "A different target revision");
+            var wrongRevision = new GitLabMergeRequestRelationship(world.ProjectId, releaseId,
+                "https://gitlab.example", 42, 13, 130, null, null, "aerolink/requirements",
+                "https://gitlab.example/aerolink/requirements/-/merge_requests/13", "Wrong revision change",
+                wrongRevisionTarget, CodeRelationshipMeaning.RelatedContext, world.Member, DateTimeOffset.UtcNow);
+            var otherRelease = new SoftwareRelease(world.ProjectId, "7.1", false);
+            var wrongRelease = new GitLabMergeRequestRelationship(world.ProjectId, otherRelease.Id,
+                "https://gitlab.example", 42, 14, 140, null, null, "aerolink/requirements",
+                "https://gitlab.example/aerolink/requirements/-/merge_requests/14", "Wrong release change",
+                exactTarget, CodeRelationshipMeaning.RelatedContext, world.Member, DateTimeOffset.UtcNow);
+            var withdrawn = new GitLabMergeRequestRelationship(world.ProjectId, releaseId,
+                "https://gitlab.example", 42, 15, 150, null, null, "aerolink/requirements",
+                "https://gitlab.example/aerolink/requirements/-/merge_requests/15", "Withdrawn reference",
+                exactTarget, CodeRelationshipMeaning.RelatedContext, world.Member, DateTimeOffset.UtcNow);
+            withdrawn.Withdraw(withdrawn.Version, world.Member, "No longer the selected source reference.", DateTimeOffset.UtcNow);
+            db.AddRange(otherRelease, exact, wrongRevision, wrongRelease, withdrawn);
+            await db.SaveChangesAsync();
+            exactReferenceId = exact.Id;
+            wrongRevisionReferenceId = wrongRevision.Id;
+            wrongReleaseReferenceId = wrongRelease.Id;
+            withdrawnReferenceId = withdrawn.Id;
+        }
+
+        using var client = _host.CreateClient();
+        await SignInAsync(client, world.Member);
+        var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
+        var bodyReferences = thread.GetProperty("nodes").EnumerateArray()
+            .Single(x => x.GetProperty("id").GetString() == world.HighLevelRevisionId.ToString())
+            .GetProperty("recordedCodeReferences").EnumerateArray().ToList();
+        Assert.True(thread.GetProperty("recordedCodeReferencesComplete").GetBoolean());
+        var recorded = Assert.Single(bodyReferences);
+        Assert.Equal(exactReferenceId.ToString(), recorded.GetProperty("id").GetString());
+        Assert.Equal("RequirementRevision", recorded.GetProperty("targetKind").GetString());
+        Assert.Equal("HLR-97001.00", recorded.GetProperty("targetDisplaySnapshot").GetString());
+        Assert.Equal("https://gitlab.example/aerolink/requirements/-/merge_requests/12",
+            recorded.GetProperty("mergeRequestUrlSnapshot").GetString());
+        Assert.DoesNotContain(bodyReferences, x => x.GetProperty("id").GetString() == wrongRevisionReferenceId.ToString());
+        Assert.DoesNotContain(bodyReferences, x => x.GetProperty("id").GetString() == wrongReleaseReferenceId.ToString());
+        Assert.DoesNotContain(bodyReferences, x => x.GetProperty("id").GetString() == withdrawnReferenceId.ToString());
+    }
 
     private static string Url(World world, string kind, Guid focalId, Guid? buildId = null,
         Guid? baselineId = null) =>
