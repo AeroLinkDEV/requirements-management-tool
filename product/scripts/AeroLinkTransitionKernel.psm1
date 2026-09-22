@@ -29,7 +29,7 @@ using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
-namespace AeroLink.TransitionV1 {
+namespace AeroLink.TransitionV2 {
     [StructLayout(LayoutKind.Sequential)] public struct BasicLimits {
         public long PerProcessUserTimeLimit, PerJobUserTimeLimit; public uint LimitFlags;
         public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize; public uint ActiveProcessLimit;
@@ -125,10 +125,21 @@ namespace AeroLink.TransitionV1 {
         [DllImport("advapi32.dll", SetLastError=true)]
         static extern bool CreateRestrictedToken(IntPtr existing, uint flags, int disableCount, SidAndAttributes[] disable,
             int deleteCount, IntPtr deletePrivileges, int restrictCount, IntPtr restrict, out IntPtr newToken);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetAclInformation(IntPtr acl, out AclSizeInformation info, int length, int infoClass);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool IsValidAcl(IntPtr acl);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetAce(IntPtr acl, int index, out IntPtr ace);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool InitializeAcl(IntPtr acl, uint bytes, uint revision);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool AddAce(IntPtr acl, uint revision, uint index, IntPtr aceList, uint bytes);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool AddAccessAllowedAceEx(IntPtr acl, uint revision, uint flags, uint accessMask, IntPtr sid);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool SetTokenInformation(IntPtr token, int cls, IntPtr info, int length);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern bool IsValidSid(IntPtr sid);
+        [DllImport("advapi32.dll", SetLastError=true)] static extern uint GetLengthSid(IntPtr sid);
         [DllImport("advapi32.dll", SetLastError=true)] static extern bool ConvertStringSidToSidW([MarshalAs(UnmanagedType.LPWStr)] string sid, out IntPtr psid);
         [DllImport("kernel32.dll", SetLastError=true)] static extern bool ProcessIdToSessionId(int pid, out int session);
 
         [StructLayout(LayoutKind.Sequential)] public struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
+        [StructLayout(LayoutKind.Sequential)] struct TokenDefaultDacl { public IntPtr DefaultDacl; }
+        [StructLayout(LayoutKind.Sequential)] struct AclSizeInformation { public uint AceCount, AclBytesInUse, AclBytesFree; }
         [StructLayout(LayoutKind.Sequential)] struct StartupInfoEx {
             public int cb; public IntPtr lpReserved, lpDesktop, lpTitle;
             public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
@@ -140,6 +151,9 @@ namespace AeroLink.TransitionV1 {
         const uint JobAllAccess = 0x1F001F;
         const uint JobQuery = 0x0004 | 0x00100000;
         const int ErrorAlreadyExists = 183, ErrorFileNotFound = 2;
+        const int TokenUserInformationClass = 1, TokenDefaultDaclInformationClass = 6, AclSizeInformationClass = 2;
+        const uint TokenDuplicate = 0x0002, TokenAssignPrimary = 0x0001, TokenQuery = 0x0008, TokenAdjustDefault = 0x0080;
+        const uint AclRevision = 2, ObjectInheritAce = 0x0001, GenericAll = 0x10000000;
         public const string PlacementProtocol = "aerolink-placement-1";
 
         // ---------------- Jobs ----------------
@@ -295,18 +309,68 @@ namespace AeroLink.TransitionV1 {
             return Marshal.StringToHGlobalUni(block.ToString());
         }
 
+        static void AddCurrentUserToTokenDacl(IntPtr token) {
+            IntPtr defaultDaclInfo = IntPtr.Zero, userInfo = IntPtr.Zero, newAcl = IntPtr.Zero, replacement = IntPtr.Zero;
+            try {
+                defaultDaclInfo = ReadVariable(token, TokenDefaultDaclInformationClass);
+                TokenDefaultDacl current = (TokenDefaultDacl)Marshal.PtrToStructure(defaultDaclInfo, typeof(TokenDefaultDacl));
+                if (current.DefaultDacl == IntPtr.Zero) throw new InvalidOperationException("The restricted token has no default DACL to preserve.");
+                if (!IsValidAcl(current.DefaultDacl)) throw new InvalidOperationException("The restricted token default DACL is invalid.");
+                AclSizeInformation size;
+                if (!GetAclInformation(current.DefaultDacl, out size, Marshal.SizeOf(typeof(AclSizeInformation)), AclSizeInformationClass))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+
+                userInfo = ReadVariable(token, TokenUserInformationClass);
+                SidAndAttributes user = (SidAndAttributes)Marshal.PtrToStructure(userInfo, typeof(SidAndAttributes));
+                if (user.Sid == IntPtr.Zero || !IsValidSid(user.Sid)) throw new InvalidOperationException("The restricted token user SID is invalid.");
+
+                // ACL and ACCESS_ALLOWED_ACE sizes include their native headers. Do not replace or normalize any
+                // existing ACE: PostgreSQL's fix adds only an inheritable grant for this token's own user SID.
+                uint userSidBytes = GetLengthSid(user.Sid);
+                if (userSidBytes == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+                ulong addedAceBytes = 8UL + userSidBytes;
+                ulong aclBytes = (ulong)size.AclBytesInUse + addedAceBytes;
+                if (aclBytes > ushort.MaxValue) throw new InvalidOperationException("The restricted token default DACL exceeds the Windows ACL size limit.");
+                newAcl = Marshal.AllocHGlobal((int)aclBytes);
+                if (!InitializeAcl(newAcl, (uint)aclBytes, AclRevision)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                for (int index = 0; index < size.AceCount; index++) {
+                    IntPtr ace;
+                    if (!GetAce(current.DefaultDacl, index, out ace)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                    int aceBytes = unchecked((ushort)Marshal.ReadInt16(ace, 2));
+                    if (aceBytes < 4) throw new InvalidOperationException("The restricted token default DACL contains an invalid ACE.");
+                    if (!AddAce(newAcl, AclRevision, UInt32.MaxValue, ace, (uint)aceBytes)) throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                if (!AddAccessAllowedAceEx(newAcl, AclRevision, ObjectInheritAce, GenericAll, user.Sid))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+
+                replacement = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(TokenDefaultDacl)));
+                Marshal.StructureToPtr(new TokenDefaultDacl { DefaultDacl = newAcl }, replacement, false);
+                if (!SetTokenInformation(token, TokenDefaultDaclInformationClass, replacement, Marshal.SizeOf(typeof(TokenDefaultDacl))))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+            } finally {
+                if (replacement != IntPtr.Zero) Marshal.FreeHGlobal(replacement);
+                if (newAcl != IntPtr.Zero) Marshal.FreeHGlobal(newAcl);
+                if (userInfo != IntPtr.Zero) Marshal.FreeHGlobal(userInfo);
+                if (defaultDaclInfo != IntPtr.Zero) Marshal.FreeHGlobal(defaultDaclInfo);
+            }
+        }
+
         static IntPtr RestrictedAdministratorsToken() {
-            IntPtr token, restricted, admins = IntPtr.Zero, powerUsers = IntPtr.Zero;
-            // TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY
-            if (!OpenProcessToken(GetCurrentProcess(), 0x0002 | 0x0001 | 0x0008, out token)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            IntPtr token, restricted = IntPtr.Zero, admins = IntPtr.Zero, powerUsers = IntPtr.Zero;
+            // TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY | TOKEN_ADJUST_DEFAULT (for TokenDefaultDacl).
+            if (!OpenProcessToken(GetCurrentProcess(), TokenDuplicate | TokenAssignPrimary | TokenQuery | TokenAdjustDefault, out token)) throw new Win32Exception(Marshal.GetLastWin32Error());
             try {
                 if (!ConvertStringSidToSidW("S-1-5-32-544", out admins) || !ConvertStringSidToSidW("S-1-5-32-547", out powerUsers)) throw new Win32Exception(Marshal.GetLastWin32Error());
                 SidAndAttributes[] disable = new SidAndAttributes[2];
                 disable[0].Sid = admins; disable[1].Sid = powerUsers;
                 // DISABLE_MAX_PRIVILEGE: every privilege except SeChangeNotifyPrivilege is removed.
                 if (!CreateRestrictedToken(token, 0x1, 2, disable, 0, IntPtr.Zero, 0, IntPtr.Zero, out restricted)) throw new Win32Exception(Marshal.GetLastWin32Error());
-                return restricted;
+                AddCurrentUserToTokenDacl(restricted);
+                IntPtr result = restricted;
+                restricted = IntPtr.Zero;
+                return result;
             } finally {
+                if (restricted != IntPtr.Zero) CloseHandle(restricted);
                 CloseHandle(token);
                 if (admins != IntPtr.Zero) LocalFree(admins);
                 if (powerUsers != IntPtr.Zero) LocalFree(powerUsers);
@@ -515,7 +579,7 @@ namespace AeroLink.TransitionV1 {
 }
 '@
 
-if (-not ('AeroLink.TransitionV1.Kernel' -as [type])) {
+if (-not ('AeroLink.TransitionV2.Kernel' -as [type])) {
     Add-Type -TypeDefinition $script:TransitionKernelSource
 }
 
@@ -538,8 +602,8 @@ function Get-AeroLinkProcessIdentityRecord {
     param([Parameter(Mandatory)][int]$ProcessId)
     try {
         return [pscustomobject]@{ ProcessId = $ProcessId
-            StartedAtUtc = [AeroLink.TransitionV1.Kernel]::StartedAtUtc($ProcessId)
-            ImagePath = [AeroLink.TransitionV1.Kernel]::ImagePath($ProcessId) }
+            StartedAtUtc = [AeroLink.TransitionV2.Kernel]::StartedAtUtc($ProcessId)
+            ImagePath = [AeroLink.TransitionV2.Kernel]::ImagePath($ProcessId) }
     }
     catch { return $null }
 }
@@ -801,7 +865,7 @@ function Get-AeroLinkTokenFacts {
         product used it historically, never instead of them.
     #>
     try {
-        $facts = [AeroLink.TransitionV1.Kernel]::CurrentTokenFacts()
+        $facts = [AeroLink.TransitionV2.Kernel]::CurrentTokenFacts()
         $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
         return [pscustomobject]@{
             Readable = $true
