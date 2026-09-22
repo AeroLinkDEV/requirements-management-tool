@@ -273,6 +273,194 @@ public sealed class ReleasePickerMembershipApiTests
     }
 
     [Fact]
+    public async Task Revoked_project_access_denies_the_frozen_continuation_and_relationship_write()
+    {
+        using var factory = new AeroLinkApiFactory();
+        var admin = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(admin);
+        Guid projectId, programId, userId, documentId, revisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var program = new ProgramRecord("Picker revoke program", "PICKERREVK");
+            var project = new ProjectRecord(program.Id, "Picker revoke project", "Software");
+            db.AddRange(program, project);
+            db.Add(new AeroLink.Domain.Identity.UserAccount(
+                "picker.revoked.user", "Picker Revoked User", $"picker.revoked.{Guid.NewGuid():N}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword),
+                DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+            var release = new SoftwareRelease(project.Id, "1.0", true);
+            var successor = new SoftwareRelease(project.Id, "1.5", false, release.Id);
+            db.AddRange(release, successor);
+            await db.SaveChangesAsync();
+            programId = program.Id;
+            projectId = project.Id;
+
+            var revoked = await db.UserAccounts.AsNoTracking().SingleAsync(x => x.UserName == "picker.revoked.user");
+            userId = revoked.Id;
+        }
+
+        // The user is granted Engineer on the program and can read the frozen picker traversal.
+        using (var grant = await admin.PostAsJsonAsync($"/api/admin/users/{userId}/memberships", new { programId, role = "Engineer" }))
+        {
+            Assert.True(grant.IsSuccessStatusCode || grant.StatusCode == HttpStatusCode.Conflict, await grant.Content.ReadAsStringAsync());
+        }
+
+        var member = factory.CreateClient();
+        using (var login = await member.PostAsJsonAsync("/api/auth/login", new
+        {
+            userName = "picker.revoked.user",
+            password = AeroLinkApiFactory.MemberPassword,
+        }))
+        {
+            Assert.True(login.IsSuccessStatusCode, await login.Content.ReadAsStringAsync());
+        }
+
+        var pageOne = await PageAsync(member, projectId, pageSize: 1);
+        Assert.Equal(["BUILD-1.0"], DisplayNumbers(pageOne));
+        Assert.True(pageOne.GetProperty("hasMore").GetBoolean());
+        var cursor = pageOne.GetProperty("nextCursor").GetString()!;
+
+        // The project also gains a controlled document with an in-work revision for the write check;
+        // the member user is the authoring steward while their membership is still active.
+        using (var created = await member.PostAsJsonAsync("/api/managed-documents", new
+        {
+            projectId,
+            acronym = "PRV",
+            documentType = "Software Configuration Management Plan",
+            title = "Picker revocation fixture",
+            ownerId = "picker.revoked.user",
+            formalChangeSummary = "Revocation fixture document.",
+            operationKey = Guid.NewGuid().ToString("N"),
+        }))
+        {
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            var body = await created.Content.ReadFromJsonAsync<JsonElement>();
+            documentId = body.GetProperty("id").GetGuid();
+            revisionId = body.GetProperty("revisionId").GetGuid();
+        }
+
+        // Revoke the program membership, then both the frozen continuation and the relationship write
+        // fail closed without disclosing any candidate.
+        using (var revoke = await admin.DeleteAsync($"/api/admin/users/{userId}/memberships/{programId}/Engineer"))
+        {
+            Assert.True(revoke.IsSuccessStatusCode || revoke.StatusCode == HttpStatusCode.NotFound, await revoke.Content.ReadAsStringAsync());
+        }
+
+        using (var continuation = await member.GetAsync(
+            $"/api/managed-documents/link-options?projectId={projectId}&artifactType=Release&pageSize=1&cursor={Uri.EscapeDataString(cursor)}"))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, continuation.StatusCode);
+            Assert.DoesNotContain("BUILD-", await continuation.Content.ReadAsStringAsync());
+        }
+
+        var releaseIdFromCursor = await PageAsync(admin, projectId, pageSize: 1, cursor)
+            .ContinueWith(task => task.Result.GetProperty("items").EnumerateArray().First()
+                .GetProperty("id").GetString()!);
+        using (var write = await member.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new
+        {
+            revisionId,
+            artifactType = "Release",
+            artifactId = releaseIdFromCursor,
+            relationship = "RelatedBuild",
+            expectedVersion = 1L,
+        }))
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, write.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Foreign_project_picker_reads_and_relationship_writes_are_refused()
+    {
+        var factory = new AeroLinkApiFactory();
+        var admin = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(admin);
+        Guid memberProjectId, foreignProjectId, foreignReleaseId, documentId, revisionId, userId, programId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var memberProgram = new ProgramRecord("Picker member program", "PICKERMBR");
+            var memberProject = new ProjectRecord(memberProgram.Id, "Picker member project", "Software");
+            var foreignProgram = new ProgramRecord("Picker foreign program", "PICKERFRN");
+            var foreignProject = new ProjectRecord(foreignProgram.Id, "Picker foreign project", "Software");
+            db.AddRange(memberProgram, memberProject, foreignProgram, foreignProject);
+            db.Add(new AeroLink.Domain.Identity.UserAccount(
+                "picker.member.user", "Picker Member User", $"picker.member.{Guid.NewGuid():N}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword),
+                DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+            var memberRelease = new SoftwareRelease(memberProject.Id, "1.0", true);
+            var foreignRelease = new SoftwareRelease(foreignProject.Id, "1.0", true);
+            db.AddRange(memberRelease, foreignRelease);
+            await db.SaveChangesAsync();
+            memberProjectId = memberProject.Id;
+            foreignProjectId = foreignProject.Id;
+            foreignReleaseId = foreignRelease.Id;
+            programId = memberProgram.Id;
+            var memberUser = await db.UserAccounts.AsNoTracking().SingleAsync(x => x.UserName == "picker.member.user");
+            userId = memberUser.Id;
+        }
+
+        // The member user is an authorized authoring member of the member Program only.
+        using (var grant = await admin.PostAsJsonAsync($"/api/admin/users/{userId}/memberships", new { programId, role = "Engineer" }))
+        {
+            Assert.True(grant.IsSuccessStatusCode, await grant.Content.ReadAsStringAsync());
+        }
+
+        var member = factory.CreateClient();
+        using (var login = await member.PostAsJsonAsync("/api/auth/login", new
+        {
+            userName = "picker.member.user",
+            password = AeroLinkApiFactory.MemberPassword,
+        }))
+        {
+            Assert.True(login.IsSuccessStatusCode, await login.Content.ReadAsStringAsync());
+        }
+
+        using (var created = await member.PostAsJsonAsync("/api/managed-documents", new
+        {
+            projectId = memberProjectId,
+            acronym = "FRN",
+            documentType = "Software Configuration Management Plan",
+            title = "Picker foreign fixture",
+            ownerId = "picker.member.user",
+            formalChangeSummary = "Foreign project fixture document.",
+            operationKey = Guid.NewGuid().ToString("N"),
+        }))
+        {
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            var body = await created.Content.ReadFromJsonAsync<JsonElement>();
+            documentId = body.GetProperty("id").GetGuid();
+            revisionId = body.GetProperty("revisionId").GetGuid();
+        }
+
+        using (var memberRead = await member.GetAsync(
+            $"/api/managed-documents/link-options?projectId={memberProjectId}&artifactType=Release&pageSize=50"))
+        {
+            Assert.True(memberRead.IsSuccessStatusCode, await memberRead.Content.ReadAsStringAsync());
+        }
+
+        using var foreignRead = await member.GetAsync(
+            $"/api/managed-documents/link-options?projectId={foreignProjectId}&artifactType=Release&pageSize=50");
+        Assert.Equal(HttpStatusCode.Forbidden, foreignRead.StatusCode);
+
+        // The relationship write may not reach across the project boundary either, even when the caller
+        // supplies a syntactically valid release identifier from another Project.
+        using var foreignWrite = await member.PostAsJsonAsync($"/api/managed-documents/{documentId}/links", new
+        {
+            revisionId,
+            artifactType = "Release",
+            artifactId = foreignReleaseId,
+            relationship = "RelatedBuild",
+            expectedVersion = 1,
+        });
+        Assert.True(foreignWrite.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.BadRequest,
+            await foreignWrite.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task Release_ordinal_is_database_owned_across_ef_lifecycle_saves_on_sqlite()
     {
         var factory = new AeroLinkApiFactory();

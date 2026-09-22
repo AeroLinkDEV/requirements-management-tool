@@ -1,19 +1,19 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 991,
-    "cases": 1131,
+    "tests": 994,
+    "cases": 1134,
     "classes": 157,
-    "hostedTests": 934,
-    "hostedCases": 1052,
-    "nonHostedTests": 38,
-    "nonHostedCases": 52,
-    "unknownHostTests": 19,
-    "unknownHostCases": 27,
+    "hostedTests": 937,
+    "hostedCases": 1055,
+    "nonHostedTests": 34,
+    "nonHostedCases": 48,
+    "unknownHostTests": 23,
+    "unknownHostCases": 31,
     "hostedCandidateTests": 18,
     "hostedCandidateCases": 18,
-    "unknownCandidateTests": 8,
-    "unknownCandidateCases": 16,
+    "unknownCandidateTests": 11,
+    "unknownCandidateCases": 19,
     "unknownCaseTests": 0,
     "criterion7": "unresolved"
   },
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 111,
-      "cases": 129,
+      "tests": 113,
+      "cases": 131,
       "unknownCases": 0,
-      "classes": 65
+      "classes": 66
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -53,10 +53,10 @@
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
       "level": "API or Infrastructure (must stay hosted)",
-      "tests": 21,
-      "cases": 21,
+      "tests": 22,
+      "cases": 22,
       "unknownCases": 0,
-      "classes": 11
+      "classes": 12
     },
     "startup-config": {
       "label": "Startup, hosting and configuration",
@@ -12114,6 +12114,24 @@
     },
     {
       "cls": "ReleasePickerMembershipApiTests",
+      "test": "Foreign_project_picker_reads_and_relationship_writes_are_refused",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 374,
+        "end": 461
+      }
+    },
+    {
+      "cls": "ReleasePickerMembershipApiTests",
       "test": "Old_release_v1_cursor_fails_closed_with_a_start_again_path",
       "kind": "Fact",
       "intent": "http-boundary",
@@ -12184,8 +12202,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 275,
-        "end": 333
+        "start": 463,
+        "end": 521
       }
     },
     {
@@ -12204,6 +12222,24 @@
       "sourceLines": {
         "start": 175,
         "end": 235
+      }
+    },
+    {
+      "cls": "ReleasePickerMembershipApiTests",
+      "test": "Revoked_project_access_denies_the_frozen_continuation_and_relationship_write",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 275,
+        "end": 372
       }
     },
     {
@@ -12227,11 +12263,11 @@
       "intent": "in-process-logic",
       "cases": 1,
       "caseEvidence": "Fact",
-      "hosted": "not-hosted",
+      "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 178,
-        "end": 226
+        "start": 250,
+        "end": 298
       }
     },
     {
@@ -12241,11 +12277,11 @@
       "intent": "ef-translation",
       "cases": 1,
       "caseEvidence": "Fact",
-      "hosted": "not-hosted",
+      "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 104,
-        "end": 141
+        "start": 176,
+        "end": 213
       }
     },
     {
@@ -12255,11 +12291,11 @@
       "intent": "in-process-logic",
       "cases": 1,
       "caseEvidence": "Fact",
-      "hosted": "not-hosted",
+      "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 44,
-        "end": 102
+        "start": 116,
+        "end": 174
       }
     },
     {
@@ -12269,11 +12305,29 @@
       "intent": "in-process-logic",
       "cases": 1,
       "caseEvidence": "Fact",
-      "hosted": "not-hosted",
+      "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 143,
-        "end": 176
+        "start": 215,
+        "end": 248
+      }
+    },
+    {
+      "cls": "ReleasePickerSqliteGuardTests",
+      "test": "The_api_host_installs_the_guards_before_serving_and_a_copied_database_restarts_cleanly",
+      "kind": "Fact",
+      "intent": "filesystem",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 45,
+        "end": 114
       }
     },
     {

@@ -41,6 +41,78 @@ public sealed class ReleasePickerSqliteGuardTests : IDisposable
         return (string)(await command.ExecuteScalarAsync())!;
     }
 
+
+    [Fact]
+    public async Task The_api_host_installs_the_guards_before_serving_and_a_copied_database_restarts_cleanly()
+    {
+        // A running API host always boots through Program.cs, whose SQLite initialization path installs the
+        // guards after EnsureCreated: prove the safeguards exist on the served database of a live host.
+        var factory = new AeroLinkApiFactory();
+        using var _ = factory;
+        var client = factory.CreateClient();
+        await ProblemReportApiTests.BootstrapAndLoginAsync(client);
+        await using (var served = new AeroLinkDbContext(
+            new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(factory.ConnectionString).Options))
+        {
+            await served.Database.OpenConnectionAsync();
+            var servedConnection = (SqliteConnection)served.Database.GetDbConnection();
+            await using var check = servedConnection.CreateCommand();
+            check.CommandText = """
+                SELECT (SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'aerolink_release_picker%'),
+                       (SELECT COUNT(*) FROM pragma_table_info('software_releases') WHERE name = 'PickerLegacyCohort')
+                """;
+            await using var reader = await check.ExecuteReaderAsync();
+            await reader.ReadAsync();
+            Assert.Equal(3L, reader.GetInt64(0));
+            Assert.Equal(1L, reader.GetInt64(1));
+        }
+
+        // Copy/restart: a guarded database file copied elsewhere restarts without reclassification and
+        // keeps allocating new membership exactly once per project.
+        var projectId = Guid.NewGuid();
+        await using (var setup = CreateContext())
+        {
+            await setup.Database.EnsureCreatedAsync();
+            await InsertRawReleaseAsync(projectId, "1.0");
+            await ReleasePickerSqliteGuard.EnsureInstalledAsync(setup);
+        }
+
+        var copyPath = _databasePath + ".copy";
+        // The database may be in WAL mode (the mode is persistent in the file header), so checkpoint and
+        // truncate the WAL before copying: copying a bare main file would lose the committed pages.
+        await using (var checkpointConnection = new SqliteConnection($"Data Source={_databasePath}"))
+        {
+            await checkpointConnection.OpenAsync();
+            await using var checkpoint = checkpointConnection.CreateCommand();
+            checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+            await checkpoint.ExecuteNonQueryAsync();
+        }
+        File.Copy(_databasePath, copyPath, overwrite: true);
+        try
+        {
+            await using var copy = new AeroLinkDbContext(
+                new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={copyPath}").Options);
+            await copy.Database.OpenConnectionAsync();
+            var copyConnection = (SqliteConnection)copy.Database.GetDbConnection();
+            await using var dump = copyConnection.CreateCommand();
+            dump.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'software_releases'";
+            var copiedTableCount = (long)(await dump.ExecuteScalarAsync())!;
+            Assert.Equal(1L, copiedTableCount);
+            await ReleasePickerSqliteGuard.EnsureInstalledAsync(copy);
+            var copied = new SoftwareRelease(projectId, "1.5", false);
+            copy.Add(copied);
+            await copy.SaveChangesAsync();
+            Assert.Equal(1, copied.PickerInsertionOrdinal);
+            var legacyFlag = await ScalarTextAsync(copyConnection, "SELECT CAST(\"PickerLegacyCohort\" AS TEXT) FROM \"software_releases\" WHERE \"Version\" = '1.0'");
+            Assert.Equal("1", legacyFlag);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (File.Exists(copyPath)) File.Delete(copyPath);
+        }
+    }
+
     [Fact]
     public async Task Installed_guards_reject_the_full_forbidden_membership_matrix()
     {

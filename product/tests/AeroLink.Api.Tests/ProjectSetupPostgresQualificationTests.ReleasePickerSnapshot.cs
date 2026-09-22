@@ -380,6 +380,82 @@ public sealed partial class ProjectSetupPostgresQualificationTests
     }
 
     [RequiredSetupPostgresFact]
+    public async Task Picker_continuation_on_a_larger_fixture_stays_bounded_and_records_latency()
+    {
+        var capture = new SqlCaptureInterceptor();
+        await WithDatabaseAsync(async connection =>
+        {
+            using var factory = new AeroLinkApiFactory(postgresConnection: connection, commandInterceptor: capture);
+            var client = factory.CreateClient();
+            await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+            var projectId = await SeedPickerProjectAsync(factory, "PICKERSCALE");
+
+            // A representative larger inventory: 600 additional in-work builds, each through the shipped
+            // allocator trigger (set-based INSERT, one fenced nextval per row).
+            await using (var raw = new NpgsqlConnection(connection))
+            {
+                await raw.OpenAsync();
+                await using var seed = raw.CreateCommand();
+                seed.CommandText = """
+                    INSERT INTO software_releases ("Id", "ProjectId", "Version", "IsReleased")
+                    SELECT gen_random_uuid(), @p, '3.' || lpad(g::text, 3, '0'), false
+                    FROM generate_series(1, 600) g
+                    """;
+                seed.Parameters.AddWithValue("p", projectId);
+                await seed.ExecuteNonQueryAsync();
+            }
+            Assert.Equal(601L, await ScalarAsync(connection,
+                "SELECT COUNT(*) FROM software_releases WHERE \"ProjectId\" = @p",
+                parameters => parameters.AddWithValue("p", projectId)));
+
+            var pageWatch = System.Diagnostics.Stopwatch.StartNew();
+            var pageOne = await LinkOptionsPageAsync(client, projectId, pageSize: 100);
+            pageWatch.Stop();
+            Assert.Equal(100, pageOne.GetProperty("items").GetArrayLength());
+            Assert.True(pageOne.GetProperty("hasMore").GetBoolean());
+            var cursor = pageOne.GetProperty("nextCursor").GetString()!;
+
+            // The continuation request: bounded commands, bounded materialization, recorded latency.
+            capture.Statements.Clear();
+            var continuationWatch = System.Diagnostics.Stopwatch.StartNew();
+            var continuation = await LinkOptionsPageAsync(client, projectId, pageSize: 100, cursor);
+            continuationWatch.Stop();
+            Assert.Equal(100, continuation.GetProperty("items").GetArrayLength());
+            Assert.True(continuationWatch.ElapsedMilliseconds < 2000,
+                $"continuation took {continuationWatch.ElapsedMilliseconds} ms");
+            Console.WriteLine($"PICKER_SCALE pageOneMs={pageWatch.ElapsedMilliseconds} continuationMs={continuationWatch.ElapsedMilliseconds}");
+
+            // Full traversal: every candidate exactly once, in canonical order, no duplicates.
+            var seen = new List<string>(601);
+            seen.AddRange(DisplayNumbers(pageOne));
+            seen.AddRange(DisplayNumbers(continuation));
+            var walk = continuation.GetProperty("nextCursor").GetString();
+            while (walk is not null)
+            {
+                var page = await LinkOptionsPageAsync(client, projectId, pageSize: 100, walk);
+                seen.AddRange(DisplayNumbers(page));
+                walk = page.GetProperty("hasMore").GetBoolean() ? page.GetProperty("nextCursor").GetString() : null;
+            }
+            Assert.Equal(601, seen.Count);
+            Assert.Equal(601, seen.Distinct().Count());
+
+            // The captured continuation command stays the bounded keyset query; retain its plan.
+            var paged = capture.Statements.FirstOrDefault(text =>
+                text.Contains("PickerInsertionOrdinal", StringComparison.Ordinal)
+                && text.Contains("ORDER BY", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(paged);
+            Assert.Contains("LIMIT 101", paged);
+            await using var explain = new NpgsqlConnection(connection);
+            await explain.OpenAsync();
+            await using var command = explain.CreateCommand();
+            command.CommandText = "EXPLAIN (ANALYZE ON, COSTS ON, TIMING OFF) " + paged;
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                Console.WriteLine("PICKER_SCALE_PLAN: " + reader.GetString(0));
+        });
+    }
+
+    [RequiredSetupPostgresFact]
     public async Task Picker_database_guard_rejects_forbidden_membership_mutations()
     {
         await WithDatabaseAsync(async connection =>

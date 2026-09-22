@@ -265,6 +265,7 @@
       "file": "AdministrationEndpoints.cs",
       "coveredBy": [
         "ProjectLeadershipApiTests",
+        "ReleasePickerMembershipApiTests",
         "SecurityBoundaryTests"
       ]
     },
@@ -374,6 +375,7 @@
         "ProjectSetupSourceOptionsApiTests",
         "RebaseRequirementChangeTests",
         "ReleaseCampaignExactIntentApiTests",
+        "ReleasePickerMembershipApiTests",
         "ReleasedExecutionEvidenceApiTests",
         "ReleasedSyntheticSourceSupplementApiTests",
         "RemoveRequirementChangeTests",
@@ -1303,7 +1305,8 @@
         "ManagedDocumentApiTests",
         "ManagedDocumentApiTests.BuildIdentity",
         "ManagedDocumentApiTests.ProjectSetup",
-        "ManagedDocumentRecoveryApiTests"
+        "ManagedDocumentRecoveryApiTests",
+        "ReleasePickerMembershipApiTests"
       ]
     },
     {
@@ -1312,7 +1315,8 @@
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
         "ManagedDocumentApiTests",
-        "ManagedDocumentApiTests.BuildIdentity"
+        "ManagedDocumentApiTests.BuildIdentity",
+        "ReleasePickerMembershipApiTests"
       ]
     },
     {
