@@ -152,6 +152,8 @@ type Report = {
   supportingAttachments?: HistoricalAttachment[];
   capabilities?: {
     canApproveSqaClosure: boolean;
+    /** Waiting for SQA on a result a later change withdrew. The server offers no close until it is resent. */
+    closureBasisWithdrawn?: boolean;
     canApproveReleaseWaiver: boolean;
     releaseWaiverAuthority?: string;
     ownerEligible?: boolean;
@@ -1286,6 +1288,7 @@ export default function ProblemReportCenter({
                     isOwner && !["Closed", ...terminalDispositions].includes(selected.state)
                   }
                   showClosureResult={selected.state === "Verifying"}
+                  closureBasisWithdrawn={selected.capabilities?.closureBasisWithdrawn}
                   dispositionRationale={selected.dispositionRationale}
                   onTransition={requestTransition}
                   onReject={() => {
@@ -1828,6 +1831,7 @@ export default function ProblemReportCenter({
                       empty panel on nearly every record. */}
                   {!isHistorical &&
                     (selected.capabilities?.canApproveReleaseWaiver ||
+                      selected.capabilities?.closureBasisWithdrawn ||
                       (selected.state === "Verifying" &&
                         latestClosureCandidate?.state === "Invalidated")) && (
                       <section className="prFlow">
@@ -1838,6 +1842,21 @@ export default function ProblemReportCenter({
                             is at the top of the record.
                           </p>
                         </div>
+                        {/* #1088: the change that withdrew the basis did not move the report, so it is
+                            still with SQA and has to say why SQA cannot close it. */}
+                        {selected.capabilities?.closureBasisWithdrawn && (
+                          <div className="prClosureInvalidated" role="status">
+                            <b>Closure basis withdrawn</b>
+                            <span>
+                              {spaced(
+                                latestClosureCandidate?.invalidationReason || "A controlled change",
+                              )}{" "}
+                              withdrew the passing result this report was sent to SQA on. It is
+                              still waiting for SQA, but cannot be closed. Return it to Verifying
+                              and send it again on a fresh passing result.
+                            </span>
+                          </div>
+                        )}
                         {selected.state === "Verifying" &&
                           latestClosureCandidate?.state === "Invalidated" && (
                             <div className="prClosureInvalidated" role="status">

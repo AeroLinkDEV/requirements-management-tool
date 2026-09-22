@@ -1057,6 +1057,7 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
         }
         var fromState = ProblemReportTransitionPolicy.Canonical(item.State);
         var wasAwaitingClosure = fromState == ProblemReportState.WaitingForSqaToClose;
+        var hadClosureBasis = item.HasClosureBasis();
         // The actor is whoever checked in, always. This used to substitute the responsible engineer
         // under administrator authority, purely to get past an owner check that UpdateDetails no longer
         // makes — leaving it would credit a correction to somebody who did not make it.
@@ -1070,8 +1071,10 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
                 draft.CorrectiveActionRich, draft.SystemAircraftImpactRich,
                 draft.Effects, draft.EffectsRich, draft.Containment, draft.ContainmentRich));
         var toState = ProblemReportTransitionPolicy.Canonical(item.State);
-        var lifecycleRationale = fromState != toState
-            ? "Controlled detail correction invalidated the prior closure evidence and returned the report to Verifying."
+        // The correction withdraws the closure basis but never moves the report (#1088): it stays waiting on
+        // SQA, unclosable until a person returns it to Verifying and sends it again.
+        var lifecycleRationale = hadClosureBasis
+            ? "Controlled detail correction withdrew the closure basis. SQA cannot close this report until it is returned to Verifying and sent again on a fresh passing result."
             : null;
         // No `actorDisplayName` here. Check-in reaches this through IControlledEditingAdapter, which carries
         // the actor as a bare handle several layers up, so threading one would widen a shared interface used

@@ -15,6 +15,7 @@ public sealed class ProblemReportTests
 
         report.ReadyForSccb("verification.engineer", Now);
         report.OpenBySccb("change.board", Now);
+        report.BeginImplementation("verification.engineer", Now.AddMinutes(1));
         report.BeginInvestigation("verification.engineer", "Reset sequence reproduces under load.", "Timeout race", "Navigation reset", "Disable automatic retry", Now.AddMinutes(1));
         report.ProposeResolution("verification.engineer", "Serialize the reset command and add a guard.", Now.AddMinutes(2));
         var executionId = Guid.NewGuid();
@@ -38,20 +39,58 @@ public sealed class ProblemReportTests
     }
 
     [Fact]
-    public void Closure_significant_change_returns_the_report_to_verification_without_erasing_history_identity()
+    public void Closure_significant_change_withdraws_the_closure_basis_without_moving_the_report()
     {
         var report = ReadyForClosure();
         var selectedExecution = report.ResolutionVerificationExecutionId;
+        Assert.True(report.HasClosureBasis());
 
         report.UpdateDetails("verification.engineer", report.Title, report.Problem, "", "", "", "Revised analysis",
             "Revised root cause", "Revised corrective action", "Revised aircraft impact", "{}",
             ProblemReportSeverity.Critical, ProblemReportPriority.Urgent, Now.AddMinutes(1),
             ProblemReportCategory.CodeFunctional, "Use the guarded operating mode.");
 
-        Assert.Equal(ProblemReportState.Verifying, report.State);
+        // #1088: a change informs a lifecycle decision and never makes one. The report stays with SQA, its
+        // basis is withdrawn, and it cannot be closed until a person returns it and sends it again.
+        Assert.Equal(ProblemReportState.WaitingForSqaToClose, report.State);
         Assert.Null(report.ResolutionVerificationExecutionId);
+        Assert.False(report.HasClosureBasis());
         Assert.NotEqual(Guid.Empty, selectedExecution);
         Assert.Equal("Revised corrective action", report.CorrectiveAction);
+        Assert.Throws<DomainException>(() => report.ApproveClosure("quality.analyst", Guid.NewGuid(), Now.AddMinutes(2)));
+
+        Assert.Throws<DomainException>(() =>
+            report.TransitionTo(ProblemReportState.Verifying, "verification.engineer", null, Now.AddMinutes(2)));
+        report.TransitionTo(ProblemReportState.Verifying, "verification.engineer", "Corrective action revised; retest needed.", Now.AddMinutes(2));
+        Assert.Equal(ProblemReportState.Verifying, report.State);
+    }
+
+    [Fact]
+    public void Only_a_person_choosing_a_passing_result_moves_a_report_into_SQA()
+    {
+        var report = NewReport(); report.ReadyForSccb("verification.engineer", Now); report.OpenBySccb("change.board", Now);
+        report.BeginImplementation("verification.engineer", Now);
+        report.ProposeResolution("verification.engineer", "Serialize command", Now);
+
+        // No bare transition into SQA: the evidence and the decision to rely on it are one act (#1088).
+        Assert.Throws<DomainException>(() =>
+            report.TransitionTo(ProblemReportState.WaitingForSqaToClose, "verification.engineer", null, Now));
+        Assert.Equal(ProblemReportState.Verifying, report.State);
+
+        report.RecordResolutionVerification("verification.engineer", Guid.NewGuid(), Now, "Retest passed on build 1.6.");
+        Assert.Equal(ProblemReportState.WaitingForSqaToClose, report.State);
+        Assert.True(report.HasClosureBasis());
+    }
+
+    [Fact]
+    public void Recording_investigation_never_starts_implementation()
+    {
+        var report = NewReport(); report.ReadyForSccb("verification.engineer", Now); report.OpenBySccb("change.board", Now);
+
+        report.BeginInvestigation("verification.engineer", "Reproduced", "Timeout race", "Reset", "Guard", Now);
+
+        Assert.Equal(ProblemReportState.Open, report.State);
+        Assert.Equal("Reproduced", report.Analysis);
     }
 
     [Fact]
@@ -208,6 +247,6 @@ public sealed class ProblemReportTests
     private static ProblemReport NewReport() => new(ProjectId, "PR-00001", "Unexpected navigation reset", "Unit reset while airborne.", "", "verification.engineer", Now, "Verification failure", ProblemReportSeverity.High, ProblemReportPriority.Urgent, "Test execution", "Build 1.6.0", category: ProblemReportCategory.CodeFunctional);
     private static ProblemReport ReadyForClosure()
     {
-        var report = NewReport(); report.ReadyForSccb("verification.engineer", Now); report.OpenBySccb("change.board", Now); report.BeginInvestigation("verification.engineer", "Reproduced", "Timeout race", "Reset", "Guard", Now); report.ProposeResolution("verification.engineer", "Serialize command", Now); report.RecordResolutionVerification("verification.engineer", Guid.NewGuid(), Now); return report;
+        var report = NewReport(); report.ReadyForSccb("verification.engineer", Now); report.OpenBySccb("change.board", Now); report.BeginImplementation("verification.engineer", Now); report.BeginInvestigation("verification.engineer", "Reproduced", "Timeout race", "Reset", "Guard", Now); report.ProposeResolution("verification.engineer", "Serialize command", Now); report.RecordResolutionVerification("verification.engineer", Guid.NewGuid(), Now); return report;
     }
 }

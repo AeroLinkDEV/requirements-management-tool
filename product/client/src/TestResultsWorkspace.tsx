@@ -132,6 +132,9 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   // corrective action does: it answers a named failure, not "whatever happened last".
   const [supersedesExecutionId, setSupersedesExecutionId] = useState<string>()
   const [corrective, setCorrective] = useState<CorrectiveAction>()
+  // A passing corrective result the engineer may send the report to SQA on. Offered, never acted on.
+  const [closureOffer, setClosureOffer] = useState<{ executionId: string; procedureNumber: string }>()
+  const [closureRationale, setClosureRationale] = useState('')
 
   const openRecording = (procedure: SetArtifact, predecessorId?: string | null) => {
     setOutcome('Pass')
@@ -255,23 +258,35 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
         executedAt: new Date(String(form.get('executedAt'))).toISOString(),
       }),
     })
-    // When the engineer arrived from a Verifying PR and ran its identified procedure, a passing result is
-    // explicitly selected as closure evidence. Other passing runs remain ordinary build evidence.
-    if (correctiveProblemReportId && (corrective?.artifactRevisionId ?? corrective?.procedureRevisionId) === procedure.artifactRevisionId && form.get('outcome') === 'Pass') {
-      const report = await apiRequest<{ version: number; state: string }>(`${api}/api/problem-reports/${correctiveProblemReportId}`)
-      if (report.state === 'Verifying') {
-        await apiRequest(`${api}/api/problem-reports/${correctiveProblemReportId}/verify`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ expectedVersion: report.version, testExecutionId: execution.id }),
-        })
-        setSaved(`Recorded against ${procedure.displayNumber} and selected as PR closure evidence.`)
-      }
-    }
     setRecording(undefined)
     setSupersedesExecutionId(undefined)
-    if (!correctiveProblemReportId || (corrective?.artifactRevisionId ?? corrective?.procedureRevisionId) !== procedure.artifactRevisionId || form.get('outcome') !== 'Pass')
-      setSaved(`Recorded against ${procedure.displayNumber}.`)
+    setSaved(`Recorded against ${procedure.displayNumber}.`)
+    // Recording a result never moves the Problem Report (#1088). When this pass answers the report the
+    // engineer came from, it is offered as closure evidence, and sending the report to SQA on it is a
+    // separate act that they confirm, with a reason if they have one.
+    if (correctiveProblemReportId && (corrective?.artifactRevisionId ?? corrective?.procedureRevisionId) === procedure.artifactRevisionId && form.get('outcome') === 'Pass') {
+      const report = await apiRequest<{ state: string }>(`${api}/api/problem-reports/${correctiveProblemReportId}`)
+      if (report.state === 'Verifying') {
+        setClosureRationale('')
+        setClosureOffer({ executionId: execution.id, procedureNumber: procedure.displayNumber })
+      }
+    }
   }, 'The result could not be recorded.')
+
+  const sendToSqa = () => act(async () => {
+    if (!correctiveProblemReportId || !closureOffer) return
+    const report = await apiRequest<{ version: number }>(`${api}/api/problem-reports/${correctiveProblemReportId}`)
+    await apiRequest(`${api}/api/problem-reports/${correctiveProblemReportId}/verify`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expectedVersion: report.version,
+        testExecutionId: closureOffer.executionId,
+        rationale: closureRationale.trim() || null,
+      }),
+    })
+    setClosureOffer(undefined)
+    setSaved(`${corrective?.problemReportNumber ?? 'The Problem Report'} was sent to SQA on the ${closureOffer.procedureNumber} result.`)
+  }, 'The Problem Report could not be sent to SQA on this result.')
 
   const attachEvidence = (procedure: SetArtifact, file: File) => act(async () => {
     if (!procedure.latestExecutionId) { setError('Record a result before attaching its evidence.'); return }
@@ -309,12 +324,45 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
               : 'Record a passing successor execution'}</b>
             <p>{corrective.reason}</p>
           </div>
-          {(() => {
+          {closureOffer ? (
+            <div className="correctiveSend">
+              <p>
+                {corrective.problemReportNumber} is still in Verifying. Recording this pass did not move it. Send it to
+                SQA on the {closureOffer.procedureNumber} result if this closes the problem.
+              </p>
+              <label>
+                Reason (optional)
+                <textarea value={closureRationale} onChange={event => setClosureRationale(event.target.value)}
+                  placeholder="Why this result is enough for SQA to close the report" />
+              </label>
+              <div>
+                <button type="button" disabled={busy} onClick={() => void sendToSqa()}>
+                  Send {corrective.problemReportNumber} to SQA
+                </button>
+                <button type="button" className="secondary" disabled={busy} onClick={() => setClosureOffer(undefined)}>
+                  Not now
+                </button>
+              </div>
+            </div>
+          ) : (() => {
             if (readOnly) return <span className="correctiveHint">This build is released. Its results are read-only.</span>
             const targetRevisionId = corrective.artifactRevisionId ?? corrective.procedureRevisionId
             const target = set?.artifacts.find(x => x.artifactRevisionId === targetRevisionId)
             if (!target) return <span className="correctiveHint">Add {corrective.procedureNumber ?? `the ${artifactNoun.toLowerCase()}`} to this build&apos;s test set below, then record its result.</span>
-            return <button type="button" disabled={busy} onClick={() => openRecording(target, corrective.executionId)}>Record successor execution →</button>
+            // A pass already on record can be offered too, so declining the offer is never a dead end. The
+            // server still decides whether it is a valid successor for this report.
+            const latestPass = target.latestOutcome === 'Pass' ? target.latestExecutionId : undefined
+            return (
+              <div className="correctiveActions">
+                <button type="button" disabled={busy} onClick={() => openRecording(target, corrective.executionId)}>Record successor execution →</button>
+                {latestPass && (
+                  <button type="button" className="secondary" disabled={busy}
+                    onClick={() => { setClosureRationale(''); setClosureOffer({ executionId: latestPass, procedureNumber: target.displayNumber }) }}>
+                    Send to SQA on the latest pass…
+                  </button>
+                )}
+              </div>
+            )
           })()}
         </section>
       )}

@@ -308,7 +308,9 @@ public sealed class ProblemReportVerificationApiTests
             draft["systemAircraftImpact"] = "The revised impact includes degraded guidance availability.";
         });
         var invalidated = await engineer.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
-        Assert.Equal("Verifying", invalidated.GetProperty("state").GetString());
+        // The edit withdraws the basis and leaves the report with SQA; nothing moved it (#1088).
+        Assert.Equal("WaitingForSqaToClose", invalidated.GetProperty("state").GetString());
+        Assert.True(invalidated.GetProperty("capabilities").GetProperty("closureBasisWithdrawn").GetBoolean());
         Assert.Equal(JsonValueKind.Null, invalidated.GetProperty("resolutionVerificationExecutionId").ValueKind);
         Assert.Equal(0, invalidated.GetProperty("testEvidence").GetArrayLength());
         Assert.Contains(invalidated.GetProperty("links").EnumerateArray(), link =>
@@ -330,6 +332,11 @@ public sealed class ProblemReportVerificationApiTests
                 (await staleClosure.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
         }
 
+        using (var withdrawnClosure = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
+            new { expectedVersion = invalidated.GetProperty("version").GetInt64() }))
+            Assert.Equal(HttpStatusCode.Conflict, withdrawnClosure.StatusCode);
+
+        await ReturnToVerifyingAsync(engineer, fixture.ReportId, "The corrective action was revised and needs a fresh retest.");
         var second = await SelectCandidateAsync(engineer, fixture, fixture.TargetBuildId, targetReleaseId: null);
         using var closed = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
             new { expectedVersion = second.ReportVersion });
@@ -426,14 +433,17 @@ public sealed class ProblemReportVerificationApiTests
         using var retarget = await client.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/target-build",
             new { expectedVersion = first.ReportVersion, targetReleaseId = fixture.WrongReleaseId });
         Assert.Equal(HttpStatusCode.OK, retarget.StatusCode);
-        Assert.Equal("Verifying", (await retarget.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+        // Each change withdraws the basis and leaves the report with SQA; nothing moves it (#1088).
+        Assert.Equal("WaitingForSqaToClose", (await retarget.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
 
+        await ReturnToVerifyingAsync(client, fixture.ReportId, "The target build changed; verify against the new build.");
         var second = await SelectCandidateAsync(client, fixture, fixture.WrongBuildId, fixture.WrongReleaseId);
         using var reassign = await client.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/owner",
             new { expectedVersion = second.ReportVersion, responsibleEngineerId = "closure.engineer" });
         Assert.Equal(HttpStatusCode.OK, reassign.StatusCode);
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
-        Assert.Equal("Verifying", detail.GetProperty("state").GetString());
+        Assert.Equal("WaitingForSqaToClose", detail.GetProperty("state").GetString());
+        Assert.True(detail.GetProperty("capabilities").GetProperty("closureBasisWithdrawn").GetBoolean());
         Assert.Equal("closure.engineer", detail.GetProperty("responsibleEngineerId").GetString());
         Assert.Equal(0, detail.GetProperty("testEvidence").GetArrayLength());
         Assert.Equal(2, detail.GetProperty("links").EnumerateArray().Count(link =>
@@ -485,7 +495,9 @@ public sealed class ProblemReportVerificationApiTests
         }
         else
         {
-            Assert.Equal("Verifying", detail.GetProperty("state").GetString());
+            // The check-in won: it withdrew the basis and left the report with SQA (#1088).
+            Assert.Equal("WaitingForSqaToClose", detail.GetProperty("state").GetString());
+            Assert.True(detail.GetProperty("capabilities").GetProperty("closureBasisWithdrawn").GetBoolean());
             Assert.Equal("Invalidated", persistedCandidate.GetProperty("state").GetString());
         }
     }
@@ -774,6 +786,19 @@ public sealed class ProblemReportVerificationApiTests
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
 
+    /// <summary>
+    /// A withdrawn closure basis leaves the report with SQA (#1088). Re-verifying starts with a person
+    /// explicitly returning it to Verifying, which as a backward move needs their reason.
+    /// </summary>
+    private static async Task ReturnToVerifyingAsync(HttpClient client, Guid reportId, string rationale)
+    {
+        var version = (await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}"))
+            .GetProperty("version").GetInt64();
+        using var returned = await client.PostAsJsonAsync($"/api/problem-reports/{reportId}/transition",
+            new { expectedVersion = version, targetState = "Verifying", rationale });
+        Assert.Equal(HttpStatusCode.OK, returned.StatusCode);
+    }
+
     private static async Task<(Guid ExecutionId, long ReportVersion)> SelectCandidateAsync(HttpClient client,
         Fixture fixture, Guid buildId, Guid? targetReleaseId, HttpClient? verificationClient = null)
     {
@@ -833,6 +858,7 @@ public sealed class ProblemReportVerificationApiTests
         var owner = report.ResponsibleEngineerId;
         report.ReadyForSccb(owner, now.AddMinutes(-3));
         report.OpenBySccb("sccb", now.AddMinutes(-2));
+        report.BeginImplementation(owner, now.AddMinutes(-1));
         report.BeginInvestigation(owner, "Root cause", "Cause", "Effect", "", now.AddMinutes(-1));
         report.ProposeResolution(owner, "Correct and retest.", now);
     }
