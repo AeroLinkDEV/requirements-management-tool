@@ -709,8 +709,6 @@ export default function ProblemReportCenter({
         expectedVersion: selected.version,
         ...payload,
       });
-      setNote("");
-      noteDraft.clear();
       await refresh(selected.id);
       return true;
     } catch (reason) {
@@ -754,6 +752,18 @@ export default function ProblemReportCenter({
       setBusy(false);
     }
   };
+  /**
+   * The working note is spent once its text has been confirmed as a rationale and accepted.
+   *
+   * Clearing it belonged to every action before, which was harmless while nothing could write to the
+   * note. Now that it holds a drafted rationale, a forward move or a blocker toggle wiping it would
+   * destroy work the reader did for a different transition — so only the two paths that actually
+   * submit its text spend it.
+   */
+  const spendNote = () => {
+    setNote("");
+    noteDraft.clear();
+  };
   const closeDisposition = () => {
     setShowDisposition(false);
     setDispositionRationale("");
@@ -766,26 +776,42 @@ export default function ProblemReportCenter({
         targetState: "Rejected",
         rationale: dispositionRationale.trim(),
       })
-    )
+    ) {
+      spendNote();
       closeDisposition();
+    }
   };
   const [transitionTarget, setTransitionTarget] = useState("");
+  const [transitionNeedsRationale, setTransitionNeedsRationale] = useState(false);
+  /**
+   * A forward move stays one click unless there is something to record with it.
+   *
+   * The server keeps a rationale on every transition now, not only where one is demanded, so a reason
+   * written for this move is permanent. What must never happen is text being submitted that nobody
+   * confirmed for this particular decision — so a drafted note opens the dialog rather than riding
+   * along silently, and a reader who has written nothing is not asked for anything.
+   */
   const requestTransition = (target: string, requiresRationale: boolean) => {
-    if (requiresRationale) {
+    if (requiresRationale || note.trim()) {
       setTransitionTarget(target);
-      setReopenRationale("");
+      setTransitionNeedsRationale(requiresRationale);
+      setReopenRationale(note.trim());
       setShowReopen(true);
     } else void action("transition", { targetState: target });
   };
   const submitReopen = async (event: FormEvent) => {
     event.preventDefault();
-    if (!reopenRationale.trim() || !transitionTarget) return;
+    if (!transitionTarget) return;
+    // Required on the edges the policy demands it for; optional on the rest, where an empty field is a
+    // real answer and is sent as no rationale rather than as an empty one.
+    if (transitionNeedsRationale && !reopenRationale.trim()) return;
     if (
       await action("transition", {
         targetState: transitionTarget,
-        rationale: reopenRationale.trim(),
+        rationale: reopenRationale.trim() || undefined,
       })
     ) {
+      spendNote();
       setShowReopen(false);
       setReopenRationale("");
       setTransitionTarget("");
@@ -1262,7 +1288,50 @@ export default function ProblemReportCenter({
                   showClosureResult={selected.state === "Verifying"}
                   dispositionRationale={selected.dispositionRationale}
                   onTransition={requestTransition}
-                  onReject={() => setShowDisposition(true)}
+                  onReject={() => {
+                    setDispositionRationale(note.trim());
+                    setShowDisposition(true);
+                  }}
+                  noteOffer={
+                    !isFinished &&
+                    noteDraft.offered && (
+                      <DraftRestore
+                        savedAt={noteDraft.offered.savedAt}
+                        description="An unsubmitted working note is available in this browser."
+                        onRestore={() => {
+                          setNote(noteDraft.offered!.value);
+                          noteDraft.restore();
+                        }}
+                        onDiscard={noteDraft.discard}
+                      />
+                    )
+                  }
+                  noteArea={
+                    !isFinished && (
+                      <>
+                        <label htmlFor="prWorkingNote">Working note</label>
+                        <textarea
+                          id="prWorkingNote"
+                          rows={3}
+                          value={note}
+                          onChange={(event) => setNote(event.target.value)}
+                          placeholder="Why this report is about to move — drafted here, submitted in the dialog."
+                        />
+                        <p>
+                          Kept in this browser until you move the report. It then opens the
+                          transition dialog, and whatever you confirm there is retained in immutable
+                          history against that exact transition.
+                        </p>
+                        {note.trim() && (
+                          <AutosaveState
+                            status={noteDraft.status}
+                            savedAt={noteDraft.savedAt}
+                            where="this browser"
+                          />
+                        )}
+                      </>
+                    )
+                  }
                   onToggleBlocker={() =>
                     void action("blocker", {
                       isReleaseBlocker: !selected.isReleaseBlocker,
@@ -1759,7 +1828,6 @@ export default function ProblemReportCenter({
                       empty panel on nearly every record. */}
                   {!isHistorical &&
                     (selected.capabilities?.canApproveReleaseWaiver ||
-                      noteDraft.offered ||
                       (selected.state === "Verifying" &&
                         latestClosureCandidate?.state === "Invalidated")) && (
                       <section className="prFlow">
@@ -1770,24 +1838,6 @@ export default function ProblemReportCenter({
                             is at the top of the record.
                           </p>
                         </div>
-                        {noteDraft.offered && (
-                          <DraftRestore
-                            savedAt={noteDraft.offered.savedAt}
-                            description="Unsubmitted notes are available in this browser."
-                            onRestore={() => {
-                              setNote(noteDraft.offered!.value);
-                              noteDraft.restore();
-                            }}
-                            onDiscard={noteDraft.discard}
-                          />
-                        )}{" "}
-                        {note.trim() && (
-                          <AutosaveState
-                            status={noteDraft.status}
-                            savedAt={noteDraft.savedAt}
-                            where="this browser"
-                          />
-                        )}
                         {selected.state === "Verifying" &&
                           latestClosureCandidate?.state === "Invalidated" && (
                             <div className="prClosureInvalidated" role="status">
@@ -2063,19 +2113,25 @@ export default function ProblemReportCenter({
               Move to {stateLabel(transitionTarget)} · {selected.displayNumber}
             </h2>
             <p>
-              Backward transitions require a nonblank rationale and are retained in immutable
-              history.
+              {transitionNeedsRationale
+                ? "Backward transitions require a nonblank rationale."
+                : "A rationale is optional for this transition."}{" "}
+              Whatever is written here is retained in immutable history, against this exact
+              transition.
             </p>
             <label>
-              Rationale
+              {transitionNeedsRationale ? "Rationale" : "Rationale (optional)"}
               <textarea
-                required
+                required={transitionNeedsRationale}
                 value={reopenRationale}
                 onChange={(event) => setReopenRationale(event.target.value)}
                 placeholder="Explain the engineering basis for this transition."
               />
             </label>
-            <button className="primaryAction" disabled={busy || !reopenRationale.trim()}>
+            <button
+              className="primaryAction"
+              disabled={busy || (transitionNeedsRationale && !reopenRationale.trim())}
+            >
               Move to {stateLabel(transitionTarget)} →
             </button>
           </form>

@@ -590,9 +590,18 @@ public static class ProblemReportEndpoints
                     || string.Equals(http.UserAccount().UserName, report.ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase)))
                 return Results.Forbid();
         }
-        var acceptedRationale = ProblemReportTransitionPolicy.RequiresRationale(report.State, target)
-            ? request.Rationale
-            : null;
+        // A reason for a lifecycle decision is kept wherever one is given, not only where one is demanded.
+        //
+        // This used to null the rationale on any edge that did not require one, so the reasoning behind a
+        // forward move — why this went to the SCCB now, why implementation started — was discarded at the
+        // boundary and the record kept only the actor and the timestamp. The domain has always been willing
+        // to store it: TransitionTo requires a rationale on the edges that demand one, and trims and keeps
+        // whatever it is given on the rest. This line was the only thing dropping it.
+        //
+        // Optional, deliberately. Demanding a rationale for every routine move would buy a field full of
+        // "moving on" rather than a better record. Where one is written it is permanent, carried in the
+        // same immutable revision as the transition it explains.
+        var acceptedRationale = request.Rationale;
         return await ChangeAsync(report, request.ExpectedVersion, http, db, ct,
             $"ProblemReportTransitionedTo{target}",
             (item, actor, now) =>

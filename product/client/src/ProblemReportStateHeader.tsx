@@ -18,6 +18,23 @@ type Props = {
   /** Verifying only: closure needs a passing successor result before SQA can close. */
   showClosureResult?: boolean;
   dispositionRationale?: string;
+  /**
+   * The working note: a draft of the rationale a backward move or a rejection will ask for.
+   *
+   * Composed by the parent, which owns the text and its per-report autosave, and placed here because
+   * it belongs beside the actions it is written for. It is deliberately never submitted with an
+   * action: the server keeps free text only where a transition requires a rationale and discards it
+   * everywhere else (`acceptedRationale` in ProblemReportEndpoints), so a note that travelled with an
+   * action would look like it was on the record while being dropped.
+   */
+  noteArea?: ReactNode;
+  /**
+   * The offer to restore an unsubmitted note, shown outside the disclosure.
+   *
+   * Deliberately not folded away with the note itself: work held in a browser that nobody is told
+   * about is work nobody recovers, and an offer hidden behind a closed `<details>` is exactly that.
+   */
+  noteOffer?: ReactNode;
   onTransition: (target: string, requiresRationale: boolean) => void;
   /** Opens the disposition dialog. Rejection collects a disposition, so it is never a plain transition. */
   onReject: () => void;
@@ -57,6 +74,8 @@ export default function ProblemReportStateHeader({
   canToggleBlocker,
   showClosureResult,
   dispositionRationale,
+  noteArea,
+  noteOffer,
   onTransition,
   onReject,
   onToggleBlocker,
@@ -217,6 +236,16 @@ export default function ProblemReportStateHeader({
         {blockerControl}
         {rejectControl}
       </div>
+
+      {/* Folded away by default. It is a scratch pad for the rationale the next backward move or
+          rejection will ask for, not something a reader of the record needs in front of them. */}
+      {noteOffer}
+      {noteArea && (
+        <details className="prStateNote">
+          <summary>Working note</summary>
+          <div>{noteArea}</div>
+        </details>
+      )}
     </section>
   );
 }
