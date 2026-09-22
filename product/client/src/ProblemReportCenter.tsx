@@ -709,8 +709,6 @@ export default function ProblemReportCenter({
         expectedVersion: selected.version,
         ...payload,
       });
-      setNote("");
-      noteDraft.clear();
       await refresh(selected.id);
       return true;
     } catch (reason) {
@@ -754,6 +752,18 @@ export default function ProblemReportCenter({
       setBusy(false);
     }
   };
+  /**
+   * The working note is spent once its text has been confirmed as a rationale and accepted.
+   *
+   * Clearing it belonged to every action before, which was harmless while nothing could write to the
+   * note. Now that it holds a drafted rationale, a forward move or a blocker toggle wiping it would
+   * destroy work the reader did for a different transition — so only the two paths that actually
+   * submit its text spend it.
+   */
+  const spendNote = () => {
+    setNote("");
+    noteDraft.clear();
+  };
   const closeDisposition = () => {
     setShowDisposition(false);
     setDispositionRationale("");
@@ -766,14 +776,18 @@ export default function ProblemReportCenter({
         targetState: "Rejected",
         rationale: dispositionRationale.trim(),
       })
-    )
+    ) {
+      spendNote();
       closeDisposition();
+    }
   };
   const [transitionTarget, setTransitionTarget] = useState("");
   const requestTransition = (target: string, requiresRationale: boolean) => {
     if (requiresRationale) {
       setTransitionTarget(target);
-      setReopenRationale("");
+      // The working note is a draft of exactly this text, so it opens the dialog already written.
+      // Still editable, and still the dialog's value that is submitted — the note is never sent.
+      setReopenRationale(note.trim());
       setShowReopen(true);
     } else void action("transition", { targetState: target });
   };
@@ -786,6 +800,7 @@ export default function ProblemReportCenter({
         rationale: reopenRationale.trim(),
       })
     ) {
+      spendNote();
       setShowReopen(false);
       setReopenRationale("");
       setTransitionTarget("");
@@ -1262,7 +1277,49 @@ export default function ProblemReportCenter({
                   showClosureResult={selected.state === "Verifying"}
                   dispositionRationale={selected.dispositionRationale}
                   onTransition={requestTransition}
-                  onReject={() => setShowDisposition(true)}
+                  onReject={() => {
+                    setDispositionRationale(note.trim());
+                    setShowDisposition(true);
+                  }}
+                  noteOffer={
+                    !isFinished &&
+                    noteDraft.offered && (
+                      <DraftRestore
+                        savedAt={noteDraft.offered.savedAt}
+                        description="An unsubmitted working note is available in this browser."
+                        onRestore={() => {
+                          setNote(noteDraft.offered!.value);
+                          noteDraft.restore();
+                        }}
+                        onDiscard={noteDraft.discard}
+                      />
+                    )
+                  }
+                  noteArea={
+                    !isFinished && (
+                      <>
+                        <label htmlFor="prWorkingNote">Working note</label>
+                        <textarea
+                          id="prWorkingNote"
+                          rows={3}
+                          value={note}
+                          onChange={(event) => setNote(event.target.value)}
+                          placeholder="Why this report is about to move — drafted here, submitted in the dialog."
+                        />
+                        <p>
+                          Kept in this browser until you use it. It is not part of the controlled
+                          record: what the record keeps is the rationale you confirm in the dialog.
+                        </p>
+                        {note.trim() && (
+                          <AutosaveState
+                            status={noteDraft.status}
+                            savedAt={noteDraft.savedAt}
+                            where="this browser"
+                          />
+                        )}
+                      </>
+                    )
+                  }
                   onToggleBlocker={() =>
                     void action("blocker", {
                       isReleaseBlocker: !selected.isReleaseBlocker,
@@ -1759,7 +1816,6 @@ export default function ProblemReportCenter({
                       empty panel on nearly every record. */}
                   {!isHistorical &&
                     (selected.capabilities?.canApproveReleaseWaiver ||
-                      noteDraft.offered ||
                       (selected.state === "Verifying" &&
                         latestClosureCandidate?.state === "Invalidated")) && (
                       <section className="prFlow">
@@ -1770,24 +1826,6 @@ export default function ProblemReportCenter({
                             is at the top of the record.
                           </p>
                         </div>
-                        {noteDraft.offered && (
-                          <DraftRestore
-                            savedAt={noteDraft.offered.savedAt}
-                            description="Unsubmitted notes are available in this browser."
-                            onRestore={() => {
-                              setNote(noteDraft.offered!.value);
-                              noteDraft.restore();
-                            }}
-                            onDiscard={noteDraft.discard}
-                          />
-                        )}{" "}
-                        {note.trim() && (
-                          <AutosaveState
-                            status={noteDraft.status}
-                            savedAt={noteDraft.savedAt}
-                            where="this browser"
-                          />
-                        )}
                         {selected.state === "Verifying" &&
                           latestClosureCandidate?.state === "Invalidated" && (
                             <div className="prClosureInvalidated" role="status">

@@ -212,6 +212,49 @@
 .prBackward > div button:hover:not(:disabled) { background: var(--surface-subtle); }
 .prBackward > div button:disabled { opacity: 0.55; cursor: not-allowed; }
 
+/* The working note. Folded away, because it is a scratch pad for whoever is about to move the report,
+   not something a reader of the record needs in front of them. */
+.prStateNote > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--teal-700);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+  cursor: pointer;
+}
+.prStateNote > div { display: grid; gap: 8px; margin-top: 10px; }
+.prStateNote label {
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.prStateNote textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink-900);
+  font: inherit;
+  font-size: var(--text-control);
+  line-height: var(--leading-body, 1.55);
+  resize: vertical;
+}
+.prStateNote textarea:focus-visible { outline: 2px solid var(--teal-600); outline-offset: 1px; }
+/* Says plainly that this text is not the record. A field that autosaves and is then not submitted has
+   to admit that, or it reads as evidence it never becomes. */
+.prStateNote p {
+  margin: 0;
+  max-width: 76ch;
+  color: var(--ink-500);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body, 1.5);
+}
+
 /* Off the lifecycle: rejected, and terminal. No rail, because nothing progressed along one. */
 .prStateOffPath {
   grid-template-columns: minmax(0, 1fr) auto;
