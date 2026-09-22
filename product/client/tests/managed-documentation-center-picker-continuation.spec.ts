@@ -1,13 +1,18 @@
 // Checkpoint C browser journey for #1040: the Documentation Center build relationship picker must freeze
 // candidate membership across "Load more records" continuations, show builds committed later only after a
-// fresh traversal, and link the exact selected build with its canonical deep link. The fixture drives the
-// disposable browser SQLite database directly (through the same guarded schema the API host installed).
+// fresh traversal, and link the exact selected build with its canonical deep link.
+//
+// Each attempt owns its Program/Project/document (created through the API as the administrator), so
+// repetitions of this journey are isolated from each other and from the shared showcase fixture. The
+// candidate builds are inserted into the attempt's disposable run database through the same guarded schema
+// and allocator trigger the API host installed at startup; Guid text is UPPERCASE to match how
+// Microsoft.Data.Sqlite persists Guid properties.
 import { expect, test } from '@playwright/test'
 import { DatabaseSync } from 'node:sqlite'
-import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { apiBase, apiLogin, login, showcaseSeed } from './auth'
+import { createHash } from 'node:crypto'
+import { apiBase, apiLogin, login } from './auth'
 import { browserStoragePath } from '../scripts/browser-storage.mjs'
 
 function browserDatabasePath(): string {
@@ -34,27 +39,63 @@ function seedInWorkBuild(projectId: string, version: string): string {
 
 test('the build picker freezes membership across pages and links the exact selected build', async ({ page, request }) => {
   test.setTimeout(360_000)
-  const showcase = await showcaseSeed(request)
-  await apiLogin(request, 'software.author')
+  await apiLogin(request, 'admin')
 
-  // Fifty-five extra in-work builds bring the picker to 57 candidates (default page size 50), so the
-  // dialog exercises a real continuation. They are inserted directly into the disposable run database,
-  // through the same guarded schema and allocator trigger the API host installed at startup.
+  // A test-owned Program/Project/document per attempt keeps repetitions and the shared showcase isolated.
+  const attempt = Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36)
+  const programCode = `PCK${attempt.toUpperCase()}`
+  const acronym = `PCK${attempt.slice(-4).toUpperCase()}`
+  const workspaceResponse = await request.post(`${apiBase}/api/workspaces`, {
+    data: {
+      programName: `Picker Continuation ${attempt}`,
+      programCode,
+      projectName: `Picker Continuation Project ${attempt}`,
+      softwareProduct: 'Software',
+      initialRelease: '1.0',
+      initialReleaseIsReleased: false,
+    },
+  })
+  expect(workspaceResponse.ok(), await workspaceResponse.text()).toBeTruthy()
+  const workspace = await workspaceResponse.json() as {
+    program: { id: string }
+    project: { id: string }
+  }
+  const programId = workspace.program.id
+  const projectId = workspace.project.id
+
+  const meResponse = await request.get(`${apiBase}/api/auth/me`)
+  expect(meResponse.ok(), await meResponse.text()).toBeTruthy()
+  const adminUserId = (await meResponse.json() as { id: string }).id
+  const grantResponse = await request.post(`${apiBase}/api/admin/users/${adminUserId}/memberships`, {
+    data: { programId, role: 'Engineer' },
+  })
+  expect(grantResponse.ok(), await grantResponse.text()).toBeTruthy()
+
+  const documentResponse = await request.post(`${apiBase}/api/managed-documents`, {
+    data: {
+      projectId,
+      acronym,
+      documentType: 'Software Configuration Management Plan',
+      title: `Picker continuation ${attempt}`,
+      ownerId: 'admin',
+      formalChangeSummary: 'Picker continuation journey fixture.',
+      operationKey: crypto.randomUUID(),
+    },
+  })
+  expect(documentResponse.ok(), await documentResponse.text()).toBeTruthy()
+
+  // Fifty-five extra in-work builds bring the picker to 56 candidates (default page size 50), so the
+  // dialog exercises a real continuation. They are inserted directly into the attempt's disposable run
+  // database, through the same guarded schema and allocator trigger the API host installed at startup.
   for (let index = 1; index <= 55; index++) {
-    seedInWorkBuild(showcase.projectId, `2.${String(index).padStart(2, '0')}`)
+    seedInWorkBuild(projectId, `2.${String(index).padStart(2, '0')}`)
   }
 
-  const documentsResponse = await request.get(`${apiBase}/api/managed-documents?projectId=${showcase.projectId}`)
-  expect(documentsResponse.ok(), await documentsResponse.text()).toBeTruthy()
-  const document = (await documentsResponse.json() as { items: { id: string; acronym: string }[] })
-    .items.find((item) => item.acronym === 'SDP')
-  expect(document).toBeTruthy()
-
-  await login(page, 'software.author', { openProject: false })
-  await page.goto(`/programs/${showcase.programId}/projects/${showcase.projectId}/documentation-center`)
+  await login(page, 'admin', { openProject: false })
+  await page.goto(`/programs/${programId}/projects/${projectId}/documentation-center`)
   await expect(page.getByRole('heading', { name: 'Documentation Center' })).toBeVisible()
-  await page.getByRole('button', { name: /SDP SDP-000001/ }).click()
-  await expect(page.getByRole('heading', { name: 'FMS Software Development Plan' })).toBeVisible()
+  await page.getByRole('button', { name: new RegExp(`^${acronym} `) }).click()
+  await expect(page.getByRole('heading', { name: `Picker continuation ${attempt}` })).toBeVisible()
   await page.getByRole('button', { name: 'links', exact: true }).click()
   await page.getByRole('button', { name: '+ Link artifact' }).click()
   await page.getByLabel('Artifact type').selectOption({ label: 'Build' })
@@ -63,15 +104,15 @@ test('the build picker freezes membership across pages and links the exact selec
   // dialog's initial artifact-type load cannot clobber the Build list after the count assertion.
   // Option elements have no layout box, so presence is asserted with counts, never visibility.
   const options = page.locator('select[name="artifactId"] option')
-  await expect(page.locator('select[name="artifactId"] option', { hasText: 'BUILD-1.5' })).toHaveCount(1)
+  await expect(page.locator('select[name="artifactId"] option', { hasText: 'BUILD-1.0' })).toHaveCount(1)
   await expect(options).toHaveCount(51)
   await expect(page.getByRole('button', { name: 'Load more records' })).toBeVisible()
 
   // A build committed after page one must stay outside this traversal's continuation.
-  seedInWorkBuild(showcase.projectId, '9.9')
+  seedInWorkBuild(projectId, '9.9')
   await expect(page.getByRole('button', { name: 'Load more records' })).toBeVisible()
   await page.getByRole('button', { name: 'Load more records' }).click()
-  await expect(options).toHaveCount(58) // placeholder + all 57 candidates bound at page one
+  await expect(options).toHaveCount(57) // placeholder + all 56 candidates bound at page one
   await expect(page.locator('select[name="artifactId"] option', { hasText: 'BUILD-9.9' })).toHaveCount(0)
 
   // Select a build that exists only on page two and link it.
@@ -86,7 +127,7 @@ test('the build picker freezes membership across pages and links the exact selec
   await expect(page.getByText('The canonical lifecycle relationship was linked')).toBeVisible()
 
   // The saved relationship carries the exact selected Release identity and its canonical deep link.
-  await page.getByRole('button', { name: 'Links' }).click()
+  await page.getByRole('button', { name: 'links', exact: true }).click()
   const row = page.locator('.mdLinks > div').filter({
     has: page.locator('span').filter({ hasText: /^Release ·/ }),
   })
@@ -95,11 +136,11 @@ test('the build picker freezes membership across pages and links the exact selec
   expect(href).toMatch(new RegExp(`/releases/${selectedReleaseId}/command-center$`))
 
   // A fresh traversal re-establishes the boundary and now shows the late build.
-  seedInWorkBuild(showcase.projectId, '2.56')
+  seedInWorkBuild(projectId, '2.56')
   await page.getByRole('button', { name: '+ Link artifact' }).click()
   await page.getByLabel('Artifact type').selectOption({ label: 'Build' })
-  await expect(options).toHaveCount(51) // fresh page one over 59 candidates
+  await expect(options).toHaveCount(51) // fresh page one over 58 candidates
   await page.getByRole('button', { name: 'Load more records' }).click()
-  await expect(options).toHaveCount(60) // placeholder + 59, now including the formerly late BUILD-9.9
+  await expect(options).toHaveCount(59) // placeholder + all 58, now including the formerly late BUILD-9.9
   await expect(page.locator('select[name="artifactId"] option', { hasText: 'BUILD-9.9' })).toHaveCount(1)
 })

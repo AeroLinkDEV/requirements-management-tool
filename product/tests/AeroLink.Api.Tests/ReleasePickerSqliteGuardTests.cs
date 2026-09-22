@@ -1,3 +1,5 @@
+using System.Net.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.Data.Sqlite;
@@ -67,50 +69,86 @@ public sealed class ReleasePickerSqliteGuardTests : IDisposable
             Assert.Equal(1L, reader.GetInt64(1));
         }
 
-        // Copy/restart: a guarded database file copied elsewhere restarts without reclassification and
-        // keeps allocating new membership exactly once per project.
+        // Copy/restart: a guarded database file becomes the template for a NEW API host. The host must
+        // start through Program.cs from the copied file (the guard is never invoked manually here), serve
+        // the copied rows with their classification and ordinals unchanged, and keep allocating membership.
         var projectId = Guid.NewGuid();
-        await using (var setup = CreateContext())
+        var templatePath = Path.Combine(Path.GetTempPath(), $"picker-guard-template-{Guid.NewGuid():N}.db");
+        await using (var setup = new AeroLinkDbContext(
+            new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={templatePath}").Options))
         {
             await setup.Database.EnsureCreatedAsync();
-            await InsertRawReleaseAsync(projectId, "1.0");
+            await InsertRawReleaseIntoAsync(templatePath, projectId, "1.0");
             await ReleasePickerSqliteGuard.EnsureInstalledAsync(setup);
-        }
-
-        var copyPath = _databasePath + ".copy";
-        // The database may be in WAL mode (the mode is persistent in the file header), so checkpoint and
-        // truncate the WAL before copying: copying a bare main file would lose the committed pages.
-        await using (var checkpointConnection = new SqliteConnection($"Data Source={_databasePath}"))
-        {
-            await checkpointConnection.OpenAsync();
-            await using var checkpoint = checkpointConnection.CreateCommand();
+            var allocated = new SoftwareRelease(projectId, "1.5", false);
+            setup.Add(allocated);
+            await setup.SaveChangesAsync();
+            // Checkpoint and close so the template has no unmerged -wal: the factory seam refuses those.
+            await setup.Database.OpenConnectionAsync();
+            var connection = (SqliteConnection)setup.Database.GetDbConnection();
+            await using var checkpoint = connection.CreateCommand();
             checkpoint.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
             await checkpoint.ExecuteNonQueryAsync();
         }
-        File.Copy(_databasePath, copyPath, overwrite: true);
+
         try
         {
-            await using var copy = new AeroLinkDbContext(
-                new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite($"Data Source={copyPath}").Options);
-            await copy.Database.OpenConnectionAsync();
-            var copyConnection = (SqliteConnection)copy.Database.GetDbConnection();
-            await using var dump = copyConnection.CreateCommand();
-            dump.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'software_releases'";
-            var copiedTableCount = (long)(await dump.ExecuteScalarAsync())!;
-            Assert.Equal(1L, copiedTableCount);
-            await ReleasePickerSqliteGuard.EnsureInstalledAsync(copy);
-            var copied = new SoftwareRelease(projectId, "1.5", false);
-            copy.Add(copied);
-            await copy.SaveChangesAsync();
-            Assert.Equal(1, copied.PickerInsertionOrdinal);
-            var legacyFlag = await ScalarTextAsync(copyConnection, "SELECT CAST(\"PickerLegacyCohort\" AS TEXT) FROM \"software_releases\" WHERE \"Version\" = '1.0'");
-            Assert.Equal("1", legacyFlag);
+            using var copiedHost = new AeroLinkApiFactory(showcaseTemplate: templatePath);
+            var copiedClient = copiedHost.CreateClient();
+            await ProblemReportApiTests.BootstrapAndLoginAsync(copiedClient);
+
+            // Startup completed through Program.cs and the guards exist on the database actually served.
+            await using (var served = new AeroLinkDbContext(
+                new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(copiedHost.ConnectionString).Options))
+            {
+                await served.Database.OpenConnectionAsync();
+                var servedConnection = (SqliteConnection)served.Database.GetDbConnection();
+                await using var check = servedConnection.CreateCommand();
+                check.CommandText = """
+                    SELECT (SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'aerolink_release_picker%'),
+                           (SELECT COUNT(*) FROM software_releases WHERE "PickerLegacyCohort" = 1 AND "PickerInsertionOrdinal" IS NULL),
+                           (SELECT COALESCE(MAX("PickerInsertionOrdinal"), 0) FROM software_releases)
+                    """;
+                await using var reader = await check.ExecuteReaderAsync();
+                await reader.ReadAsync();
+                Assert.Equal(3L, reader.GetInt64(0));
+                Assert.Equal(1L, reader.GetInt64(1));
+                Assert.Equal(1L, reader.GetInt64(2));
+            }
+
+            // Host-backed read through the real endpoint, then a new insertion with correct allocation.
+            var pickerPage = await copiedClient.GetFromJsonAsync<System.Text.Json.JsonElement>(
+                $"/api/managed-documents/link-options?projectId={projectId}&artifactType=Release&pageSize=50");
+            var displayed = pickerPage.GetProperty("items").EnumerateArray()
+                .Select(item => item.GetProperty("displayNumber").GetString()).ToList();
+            Assert.Equal(new[] { "BUILD-1.0", "BUILD-1.5" }, displayed);
+
+            using (var insertScope = copiedHost.Services.CreateScope())
+            {
+                var servedDb = insertScope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                var insertion = new SoftwareRelease(projectId, "1.6", false);
+                servedDb.Add(insertion);
+                await servedDb.SaveChangesAsync();
+                Assert.Equal(2, insertion.PickerInsertionOrdinal);
+            }
         }
         finally
         {
             SqliteConnection.ClearAllPools();
-            if (File.Exists(copyPath)) File.Delete(copyPath);
+            if (File.Exists(templatePath)) File.Delete(templatePath);
         }
+    }
+
+    private static async Task InsertRawReleaseIntoAsync(string databasePath, Guid projectId, string version)
+    {
+        await using var connection = new SqliteConnection($"Data Source={databasePath}");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO \"software_releases\" (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\") VALUES ($id, $p, $v, 0)";
+        command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString());
+        command.Parameters.AddWithValue("$p", projectId.ToString());
+        command.Parameters.AddWithValue("$v", version);
+        await command.ExecuteNonQueryAsync();
     }
 
     [Fact]
