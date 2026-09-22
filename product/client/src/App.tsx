@@ -1185,7 +1185,8 @@ function App() {
     return inShell(<CodeWorkspace api={API} projectId={project.project.id} releaseId={release.id}
       readOnly={release.isReleased} page={view === "codeExplorer" ? "explorer" : "mergeRequests"}
       onBack={() => navigate("dashboard")}
-      onPage={page => navigate(page === "explorer" ? "codeExplorer" : "codeMergeRequests", "software")} />);
+      onPage={page => navigate(page === "explorer" ? "codeExplorer" : "codeMergeRequests", "software")}
+      traceArtifactHref={node => context ? exactTraceArtifactPath(context, node) : undefined} />);
   if (view === "lifecycle" && project)
     return inShell(
       <DigitalThreadPage

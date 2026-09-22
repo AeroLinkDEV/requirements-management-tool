@@ -32,6 +32,7 @@ Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkTransitionKernel.psm1') -DisableNameChecking
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkRuntimeIdentity.psm1') -DisableNameChecking
 Import-Module (Join-Path $PSScriptRoot 'AeroLinkProcessControl.psm1') -DisableNameChecking
+Import-Module (Join-Path $PSScriptRoot 'AeroLinkProtectedConfig.psm1') -DisableNameChecking
 
 $script:HandoffProtocolVersion = 1
 $script:SupportedHandoffProtocols = @(1)
@@ -625,6 +626,11 @@ function Test-AeroLinkRoleReadiness {
                 if ($expectedMode -and [string]$identity.mode -ne $expectedMode) { return & $result $false "the API reports mode '$($identity.mode)', not '$expectedMode'" }
                 $expectedSource = [string](Get-AeroLinkProperty $Readiness 'expectedSourceIdentity' '')
                 if ($expectedSource -and [string]$identity.sourceIdentity -ne $expectedSource) { return & $result $false "the API runs source '$($identity.sourceIdentity)', not '$expectedSource'" }
+                $expectedGitLab = [string](Get-AeroLinkProperty $Readiness 'expectedGitLabConfigurationFingerprint' '')
+                if ($expectedGitLab) {
+                    $actualGitLab = [string](Get-AeroLinkProperty $identity 'gitLabConfigurationFingerprint' 'unconfigured')
+                    if ($actualGitLab -ne $expectedGitLab) { return & $result $false "the API has protected GitLab fingerprint '$actualGitLab', not '$expectedGitLab'" }
+                }
                 foreach ($binding in @(@('expectedInstanceId', 'id'), @('expectedClassification', 'classification'))) {
                     $expected = [string](Get-AeroLinkProperty $Readiness $binding[0] '')
                     if (-not $expected) { continue }
@@ -665,7 +671,7 @@ function New-AeroLinkServiceEnvironment {
       value removes a name), and the transition's capabilities removed. A restored API must not carry a lease token,
       a journal path or a handoff into its lifetime.
     #>
-    param($Overrides)
+    param($Overrides, [ValidateSet('postgres', 'api', 'tunnel', 'qualification-probe')][string]$Role = 'api')
     $environment = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in [Environment]::GetEnvironmentVariables([EnvironmentVariableTarget]::Process).GetEnumerator()) { $environment[[string]$entry.Key] = [string]$entry.Value }
     if ($Overrides) {
@@ -673,9 +679,35 @@ function New-AeroLinkServiceEnvironment {
             if ($null -eq $property.Value) { [void]$environment.Remove($property.Name) } else { $environment[$property.Name] = [string]$property.Value }
         }
     }
+    # Do not let an ambient connector survive into a restored API when the protected record is intentionally
+    # unconfigured or omits optional display/supplement metadata. Only the protected marker below may repopulate
+    # these names, and it is resolved in memory after the request JSON has been consumed.
+    foreach ($name in @(
+        'ProjectGitLab__BaseUrl', 'ProjectGitLab__ReadAccessToken', 'ProjectGitLab__SyntheticDemoProjectId',
+        'ProjectGitLab__SyntheticDemoRemoteProjectId',
+        'ProjectGitLab__ReleasedSyntheticSourceSupplementScope__ProgramId',
+        'ProjectGitLab__ReleasedSyntheticSourceSupplementScope__ProjectId',
+        'ProjectGitLab__ReleasedSyntheticSourceSupplementScope__ReleaseId',
+        'ProjectGitLab__ReleasedSyntheticSourceSupplementScope__BaselineId',
+        'ProjectGitLab__ReleasedSyntheticSourceSupplementScope__CampaignId',
+        'Runtime__GitLabConfigFingerprint')) { [void]$environment.Remove($name) }
+    # The requester may carry only this non-secret marker through the transition spool. Resolve the DPAPI
+    # ciphertext here, in the authority's memory, immediately before creating the API process. The token never
+    # appears in the request JSON, launch arguments or transition journal.
+    $protectedConfigPath = if ($environment.ContainsKey('AEROLINK_PROTECTED_GITLAB_CONFIG_PATH')) { $environment['AEROLINK_PROTECTED_GITLAB_CONFIG_PATH'] } else { '' }
+    $protectedInstallationRoot = if ($environment.ContainsKey('AEROLINK_PROTECTED_GITLAB_INSTALLATION_ROOT')) { $environment['AEROLINK_PROTECTED_GITLAB_INSTALLATION_ROOT'] } else { '' }
+    if ($protectedConfigPath -and -not $protectedInstallationRoot) { throw 'A protected GitLab marker is missing its installation-root binding.' }
+    if ($protectedInstallationRoot -and -not $protectedConfigPath) { throw 'A protected GitLab installation-root marker is missing its configuration path.' }
+    if ($protectedConfigPath -and $Role -ne 'api') { throw 'A protected GitLab marker is permitted only for the API launch role.' }
+    if (-not [string]::IsNullOrWhiteSpace($protectedConfigPath)) {
+        $protected = Get-AeroLinkProtectedGitLabRuntimeEnvironment -InstallationRoot $protectedInstallationRoot -ConfigPath $protectedConfigPath
+        foreach ($entry in $protected.Environment.GetEnumerator()) { $environment[[string]$entry.Key] = [string]$entry.Value }
+    }
     foreach ($name in @('AEROLINK_TRANSITION_LEASE', 'AEROLINK_TRANSITION_JOURNAL', 'AEROLINK_TRANSITION_HANDOFF', 'AEROLINK_PRODUCTION_OBLIGATION', 'AEROLINK_TRANSITION_CONTINUATION', 'AEROLINK_REMOTE_DEMO_HANDOFF')) {
         [void]$environment.Remove($name)
     }
+    [void]$environment.Remove('AEROLINK_PROTECTED_GITLAB_CONFIG_PATH')
+    [void]$environment.Remove('AEROLINK_PROTECTED_GITLAB_INSTALLATION_ROOT')
     return $environment
 }
 
@@ -794,7 +826,7 @@ function Invoke-AeroLinkAuthorityPump {
                 $spec.StandardOutputPath = [string](Get-AeroLinkProperty $launch 'standardOutput' '')
                 $spec.StandardErrorPath = [string](Get-AeroLinkProperty $launch 'standardError' '')
                 foreach ($log in @($spec.StandardOutputPath, $spec.StandardErrorPath)) { if ($log) { $d = Split-Path -Parent $log; if ($d -and -not (Test-Path -LiteralPath $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null } } }
-                $spec.Environment = New-AeroLinkServiceEnvironment -Overrides (Get-AeroLinkProperty $launch 'environment' $null)
+                $spec.Environment = New-AeroLinkServiceEnvironment -Overrides (Get-AeroLinkProperty $launch 'environment' $null) -Role ([string]$body.role)
                 $spec.RestrictAdministrators = [bool](Get-AeroLinkProperty $launch 'restrictAdministrators' $false)
                 $spec.Breakaway = $breakaway
                 $staged = $K::Launch($job, $spec)

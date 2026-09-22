@@ -26,6 +26,7 @@ public sealed record AeroLinkRuntimeIdentity(
     string InstanceId,
     string InstanceLabel,
     string InstanceClassification,
+    string GitLabConfigurationFingerprint,
     string? DatabaseName,
     string? SnapshotSourceLabel,
     string? SnapshotSourceSha,
@@ -60,6 +61,7 @@ public static class RuntimeIdentityEndpoints
             InstanceId: Trimmed(configuration["Instance:InstanceId"]) ?? "unknown",
             InstanceLabel: Trimmed(configuration["Instance:Label"]) ?? "AEROLINK",
             InstanceClassification: Trimmed(configuration["Instance:Classification"]) ?? "Undeclared",
+            GitLabConfigurationFingerprint: Trimmed(configuration["Runtime:GitLabConfigFingerprint"]) ?? "unconfigured",
             DatabaseName: DatabaseName(configuration),
             SnapshotSourceLabel: Trimmed(configuration["Instance:SnapshotSourceLabel"]),
             SnapshotSourceSha: Trimmed(configuration["Instance:SnapshotSourceSha"]),
@@ -135,6 +137,7 @@ public static class RuntimeIdentityEndpoints
                 sourceSha = loopback ? identity.SourceSha : null,
                 sourceShortSha = loopback ? identity.SourceShortSha : null,
                 sourceIdentity = loopback ? identity.SourceIdentity : null,
+                gitLabConfigurationFingerprint = loopback ? identity.GitLabConfigurationFingerprint : null,
                 mode = identity.Mode,
                 mainCurrency = currency is null ? null : new
                 {

@@ -130,6 +130,40 @@ test('exact verification artifact routes preserve immutable revision identity al
   })).toBeUndefined()
 })
 
+test('code relationship targets round-trip through their exact AeroLink destinations', () => {
+  const requirement = exactTraceArtifactPath(context, {
+    id: 'llr-revision', kind: 'RequirementRevision', artifactId: 'llr-artifact',
+    displayNumber: 'LLR-000001.00',
+  })
+  expect(requirement).toBe('/programs/program-a/projects/project-a/releases/release-a/requirements/llr-artifact?discipline=software&requirementRevisionId=llr-revision')
+
+  const changeRequest = exactTraceArtifactPath(context, {
+    id: 'llrcr-revision', kind: 'ChangeRequest', displayNumber: 'LLRCR-000001.00',
+  })
+  expect(changeRequest).toBe('/programs/program-a/projects/project-a/releases/release-a/software/change-requests/llrcr-revision')
+
+  const proposal = exactTraceArtifactPath(context, {
+    id: 'llr-proposal', kind: 'RequirementProposal', artifactId: 'llrcr-owner',
+    displayNumber: 'LLR-000001.00 proposal in LLRCR-000001.00',
+  })
+  expect(proposal).toBe('/programs/program-a/projects/project-a/releases/release-a/software/change-requests/llrcr-owner?proposalId=llr-proposal')
+  expect(parseRoute(proposal!)).toMatchObject({ view: 'scr', discipline: 'software', artifactId: 'llrcr-owner', requirementProposalId: 'llr-proposal' })
+
+  const problemReport = exactTraceArtifactPath(context, {
+    id: 'problem-report-snapshot', kind: 'ProblemReportRevision', artifactId: 'problem-report',
+    displayNumber: 'PR-000001.02',
+  })
+  expect(problemReport).toBe('/programs/program-a/projects/project-a/releases/release-a/problem-reports/problem-report?snapshotId=problem-report-snapshot')
+  expect(parseRoute(problemReport!)).toMatchObject({ view: 'problemReports', artifactId: 'problem-report', historicalProblemReportSnapshotId: 'problem-report-snapshot' })
+
+  expect(exactTraceArtifactPath(context, {
+    id: 'proposal-without-owner', kind: 'RequirementProposal', displayNumber: 'LLR-000001.00 proposal in LLRCR-000001.00',
+  })).toBeUndefined()
+  expect(exactTraceArtifactPath(context, {
+    id: 'unknown', kind: 'Unknown', displayNumber: 'Unknown', artifactId: 'owner',
+  })).toBeUndefined()
+})
+
 test('controlled document TCR links open the exact package in its build and discipline', () => {
   const root = '/programs/program-a/projects/project-a/releases/release-a'
   for (const [discipline, kind, branch] of [

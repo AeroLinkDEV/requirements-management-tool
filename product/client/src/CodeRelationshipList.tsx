@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import ExactArtifactLink from './ExactArtifactLink'
 import { PersonName } from './People'
 import { stateLabel } from './presentation'
+import type { ExactTraceArtifact } from './routing'
 import { useCodeRead, type CodeRelationship } from './codeWorkspaceData'
 
 export default function CodeRelationshipList({ api, projectId, items, readOnly, onChanged,
-  empty = 'No direct relationship is recorded.' }: { api: string; projectId: string; items: CodeRelationship[];
-  readOnly: boolean; onChanged: () => void; empty?: string }) {
-  return <section className="codeRelationships"><h3>Linked AeroLink artifacts</h3>{items.length === 0 ? <p>{empty}</p> : <ul>
+  empty = 'No direct relationship is recorded.', traceArtifactHref }: { api: string; projectId: string; items: CodeRelationship[];
+  readOnly: boolean; onChanged: () => void; empty?: string;
+  traceArtifactHref?: (target: ExactTraceArtifact) => string | undefined }) {
+    return <section className="codeRelationships"><h3>Linked AeroLink artifacts</h3>{items.length === 0 ? <p>{empty}</p> : <ul>
     {items.map(item => <Relationship key={`${projectId}/${item.relationshipKind}/${item.id}/${item.version}`}
-      {...{ api, projectId, item, readOnly, onChanged }} />)}</ul>}</section>
+      {...{ api, projectId, item, readOnly, onChanged, traceArtifactHref }} />)}</ul>}</section>
 }
 
-function Relationship({ api, projectId, item, readOnly, onChanged }: { api: string; projectId: string;
-  item: CodeRelationship; readOnly: boolean; onChanged: () => void }) {
+function Relationship({ api, projectId, item, readOnly, onChanged, traceArtifactHref }: { api: string; projectId: string;
+  item: CodeRelationship; readOnly: boolean; onChanged: () => void;
+  traceArtifactHref?: (target: ExactTraceArtifact) => string | undefined }) {
   const [showHistory, setShowHistory] = useState(false)
   const [withdrawing, setWithdrawing] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -39,7 +43,18 @@ function Relationship({ api, projectId, item, readOnly, onChanged }: { api: stri
     event.preventDefault()
     void change('withdraw', String(new FormData(event.currentTarget).get('rationale') ?? ''))
   }
-  return <li><b>{item.targetDisplaySnapshot || 'Retained exact target'}</b>
+  const exactTarget = (() => {
+    const base = { id: item.targetIdentityId, displayNumber: item.targetDisplaySnapshot }
+    switch (item.targetKind) {
+      case 'RequirementRevision': return { ...base, kind: 'RequirementRevision', artifactId: item.targetOwnerIdentityId }
+      case 'ChangeRequestRevision': return { ...base, kind: 'ChangeRequest' }
+      case 'RequirementProposal': return { ...base, kind: 'RequirementProposal', artifactId: item.targetOwnerIdentityId }
+      case 'ProblemReportRevision': return { ...base, kind: 'ProblemReportRevision', artifactId: item.targetOwnerIdentityId }
+      default: return undefined
+    }
+  })()
+  const targetHref = exactTarget ? traceArtifactHref?.(exactTarget) : undefined
+  return <li><ExactArtifactLink href={targetHref}>{item.targetDisplaySnapshot || 'Retained exact target'}</ExactArtifactLink>
     {item.mergeRequestIid && <p>{item.mergeRequestUrlSnapshot
       ? <a href={item.mergeRequestUrlSnapshot} target="_blank" rel="noreferrer">GitLab !{item.mergeRequestIid} · {item.mergeRequestTitleSnapshot || 'Recorded merge request'}</a>
       : `Associated GitLab MR !${item.mergeRequestIid}`}</p>}
