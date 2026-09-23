@@ -347,12 +347,12 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
   // is structure, not a result set, and re-reading it on every keystroke would make it flicker.
   useEffect(() => {
     let active = true
-    fetch(`${api}/api/projects/${projectId}/${isSystemScope ? 'test-procedure-documents' : 'test-artifacts'}?scope=${discipline}`)
+    fetch(`${api}/api/projects/${projectId}/${isSystemScope ? 'test-procedure-documents' : 'test-artifacts'}?scope=${discipline}${releaseId ? `&releaseId=${releaseId}` : ''}`)
       .then(response => response.ok ? response.json() : [])
       .then((value: ProcedureDocument[]) => { if (active) setDocuments(value) })
       .catch(() => { if (active) setDocuments([]) })
     return () => { active = false }
-  }, [api, projectId, discipline, isSystemScope])
+  }, [api, projectId, releaseId, discipline, isSystemScope])
   useEffect(() => { void load() }, [load])
 
   /**

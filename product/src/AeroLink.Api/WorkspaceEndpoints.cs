@@ -354,7 +354,10 @@ public static class WorkspaceEndpoints
             if (projectId is not null && !await http.HasProjectAccessAsync(db, projectId.Value, ct)) return Results.Forbid();
             var allowedProjects = actor.IsAdministrator ? null : await db.Projects.AsNoTracking().Where(x => actor.Programs.Select(p => p.ProgramId).Contains(x.ProgramId)).Select(x => x.Id).ToListAsync(ct);
             var source = db.SystemChangeRequests.AsNoTracking().Where(x => (allowedProjects == null || allowedProjects.Contains(x.ProjectId)) && (projectId == null || x.ProjectId == projectId) && (releaseId == null || x.TargetReleaseId == releaseId));
-            var requests = await source.Select(x => new { x.Id, x.Type, x.State }).ToListAsync(ct);
+            // One row per change request: a revised request's earlier approved revision is history, not a second
+            // change, and the register this card opens counts it once (#1091 CNT-1).
+            var requests = (await source.Select(x => new { x.Id, x.Type, x.State, x.BaseNumber, x.Revision }).ToListAsync(ct))
+                .GroupBy(x => x.BaseNumber).Select(group => group.OrderByDescending(x => x.Revision).First()).ToList();
             var requestIds = requests.Select(x => x.Id).ToList();
             var impacts = await db.VerificationImpactItems.AsNoTracking()
                 .Where(x => requestIds.Contains(x.ChangeRequestId))
@@ -406,7 +409,7 @@ public static class WorkspaceEndpoints
             });
         });
 
-        app.MapGet("/api/directory", async (Guid? programId, Guid? projectId, string? search, int? limit, string? authority, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        app.MapGet("/api/directory", async (Guid? programId, Guid? projectId, string? search, int? limit, string? authority, string? roles, HttpContext http, AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
         {
             var selectedProgram = programId ?? (projectId is null ? null : await db.Projects.Where(x=>x.Id==projectId).Select(x=>(Guid?)x.ProgramId).SingleOrDefaultAsync(ct));
             if(selectedProgram is null)return Results.BadRequest(new{error="Choose a Program or Project directory context."});
@@ -436,6 +439,10 @@ public static class WorkspaceEndpoints
                     || string.Equals(authority,ProblemReportOwnerAuthority.DirectoryAuthority,StringComparison.Ordinal)&&ProblemReportOwnerAuthority.IsEligible(x.Select(r=>r.role))
                     || string.Equals(authority,ManagedDocumentAssignmentPolicy.DirectoryAuthority,StringComparison.Ordinal)&&managedDocumentAuthors!.Contains(x.Key.UserName))
                 .Select(x => {var roles=x.Select(r=>r.role.ToString()).Order().ToList();return new{x.Key.Id,x.Key.UserName,x.Key.DisplayName,x.Key.Email,title=DirectoryTitles.For(x.Key.UserName,roles),roles};});
+            // A role-restricted picker filters here, before the limit. Filtering a limited page in the browser hid
+            // every eligible reviewer outside the first ten name matches (#1091 PICK-1).
+            var requiredRoles=(roles??"").Split(',',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if(requiredRoles.Count>0)people=people.Where(x=>x.roles.Any(requiredRoles.Contains));
             var q=search?.Trim()??"";
             if(q.Length>0)people=people.Where(x=>x.DisplayName.Contains(q,StringComparison.OrdinalIgnoreCase)||x.UserName.Contains(q,StringComparison.OrdinalIgnoreCase)||x.Email.Contains(q,StringComparison.OrdinalIgnoreCase)||x.title.Contains(q,StringComparison.OrdinalIgnoreCase)||x.roles.Any(r=>r.Contains(q,StringComparison.OrdinalIgnoreCase)));
             // Exact account/display-name matches lead the suggestions. Handles remain hidden in the picker,
@@ -779,7 +786,8 @@ public static class WorkspaceEndpoints
                      .Where(type=>type.HasValue).Select(type=>new{Type=type!.Value,Level=level}))
                  .ToDictionary(x=>x.Type,x=>x.Level);
             var effectiveBaselineId=releaseId is null?null:await BuildScope.EffectiveBaselineAsync(db,projectId,releaseId.Value,ct);
-            var procedureEffectivity=releaseId is null?null:await TestProcedureEffectivity.ForReleaseAsync(db,projectId,releaseId.Value,ct);
+            // Search reads what the build carries, source Cases included; the executable manifest omits them (#1091 PAL-1).
+            var procedureEffectivity=releaseId is null?null:await VerificationReadEffectivity.ForReleaseAsync(db,projectId,releaseId.Value,ct);
              items.AddRange(await db.SystemChangeRequests.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.TargetReleaseId==releaseId)
                  &&(x.Type==ChangeRequestType.System ? allowedChangeControlLevels.Contains(RequirementLevel.System) : x.Type==ChangeRequestType.Interface ? allowedChangeControlLevels.Contains(RequirementLevel.Interface) : x.SoftwareLevel!=null&&allowedChangeControlLevels.Contains(x.SoftwareLevel.Value))
                  &&(x.BaseNumber.ToLower().Contains(identifierQ)||x.Title.ToLower().Contains(q)||x.Problem.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"change-request",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Title,x.State.ToString(),x.Type==ChangeRequestType.Software?"software":"system",x.UpdatedAt,x.Type==ChangeRequestType.System?RequirementLevel.System.ToString():x.Type==ChangeRequestType.Interface?RequirementLevel.Interface.ToString():x.SoftwareLevel!.Value.ToString())).ToListAsync(ct));
@@ -815,7 +823,7 @@ public static class WorkspaceEndpoints
             items.AddRange(requirementRows.Select(x=>new SearchResultDto(x.Id,"requirement",$"{x.BaseNumber}.{x.Revision:D2}",x.Statement,x.State.ToString(),x.Level==RequirementLevel.System?"system":"software",x.CreatedAt,x.Level.ToString())));
             items.AddRange(await db.CandidateBaselines.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.ReleaseId==releaseId)&&(x.BaseNumber.ToLower().Contains(q)||x.Name.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"baseline",x.BaseNumber+"."+(x.Revision<10?"0":"")+x.Revision,x.Name,x.State.ToString(),"configuration",x.CreatedAt)).ToListAsync(ct));
             items.AddRange(await db.SoftwareBuilds.AsNoTracking().Where(x=>x.ProjectId==projectId&&(releaseId==null||x.ReleaseId==releaseId)&&(x.BuildNumber.ToLower().Contains(q)||x.Description.ToLower().Contains(q))).Take(take).Select(x=>new SearchResultDto(x.Id,"build",x.BuildNumber,x.Description,x.State.ToString(),"software",x.RecordedAt)).ToListAsync(ct));
-            var effectiveProcedureRevisionIds=procedureEffectivity?.RevisionIds.ToList();
+            var effectiveProcedureRevisionIds=procedureEffectivity?.RevisionByProcedure.Values.ToList();
             var procedureSearchRevisionIds=releaseId is null
                 ? await(from revision in db.TestProcedureRevisions.AsNoTracking()
                          join procedure in db.TestProcedures.AsNoTracking().Where(x=>x.ProjectId==projectId&&allowedProcedureLevels.Contains(x.Level)

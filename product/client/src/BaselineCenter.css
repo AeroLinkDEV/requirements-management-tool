@@ -107,3 +107,6 @@ html .reopenConfirm {
 html .reopenConfirm:disabled { cursor: not-allowed; opacity: .5; }
 .reopenRefusal, .reopenError { color: #8a3f3f; font: 600 13px/1.5 Manrope, sans-serif; margin: 0; }
 .reopenQuiet { color: #6b5555; font: 500 13px/1.5 Manrope, sans-serif; }
+/* #1091 BAS-1: progressive manifest, and long hashes wrap instead of widening the page. */
+.manifestMore { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 0 4px; color: #5c6a7e; font-size: 13px; }
+.swrdHash code { overflow-wrap: anywhere; }
