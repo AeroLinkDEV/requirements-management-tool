@@ -13,7 +13,7 @@
 .jiraState.attention > i { background: #c98a00; }
 .jiraState b { display: block; color: #1c3044; font-size: 14px; }
 .jiraState code { display: block; margin: 2px 0; color: #4b5f74; font-size: 12px; overflow-wrap: anywhere; }
-.jiraState small { color: #7f8d9c; font-size: 12px; }
+.jiraState small { color: #5f6d7e; font-size: 12px; }
 
 .jiraActions { display: flex; gap: 8px; flex-wrap: wrap; }
 .jiraActions button {
@@ -37,4 +37,4 @@
 .jiraLinks a { color: #2e74b5; font: 600 13px/1 "DM Sans", sans-serif; }
 .jiraLinks em { color: #a4262c; font-size: 12px; font-style: normal; }
 .jiraLinks strong { display: block; color: #4b5f74; font: 600 12px/1.3 "DM Sans", sans-serif; text-align: right; }
-.jiraLinks time { display: block; color: #7f8d9c; font-size: 11px; text-align: right; }
+.jiraLinks time { display: block; color: #5f6d7e; font-size: 11px; text-align: right; }

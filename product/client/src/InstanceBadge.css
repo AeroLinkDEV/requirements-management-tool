@@ -48,7 +48,8 @@
    opportunities so the label can never escape the capped chip — ordinary words still wrap at their
    boundaries first. It also collapses the flex child's min-content, which is what let a single long
    token push past the badge box (Checkpoint B, F01). */
-.instanceBadge summary [data-testid="instance-label"] { overflow-wrap: anywhere; }
+/* #1091 RESP-1: "anywhere" broke HOME into "HOM/E" in the 1024px sidebar; break-word still splits only tokens too long to fit a line. */
+.instanceBadge summary [data-testid="instance-label"] { overflow-wrap: break-word; word-break: normal; }
 
 .instanceBadge--homecanonical {
   border-color: #3f7f72;

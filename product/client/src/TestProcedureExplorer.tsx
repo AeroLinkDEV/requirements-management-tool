@@ -1121,14 +1121,14 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
                         <b>{procedure.displayNumber}</b>
                         <p>{procedure.title}</p>
                       </button>
-                    <span className={`artifactBadge ${procedure.artifactKind?.toLowerCase() ?? 'unknown'}`}>{procedure.artifactLabel ?? procedure.artifactKind ?? 'Artifact'}</span>
-                    <span>{procedureLevelLabel(procedure.level)}</span>
-                    <span>{procedure.artifactKind === 'Procedure' && procedure.level !== 'System'
+                    <span role="cell" className={`artifactBadge ${procedure.artifactKind?.toLowerCase() ?? 'unknown'}`}>{procedure.artifactLabel ?? procedure.artifactKind ?? 'Artifact'}</span>
+                    <span role="cell">{procedureLevelLabel(procedure.level)}</span>
+                    <span role="cell">{procedure.artifactKind === 'Procedure' && procedure.level !== 'System'
                       ? procedure.parentCount ?? 0
                       : procedure.requirementCount ?? 0}</span>
-                    <span>{procedure.lastOutcome ?? 'Not run'}</span>
-                    <i className={procedure.state.toLowerCase()}>{stateLabel(procedure.state)}</i>
-                    <span>○ 0</span>
+                    <span role="cell">{procedure.lastOutcome ?? 'Not run'}</span>
+                    <i role="cell" className={procedure.state.toLowerCase()}>{stateLabel(procedure.state)}</i>
+                    <span role="cell">○ 0</span>
                   </article>
                 ))}
             </div>

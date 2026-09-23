@@ -49,3 +49,8 @@ small { font-size: var(--text-xs); }
 @media (prefers-reduced-motion: reduce) {
   main button:not([class]) { transition: none; }
 }
+/* #1091 A11Y-1: keyboard users reach the page without tabbing through ~25 navigation controls. */
+.skipLink { position: absolute; left: 12px; top: -60px; z-index: 300; padding: 10px 14px; border-radius: var(--radius-sm); background: var(--surface); color: var(--teal-700); font-weight: 700; box-shadow: 0 6px 20px #0003; }
+.skipLink:focus { top: 12px; }
+.workspaceStage:focus { outline: none; }
+.workQueue .workOverdue { color: #a93448; font-style: normal; font-weight: 700; }

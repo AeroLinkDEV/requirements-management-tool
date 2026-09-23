@@ -9,7 +9,7 @@ test("enterprise control proves content, queries, exports, redlines, and cryptog
   await selectProgram(page, "Flight Management System Live Program");
   await openNavigationGroup(page, "ADMINISTRATION");
   await page.getByRole("link", { name: /Enterprise Control/ }).click();
-  await expect(page.getByRole("heading", { name: "Enterprise Control" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "System Operations" })).toBeVisible();
   await expect(page.getByText("Repository assurance posture")).toBeVisible();
 
   await page.getByRole("button", { name: "Content vault" }).click();

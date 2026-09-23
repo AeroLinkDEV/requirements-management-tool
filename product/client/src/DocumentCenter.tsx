@@ -34,7 +34,7 @@ export default function DocumentCenter({ api, projectId, release, discipline, la
         <div>
           <button className="back" onClick={onBack}>← {assurance ? "Verification" : "Requirements Explorer"}</button>
           <p className="eyebrow">{assurance ? "ASSURANCE" : "ENGINEERING"} / {scope.toUpperCase()}</p>
-          <h1>Documents</h1>
+          <h1>Generated Documents</h1>
           <p>
             {release.isReleased
               ? `Approved documents belonging to software build SW-${release.version.padStart(4, "0").replace(".", ".")}0.`

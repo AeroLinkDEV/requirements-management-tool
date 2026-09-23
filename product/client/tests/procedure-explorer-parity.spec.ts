@@ -149,7 +149,7 @@ test('a Procedure-enabled profile adds distinct HLRTPD and LLRTPD actions in the
     .getByRole('button', { name: 'Software' }).click()
   await verification.getByRole('link', { name: 'Generated Software Verification Documents' }).click()
 
-  await expect(page.getByRole('heading', { name: 'Documents', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Generated Documents', level: 1 })).toBeVisible()
   const outputs = page.getByRole('region', { name: 'Software assurance documents' })
   await expect(outputs.locator('.documentOutput')).toHaveCount(4)
   await expect(outputs.getByText('HLR Test Case Document (HLRTD)')).toBeVisible()
