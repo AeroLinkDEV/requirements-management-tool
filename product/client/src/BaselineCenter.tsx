@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PersonName } from "./People";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useFormDraft } from "./autosave";
-import { stateLabel } from './presentation'
+import { requirementLevelLabel, stateLabel } from './presentation'
 import LegacyProcedureBootstrapPanel from './LegacyProcedureBootstrapPanel'
 import { ReopenBaselinePanel } from './ReopenBaselinePanel'
 import type { FormEvent } from "react";
@@ -217,7 +217,7 @@ export default function BaselineCenter({
             ← Command Center
           </button>
           <p className="eyebrow">
-            CONFIGURATION CONTROL / RELEASE {releaseVersion}
+            CONFIGURATION CONTROL / BUILD {releaseVersion}
           </p>
           <h1>Candidate Baselines</h1>
           <p>
@@ -478,7 +478,7 @@ export default function BaselineCenter({
                       <article className="manifestRequirement" key={item.id}>
                         <div>
                           <b>{item.displayNumber}</b>
-                          <span>{item.level}</span>
+                          <span>{requirementLevelLabel(item.level)}</span>
                         </div>
                         <p>{item.statement}</p>
                         <small>

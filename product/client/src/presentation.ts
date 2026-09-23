@@ -545,3 +545,13 @@ export const formatEvidentiaryDateTime = (value: string | Date | null | undefine
   if (Number.isNaN(date.getTime())) return invalidTimestampText
   return `${dateTimeFormatter(ordinaryDateOptions, timeZone).format(date)} · ${dateTimeFormatter(evidentiaryTimeOptions, timeZone).format(date)} ${timeZoneOffset(date, timeZone)}`.trimEnd()
 }
+
+/** Reader-facing name of a requirement level; the enum value never reaches the page (#1091 LOW-11). */
+export const requirementLevelLabel = (level?: string | null) => {
+  switch (level) {
+    case 'HighLevel': return 'High-level'
+    case 'LowLevel': return 'Low-level'
+    case undefined: case null: case '': return ''
+    default: return level
+  }
+}

@@ -1380,8 +1380,11 @@ export default function ManagedDocumentationCenter({
                           <dt>Contributors</dt>
                           <dd>
                             {[...new Set(inWork.checkIns.map((item) => item.actorId))].map(
-                              (value) => (
-                                <PersonName key={value} userName={value} />
+                              (value, index) => (
+                                <span key={value}>
+                                  {index > 0 && ", "}
+                                  <PersonName userName={value} />
+                                </span>
                               ),
                             )}
                           </dd>

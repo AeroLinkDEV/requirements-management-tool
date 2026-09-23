@@ -1213,7 +1213,7 @@ function App() {
         api={API}
         projectId={project.project.id}
         activeReleaseId={release?.id ?? ""}
-        releases={release ? [release] : []}
+        releases={project.releases}
         user={user}
         screen={view === "releaseImpact" ? "impact" : view === "releaseDecision" ? "decision" : "readiness"}
         selectedScrId={view === "releaseImpact" ? selectedArtifactId || undefined : undefined}

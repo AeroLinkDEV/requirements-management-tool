@@ -125,7 +125,7 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   // Tracked so the evidence field can be required exactly where the product requires it. A Pass or a Fail
   // is a claim about what was observed and has to say where the observation is recorded; a Blocked run
   // observed nothing, so demanding evidence of it would be demanding evidence of an absence.
-  const [outcome, setOutcome] = useState<'Pass' | 'Fail' | 'Blocked'>('Pass')
+  const [outcome, setOutcome] = useState<'' | 'Pass' | 'Fail' | 'Blocked'>('')
   const [executions, setExecutions] = useState<Execution[]>([])
   const [showRuns, setShowRuns] = useState('')
   // Set when a retest supersedes a specific earlier run rather than simply the latest one, which is what a
@@ -137,7 +137,8 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   const [closureRationale, setClosureRationale] = useState('')
 
   const openRecording = (procedure: SetArtifact, predecessorId?: string | null) => {
-    setOutcome('Pass')
+    // A human determination starts undecided (#1091 TR-1): a pre-selected Pass can be recorded by accident.
+    setOutcome('')
     setSupersedesExecutionId(predecessorId ?? undefined)
     setRecording(procedure)
   }
@@ -299,6 +300,8 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
   }, 'The evidence could not be stored and linked to this result.')
 
   const exclude = (artifactRevisionId: string) => act(async () => {
+    const removed = set?.artifacts.find(item => item.artifactRevisionId === artifactRevisionId)
+    if (!window.confirm(`Take ${removed?.displayNumber ?? 'this item'} out of this build's test set? Any result it already has is kept.`)) return
     await apiRequest(`${api}/api/releases/${releaseId}/test-sets/${discipline}/${artifactSetSegment}/${artifactRevisionId}`, { method: 'DELETE' })
     setSaved('Taken out of the test set. Any result it already has is kept.')
   }, `The ${artifactNoun.toLowerCase()} could not be removed from the test set.`)
@@ -506,7 +509,8 @@ export default function TestResultsWorkspace({ api, projectId, releaseId, discip
                 for that decision and for the reasoning behind it, because a verdict alone cannot be read back
                 years later by somebody reconstructing why a build was released. */}
             <label>Outcome
-              <select name="outcome" value={outcome} onChange={event => setOutcome(event.target.value as "Pass" | "Fail" | "Blocked")}>
+              <select name="outcome" value={outcome} required onChange={event => setOutcome(event.target.value as "" | "Pass" | "Fail" | "Blocked")}>
+                <option value="" disabled>Choose the observed outcome…</option>
                 <option value="Pass">Pass</option>
                 <option value="Fail">Fail</option>
                 <option value="Blocked">Blocked</option>

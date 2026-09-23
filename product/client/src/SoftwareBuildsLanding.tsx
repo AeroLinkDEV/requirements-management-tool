@@ -80,7 +80,7 @@ export default function SoftwareBuildsLanding({
             <button type="button" className="personnelButton" onClick={onPersonnel}>Personnel</button>
             <button type="button" className="approvalConfigurationButton" onClick={onProjectConfiguration}>Project configuration</button>
             <button type="button" className="importedBaselinesButton" onClick={onImportedBaselines}>Imported baselines</button>
-            <button type="button" className="projectOverviewButton" onClick={onProjectOverview}><span aria-hidden="true">←</span> Project overview</button>
+            <button type="button" className="projectOverviewButton" onClick={onProjectOverview}><span aria-hidden="true">←</span> All projects</button>
           </div>
         </header>
 
@@ -144,14 +144,9 @@ export default function SoftwareBuildsLanding({
               })}
             </ol>
           ) : (
-            <p className="buildLineageEmpty">This project has no software builds yet.</p>
+            <p className="buildLineageEmpty">This project has no software builds yet. Use <b>Imported baselines</b> above to bring in an existing baseline as its first build.</p>
           )}
         </section>
-
-        <aside className="buildDetailsHelper">
-          <span aria-hidden="true">◇</span>
-          <div><h2>Build details</h2><p>Select a build above to view its controlled workspace.</p></div>
-        </aside>
       </main>
     </div>
   );

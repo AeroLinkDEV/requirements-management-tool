@@ -122,6 +122,9 @@ export function RichContentEditor({ api, projectId, editSessionId, value, label,
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
   const [focusBlockIndex, setFocusBlockIndex] = useState<number>();
+  // The empty-state editor is replaced by the first real paragraph on the first keystroke (#1091 RTE-1), so the
+  // new editor must take focus with the caret after the character just typed.
+  const focusAtEnd = useRef(false);
   const editorRoot = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -134,6 +137,12 @@ export function RichContentEditor({ api, projectId, editSessionId, value, label,
     );
     if (target) {
       target.focus();
+      if (focusAtEnd.current) {
+        const selection = window.getSelection();
+        selection?.selectAllChildren(target);
+        selection?.collapseToEnd();
+        focusAtEnd.current = false;
+      }
       setFocusBlockIndex(undefined);
     }
   }, [blocks, focusBlockIndex]);
@@ -302,7 +311,7 @@ export function RichContentEditor({ api, projectId, editSessionId, value, label,
               label={`${label} paragraph 1`}
               disabled={disabled}
               placeholder={placeholder ?? "Describe what happened, what was observed, and why it matters."}
-              onChange={(next) => commit([next])}
+              onChange={(next) => { focusAtEnd.current = true; commit([next]); setFocusBlockIndex(0); }}
               onSplit={(before, after) => { commit([before, after]); setFocusBlockIndex(1); }}
             />
           </li>

@@ -435,6 +435,16 @@
 .reqLayout.inspecting { grid-template-columns: 210px minmax(500px, 1fr) 360px; }
 .reqLayout.inspecting .reqTableHead,
 .reqLayout.inspecting .reqTable article { grid-template-columns: minmax(245px, 1fr) 68px 92px 62px; column-gap: 7px; }
+/* #1091 TPX-1: the verification list carries seven columns in a resizable panel that can be ~320px wide, so a
+   fixed 245px first column pushed Artifact and State off the edge ("ARTIFAC", "Approvec"). While inspecting,
+   it shows identifier + artifact over latest result + state, sized to whatever width the panel has. */
+.reqLayout.inspecting .procedureList .reqTableHead,
+.reqLayout.inspecting .procedureList article { grid-template-columns: minmax(0, 1fr) max-content; }
+.reqLayout.inspecting .procedureList .reqTableHead > :nth-child(3),
+.reqLayout.inspecting .procedureList .reqTableHead > :nth-child(4),
+.reqLayout.inspecting .procedureList article > :nth-child(3),
+.reqLayout.inspecting .procedureList article > :nth-child(4) { display: none; }
+.reqLayout.inspecting .procedureList article > * { min-width: 0; }
 .reqLayout.inspecting .reqTableHead > span:last-child,
 .reqLayout.inspecting .reqTable article > span:last-child { display: none; }
 .reqLayout.inspecting .impactLaunch { white-space: normal; line-height: 1.35; }
@@ -445,7 +455,7 @@
 .explorerBoundary > span { display: flex; flex-direction: column; gap: 1px; }
 .explorerBoundary b { font-size: 12px; }
 .explorerBoundary small { color: #5c7572; font-size: 12px; }
-.requirementInspector .inspectorTabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.requirementInspector .inspectorTabs { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
 .requirementInspector .inspectorTabs button { min-width: 0; padding: 12px 4px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .requirementInspector .inspectorTabs span { padding: 1px 4px; }
 .changeBoundaryNote { margin: 7px 0 18px; color: #6a7789; font-size: 12px; line-height: 1.45; }

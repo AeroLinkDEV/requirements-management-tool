@@ -179,14 +179,14 @@ test('a software HLR trace navigates to the exact software requirement revision'
     { timeout: 30_000 })
   const heading = page.getByRole('heading', { name: /^HLR-\d{6}\.\d{2}$/ })
   await expect(heading).toBeVisible({ timeout: 30_000 })
-  await expect(page.locator('.requirementInspector')).toContainText('HIGHLEVEL REQUIREMENT')
+  await expect(page.locator('.requirementInspector')).toContainText('HIGH-LEVEL REQUIREMENT')
   const display = (await heading.textContent())!.trim()
   const exactUrl = page.url()
 
   await page.reload()
   await expect(page).toHaveURL(exactUrl)
   await expect(page.getByRole('heading', { name: display })).toBeVisible({ timeout: 30_000 })
-  await expect(page.locator('.requirementInspector')).toContainText('HIGHLEVEL REQUIREMENT')
+  await expect(page.locator('.requirementInspector')).toContainText('HIGH-LEVEL REQUIREMENT')
 })
 
 test('an exact requirement deep link fails closed instead of substituting the latest revision', async ({ page }) => {

@@ -37,7 +37,7 @@ test('The sign-in story panel gives truthful workspace context without changing 
   await expect(page.locator('.loginStoryContext')).toContainText('CONTROLLED ENGINEERING WORKSPACE')
   // The owner-mandated sign-in headline (#925 P1), singular "Document" and all.
   await expect(page.locator('.loginStoryContext h1')).toHaveText(
-    'Requirements, Verification, Changes, Evidence, Document, and more in one connected record')
+    'Requirements, Verification, Changes, Evidence, Documents, and more in one connected record')
   // The explanatory paragraph and the access statement were removed by the same owner direction.
   await expect(page.locator('.loginStoryContext')).not.toContainText('Sign in to reach the programs')
   await expect(page.locator('.loginStoryContext')).not.toContainText('PROJECT ACCESS IS ENFORCED')
