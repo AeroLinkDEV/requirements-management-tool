@@ -1095,6 +1095,15 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: product/client/package-lock.json
+      # #939: a stalled request makes the API print AEROLINK-STALL with its pid, and the log wrapper then captures
+      # every managed thread's stack with this tool. Diagnostics only, so it can never decide the job: a failed
+      # install leaves capture unconfigured, and the wrapper records that in the API transcript instead.
+      - name: Install stack capture for stalled-request diagnostics
+        continue-on-error: true
+        shell: bash
+        run: |
+          dotnet tool install dotnet-stack --version 10.0.745401 --tool-path "$RUNNER_TEMP/dotnet-diagnostics"
+          node -e "const fs=require('fs');const p=require('path').join(process.env.RUNNER_TEMP,'dotnet-diagnostics','dotnet-stack');const t=[p+'.exe',p].find(f=>fs.existsSync(f));if(!t)process.exit(1);fs.appendFileSync(process.env.GITHUB_ENV,'AEROLINK_E2E_STACK_ARGV='+JSON.stringify([t])+'\n')"
       - name: Cache NuGet packages
         id: nuget
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -1265,6 +1274,15 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: product/client/package-lock.json
+      # #939: a stalled request makes the API print AEROLINK-STALL with its pid, and the log wrapper then captures
+      # every managed thread's stack with this tool. Diagnostics only, so it can never decide the job: a failed
+      # install leaves capture unconfigured, and the wrapper records that in the API transcript instead.
+      - name: Install stack capture for stalled-request diagnostics
+        continue-on-error: true
+        shell: bash
+        run: |
+          dotnet tool install dotnet-stack --version 10.0.745401 --tool-path "$RUNNER_TEMP/dotnet-diagnostics"
+          node -e "const fs=require('fs');const p=require('path').join(process.env.RUNNER_TEMP,'dotnet-diagnostics','dotnet-stack');const t=[p+'.exe',p].find(f=>fs.existsSync(f));if(!t)process.exit(1);fs.appendFileSync(process.env.GITHUB_ENV,'AEROLINK_E2E_STACK_ARGV='+JSON.stringify([t])+'\n')"
       - name: Cache NuGet packages
         id: nuget
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -1382,6 +1400,15 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: product/client/package-lock.json
+      # #939: a stalled request makes the API print AEROLINK-STALL with its pid, and the log wrapper then captures
+      # every managed thread's stack with this tool. Diagnostics only, so it can never decide the job: a failed
+      # install leaves capture unconfigured, and the wrapper records that in the API transcript instead.
+      - name: Install stack capture for stalled-request diagnostics
+        continue-on-error: true
+        shell: bash
+        run: |
+          dotnet tool install dotnet-stack --version 10.0.745401 --tool-path "$RUNNER_TEMP/dotnet-diagnostics"
+          node -e "const fs=require('fs');const p=require('path').join(process.env.RUNNER_TEMP,'dotnet-diagnostics','dotnet-stack');const t=[p+'.exe',p].find(f=>fs.existsSync(f));if(!t)process.exit(1);fs.appendFileSync(process.env.GITHUB_ENV,'AEROLINK_E2E_STACK_ARGV='+JSON.stringify([t])+'\n')"
       # The weekly run reuses whatever the week's pull requests left behind. On a quiet week the entry has been
       # evicted and this pays the download once, which is the point of a weekly environment-rot check anyway.
       - name: Cache Chromium

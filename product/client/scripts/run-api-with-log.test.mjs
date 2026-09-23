@@ -604,3 +604,89 @@ test('separate execution identities do not overwrite one another, and a retry ap
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// ---------------------------------------------------------------------------------------------------
+// Stack capture on a reported stall (#939)
+// ---------------------------------------------------------------------------------------------------
+
+/** A stand-in for `dotnet-stack`: prints what it was asked to do, as the real tool prints stacks. */
+const fakeStackArgv = JSON.stringify([process.execPath, '-e', "console.log('fake-stack ' + process.argv.slice(1).join(' '))"])
+
+test('a stall marker runs the configured capture against the pid it names and keeps the output', async () => {
+  const dir = scratch()
+  const registry = []
+  const logPath = join(dir, 'api.log')
+  try {
+    const state = startWrapper(
+      nodeArgv("console.log('warn: StallWatchdog'); console.log('      AEROLINK-STALL pid=4242 method=POST path=/api/auth/login'); setTimeout(() => {}, 30000)"),
+      { logPath, registry, env: { AEROLINK_E2E_STACK_ARGV: fakeStackArgv } },
+    )
+    await waitFor(() => /stk ==== capture ended exit=0/.test(readFileSync(logPath, 'utf8')), 'the capture to finish')
+    const log = readFileSync(logPath, 'utf8')
+    assert.match(log, /stk ==== capturing managed stacks of pid 4242 \(1\/5\) ====/)
+    // The pid comes from the marker, not from the process the wrapper started.
+    assert.match(log, /^\S+ stk fake-stack report -p 4242$/m)
+    killTree(state.proc.pid)
+    await withDeadline(state.closed, 'the wrapper to exit')
+  } finally {
+    registry.forEach(killTree)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a marker split across output chunks is still recognised', async () => {
+  const dir = scratch()
+  const registry = []
+  const logPath = join(dir, 'api.log')
+  try {
+    const state = startWrapper(
+      nodeArgv("process.stdout.write('AEROLINK-ST'); setTimeout(() => { process.stdout.write('ALL pid=77 method=GET\\n'); setTimeout(() => {}, 30000) }, 300)"),
+      { logPath, registry, env: { AEROLINK_E2E_STACK_ARGV: fakeStackArgv } },
+    )
+    await waitFor(() => /stk fake-stack report -p 77$/m.test(readFileSync(logPath, 'utf8')), 'the capture of pid 77')
+    killTree(state.proc.pid)
+    await withDeadline(state.closed, 'the wrapper to exit')
+  } finally {
+    registry.forEach(killTree)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('without a configured capture a stall is noted once and the outcome is unchanged', async () => {
+  const dir = scratch()
+  const registry = []
+  const logPath = join(dir, 'api.log')
+  try {
+    const result = await runWrapper(
+      nodeArgv("console.log('AEROLINK-STALL pid=1 a'); console.log('AEROLINK-STALL pid=1 b'); process.exit(3)"),
+      { logPath, registry, env: { AEROLINK_E2E_STACK_ARGV: '' } },
+    )
+    assert.equal(result.code, 3)
+    const notes = readFileSync(logPath, 'utf8').match(/stack capture is not configured/g) ?? []
+    assert.equal(notes.length, 1)
+  } finally {
+    registry.forEach(killTree)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('captures are spaced, so a burst of stalls takes one capture rather than one each', async () => {
+  const dir = scratch()
+  const registry = []
+  const logPath = join(dir, 'api.log')
+  try {
+    const state = startWrapper(
+      nodeArgv("for (const pid of [11, 12, 13]) console.log('AEROLINK-STALL pid=' + pid); setTimeout(() => {}, 30000)"),
+      { logPath, registry, env: { AEROLINK_E2E_STACK_ARGV: fakeStackArgv, AEROLINK_E2E_STACK_SPACING_MS: '60000' } },
+    )
+    await waitFor(() => /stk ==== capture ended/.test(readFileSync(logPath, 'utf8')), 'the first capture to finish')
+    const log = readFileSync(logPath, 'utf8')
+    assert.equal((log.match(/capturing managed stacks/g) ?? []).length, 1)
+    assert.match(log, /fake-stack report -p 11$/m)
+    killTree(state.proc.pid)
+    await withDeadline(state.closed, 'the wrapper to exit')
+  } finally {
+    registry.forEach(killTree)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

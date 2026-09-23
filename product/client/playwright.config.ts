@@ -113,6 +113,12 @@ export default defineConfig({
         // change with its own justification, and is not being smuggled in here.
         'Logging__LogLevel__Microsoft.AspNetCore': 'Information',
         'Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command': 'Warning',
+        // #939: a request that reached its endpoint and waited until the browser gave up, twice, with nothing
+        // in the transcript to say on what. The API reports a request still executing after 10 s (and the
+        // wrapper captures every thread's stack when AEROLINK_E2E_STACK_ARGV names a capture tool), and any
+        // database command, connection or transaction slower than 2 s, with whose work it was.
+        Diagnostics__StallReportSeconds: '10',
+        Diagnostics__SlowDatabaseMilliseconds: '2000',
         Database__Provider: 'Sqlite',
         Evidence__Root: storage.evidence,
         DemoData__Enabled: 'false',
