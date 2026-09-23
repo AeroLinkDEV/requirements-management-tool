@@ -174,11 +174,100 @@ const makeStamper = stream => {
 const out = makeStamper('out')
 const err = makeStamper('err')
 
+// ---------------------------------------------------------------------------------------------------
+// Stack capture on a reported stall (#939)
+//
+// The API, when told to, prints `AEROLINK-STALL pid=<n> ...` once a request has been executing too long. The
+// transcript already shows that a request waited; what it cannot show is what the process was doing, and
+// that needs every managed thread's stack taken while the wait is happening. This wrapper does it by running
+// the configured capture command (in CI, `dotnet-stack`) against the pid in the marker. The pid comes from the
+// marker because `dotnet run` makes the server a grandchild this wrapper never sees.
+//
+// Same rule as everything else here: it must not change the outcome. Captures are bounded in number and
+// spacing, each is time-limited, and a missing tool or a failed capture only adds a line to the transcript.
+// Unset, which is the default for anyone running the suite locally, nothing is attempted.
+
+/** The capture command as a JSON argument vector; `report -p <pid>` is appended. */
+const stackArgvJson = process.env.AEROLINK_E2E_STACK_ARGV
+let stackArgv = null
+if (stackArgvJson) {
+  try {
+    const parsed = JSON.parse(stackArgvJson)
+    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(item => typeof item === 'string')) stackArgv = parsed
+    else writeLog(`==== stack capture disabled: AEROLINK_E2E_STACK_ARGV must be a non-empty array of strings\n`)
+  } catch (error) {
+    writeLog(`==== stack capture disabled: AEROLINK_E2E_STACK_ARGV is not valid JSON (${error.message})\n`)
+  }
+}
+
+const stallMarker = /AEROLINK-STALL pid=(\d+)/
+const maximumCaptures = Number(process.env.AEROLINK_E2E_STACK_MAX_CAPTURES ?? 5)
+const minimumCaptureSpacingMs = Number(process.env.AEROLINK_E2E_STACK_SPACING_MS ?? 20_000)
+let captures = 0
+let lastCaptureAt = -Infinity
+let captureRunning = false
+let runningCapture = null
+let reportedUnconfigured = false
+
+const captureStacks = pid => {
+  if (!stackArgv) {
+    if (!reportedUnconfigured) writeLog(`${new Date().toISOString()} stk stall reported for pid ${pid}; stack capture is not configured\n`)
+    reportedUnconfigured = true
+    return
+  }
+  const now = Date.now()
+  if (captureRunning || captures >= maximumCaptures || now - lastCaptureAt < minimumCaptureSpacingMs) return
+  captures += 1
+  lastCaptureAt = now
+  captureRunning = true
+  writeLog(`${new Date().toISOString()} stk ==== capturing managed stacks of pid ${pid} (${captures}/${maximumCaptures}) ====\n`)
+  const stk = makeStamper('stk')
+  let capture
+  try {
+    capture = spawn(stackArgv[0], [...stackArgv.slice(1), 'report', '-p', String(pid)],
+      { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (error) {
+    writeLog(`${new Date().toISOString()} stk capture could not start (${error.message})\n`)
+    captureRunning = false
+    return
+  }
+  runningCapture = capture
+  capture.stdout.setEncoding('utf8')
+  capture.stderr.setEncoding('utf8')
+  capture.stdout.on('data', chunk => stk.push(chunk))
+  capture.stderr.on('data', chunk => stk.push(chunk))
+  const limit = setTimeout(() => { try { capture.kill() } catch { /* already gone */ } }, 60_000)
+  capture.on('error', error => writeLog(`${new Date().toISOString()} stk capture failed (${error.message})\n`))
+  capture.on('close', code => {
+    clearTimeout(limit)
+    captureRunning = false
+    runningCapture = null
+    writeLog(`${new Date().toISOString()} stk ==== capture ended exit=${code ?? 'null'} ====\n`)
+  })
+}
+
+/** Whole stdout lines, for marker detection only. The transcript itself is written by `out`, unbuffered. */
+let pendingStdoutLine = ''
+const watchStdout = chunk => {
+  pendingStdoutLine += chunk
+  let newline = pendingStdoutLine.indexOf('\n')
+  while (newline >= 0) {
+    const match = stallMarker.exec(pendingStdoutLine.slice(0, newline))
+    if (match) captureStacks(Number(match[1]))
+    pendingStdoutLine = pendingStdoutLine.slice(newline + 1)
+    newline = pendingStdoutLine.indexOf('\n')
+  }
+  if (pendingStdoutLine.length > 16_384) pendingStdoutLine = pendingStdoutLine.slice(-16_384)
+}
+
 const child = spawn(argv[0], argv.slice(1), { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
 
 child.stdout.setEncoding('utf8')
 child.stderr.setEncoding('utf8')
-child.stdout.on('data', chunk => out.push(chunk))
+child.stdout.on('data', chunk => {
+  out.push(chunk)
+  watchStdout(chunk)
+})
 child.stderr.on('data', chunk => {
   err.push(chunk)
   // Unchanged from what Playwright already did with stderr. Removing this would quietly take away console
@@ -224,6 +313,8 @@ for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
 }
 
 const finish = (code, signal) => {
+  // A capture outliving the server it was reading has nothing left to report.
+  if (runningCapture) { try { runningCapture.kill() } catch { /* already gone */ } }
   const state = captureDegraded === '' ? 'complete' : `degraded (${captureDegraded})`
   // Best-effort, and deliberately not relied upon.
   //

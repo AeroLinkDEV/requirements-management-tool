@@ -1,5 +1,7 @@
 using AeroLink.Domain.Assurance;
+using AeroLink.Infrastructure.Diagnostics;
 using AeroLink.Infrastructure.Notifications;
+using Microsoft.Extensions.Logging;
 using AeroLink.Domain.Contracts;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -31,11 +33,22 @@ public static class DependencyInjection
             throw new InvalidOperationException(
                 $"Database:Provider is '{provider}'. AeroLink supports 'PostgreSql' and 'Sqlite'.");
         services.AddSingleton<ReleasedExecutionEvidenceInterceptor>();
+        // #939 stall diagnostics. Both are opt-in; the browser harness sets them and nothing else does.
+        var slowDatabaseAfter = StallDiagnosticsSettings.SlowDatabaseAfter(configuration);
+        if (slowDatabaseAfter is { } slowThreshold)
+            services.AddSingleton(provider => new SlowDatabaseInterceptor(slowThreshold,
+                provider.GetRequiredService<ILogger<SlowDatabaseInterceptor>>()));
+        services.AddSingleton<InFlightRequests>();
+        if (StallDiagnosticsSettings.StallReportAfter(configuration) is { } stallThreshold)
+            services.AddHostedService(provider => new StallWatchdog(provider.GetRequiredService<InFlightRequests>(),
+                stallThreshold, provider.GetRequiredService<ILogger<StallWatchdog>>()));
         services.AddDbContext<AeroLinkDbContext>((serviceProvider, options) =>
         {
             if (isPostgres) options.UseNpgsql(connection);
             else options.UseSqlite(connection);
             options.AddInterceptors(serviceProvider.GetRequiredService<ReleasedExecutionEvidenceInterceptor>());
+            if (slowDatabaseAfter is not null)
+                options.AddInterceptors(serviceProvider.GetRequiredService<SlowDatabaseInterceptor>());
         });
         services.AddScoped<IChangeRequestRepository, ChangeRequestRepository>();
         services.AddScoped<IProgramRepository, ProgramRepository>();

@@ -15,6 +15,7 @@ using AeroLink.Api;
 using System.Security.Cryptography;
 using System.Text;
 using AeroLink.Infrastructure;
+using AeroLink.Infrastructure.Diagnostics;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json.Serialization;
@@ -99,6 +100,20 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
 
 var app = builder.Build();
 app.UseExceptionHandler();
+// #939 stall diagnostics, opt-in. First in the pipeline so a request is tracked from the moment it arrives,
+// including the session gate, which is where one of the hung requests was waiting.
+if (StallDiagnosticsSettings.StallReportAfter(builder.Configuration) is not null
+    || StallDiagnosticsSettings.SlowDatabaseAfter(builder.Configuration) is not null)
+{
+    var inFlight = app.Services.GetRequiredService<InFlightRequests>();
+    app.Use(async (context, next) =>
+    {
+        var id = inFlight.Begin(context.Request.Method, context.Request.Path.Value ?? "");
+        DiagnosticsWorkContext.Set($"{context.Request.Method} {context.Request.Path.Value}");
+        try { await next(); }
+        finally { inFlight.End(id); }
+    });
+}
 app.UseCors();
 app.UseRateLimiter();
 app.UseAuthentication();
