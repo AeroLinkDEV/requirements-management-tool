@@ -760,9 +760,15 @@ function buildIntegrated(scenario) {
     // verbatim payload: used to inject records the checker must fail on
     writeFileSync(join(state, `run-${name}.json`), raw)
   }
+  if (scenario.pinnedReadBody) {
+    // the failed-response body is normalized onto the integrated identity too: the
+    // named condition is an HTTP failure carrying OTHERWISE ACCEPTABLE success evidence
+    writeFileSync(join(state, 'pinned-read-body.json'), JSON.stringify(integrated(scenario.pinnedReadBody)))
+  }
   if (scenario.prePinLeftover) {
-    // an earlier success-shaped response file left behind by a previous read
-    writeFileSync(join(state, 'tmp', 'pinned-101.json'), JSON.stringify(success101))
+    // an earlier success-shaped response file left behind by a previous read —
+    // built from the trusted record so only the read failure can refuse
+    writeFileSync(join(state, 'tmp', 'pinned-101.json'), JSON.stringify(integrated(success101)))
   }
   writeFileSync(join(state, 'jobs.json'), JSON.stringify(scenario.jobs ?? {
     jobs: [
@@ -1068,6 +1074,13 @@ test('integrated: post-pin transport failure with a stale success-shaped file re
   const { state, run } = postPinFailureState({ pinnedReadExit: 28, prePinLeftover: true })
   const leftover = join(state, 'tmp', 'pinned-101.json')
   assert.equal(existsSync(leftover), true, 'precondition: stale success-shaped file present')
+  // the stale payload carries the trusted integrated identity — only the read
+  // failure, not a trust mismatch, may refuse this scenario
+  const staleRecord = JSON.parse(readFileSync(leftover, 'utf8'))
+  assert.equal(staleRecord.head_sha, INTEGRATED_SHA)
+  assert.equal(staleRecord.head_branch, INTEGRATED_REF)
+  assert.equal(staleRecord.status, 'completed')
+  assert.equal(staleRecord.conclusion, 'success')
   const outcome = run()
   // poll_pinned removes the stale file before the read, then curl exits 28:
   // the stale file is gone and its contents were never interpreted
@@ -1078,7 +1091,15 @@ test('integrated: post-pin transport failure with a stale success-shaped file re
 test('integrated: post-pin failed HTTP carrying a success-shaped body refuses', { skip: skipIntegrated }, () => {
   const { state, run } = postPinFailureState({ pinnedReadStatus: 500, pinnedReadBody: success101 })
   const outcome = run()
-  // a 500 response whose body looks like a run must not be treated as evidence
+  // a 500 response whose body looks like a run must not be treated as evidence;
+  // the mock must deliver the NORMALIZED success body it was given
+  const delivered = JSON.parse(readFileSync(join(state, 'tmp', 'pinned-101.json'), 'utf8'))
+  assert.equal(delivered.head_sha, INTEGRATED_SHA)
+  assert.equal(delivered.head_branch, INTEGRATED_REF)
+  assert.equal(delivered.status, 'completed')
+  assert.equal(delivered.conclusion, 'success')
+  assert.equal(delivered.run_attempt, 1)
+  assert.match(readFileSync(join(state, 'pinned-read-body.json'), 'utf8'), /glm\/integrated-branch/)
   assertPostPinRefusal(state, outcome)
 })
 
