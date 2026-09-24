@@ -23,7 +23,8 @@ test('PR readiness refuses cross-PR current queue aliases through the actual pro
   assert.ok(embedded, 'the guard must be defined by the protected workflow')
   const source = embedded[1].replace(/^          /gm, '')
   const queue = candidates => ({ data: { repository: { mergeQueue: { entries: {
-    nodes: candidates.map(oid => ({ headCommit: { oid } })), pageInfo: { hasNextPage: false },
+    nodes: candidates.map(entry => typeof entry === 'object' && entry !== null ? entry : { state: 'AWAITING_CHECKS', headCommit: { oid: entry } }),
+    pageInfo: { hasNextPage: false },
   } } } } })
   const cases = [
     { name: 'ordinary distinct PR', queue: queue([sha('b')]), pass: true },
@@ -32,6 +33,12 @@ test('PR readiness refuses cross-PR current queue aliases through the actual pro
     { name: 'missing queue', queue: {}, pass: false },
     { name: 'GraphQL error', queue: { ...queue([]), errors: [{ message: 'denied' }] }, pass: false },
     { name: 'unresolved candidate', queue: queue([null]), pass: false },
+    // #1106: a freshly queued entry has no candidate commit yet and cannot alias the PR head.
+    { name: 'queued entry without a candidate yet', queue: queue([sha('b'), { state: 'QUEUED', headCommit: null }]), pass: true },
+    { name: 'queued entry whose candidate is the PR head', queue: queue([{ state: 'QUEUED', headCommit: { oid: sha('a') } }]), pass: false },
+    { name: 'queued entry with a malformed candidate', queue: queue([{ state: 'QUEUED', headCommit: { oid: 'abc' } }]), pass: false },
+    { name: 'awaiting-checks entry without a candidate', queue: queue([{ state: 'AWAITING_CHECKS', headCommit: null }]), pass: false },
+    { name: 'entry without a state or candidate', queue: queue([{ headCommit: null }]), pass: false },
   ]
   const paged = queue([])
   paged.data.repository.mergeQueue.entries.pageInfo.hasNextPage = true
