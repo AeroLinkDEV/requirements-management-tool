@@ -49,6 +49,11 @@ jobs:
             --header "Accept: application/vnd.github+json"
             --header "X-GitHub-Api-Version: 2022-11-28"
           )
+          SELF_RUN_ID="${{ github.run_id }}"
+          SELF_RUN_ATTEMPT="${{ github.run_attempt }}"
+          BOUNDARY_ID=0
+          PINNED_ID=""
+          PINNED_ATTEMPT=""
 
           # This protected-runner helper never comes from candidate code. Readiness and queue binding use
           # the same required App context, so a queue commit must never be approved through PR readiness.
@@ -115,16 +120,145 @@ jobs:
           PY
           }
 
+          # Bounded pagination walk: fetch up to three pages and require the walk to complete.
+          # A still-present rel="next" refuses rather than reasoning over a truncated history.
+          collect_pages() {
+            local prefix="$1" url="$2" page complete=0
+            rm -f "$prefix.page."* "$prefix.headers."* 2>/dev/null || true
+            for page in 1 2 3; do
+              curl --fail-with-body --silent --show-error "${headers[@]}" \
+                --dump-header "$prefix.headers.$page" \
+                "$url&page=$page&per_page=100" --output "$prefix.page.$page"
+              if ! grep -qi '^link:.*rel="next"' "$prefix.headers.$page"; then
+                complete=1
+                break
+              fi
+            done
+            if [ "$complete" != "1" ]; then
+              echo "::error::History pagination did not complete within the bounded walk: $prefix"
+              exit 1
+            fi
+          }
+
+          # The single common gate before EVERY dispatch POST (NONE included): strict
+          # authorization validation, mandatory requester identity, first-attempt-only
+          # requesters, self-postdating, and spend-once consumption. Prints
+          # "ALLOWED <instant>" or "REFUSED <reason>"; the caller exits on REFUSED.
+          authorize_dispatch() {
+            collect_pages "$api/issues/$PR_NUMBER/events" "$RUNNER_TEMP/events"
+            collect_pages "$api/actions/workflows/request-full-ci.yml/runs?head_sha=$HEAD_SHA&event=pull_request_target" "$RUNNER_TEMP/requester"
+            python - "$RUNNER_TEMP" "$HEAD_SHA" "$HEAD_REF" "$PR_NUMBER" "$SELF_RUN_ID" "$SELF_RUN_ATTEMPT" <<'PY'
+          import glob
+          import json
+          import sys
+          from datetime import datetime
+
+          prefix, head_sha, head_ref, pr_number, self_run_id, self_run_attempt = sys.argv[1:7]
+          pr_number = int(pr_number)
+          self_run_id = int(self_run_id)
+          self_run_attempt = int(self_run_attempt)
+          BOT = "github-actions[bot]"
+
+          def instant(text):
+              if not text:
+                  return None
+              try:
+                  return datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+              except ValueError:
+                  return None
+
+          def refuse(reason):
+              print("REFUSED " + reason)
+              raise SystemExit(0)
+
+          def load_pages(name):
+              rows = []
+              for path in sorted(glob.glob(prefix + "/" + name + ".page.*"),
+                                 key=lambda p: int(p.rsplit(".", 1)[-1])):
+                  rows.extend(json.load(open(path, encoding="utf-8")))
+              return rows
+
+          def trusted(run):
+              return (run.get("head_sha") == head_sha and run.get("head_branch") == head_ref
+                      and run.get("event") == "workflow_dispatch"
+                      and (run.get("actor") or {}).get("login") == BOT
+                      and (run.get("triggering_actor") or {}).get("login") == BOT
+                      and pr_number in {item.get("number") for item in run.get("pull_requests", [])
+                                        if isinstance(item, dict)})
+
+          events = load_pages("events")
+          requester = load_pages("requester")
+          runs = json.load(open(prefix + "/product-runs.json", encoding="utf-8")).get("workflow_runs", [])
+
+          boundary = None
+          for run in runs:
+              if (run.get("status") == "completed" and run.get("conclusion") != "success"
+                      and trusted(run)):
+                  moment = instant(run.get("updated_at"))
+                  if moment is None:
+                      refuse("unestablishable failure boundary on Product run %s" % run.get("id"))
+                  boundary = moment if boundary is None or moment > boundary else boundary
+
+          labels = [e for e in events
+                    if e.get("event") == "labeled"
+                    and (e.get("label") or {}).get("name") == "ready-for-full-ci"]
+          if not labels:
+              refuse("no readiness label event in the complete history")
+          latest = None
+          for e in labels:
+              moment = instant(e.get("created_at"))
+              if moment is None:
+                  refuse("unestablishable readiness label timestamp (event %s)" % e.get("id"))
+              latest = moment if latest is None or moment > latest else latest
+
+          if self_run_attempt != 1:
+              refuse("requester rerun (attempt %s); reruns reconcile or refuse, never dispatch"
+                     % self_run_attempt)
+          own = None
+          for run in requester:
+              if run.get("id") == self_run_id:
+                  own = run
+                  break
+          # Identity validation happens BEFORE the own timestamp is used or the record is
+          # excluded from consumption: a record with this id but a different head or event
+          # is not this requester.
+          if (own is None or own.get("event") != "pull_request_target"
+                  or own.get("head_sha") != head_sha):
+              refuse("current requester identity is missing from the history or mismatches this head")
+          own_created = instant(own.get("created_at"))
+          if own_created is None:
+              refuse("unestablishable requester timestamp (run %s)" % own.get("id"))
+          if not own_created > latest:
+              refuse("requester predates the authorization and cannot act under it")
+          for run in requester:
+              if run.get("head_sha") != head_sha or run.get("event") != "pull_request_target":
+                  continue
+              created = instant(run.get("created_at"))
+              if created is None:
+                  refuse("unestablishable requester timestamp (run %s)" % run.get("id"))
+              if run.get("id") == self_run_id and run.get("run_attempt") == self_run_attempt:
+                  continue
+              if created >= latest:
+                  refuse("authorization already consumed by requester run %s" % run.get("id"))
+
+          if boundary is not None and not latest > boundary:
+              refuse("authorization predates the newest failed Product attempt (stale)")
+          print("ALLOWED " + latest.isoformat())
+          PY
+          }
+
           find_product_run() {
             curl --fail-with-body --silent --show-error "${headers[@]}" \
               "$api/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&event=workflow_dispatch&per_page=100" \
               --output "$RUNNER_TEMP/product-runs.json"
-            python - "$RUNNER_TEMP/product-runs.json" "$HEAD_SHA" "$PR_NUMBER" "$HEAD_REF" <<'PY'
+            BOUNDARY_ID="$BOUNDARY_ID" python - "$RUNNER_TEMP/product-runs.json" "$HEAD_SHA" "$PR_NUMBER" "$HEAD_REF" <<'PY'
           import json
+          import os
           import sys
 
-          path, head_sha, pr_number, head_ref = sys.argv[1:]
+          path, head_sha, pr_number, head_ref = sys.argv[1:5]
           pr_number = int(pr_number)
+          boundary_id = int(os.environ.get("BOUNDARY_ID") or 0)
           with open(path, encoding="utf-8") as handle:
               runs = json.load(handle).get("workflow_runs", [])
           matches = []
@@ -137,6 +271,10 @@ jobs:
                   and run.get("actor", {}).get("login") == "github-actions[bot]"
                   and run.get("triggering_actor", {}).get("login") == "github-actions[bot]"
                   and pr_number in prs
+                  # Post-dispatch discovery considers only attempts newer than the
+                  # pre-dispatch boundary: pre-boundary history can neither bind nor
+                  # shadow the newly dispatched run.
+                  and int(run.get("id", 0)) > boundary_id
               ):
                   matches.append(run)
           # Every run reaching here is already trusted: exact head SHA, exact branch, dispatched by the bot on
@@ -153,32 +291,104 @@ jobs:
               run = min(successful, key=lambda item: item["id"])
               print(f"FOUND {run['id']} completed success")
           elif matches and all(run.get("status") == "completed" for run in matches):
-              # All attempts finished and none passed. Report one so the caller fails on the real conclusion
-              # rather than on a timeout that names nothing.
-              run = min(matches, key=lambda item: item["id"])
-              print(f"FOUND {run['id']} completed {run.get('conclusion')}")
+              # All attempts finished and none passed. Report the newest attempt so the caller
+              # fails on the real conclusion rather than on a timeout that names nothing.
+              run = max(matches, key=lambda item: item["id"])
+              print(f"EXHAUSTED {run['id']} {run.get('conclusion')} {run.get('updated_at')}")
           elif matches:
               # An attempt is still running. Wait for it; dispatching another is what created the deadlock.
-              print("PENDING")
+              run = max(matches, key=lambda item: item["id"])
+              print(f"PENDING {run['id']}")
           else:
               print("NONE")
           PY
           }
 
-          verify_live_pr
-          node "$RUNNER_TEMP/verify-readiness-target.mjs"
-          match="$(find_product_run)"
-          case "$match" in
-            ERROR*) echo "::error::$match"; exit 1 ;;
-            FOUND*) read -r _ run_id _ _ <<< "$match" ;;
-            PENDING) run_id="" ;;
-            NONE)
-              # The readiness event can be delayed behind an unrelated label event. Refreshes use the
-              # existing bounded polling loop while the separate dispatcher lane creates the trusted run.
-              # They never dispatch Full themselves, and missing proof still times out as failure.
-              if [ "$REQUEST_LABEL" = "ready-for-full-ci" ]; then
-              python - <<'PY' > "$RUNNER_TEMP/full-ci-dispatch.json"
-          import json, os
+          # Shared identity/trust check for a candidate Product run record. Prints
+          # "ATTEMPT <n>" (trusted; caller pins), "RUNNING", "SUCCEEDED",
+          # "FAILED <conclusion>", or "REFUSED <reason>" (identity problem; nonzero exit).
+          cat > "$RUNNER_TEMP/check-product-run.py" <<'PY'
+          import json
+          import sys
+
+          path, head_sha, head_ref, pr_number, expected_attempt = sys.argv[1:6]
+          pr_number = int(pr_number)
+          BOT = "github-actions[bot]"
+
+          def login(value):
+              return value.get("login") if isinstance(value, dict) else None
+
+          def refuse(reason):
+              print("REFUSED " + reason)
+              raise SystemExit(1)
+
+          with open(path, encoding="utf-8") as handle:
+              run = json.load(handle)
+          if run.get("head_sha") != head_sha:
+              refuse("pinned run head SHA mismatch")
+          if run.get("head_branch") != head_ref:
+              refuse("pinned run head ref mismatch")
+          if run.get("event") != "workflow_dispatch":
+              refuse("pinned run is not a workflow_dispatch run")
+          if login(run.get("actor")) != BOT or login(run.get("triggering_actor")) != BOT:
+              refuse("pinned run trust identity changed")
+          if pr_number not in {item.get("number") for item in run.get("pull_requests", [])
+                               if isinstance(item, dict)}:
+              refuse("pinned run is not associated with this pull request")
+          attempt = run.get("run_attempt")
+          if str(expected_attempt) and str(attempt) != str(expected_attempt):
+              refuse("pinned run attempt changed (%s -> %s)" % (expected_attempt, attempt))
+          if run.get("status") != "completed":
+              print("RUNNING")
+          elif run.get("conclusion") == "success":
+              print("SUCCEEDED")
+          else:
+              print("FAILED " + str(run.get("conclusion")))
+          PY
+
+          # Validate a candidate record through the exact identity checks and pin it
+          # (id + attempt). Any identity problem refuses the requester.
+          fetch_and_pin_run() {
+            curl --fail-with-body --silent --show-error "${headers[@]}" \
+              "$api/actions/runs/$1" --output "$RUNNER_TEMP/pin-$1.json"
+            local check
+            check="$(python "$RUNNER_TEMP/check-product-run.py" "$RUNNER_TEMP/pin-$1.json" \
+              "$HEAD_SHA" "$HEAD_REF" "$PR_NUMBER" '')"
+            case "$check" in
+              REFUSED*)
+                echo "::error::$check"
+                exit 1
+                ;;
+              ATTEMPT*)
+                PINNED_ID="$1"
+                PINNED_ATTEMPT="${check#ATTEMPT }"
+                ;;
+              *)
+                echo "::error::Unexpected pinned-run check output: $check"
+                exit 1
+                ;;
+            esac
+          }
+
+          # Direct poll of the pinned identity only. Prints RUNNING / SUCCEEDED /
+          # FAILED <conclusion>; an identity problem refuses the requester.
+          poll_pinned() {
+            curl --fail-with-body --silent --show-error "${headers[@]}" \
+              "$api/actions/runs/$PINNED_ID" --output "$RUNNER_TEMP/pinned-$PINNED_ID.json"
+            python "$RUNNER_TEMP/check-product-run.py" "$RUNNER_TEMP/pinned-$PINNED_ID.json" \
+              "$HEAD_SHA" "$HEAD_REF" "$PR_NUMBER" "$PINNED_ATTEMPT"
+          }
+
+          # The uncertain-outcome-safe dispatch: the common gate must already have allowed
+          # this caller. A successful response carries the run identity, which is validated
+          # and pinned; a lost response leaves discovery (spend-once makes any new trusted
+          # attempt this requester's own) within the bounded wait — never a redispatch.
+          dispatch_full_run() {
+            verify_live_pr
+            authorize_dispatch
+            python - <<'PY' > "$RUNNER_TEMP/full-ci-dispatch.json"
+          import json
+          import os
           print(json.dumps({
               "ref": os.environ["HEAD_REF"],
               "inputs": {
@@ -187,20 +397,70 @@ jobs:
                   "pull_request_head_sha": os.environ["HEAD_SHA"],
                   "full_diagnostics": "false",
               },
+              "return_run_details": True,
           }))
           PY
-              curl --fail-with-body --silent --show-error \
-                --request POST "${headers[@]}" \
-                --header "Content-Type: application/json" \
-                --data-binary "@$RUNNER_TEMP/full-ci-dispatch.json" \
-                "$api/actions/workflows/ci.yml/dispatches"
+            curl --fail-with-body --silent --show-error \
+              --request POST "${headers[@]}" \
+              --header "Content-Type: application/json" \
+              --data-binary "@$RUNNER_TEMP/full-ci-dispatch.json" \
+              --output "$RUNNER_TEMP/dispatch-response.json" \
+              "$api/actions/workflows/ci.yml/dispatches"
+            local response_id
+            response_id="$(python - "$RUNNER_TEMP/dispatch-response.json" <<'PY'
+          import json
+          import sys
+          try:
+              with open(sys.argv[1], encoding="utf-8") as handle:
+                  body = json.load(handle)
+              print(body.get("workflow_run_id") or "")
+          except (ValueError, OSError):
+              print("")
+          PY
+          )"
+            if [ -n "$response_id" ]; then
+              fetch_and_pin_run "$response_id"
+            fi
+          }
+
+          verify_live_pr
+          node "$RUNNER_TEMP/verify-readiness-target.mjs"
+          match="$(find_product_run)"
+          case "$match" in
+            ERROR*) echo "::error::$match"; exit 1 ;;
+            FOUND*)
+              read -r _ run_id _ _ <<< "$match"
+              fetch_and_pin_run "$run_id"
+              ;;
+            PENDING*)
+              read -r _ run_id <<< "$match"
+              fetch_and_pin_run "$run_id"
+              ;;
+            EXHAUSTED*)
+              read -r _ boundary_id _ _ <<< "$match"
+              BOUNDARY_ID="$boundary_id"
+              # All matching trusted attempts finished unsuccessfully. Only a fresh
+              # readiness request whose requester qualifies under the common gate may
+              # dispatch one new attempt; refreshes report the real conclusion.
+              if [ "$REQUEST_LABEL" != "ready-for-full-ci" ]; then
+                echo "::error::Exact-head Product run $boundary_id completed unsuccessfully; a refresh cannot dispatch Full."
+                exit 1
               fi
-              run_id=""
+              dispatch_full_run
+              ;;
+            NONE)
+              # The readiness event can be delayed behind an unrelated label event. Refreshes use the
+              # existing bounded polling loop while the separate dispatcher lane creates the trusted run.
+              # They never dispatch Full themselves, and missing proof still times out as failure.
+              if [ "$REQUEST_LABEL" = "ready-for-full-ci" ]; then
+                dispatch_full_run
+              fi
               ;;
             *) echo "::error::Unexpected Product-run matcher output: $match"; exit 1 ;;
           esac
 
           authoritative="false"
+          run_id=""
           # 420 polls at 10s is 70 minutes, and timeout-minutes above must stay ahead of it.
           #
           # 210 was 35 minutes, which sat below the Product gate's own median. Sixteen successful gate runs
@@ -211,34 +471,67 @@ jobs:
           # cost of the headroom is that a truly hung gate takes longer to be declared dead.
           for attempt in $(seq 1 420); do
             verify_live_pr
+            if [ -n "$PINNED_ID" ]; then
+              state="$(poll_pinned)"
+              case "$state" in
+                RUNNING)
+                  sleep 10
+                  continue
+                  ;;
+                SUCCEEDED)
+                  authoritative="true"
+                  run_id="$PINNED_ID"
+                  break
+                  ;;
+                FAILED*)
+                  echo "::error::Pinned Product run $PINNED_ID (attempt $PINNED_ATTEMPT) concluded: ${state#FAILED }."
+                  exit 1
+                  ;;
+                REFUSED*)
+                  echo "::error::$state"
+                  exit 1
+                  ;;
+                *)
+                  echo "::error::Unexpected pinned-run state: $state"
+                  exit 1
+                  ;;
+              esac
+            fi
             match="$(find_product_run)"
             case "$match" in
               ERROR*) echo "::error::$match"; exit 1 ;;
-              NONE|PENDING) sleep 10; continue ;;
-              FOUND*)
-                read -r _ run_id status conclusion <<< "$match"
-                if [ "$status" != "completed" ]; then
-                  sleep 10
-                  continue
-                fi
-                if [ "$conclusion" != "success" ]; then
-                  echo "::error::Exact-head Product run $run_id completed with conclusion=$conclusion."
-                  exit 1
-                fi
-                authoritative="true"
-                break
+              NONE) sleep 10; continue ;;
+              PENDING*)
+                read -r _ run_id <<< "$match"
+                fetch_and_pin_run "$run_id"
+                continue
                 ;;
-              *) echo "::error::Unexpected Product-run matcher output: $match"; exit 1 ;;
+              FOUND*)
+                read -r _ run_id _ _ <<< "$match"
+                fetch_and_pin_run "$run_id"
+                continue
+                ;;
+              EXHAUSTED*)
+                read -r _ finished_id _ _ <<< "$match"
+                echo "::error::The dispatched Product run $finished_id completed unsuccessfully."
+                exit 1
+                ;;
+              *)
+                echo "::error::Unexpected Product-run matcher output: $match"
+                exit 1
+                ;;
             esac
           done
 
-          if [ "$authoritative" != "true" ] || [ -z "${run_id:-}" ]; then
+          if [ "$authoritative" != "true" ] || [ -z "$run_id" ] || [ -z "$PINNED_ATTEMPT" ]; then
             echo "::error::No successful trusted Product workflow_dispatch completed for exact head $HEAD_SHA before timeout."
             exit 1
           fi
 
+          # Qualification evidence comes from the pinned run's pinned attempt: a latest-jobs
+          # filter alone cannot bind the evidence to the selected attempt.
           curl --fail-with-body --silent --show-error "${headers[@]}" \
-            "$api/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
+            "$api/actions/runs/$run_id/attempts/$PINNED_ATTEMPT/jobs?per_page=100" \
             --output "$RUNNER_TEMP/product-jobs.json"
           python - "$RUNNER_TEMP/product-jobs.json" <<'PY'
           import json
@@ -282,7 +575,7 @@ jobs:
           PY
 
           verify_live_pr
-          echo "Bound exact Product Full run $run_id to PR #$PR_NUMBER head $HEAD_SHA using comparison base $BASE_SHA." >> "$GITHUB_STEP_SUMMARY"
+          echo "Bound exact Product Full run $run_id (attempt $PINNED_ATTEMPT) to PR #$PR_NUMBER head $HEAD_SHA using comparison base $BASE_SHA." >> "$GITHUB_STEP_SUMMARY"
       - name: Mint the repository-scoped Merge Authority token
         id: authority-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
