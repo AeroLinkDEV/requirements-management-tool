@@ -31,6 +31,12 @@ async function mockShell(page: Page, load: () => Promise<unknown> = async () => 
   });
 }
 
+// The shell's navigation is under test, not the Documentation Center's own content, so its record reads are
+// left pending: the page stays in its loading state instead of rendering the generic mock's empty array.
+async function holdDocumentationCenterReads(page: Page) {
+  await page.route("**/api/managed-documents**", () => {});
+}
+
 test("an authenticated root destination canonicalizes to the Projects portal", async ({ page }) => {
   await mockShell(page);
   await page.goto("/");
@@ -225,4 +231,52 @@ test("new package authoring selection survives route parsing for each verificati
     const route = parseRoute(routePath(context, "testChangeRequests", discipline, "saved-package", kind));
     expect(route).toMatchObject({ ...context, view: "testChangeRequests", discipline, artifactId: "saved-package" });
   }
+});
+
+test("leaving the project-wide Documentation Center returns to the build it was opened from", async ({ page }) => {
+  await mockShell(page, async () => [{ ...fms, projects: [{ ...fms.projects[0], releases: [...fms.projects[0].releases, { id: "fms-next", version: "1.7", isReleased: false }] }] }]);
+  await holdDocumentationCenterReads(page);
+  await page.goto(routePath(context, "dashboard"));
+  const nav = page.getByRole("navigation", { name: "Primary navigation" });
+  await nav.getByRole("link", { name: "Documentation Center", exact: true }).click();
+  await expect(page).toHaveURL(/\/programs\/fms-program\/projects\/fms-project\/documentation-center$/);
+  await nav.locator("summary", { hasText: "CODE" }).click();
+  await nav.getByRole("link", { name: "Code merge requests", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(routePath(context, "codeMergeRequests") + "$"));
+  await expect(page.locator(".contextBar")).toContainText("Build 1.6");
+  await expect(page.locator(".contextBar strong")).toHaveText("Merge Requests");
+});
+
+test("quick navigation from the Documentation Center returns to the build it was opened from", async ({ page }) => {
+  await mockShell(page);
+  await holdDocumentationCenterReads(page);
+  await page.route("**/api/search?**", route => route.fulfill({ json: { items: [] } }));
+  await page.goto(routePath(context, "dashboard"));
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Documentation Center", exact: true }).click();
+  await expect(page).toHaveURL(/\/projects\/fms-project\/documentation-center$/);
+  const palette = page.getByRole("dialog", { name: "Quick navigation" });
+  // The shortcut listener is registered by an effect after the route change renders; a press that lands first
+  // is ignored (#939, #928), so press again until the palette opens.
+  await expect(async () => {
+    await page.keyboard.press("Control+k");
+    await expect(palette).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
+  await page.getByRole("textbox", { name: "Search AeroLink" }).fill("System Requirements Explorer");
+  await expect(palette.getByText("Choose a build to open this")).toHaveCount(0);
+  await palette.getByRole("link", { name: /System Requirements Explorer/ }).first().click();
+  await expect(page).toHaveURL(new RegExp("/releases/fms-current/"));
+  await expect(page.locator(".contextBar")).toContainText("Build 1.6");
+});
+
+test("a directly opened Documentation Center asks for a build instead of showing Command Center", async ({ page }) => {
+  await mockShell(page);
+  await holdDocumentationCenterReads(page);
+  await page.goto("/programs/fms-program/projects/fms-project/documentation-center");
+  const nav = page.getByRole("navigation", { name: "Primary navigation" });
+  await nav.locator("summary", { hasText: "CODE" }).click();
+  await expect(nav.getByRole("link", { name: "Code merge requests", exact: true })).toHaveAttribute("href", fmsPath);
+  await nav.getByRole("link", { name: "Code merge requests", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(fmsPath + "$"));
+  await expect(page.getByRole("heading", { name: "FMS Product Development", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Command Center", exact: true })).toHaveCount(0);
 });
