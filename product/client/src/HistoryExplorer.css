@@ -594,7 +594,7 @@
 
 /* At 1280px the shared register still has to reserve room for four readable columns. Stack the inspector before
    the table is squeezed into one-word cells; the side-by-side presentation remains available at 1440px and up. */
-@media (max-width: 1360px) {
+@media (max-width: 1439.98px) {
   .registerInspectorLayout { grid-template-columns: minmax(0, 1fr); }
   .registerInspectorLayout > .requirementInspector {
     position: static;

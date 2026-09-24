@@ -1084,9 +1084,9 @@ button.coverageState:hover {
     z-index: 10;
     box-shadow: -15px 0 40px #10233a22;
   }
-  /* A drawer with nothing selected would only hide the list it invites you to choose from. The Code workspace
-     keeps its inspector in flow (stacked under the list), so its empty state stays. */
-  .requirementInspector:has(> .procedureInspectorEmpty):not(.codeRegisterLayout *) {
+  /* A drawer with nothing selected would only hide the list it invites you to choose from. The Code workspace and
+     the change request registers keep theirs in flow (stacked under the list), so their empty state stays. */
+  .requirementInspector:has(> .procedureInspectorEmpty):not(.codeRegisterLayout *, .registerInspectorLayout > *) {
     display: none;
   }
   .requirementsCommand .tagFilter { display: block; }
