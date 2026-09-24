@@ -79,7 +79,7 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .buildConnector { position: absolute; z-index: 2; top: 50%; right: -39px; width: 26px; height: 26px; display: grid; place-items: center; transform: translateY(-50%); border: 1px solid #8697a9; border-radius: 50%; background: var(--canvas); color: #354b65; font-size: 18px; }
 .buildConnector::before { content: ""; position: absolute; z-index: -1; right: 25px; width: 28px; border-top: 1px solid #8797a8; }
 /* #1047: mock showcase history is drawn, but never the same as recorded ancestry. */
-.buildConnector.mock { border-style: dashed; color: #8a7fb0; }
+.buildConnector.mock { border-style: dashed; }
 .buildConnector.mock::before { border-top-style: dashed; }
 /* The last card in a grid row has no neighbour to its right; an arrow there would point at nothing. */
 .buildLineage li:nth-child(5n) > .buildConnector { display: none; }
