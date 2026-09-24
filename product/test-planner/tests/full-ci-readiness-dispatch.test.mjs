@@ -468,6 +468,7 @@ test('the bounded pagination walk refuses truncated histories', () => {
       '  if [ "$page" -lt "$TOTAL_PAGES" ]; then',
       "    printf 'link: <https://example/list?page=%s>; rel=\"next\"\\n' \"$((page + 1))\" >> \"$dump\"",
       '  fi',
+      "  printf '%s\\n' \"$url\" >> \"$prefix.urls.log\"",
       "  printf '[]\\n' > \"$out\"",
       '}',
     ].join('\n')
@@ -485,12 +486,30 @@ test('the bounded pagination walk refuses truncated histories', () => {
     })
     assert.equal(run2.status, 1, run2.stderr)
     assert.match(run2.stdout, /bounded walk/)
+    // the actual requested URLs: the base https://example/list?x=1 already carries a
+    // query ("?x=1"), so every page correctly appends with "&"
+    const truncatedUrls = readFileSync(join(scratch, 'truncated.urls.log'), 'utf8').split('\n').filter(Boolean)
+    assert.deepEqual(truncatedUrls, [
+      'https://example/list?x=1&page=1&per_page=100',
+      'https://example/list?x=1&page=2&per_page=100',
+      'https://example/list?x=1&page=3&per_page=100',
+    ])
     const script1 = script.replace('TOTAL_PAGES=4', 'TOTAL_PAGES=1')
     const run1 = spawnSync(bash, ['--noprofile', '--norc', '-c', script1, '_', join(scratch, 'single'), 'https://example/list?x=1'], {
       encoding: 'utf8', timeout: 10_000,
     })
     assert.equal(run1.status, 0, run1.stderr)
     assert.match(run1.stdout, /COLLECTED/)
+    // a query-bearing base keeps its parameters and switches to "&"
+    const queryBase = 'https://example/runs?head_sha=' + 'a'.repeat(40) + '&event=pull_request_target'
+    const scriptQ = script.replace('TOTAL_PAGES=4', 'TOTAL_PAGES=1')
+    const runQ = spawnSync(bash, ['--noprofile', '--norc', '-c', scriptQ, '_', join(scratch, 'query'), queryBase], {
+      encoding: 'utf8', timeout: 10_000,
+    })
+    assert.equal(runQ.status, 0, runQ.stderr)
+    assert.match(runQ.stdout, /COLLECTED/)
+    const queryUrls = readFileSync(join(scratch, 'query.urls.log'), 'utf8').split('\n').filter(Boolean)
+    assert.deepEqual(queryUrls, [queryBase + '&page=1&per_page=100'])
   } finally {
     rmSync(scratch, { recursive: true, force: true })
   }

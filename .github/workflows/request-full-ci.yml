@@ -405,15 +405,31 @@ jobs:
 
           # Validate a candidate record through the exact identity checks and pin it
           # (id + attempt). Any identity problem, or a completed failure, refuses.
-          # The check verdict travels through a file so its text stays visible even
-          # when the caller's command substitution must not swallow it.
+          # The wrapper must never inherit a suppressed errexit from an OR-list caller:
+          # every command's exit status is explicit, and stale response/verdict files
+          # are removed before the read so they can never supply evidence.
           fetch_and_pin_run() {
+            rm -f "$RUNNER_TEMP/pin-$1.json" "$RUNNER_TEMP/pin-check"
+            local pin_status=0
             curl --fail-with-body --silent --show-error "${headers[@]}" \
-              "$api/actions/runs/$1" --output "$RUNNER_TEMP/pin-$1.json"
+              "$api/actions/runs/$1" --output "$RUNNER_TEMP/pin-$1.json" || pin_status=$?
+            if [ "$pin_status" -ne 0 ]; then
+              echo "::error::Pinned-run fetch failed (curl exit $pin_status)"
+              exit 1
+            fi
+            local py_status=0
             python "$RUNNER_TEMP/check-product-run.py" pin "$RUNNER_TEMP/pin-$1.json" \
-              "$HEAD_SHA" "$HEAD_REF" "$PR_NUMBER" > "$RUNNER_TEMP/pin-check" || true
+              "$HEAD_SHA" "$HEAD_REF" "$PR_NUMBER" > "$RUNNER_TEMP/pin-check" || py_status=$?
             local check
             check="$(cat "$RUNNER_TEMP/pin-check")"
+            if [ "$py_status" -ne 0 ]; then
+              echo "::error::Pinned-run verification failed: ${check:-no verdict}"
+              exit 1
+            fi
+            if [ -z "$check" ]; then
+              echo "::error::Pinned-run verification produced no verdict"
+              exit 1
+            fi
             case "$check" in
               REFUSED*)
                 echo "::error::$check"
@@ -430,14 +446,25 @@ jobs:
             esac
           }
 
-          # Direct poll of the pinned identity only. The verdict is written to a file
-          # (never swallowed by command substitution); a refusal exits nonzero after
-          # the reason has been surfaced on stdout.
+          # Direct poll of the pinned identity only. Stale response/verdict files are
+          # removed before the read; every command's exit status is explicit; the
+          # verdict travels through a file and a failed read refuses the requester.
           poll_pinned() {
+            rm -f "$RUNNER_TEMP/pinned-$PINNED_ID.json" "$RUNNER_TEMP/poll-check"
+            local poll_status=0
             curl --fail-with-body --silent --show-error "${headers[@]}" \
-              "$api/actions/runs/$PINNED_ID" --output "$RUNNER_TEMP/pinned-$PINNED_ID.json"
+              "$api/actions/runs/$PINNED_ID" --output "$RUNNER_TEMP/pinned-$PINNED_ID.json" || poll_status=$?
+            if [ "$poll_status" -ne 0 ]; then
+              echo "REFUSED pinned-run read failed (curl exit $poll_status)"
+              return 1
+            fi
             python "$RUNNER_TEMP/check-product-run.py" poll "$RUNNER_TEMP/pinned-$PINNED_ID.json" \
-              "$HEAD_SHA" "$HEAD_REF" "$PR_NUMBER" "$PINNED_ATTEMPT" > "$RUNNER_TEMP/poll-check" || true
+              "$HEAD_SHA" "$HEAD_REF" "$PR_NUMBER" "$PINNED_ATTEMPT" > "$RUNNER_TEMP/poll-check" || poll_status=$?
+            if [ "$poll_status" -ne 0 ]; then
+              echo "REFUSED pinned-run verification failed"
+              cat "$RUNNER_TEMP/poll-check"
+              return 1
+            fi
           }
 
           # The uncertain-outcome-safe dispatch: the common gate has already allowed this
@@ -546,7 +573,12 @@ jobs:
             if [ -n "$PINNED_ID" ]; then
               poll_status=0
               poll_pinned || poll_status=$?
-              state="$(cat "$RUNNER_TEMP/poll-check")"
+              # A failed read refuses: the default verdict applies unless the checker
+              # produced its own (the function emits its reason on stdout either way).
+              state="REFUSED pinned-run read failed"
+              if [ -s "$RUNNER_TEMP/poll-check" ]; then
+                state="$(cat "$RUNNER_TEMP/poll-check")"
+              fi
               case "$state" in
                 RUNNING)
                   [ "$poll_status" = "0" ] || { echo "::error::Pinned-run poll failed unexpectedly."; exit 1; }
