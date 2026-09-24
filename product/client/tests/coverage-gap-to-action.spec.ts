@@ -15,7 +15,7 @@ test("a verification gap can be filtered to, read, and acted on from the require
   request,
 }) => {
   test.setTimeout(120_000);
-  // Below 1360px the requirement inspector becomes a fixed overlay and covers the right-hand table columns,
+  // Below 1440px the requirement inspector becomes a fixed overlay and covers the right-hand table columns,
   // including the one this test clicks. The workspace auto-selects a requirement on load, so that overlay is
   // open before the test touches anything.
   await page.setViewportSize({ width: 1440, height: 900 });
