@@ -78,7 +78,8 @@ test('the operator console shows runtime status without the product capability c
   await expect(page.getByRole('heading', { name: 'Webhook destinations' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Recent delivery activity' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Send test event', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Create identity' })).toBeVisible()
+  // #1091: an empty list offers one action ("Create first identity"), not two.
+  await expect(page.getByRole('button', { name: 'Create identity' }).or(page.getByRole('button', { name: 'Create first identity' }))).toBeVisible()
 })
 
 test('integration command center governs machine access and signed event delivery', async ({ page }) => {
