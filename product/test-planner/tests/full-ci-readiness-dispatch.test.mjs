@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { join, resolve } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 
 const read = (relative) => readFileSync(new URL(`../../../${relative}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -22,8 +22,6 @@ const skipWithoutPython = pythonReady ? false : 'no Python runtime available for
 
 let scratchCounter = 0
 
-// Extracts a quoted heredoc body (YAML-indented by ten spaces) that appears after `anchor`
-// and is terminated by the marker line. Returns the body dedented, ready to execute.
 function pythonBlock(afterAnchor, marker = 'PY') {
   const anchorAt = requester.indexOf(afterAnchor)
   assert.notEqual(anchorAt, -1, `anchor missing: ${afterAnchor}`)
@@ -160,15 +158,12 @@ test('the actual required aggregate refuses every non-success prerequisite resul
 test('retry orchestration keeps one common gate before every dispatch POST and never dispatches from refresh lanes', () => {
   assert.match(requester, /authorize_dispatch\(\) \{/)
   assert.match(requester, /dispatch_full_run\(\) \{/)
-  // the gate and the POST live inside the shared dispatcher, so no path can bypass them
   const dispatcherAt = requester.indexOf('dispatch_full_run() {')
   const dispatcherEnd = requester.indexOf('\n          }\n', dispatcherAt)
   const dispatcherBody = requester.slice(dispatcherAt, dispatcherEnd)
   assert.match(dispatcherBody, /authorize_dispatch$/m)
   assert.match(dispatcherBody, /return_run_details/)
   assert.match(dispatcherBody, /actions\/workflows\/ci\.yml\/dispatches/)
-  // exactly two call sites: the EXHAUSTED retry and the NONE first dispatch, both gated on
-  // the readiness label; refresh lanes never dispatch.
   assert.equal((requester.match(/^ {14,16}dispatch_full_run$/gm) || []).length, 2)
   assert.match(requester, /EXHAUSTED\*[\s\S]*?ready-for-full-ci" \]; then[\s\S]*?dispatch_full_run/)
   assert.match(requester, /a refresh cannot dispatch Full/)
@@ -186,11 +181,9 @@ test('the gate demands mandatory requester identity, first attempts, self-postda
   assert.match(requester, /created >= latest/)
   assert.match(requester, /authorization already consumed by requester run/)
   assert.match(requester, /requester predates the authorization/)
-  // bounded pagination completeness for both histories
   assert.match(requester, /for page in 1 2 3/)
   assert.match(requester, /rel="next"/)
   assert.match(requester, /History pagination did not complete within the bounded walk/)
-  // strict timestamps on every validated record kind
   assert.match(requester, /unestablishable failure boundary/)
   assert.match(requester, /unestablishable readiness label timestamp/)
   assert.match(requester, /unestablishable requester timestamp/)
@@ -199,11 +192,10 @@ test('the gate demands mandatory requester identity, first attempts, self-postda
 test('uncertain dispatch outcomes end in refusal; the dispatched run is pinned by response identity or boundary-filtered discovery', () => {
   assert.match(requester, /return_run_details/)
   assert.match(requester, /workflow_run_id/)
-  // discovery filters candidates to ids newer than the pre-dispatch boundary
   assert.match(requester, /int\(run\.get\("id", 0\)\) > boundary_id/)
-  // run + attempt pinning: qualification evidence comes from the pinned attempt
   assert.match(requester, /attempts\/\$PINNED_ATTEMPT\/jobs/)
   assert.doesNotMatch(requester, /filter=latest/)
+  assert.match(requester, /cannot bind evidence to the selected attempt/)
   assert.match(requester, /attempt \$PINNED_ATTEMPT\) to PR #/)
   assert.match(requester, /pinned run attempt changed/)
 })
@@ -250,6 +242,11 @@ test('the exact-head matcher verb selection executes against scripted transcript
     out = run(transcript([productRun(101, 'in_progress', undefined, '2026-09-23T12:10:00Z'), productRun(100, 'in_progress')])).stdout.trim()
     assert.equal(out, 'PENDING 101')
 
+    // PENDING must attach to an UNFINISHED attempt: a completed failure among the
+    // matches is already accounted for by EXHAUSTED reporting and is never selected.
+    out = run(transcript([productRun(100, 'in_progress'), productRun(101, 'completed', 'failure', '2026-09-23T12:30:00Z')])).stdout.trim()
+    assert.equal(out, 'PENDING 100')
+
     out = run(transcript([productRun(100, 'completed', 'failure'), productRun(101, 'completed', 'failure', '2026-09-23T12:30:00Z')])).stdout.trim()
     assert.match(out, /^EXHAUSTED 101 failure 2026-09-23T12:30:00Z$/)
 
@@ -281,18 +278,21 @@ function requesterRun(id, created, { status = 'completed', attempt = 1, sha = 'a
   }
 }
 
-test('the common dispatch gate executes: freshness, spend-once, identity, ties and histories', { skip: skipWithoutPython }, () => {
+test('the common dispatch gate executes: freshness, spend-once, identity, ties, histories and shapes', { skip: skipWithoutPython }, () => {
   const source = pythonBlock('authorize_dispatch() {')
   const sha = 'a'.repeat(40)
   const scratch = mkdtempSync(join(tmpdir(), 'aerolink-requester-gate-'))
   try {
     let caseCounter = 0
-    const runGate = ({ events, requester = [], runs = [], selfRunId, selfAttempt = 1 }) => {
+    const runGate = ({ events, requester = [], runs = [], selfRunId, selfAttempt = 1, shapes = {} }) => {
       const prefix = join(scratch, `case-${caseCounter++}`)
       mkdirSync(prefix, { recursive: true })
-      writeFileSync(join(prefix, 'events.page.1'), JSON.stringify(events))
-      writeFileSync(join(prefix, 'requester.page.1'), JSON.stringify(requester))
-      writeFileSync(join(prefix, 'product-runs.json'), JSON.stringify({ workflow_runs: runs }))
+      writeFileSync(join(prefix, 'events.page.1'),
+        shapes.events === 'flat-object' ? JSON.stringify({ items: events }) : JSON.stringify(events))
+      writeFileSync(join(prefix, 'requester.page.1'),
+        shapes.requester === 'flat-array' ? JSON.stringify(requester) : JSON.stringify({ workflow_runs: requester }))
+      writeFileSync(join(prefix, 'product-runs.json'),
+        shapes.runs === 'flat-array' ? JSON.stringify(runs) : JSON.stringify({ workflow_runs: runs }))
       return runPython(source, [prefix, sha, 'glm/some-branch', '1066', String(selfRunId), String(selfAttempt)])
     }
     const freshEvents = [
@@ -302,15 +302,12 @@ test('the common dispatch gate executes: freshness, spend-once, identity, ties a
     const staleEvents = [labeledEvent(1, '2026-09-23T09:54:44Z')]
     const staleRun = (updated) => productRun(100, 'completed', 'failure', updated)
 
-    // first young requester over a fresh authorization dispatches
     let out = runGate({ events: freshEvents, requester: [requesterRun(7000, '2026-09-23T12:00:05Z')], selfRunId: 7000 }).stdout.trim()
     assert.match(out, /^ALLOWED /)
 
-    // stale authorization refuses
     out = runGate({ events: staleEvents, requester: [requesterRun(7000, '2026-09-23T10:00:00Z')], runs: [staleRun('2026-09-23T10:19:05Z')], selfRunId: 7000 }).stdout.trim()
     assert.match(out, /^REFUSED .*stale/)
 
-    // consumption at-or-after the authorization, across statuses; ties consume
     for (const status of ['pending', 'in_progress', 'cancelled', 'completed']) {
       out = runGate({
         events: freshEvents,
@@ -326,7 +323,6 @@ test('the common dispatch gate executes: freshness, spend-once, identity, ties a
     }).stdout.trim()
     assert.match(out, /^REFUSED .*consumed/) // tie consumes
 
-    // an old requester cannot borrow a newer authorization
     out = runGate({
       events: [labeledEvent(1, '2026-09-22T10:49:17Z'), labeledEvent(2, '2026-09-23T13:00:00Z')],
       requester: [requesterRun(7000, '2026-09-23T12:00:05Z')],
@@ -334,7 +330,6 @@ test('the common dispatch gate executes: freshness, spend-once, identity, ties a
     }).stdout.trim()
     assert.match(out, /^REFUSED .*predates/)
 
-    // requester reruns reconcile or refuse, never dispatch
     out = runGate({
       events: freshEvents,
       requester: [requesterRun(7000, '2026-09-23T12:00:05Z', { attempt: 2 })],
@@ -342,7 +337,6 @@ test('the common dispatch gate executes: freshness, spend-once, identity, ties a
     }).stdout.trim()
     assert.match(out, /^REFUSED .*rerun/)
 
-    // identity verification: missing, wrong head, wrong event
     out = runGate({ events: freshEvents, requester: [], selfRunId: 7000 }).stdout.trim()
     assert.match(out, /^REFUSED /)
     out = runGate({
@@ -358,7 +352,6 @@ test('the common dispatch gate executes: freshness, spend-once, identity, ties a
     }).stdout.trim()
     assert.match(out, /^REFUSED /)
 
-    // malformed timestamps refuse on every validated record kind
     out = runGate({
       events: freshEvents,
       requester: [requesterRun(7000, '2026-09-23T12:00:05Z')],
@@ -378,6 +371,22 @@ test('the common dispatch gate executes: freshness, spend-once, identity, ties a
       selfRunId: 7000,
     }).stdout.trim()
     assert.match(out, /^REFUSED .*requester timestamp/)
+
+    out = runGate({
+      events: freshEvents, requester: [requesterRun(7000, '2026-09-23T12:00:05Z')],
+      selfRunId: 7000, shapes: { requester: 'flat-array' },
+    }).stdout.trim()
+    assert.match(out, /^REFUSED .*requester history response shape/)
+    out = runGate({
+      events: freshEvents, requester: [requesterRun(7000, '2026-09-23T12:00:05Z')],
+      runs: [staleRun('2026-09-23T10:19:05Z')], selfRunId: 7000, shapes: { runs: 'flat-array' },
+    }).stdout.trim()
+    assert.match(out, /^REFUSED .*Product run transcript shape/)
+    out = runGate({
+      events: freshEvents, requester: [requesterRun(7000, '2026-09-23T12:00:05Z')],
+      selfRunId: 7000, shapes: { events: 'flat-object' },
+    }).stdout.trim()
+    assert.match(out, /^REFUSED .*events history response shape/)
   } finally {
     rmSync(scratch, { recursive: true, force: true })
   }
@@ -385,7 +394,7 @@ test('the common dispatch gate executes: freshness, spend-once, identity, ties a
 
 // ---- executed embedded Python: pinned Product run identity ---------------------------
 
-test('pinned Product identity checks execute: trust, attempt, and terminal states', { skip: skipWithoutPython }, () => {
+test('pinned Product identity checks execute: pin/poll modes, trust, attempt, and terminal states', { skip: skipWithoutPython }, () => {
   const source = pythonBlock('cat > "$RUNNER_TEMP/check-product-run.py"')
   const sha = 'a'.repeat(40)
   const scratch = mkdtempSync(join(tmpdir(), 'aerolink-requester-pinned-'))
@@ -395,25 +404,33 @@ test('pinned Product identity checks execute: trust, attempt, and terminal state
       actor: { login: 'github-actions[bot]' }, triggering_actor: { login: 'github-actions[bot]' },
       pull_requests: [{ number: 1066 }], run_attempt: 1, status: 'in_progress', ...overrides,
     })
-    const run = (record, expected = '') => {
+    const run = (record, mode, expected = '') => {
       const path = join(scratch, `pin-${scratchCounter++}.json`)
       writeFileSync(path, record)
-      return runPython(source, [path, sha, 'glm/some-branch', '1066', expected])
+      const args = [mode, path, sha, 'glm/some-branch', '1066']
+      if (expected !== '') args.push(expected)
+      return runPython(source, args)
     }
 
-    let out = run(record()).stdout.trim()
+    let out = run(record(), 'pin').stdout.trim()
+    assert.equal(out, 'ATTEMPT 1')
+    out = run(record({ status: 'completed', conclusion: 'success' }), 'pin').stdout.trim()
+    assert.equal(out, 'ATTEMPT 1')
+    out = run(record({ status: 'completed', conclusion: 'failure' }), 'pin').stdout.trim()
+    assert.match(out, /^REFUSED .*completed failure/)
+    out = run(record(), 'poll', '1').stdout.trim()
     assert.equal(out, 'RUNNING')
-    out = run(record({ status: 'completed', conclusion: 'success' })).stdout.trim()
+    out = run(record({ status: 'completed', conclusion: 'success' }), 'poll', '1').stdout.trim()
     assert.equal(out, 'SUCCEEDED')
-    out = run(record({ status: 'completed', conclusion: 'failure' })).stdout.trim()
+    out = run(record({ status: 'completed', conclusion: 'failure' }), 'poll', '1').stdout.trim()
     assert.equal(out, 'FAILED failure')
-    out = run(record({ status: 'completed', conclusion: 'success', run_attempt: 2 }), '1').stdout.trim()
+    out = run(record({ status: 'completed', conclusion: 'success', run_attempt: 2 }), 'poll', '1').stdout.trim()
     assert.match(out, /^REFUSED .*attempt changed/)
-    out = run(record({ head_sha: 'b'.repeat(40) })).stdout.trim()
+    out = run(record({ head_sha: 'b'.repeat(40) }), 'pin').stdout.trim()
     assert.match(out, /^REFUSED .*head SHA/)
-    out = run(record({ triggering_actor: { login: 'seanmccarthyns' } })).stdout.trim()
+    out = run(record({ triggering_actor: { login: 'seanmccarthyns' } }), 'pin').stdout.trim()
     assert.match(out, /^REFUSED .*trust identity/)
-    out = run(record({ pull_requests: [{ number: 999 }] })).stdout.trim()
+    out = run(record({ pull_requests: [{ number: 999 }] }), 'poll', '1').stdout.trim()
     assert.match(out, /^REFUSED .*pull request/)
   } finally {
     rmSync(scratch, { recursive: true, force: true })
@@ -430,50 +447,49 @@ test('the bounded pagination walk refuses truncated histories', () => {
   const fn = requester.slice(start, end) + '\n}'
   const scratch = mkdtempSync(join(tmpdir(), 'aerolink-requester-pages-'))
   try {
-    // A function-defined curl overrides the binary, so the extracted collect_pages runs
-    // unmodified against a scripted transport that simulates paginated Link headers.
-    const mockCurl = `curl() {
-  local dump="" out="" url="" prev=""
-  for arg in "$@"; do
-    case "$arg" in
-      --dump-header|--output) prev="$arg" ;;
-      --*) prev="" ;;
-      *)
-        if [ "$prev" = "--dump-header" ]; then dump="$arg"; prev=""
-        elif [ "$prev" = "--output" ]; then out="$arg"; prev=""
-        else url="$arg"
-        fi ;;
-    esac
-  done
-  local page
-  page="$(printf '%s' "$url" | sed -n 's/.*[?&]page=\\([0-9]*\\).*/\\1/p')"
-  printf 'HTTP/2 200\\n' > "$dump"
-  if [ "$page" -lt "$TOTAL_PAGES" ]; then
-    printf 'link: <https://example/list?page=%s>; rel="next"\\n' "$((page + 1))" >> "$dump"
-  fi
-  printf '[]\\n' > "$out"
-}
-`
-    const scriptFor = (totalPages) => `set -euo pipefail
-headers=()
-TOTAL_PAGES=${totalPages}
-${fn}
-${mockCurl}
-collect_pages "$1" "$2"
-echo COLLECTED
-`
-    // single complete page: collected
-    const run1 = spawnSync(bash, ['--noprofile', '--norc', '-c', scriptFor(1), '_', join(scratch, 'single'), 'https://example/list?x=1'], {
-      encoding: 'utf8', timeout: 10_000,
-    })
-    assert.equal(run1.status, 0, run1.stderr)
-    assert.match(run1.stdout, /COLLECTED/)
-    // four pages: the bounded walk refuses
-    const run2 = spawnSync(bash, ['--noprofile', '--norc', '-c', scriptFor(4), '_', join(scratch, 'truncated'), 'https://example/list?x=1'], {
+    const mockCurl = [
+      'curl() {',
+      '  local dump="" out="" url="" prev=""',
+      '  for arg in "$@"; do',
+      '    case "$arg" in',
+      '      --dump-header|--output) prev="$arg" ;;',
+      '      --*) prev="" ;;',
+      '      *)',
+      '        if [ "$prev" = "--dump-header" ]; then dump="$arg"; prev=""',
+      '        elif [ "$prev" = "--output" ]; then out="$arg"; prev=""',
+      '        else url="$arg"',
+      '        fi ;;',
+      '    esac',
+      '  done',
+      '  local page',
+      "  page=\"$(printf '%s' \"$url\" | sed -n 's/.*[?&]page=\\([0-9]*\\).*/\\1/p')\"",
+      "  printf 'HTTP/2 200\\n' > \"$dump\"",
+      '  if [ "$page" -lt "$TOTAL_PAGES" ]; then',
+      "    printf 'link: <https://example/list?page=%s>; rel=\"next\"\\n' \"$((page + 1))\" >> \"$dump\"",
+      '  fi',
+      "  printf '[]\\n' > \"$out\"",
+      '}',
+    ].join('\n')
+    const script = [
+      'set -euo pipefail',
+      'headers=()',
+      'TOTAL_PAGES=4',
+      fn,
+      mockCurl,
+      'collect_pages "$1" "$2"',
+      'echo COLLECTED',
+    ].join('\n')
+    const run2 = spawnSync(bash, ['--noprofile', '--norc', '-c', script, '_', join(scratch, 'truncated'), 'https://example/list?x=1'], {
       encoding: 'utf8', timeout: 10_000,
     })
     assert.equal(run2.status, 1, run2.stderr)
     assert.match(run2.stdout, /bounded walk/)
+    const script1 = script.replace('TOTAL_PAGES=4', 'TOTAL_PAGES=1')
+    const run1 = spawnSync(bash, ['--noprofile', '--norc', '-c', script1, '_', join(scratch, 'single'), 'https://example/list?x=1'], {
+      encoding: 'utf8', timeout: 10_000,
+    })
+    assert.equal(run1.status, 0, run1.stderr)
+    assert.match(run1.stdout, /COLLECTED/)
   } finally {
     rmSync(scratch, { recursive: true, force: true })
   }
@@ -487,16 +503,17 @@ test('the initial decision dispatches once for readiness labels and never for re
   const end = requester.indexOf('\n          esac', decisionStart)
   const decision = requester.slice(decisionStart, end + '\n          esac'.length).replace(/^ {10}/gm, '')
 
-  const scriptFor = (stubMatch, label) => `set -euo pipefail
-REQUEST_LABEL=${JSON.stringify(label)}
-BOUNDARY_ID=0
-match=${JSON.stringify(stubMatch)}
-find_product_run() { printf '%s\\n' "$match"; }
-dispatch_full_run() { echo DISPATCHED; }
-fetch_and_pin_run() { echo "PINNED $1"; }
-verify_live_pr() { :; }
-${decision}
-`
+  const scriptFor = (stubMatch, label) => [
+    'set -euo pipefail',
+    'REQUEST_LABEL=' + JSON.stringify(label),
+    'BOUNDARY_ID=0',
+    'match=' + JSON.stringify(stubMatch),
+    'find_product_run() { printf \'%s\\n\' "$match"; }',
+    'dispatch_full_run() { echo DISPATCHED; }',
+    'fetch_and_pin_run() { echo "PINNED $1"; }',
+    'verify_live_pr() { :; }',
+    decision,
+  ].join('\n')
   const scratch = mkdtempSync(join(tmpdir(), 'aerolink-requester-decision-'))
   try {
     const run = (stubMatch, label) => spawnSync(bash, ['--noprofile', '--norc', '-c', scriptFor(stubMatch, label)], {
@@ -523,4 +540,376 @@ ${decision}
   } finally {
     rmSync(scratch, { recursive: true, force: true })
   }
+})
+
+// ---- integrated harness: the actual workflow shell + embedded Python over a mocked transport
+// The full run-block body is extracted, dedented and executed verbatim against a stateful
+// Python curl replacement. POSTs are counted ONLY at that transport boundary; authorization,
+// dispatch, pinning, polling and qualification are the real code.
+
+const INTEGRATED_SHA = 'a'.repeat(40)
+const INTEGRATED_REF = 'glm/integrated-branch'
+
+function workflowRunBody() {
+  const stepAt = requester.indexOf('- name: Authenticate live ready PR, dispatch once, and bind exact Product success')
+  assert.notEqual(stepAt, -1)
+  const runAt = requester.indexOf('        run: |', stepAt)
+  assert.notEqual(runAt, -1)
+  const bodyStart = runAt + '        run: |\n'.length
+  const nextStep = requester.indexOf('\n      - name: Mint', bodyStart)
+  const dedented = requester.slice(bodyStart, nextStep === -1 ? undefined : nextStep).replace(/^ {10}/gm, '')
+  // the harness supplies the requester identity through its environment
+  return dedented
+    .replace(/^SELF_RUN_ID="\$\{\{ github\.run_id \}\}"\n/m, '')
+    .replace(/^SELF_RUN_ATTEMPT="\$\{\{ github\.run_attempt \}\}"\n/m, '')
+}
+
+function mockCurlSource() {
+  return [
+    'import json',
+    'import os',
+    'import sys',
+    '',
+    'method, url, dump, out, data = sys.argv[1:6]',
+    'state = os.environ["MOCK_STATE"]',
+    '',
+    'def readj(name, default):',
+    '    path = os.path.join(state, name)',
+    '    if not os.path.exists(path):',
+    '        return default',
+    '    with open(path, encoding="utf-8") as handle:',
+    '        return json.load(handle)',
+    '',
+    'def writej(name, obj):',
+    '    with open(os.path.join(state, name), "w", encoding="utf-8") as handle:',
+    '        json.dump(obj, handle)',
+    '',
+    'counters = readj("counters.json", {"listGets": 0, "pinnedGets": 0, "postSeen": False, "postCount": 0})',
+    'scenario = readj("scenario.json", {})',
+    'code = 200',
+    'resp = {}',
+    '',
+    'if method == "POST" and url.endswith("/dispatches"):',
+    '    counters["postSeen"] = True',
+    '    counters["postCount"] = counters.get("postCount", 0) + 1',
+    '    if data and os.path.exists(data):',
+    '        os.replace(data, os.path.join(state, "last-dispatch.json"))',
+    '    if scenario.get("dispatchResponse", "details") == "details":',
+    '        resp = {"workflow_run_id": scenario.get("dispatchRunId", 101)}',
+    '    else:',
+    '        resp = {}',
+    '        code = 202',
+    'elif "/actions/workflows/ci.yml/runs" in url:',
+    '    counters["listGets"] = counters.get("listGets", 0) + 1',
+    '    runs = list(readj("static-runs.json", {"workflow_runs": []}).get("workflow_runs", []))',
+    '    final = readj("run-101-final.json", None)',
+    '    reveal = int(scenario.get("revealAfter", 1))',
+    '    if counters.get("postSeen") and final is not None and counters.get("listGets", 0) >= reveal:',
+    '        runs.append(final)',
+    '    resp = {"workflow_runs": runs, "total_count": len(runs)}',
+    'elif "request-full-ci.yml/runs" in url:',
+    '    resp = {"workflow_runs": readj("requester-runs.json", [])}',
+    'elif "/issues/" in url:',
+    '    resp = readj("events.json", [])',
+    'elif "/pulls/" in url:',
+    '    resp = readj("pr.json", {})',
+    'elif "/actions/runs/" in url and "/attempts/" in url:',
+    "    with open(os.path.join(state, 'jobs-requests'), 'a', encoding='utf-8') as handle:",
+    "        handle.write(url.split('mock.local', 1)[-1] + chr(10))",
+    '    resp = readj("jobs.json", {})',
+    'elif "/actions/runs/" in url:',
+    '    run_id = int(url.rsplit("/", 1)[-1])',
+    '    counters["pinnedGets"] = counters.get("pinnedGets", 0) + 1',
+    "    initial = readj('run-%d-initial.json' % run_id, None)",
+    "    final = readj('run-%d-final.json' % run_id, None)",
+    "    plain = readj('run-%d.json' % run_id, None)",
+    '    threshold = int(scenario.get("pinnedFinalAfter", 2))',
+    '    rec = plain',
+    '    if initial is not None or final is not None:',
+    '        if final is None or not counters.get("postSeen"):',
+    '            rec = initial',
+    '        elif counters.get("pinnedGets", 0) >= threshold:',
+    '            rec = final',
+    '        else:',
+    '            rec = initial',
+    '    if rec is None:',
+    '        code = 404',
+    '        resp = {"message": "Not Found"}',
+    '    else:',
+    '        resp = rec',
+  ]
+}
+
+function mockCurlTail() {
+  return [
+    '',
+    'writej("counters.json", counters)',
+    'with open(os.path.join(state, "last-code"), "w", encoding="utf-8") as handle:',
+    '    handle.write(str(code))',
+    'if dump:',
+    "    with open(dump, \"w\", encoding=\"utf-8\") as handle:",
+    "        handle.write('HTTP/2 %d\\n' % code)",
+    'if out:',
+    '    with open(out, "w", encoding="utf-8") as handle:',
+    '        handle.write(json.dumps(resp))',
+    'if code >= 400:',
+    '    raise SystemExit(22)',
+  ].join('\n')
+}
+
+function buildIntegrated(scenario) {
+  const state = mkdtempSync(join(tmpdir(), 'aerolink-requester-integrated-'))
+  mkdirSync(join(state, 'tmp'), { recursive: true })
+  const freshEvents = [
+    labeledEvent(1, '2026-09-22T10:49:17Z'),
+    labeledEvent(2, '2026-09-23T12:00:00Z'),
+  ]
+  const staleEvents = [labeledEvent(1, '2026-09-23T09:54:44Z')]
+  writeFileSync(join(state, 'scenario.json'), JSON.stringify(scenario, null, 2))
+  writeFileSync(join(state, 'events.json'), JSON.stringify(scenario.stale ? staleEvents : freshEvents))
+  writeFileSync(join(state, 'requester-runs.json'), JSON.stringify(scenario.requester ?? []))
+  writeFileSync(join(state, 'static-runs.json'), JSON.stringify({ workflow_runs: scenario.productRuns ?? [] }))
+  for (const [name, rec] of Object.entries(scenario.runRecords ?? {})) {
+    writeFileSync(join(state, `run-${name}.json`), JSON.stringify(rec))
+  }
+  writeFileSync(join(state, 'jobs.json'), JSON.stringify(scenario.jobs ?? {
+    jobs: [
+      { name: 'Classify changed product areas', steps: [{ name: 'Authenticate label-dispatched pull-request context', status: 'completed', conclusion: 'success' }] },
+      { name: 'Full Product evidence aggregate', status: 'completed', conclusion: 'success' },
+    ],
+  }))
+  writeFileSync(join(state, 'pr.json'), JSON.stringify({
+    state: 'open',
+    head: { sha: INTEGRATED_SHA, ref: INTEGRATED_REF, repo: { full_name: 'owner/repo' } },
+    labels: [{ name: 'ready-for-full-ci' }],
+  }))
+  writeFileSync(join(state, 'counters.json'), JSON.stringify({ listGets: 0, pinnedGets: 0, postSeen: false, postCount: 0 }))
+  writeFileSync(join(state, 'jobs-requests'), '')
+  writeFileSync(join(state, 'summary.md'), '')
+  writeFileSync(join(state, 'mock-curl.py'), mockCurlSource().join('\n') + '\n' + mockCurlTail())
+  return state
+}
+
+function integratedHarness(stateDir, selfAttempt = 1) {
+  const shim = join(stateDir, 'shim')
+  mkdirSync(shim, { recursive: true })
+  const shimPosix = '/' + shim[0].toLowerCase() + shim.slice(2).split(sep).join('/')
+  const pythonShim = join(shim, 'python')
+  writeFileSync(pythonShim, '#!/usr/bin/env bash\nexec "' + pythonExecutable + '" "$@"\n')
+  chmodSync(pythonShim, 0o755)
+  // the production loop keeps the 420-poll bound; this test-scaled copy bounds at 60 polls
+  const body = workflowRunBody().replace('for attempt in $(seq 1 420); do', 'for attempt in $(seq 1 60); do')
+  const lines = [
+    'set -euo pipefail',
+    'export GITHUB_API_URL="https://mock.local"',
+    'export GITHUB_TOKEN="integration-mock-token"',
+    'export GITHUB_REPOSITORY="owner/repo"',
+    'export HEAD_SHA="' + INTEGRATED_SHA + '"',
+    'export HEAD_REF="' + INTEGRATED_REF + '"',
+    'export BASE_SHA="' + 'b'.repeat(40) + '"',
+    'export PR_NUMBER="1066"',
+    'export REQUEST_LABEL="ready-for-full-ci"',
+    'export SELF_RUN_ID="7000"',
+    'export SELF_RUN_ATTEMPT="' + selfAttempt + '"',
+    'export RUNNER_TEMP="' + join(stateDir, 'tmp') + '"',
+    'export GITHUB_STEP_SUMMARY="' + join(stateDir, 'summary.md') + '"',
+    'export MOCK_STATE="' + stateDir + '"',
+    'export PATH="' + shimPosix + '":$PATH',
+    'api="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY"',
+    'headers=()',
+    'BOUNDARY_ID=0',
+    'PINNED_ID=""',
+    'PINNED_ATTEMPT=""',
+    'sleep() { :; }',
+    'node() { :; }',
+    'curl() {',
+    '  local method="GET" dump="" out="" data="" want_code=0 prev="" url="" arg',
+    '  for arg in "$@"; do',
+    '    case "$arg" in',
+    '      --request|--dump-header|--output|--data-binary) prev="$arg" ;;',
+    '      --write-out) prev="WANT" ;;',
+    '      --*) prev="" ;;',
+    '      *)',
+    '        case "$prev" in',
+    '          --request) method="$arg" ;;',
+    '          --dump-header) dump="$arg" ;;',
+    '          --output) out="$arg" ;;',
+    '          --data-binary) data="${arg#@}" ;;',
+    '          WANT) want_code=1 ;;',
+    '          "") url="$arg" ;;',
+    '        esac',
+    '        prev=""',
+    '        ;;',
+    '    esac',
+    '  done',
+    '  {',
+    "    printf 'CURL method=[%s] url=[%s] dump=[%s] out=[%s] data=[%s]\\n' \"$method\" \"$url\" \"$dump\" \"$out\" \"$data\" >> \"$MOCK_STATE/curl-trace\"",
+    '  }',
+    '  local status=0',
+    '  python "' + stateDir + '/mock-curl.py" "$method" "$url" "$dump" "$out" "$data" || status=$?',
+    '  if [ "$want_code" = "1" ] && [ -f "$MOCK_STATE/last-code" ]; then cat "$MOCK_STATE/last-code"; fi',
+    '  return "$status"',
+    '}',
+    body,
+  ]
+  return lines.join('\n')
+}
+
+function runIntegrated(state, selfAttempt = 1) {
+  const script = integratedHarness(state, selfAttempt)
+  const file = join(state, 'harness.sh')
+  writeFileSync(file, script)
+  return spawnSync(bash, ['--noprofile', '--norc', file], { encoding: 'utf8', timeout: 240_000 })
+}
+
+function integratedState(scenario) {
+  const state = buildIntegrated(scenario)
+  return { state, run: (attempt) => runIntegrated(state, attempt ?? 1) }
+}
+
+const counters = (state) => JSON.parse(readFileSync(join(state, 'counters.json'), 'utf8'))
+
+const inflight101 = productRun(101, 'in_progress', undefined, '2026-09-23T12:10:00Z', { created_at: '2026-09-23T12:05:00Z' })
+const success101 = productRun(101, 'completed', 'success', '2026-09-23T12:20:00Z', { created_at: '2026-09-23T12:05:00Z' })
+const failed100 = productRun(100, 'completed', 'failure', '2026-09-23T10:19:05Z')
+const success200 = productRun(200, 'completed', 'success', '2026-09-22T11:00:00Z')
+const integratedSelf = requesterRun(7000, '2026-09-23T12:00:05Z')
+
+test('integrated: eligible NONE dispatches once, pins the response identity, and qualifies the pinned attempt', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+  const { state, run } = integratedState({
+    requester: [integratedSelf], productRuns: [],
+    runRecords: { '101-initial': inflight101, '101-final': success101 },
+    dispatchResponse: 'details', revealAfter: 1, pinnedFinalAfter: 2,
+  })
+  const outcome = run()
+  assert.equal(outcome.status, 0, [outcome.stdout, outcome.stderr, outcome.stderr && readFileSync(join(state, 'harness.sh'), 'utf8').length].join("||").slice(0, 2500))
+  assert.equal(counters(state).postCount, 1)
+  const dispatch = readFileSync(join(state, 'last-dispatch.json'), 'utf8')
+  assert.match(dispatch, /return_run_details/)
+  assert.match(readFileSync(join(state, 'summary.md'), 'utf8'), /run 101 \(attempt 1\)/)
+  assert.match(readFileSync(join(state, 'jobs-requests'), 'utf8'), /\/actions\/runs\/101\/attempts\/1\/jobs\?per_page=100/)
+})
+
+test('integrated: eligible EXHAUSTED dispatch with a lost response recovers by discovery — one POST total', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+  const { state, run } = integratedState({
+    requester: [integratedSelf], productRuns: [failed100],
+    runRecords: { '101-initial': inflight101, '101-final': success101 },
+    dispatchResponse: 'empty', revealAfter: 2, pinnedFinalAfter: 2,
+  })
+  const outcome = run()
+  assert.equal(outcome.status, 0, outcome.stderr.slice(0, 3000))
+  assert.equal(counters(state).postCount, 1)
+  assert.match(readFileSync(join(state, 'summary.md'), 'utf8'), /run 101 \(attempt 1\)/)
+})
+
+test('integrated: a lost response that never resolves refuses after exactly one POST', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+  const { state, run } = integratedState({
+    requester: [integratedSelf], productRuns: [failed100], dispatchResponse: 'empty',
+  })
+  const outcome = run()
+  assert.equal(outcome.status, 1)
+  assert.match(outcome.stdout, /No successful trusted Product workflow_dispatch/)
+  assert.equal(counters(state).postCount, 1)
+})
+
+test('integrated: stale, consumed and missing-identity refusals post zero times', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+  const stale = integratedState({
+    stale: true, requester: [requesterRun(7000, '2026-09-23T10:00:00Z')], productRuns: [failed100],
+  })
+  const staleOutcome = stale.run()
+  assert.equal(staleOutcome.status, 1)
+  assert.match(staleOutcome.stdout, /Dispatch refused/)
+  assert.match(staleOutcome.stdout, /stale/)
+  assert.equal(counters(stale.state).postCount, 0)
+
+  const consumed = integratedState({
+    requester: [requesterRun(6000, '2026-09-23T12:00:10Z')], productRuns: [failed100],
+  })
+  const consumedOutcome = consumed.run()
+  assert.equal(consumedOutcome.status, 1)
+  assert.match(consumedOutcome.stdout, /authorization already consumed by requester run 6000/)
+  assert.equal(counters(consumed.state).postCount, 0)
+
+  const missing = integratedState({ requester: [], productRuns: [failed100] })
+  const missingOutcome = missing.run()
+  assert.equal(missingOutcome.status, 1)
+  assert.match(missingOutcome.stdout, /identity is missing from the history or mismatches this head/)
+  assert.equal(counters(missing.state).postCount, 0)
+})
+
+test('integrated: a requester rerun refuses with zero POSTs', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+  const { state, run } = integratedState({
+    requester: [requesterRun(7000, '2026-09-23T12:00:05Z', { attempt: 2 })], productRuns: [failed100],
+  })
+  const outcome = run(2)
+  assert.equal(outcome.status, 1)
+  assert.match(outcome.stdout, /requester rerun/)
+  assert.equal(counters(state).postCount, 0)
+})
+
+test('integrated: pinned-run trust changes and attempt changes refuse after the single dispatch', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+  const trust = integratedState({
+    requester: [integratedSelf], productRuns: [],
+    runRecords: {
+      '101-initial': inflight101,
+      '101-final': { ...success101, triggering_actor: { login: 'seanmccarthyns' } },
+    },
+    dispatchResponse: 'details', pinnedFinalAfter: 1,
+  })
+  const trustOutcome = trust.run()
+  assert.equal(trustOutcome.status, 1)
+  assert.match(trustOutcome.stdout, /trust identity changed/)
+  assert.equal(counters(trust.state).postCount, 1)
+
+  const attempt = integratedState({
+    requester: [integratedSelf], productRuns: [],
+    runRecords: {
+      '101-initial': inflight101,
+      '101-final': { ...success101, run_attempt: 2 },
+    },
+    dispatchResponse: 'details', pinnedFinalAfter: 1,
+  })
+  const attemptOutcome = attempt.run()
+  assert.equal(attemptOutcome.status, 1)
+  assert.match(attemptOutcome.stdout, /attempt changed/)
+  assert.equal(counters(attempt.state).postCount, 1)
+})
+
+test('integrated: a missing pinned record (404) refuses after the single dispatch', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+  const { state, run } = integratedState({
+    requester: [integratedSelf], productRuns: [], dispatchResponse: 'details',
+  })
+  const outcome = run()
+  assert.equal(outcome.status, 1)
+  assert.equal(counters(state).postCount, 1)
+})
+
+test('integrated: an existing authoritative success is reused without dispatch', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+  const { state, run } = integratedState({
+    requester: [integratedSelf], productRuns: [success200],
+    runRecords: { 200: success200 },
+  })
+  const outcome = run()
+  assert.equal(outcome.status, 0, outcome.stderr.slice(0, 3000))
+  assert.equal(counters(state).postCount, 0)
+  assert.match(readFileSync(join(state, 'summary.md'), 'utf8'), /run 200 \(attempt 1\)/)
+})
+
+test('integrated: failed qualification evidence refuses and the per-attempt jobs request is exact', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+  const { state, run } = integratedState({
+    requester: [integratedSelf], productRuns: [],
+    runRecords: { '101-initial': inflight101, '101-final': success101 },
+    dispatchResponse: 'details', revealAfter: 1, pinnedFinalAfter: 2,
+    jobs: {
+      jobs: [
+        { name: 'Classify changed product areas', steps: [{ name: 'Authenticate label-dispatched pull-request context', status: 'completed', conclusion: 'success' }] },
+        { name: 'Full Product evidence aggregate', status: 'completed', conclusion: 'failure' },
+      ],
+    },
+  })
+  const outcome = run()
+  assert.equal(outcome.status, 1)
+  assert.match(outcome.stdout, /Product aggregate is not authoritative success/)
+  assert.equal(counters(state).postCount, 1)
+  assert.match(readFileSync(join(state, 'jobs-requests'), 'utf8'), /\/actions\/runs\/101\/attempts\/1\/jobs\?per_page=100/)
 })
