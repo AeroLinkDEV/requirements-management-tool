@@ -95,6 +95,9 @@ test("requirements explorer keeps every primary filter usable at desktop review 
     });
   }
 
+  // Below 1440px the inspector opened at 1440 is a drawer over the right of the page (#1091 TPX-1); close it
+  // to use the filters beneath, as a reader would.
+  await page.getByRole("button", { name: "Close requirement inspector" }).click();
   await coverage.selectOption("covered");
   await expect(coverage).toHaveValue("covered");
   await tag.fill("navigation");
