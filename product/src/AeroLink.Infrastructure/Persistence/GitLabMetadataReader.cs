@@ -125,7 +125,6 @@ public sealed class GitLabMetadataReader(HttpClient client, IOptions<ProjectGitL
     private const int MaxSearchLength = 200;
     private const int MaxReferenceLength = 256;
     private const int MaxPathLength = 2048;
-    private static readonly TimeSpan WholeRequestTimeout = TimeSpan.FromSeconds(15);
     private static readonly Regex FullSha = new("^[0-9a-fA-F]{40}(?:[0-9a-fA-F]{24})?$", RegexOptions.CultureInvariant);
 
     public async Task<GitLabMetadataResult<IReadOnlyList<GitLabMergeRequestSummary>>> DiscoverMergeRequestsAsync(
@@ -378,7 +377,7 @@ public sealed class GitLabMetadataReader(HttpClient client, IOptions<ProjectGitL
         request.Headers.TryAddWithoutValidation("PRIVATE-TOKEN", options.Value.ReadAccessToken.Trim());
         request.Headers.Accept.ParseAdd("application/json");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(WholeRequestTimeout);
+        timeout.CancelAfter(options.Value.MetadataRequestTimeout);
         try
         {
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);

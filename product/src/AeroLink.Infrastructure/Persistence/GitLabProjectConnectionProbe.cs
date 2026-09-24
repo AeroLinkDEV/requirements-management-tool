@@ -11,6 +11,16 @@ public sealed class ProjectGitLabOptions
     public string SyntheticDemoProjectId { get; set; } = "";
     public string SyntheticDemoRemoteProjectId { get; set; } = "";
     public ReleasedSyntheticSourceSupplementScopeOptions ReleasedSyntheticSourceSupplementScope { get; set; } = new();
+
+    /// <summary>
+    /// The whole-request limit on one GitLab metadata read, 15 seconds unless configured. A test that
+    /// deliberately holds a provider response open while it changes the database sets this higher, so a slow
+    /// runner cannot turn the answer under test into a timeout (#1092). Values below one second are ignored.
+    /// </summary>
+    public int MetadataRequestTimeoutSeconds { get; set; } = 15;
+
+    public TimeSpan MetadataRequestTimeout =>
+        TimeSpan.FromSeconds(MetadataRequestTimeoutSeconds >= 1 ? MetadataRequestTimeoutSeconds : 15);
 }
 
 /// <summary>
