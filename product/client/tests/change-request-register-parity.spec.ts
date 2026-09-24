@@ -71,7 +71,7 @@ test('the requirements register keeps its shape on the shared component', async 
   // A row says what it is, what it proposes and who raised it — not just a number.
   const row = page.locator('.historyRow.allocation').first()
   await expect(row).toBeVisible({ timeout: 30_000 })
-  await expect(row).toContainText('requirement changes')
+  await expect(row).toContainText(/requirement changes?/)
   await expect(row).toHaveAttribute('href', /systems\/change-requests\/[0-9a-f-]{36}$/)
   await row.click()
   await expect(row).toHaveAttribute('aria-current', 'true')
@@ -290,7 +290,7 @@ test('register keeps rows readable and stacks the inspector at a supported 1280p
   const tableBox = await table.boundingBox()
   const inspectorBox = await inspector.boundingBox()
   expect(inspectorBox?.y).toBeGreaterThanOrEqual((tableBox?.y ?? 0) + (tableBox?.height ?? 0) - 2)
-  await expect(row).toContainText('requirement changes')
+  await expect(row).toContainText(/requirement changes?/)
   await testInfo.attach('requirements-register-1280-stacked', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
 })
 

@@ -110,6 +110,7 @@ test('the execution workflow offers and records only the exact carried procedure
   const record = page.getByRole('dialog', { name: new RegExp(`Record a result for ${carried.baseNumber}\\.00`) })
   await expect(record).toBeVisible({ timeout: 30_000 })
   await record.getByLabel('Configuration under test').fill('Execution rig 1')
+  await record.getByLabel('Outcome').selectOption('Pass')
   await record.getByLabel('Determination', { exact: true }).fill('Sequencing held across the transition.')
   await record.getByLabel('Evidence reference').fill('rig1/execution-route.log')
   await record.getByRole('button', { name: 'Record determination' }).click()

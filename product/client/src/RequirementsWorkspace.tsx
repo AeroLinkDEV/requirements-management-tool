@@ -1,7 +1,7 @@
 import { useLatestRequest } from "./useLatestRequest";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PersonName } from "./People";
-import { artifactAcronym, coverageLabel, stateLabel, verificationArtifactNoun } from './presentation'
+import { artifactAcronym, coverageLabel, requirementLevelLabel, stateLabel, verificationArtifactNoun } from './presentation'
 import { apiRequest, operationError, recordClientOperationFailure } from './apiClient'
 import type { FormEvent } from "react";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
@@ -1410,7 +1410,7 @@ export default function RequirementsWorkspace({
           </aside>
         ) : selected && (
           <ControlledArtifactInspector
-            artifactType={`${selected.level.toUpperCase()} REQUIREMENT`}
+            artifactType={`${requirementLevelLabel(selected.level).toUpperCase()} REQUIREMENT`}
             displayNumber={selected.displayNumber}
             closeLabel="Close requirement inspector"
             onClose={() => {

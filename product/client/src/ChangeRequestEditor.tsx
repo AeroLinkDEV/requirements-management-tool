@@ -173,6 +173,9 @@ export default function ChangeRequestEditor({
   const upstreamPicker = useUpstreamCandidates(`${api}/api/authoring/upstream-change-requests?projectId=${projectId}&releaseId=${releaseId}&type=${scope}${scope === "Software" ? `&softwareLevel=${defaultLevel}` : ""}`);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // A refused save is reported at the foot of a long form; bring it into view so it is not missed (#1091 SCR-8).
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: "center" }); }, [error]);
   const [validationError, setValidationError] = useState<ValidationError>();
 
   // Held in this browser, because the change request does not exist on the server yet and reserving one
@@ -487,7 +490,7 @@ export default function ChangeRequestEditor({
               <small id="change-request-number-help">Previewed here; assigned atomically by the server on save.</small>
             </label>
             <label>
-              Target release
+              Target build
               <input value={releaseVersion} readOnly />
             </label>
             <label>
@@ -589,7 +592,7 @@ export default function ChangeRequestEditor({
           )}
         </section>
 
-        {error && <div className="formError" role="alert">{error}</div>}
+        {error && <div className="formError" role="alert" ref={errorRef}>{error}</div>}
         {validationError && <div className="formError" role="alert">{validationError.message}</div>}
         <footer className="editorActions">
           <p>

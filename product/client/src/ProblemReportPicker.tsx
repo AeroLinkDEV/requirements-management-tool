@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './ProblemReportPicker.css'
+import { stateLabel as problemReportStateLabel } from './problemReportLifecycle'
 
 export type ProblemReportOption = {
   id: string
@@ -132,7 +133,7 @@ export default function ProblemReportPicker({ api, projectId, scope, releaseId, 
         : ''
       return <label key={report.id} className={historical?'problemReportHistorical':''}>
         <input type="checkbox" checked={selected.includes(report.id)} disabled={isLocked || historical && !selected.includes(report.id)} onChange={() => toggle(report.id)} />
-        <b>{report.displayNumber}</b><span>{report.title}{explanation&&<small>{explanation}</small>}</span><i>{report.state.replace(/([A-Z])/g, ' $1')}</i>
+        <b>{report.displayNumber}</b><span>{report.title}{explanation&&<small>{explanation}</small>}</span><i>{problemReportStateLabel(report.state)}</i>
       </label>
     })}
     {hasMore&&<button type="button" className="problemReportMore" disabled={busy} onClick={()=>setPage(current=>current+1)}>Load more problem reports</button>}

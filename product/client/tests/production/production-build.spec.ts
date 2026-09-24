@@ -314,6 +314,7 @@ test('verification mutation failures retain the engineer input and only confirme
 
   const form = page.locator('.recordResultModal form')
   await form.getByLabel('Configuration under test').fill('Production qualification rig')
+  await form.getByLabel('Outcome').selectOption('Pass')
   await form.getByLabel('Evidence reference').fill('evidence/production-mutation.json')
   await form.getByLabel('Determination', { exact: true }).fill('The compiled client recorded the protected result exactly once.')
 

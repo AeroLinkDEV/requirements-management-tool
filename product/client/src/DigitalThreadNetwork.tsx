@@ -8,7 +8,7 @@ import DigitalThreadTable, {
 import { usePanelDock } from "./digitalThreadPanelDock"
 import ExactArtifactLink from "./ExactArtifactLink"
 import { type CanvasEdge, type CanvasNode, compactLanes, trace } from "./digitalThreadGeometry"
-import { stateLabel } from "./presentation"
+import { requirementLevelLabel, stateLabel } from "./presentation"
 import { traceRelationLabel, traceRelationLabelFor } from "./tracePresentation"
 import {
   OFF_LADDER,
@@ -262,7 +262,7 @@ export default function DigitalThreadNetwork({
           </>
         ),
       },
-      { key: "level", label: "Level", render: row => row.node.level ?? "Unclassified" },
+      { key: "level", label: "Level", render: row => requirementLevelLabel(row.node.level) || "Unclassified" },
       // #1016 S13A. The Table must not be the less informative view: a reader here needs the same two facts
       // the Map shows — what the record was raised from, and what its assessment concluded — in the same
       // words, from the same formatters.
