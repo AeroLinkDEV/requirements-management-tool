@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { join, resolve, sep } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -674,10 +674,25 @@ function mockCurlSource() {
     '        bad_url()',
     '    run_id = int(url.rsplit("/", 1)[-1])',
     '    counters["pinnedGets"] = counters.get("pinnedGets", 0) + 1',
+    "    pin_read_exit = scenario.get(\"pinnedReadExit\")",
+    "    pin_read_status = scenario.get(\"pinnedReadStatus\")",
+    '    threshold = int(scenario.get("pinnedFinalAfter", 2))',
+    '    if (pin_read_exit is not None or pin_read_status is not None) and counters.get("pinnedGets", 0) >= threshold:',
+    '        writej("counters.json", counters)',
+    '        if pin_read_exit is not None:',
+    "            raise SystemExit(int(pin_read_exit))",
+    '        code = int(pin_read_status)',
+    '        resp = readj("pinned-read-body.json", {"message": "injected failure"})',
+    '        if dump:',
+    "            with open(dump, 'w', encoding='utf-8') as handle:",
+    "                handle.write('HTTP/2 %d' % code + chr(10))",
+    '        if out:',
+    "            with open(out, 'w', encoding='utf-8') as handle:",
+    '                json.dump(resp, handle)',
+    "        raise SystemExit(22)",
     "    initial = readj('run-%d-initial.json' % run_id, None)",
     "    final = readj('run-%d-final.json' % run_id, None)",
     "    plain = readj('run-%d.json' % run_id, None)",
-    '    threshold = int(scenario.get("pinnedFinalAfter", 2))',
     '    rec = plain',
     '    if initial is not None or final is not None:',
     '        if final is None or not counters.get("postSeen"):',
@@ -740,6 +755,14 @@ function buildIntegrated(scenario) {
   writeFileSync(join(state, 'static-runs.json'), JSON.stringify({ workflow_runs: productRuns }))
   for (const [name, rec] of Object.entries(runRecords)) {
     writeFileSync(join(state, `run-${name}.json`), JSON.stringify(rec))
+  }
+  for (const [name, raw] of Object.entries(scenario.rawRunRecords ?? {})) {
+    // verbatim payload: used to inject records the checker must fail on
+    writeFileSync(join(state, `run-${name}.json`), raw)
+  }
+  if (scenario.prePinLeftover) {
+    // an earlier success-shaped response file left behind by a previous read
+    writeFileSync(join(state, 'tmp', 'pinned-101.json'), JSON.stringify(success101))
   }
   writeFileSync(join(state, 'jobs.json'), JSON.stringify(scenario.jobs ?? {
     jobs: [
@@ -1013,4 +1036,66 @@ test('integrated: multi-page event histories are walked with query-correct URLs 
   assert.match(requests, /\/issues\/1066\/events\?page=1&per_page=100/)
   assert.match(requests, /\/issues\/1066\/events\?page=2&per_page=100/)
   assert.match(readFileSync(join(state, 'summary.md'), 'utf8'), /run 101 \(attempt 1\)/)
+})
+
+// ---- I07 regressions: a failed pinned read after a valid pin must refuse the
+// requester before any RUNNING/SUCCEEDED verdict, qualification request, or
+// rebinding — with the original pin proven to have occurred first (pinnedGets
+// reaches 2: one fetch during pinning, one failed poll).
+
+function postPinFailureState(overrides = {}) {
+  return integratedState({
+    requester: [integratedSelf], productRuns: [],
+    runRecords: { '101-initial': inflight101, '101-final': success101 },
+    dispatchResponse: 'details', pinnedFinalAfter: 2,
+    ...overrides,
+  })
+}
+
+function assertPostPinRefusal(state, outcome) {
+  assert.equal(outcome.status, 1)
+  assert.match(diagnostic(state, outcome), /pinned-run read failed/)
+  // the original pin occurred before the failure injection: two pinned-record
+  // reads (one during pinning, one failed poll) against exactly one dispatch
+  assert.equal(counters(state).pinnedGets, 2)
+  assert.equal(counters(state).postCount, 1)
+  // no successful binding summary, no qualification request after the failed poll
+  assert.equal(readFileSync(join(state, 'summary.md'), 'utf8'), '')
+  assert.equal(readFileSync(join(state, 'jobs-requests'), 'utf8'), '')
+}
+
+test('integrated: post-pin transport failure with a stale success-shaped file refuses', { skip: skipIntegrated }, () => {
+  const { state, run } = postPinFailureState({ pinnedReadExit: 28, prePinLeftover: true })
+  const leftover = join(state, 'tmp', 'pinned-101.json')
+  assert.equal(existsSync(leftover), true, 'precondition: stale success-shaped file present')
+  const outcome = run()
+  // poll_pinned removes the stale file before the read, then curl exits 28:
+  // the stale file is gone and its contents were never interpreted
+  assert.equal(existsSync(leftover), false, 'stale file must be removed before the read')
+  assertPostPinRefusal(state, outcome)
+})
+
+test('integrated: post-pin failed HTTP carrying a success-shaped body refuses', { skip: skipIntegrated }, () => {
+  const { state, run } = postPinFailureState({ pinnedReadStatus: 500, pinnedReadBody: success101 })
+  const outcome = run()
+  // a 500 response whose body looks like a run must not be treated as evidence
+  assertPostPinRefusal(state, outcome)
+})
+
+test('integrated: post-pin 404 refuses', { skip: skipIntegrated }, () => {
+  const { state, run } = postPinFailureState({ pinnedReadStatus: 404, pinnedReadBody: { message: 'Not Found' } })
+  const outcome = run()
+  assertPostPinRefusal(state, outcome)
+})
+
+test('integrated: checker failure after pinning refuses without a bind', { skip: skipIntegrated }, () => {
+  // run-101-final.json is verbatim '[]' — valid JSON, wrong shape — so the
+  // checker crashes (nonzero, empty verdict) instead of producing a verdict
+  const { state, run } = postPinFailureState({ rawRunRecords: { '101-final': '[]' } })
+  const outcome = run()
+  assert.equal(outcome.status, 1)
+  assert.match(diagnostic(state, outcome), /verification failed/)
+  assert.equal(counters(state).postCount, 1)
+  assert.equal(readFileSync(join(state, 'summary.md'), 'utf8'), '')
+  assert.equal(readFileSync(join(state, 'jobs-requests'), 'utf8'), '')
 })
