@@ -63,7 +63,7 @@
 }
 .workflowHistory b { color: #1c3044; font-size: 13px; }
 .workflowHistory b i { color: #4b5f74; font-size: 12px; font-style: normal; }
-.workflowHistory small { display: block; color: #7f8d9c; font-size: 11px; }
+.workflowHistory small { display: block; color: #5f6d7e; font-size: 11px; }
 
 .workflowModal {
   position: fixed; inset: 0; z-index: 40;
@@ -93,7 +93,7 @@
 .workflowModal fieldset.workflowMode label { grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 9px; font-weight: 400; }
 .workflowModal fieldset.workflowMode input { width: 18px; height: 18px; min-height: 18px; margin-top: 2px; }
 .workflowModal fieldset.workflowMode b { display: block; color: #1c3044; font-size: 13px; }
-.workflowModal fieldset.workflowMode small { color: #7f8d9c; font-size: 12px; }
+.workflowModal fieldset.workflowMode small { color: #5f6d7e; font-size: 12px; }
 
 .workflowStageEditor { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .workflowStageEditor > li {

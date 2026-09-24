@@ -13,7 +13,7 @@
 .draftState.saved i { background: #168578; }
 .draftState.error i, .draftState.conflict i { background: #a4262c; }
 .draftState.error, .draftState.conflict { border-color: #f0c2c4; color: #a4262c; }
-.draftState small { color: #7f8d9c; font-weight: 400; font-size: 11px; }
+.draftState small { color: #5f6d7e; font-weight: 400; font-size: 11px; }
 
 .draftRestore {
   display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;

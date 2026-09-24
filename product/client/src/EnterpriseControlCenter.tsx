@@ -533,9 +533,9 @@ export default function EnterpriseControlCenter({
             ← Command Center
           </button>
           <p className="eyebrow">
-            ENTERPRISE HARDENING / CONTROLLED OPERATIONS
+            ADMINISTRATION / CONTROLLED OPERATIONS
           </p>
-          <h1>Enterprise Control</h1>
+          <h1>System Operations</h1>
           <p>
             Content integrity, change clarity, reusable intelligence, durable
             processing, controlled configuration, and qualification evidence.

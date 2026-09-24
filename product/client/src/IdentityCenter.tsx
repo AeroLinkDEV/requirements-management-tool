@@ -948,6 +948,10 @@ export function MyWorkCenter({
                     <small>
                       Assigned {task.ageDays} day{task.ageDays === 1 ? "" : "s"}{" "}
                       ago · due {new Date(task.dueAt).toLocaleDateString()}
+                      {/* The overdue count above has to be findable in the list (#1091 LOW-7). */}
+                      {new Date(task.dueAt).getTime() < Date.now() && (
+                        <em className="workOverdue"> · Overdue</em>
+                      )}
                     </small>
                   </div>
                   <button>Open work item →</button>

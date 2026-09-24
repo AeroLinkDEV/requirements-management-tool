@@ -35,7 +35,7 @@ const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:st
   {label:'Software LLR Downstream Assessments',view:'testingCoverage',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Approved changes waiting for an LLRTCCR conclusion',icon:'coverage'},
   {label:'Software LLR Test Results',view:'testResults',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Low-level software test set and recorded determinations',icon:'testResults'},
   {label:'Digital Thread',view:'lifecycle',discipline:'system',detail:'Traceability and outputs across the released evidence path',icon:'digitalThread'},
-  {label:'Lifecycle Decision Room',view:'release',discipline:'system',detail:'Release readiness, change impact, evidence, and authority',icon:'release'},
+  {label:'Release Readiness',view:'release',discipline:'system',detail:'Release readiness, change impact, evidence, and authority',icon:'release'},
   {label:'System Operations',view:'enterprise',discipline:'system',detail:'Operational controls and integrity',icon:'operations'},
 ]
 

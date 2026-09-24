@@ -19,7 +19,7 @@ const openCenter = async (page: import('@playwright/test').Page) => {
   await login(page)
   await openNavigationGroup(page, 'ADMINISTRATION')
   await page.getByRole('link', { name: 'Integration Command Center' }).click()
-  await expect(page.getByRole('heading', { name: 'Integration Command Center' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Integration Center' })).toBeVisible()
   await expect(page.getByText('v1 operational')).toBeVisible()
   await expect(page.getByText('Scoped credentials')).toBeVisible()
 }

@@ -63,7 +63,8 @@ button, input, select, textarea { font: inherit; }
 button, a, summary, select { cursor: pointer; }
 button, input, select, textarea { min-height: var(--control-height); }
 button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
-  outline: 3px solid rgba(35, 135, 125, .28);
+  /* #1091 A11Y-1: a 28%-opacity ring was nearly invisible, especially on the navy navigation. */
+  outline: 3px solid var(--teal-600, #1f8a80);
   outline-offset: 2px;
 }
 button:disabled { cursor: not-allowed; }
@@ -75,3 +76,4 @@ button:disabled { cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
+aside :focus-visible, .primaryNavigation :focus-visible, .appNavigation :focus-visible { outline-color: #7fe3d3; }

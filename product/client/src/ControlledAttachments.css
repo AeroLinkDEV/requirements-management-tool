@@ -31,7 +31,7 @@
 
 .attachmentError { margin: 0; color: #a4262c; font-size: 13px; }
 .attachmentMessage { margin: 0; color: #1f6f63; font-size: 13px; }
-.attachmentEmpty { margin: 0; color: #7f8d9c; font-size: 13px; }
+.attachmentEmpty { margin: 0; color: #5f6d7e; font-size: 13px; }
 .attachmentRemoval {
   display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.5fr) auto auto;
   align-items: end; gap: 10px; padding: 12px;
@@ -67,9 +67,9 @@
 .attachmentDetail b { color: #1c3044; font-size: 14px; }
 .attachmentDetail b i { color: #4b5f74; font-size: 12px; font-style: normal; }
 .attachmentDetail p { margin: 0; color: #4b5f74; font-size: 12px; overflow-wrap: anywhere; }
-.attachmentDetail .attachmentWhy { color: #7f8d9c; }
+.attachmentDetail .attachmentWhy { color: #5f6d7e; }
 .attachmentDetail code { color: #4b5f74; font-size: 11px; overflow-wrap: anywhere; }
-.attachmentDetail small { color: #7f8d9c; font-size: 11px; }
+.attachmentDetail small { color: #5f6d7e; font-size: 11px; }
 
 .attachmentActions { display: grid; gap: 5px; justify-items: stretch; }
 .attachmentActions a,
