@@ -299,8 +299,8 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
                 ChangeRequestType.Interface);
             origin.AddRequirementChange(seeded.ManagerName, "ICDR-090001", 0, RequirementLevel.Interface,
                 RequirementChangeKind.Introduce, "The interface baseline contract shall remain compatible.", "Baseline trace", "Not applicable", now);
-            origin.SubmitForReview(seeded.ManagerName, [new ApproverSelection(seeded.ManagerName, "Configuration Manager")], now);
-            origin.ApproveActiveStage(seeded.ManagerName, now);
+            origin.SubmitForReview(seeded.ManagerName, [new ApproverSelection("independent.reviewer", "Independent Reviewer")], now);
+            origin.ApproveActiveStage("independent.reviewer", now);
             var baseline = new CandidateBaseline("SW-01.00", 0, seeded.ProjectId, seeded.ReleaseId, null,
                 "ICD parent baseline", seeded.ManagerName, now);
             baseline.Select(origin, seeded.ManagerName, now);

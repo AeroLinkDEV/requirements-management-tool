@@ -108,7 +108,9 @@ export default function BaselineCenter({
     [swrd, setSwrd] = useState<Swrd>(),
     [creating, setCreating] = useState(false),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    // The manifest can hold thousands of revisions; render it progressively (#1091 BAS-1).
+    [manifestShown, setManifestShown] = useState(50);
   const loadList = useCallback(async () => {
     const [response, priorResponse] = await Promise.all([
       fetch(
@@ -474,7 +476,7 @@ export default function BaselineCenter({
                       <span>REQUIREMENT MANIFEST SHA-256</span>
                       <code>{swrd.requirementsHash}</code>
                     </div>
-                    {swrd.requirements.map((item) => (
+                    {swrd.requirements.slice(0, manifestShown).map((item) => (
                       <article className="manifestRequirement" key={item.id}>
                         <div>
                           <b>{item.displayNumber}</b>
@@ -487,6 +489,20 @@ export default function BaselineCenter({
                         </small>
                       </article>
                     ))}
+                    {swrd.requirements.length > manifestShown && (
+                      <div className="manifestMore">
+                        <span>
+                          Showing {manifestShown.toLocaleString()} of{" "}
+                          {swrd.requirements.length.toLocaleString()} revisions.
+                        </span>
+                        <button type="button" onClick={() => setManifestShown((count) => count + 200)}>
+                          Show 200 more
+                        </button>
+                        <button type="button" onClick={() => setManifestShown(swrd.requirements.length)}>
+                          Show all
+                        </button>
+                      </div>
+                    )}
                   </section>
                 )}
                 <div className="baselineColumns">

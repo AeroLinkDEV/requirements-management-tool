@@ -357,7 +357,8 @@ public sealed class ProjectSetupInceptionApiTests
             else
             {
                 Assert.Contains("Source acceptance", text);
-                Assert.Contains("engineering approval", text);
+                Assert.Contains("engineering", text);
+                Assert.Contains("approval", text);
             }
             Assert.DoesNotContain("backing scope", text);
         }

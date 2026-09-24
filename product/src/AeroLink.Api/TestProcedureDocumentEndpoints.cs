@@ -17,7 +17,7 @@ public static class TestProcedureDocumentEndpoints
     public static void MapTestProcedureDocumentEndpoints(this WebApplication app)
     {
         app.MapGet("/api/projects/{projectId:guid}/{artifactRoute:regex(test-procedure-documents|test-case-documents|test-artifacts)}", async (Guid projectId,
-            string artifactRoute, string? scope, HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
+            string artifactRoute, string? scope, Guid? releaseId, HttpContext http, AeroLinkDbContext db, IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             var ladderPolicy = await policyResolver.ResolveAsync(projectId, ct);
@@ -53,9 +53,17 @@ public static class TestProcedureDocumentEndpoints
                 .OrderBy(x => x.Position)
                 .ToListAsync(ct);
 
+            // With a build selected, the rail counts what that build carries, so a count and the list it opens
+            // agree (#1091 CNT-2: "Unsectioned procedures 77" opened "75 found").
+            HashSet<Guid>? carried = null;
+            if (releaseId is not null)
+                carried = (await VerificationReadEffectivity.ForReleaseAsync(db, projectId, releaseId.Value, ct, policyResolver))
+                    ?.RevisionByProcedure.Keys.ToHashSet() ?? [];
             return Results.Ok(documents.Select(document =>
             {
-                var own = nodes.Where(x => x.DocumentId == document.Id).ToList();
+                var own = nodes.Where(x => x.DocumentId == document.Id
+                    && (carried is null || x.Type != TestProcedureDocumentNodeType.Procedure
+                        || x.ProcedureId is Guid procedureId && carried.Contains(procedureId))).ToList();
                 var sections = own.Where(x => x.Type == TestProcedureDocumentNodeType.Section).ToList();
                 return new
                 {

@@ -78,7 +78,7 @@ public sealed class ProjectSetupServiceQualificationTests
                 Assert.Contains("DRAFT", xml);
                 Assert.Contains("Release SW-01.30", xml); // cover
                 Assert.Contains("xml:space=\"preserve\">Release</w:t>", xml); // document control label
-                Assert.Contains("release SW-01.30 applied", xml); // body
+                Assert.Contains("Build SW-01.30 applied", xml); // body
                 Assert.DoesNotContain("Release 1.3", xml);
                 Assert.DoesNotContain("FMS shall", xml);
                 Assert.DoesNotContain("backing scope", xml);

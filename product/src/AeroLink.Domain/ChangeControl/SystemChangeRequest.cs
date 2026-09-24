@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Identity;
 using AeroLink.Domain.Requirements;
 
 namespace AeroLink.Domain.ChangeControl;
@@ -595,6 +596,11 @@ public sealed class SystemChangeRequest
             && !_allowLegacyHistoricalSubmission)
             SnapshotContractVersion = CurrentSnapshotContractVersion;
         ValidateReadyForReview(ladderPolicy, traceEvidence, allowUnresolvedTraceSeed);
+        // Independent review (#1091 SOD-1): the author may not review their own change. An administrator is
+        // exempt, but only while answering through administrator authority, and the exemption is recorded.
+        var selfReview = approvers.Where(x => string.Equals(x.UserId, AuthorId, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (selfReview.Any(x => !IsAdministratorAuthority(x.Role, x.AuthoritySource)))
+            throw new DomainException($"{DisplayNumber} was authored by {AuthorId}, who cannot review it. Choose an independent reviewer.");
         var cycle = new ReviewCycle(Id, _reviewCycles.Count + 1, ComputeSnapshotHash(traceEvidence), approvers, now, mode, workflow,
             SnapshotContractVersion, BuildTraceSnapshotJson(traceEvidence));
         _reviewCycles.Add(cycle);
@@ -608,6 +614,9 @@ public sealed class SystemChangeRequest
         Audit("ReviewStarted", actorId,
             $"Started {cycle.Mode.ToString().ToLowerInvariant()} review cycle {cycle.Sequence} with {approvers.Count} approvers" +
             (workflow is null ? "." : $" following {workflow.Name} v{workflow.Version}."), now);
+        if (selfReview.Count > 0)
+            Audit("AdministratorSelfReview", actorId,
+                $"Author {AuthorId} is named as a reviewer under administrator authority; independent review is not claimed for that stage.", now);
         return cycle;
     }
 
@@ -646,7 +655,19 @@ public sealed class SystemChangeRequest
     {
         EnsureInReview();
         var cycle = ActiveReviewCycle!;
+        var selfSigning = string.Equals(actorId, AuthorId, StringComparison.OrdinalIgnoreCase);
+        if (selfSigning)
+        {
+            var step = cycle.Steps.FirstOrDefault(x => x.State == ApprovalStepState.Active
+                && string.Equals(x.ApproverId, actorId, StringComparison.OrdinalIgnoreCase));
+            if (step is not null && !IsAdministratorAuthority(Enum.TryParse<ProgramRole>(step.Authority, out var role) ? role : null,
+                    step.AuthoritySource ?? ProjectAuthoritySource.None))
+                throw new DomainException($"{DisplayNumber} was authored by {actorId}, who cannot approve it.");
+        }
         var fullyApproved = cycle.Approve(actorId, rationale, now);
+        if (selfSigning)
+            Audit("AdministratorSelfReview", actorId,
+                $"The author signed review cycle {cycle.Sequence} under administrator authority. This signature is an administrator self-review, not independent review.", now);
         Audit("ApprovalRecorded", actorId, $"Approved review cycle {cycle.Sequence} stage." + (string.IsNullOrWhiteSpace(rationale) ? "" : $" Reason: {rationale.Trim()}"), now);
         if (fullyApproved)
         {
@@ -1110,6 +1131,9 @@ public sealed class SystemChangeRequest
             isTopOfLadder = evidence?.IsTopOfLadder ?? false,
         });
     }
+
+    private static bool IsAdministratorAuthority(ProgramRole? role, ProjectAuthoritySource source) =>
+        role == ProgramRole.Administrator || source == ProjectAuthoritySource.AdministratorSubstitution;
 
     private void Audit(string type, string actor, string detail, DateTimeOffset now) =>
         _auditEvents.Add(new AuditEvent(Id, type, actor, detail, now));

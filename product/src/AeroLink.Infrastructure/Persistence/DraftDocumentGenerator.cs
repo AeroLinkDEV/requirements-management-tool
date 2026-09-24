@@ -80,8 +80,8 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             project.SoftwareProduct, await PublicationProgramContext.ResolveAsync(db, project, program, ct), project.Name, DocumentTypeName(type),
             $"{project.SoftwareProduct} {DocumentTypeName(type)}",
             inception is null
-                ? $"Draft for release {releaseLabel}. Released content plus every approved change not yet baselined."
-                : $"Draft for release {releaseLabel}. Accepted source content plus approved project changes. Source acceptance is not a new engineering approval.",
+                ? $"Draft for Build {releaseLabel}. Released content plus every approved change not yet baselined."
+                : $"Draft for Build {releaseLabel}. Accepted source content plus approved project changes. Source acceptance is not a new engineering approval.",
             documentNumber, revision.ToString("D2"), "DRAFT - NOT APPROVED", releaseLabel,
             sourceBaseline?.DisplayNumber ?? "No released predecessor", preparedBy, generatedAt,
             // No manifest hash: a hash asserts that this content is fixed and reproducible, and this content is
@@ -100,8 +100,8 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             {
                 new PublicationSection("Effective Requirements",
                     inception is null
-                        ? $"The released baseline for this product with every approved change to release {releaseLabel} applied. Rows marked as changed are not yet part of any frozen baseline."
-                        : $"The exact accepted source manifest with approved changes to release {releaseLabel} applied. Source approvals remain source facts; this draft does not approve inherited content.",
+                        ? $"The released baseline for this product with every approved change to Build {releaseLabel} applied. Rows marked as changed are not yet part of any frozen baseline."
+                        : $"The exact accepted source manifest with approved changes to Build {releaseLabel} applied. Source approvals remain source facts; this draft does not approve inherited content.",
                     records),
             })
         {
@@ -116,6 +116,15 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
                 ? stored
                 : item.RichText;
             if (string.IsNullOrWhiteSpace(content)) return "";
+            // Legacy revisions stored their statement as raw HTML ("<p>…</p>") rather than structured blocks. Read
+            // as a paragraph that text never equals the statement, so the markup was published beneath it (#1091
+            // GEN-1). Reduce it to text first: identical text adds nothing, anything else publishes as text.
+            if (!content.TrimStart().StartsWith('{'))
+            {
+                var legacyText = LegacyHtmlText(content);
+                if (Collapse(legacyText) == Collapse(item.Statement)) return "";
+                content = AeroLink.Domain.Content.RichContent.FromPlainText(legacyText);
+            }
             var adds = AeroLink.Domain.Content.RichContent.HasStructure(content)
                 || AeroLink.Domain.Content.RichContent.ToPlainText(content) != item.Statement;
             return adds ? RichContentPublisher.ForPublication(content, images) : "";
@@ -128,8 +137,22 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
     {
         var level = VerificationArtifactVocabulary.Definition(artifactKey).ProcedureLevel;
         var isCaseDocument = artifactKey.Kind == VerificationArtifactKind.Case;
-        var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, project.Id, release.Id, ct);
-        var revisionIds = effectivity?.RevisionIds ?? [];
+        // A Case document publishes source Cases. They are carried by the build's read projection, never by the
+        // executable manifest, so reading the executable manifest published an empty Case document (#1091 GEN-2).
+        bool exactManifest;
+        IReadOnlyList<Guid> revisionIds;
+        if (isCaseDocument)
+        {
+            var read = await VerificationReadEffectivity.ForReleaseAsync(db, project.Id, release.Id, ct);
+            exactManifest = read?.IsExactManifest == true;
+            revisionIds = read?.RevisionByProcedure.Values.ToList() ?? [];
+        }
+        else
+        {
+            var executable = await TestProcedureEffectivity.ForReleaseAsync(db, project.Id, release.Id, ct);
+            exactManifest = executable?.IsExactManifest == true;
+            revisionIds = executable?.RevisionIds ?? [];
+        }
         var latest = await (from revision in db.TestProcedureRevisions.AsNoTracking()
                                 .Where(x => revisionIds.Contains(x.Id))
                             join procedure in db.TestProcedures.AsNoTracking()
@@ -184,7 +207,7 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
             new[]
             {
                 new PublicationSection(level == TestProcedureLevel.System || !isCaseDocument ? "Effective Test Procedures" : "Effective Test Cases",
-                    effectivity?.IsExactManifest == true
+                    exactManifest
                         ? level == TestProcedureLevel.System || !isCaseDocument
                             ? "Exact controlled procedure revisions carried by the effective build manifest."
                             : "Exact controlled Case revisions carried by the effective build manifest."
@@ -326,4 +349,10 @@ public sealed class DraftDocumentGenerator(AeroLinkDbContext db, RichContentPubl
         ControlledDocumentType.LowLevelTestCases => "LLR Test Case Document (LLRTD)",
         _ => throw new DomainException($"Unknown controlled document type: {type}"),
     };
+
+    private static string LegacyHtmlText(string html) =>
+        System.Net.WebUtility.HtmlDecode(System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", " ")).Trim();
+
+    private static string Collapse(string? text) =>
+        System.Text.RegularExpressions.Regex.Replace(text ?? "", @"\s+", " ").Trim();
 }
