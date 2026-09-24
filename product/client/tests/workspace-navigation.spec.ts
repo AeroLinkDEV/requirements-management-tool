@@ -254,9 +254,14 @@ test("quick navigation from the Documentation Center returns to the build it was
   await page.goto(routePath(context, "dashboard"));
   await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Documentation Center", exact: true }).click();
   await expect(page).toHaveURL(/\/projects\/fms-project\/documentation-center$/);
-  await page.keyboard.press("Control+k");
-  await page.getByRole("textbox", { name: "Search AeroLink" }).fill("System Requirements Explorer");
   const palette = page.getByRole("dialog", { name: "Quick navigation" });
+  // The shortcut listener is registered by an effect after the route change renders; a press that lands first
+  // is ignored (#939, #928), so press again until the palette opens.
+  await expect(async () => {
+    await page.keyboard.press("Control+k");
+    await expect(palette).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
+  await page.getByRole("textbox", { name: "Search AeroLink" }).fill("System Requirements Explorer");
   await expect(palette.getByText("Choose a build to open this")).toHaveCount(0);
   await palette.getByRole("link", { name: /System Requirements Explorer/ }).first().click();
   await expect(page).toHaveURL(new RegExp("/releases/fms-current/"));
