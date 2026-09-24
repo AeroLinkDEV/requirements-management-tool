@@ -63,6 +63,10 @@ jobs:
               throw new Error('Queue response is incomplete.')
             }
             for (const entry of entries.nodes) {
+              // An entry GitHub has only queued has no candidate commit yet, so there is nothing its identity could
+              // alias. Refusing on it failed every other PR each time one entered the queue (#1106). Any other state
+              // without a resolvable candidate, or a malformed one, is still refused.
+              if (entry?.state === 'QUEUED' && entry.headCommit == null) continue
               const candidate = entry?.headCommit?.oid
               if (typeof candidate !== 'string' || !/^[0-9a-f]{40}$/.test(candidate)) throw new Error('Queue candidate identity is unresolved.')
               if (candidate === headSha) throw new Error('Readiness SHA is a current queue candidate.')
@@ -76,7 +80,7 @@ jobs:
               headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, Accept: 'application/vnd.github+json',
                 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
               body: JSON.stringify({ variables: { owner, name },
-                query: 'query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mergeQueue{entries(first:100){nodes{headCommit{oid}} pageInfo{hasNextPage}}}}}' }),
+                query: 'query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mergeQueue{entries(first:100){nodes{state headCommit{oid}} pageInfo{hasNextPage}}}}}' }),
             })
             if (!response.ok) throw new Error('Queue API read failed.')
             verifyReadinessTarget(process.env.HEAD_SHA, await response.json())
