@@ -16,9 +16,13 @@ const layoutTargets = [
 ];
 
 function directPanels(container) {
-  return Array.from(container.children).filter(
-    (element) => !element.classList.contains("workspaceSplitter"),
-  );
+  // A panel taken out of flow (the requirement inspector becomes a fixed drawer at narrower widths) owns no
+  // grid track. Counting it left an empty track and squeezed the list beside it (#1091 TPX-1).
+  return Array.from(container.children).filter((element) => {
+    if (element.classList.contains("workspaceSplitter")) return false;
+    const position = getComputedStyle(element).position;
+    return position !== "fixed" && position !== "absolute";
+  });
 }
 
 function storageKey(container, target) {

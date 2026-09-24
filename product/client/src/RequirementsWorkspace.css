@@ -1041,8 +1041,9 @@ button.coverageState:hover {
     grid-column: 2;
   }
 }
-@media (max-width: 1360px) {
-  /* The inspector becomes a fixed right-hand overlay at this width. Keep the canonical command bar above it
+@media (max-width: 1439.98px) {
+  /* The inspector becomes a fixed right-hand overlay at this width (#1091 TPX-1: raised from 1360px so a
+     1280-1440px screen keeps the list at full width instead of squeezing it to ~260px). Keep the canonical command bar above it
      and below the global context bar, including after a client-side route preserves the prior scroll offset. */
   .reqCommand {
     position: sticky;
@@ -1082,6 +1083,11 @@ button.coverageState:hover {
     width: 390px;
     z-index: 10;
     box-shadow: -15px 0 40px #10233a22;
+  }
+  /* A drawer with nothing selected would only hide the list it invites you to choose from. The Code workspace and
+     the change request registers keep theirs in flow (stacked under the list), so their empty state stays. */
+  .requirementInspector:has(> .procedureInspectorEmpty):not(.codeRegisterLayout *, .registerInspectorLayout > *) {
+    display: none;
   }
   .requirementsCommand .tagFilter { display: block; }
   .requirementsCommand .pageSizeControl { display: flex; }

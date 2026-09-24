@@ -486,6 +486,9 @@ export default function RequirementsWorkspace({
     )
       return;
     autoSelected.current = true;
+    // Below 1440px the inspector is a drawer over the list (#1091 TPX-1). Opening one unasked would cover the
+    // list on arrival, so there the reader chooses the first record.
+    if (window.matchMedia("(max-width: 1439.98px)").matches) return;
     void open(data.items[0]);
   }, [data?.items, initialArtifactId, loading, open, selected]);
   useEffect(() => {

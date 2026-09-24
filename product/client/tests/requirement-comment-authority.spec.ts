@@ -1,6 +1,10 @@
 import { expect, test, type Route } from "@playwright/test";
 import { apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed } from "./auth";
 
+// These races start from the explorer opening its first requirement unasked, which it does only where the
+// inspector is a side panel (1440px and up); below that it is a drawer and waits for a choice (#1091 TPX-1).
+test.use({ viewport: { width: 1600, height: 900 } });
+
 /**
  * Comment state in the Requirements Explorer has exactly one legitimate owner at a time: the latest
  * read or mutation issued for the requirement the inspector is actually showing. Three defects share

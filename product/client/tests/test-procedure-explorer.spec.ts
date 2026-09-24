@@ -46,6 +46,9 @@ async function useBrowserFixture(page: import('@playwright/test').Page) {
  */
 test('a procedure opens onto the same four-tab inspector a requirement does', async ({ page }) => {
   test.setTimeout(120_000)
+  // The empty inspector is a side panel from 1440px; below that the detail is a drawer shown only once a
+  // procedure is chosen (#1091 TPX-1).
+  await page.setViewportSize({ width: 1600, height: 900 })
   await login(page, 'admin')
   await openNavigationGroup(page, 'ASSURANCE')
   await page.getByRole('link', { name: 'System Test Procedure Explorer' }).click()
