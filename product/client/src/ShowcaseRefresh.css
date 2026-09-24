@@ -435,13 +435,6 @@
 .reqLayout.inspecting { grid-template-columns: 210px minmax(500px, 1fr) 360px; }
 .reqLayout.inspecting .reqTableHead,
 .reqLayout.inspecting .reqTable article { grid-template-columns: minmax(245px, 1fr) 68px 92px 62px; column-gap: 7px; }
-/* #1091 TPX-1: the verification list carries seven columns in a resizable panel that can be ~320px wide, so a
-   fixed 245px first column pushed Artifact and State off the edge ("ARTIFAC", "Approvec"). While inspecting,
-   every column stays, flowing onto a second line (identifier, artifact, level over verifies, latest result,
-   state) sized to whatever width the panel has. */
-.reqLayout.inspecting .procedureList .reqTableHead,
-.reqLayout.inspecting .procedureList article { grid-template-columns: minmax(0, 1fr) repeat(2, max-content); }
-.reqLayout.inspecting .procedureList article > * { min-width: 0; }
 .reqLayout.inspecting .reqTableHead > span:last-child,
 .reqLayout.inspecting .reqTable article > span:last-child { display: none; }
 .reqLayout.inspecting .impactLaunch { white-space: normal; line-height: 1.35; }
