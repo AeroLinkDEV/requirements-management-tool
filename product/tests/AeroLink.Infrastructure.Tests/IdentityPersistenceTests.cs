@@ -14,7 +14,7 @@ public sealed class IdentityPersistenceTests
         await using var db = new AeroLinkDbContext(options);
         await db.Database.OpenConnectionAsync();
         await db.Database.EnsureCreatedAsync();
-        var program = new ProgramRecord("Seeded Program", SecondShowcaseSeeder.ProgramCode);
+        var program = new ProgramRecord("Seeded Program", ImportPracticeSeeder.ProgramCode);
         db.Programs.Add(program);
         await db.SaveChangesAsync();
 
@@ -55,7 +55,7 @@ public sealed class IdentityPersistenceTests
         await db.Database.OpenConnectionAsync();
         await db.Database.EnsureCreatedAsync();
         var now = DateTimeOffset.UtcNow;
-        var program = new ProgramRecord("Disabled Seed Holder Program", SecondShowcaseSeeder.ProgramCode);
+        var program = new ProgramRecord("Disabled Seed Holder Program", ImportPracticeSeeder.ProgramCode);
         var disabled = new UserAccount("engineering.manager", "Engineering Manager",
             "engineering.manager@aerolink.local", IdentityService.HashPassword(IdentitySeeder.DemoPassword), now);
         disabled.Disable(now);

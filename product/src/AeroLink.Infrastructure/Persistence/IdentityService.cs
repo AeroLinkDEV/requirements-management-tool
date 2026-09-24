@@ -243,7 +243,7 @@ public sealed class IdentitySeeder(AeroLinkDbContext db)
         // Demo-account seeding is restricted to the explicitly named showcase Programs. User-created
         // Projects must retain only the memberships an administrator deliberately grants; treating every
         // Program row as a fixture silently copied the FMS directory into new owner Projects on restart.
-        var demoProgramCodes = new[] { FmsShowcaseSeeder.ProgramCode, SecondShowcaseSeeder.ProgramCode, ImportPracticeSeeder.ProgramCode };
+        var demoProgramCodes = new[] { FmsShowcaseSeeder.ProgramCode, ImportPracticeSeeder.ProgramCode };
         var programs = await db.Programs.AsNoTracking().Where(x => demoProgramCodes.Contains(x.Code)).Select(x => x.Id).ToListAsync(ct);
         // FMS closure authority is controlled by FmsShowcaseSeeder's fresh-program path or an explicit
         // operator upgrade. The directory pass may grant the other seeded roles, but must not silently create
