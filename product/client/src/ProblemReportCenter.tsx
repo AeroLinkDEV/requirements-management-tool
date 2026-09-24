@@ -1960,7 +1960,7 @@ export default function ProblemReportCenter({
                 ×
               </button>
               <p>NEW PROBLEM REPORT</p>
-              <h2>Save Draft PR</h2>
+              <h2>Record a problem</h2>
             </header>
             <div className="prEditorBody">
               {createDraft.offered && (

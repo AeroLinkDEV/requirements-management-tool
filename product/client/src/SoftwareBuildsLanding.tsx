@@ -136,7 +136,7 @@ export default function SoftwareBuildsLanding({
                         aria-label={enabled ? `Open build ${release.version} (${identity})` : `Open build ${release.version}`}
                         title={!enabled ? "This build has no supported official identity" : undefined}
                       >
-                        <span aria-hidden="true">↗</span> Open build
+                        Open build <span aria-hidden="true">→</span>
                       </button>
                     </article>
                   </li>

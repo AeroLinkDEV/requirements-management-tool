@@ -33,7 +33,6 @@ function ProjectCard({ project, onOpen }: { project: AuthorizedProject; onOpen: 
     >
       <div className="projectCardTop">
         <span className="projectIcon"><ProjectIcon name="project" /></span>
-        <span className="projectBadge active">Authorized</span>
       </div>
       <h2>{project.name}</h2>
       <p>{project.softwareProduct}</p>

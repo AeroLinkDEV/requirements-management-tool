@@ -1712,7 +1712,7 @@ export default function ChangeRequestWorkspace({
                         can see the change is being reworked, previously had to ask the active reviewer to
                         reject work everybody already knew was going to change. */}
                     {canCancelReview && (
-                      <button type="button" className="secondary" disabled={busy} onClick={() => void cancelReview()}>Cancel review</button>
+                      <button type="button" className="secondary cancelReview" disabled={busy} onClick={() => void cancelReview()}>Cancel review</button>
                     )}
                   </div>
                 )}
