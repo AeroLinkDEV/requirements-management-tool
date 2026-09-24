@@ -17,8 +17,8 @@ The showcase coexists with the clean **Create a new program** workflow. Its prog
 
 After authentication, the user selects **FMS Product Development** on the Projects page and then chooses a
 Software Build. Build 1.5 opens this released dataset as a read-only historical workspace. Build 1.6 opens the
-in-work successor and scopes normal queries and mutations to that release. Builds 0.5 and 1.0 are lineage-only
-placeholders. Historical Build 1.5 evidence may appear inside 1.6 when clearly labelled, but it never switches
+in-work successor and scopes normal queries and mutations to that release. Builds 0.5 and 1.0 are mock lineage
+cards, badged Mock, joined by dashed arrows, never counted and never opening a workspace (#1047). Historical Build 1.5 evidence may appear inside 1.6 when clearly labelled, but it never switches
 the active workspace. A final **Plan next build** card is a non-record placeholder and creates no future release
 or version. See DEC-070 and DEC-088.
 
