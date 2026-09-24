@@ -2584,3 +2584,25 @@ choices are created as focused issues only when their trigger and acceptance bou
   - `ResolutionVerified` is sending a Verifying report to SQA on a chosen result. It keeps a supplied rationale from DEC-133 onward. Before that, this path could not carry one, and it was also the silent move DEC-133 removed.
   - `ReadyForSccb`, `OpenedBySccb`, `ImplementationStarted`, `ResolutionProposed` and `ClosureApproved` are dedicated API actions whose requests have no rationale field. The Problem Report page does not use them, but API callers and seeded demonstration history do. They never carry a forward rationale, so their silence is not evidence that the actor chose not to explain.
 - **What still holds from DEC-132:** Backward and rejection rationale remain complete because they are mandatory on every path. Forward rationale is weaker evidence and must not be relied on as uniformly present. Making it mandatory, or giving the dedicated actions a rationale field, would each be a separate decision, and a mandatory rule would need a story for the existing gap.
+
+### DEC-135 - The CI Maintenance Delegation Extends to Claude
+
+- **Date:** 2026-09-24 UTC
+- **Status:** Accepted
+- **Authority:** The owner stated **"I want to give you this autonomy also!"** in the Claude conversation on 2026-09-24, after #1097 (a `.github/` maintenance PR authored by Claude) needed his own environment approval, and after the scope of DEC-124 and this extension had been explained to him. The statement is transcribed here by Claude. That agent-authored record is evidence of the delegation, not an independently posted owner review.
+- **Decision:** Claude may submit exact CI-maintenance environment approvals on the owner's behalf, under the same standing authorization DEC-124 gives Codex, without asking for new conversational confirmation for each digest. This includes candidates Claude authored. The delegation stays in effect until the owner revokes or narrows it, for Claude or for both agents.
+- **Qualification:** The DEC-124 qualification applies unchanged. Before each approval, Claude must:
+  - confirm the current composed candidate's native Product proof succeeded;
+  - check that the candidate's diff against `main` is exactly the reviewed PR;
+  - read the hosted packet and confirm its PR, head, candidate, run and attempt identities, and take the exact digest from it;
+  - submit `APPROVE MAINTENANCE <digest>` through the existing owner-authenticated environment review;
+  - record on the PR that Claude acted under delegated authority. The approval must not be described as an independent human review.
+
+  Where Claude authored the candidate, that record says so. The approval attests only that the candidate is exactly the reviewed change with passing proof. It is not a second pair of eyes.
+- **Tool permission:** Claude Code blocks an agent approving its own gate unless its permission settings allow it. The owner separately permits the one approval call this decision covers: `POST` to this repository's `actions/runs/<id>/pending_deployments`. Without that setting this decision authorizes the action but Claude cannot take it, and the approval falls back to the owner.
+- **Preserved controls:** Everything DEC-124 preserves remains:
+  - the protected publisher's live revalidation;
+  - refusals for stale or failed proof, changed publishers and kernel paths;
+  - required checks, credential isolation and the no-force-merge boundary;
+  - separately reviewed, qualified transitions for kernel changes. This delegation cannot let a kernel authorize itself.
+- **Supersedes:** Nothing. DEC-124 remains authoritative for Codex, and this decision adds Claude as a second delegate on the same terms. It changes operator authorization only, not workflow code, GitHub reviewer identity or environment policy.
