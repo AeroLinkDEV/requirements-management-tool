@@ -18,6 +18,8 @@ export default defineConfig({
     ['list'],
     ['json', { outputFile: 'test-results/fast/rendered.json' }],
     ['html', { open: 'never', outputFolder: 'playwright-report/fast' }],
+    // #986: the host socket state at a failed attempt, logged because the job log is always retained.
+    ['./scripts/socket-snapshot-reporter.mjs'],
   ],
   use: {
     baseURL,

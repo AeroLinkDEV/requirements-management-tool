@@ -72,7 +72,7 @@ export default defineConfig({
   // and far enough above the work that a failure means something. A genuine hang still fails, fifteen
   // seconds later, which is the trade: slower to report the real thing, and it reports the real thing.
   expect: { timeout: 15_000 },
-  reporter: [['list'], ['./tests/slow-test-reporter.ts'], ['html', { open: 'never', outputFolder: reportDir }], ['./scripts/browser-storage-reporter.mjs', { runId }]],
+  reporter: [['list'], ['./tests/slow-test-reporter.ts'], ['html', { open: 'never', outputFolder: reportDir }], ['./scripts/browser-storage-reporter.mjs', { runId }], ['./scripts/socket-snapshot-reporter.mjs']],
   use: {
     baseURL: `http://127.0.0.1:${e2eClientPort}`,
     trace: 'retain-on-failure',
