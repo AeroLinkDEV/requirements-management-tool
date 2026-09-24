@@ -28,6 +28,58 @@ public static class WorkspaceEndpoints
 
     private static SoftwareRelease? SelectEntryRelease(IEnumerable<SoftwareRelease> releases) =>
         SoftwareReleaseOrdering.PreferredContext(releases);
+
+    /// <summary>
+    /// Problem Reports waiting on this person (#1113 S2). Project-scoped like the reports themselves, so the
+    /// selected build does not narrow it. SCCB and SQA items use the same authority rule as the actions they
+    /// lead to. No due date is invented: nothing in the Problem Report policy sets one, so the item carries
+    /// how long the report has been in its current state, read from its recorded transitions.
+    /// </summary>
+    private static async Task<List<object>> MyProblemReportWorkAsync(Guid? projectId, AuthenticatedUser actor,
+        AeroLinkDbContext db, IdentityService identity, DateTimeOffset now, CancellationToken ct)
+    {
+        var sccb = projectId is not null && await ProblemReportEndpoints.HasSccbOpeningAuthorityAsync(projectId.Value, actor, db, ct);
+        var sqa = projectId is not null && await ProblemReportEndpoints.HasSqaClosureAuthorityAsync(projectId.Value, actor, db, identity, ct);
+        var user = actor.UserName;
+        var reports = await db.ProblemReports.AsNoTracking().Where(x => (projectId == null || x.ProjectId == projectId)
+                && ((x.ReportedBy == user && x.State == ProblemReportState.Draft)
+                    || (x.ResponsibleEngineerId == user && (x.State == ProblemReportState.Open || x.State == ProblemReportState.Implementing || x.State == ProblemReportState.Verifying))
+                    || (sccb && x.State == ProblemReportState.ReadyForSccb)
+                    || (sqa && x.State == ProblemReportState.WaitingForSqaToClose && x.ReportedBy != user && x.ResponsibleEngineerId != user)))
+            .ToListAsync(ct);
+        if (reports.Count == 0) return [];
+        var ids = reports.Select(x => x.Id).ToList();
+        // Materialized before ordering: SQLite cannot ORDER BY a DateTimeOffset, and the set is one person's queue.
+        var entries = (await db.ProblemReportRevisions.AsNoTracking()
+                .Where(x => ids.Contains(x.ProblemReportId) && x.ToState != "" && x.FromState != x.ToState)
+                .Select(x => new { x.ProblemReportId, x.ToState, x.OccurredAt }).ToListAsync(ct))
+            .GroupBy(x => (x.ProblemReportId, x.ToState))
+            .ToDictionary(x => x.Key, x => x.Max(item => item.OccurredAt));
+        return reports.OrderBy(x => x.Severity).ThenBy(x => x.UpdatedAt.UtcDateTime).Select(x =>
+        {
+            var state = ProblemReportTransitionPolicy.Canonical(x.State);
+            DateTimeOffset? stateSince = entries.TryGetValue((x.Id, state.ToString()), out var entered) ? entered : null;
+            var (type, action) = state switch
+            {
+                ProblemReportState.Draft => ("Problem Report draft", "Complete and send to the SCCB"),
+                ProblemReportState.ReadyForSccb => ("SCCB decision", "Review at the SCCB"),
+                ProblemReportState.Open => ("Problem Report", "Investigate or start implementation"),
+                ProblemReportState.Implementing => ("Problem Report", "Record the correction and propose a resolution"),
+                ProblemReportState.Verifying => ("Problem Report", "Send to SQA on a passing result"),
+                _ => ("SQA closure", "Independent SQA closure review"),
+            };
+            return (object)new
+            {
+                id = x.Id, type, artifact = x.DisplayNumber, title = x.Title,
+                priority = x.Severity is ProblemReportSeverity.Critical or ProblemReportSeverity.High ? "High" : "Normal",
+                dueAt = (DateTimeOffset?)null,
+                ageDays = (int)(now - (stateSince ?? x.UpdatedAt)).TotalDays,
+                stateSince, updatedAt = x.UpdatedAt,
+                route = "problemReports", discipline = "project",
+                problemReport = new { state = state.ToString(), severity = x.Severity.ToString(), nextAction = action },
+            };
+        }).ToList();
+    }
     public static void MapWorkspaceEndpoints(this WebApplication app)
     {
         // Unsubscribe is reachable without signing in, because it is followed from a mail client. The signed
@@ -545,8 +597,9 @@ public static class WorkspaceEndpoints
                                                   && session.State == EditSessionState.Active && session.UserName == actor.UserName
                                                   && (projectId == null || document.ProjectId == projectId)
                                               select new { id = document.Id, type = "Project document checkout", artifact = document.DocumentNumber + "." + (revision.Revision < 10 ? "0" : "") + revision.Revision, title = "Recover the active desktop checkout", priority = "Normal", dueAt = session.ExpiresAt, ageDays = (int)(now - session.OpenedAt).TotalDays, route = "managedDocuments", discipline = "project" }).ToListAsync(ct)).OrderBy(x => x.dueAt).ToList();
-            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(commentsToRead).Concat(assignedTestWork).Concat(managedOwnerWork).Concat(managedReviewWork).Concat(managedRecoveryWork).Concat(managedCheckoutWork).ToList();
-            return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count + managedReviewWork.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now) + managedOwnerWork.Count(x => x.dueAt < now) + managedReviewWork.Count(x => x.dueAt < now) + managedRecoveryWork.Count, drafts = authoredDrafts.Count + managedOwnerWork.Count }, tasks });
+            var problemReportWork = await MyProblemReportWorkAsync(projectId, actor, db, identity, now, ct);
+            var tasks = activeScrSteps.Cast<object>().Concat(releaseSteps).Concat(authoredDrafts).Concat(commentsToRead).Concat(assignedTestWork).Concat(managedOwnerWork).Concat(managedReviewWork).Concat(managedRecoveryWork).Concat(managedCheckoutWork).Concat(problemReportWork).ToList();
+            return Results.Ok(new { generatedAt = now, summary = new { total = tasks.Count, approvals = activeScrSteps.Count + releaseSteps.Count + managedReviewWork.Count, overdue = activeScrSteps.Count(x => x.dueAt < now) + releaseSteps.Count(x => x.dueAt < now) + authoredDrafts.Count(x => x.dueAt < now) + managedOwnerWork.Count(x => x.dueAt < now) + managedReviewWork.Count(x => x.dueAt < now) + managedRecoveryWork.Count, drafts = authoredDrafts.Count + managedOwnerWork.Count, problemReports = problemReportWork.Count }, tasks });
         });
 
         // Notifications and Jira emitted paths such as /systems/change-requests/{id}. The client router

@@ -37,14 +37,14 @@ test('the whole metrics section is compact and the queue moves up, at every widt
 
       const section = page.locator('.workMetrics')
       await expect(section).toBeVisible()
-      // The scope is stated once for the row, and all four server-authoritative metrics remain with a
+      // The scope is stated once for the row, and all five server-authoritative metrics remain with a
       // value. Exact counts are deliberately not pinned: other journeys sharing this disposable
       // database legitimately change the signed-in author's work items, and P3 is about the row's
       // presentation, not any moment's queue contents.
       await expect(section.getByText('Current program scope')).toHaveCount(1)
       const cards = page.locator('.workMetricsGrid article')
-      await expect(cards).toHaveCount(4)
-      for (const label of ['Assigned to me', 'Awaiting signature', 'Overdue', 'Drafts I own']) {
+      await expect(cards).toHaveCount(5)
+      for (const label of ['Assigned to me', 'Awaiting signature', 'Overdue', 'Drafts I own', 'Problem Reports']) {
         await expect(cards.filter({ hasText: label }).locator('b')).toHaveText(/^\d+$/)
       }
 
