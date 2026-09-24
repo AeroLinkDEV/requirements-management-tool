@@ -160,7 +160,6 @@ await using (var scope = app.Services.CreateAsyncScope())
     if (!restoreValidationReadOnly && builder.Configuration.GetValue<bool>("DemoData:Enabled"))
     {
         await scope.ServiceProvider.GetRequiredService<FmsShowcaseSeeder>().EnsureSeededAsync();
-        await scope.ServiceProvider.GetRequiredService<SecondShowcaseSeeder>().EnsureSeededAsync();
         // IdentitySeeder runs below after all showcase Programs exist, granting every seeded directory role
         // to each Program. An existing FMS is otherwise read-only here; controlled enrichment is the
         // explicit backup-confirmed /api/showcase/upgrade operation.

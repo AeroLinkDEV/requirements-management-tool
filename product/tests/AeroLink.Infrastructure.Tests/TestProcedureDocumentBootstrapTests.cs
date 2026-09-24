@@ -27,7 +27,7 @@ public sealed class TestProcedureDocumentBootstrapTests
         var fixture = await DatabaseAsync();
         await using var db = fixture.Db;
         db.ChangeTracker.Clear();
-        // This is the SecondShowcaseSeeder retry shape: the envelope is tracked by an earlier query, while
+        // This is the SystemLowLevelLadderFixture (formerly SecondShowcaseSeeder) retry shape: the envelope is tracked by an earlier query, while
         // its child graph is either absent or only partly loaded. A nonempty Steps collection is not proof
         // that AllowedUpstream is loaded.
         var tracked = stepsAlreadyLoaded
