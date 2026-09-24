@@ -62,7 +62,7 @@ public static class ProfessionalPublicationRenderer
             {
                 body.Append(P(publication.DocumentNumber + "  |  REVISION " + publication.Revision, "CoverNumber")).Append(P(publication.Status.ToUpperInvariant(), "CoverStatus"));
             }
-            body.Append(P($"{publication.Product}  |  Release {publication.Release}", "CoverMeta")).Append(P(ProjectLabel(publication), "CoverMeta"));
+            body.Append(P($"{publication.Product}  |  Build {publication.Release}", "CoverMeta")).Append(P(ProjectLabel(publication), "CoverMeta"));
             body.Append(P(publication.ControlledStatusControls && publication.Approvals.Count == 0
                 ? "APPROVAL EVIDENCE" : "APPROVALS RECORDED FOR THIS PUBLICATION", "CoverApprovalHeading"));
             var coverApprovals = publication.Approvals.Take(5).ToList();
@@ -72,7 +72,7 @@ public static class ProfessionalPublicationRenderer
             body.Append(P("CONTROLLED COPY  |  Verify manifest hash before use", "CoverNotice")).Append(PageBreak());
 
             body.Append(P("Document Control", "Heading1"));
-            var controlRows = new List<IReadOnlyList<string>> { new[] { "Document type", publication.DocumentType }, new[] { "Document number", publication.DocumentNumber }, new[] { "Revision", publication.Revision }, new[] { "Status", publication.Status }, new[] { "Release", publication.Release }, new[] { "Baseline", publication.Baseline }, new[] { "Prepared by", publication.PreparedBy }, new[] { "Generated", publication.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'") }, new[] { "Manifest SHA-256", publication.ManifestHash } };
+            var controlRows = new List<IReadOnlyList<string>> { new[] { "Document type", publication.DocumentType }, new[] { "Document number", publication.DocumentNumber }, new[] { "Revision", publication.Revision }, new[] { "Status", publication.Status }, new[] { "Build", publication.Release }, new[] { "Baseline", publication.Baseline }, new[] { "Prepared by", publication.PreparedBy }, new[] { "Generated", publication.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'") }, new[] { "Manifest SHA-256", publication.ManifestHash } };
             controlRows.AddRange(publication.Metadata.Select(x => (IReadOnlyList<string>)new[] { x.Label, x.Value }));
             body.Append(publication.ControlledStatusControls
                 ? ControlledDocumentControlTable(controlRows)
@@ -172,7 +172,7 @@ public static class ProfessionalPublicationRenderer
         "<v:fill opacity=\".45\"/></v:shape></w:pict></w:r>";
     private static string Footer(ProfessionalPublication p)
     {
-        var manifest = p.ManifestHash[..Math.Min(12, p.ManifestHash.Length)];
+        var manifest = ManifestLabel(p);
         var inner = p.ControlledStatusControls
             ? Sdt(WordDocumentStructure.DocumentNumberTag, FooterRun(p.DocumentNumber)) + FooterRun(" Rev ")
                 + Sdt(WordDocumentStructure.RevisionTag, FooterRun(p.Revision)) + FooterRun(" | ")
@@ -426,7 +426,7 @@ public static class ProfessionalPublicationRenderer
         var assets = images.Select(x => x.Image).ToDictionary(x => x.Key, StringComparer.Ordinal);
         var pageStreams = new List<string> { PdfCover(p) };
         var control = new List<PdfLine> { new("DOCUMENT CONTROL", 18, true, "2E74B5", 0, 10) };
-        var metadata = new List<(string Label, string Value)> { ("Document type",p.DocumentType),("Document number",p.DocumentNumber),("Revision",p.Revision),("Status",p.Status),("Release",p.Release),("Baseline",p.Baseline),("Prepared by",p.PreparedBy),("Generated",p.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm UTC")),("Manifest SHA-256",p.ManifestHash) }; metadata.AddRange(p.Metadata);
+        var metadata = new List<(string Label, string Value)> { ("Document type",p.DocumentType),("Document number",p.DocumentNumber),("Revision",p.Revision),("Status",p.Status),("Build",p.Release),("Baseline",p.Baseline),("Prepared by",p.PreparedBy),("Generated",p.GeneratedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm UTC")),("Manifest SHA-256",p.ManifestHash) }; metadata.AddRange(p.Metadata);
         foreach (var item in metadata) { control.Add(new(item.Label.ToUpperInvariant(), 7, true, "718096", 0, 1)); control.AddRange(Wrap(item.Value, 92).Select(x => new PdfLine(x, 9, false, "25364D", 0, 5))); }
         control.Add(new("APPROVAL REGISTER", 14, true, "2E74B5", 0, 7)); if (p.Approvals.Count == 0) control.AddRange(Wrap(ApprovalEvidenceNotice(p), 92).Select(x => new PdfLine(x, 9, false)));
         foreach (var approval in p.Approvals) control.Add(new($"{approval.Role}: {approval.Name} ({approval.UserId}) - {ApprovalDecision(approval)}", 8, true, "25364D", 0, 5));
@@ -440,20 +440,21 @@ public static class ProfessionalPublicationRenderer
     }
     private static string PdfCover(ProfessionalPublication p)
     {
-        var s = new StringBuilder("0.063 0.165 0.263 rg 0 0 612 792 re f\n0.086 0.522 0.471 rg 0 742 612 50 re f\n" + PdfWatermark(p, true) + "BT\n");
+        // Every filled shape is drawn before the watermark, so the approvals panel cannot hide it (#1109).
+        var s = new StringBuilder("0.063 0.165 0.263 rg 0 0 612 792 re f\n0.086 0.522 0.471 rg 0 742 612 50 re f\n0.105 0.235 0.340 rg 54 118 504 190 re f\n" + PdfWatermark(p, true) + "BT\n");
         Text(s, p.Product.ToUpperInvariant() + "  |  CONTROLLED LIFECYCLE PUBLICATION", 54, 760, 9, true, "FFFFFF"); Text(s, p.DocumentType.ToUpperInvariant(), 64, 650, 10, true, "65D3C3");
         var y = 610; foreach (var line in Wrap(p.Title, 38)) { Text(s, line, 64, y, 25, true, "FFFFFF"); y -= 32; } foreach (var line in Wrap(p.Subtitle, 65)) { Text(s, line, 64, y - 4, 11, false, "B7C5D4"); y -= 17; }
         y -= 20; Text(s, p.DocumentNumber + "  |  REVISION " + p.Revision, 64, y, 12, true, "65D3C3"); Text(s, p.Status.ToUpperInvariant(), 64, y - 24, 10, true, "F0C96A");
-        s.Append("0.105 0.235 0.340 rg 54 118 504 190 re f\n"); Text(s, p.ControlledStatusControls && p.Approvals.Count == 0 ? "APPROVAL EVIDENCE" : "APPROVALS RECORDED FOR THIS PUBLICATION", 72, 282, 8, true, "65D3C3"); var ay = 258;
+        Text(s, p.ControlledStatusControls && p.Approvals.Count == 0 ? "APPROVAL EVIDENCE" : "APPROVALS RECORDED FOR THIS PUBLICATION", 72, 282, 8, true, "65D3C3"); var ay = 258;
         if (p.Approvals.Count == 0) foreach (var line in Wrap(ApprovalEvidenceNotice(p), 70)) { Text(s, line, 72, ay, 9, false, "FFFFFF"); ay -= 14; }
         foreach (var approval in p.Approvals.Take(5)) { Text(s, approval.Name, 72, ay, 10, true, "FFFFFF"); Text(s, approval.Role + " | " + ApprovalDecision(approval), 72, ay - 13, 7, false, "B7C5D4"); ay -= 31; }
         if (p.Approvals.Count > 5) Text(s, "+ additional approvals in Document Control", 72, ay, 8, false, "B7C5D4");
-        Text(s, ProjectLabel(p) + " | Release " + p.Release, 64, 84, 8, false, "B7C5D4"); Text(s, "CONTROLLED COPY - Verify manifest hash before use", 64, 58, 8, true, "F0C96A"); return s.Append("ET").ToString();
+        Text(s, ProjectLabel(p) + " | Build " + p.Release, 64, 84, 8, false, "B7C5D4"); Text(s, "CONTROLLED COPY - Verify manifest hash before use", 64, 58, 8, true, "F0C96A"); return s.Append("ET").ToString();
     }
     private static IEnumerable<string> Paginate(IReadOnlyList<PdfLine> lines, ProfessionalPublication p, bool control)
     {
         var pages = new List<string>(); var current = new List<PdfLine>(); var used = 0; const int max = 650;
-        foreach (var line in lines) { var height = line.Size + line.After; if (used + height > max && current.Count > 0) { pages.Add(PdfContentPage(current, p, control)); current = []; used = 0; } current.Add(line); used += height; }
+        foreach (var line in lines) { var height = LineHeight(line); if (used + height > max && current.Count > 0) { pages.Add(PdfContentPage(current, p, control)); current = []; used = 0; } current.Add(line); used += height; }
         if (current.Count > 0) pages.Add(PdfContentPage(current, p, control)); return pages;
     }
     private static IEnumerable<string> PaginateSection(PublicationSection section, ProfessionalPublication p,
@@ -552,12 +553,16 @@ public static class ProfessionalPublicationRenderer
         FlushPage();
         return pages;
     }
-    private static int LineHeight(PdfLine line) => line.Size + line.After;
+    private static int HeadingSpace(PdfLine line) => line.Size >= 14 ? 12 : 0;
+    private static int LineHeight(PdfLine line) => HeadingSpace(line) + line.Size + line.After;
     private static string PdfContentPage(IReadOnlyList<PdfLine> lines, ProfessionalPublication p, bool control)
     {
-        var s = new StringBuilder(PdfWatermark(p, false) + "0.086 0.522 0.471 RG 1.3 w 54 760 m 558 760 l S\nBT\n"); Text(s, p.Product + " | " + p.DocumentNumber + " Rev " + p.Revision, 54, 772, 8, true, "102A43"); var y = 738;
-        foreach (var line in lines) { Text(s, line.Text, 54 + line.Indent, y, line.Size, line.Bold, line.Color); y -= line.Size + line.After; }
-        Text(s, p.DocumentNumber + " | " + p.Status + " | Manifest " + p.ManifestHash[..Math.Min(12, p.ManifestHash.Length)], 54, 28, 7, false, "718096"); return s.Append("ET").ToString();
+        var s = new StringBuilder(PdfWatermark(p, false) + "0.086 0.522 0.471 RG 1.3 w 54 760 m 558 760 l S\nBT\n"); Text(s, p.Product + " | " + p.DocumentNumber + " Rev " + p.Revision, 54, 772, 8, true, "102A43");
+        // Each line drops by its own size before it is drawn, and a heading gets room above it. Dropping by the
+        // previous line's size put a 14pt heading's cap height against the 9pt line above it (#1109).
+        var y = 756; var first = true;
+        foreach (var line in lines) { if (!first) y -= HeadingSpace(line); y -= line.Size; Text(s, line.Text, 54 + line.Indent, y, line.Size, line.Bold, line.Color); y -= line.After; first = false; }
+        Text(s, p.DocumentNumber + " | " + p.Status + " | Manifest " + ManifestLabel(p), 54, 28, 7, false, "718096"); return s.Append("ET").ToString();
     }
     private static void Text(StringBuilder s, string value, int x, int y, int size, bool bold, string color) { var (r,g,b)=Rgb(color); s.Append($"{r:0.###} {g:0.###} {b:0.###} rg /{(bold ? "F2" : "F1")} {size} Tf 1 0 0 1 {x} {y} Tm ({PdfEscape(value)}) Tj\n"); }
 
@@ -701,5 +706,19 @@ public static class ProfessionalPublicationRenderer
             }
         }
     }
-    private static string PdfEscape(string value) => new(value.Select(c => c is '(' or ')' or '\\' ? ' ' : c > 126 ? '-' : c).ToArray());
+    // Parentheses and backslashes are escaped, not dropped: replacing them with spaces printed "Document (SYSRD)"
+    // as "Document  SYSRD " (#1109).
+    private static string PdfEscape(string value) => string.Concat(value.Select(c => c switch
+    {
+        '(' => "\\(",
+        ')' => "\\)",
+        '\\' => "\\\\",
+        > (char)126 => "-",
+        _ => c.ToString(),
+    }));
+
+    // A draft has no manifest hash and says so in words; only a real hash is shortened (#1109: the footer read
+    // "Manifest not applicab").
+    private static string ManifestLabel(ProfessionalPublication p) =>
+        p.ManifestHash.Length == 64 && p.ManifestHash.All(Uri.IsHexDigit) ? p.ManifestHash[..12] : p.ManifestHash;
 }
