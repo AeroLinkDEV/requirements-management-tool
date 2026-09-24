@@ -194,6 +194,7 @@ test('uncertain dispatch outcomes end in refusal; the dispatched run is pinned b
   assert.match(requester, /workflow_run_id/)
   assert.match(requester, /int\(run\.get\("id", 0\)\) > boundary_id/)
   assert.match(requester, /attempts\/\$PINNED_ATTEMPT\/jobs/)
+  assert.match(requester, /poll-check/)
   assert.doesNotMatch(requester, /filter=latest/)
   assert.match(requester, /cannot bind evidence to the selected attempt/)
   assert.match(requester, /attempt \$PINNED_ATTEMPT\) to PR #/)
@@ -568,10 +569,12 @@ function mockCurlSource() {
   return [
     'import json',
     'import os',
+    'import re',
     'import sys',
     '',
     'method, url, dump, out, data = sys.argv[1:6]',
     'state = os.environ["MOCK_STATE"]',
+    'head_sha = os.environ["HEAD_SHA"]',
     '',
     'def readj(name, default):',
     '    path = os.path.join(state, name)',
@@ -589,6 +592,21 @@ function mockCurlSource() {
     'code = 200',
     'resp = {}',
     '',
+    'with open(os.path.join(state, "requests.log"), "a", encoding="utf-8") as handle:',
+    '    handle.write(method + " " + url + chr(10))',
+    '',
+    'def bad_url():',
+    '    code = 404',
+    '    resp = {"message": "malformed request (mock rejects the query or path)"}',
+    '    writej("counters.json", counters)',
+    '    if dump:',
+    "        with open(dump, 'w', encoding='utf-8') as handle:",
+    "            handle.write('HTTP/2 404' + chr(10))",
+    '    if out:',
+    '        with open(out, "w", encoding="utf-8") as handle:',
+    '            json.dump(resp, handle)',
+    '    raise SystemExit(22)',
+    '',
     'if method == "POST" and url.endswith("/dispatches"):',
     '    counters["postSeen"] = True',
     '    counters["postCount"] = counters.get("postCount", 0) + 1',
@@ -599,7 +617,13 @@ function mockCurlSource() {
     '    else:',
     '        resp = {}',
     '        code = 202',
+    '    transport_exit = scenario.get("transportExit")',
+    '    writej("counters.json", counters)',
+    '    if transport_exit is not None:',
+    '        raise SystemExit(int(transport_exit))',
     'elif "/actions/workflows/ci.yml/runs" in url:',
+    "    if not re.fullmatch(r\".*/actions/workflows/ci.yml/runs\\?head_sha=[0-9a-f]{40}&event=workflow_dispatch&per_page=100\", url):",
+    '        bad_url()',
     '    counters["listGets"] = counters.get("listGets", 0) + 1',
     '    runs = list(readj("static-runs.json", {"workflow_runs": []}).get("workflow_runs", []))',
     '    final = readj("run-101-final.json", None)',
@@ -608,9 +632,18 @@ function mockCurlSource() {
     '        runs.append(final)',
     '    resp = {"workflow_runs": runs, "total_count": len(runs)}',
     'elif "request-full-ci.yml/runs" in url:',
+    "    if not re.fullmatch(r\".*/request-full-ci.yml/runs\\?head_sha=[0-9a-f]{40}&event=pull_request_target&page=[0-9]+&per_page=100\", url):",
+    '        bad_url()',
     '    resp = {"workflow_runs": readj("requester-runs.json", [])}',
     'elif "/issues/" in url:',
-    '    resp = readj("events.json", [])',
+    "    if not re.fullmatch(r\".*/issues/1066/events\\?page=[0-9]+&per_page=100\", url):",
+    '        bad_url()',
+    '    page = int(re.search(r"page=([0-9]+)", url).group(1))',
+    '    pages = scenario.get("eventsPages") or []',
+    '    if pages:',
+    '        resp = pages[page - 1] if page <= len(pages) else []',
+    '    else:',
+    '        resp = readj("events.json", [])',
     'elif "/pulls/" in url:',
     '    resp = readj("pr.json", {})',
     'elif "/actions/runs/" in url and "/attempts/" in url:',
@@ -618,6 +651,8 @@ function mockCurlSource() {
     "        handle.write(url.split('mock.local', 1)[-1] + chr(10))",
     '    resp = readj("jobs.json", {})',
     'elif "/actions/runs/" in url:',
+    "    if not re.fullmatch(r\".*/actions/runs/[0-9]+\", url):",
+    '        bad_url()',
     '    run_id = int(url.rsplit("/", 1)[-1])',
     '    counters["pinnedGets"] = counters.get("pinnedGets", 0) + 1',
     "    initial = readj('run-%d-initial.json' % run_id, None)",
@@ -647,14 +682,17 @@ function mockCurlTail() {
     'with open(os.path.join(state, "last-code"), "w", encoding="utf-8") as handle:',
     '    handle.write(str(code))',
     'if dump:',
+    '    link_next = len(scenario.get("eventsPages") or []) > 1 and "/issues/" in url',
     "    with open(dump, \"w\", encoding=\"utf-8\") as handle:",
-    "        handle.write('HTTP/2 %d\\n' % code)",
+    "        handle.write('HTTP/2 %d' % code + chr(10))",
+    '        if link_next and re.search(r"page=([0-9]+)", url).group(1) == "1":',
+    "            handle.write('link: <https://mock.local' + url.split('mock.local', 1)[-1].split('?')[0] + '?page=2&per_page=100>; rel=\"next\"' + chr(10))",
     'if out:',
     '    with open(out, "w", encoding="utf-8") as handle:',
     '        handle.write(json.dumps(resp))',
     'if code >= 400:',
     '    raise SystemExit(22)',
-  ].join('\n')
+  ].join(String.fromCharCode(10))
 }
 
 function buildIntegrated(scenario) {
@@ -665,11 +703,23 @@ function buildIntegrated(scenario) {
     labeledEvent(2, '2026-09-23T12:00:00Z'),
   ]
   const staleEvents = [labeledEvent(1, '2026-09-23T09:54:44Z')]
-  writeFileSync(join(state, 'scenario.json'), JSON.stringify(scenario, null, 2))
-  writeFileSync(join(state, 'events.json'), JSON.stringify(scenario.stale ? staleEvents : freshEvents))
-  writeFileSync(join(state, 'requester-runs.json'), JSON.stringify(scenario.requester ?? []))
-  writeFileSync(join(state, 'static-runs.json'), JSON.stringify({ workflow_runs: scenario.productRuns ?? [] }))
+  // every Product record is normalized onto the integrated head/ref so the trust
+  // checks inside the workflow's real helper accept exactly what they should
+  const integrated = (rec) => ({ ...rec, head_sha: INTEGRATED_SHA, head_branch: INTEGRATED_REF })
+  const productRuns = (scenario.productRuns ?? []).map(integrated)
+  const runRecords = {}
   for (const [name, rec] of Object.entries(scenario.runRecords ?? {})) {
+    runRecords[name] = integrated(rec)
+  }
+  writeFileSync(join(state, 'scenario.json'), JSON.stringify(scenario, null, 2))
+  if (scenario.eventsPages) {
+    writeFileSync(join(state, 'events-pages.json'), JSON.stringify(scenario.eventsPages))
+  } else {
+    writeFileSync(join(state, 'events.json'), JSON.stringify(scenario.stale ? staleEvents : freshEvents))
+  }
+  writeFileSync(join(state, 'requester-runs.json'), JSON.stringify(scenario.requester ?? []))
+  writeFileSync(join(state, 'static-runs.json'), JSON.stringify({ workflow_runs: productRuns }))
+  for (const [name, rec] of Object.entries(runRecords)) {
     writeFileSync(join(state, `run-${name}.json`), JSON.stringify(rec))
   }
   writeFileSync(join(state, 'jobs.json'), JSON.stringify(scenario.jobs ?? {
@@ -693,7 +743,11 @@ function buildIntegrated(scenario) {
 function integratedHarness(stateDir, selfAttempt = 1) {
   const shim = join(stateDir, 'shim')
   mkdirSync(shim, { recursive: true })
-  const shimPosix = '/' + shim[0].toLowerCase() + shim.slice(2).split(sep).join('/')
+  // PATH needs the POSIX spelling of the shim directory; native Windows paths keep the
+  // drive-letter conversion, POSIX systems already are POSIX.
+  const shimForPath = process.platform === 'win32'
+    ? '/' + shim[0].toLowerCase() + shim.slice(2).split(sep).join('/')
+    : shim
   const pythonShim = join(shim, 'python')
   writeFileSync(pythonShim, '#!/usr/bin/env bash\nexec "' + pythonExecutable + '" "$@"\n')
   chmodSync(pythonShim, 0o755)
@@ -714,7 +768,7 @@ function integratedHarness(stateDir, selfAttempt = 1) {
     'export RUNNER_TEMP="' + join(stateDir, 'tmp') + '"',
     'export GITHUB_STEP_SUMMARY="' + join(stateDir, 'summary.md') + '"',
     'export MOCK_STATE="' + stateDir + '"',
-    'export PATH="' + shimPosix + '":$PATH',
+    'export PATH="' + shimForPath + '":$PATH',
     'api="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY"',
     'headers=()',
     'BOUNDARY_ID=0',
@@ -772,127 +826,139 @@ const failed100 = productRun(100, 'completed', 'failure', '2026-09-23T10:19:05Z'
 const success200 = productRun(200, 'completed', 'success', '2026-09-22T11:00:00Z')
 const integratedSelf = requesterRun(7000, '2026-09-23T12:00:05Z')
 
-test('integrated: eligible NONE dispatches once, pins the response identity, and qualifies the pinned attempt', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+
+// ---- integrated scenarios (executed on POSIX; skipped on Windows) ----
+
+const skipIntegrated = skipWithoutPython || process.platform === 'win32'
+  ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)'
+  : false
+
+function diagnostic(state, outcome) {
+  let jobs = ''
+  let summary = ''
+  try { jobs = readFileSync(join(state, 'jobs-requests'), 'utf8') } catch {}
+  try { summary = readFileSync(join(state, 'summary.md'), 'utf8') } catch {}
+  return ['stdout=<' + outcome.stdout + '>', 'stderr=<' + outcome.stderr + '>', 'summary=<' + summary + '>', 'jobs-requests=<' + jobs + '>'].join(' || ')
+}
+
+test('integrated: eligible NONE dispatches once, pins the response identity, and qualifies the pinned attempt', { skip: skipIntegrated }, () => {
   const { state, run } = integratedState({
     requester: [integratedSelf], productRuns: [],
     runRecords: { '101-initial': inflight101, '101-final': success101 },
     dispatchResponse: 'details', revealAfter: 1, pinnedFinalAfter: 2,
   })
   const outcome = run()
-  assert.equal(outcome.status, 0, [outcome.stdout, outcome.stderr, outcome.stderr && readFileSync(join(state, 'harness.sh'), 'utf8').length].join("||").slice(0, 2500))
+  assert.equal(outcome.status, 0, diagnostic(state, outcome))
   assert.equal(counters(state).postCount, 1)
-  const dispatch = readFileSync(join(state, 'last-dispatch.json'), 'utf8')
-  assert.match(dispatch, /return_run_details/)
+  assert.match(readFileSync(join(state, 'last-dispatch.json'), 'utf8'), /return_run_details/)
   assert.match(readFileSync(join(state, 'summary.md'), 'utf8'), /run 101 \(attempt 1\)/)
   assert.match(readFileSync(join(state, 'jobs-requests'), 'utf8'), /\/actions\/runs\/101\/attempts\/1\/jobs\?per_page=100/)
 })
 
-test('integrated: eligible EXHAUSTED dispatch with a lost response recovers by discovery — one POST total', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+test('integrated: eligible EXHAUSTED dispatch with a lost transport response recovers by discovery — one POST total', { skip: skipIntegrated }, () => {
   const { state, run } = integratedState({
     requester: [integratedSelf], productRuns: [failed100],
     runRecords: { '101-initial': inflight101, '101-final': success101 },
-    dispatchResponse: 'empty', revealAfter: 2, pinnedFinalAfter: 2,
+    dispatchResponse: 'empty', transportExit: 28, revealAfter: 2, pinnedFinalAfter: 2,
   })
   const outcome = run()
-  assert.equal(outcome.status, 0, outcome.stderr.slice(0, 3000))
+  assert.equal(outcome.status, 0, diagnostic(state, outcome))
   assert.equal(counters(state).postCount, 1)
   assert.match(readFileSync(join(state, 'summary.md'), 'utf8'), /run 101 \(attempt 1\)/)
 })
 
-test('integrated: a lost response that never resolves refuses after exactly one POST', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+test('integrated: a lost response that never resolves refuses after exactly one POST', { skip: skipIntegrated }, () => {
   const { state, run } = integratedState({
-    requester: [integratedSelf], productRuns: [failed100], dispatchResponse: 'empty',
+    requester: [integratedSelf], productRuns: [failed100], dispatchResponse: "empty",
   })
   const outcome = run()
   assert.equal(outcome.status, 1)
-  assert.match(outcome.stdout, /No successful trusted Product workflow_dispatch/)
+  assert.match(diagnostic(state, outcome), /No successful trusted Product workflow_dispatch/)
   assert.equal(counters(state).postCount, 1)
 })
 
-test('integrated: stale, consumed and missing-identity refusals post zero times', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+test('integrated: stale, consumed and missing-identity refusals post zero times', { skip: skipIntegrated }, () => {
   const stale = integratedState({
-    stale: true, requester: [requesterRun(7000, '2026-09-23T10:00:00Z')], productRuns: [failed100],
+    stale: true, requester: [requesterRun(7000, "2026-09-23T10:00:00Z")], productRuns: [failed100],
   })
   const staleOutcome = stale.run()
   assert.equal(staleOutcome.status, 1)
-  assert.match(staleOutcome.stdout, /Dispatch refused/)
-  assert.match(staleOutcome.stdout, /stale/)
+  assert.match(diagnostic(stale.state, staleOutcome), /Dispatch refused/)
+  assert.match(diagnostic(stale.state, staleOutcome), /stale/)
   assert.equal(counters(stale.state).postCount, 0)
-
   const consumed = integratedState({
-    requester: [requesterRun(6000, '2026-09-23T12:00:10Z')], productRuns: [failed100],
+    requester: [integratedSelf, requesterRun(6000, "2026-09-23T12:00:10Z")], productRuns: [failed100],
   })
   const consumedOutcome = consumed.run()
   assert.equal(consumedOutcome.status, 1)
-  assert.match(consumedOutcome.stdout, /authorization already consumed by requester run 6000/)
+  assert.match(diagnostic(consumed.state, consumedOutcome), /authorization already consumed by requester run 6000/)
   assert.equal(counters(consumed.state).postCount, 0)
-
   const missing = integratedState({ requester: [], productRuns: [failed100] })
   const missingOutcome = missing.run()
   assert.equal(missingOutcome.status, 1)
-  assert.match(missingOutcome.stdout, /identity is missing from the history or mismatches this head/)
+  assert.match(diagnostic(missing.state, missingOutcome), /identity is missing from the history or mismatches this head/)
   assert.equal(counters(missing.state).postCount, 0)
 })
 
-test('integrated: a requester rerun refuses with zero POSTs', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+test('integrated: a requester rerun refuses with zero POSTs', { skip: skipIntegrated }, () => {
   const { state, run } = integratedState({
-    requester: [requesterRun(7000, '2026-09-23T12:00:05Z', { attempt: 2 })], productRuns: [failed100],
+    requester: [requesterRun(7000, "2026-09-23T12:00:05Z", { attempt: 2 })], productRuns: [failed100],
   })
   const outcome = run(2)
   assert.equal(outcome.status, 1)
-  assert.match(outcome.stdout, /requester rerun/)
+  assert.match(diagnostic(state, outcome), /requester rerun/)
   assert.equal(counters(state).postCount, 0)
 })
 
-test('integrated: pinned-run trust changes and attempt changes refuse after the single dispatch', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+test('integrated: pinned-run trust and attempt changes refuse after a valid pin and a later poll', { skip: skipIntegrated }, () => {
   const trust = integratedState({
     requester: [integratedSelf], productRuns: [],
     runRecords: {
       '101-initial': inflight101,
       '101-final': { ...success101, triggering_actor: { login: 'seanmccarthyns' } },
     },
-    dispatchResponse: 'details', pinnedFinalAfter: 1,
+    dispatchResponse: 'details', pinnedFinalAfter: 2,
   })
   const trustOutcome = trust.run()
   assert.equal(trustOutcome.status, 1)
-  assert.match(trustOutcome.stdout, /trust identity changed/)
+  assert.match(diagnostic(trust.state, trustOutcome), /trust identity changed/)
   assert.equal(counters(trust.state).postCount, 1)
-
+  assert.ok(counters(trust.state).pinnedGets >= 2, "the original attempt must have been pinned before the mutation was served")
   const attempt = integratedState({
     requester: [integratedSelf], productRuns: [],
     runRecords: {
       '101-initial': inflight101,
       '101-final': { ...success101, run_attempt: 2 },
     },
-    dispatchResponse: 'details', pinnedFinalAfter: 1,
+    dispatchResponse: 'details', pinnedFinalAfter: 2,
   })
   const attemptOutcome = attempt.run()
   assert.equal(attemptOutcome.status, 1)
-  assert.match(attemptOutcome.stdout, /attempt changed/)
+  assert.match(diagnostic(attempt.state, attemptOutcome), /attempt changed/)
   assert.equal(counters(attempt.state).postCount, 1)
 })
 
-test('integrated: a missing pinned record (404) refuses after the single dispatch', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+test('integrated: a missing pinned record (404) refuses after the single dispatch', { skip: skipIntegrated }, () => {
   const { state, run } = integratedState({
-    requester: [integratedSelf], productRuns: [], dispatchResponse: 'details',
+    requester: [integratedSelf], productRuns: [], dispatchResponse: "details",
   })
   const outcome = run()
-  assert.equal(outcome.status, 1)
+  assert.notEqual(outcome.status, 0) // curl --fail exit 22 propagates through set -e
   assert.equal(counters(state).postCount, 1)
 })
 
-test('integrated: an existing authoritative success is reused without dispatch', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+test('integrated: an existing authoritative success is reused without dispatch', { skip: skipIntegrated }, () => {
   const { state, run } = integratedState({
     requester: [integratedSelf], productRuns: [success200],
     runRecords: { 200: success200 },
   })
   const outcome = run()
-  assert.equal(outcome.status, 0, outcome.stderr.slice(0, 3000))
+  assert.equal(outcome.status, 0, diagnostic(state, outcome))
   assert.equal(counters(state).postCount, 0)
   assert.match(readFileSync(join(state, 'summary.md'), 'utf8'), /run 200 \(attempt 1\)/)
 })
 
-test('integrated: failed qualification evidence refuses and the per-attempt jobs request is exact', { skip: skipWithoutPython || process.platform === 'win32' ? 'integrated harness needs a POSIX runtime (executed by the ubuntu Product gate)' : false }, () => {
+test('integrated: failed qualification evidence refuses and the per-attempt jobs request is exact', { skip: skipIntegrated }, () => {
   const { state, run } = integratedState({
     requester: [integratedSelf], productRuns: [],
     runRecords: { '101-initial': inflight101, '101-final': success101 },
@@ -906,7 +972,26 @@ test('integrated: failed qualification evidence refuses and the per-attempt jobs
   })
   const outcome = run()
   assert.equal(outcome.status, 1)
-  assert.match(outcome.stdout, /Product aggregate is not authoritative success/)
+  assert.match(diagnostic(state, outcome), /Product aggregate is not authoritative success/)
   assert.equal(counters(state).postCount, 1)
   assert.match(readFileSync(join(state, 'jobs-requests'), 'utf8'), /\/actions\/runs\/101\/attempts\/1\/jobs\?per_page=100/)
+})
+
+test('integrated: multi-page event histories are walked with query-correct URLs and consumed by the gate', { skip: skipIntegrated }, () => {
+  const { state, run } = integratedState({
+    requester: [integratedSelf], productRuns: [],
+    eventsPages: [
+      [labeledEvent(9, "2026-09-23T11:30:00Z")],
+      [labeledEvent(20, "2026-09-23T12:00:00Z")],
+    ],
+    runRecords: { '101-initial': inflight101, '101-final': success101 },
+    dispatchResponse: 'details', revealAfter: 1, pinnedFinalAfter: 2,
+  })
+  const outcome = run()
+  assert.equal(outcome.status, 0, diagnostic(state, outcome))
+  assert.equal(counters(state).postCount, 1)
+  const requests = readFileSync(join(state, 'requests.log'), 'utf8')
+  assert.match(requests, /\/issues\/1066\/events\?page=1&per_page=100/)
+  assert.match(requests, /\/issues\/1066\/events\?page=2&per_page=100/)
+  assert.match(readFileSync(join(state, 'summary.md'), 'utf8'), /run 101 \(attempt 1\)/)
 })

@@ -122,13 +122,17 @@ jobs:
 
           # Bounded pagination walk: fetch up to three pages and require the walk to complete.
           # A still-present rel="next" refuses rather than reasoning over a truncated history.
-          # Arguments: <output prefix> <base URL without any page parameter> — page 1 is
-          # appended with "?" and later pages with "&", so both endpoint shapes work.
+          # Arguments: <output prefix> <base URL> — the separator between the base URL and
+          # the pagination parameters comes from the base URL's own query string ("?" only
+          # when the base has none), so existing query parameters are preserved verbatim.
           collect_pages() {
             local prefix="$1" base_url="$2" page complete=0 separator
             rm -f "$prefix.page."* "$prefix.headers."* 2>/dev/null || true
+            case "$base_url" in
+              *"?"*) separator="&" ;;
+              *) separator="?" ;;
+            esac
             for page in 1 2 3; do
-              if [ "$page" = "1" ]; then separator="?"; else separator="&"; fi
               curl --fail-with-body --silent --show-error "${headers[@]}" \
                 --dump-header "$prefix.headers.$page" \
                 "$base_url${separator}page=$page&per_page=100" --output "$prefix.page.$page"
@@ -401,12 +405,15 @@ jobs:
 
           # Validate a candidate record through the exact identity checks and pin it
           # (id + attempt). Any identity problem, or a completed failure, refuses.
+          # The check verdict travels through a file so its text stays visible even
+          # when the caller's command substitution must not swallow it.
           fetch_and_pin_run() {
             curl --fail-with-body --silent --show-error "${headers[@]}" \
               "$api/actions/runs/$1" --output "$RUNNER_TEMP/pin-$1.json"
+            python "$RUNNER_TEMP/check-product-run.py" pin "$RUNNER_TEMP/pin-$1.json" \
+              "$HEAD_SHA" "$HEAD_REF" "$PR_NUMBER" > "$RUNNER_TEMP/pin-check" || true
             local check
-            check="$(python "$RUNNER_TEMP/check-product-run.py" pin "$RUNNER_TEMP/pin-$1.json" \
-              "$HEAD_SHA" "$HEAD_REF" "$PR_NUMBER")"
+            check="$(cat "$RUNNER_TEMP/pin-check")"
             case "$check" in
               REFUSED*)
                 echo "::error::$check"
@@ -423,13 +430,14 @@ jobs:
             esac
           }
 
-          # Direct poll of the pinned identity only. Prints RUNNING / SUCCEEDED /
-          # FAILED <conclusion>; an identity problem refuses the requester.
+          # Direct poll of the pinned identity only. The verdict is written to a file
+          # (never swallowed by command substitution); a refusal exits nonzero after
+          # the reason has been surfaced on stdout.
           poll_pinned() {
             curl --fail-with-body --silent --show-error "${headers[@]}" \
               "$api/actions/runs/$PINNED_ID" --output "$RUNNER_TEMP/pinned-$PINNED_ID.json"
             python "$RUNNER_TEMP/check-product-run.py" poll "$RUNNER_TEMP/pinned-$PINNED_ID.json" \
-              "$HEAD_SHA" "$HEAD_REF" "$PR_NUMBER" "$PINNED_ATTEMPT"
+              "$HEAD_SHA" "$HEAD_REF" "$PR_NUMBER" "$PINNED_ATTEMPT" > "$RUNNER_TEMP/poll-check" || true
           }
 
           # The uncertain-outcome-safe dispatch: the common gate has already allowed this
@@ -536,23 +544,23 @@ jobs:
           for attempt in $(seq 1 420); do
             verify_live_pr
             if [ -n "$PINNED_ID" ]; then
-              state="$(poll_pinned)"
+              poll_status=0
+              poll_pinned || poll_status=$?
+              state="$(cat "$RUNNER_TEMP/poll-check")"
               case "$state" in
                 RUNNING)
+                  [ "$poll_status" = "0" ] || { echo "::error::Pinned-run poll failed unexpectedly."; exit 1; }
                   sleep 10
                   continue
                   ;;
                 SUCCEEDED)
+                  [ "$poll_status" = "0" ] || { echo "::error::Pinned-run poll failed unexpectedly."; exit 1; }
                   authoritative="true"
                   run_id="$PINNED_ID"
                   break
                   ;;
-                FAILED*)
-                  echo "::error::Pinned Product run $PINNED_ID (attempt $PINNED_ATTEMPT) concluded: ${state#FAILED }."
-                  exit 1
-                  ;;
-                REFUSED*)
-                  echo "::error::$state"
+                FAILED*|REFUSED*)
+                  echo "::error::Pinned Product run $PINNED_ID (attempt $PINNED_ATTEMPT): $state."
                   exit 1
                   ;;
                 *)
