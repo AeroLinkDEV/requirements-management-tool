@@ -226,3 +226,27 @@ test("new package authoring selection survives route parsing for each verificati
     expect(route).toMatchObject({ ...context, view: "testChangeRequests", discipline, artifactId: "saved-package" });
   }
 });
+
+test("leaving the project-wide Documentation Center returns to the build it was opened from", async ({ page }) => {
+  await mockShell(page, async () => [{ ...fms, projects: [{ ...fms.projects[0], releases: [...fms.projects[0].releases, { id: "fms-next", version: "1.7", isReleased: false }] }] }]);
+  await page.goto(routePath(context, "dashboard"));
+  const nav = page.getByRole("navigation", { name: "Primary navigation" });
+  await nav.getByRole("link", { name: "Documentation Center", exact: true }).click();
+  await expect(page).toHaveURL(/\/programs\/fms-program\/projects\/fms-project\/documentation-center$/);
+  await nav.locator("summary", { hasText: "CODE" }).click();
+  await nav.getByRole("link", { name: "Code merge requests", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(routePath(context, "codeMergeRequests") + "$"));
+  await expect(page.locator(".contextBar")).toContainText("Build 1.6");
+  await expect(page.locator(".contextBar strong")).toHaveText("Merge Requests");
+});
+
+test("a directly opened Documentation Center asks for a build instead of showing Command Center", async ({ page }) => {
+  await mockShell(page);
+  await page.goto("/programs/fms-program/projects/fms-project/documentation-center");
+  const nav = page.getByRole("navigation", { name: "Primary navigation" });
+  await nav.locator("summary", { hasText: "CODE" }).click();
+  await nav.getByRole("link", { name: "Code merge requests", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(fmsPath + "$"));
+  await expect(page.getByRole("heading", { name: "FMS Product Development", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Command Center", exact: true })).toHaveCount(0);
+});
