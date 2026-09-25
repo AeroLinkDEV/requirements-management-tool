@@ -112,7 +112,7 @@ test('an earlier refresh waits for the separate readiness dispatcher without dis
   const noneBranch = requester.match(/            NONE\)\n([\s\S]*?)              ;;/)[1].replace(/^          /gm, '')
   assert.match(requester, /REQUEST_LABEL: \$\{\{ github\.event\.label\.name \}\}/)
   assert.match(requester, /group: full-ci-request-.*github\.event\.label\.name == 'ready-for-full-ci' && 'dispatch' \|\| 'refresh'/)
-  assert.match(requester, /NONE\|PENDING\) sleep 10; continue ;;/)
+  assert.match(requester, /NONE\|PENDING\) poll_pause; continue ;;/)
   assert.match(requester, /No successful trusted Product workflow_dispatch completed/)
   const scratch = mkdtempSync(join(tmpdir(), 'aerolink-readiness-dispatch-'))
   try {
@@ -134,6 +134,53 @@ test('an earlier refresh waits for the separate readiness dispatcher without dis
   // Already-running or completed trusted runs continue through the existing verifier, not dispatch.
   assert.match(requester, /FOUND\*\) read -r _ run_id _ _ <<< "\$match" ;;/)
   assert.match(requester, /PENDING\) run_id="" ;;/)
+})
+
+// #987: the bound step's actual script, so the tests below exercise the workflow's own shell rather than a copy.
+const boundStep = () => {
+  const start = requester.indexOf('- name: Authenticate live ready PR, dispatch once, and bind exact Product success')
+  const end = requester.indexOf('- name: Mint the repository-scoped Merge Authority token', start)
+  assert.ok(start > 0 && end > start, 'the bound step must exist')
+  return requester.slice(start, end)
+}
+
+test('every read the requester makes retries transient errors, and no write is ever retried', () => {
+  const step = boundStep()
+  const helper = step.match(/          read_api\(\) \{\n([^\n]*)\n          \}/)
+  assert.ok(helper, 'reads go through one helper')
+  assert.match(helper[1], /curl --retry 4 --retry-delay 5 --retry-max-time 90 --fail-with-body --silent --show-error "\$\{headers\[@\]\}" "\$@"/)
+  // Every other curl in the step is a write, and none of them retries: a retried dispatch could start a second
+  // Full run, and a retried check-run publication could publish twice.
+  const others = [...step.matchAll(/^ *curl (?:[^\n]*\\\n)*[^\n]*/gm)].map(match => match[0]).filter(call => !call.includes('--retry 4'))
+  assert.equal(others.length, 1, 'the bound step has exactly one non-helper curl: the dispatch')
+  for (const call of others) {
+    assert.match(call, /--request POST/)
+    assert.doesNotMatch(call, /--retry/)
+  }
+  for (const endpoint of ['"$api/pulls/$PR_NUMBER"', '"$api/actions/workflows/ci.yml/runs?', '"$api/actions/runs/$run_id/jobs?']) {
+    assert.ok(step.includes(`read_api ${endpoint}`), `${endpoint} is read through the retrying helper`)
+  }
+  const publish = requester.slice(requester.indexOf('- name: Publish trusted pull-request readiness'), requester.indexOf('\n  pr-product-aggregate:\n'))
+  assert.match(publish, /--request POST/)
+  assert.doesNotMatch(publish, /--retry/)
+})
+
+test('the requester waits on a time budget, polling every 10s for two minutes and then every 30s', () => {
+  const step = boundStep()
+  const timeout = Number(requester.match(/dispatch-and-bind:[\s\S]*?timeout-minutes: (\d+)/)[1])
+  const budget = Number(step.match(/wait_deadline=\$\(\(wait_started \+ (\d+)\)\)/)[1])
+  assert.equal(budget, 70 * 60, 'the wait keeps its 70-minute budget')
+  // A final poll plus its retries (at most 90s each for two reads) and the job lookup must still fit the job.
+  assert.ok(timeout * 60 - budget >= 4 * 60, `timeout-minutes ${timeout} must stay ahead of the ${budget}s wait`)
+  assert.match(step, /while \[ "\$SECONDS" -lt "\$wait_deadline" \]; do/)
+  assert.doesNotMatch(step, /seq 1 420|sleep 10; continue/)
+  const pause = step.match(/          poll_pause\(\) \{\n[\s\S]*?\n          \}/)[0].replace(/^          /gm, '')
+  // Run the workflow's own function with sleep intercepted. SECONDS is bash's clock and can be set directly.
+  const script = `set -euo pipefail\nsleep() { printf '%s\\n' "$1"; }\n${pause}\nwait_started=0\nfor at in 0 60 119 120 600 4100; do SECONDS=$at; poll_pause; done`
+  const result = spawnSync(bash, ['--noprofile', '--norc', '-c', script], { encoding: 'utf8', timeout: 10_000 })
+  assert.ifError(result.error)
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(result.stdout.trim().split('\n'), ['10', '10', '10', '30', '30', '30'])
 })
 
 test('the actual required aggregate refuses every non-success prerequisite result', () => {

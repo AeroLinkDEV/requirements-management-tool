@@ -63,6 +63,10 @@ jobs:
               throw new Error('Queue response is incomplete.')
             }
             for (const entry of entries.nodes) {
+              // An entry GitHub has only queued has no candidate commit yet, so there is nothing its identity could
+              // alias. Refusing on it failed every other PR each time one entered the queue (#1106). Any other state
+              // without a resolvable candidate, or a malformed one, is still refused.
+              if (entry?.state === 'QUEUED' && entry.headCommit == null) continue
               const candidate = entry?.headCommit?.oid
               if (typeof candidate !== 'string' || !/^[0-9a-f]{40}$/.test(candidate)) throw new Error('Queue candidate identity is unresolved.')
               if (candidate === headSha) throw new Error('Readiness SHA is a current queue candidate.')
@@ -76,7 +80,7 @@ jobs:
               headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, Accept: 'application/vnd.github+json',
                 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
               body: JSON.stringify({ variables: { owner, name },
-                query: 'query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mergeQueue{entries(first:100){nodes{headCommit{oid}} pageInfo{hasNextPage}}}}}' }),
+                query: 'query($owner:String!,$name:String!){repository(owner:$owner,name:$name){mergeQueue{entries(first:100){nodes{state headCommit{oid}} pageInfo{hasNextPage}}}}}' }),
             })
             if (!response.ok) throw new Error('Queue API read failed.')
             verifyReadinessTarget(process.env.HEAD_SHA, await response.json())
@@ -91,9 +95,16 @@ jobs:
           }
           NODE_READINESS_TARGET
 
+          # Every poll is an idempotent GET, and one transient GitHub 5xx used to fail the whole requester
+          # (curl exit 22), forcing a manual re-run of a gate that had not failed (#987). Reads retry curl's
+          # transient set (timeouts, 408, 429, 500, 502, 503, 504) within a bounded budget. The dispatch and
+          # check-run POSTs are deliberately not retried, so a retry can never duplicate either.
+          read_api() {
+            curl --retry 4 --retry-delay 5 --retry-max-time 90 --fail-with-body --silent --show-error "${headers[@]}" "$@"
+          }
+
           verify_live_pr() {
-            curl --fail-with-body --silent --show-error "${headers[@]}" \
-              "$api/pulls/$PR_NUMBER" --output "$RUNNER_TEMP/live-pr.json"
+            read_api "$api/pulls/$PR_NUMBER" --output "$RUNNER_TEMP/live-pr.json"
             python - "$RUNNER_TEMP/live-pr.json" "$HEAD_SHA" "$HEAD_REF" "$GITHUB_REPOSITORY" <<'PY'
           import json
           import sys
@@ -116,8 +127,7 @@ jobs:
           }
 
           find_product_run() {
-            curl --fail-with-body --silent --show-error "${headers[@]}" \
-              "$api/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&event=workflow_dispatch&per_page=100" \
+            read_api "$api/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&event=workflow_dispatch&per_page=100" \
               --output "$RUNNER_TEMP/product-runs.json"
             python - "$RUNNER_TEMP/product-runs.json" "$HEAD_SHA" "$PR_NUMBER" "$HEAD_REF" <<'PY'
           import json
@@ -201,7 +211,7 @@ jobs:
           esac
 
           authoritative="false"
-          # 420 polls at 10s is 70 minutes, and timeout-minutes above must stay ahead of it.
+          # The wait is bounded by time, 70 minutes, and timeout-minutes above must stay ahead of it.
           #
           # 210 was 35 minutes, which sat below the Product gate's own median. Sixteen successful gate runs
           # measured 15.1m min, 36.9m median, 54.3m p90, 54.4m max — bimodal, because a change that touches the
@@ -209,16 +219,27 @@ jobs:
           # genuinely passing gates could not be bound, and every miss cost a full re-run of a suite that had
           # already gone green. Seventy clears the observed maximum with room for dispatch queueing; the only
           # cost of the headroom is that a truly hung gate takes longer to be declared dead.
-          for attempt in $(seq 1 420); do
+          #
+          # Polls are 10s apart for the first two minutes, where a quick failure or a dispatch that has not
+          # registered yet shows up, then 30s. A passing gate takes 15-55 minutes, and a 10s cadence spent two
+          # reads every 10s waiting on it. The 30s cap cuts those reads by about two thirds and adds at most 30s
+          # to readiness after the gate finishes. Every poll still revalidates the live PR, and publication
+          # still rechecks it and the queue immediately beforehand.
+          wait_started=$SECONDS
+          wait_deadline=$((wait_started + 4200))
+          poll_pause() {
+            if [ $((SECONDS - wait_started)) -lt 120 ]; then sleep 10; else sleep 30; fi
+          }
+          while [ "$SECONDS" -lt "$wait_deadline" ]; do
             verify_live_pr
             match="$(find_product_run)"
             case "$match" in
               ERROR*) echo "::error::$match"; exit 1 ;;
-              NONE|PENDING) sleep 10; continue ;;
+              NONE|PENDING) poll_pause; continue ;;
               FOUND*)
                 read -r _ run_id status conclusion <<< "$match"
                 if [ "$status" != "completed" ]; then
-                  sleep 10
+                  poll_pause
                   continue
                 fi
                 if [ "$conclusion" != "success" ]; then
@@ -237,8 +258,7 @@ jobs:
             exit 1
           fi
 
-          curl --fail-with-body --silent --show-error "${headers[@]}" \
-            "$api/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
+          read_api "$api/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
             --output "$RUNNER_TEMP/product-jobs.json"
           python - "$RUNNER_TEMP/product-jobs.json" <<'PY'
           import json
