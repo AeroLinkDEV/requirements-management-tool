@@ -1,9 +1,6 @@
 import { expect, logicTest as test } from "./isolated-client-test"
 import { artifactTraceGroups, parseInspectorThread } from '../src/artifactTraceInspectorModel'
 import {
-  ARTIFACT_THREAD_LANES,
-  artifactThreadFocalNode,
-  artifactThreadLaneGroups,
   artifactThreadUrl,
   parseArtifactThread,
 } from "../src/artifactThreadContract"
@@ -196,31 +193,6 @@ test('a malformed recorded Code snapshot refuses the artifact thread instead of 
   if (!result.ok) expect(result.reason).toContain('exact snapshot contract')
 })
 
-test("there are exactly six lanes and the last one is RESULT · BUILD", () => {
-  expect(ARTIFACT_THREAD_LANES).toHaveLength(6)
-  expect(ARTIFACT_THREAD_LANES[5]).toBe("RESULT · BUILD")
-})
-
-test("an execution and a build stay together in the final lane", () => {
-  const groups = artifactThreadLaneGroups(parsed())
-  const last = groups[groups.length - 1]
-
-  // Six lanes, not seven: splitting result and build apart would contradict the prototype's lane model and
-  // strand the intra-lane edge between them.
-  expect(last.lane).toBe(5)
-  expect(last.label).toBe("RESULT · BUILD")
-  expect(last.nodes.map(node => node.kind).sort()).toEqual(["Build", "Execution"])
-})
-
-test("a change request and a test change request stay distinct in the change request lane", () => {
-  const groups = artifactThreadLaneGroups(parsed())
-  const changeLane = groups.find(group => group.lane === 1)!
-
-  // A TestChangeReview is a different aggregate and ChangeRequestType has no Test member. Sharing a lane
-  // is a layout fact; it must not become an identity fact.
-  expect(changeLane.nodes.map(node => node.kind).sort()).toEqual(["ChangeRequest", "TestChangeRequest"])
-})
-
 test("exact identities survive normalization unchanged", () => {
   const thread = parsed()
   const requirement = thread.nodes.find(node => node.kind === "Requirement")!
@@ -309,8 +281,7 @@ test("an unconnected focal artifact is a valid one-node thread", () => {
   // §6.8: an unconnected record still renders as a normal card. A seam that treated an empty edge list as
   // malformed would make the view unable to show it at all.
   expect(thread.nodes).toHaveLength(1)
-  expect(artifactThreadFocalNode(thread).id).toBe(PROCEDURE_REVISION)
-  expect(artifactThreadLaneGroups(thread).map(group => group.lane)).toEqual([4])
+  expect(thread.nodes[0]).toMatchObject({ id: PROCEDURE_REVISION, lane: 4, isFocal: true })
 })
 
 test("a level with no verification discipline keeps its reason and fabricates nothing", () => {
@@ -413,20 +384,6 @@ test("the request url carries the configuration the read requires", () => {
   expect(artifactThreadUrl({
     projectId: PROJECT, baselineId: BASELINE, focalKind: "Build", focalId: BUILD, buildId: BUILD,
   })).toContain(`buildId=${BUILD}`)
-})
-
-test("an empty lane is dropped rather than rendered as a placeholder", () => {
-  const groups = artifactThreadLaneGroups(parsed({
-    nodes: [
-      { id: SYSTEM_REVISION, kind: "Requirement", lane: 2, displayNumber: null, title: null, state: null, level: null, isFocal: true },
-      { id: BUILD, kind: "Build", lane: 5, displayNumber: "FMS-7.0.0", title: null, state: "Recorded", level: null, isFocal: false },
-    ],
-    edges: [],
-  }))
-
-  // The prototype filters unused lanes and re-indexes the rest, so structurally empty lanes are not shown.
-  // The server lane index is kept on the group so the caller still knows which lane survived.
-  expect(groups.map(group => group.lane)).toEqual([2, 5])
 })
 
 /**

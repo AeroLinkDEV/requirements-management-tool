@@ -160,21 +160,8 @@ public static class LadderConsumerManifestCatalog
 
     public static LadderConsumerManifest Current { get; } = Build(Array.Empty<ILadderConsumerRegistration>());
 
-    public static LadderConsumerManifest BuildForTests(IEnumerable<ILadderConsumerRegistration> routedConsumers) =>
-        Build(routedConsumers.ToArray());
-
     public static LadderConsumerManifest BuildForRegistrations(IEnumerable<ILadderConsumerRegistration> routedConsumers) =>
         Build(routedConsumers.ToArray());
-
-    public static LadderConsumerManifestV2 BuildForRegistrationsV2(
-        IEnumerable<ILadderConsumerRegistration> routedConsumers,
-        IEnumerable<VerificationArtifactDefinition> effectiveProfile) =>
-        BuildV2(routedConsumers, effectiveProfile);
-
-    public static LadderConsumerManifestV2 BuildForTestsV2(
-        IEnumerable<IVerificationArtifactConsumerRegistration> routedConsumers,
-        IEnumerable<VerificationArtifactDefinition> effectiveProfile) =>
-        BuildV2(routedConsumers.Cast<ILadderConsumerRegistration>(), effectiveProfile);
 
     public static LadderConsumerManifestV2 BuildV2(
         IEnumerable<ILadderConsumerRegistration> routedConsumers,

@@ -44,18 +44,10 @@ test.describe("navigation", () => {
     await openNavigationGroup(page, "REQUIREMENTS")
     await expect(page.locator(".navGroup", { hasText: "REQUIREMENTS" })
       .getByRole("link", { name: "Digital Thread" })).toHaveCount(0)
-  })
 
-  test("the route is unchanged, so existing bookmarks still resolve", async ({ page, request }) => {
-    test.setTimeout(180_000)
-    await page.setViewportSize({ width: 1440, height: 900 })
-    await apiLogin(request)
-    await showcaseSeed(request)
-    await login(page, "admin", { openProject: false })
-    await selectProgram(page, "Flight Management System Live Program")
+    // §4.3 is a navigation regrouping, not a route change: the moved link still lands on the release's
+    // traceability route. Loading that route directly from a bookmark is proven by the deep-link journeys below.
     await openThread(page)
-
-    // §4.3 is a navigation regrouping, not a route change.
     expect(new URL(page.url()).pathname).toMatch(/\/releases\/[^/]+\/traceability$/)
   })
 })

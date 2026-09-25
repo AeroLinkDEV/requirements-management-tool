@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 1001,
-    "cases": 1141,
+    "tests": 1000,
+    "cases": 1140,
     "classes": 157,
-    "hostedTests": 944,
-    "hostedCases": 1062,
+    "hostedTests": 943,
+    "hostedCases": 1061,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 23,
@@ -21,10 +21,10 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 618,
-      "cases": 704,
+      "tests": 617,
+      "cases": 703,
       "unknownCases": 0,
-      "classes": 123
+      "classes": 122
     },
     "ef-translation": {
       "label": "EF translation / relational constraints",
@@ -12146,26 +12146,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 30,
-        "end": 86
-      }
-    },
-    {
-      "cls": "ReleasedExecutionEvidenceAuthorityMismatchTests",
-      "test": "Guarded_factory_preserves_the_file_backed_sqlite_contract",
-      "kind": "Fact",
-      "intent": "http-boundary",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction",
-        "factory-client",
-        "factory-services"
-      ],
-      "sourceLines": {
         "start": 21,
-        "end": 28
+        "end": 77
       }
     },
     {

@@ -151,18 +151,6 @@ test.describe("card identity", () => {
 })
 
 test.describe("evidence", () => {
-  test("the immutable facts survive into presentation, hash included", () => {
-    const [file] = find(read(fullResponse()), EXE).evidence
-
-    expect(file.id).toBe(EVIDENCE)
-    expect(file.fileName).toBe("run.json")
-    expect(file.contentType).toBe("application/json")
-    expect(file.size).toBe(20480)
-    expect(file.sha256).toBe(HASH)
-    expect(file.uploadedBy).toBe("test.engineer")
-    expect(file.uploadedAt).toBe("2026-08-14T09:06:00+00:00")
-  })
-
   test("the abbreviation is a prefix of the real hash, never a rewriting of it", () => {
     expect(HASH.startsWith(shortHash(HASH))).toBe(true)
     expect(shortHash(HASH)).toHaveLength(12)

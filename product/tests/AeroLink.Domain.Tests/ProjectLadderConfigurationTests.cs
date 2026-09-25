@@ -156,7 +156,7 @@ public sealed class ProjectLadderConfigurationTests
         Assert.Equal(ids.OrderBy(x => x, StringComparer.Ordinal), matrixIds.OrderBy(x => x, StringComparer.Ordinal));
         Assert.Equal(matrixIds.Length, matrixIds.Distinct(StringComparer.Ordinal).Count());
 
-        var unknown = LadderConsumerManifestCatalog.BuildForTests(
+        var unknown = LadderConsumerManifestCatalog.BuildForRegistrations(
             [new LadderConsumerRegistration("future.unregistered", "Not a current consumer")]);
         Assert.False(unknown.IsReady);
         Assert.Contains(unknown.UnknownRegistrations, x => x.Id == "future.unregistered");

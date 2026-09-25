@@ -86,6 +86,7 @@ These rules are expensive to rediscover and should be treated as non-negotiable 
 Use the repository's test-planning contract instead of guessing what to run.
 
 - The changed-area planner is the shared authority for local/CI test selection.
+- Before adding or materially changing a test, pass the authoring gate in [TEST_RISK_LAYERS.md](product/docs/TEST_RISK_LAYERS.md#authoring-gate): name the behavior it protects, the regression that makes it fail, and why existing coverage misses it. Give each contract one primary owner test, add no production seam that only a test calls, and prove a bug regression test fails on the pre-fix code. Delete or move a test only with the evidence that document requires. The `test-audit` skill (`.agents/skills/test-audit/`) runs the same gate and the audit workflow.
 - A passing `dotnet test` command is not proof that every `.csproj` in the repository compiles; ensure the required solution/projects/tools are covered by the planned build.
 - Adding/removing API tests may change generated test-intent, route-manifest, and host-classification artifacts. Regenerate them from source; never hand-merge generated JSON.
 - Run the affected generators selected by the planner and applicable contracts twice. Require the second run to leave their outputs identical to the first run; intended generated changes relative to `HEAD` may remain in the PR.
