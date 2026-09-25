@@ -365,6 +365,18 @@ const proposalComplete = (item: DraftRequirement) =>
         Boolean(item.upstreamRevisionIds?.length)),
   );
 
+// What the first incomplete proposal still needs, named for the author (#1091 SCR-7).
+const proposalGap = (items: DraftRequirement[]) => {
+  const item = items.find(candidate => !proposalComplete(candidate));
+  if (!item) return "Add a requirement proposal.";
+  const name = item.baseNumber ? `${item.baseNumber}` : "A proposal";
+  const derived = item.isDerived ?? parseObject(item.attributesJson).derived === true;
+  if (!item.baseNumber) return "A proposal still needs its identifier — save it to issue one.";
+  if (item.kind !== "Retire" && !item.statement.trim()) return `${name} needs a requirement statement.`;
+  if (derived && !item.rationale.trim()) return `${name} is derived and needs a rationale.`;
+  return `${name} needs an upward allocation to a higher-level requirement, or to be marked derived.`;
+};
+
 // The rule this held — a proposal needs its identifier and statement — now lives in
 // `SystemChangeRequest.ValidateReadyForReview`, where it gates review submission rather than check-in. Kept
 // in one place rather than two, so the client cannot drift into refusing something the aggregate accepts.
@@ -1666,7 +1678,7 @@ export default function ChangeRequestWorkspace({
                 <><div className="railReadiness ready"><b>Ready for review</b><span>The change case, requirement proposals, and upstream trace answer are complete.</span></div><button type="button" className="primaryFull" onClick={openReviewerSetup}>Configure & Submit Review</button></>
               )}
               {scr.state === "Draft" && isAuthor && !reviewReady && (
-                <div className="railReadiness"><b>Draft needs authoring</b><span>{!caseComplete ? "Complete the change case." : !proposalsComplete ? "Complete the requirement proposals." : "Complete the upstream trace answer."}</span><button type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>Complete Draft readiness</button></div>
+                <div className="railReadiness"><b>Draft needs authoring</b><span>{!caseComplete ? "Complete the change case." : !proposalsComplete ? proposalGap(requirements) : "Complete the upstream trace answer."}</span><button type="button" disabled={busy || Boolean(lockStatus?.locked && !lockStatus.mine)} onClick={beginEdit}>Complete Draft readiness</button></div>
               )}
               {/* No second Revise button here. The action lives in the Change case header with Check out &
                   edit, so there is one place to act; this only explains what it will do. */}
@@ -1700,7 +1712,7 @@ export default function ChangeRequestWorkspace({
                         can see the change is being reworked, previously had to ask the active reviewer to
                         reject work everybody already knew was going to change. */}
                     {canCancelReview && (
-                      <button type="button" className="secondary" disabled={busy} onClick={() => void cancelReview()}>Cancel review</button>
+                      <button type="button" className="secondary cancelReview" disabled={busy} onClick={() => void cancelReview()}>Cancel review</button>
                     )}
                   </div>
                 )}

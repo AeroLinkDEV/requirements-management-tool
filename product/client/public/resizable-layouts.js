@@ -16,9 +16,13 @@ const layoutTargets = [
 ];
 
 function directPanels(container) {
-  return Array.from(container.children).filter(
-    (element) => !element.classList.contains("workspaceSplitter"),
-  );
+  // A panel taken out of flow (the requirement inspector becomes a fixed drawer at narrower widths) owns no
+  // grid track. Counting it left an empty track and squeezed the list beside it (#1091 TPX-1).
+  return Array.from(container.children).filter((element) => {
+    if (element.classList.contains("workspaceSplitter")) return false;
+    const position = getComputedStyle(element).position;
+    return position !== "fixed" && position !== "absolute";
+  });
 }
 
 function storageKey(container, target) {
@@ -111,6 +115,15 @@ function resizeBoundary(container, axis, sizes, boundary, deltaPx) {
   return next;
 }
 
+// A focusable separator must expose its value (#1091 A11Y-1): the share of the pair held by the first panel.
+function describeValue(handle, sizes, boundary) {
+  const first = sizes[boundary] ?? 0;
+  const pair = first + (sizes[boundary + 1] ?? 0);
+  handle.setAttribute("aria-valuemin", "0");
+  handle.setAttribute("aria-valuemax", "100");
+  handle.setAttribute("aria-valuenow", String(pair > 0 ? Math.round((first / pair) * 100) : 50));
+}
+
 function createHandle(container, panels, target, sizesRef, boundary, key) {
   const axis = target.axis;
   const handle = document.createElement("button");
@@ -124,6 +137,7 @@ function createHandle(container, panels, target, sizesRef, boundary, key) {
     : `Resize panels ${boundary + 1} and ${boundary + 2} up or down`);
   handle.title = axis === "horizontal" ? "Drag left or right to resize" : "Drag up or down to resize";
   handle.innerHTML = `<span aria-hidden="true">${axis === "horizontal" ? "↔" : "↕"}</span>`;
+  describeValue(handle, sizesRef.value, boundary);
 
   let pointerStart = 0;
   let startSizes = [];
@@ -153,6 +167,7 @@ function createHandle(container, panels, target, sizesRef, boundary, key) {
       boundary,
       pointer - pointerStart,
     );
+    describeValue(handle, sizesRef.value, boundary);
   });
 
   handle.addEventListener("pointerup", finish);
@@ -171,11 +186,13 @@ function createHandle(container, panels, target, sizesRef, boundary, key) {
       boundary,
       negative ? -step : step,
     );
+    describeValue(handle, sizesRef.value, boundary);
     saveSizes(key, sizesRef.value);
   });
 
   handle.addEventListener("dblclick", () => {
     sizesRef.value = equalSizes(panels.length);
+    describeValue(handle, sizesRef.value, boundary);
     applySizes(container, axis, sizesRef.value);
     positionHandles(container, axis);
     saveSizes(key, sizesRef.value);

@@ -66,6 +66,16 @@ test('FMS selection opens the actual, ordered Software Builds lineage', async ({
   await expect(current.getByRole('button', { name: /Open build 1\.6/ })).toBeEnabled()
   await expect(current).toContainText('Predecessor')
 
+  // #1047: the FMS showcase keeps its mock back story, 0.5 and 1.0, ahead of the real builds. They are badged
+  // Mock, cannot open a workspace, are not counted, and join the lineage with dashed arrows only.
+  const mocks = page.locator('[data-mock-build]')
+  expect(await mocks.evaluateAll(items => items.map(item => item.getAttribute('data-mock-build')))).toEqual(['0.5', '1.0'])
+  await expect(mocks.getByText('Mock', { exact: true })).toHaveCount(2)
+  await expect(mocks.locator('button:not(:disabled)')).toHaveCount(0)
+  await expect(mocks.locator('[data-build-card]')).toHaveCount(0)
+  await expect(mocks.locator('.buildConnector.mock')).toHaveCount(2)
+  await expect(page.locator('.buildProjectContent dd').first()).toHaveText(String(expectedVersions.length))
+
   if (process.env.AEROLINK_BUILDS_SCREENSHOT)
     await page.screenshot({ path: process.env.AEROLINK_BUILDS_SCREENSHOT, fullPage: true })
 })
@@ -153,6 +163,8 @@ test('Build 1.6 keeps editing capability, scopes search, and labels predecessor 
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'System Requirements Explorer' }).click()
   await expect(page.getByRole('heading', { name: 'System Requirements Explorer' })).toBeVisible()
+  // Below 1440px the explorer waits for a choice rather than opening a drawer over the list (#1091 TPX-1).
+  await page.locator('.reqTable article > a.requirementTarget').first().click()
   await page.getByRole('tab', { name: /History/ }).click()
   await expect(page.getByText('Historical version — Build 1.5').first()).toBeVisible()
   await expect(page.getByLabel('Active build 1.6')).toBeVisible()

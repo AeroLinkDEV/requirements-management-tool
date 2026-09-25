@@ -279,6 +279,49 @@ test.describe("active-view table representations", () => {
     await expect(page.locator(".dtThreadTable tbody tr").filter({ hasText: target.displayNumber })).toHaveCount(1)
   })
 
+  test("a search typed while the build context loads survives its arrival", async ({ page, request }) => {
+    test.setTimeout(180_000)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await apiLogin(request)
+    await showcaseSeed(request)
+    await login(page, "admin", { openProject: false })
+    await selectProgram(page, "Flight Management System Live Program")
+
+    // #1085. The baseline resolves from the build context. Counting it as an arrival remounted the network
+    // and threw away the reader's search, so the board is held mid-load while they type.
+    let releaseContext!: () => void
+    const contextHeld = new Promise<void>(resolve => { releaseContext = resolve })
+    let contextReads = 0
+    await page.route(url => url.pathname === "/api/build-context", async route => {
+      contextReads += 1
+      await contextHeld
+      await route.continue()
+    })
+    await openThread(page)
+    await expect.poll(() => contextReads).toBeGreaterThan(0)
+    await expect(page.locator(".dtnCard")).toHaveCount(0)
+
+    const { projectId, releaseId } = ids(page)
+    const network = await (await request.get(
+      `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json() as {
+        nodes: { id: string; kind: string; displayNumber: string }[]
+      }
+    const target = network.nodes.find(node => node.kind === "ChangeRequest")
+    if (!target) throw new Error("the network projection should carry a Change Request")
+
+    const search = page.locator(".dtnSearch input")
+    await search.fill(target.displayNumber)
+    releaseContext()
+    await expect(page.locator(".dtnCard").filter({ hasText: target.displayNumber }).first()).toBeVisible()
+    await expect(search).toHaveValue(target.displayNumber)
+
+    // The filter still governs what is listed, not just the text left in the box.
+    await page.locator(".dtPageToolbar").getByRole("button", { name: "Table" }).click()
+    const rows = page.locator(".dtThreadTable tbody tr")
+    await expect(rows.filter({ hasText: target.displayNumber }).first()).toBeVisible()
+    await expect(rows.filter({ hasNotText: target.displayNumber })).toHaveCount(0)
+  })
+
   test("Inside Table keeps the opened change and type filter across the round trip", async ({ page, request }) => {
     test.setTimeout(180_000)
     await page.setViewportSize({ width: 1280, height: 900 })

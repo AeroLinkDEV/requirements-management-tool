@@ -141,7 +141,7 @@ export default function ChangeRequestRegister({
         {row.badge}
         <p>{row.title || 'Not written up yet'}</p>
         <small>
-          {row.changeCount} {changeNoun}
+          {row.changeCount} {row.changeCount === 1 ? changeNoun.replace(/s$/, "") : changeNoun}
           {row.authorId
             // Authorship is accountability, so the register names the person the way the detail surface does
             // — PersonName resolves seeded accounts to a person and falls back to the account name for

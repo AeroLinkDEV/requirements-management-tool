@@ -2551,8 +2551,58 @@ choices are created as focused issues only when their trigger and acceptance bou
 ### DEC-132 - A Problem Report Transition Retains Any Rationale Given, and Requires One Only Where the Policy Demands It
 
 - **Date:** 2026-09-22
-- **Status:** Accepted
+- **Status:** Accepted; its Consequences are corrected by DEC-134, and its decision and scope are unchanged
 - **Owner decision:** The owner decided that a note explaining a lifecycle decision must be stored and tied to the Problem Report permanently, and chose to keep a rationale optional on forward transitions rather than mandatory.
 - **Scope:** `ProblemReportEndpoints` no longer discards the rationale on transitions that do not require one. `ProblemReportTransitionPolicy.RequiresRationale` continues to decide where a rationale is *mandatory* — backward transitions and rejection — and the domain continues to reject those without one. Where a rationale is supplied on any other edge it is trimmed, stored, and carried in the same immutable revision as the transition it explains, alongside the actor, the timestamp and the from/to states. No schema, migration or domain change was needed: `ProblemReport.TransitionTo` already accepted and persisted a rationale on every edge, and the revision already carried the field. The client drafts it in a per-report working note held in the browser and confirms it in the transition dialog; text is never submitted that the actor did not confirm for the decision being made.
 - **Boundaries:** This does not make a rationale mandatory anywhere it was not already, does not change which transitions are allowed or who may perform them, and does not alter the disposition rationale, the release-waiver rationale or any existing required-rationale gate. The working note itself is browser-held drafting state and is not a second record: nothing is retained except what is confirmed in the dialog and accepted by the server.
 - **Consequences:** The record becomes partial by design. A forward transition may carry a reason or may carry none, and a reader cannot distinguish "no reason was given" from "this transition predates this decision" without consulting the transition date. Backward and rejection rationale remain complete because they are mandatory, so forward rationale is weaker evidence than backward rationale and should not be relied on as uniformly present. Reports created before this decision have no forward rationales at all. If a future assurance argument requires a complete reason for every lifecycle decision, that is a separate decision to make the forward rationale mandatory, and it would need a migration story for the existing gap.
+
+### DEC-133 - A Problem Report Changes Lifecycle State Only by an Explicit Human Transition
+
+- **Date:** 2026-09-22
+- **Status:** Accepted
+- **Owner decision:** The owner directed that a person must always drive the Problem Report lifecycle, with no automatic movement, including when passing test evidence exists. Recording evidence, editing fields or changing assignments may inform a lifecycle decision but must never make one. For a change that undermines the evidence a report was sent to SQA on, the owner chose to withdraw the closure basis and keep the report where it is, rather than keep the automatic return to Verifying as a named exception.
+- **Scope:** `ProblemReport.State` changes only through an explicit transition that an authorized person requested. Specifically:
+  - Recording a passing corrective result in Test Results no longer calls `/verify`. The page offers to send the report to SQA on that result, and the engineer must confirm, optionally giving a reason (DEC-132).
+  - Verifying → WaitingForSqaToClose is reachable only through that `/verify` act, on a chosen passing result that `ProblemReportClosureVerificationPolicy` accepts. The generic transition refuses it without evidence, and the server does not offer it as a bare state change.
+  - A closure-significant change leaves a report in WaitingForSqaToClose: an edit or check-in, an owner or target-build change, a release-blocker or waiver decision, a same-state disposition, or a controlled link change. The change clears the selected execution and invalidates the pending closure candidate, the report states that its basis was withdrawn, and SQA closure is refused in both the domain and the API. A person returns the report to Verifying, which as a backward move requires a rationale, and sends it again on a fresh result.
+  - Recording investigation no longer moves Open → Implementing.
+  - The unused automatic-implementation hooks were removed.
+- **Boundaries:** The transition graph, the edges that require a rationale, SCCB and SQA authority, closure-candidate hashing and frozen packages are unchanged. Explicit dedicated actions such as SCCB readiness and opening, implementation start and resolution proposal are human moves and remain. They carry no rationale field today; that is a DEC-132 gap, not automatic movement. Existing history is not rewritten: earlier automatic moves stay recorded as they happened.
+- **Consequences:** A report in WaitingForSqaToClose is no longer proof that its closure evidence still stands. Readers use the withdrawn-basis flag, or the candidate state, which the Problem Report detail exposes. DEC-132's Consequences named two reasons a forward transition might lack a rationale. The Test Results closure path was a third: a path with no place for a reason. This decision removes it. Reports already in WaitingForSqaToClose with no selected execution, for example ones moved there by the generic transition before this decision, can no longer be closed until they are returned to Verifying and re-verified.
+
+### DEC-134 - Corrected Consequences of DEC-132: Why a Forward Transition May Carry No Rationale
+
+- **Date:** 2026-09-22
+- **Status:** Accepted
+- **Owner decision:** The owner asked for DEC-132's Consequences to be corrected. The entry stays in place unaltered, per this log's append-only rule, and this decision replaces its Consequences. DEC-132's decision, scope and boundaries are unchanged.
+- **What DEC-132 got wrong:**
+  - **Too few causes.** It said a missing forward rationale means either that none was given or that the transition predates DEC-132, and that the transition date tells them apart. There is a third cause: the transition was made through a path with no rationale field, whenever it happened. The date alone therefore cannot distinguish the causes.
+  - **The wrong unit.** It said reports created before DEC-132 have no forward rationales at all. What matters is when a transition happened, not when the report was created. A report created before 2026-09-22 records a rationale on any later forward transition made through a path that accepts one.
+- **Corrected Consequences:** A forward transition may carry a rationale or may carry none. Its revision event type says which path recorded it, and therefore whether a rationale was possible:
+  - `ProblemReportTransitionedTo…` is the generic transition, which the Problem Report page uses for every lifecycle move. It keeps a supplied rationale from DEC-132 onward. Where it carries none, either none was given or it was recorded through the API before 2026-09-22, which nulled it.
+  - `ResolutionVerified` is sending a Verifying report to SQA on a chosen result. It keeps a supplied rationale from DEC-133 onward. Before that, this path could not carry one, and it was also the silent move DEC-133 removed.
+  - `ReadyForSccb`, `OpenedBySccb`, `ImplementationStarted`, `ResolutionProposed` and `ClosureApproved` are dedicated API actions whose requests have no rationale field. The Problem Report page does not use them, but API callers and seeded demonstration history do. They never carry a forward rationale, so their silence is not evidence that the actor chose not to explain.
+- **What still holds from DEC-132:** Backward and rejection rationale remain complete because they are mandatory on every path. Forward rationale is weaker evidence and must not be relied on as uniformly present. Making it mandatory, or giving the dedicated actions a rationale field, would each be a separate decision, and a mandatory rule would need a story for the existing gap.
+
+### DEC-135 - The CI Maintenance Delegation Extends to Claude
+
+- **Date:** 2026-09-24 UTC
+- **Status:** Accepted
+- **Authority:** The owner stated **"I want to give you this autonomy also!"** in the Claude conversation on 2026-09-24, after #1097 (a `.github/` maintenance PR authored by Claude) needed his own environment approval, and after the scope of DEC-124 and this extension had been explained to him. The statement is transcribed here by Claude. That agent-authored record is evidence of the delegation, not an independently posted owner review.
+- **Decision:** Claude may submit exact CI-maintenance environment approvals on the owner's behalf, under the same standing authorization DEC-124 gives Codex, without asking for new conversational confirmation for each digest. This includes candidates Claude authored. The delegation stays in effect until the owner revokes or narrows it, for Claude or for both agents.
+- **Qualification:** The DEC-124 qualification applies unchanged. Before each approval, Claude must:
+  - confirm the current composed candidate's native Product proof succeeded;
+  - check that the candidate's diff against `main` is exactly the reviewed PR;
+  - read the hosted packet and confirm its PR, head, candidate, run and attempt identities, and take the exact digest from it;
+  - submit `APPROVE MAINTENANCE <digest>` through the existing owner-authenticated environment review;
+  - record on the PR that Claude acted under delegated authority. The approval must not be described as an independent human review.
+
+  Where Claude authored the candidate, that record says so. The approval attests only that the candidate is exactly the reviewed change with passing proof. It is not a second pair of eyes.
+- **Tool permission:** Claude Code blocks an agent approving its own gate unless its permission settings allow it. The owner separately permits the one approval call this decision covers: `POST` to this repository's `actions/runs/<id>/pending_deployments`. Without that setting this decision authorizes the action but Claude cannot take it, and the approval falls back to the owner.
+- **Preserved controls:** Everything DEC-124 preserves remains:
+  - the protected publisher's live revalidation;
+  - refusals for stale or failed proof, changed publishers and kernel paths;
+  - required checks, credential isolation and the no-force-merge boundary;
+  - separately reviewed, qualified transitions for kernel changes. This delegation cannot let a kernel authorize itself.
+- **Supersedes:** Nothing. DEC-124 remains authoritative for Codex, and this decision adds Claude as a second delegate on the same terms. It changes operator authorization only, not workflow code, GitHub reviewer identity or environment policy.

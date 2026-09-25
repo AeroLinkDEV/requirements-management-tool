@@ -27,7 +27,7 @@
 
 .scrHeader > div:first-child > p:last-child {
   margin: 0;
-  color: #68798c;
+  color: #56657a;
   font-size: 15px;
 }
 
@@ -1364,3 +1364,6 @@ html .withdrawAction:disabled { cursor: not-allowed; opacity: .5; }
   .upstreamDraftRow { grid-template-columns: 1fr; }
   .upstreamReference > div { flex-direction: column; }
 }
+/* #1091 LOW-15: stopping a review is a secondary action, not the rail primary. */
+.reviewRail button.cancelReview { background: #fff; color: #8a3d12; border: 1px solid #e0b48f; box-shadow: none; }
+.reviewRail button.cancelReview:hover { background: #fff6ef; }

@@ -161,7 +161,9 @@ comment must be exactly `APPROVE MAINTENANCE <digest>` using the summary's 64-ch
 comment, label, different reviewer, absent approval, rejected approval or mixed/duplicate approval history is
 insufficient. Under the owner's standing delegation in
 [DEC-124](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-124---standing-owner-delegation-for-ci-maintenance-approvals),
-Codex may submit each exact approval on the owner's behalf after the required review and native qualification,
+extended to Claude by
+[DEC-135](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-135---the-ci-maintenance-delegation-extends-to-claude),
+Codex or Claude may submit each exact approval on the owner's behalf after the required review and native qualification,
 without asking the owner to confirm each digest again. Verify the current hosted packet and record the delegated
 action; do not describe it as an independent human review. The delegation remains effective until revoked or
 narrowed by the owner. The approval job executes no repository code and has no token permissions.

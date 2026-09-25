@@ -34,15 +34,15 @@ export default function DocumentCenter({ api, projectId, release, discipline, la
         <div>
           <button className="back" onClick={onBack}>← {assurance ? "Verification" : "Requirements Explorer"}</button>
           <p className="eyebrow">{assurance ? "ASSURANCE" : "ENGINEERING"} / {scope.toUpperCase()}</p>
-          <h1>Documents</h1>
+          <h1>Generated Documents</h1>
           <p>
             {release.isReleased
-              ? `Approved documents belonging to software build SW-${release.version.padStart(4, "0").replace(".", ".")}0.`
-              : `Living draft documents for the in-work software build, generated from approved content.`}
+              ? `Approved documents belonging to Build ${release.version}.`
+              : `Living draft documents for Build ${release.version}, generated from approved content.`}
           </p>
         </div>
         <span className={release.isReleased ? "statusBadge released" : "statusBadge inWork"}>
-          {release.isReleased ? "Released · read-only" : "In Work"}
+          {release.isReleased ? "Released · read-only" : "In work"}
         </span>
       </header>
       <DocumentActions

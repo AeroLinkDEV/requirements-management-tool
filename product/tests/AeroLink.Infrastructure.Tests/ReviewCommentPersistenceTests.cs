@@ -53,7 +53,7 @@ public sealed class ReviewCommentPersistenceTests
                     using var archive = new System.IO.Compression.ZipArchive(new MemoryStream(output.Content));
                     using var reader = new StreamReader(archive.GetEntry("word/document.xml")!.Open());
                     var xml = await reader.ReadToEndAsync();
-                    Assert.Contains("Release 1.0", xml);
+                    Assert.Contains("Build 1.0", xml);
                     Assert.DoesNotContain("SW-01.00", xml);
                 }
             }

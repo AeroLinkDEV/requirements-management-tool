@@ -8,16 +8,23 @@ using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Traceability;
 using Microsoft.EntityFrameworkCore;
 
-namespace AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Persistence;
+
+namespace AeroLink.Infrastructure.Tests.Fixtures;
 
 /// <summary>
-/// The small, opt-in showcase that makes a project-owned ladder visible without changing FMSLIVE.
+/// A disposable System-to-LowLevel project, built only inside tests, that proves a configured two-level ladder
+/// end to end without touching FMSLIVE.
+///
+/// This was the production "Configured Ladder Showcase" (LADDERLAB) seeder. The owner had that demonstration
+/// fully removed from the product (#1047), so no startup or seed route creates it any more. The configured-ladder
+/// behaviour it exercised is still product behaviour, so the builder lives on here, in the test assembly only.
 ///
 /// The project starts with the ordinary persisted legacy ladder because that is the same creation seam used by
 /// the workspace endpoint. It is then edited and activated through the application authority, exactly as a
-/// Configuration Manager would do it. Nothing in this seeder writes an active lifecycle value directly.
+/// Configuration Manager would do it. Nothing in this fixture writes an active lifecycle value directly.
 /// </summary>
-public sealed record SecondShowcaseSummary(
+public sealed record SystemLowLevelLadderSummary(
     Guid ProgramId,
     Guid ProjectId,
     Guid ReleaseId,
@@ -29,28 +36,28 @@ public sealed record SecondShowcaseSummary(
     int ControlledDocuments,
     int TestProcedureDocuments);
 
-public sealed class SecondShowcaseSeeder(
+public sealed class SystemLowLevelLadderFixture(
     AeroLinkDbContext db,
     ProjectLadderAuthoringService ladderAuthoring,
     IProjectLadderPolicyResolver? policyResolver = null)
 {
-    public const string ProgramCode = "LADDERLAB";
-    public const string ProjectName = "Configured Ladder Showcase";
-    private const string ProjectProduct = "Configured Ladder Software";
+    public const string ProgramCode = "LADDERFIX";
+    public const string ProjectName = "System-to-LowLevel Ladder Fixture";
+    private const string ProjectProduct = "System-to-LowLevel Ladder Software";
     private const string ReleaseVersion = "2.0";
     private const string BaselineNumber = "SW-71.20";
     private const string LegacySystemChangeRequestNumber = "SRCR-71201";
     private const string LegacyLowLevelChangeRequestNumber = "LLRCR-71202";
     private const string LegacySystemRequirementNumber = "SYSR-71201";
     private const string LegacyLowLevelRequirementNumber = "LLR-71202";
-    private const string Actor = "showcase.second";
+    private const string Actor = "ladder.fixture";
     private const string SystemsAuthor = "systems.author";
     private const string SoftwareAuthor = "software.author";
     private const string SystemsReviewer = "systems.reviewer";
     private const string SoftwareLead = "software.lead";
     private readonly IProjectLadderPolicyResolver resolver = policyResolver ?? new EffectiveProjectLadderPolicyResolver(db);
 
-    public async Task<SecondShowcaseSummary> EnsureSeededAsync(CancellationToken ct = default)
+    public async Task<SystemLowLevelLadderSummary> EnsureSeededAsync(CancellationToken ct = default)
     {
         await EnsureNoFormerReservedWorkspaceAsync(ct);
         var start = new DateTimeOffset(2026, 1, 12, 13, 0, 0, TimeSpan.Zero);
@@ -109,7 +116,7 @@ public sealed class SecondShowcaseSeeder(
         if (formerRequest is null && formerRequirement is null) return;
 
         throw new InvalidOperationException(
-            "The LADDERLAB showcase contains reserved identifiers from an earlier incompatible seed "
+            "The ladder fixture contains reserved identifiers from an earlier incompatible seed "
             + $"({LegacySystemChangeRequestNumber}/{LegacyLowLevelChangeRequestNumber} or "
             + $"{LegacySystemRequirementNumber}/{LegacyLowLevelRequirementNumber}). "
             + "It was not changed; remove or rebuild this dedicated showcase before retrying.");
@@ -478,7 +485,7 @@ public sealed class SecondShowcaseSeeder(
         return request;
     }
 
-    private async Task<SecondShowcaseSummary> SummarizeAsync(Guid programId, CancellationToken ct)
+    private async Task<SystemLowLevelLadderSummary> SummarizeAsync(Guid programId, CancellationToken ct)
     {
         var projectId = await db.Projects.Where(x => x.ProgramId == programId).Select(x => x.Id).SingleAsync(ct);
         var releaseId = await db.Releases.Where(x => x.ProjectId == projectId && x.Version == ReleaseVersion)

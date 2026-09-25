@@ -124,6 +124,54 @@ public sealed class GitLabMetadataReaderTests
     }
 
     [Fact]
+    public void ConfiguredMetadataTimeoutGovernsTheRegisteredClient()
+    {
+        // #1092: one setting sets both limits, so a test that holds a provider response open can raise them together.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAeroLinkInfrastructure(new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["ProjectGitLab:MetadataRequestTimeoutSeconds"] = "300" }).Build());
+        using var provider = services.BuildServiceProvider();
+        using var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(GitLabMetadataReader));
+        Assert.Equal(TimeSpan.FromSeconds(300), client.Timeout);
+        Assert.Equal(TimeSpan.FromSeconds(300), provider.GetRequiredService<IOptions<ProjectGitLabOptions>>().Value.MetadataRequestTimeout);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    public void AnUnusableTimeoutFallsBackToFifteenSeconds(int configured)
+    {
+        Assert.Equal(TimeSpan.FromSeconds(15),
+            new ProjectGitLabOptions { MetadataRequestTimeoutSeconds = configured }.MetadataRequestTimeout);
+    }
+
+    [Fact]
+    public async Task TheReaderEnforcesTheConfiguredWholeRequestLimit()
+    {
+        // The reader's own timer, not only the client's: a transport that outlives the configured limit is a timeout.
+        var transport = new StallingHandler();
+        var reader = new GitLabMetadataReader(new HttpClient(transport) { Timeout = Timeout.InfiniteTimeSpan },
+            Options.Create(new ProjectGitLabOptions
+            {
+                BaseUrl = "https://gitlab.example", ReadAccessToken = "test-only-token", MetadataRequestTimeoutSeconds = 1,
+            }));
+        var started = DateTimeOffset.UtcNow;
+        var result = await reader.DiscoverMergeRequestsAsync(Configuration(), new(), default).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(GitLabMetadataStatus.Timeout, result.Status);
+        Assert.InRange(DateTimeOffset.UtcNow - started, TimeSpan.FromMilliseconds(900), TimeSpan.FromSeconds(20));
+    }
+
+    private sealed class StallingHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return new(HttpStatusCode.OK);
+        }
+    }
+
+    [Fact]
     public async Task CanceledRemoteWaitIsReportedAsTimeoutWhenCallerDidNotCancel()
     {
         var result = await Reader(new Handler(_ => throw new OperationCanceledException()))

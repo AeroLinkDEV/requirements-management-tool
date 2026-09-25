@@ -292,6 +292,11 @@ The #765 improvement programme delivered a substantially richer Problem Report w
 
 Problem Reports can drive governed change work; requirements changes do not manufacture a Problem Report merely because a change exists.
 
+A Problem Report changes lifecycle state only when a person explicitly transitions it (DEC-133). Recording a passing
+corrective result offers to send the report to SQA on that result; the engineer confirms it. A later
+closure-significant change withdraws the closure basis and blocks SQA closure, but leaves the report waiting for SQA
+until a person returns it to Verifying. Any rationale given on a transition is kept (DEC-132).
+
 Upstream change requests and exact Case origins provide inherited Problem Report context for downstream authoring. Authors explicitly select direct links under the existing project/build and review-version rules; source approval does not automatically copy those links into a new verification assessment. Refreshing source context does not change independently accepted links or frozen review history. Software Procedure packages retain their exact Case origin when secondary Problem Reports are explicitly linked.
 
 ## Baselines, builds, and release control

@@ -78,6 +78,11 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .buildLineage li { position: relative; min-width: 0; }
 .buildConnector { position: absolute; z-index: 2; top: 50%; right: -39px; width: 26px; height: 26px; display: grid; place-items: center; transform: translateY(-50%); border: 1px solid #8697a9; border-radius: 50%; background: var(--canvas); color: #354b65; font-size: 18px; }
 .buildConnector::before { content: ""; position: absolute; z-index: -1; right: 25px; width: 28px; border-top: 1px solid #8797a8; }
+/* #1047: mock showcase history is drawn, but never the same as recorded ancestry. */
+.buildConnector.mock { border-style: dashed; }
+.buildConnector.mock::before { border-top-style: dashed; }
+/* The last card in a grid row has no neighbour to its right; an arrow there would point at nothing. */
+.buildLineage li:nth-child(5n) > .buildConnector { display: none; }
 
 .softwareBuildCard {
   min-height: 212px;
@@ -97,6 +102,8 @@ body:has(.buildsLandingPage) { min-width: 0; }
 .buildStatus.in-work { border: 1px solid #58a2d4; background: #eef7fd; color: #12659d; }
 .buildStatus.planned { border: 1px solid #b7a8d8; background: #f4f0fb; color: #624b96; }
 .softwareBuildCard:has(.buildStatus.planned){border-style:dashed;background:#faf9fc}
+.buildStatus.mock { border: 1px solid #c9cfd8; background: #eef0f3; color: #5f6b7a; }
+.softwareBuildCard.mock { border-style: dashed; background: #fafbfc; }
 .softwareBuildCard h3 { margin: 14px 0 5px; font: 650 14px var(--font-display); }
 .softwareBuildCard > p { flex: 1; margin: 0 0 13px; color: #536376; font-size: 12px; line-height: 1.45; }
 .softwareBuildCard .buildLifecycleDescription { flex: 0 0 auto; }

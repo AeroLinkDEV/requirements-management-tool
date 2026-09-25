@@ -419,7 +419,12 @@ public sealed class ProblemReportApiTests
         using var sccbOpen = await sccb.PostAsJsonAsync($"/api/problem-reports/{id}/sccb/open", new { expectedVersion = version });
         Assert.Equal(HttpStatusCode.OK, sccbOpen.StatusCode); version = (await sccbOpen.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
         using var investigation = await client.PostAsJsonAsync($"/api/problem-reports/{id}/investigation", new { expectedVersion = version, analysis = "Reproduced during integration test.", rootCause = "Timeout race", effects = "Navigation reset", containment = "Disable retry" });
-        Assert.Equal(HttpStatusCode.OK, investigation.StatusCode); version = (await investigation.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
+        Assert.Equal(HttpStatusCode.OK, investigation.StatusCode);
+        var investigated = await investigation.Content.ReadFromJsonAsync<JsonElement>(); version = investigated.GetProperty("version").GetInt64();
+        // Recording investigation is not starting implementation (#1088); a person does that explicitly.
+        Assert.Equal("Open", investigated.GetProperty("state").GetString());
+        using var implementing = await client.PostAsJsonAsync($"/api/problem-reports/{id}/implementation", new { expectedVersion = version });
+        Assert.Equal(HttpStatusCode.OK, implementing.StatusCode); version = (await implementing.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64();
         using var proposal = await client.PostAsJsonAsync($"/api/problem-reports/{id}/resolution", new { expectedVersion = version, correctiveAction = "Serialize reset commands." });
         Assert.Equal(HttpStatusCode.OK, proposal.StatusCode);
 
@@ -531,7 +536,7 @@ public sealed class ProblemReportApiTests
     }
 
     [Fact]
-    public async Task Automatic_waiting_invalidation_records_a_truthful_backward_rationale()
+    public async Task A_closure_significant_change_withdraws_the_basis_and_records_why_without_moving_the_report()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
@@ -547,6 +552,7 @@ public sealed class ProblemReportApiTests
                 responsibleEngineerId: "admin", category: ProblemReportCategory.CodeFunctional);
             report.ReadyForSccb("admin", now.AddMinutes(1));
             report.OpenBySccb("admin", now.AddMinutes(2));
+            report.BeginImplementation("admin", now.AddMinutes(3));
             report.BeginInvestigation("admin", "Analysis", "Cause", "Effect", "", now.AddMinutes(3));
             report.ProposeResolution("admin", "Corrective action", now.AddMinutes(4));
             report.RecordResolutionVerification("admin", Guid.NewGuid(), now.AddMinutes(5));
@@ -560,13 +566,20 @@ public sealed class ProblemReportApiTests
             new { expectedVersion = before.GetProperty("version").GetInt64(), isReleaseBlocker = true, waiverRationale = "" });
         Assert.Equal(HttpStatusCode.OK, blocked.StatusCode);
 
+        // #1088: the change informs a lifecycle decision and never makes one. The report stays with SQA, the
+        // record says the basis was withdrawn, and closure is no longer offered.
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{reportId}");
-        Assert.Equal("Verifying", detail.GetProperty("state").GetString());
+        Assert.Equal("WaitingForSqaToClose", detail.GetProperty("state").GetString());
+        var capabilities = detail.GetProperty("capabilities");
+        Assert.True(capabilities.GetProperty("closureBasisWithdrawn").GetBoolean());
+        Assert.False(capabilities.GetProperty("canApproveSqaClosure").GetBoolean());
+        Assert.DoesNotContain(capabilities.GetProperty("availableTransitions").EnumerateArray(),
+            item => item.GetProperty("state").GetString() == "Closed");
         var revision = Assert.Single(detail.GetProperty("revisions").EnumerateArray(), item =>
             item.GetProperty("eventType").GetString() == "ReleaseBlockerRaised");
         Assert.Equal("WaitingForSqaToClose", revision.GetProperty("fromState").GetString());
-        Assert.Equal("Verifying", revision.GetProperty("toState").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(revision.GetProperty("rationale").GetString()));
+        Assert.Equal("WaitingForSqaToClose", revision.GetProperty("toState").GetString());
+        Assert.Contains("withdrew the closure basis", revision.GetProperty("rationale").GetString());
     }
 
     [Fact]
@@ -585,6 +598,7 @@ public sealed class ProblemReportApiTests
                 responsibleEngineerId: "admin", category: ProblemReportCategory.CodeFunctional);
             report.ReadyForSccb("admin", now.AddMinutes(1));
             report.OpenBySccb("sccb", now.AddMinutes(2));
+            report.BeginImplementation("admin", now.AddMinutes(3));
             report.BeginInvestigation("admin", "Analysis", "Cause", "Effect", "", now.AddMinutes(3));
             report.ProposeResolution("admin", "Historical correction", now.AddMinutes(4));
             report.RecordResolutionVerification("admin", Guid.NewGuid(), now.AddMinutes(5));

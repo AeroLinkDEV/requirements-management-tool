@@ -17,6 +17,11 @@ type Props = {
   canToggleBlocker?: boolean;
   /** Verifying only: closure needs a passing successor result before SQA can close. */
   showClosureResult?: boolean;
+  /**
+   * Waiting for SQA on a result a later change withdrew (DEC-133). Said here, beside where Close would be,
+   * because the report did not move and a missing Close with no reason reads as a permissions fault.
+   */
+  closureBasisWithdrawn?: boolean;
   dispositionRationale?: string;
   /**
    * The working note: a draft of the rationale a backward move or a rejection will ask for.
@@ -73,6 +78,7 @@ export default function ProblemReportStateHeader({
   waived,
   canToggleBlocker,
   showClosureResult,
+  closureBasisWithdrawn,
   dispositionRationale,
   noteArea,
   noteOffer,
@@ -192,10 +198,21 @@ export default function ProblemReportStateHeader({
 
       {showClosureResult && onClosureResult && (
         <div className="prStatePrereq">
-          <span>Closure needs a passing successor result before SQA can close this report.</span>
+          {/* #1088: there is no bare "Move to Waiting for SQA". The report goes to SQA only when a person
+              sends it on a passing successor result they have chosen, which happens in Test Results. */}
+          <span>This report goes to SQA only on a passing successor result, which you choose and confirm.</span>
           <button type="button" className="prStateLink" disabled={busy} onClick={onClosureResult}>
-            Select closure-supporting test result →
+            Choose the closure-supporting result →
           </button>
+        </div>
+      )}
+
+      {closureBasisWithdrawn && (
+        <div className="prStatePrereq" role="status">
+          <span>
+            A later change withdrew the result this report was sent to SQA on, so it cannot be closed. Return
+            it to Verifying and send it again on a fresh passing result.
+          </span>
         </div>
       )}
 

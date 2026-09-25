@@ -330,8 +330,8 @@ public sealed class VerificationVocabularyApiTests
                 "Declares the configured spelling", "P", "A", "S", seeded.AuthorName, now);
             origin.AddRequirementChange(seeded.AuthorName, "SYSR-701500", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall hold altitude.", "Rationale", "Test", now);
-            origin.SubmitForReview(seeded.AuthorName, [new ApproverSelection(seeded.AuthorName, "Author")], now);
-            origin.ApproveActiveStage(seeded.AuthorName, now);
+            origin.SubmitForReview(seeded.AuthorName, [new ApproverSelection("independent.reviewer", "Independent Reviewer")], now);
+            origin.ApproveActiveStage("independent.reviewer", now);
             var baseline = new CandidateBaseline("SW-01.00", 0, seeded.ProjectId, seeded.ReleaseId, null,
                 "Spelling baseline", seeded.AuthorName, now);
             baseline.Select(origin, seeded.AuthorName, now);
@@ -539,8 +539,8 @@ public sealed class VerificationVocabularyApiTests
                 "Historical declaration", "P", "A", "S", seeded.AuthorName, now);
             origin.AddRequirementChange(seeded.AuthorName, "SYSR-701620", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall hold altitude.", "Rationale", "Test", now);
-            origin.SubmitForReview(seeded.AuthorName, [new ApproverSelection(seeded.AuthorName, "Author")], now);
-            origin.ApproveActiveStage(seeded.AuthorName, now);
+            origin.SubmitForReview(seeded.AuthorName, [new ApproverSelection("independent.reviewer", "Independent Reviewer")], now);
+            origin.ApproveActiveStage("independent.reviewer", now);
             var baseline = new CandidateBaseline("SW-01.00", 0, seeded.ProjectId, seeded.ReleaseId, null,
                 "Historical baseline", seeded.AuthorName, now);
             baseline.Select(origin, seeded.AuthorName, now);
@@ -697,8 +697,8 @@ public sealed class VerificationVocabularyApiTests
                 "Historical baseline origin", "P", "A", "S", seeded.AuthorName, now);
             origin.AddRequirementChange(seeded.AuthorName, "SYSR-701001", 0, RequirementLevel.System,
                 RequirementChangeKind.Introduce, "The FMS shall hold altitude.", "Historical", "test", now);
-            origin.SubmitForReview(seeded.AuthorName, [new ApproverSelection(seeded.AuthorName, "Author")], now);
-            origin.ApproveActiveStage(seeded.AuthorName, now);
+            origin.SubmitForReview(seeded.AuthorName, [new ApproverSelection("independent.reviewer", "Independent Reviewer")], now);
+            origin.ApproveActiveStage("independent.reviewer", now);
             var baseline = new CandidateBaseline("SW-01.00", 0, seeded.ProjectId, seeded.ReleaseId, null,
                 "Historical baseline", seeded.AuthorName, now);
             baseline.Select(origin, seeded.AuthorName, now);

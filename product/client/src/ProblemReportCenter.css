@@ -702,17 +702,28 @@
   background: var(--surface);
   box-shadow: var(--shadow-soft);
 }
-.prIdentity small,
-.prIdentity b,
-.prIdentity span { display: block; }
-.prIdentity small {
+/* The card styles its own plain elements and stops there.
+
+   These were `.prIdentity small`, `.prIdentity b` and `.prIdentity span`, which reach every descendant
+   however deep and whatever it is. `CategoryTile` renders `<span class="catTile">` and lays itself out
+   as a flex row; `.prIdentity span` is (0,1,1) against that rule's (0,1,0), so the tile stopped being a
+   flex container at all, `flex: none` on its code became inert, and a blockified `<b>` stretched a
+   two-digit category across the whole card as a grey bar. `.prNoCategory` lost its colour the same way.
+
+   Direct children only, and nothing carrying a class: an element with a class has a component that
+   styles it, and this card does not get a vote. Same reasoning as DesignSystem.css's `:not([class])`
+   selectors, which exist so a shared rule cannot quietly restyle something designed on purpose. */
+.prIdentity > div > small,
+.prIdentity > div > b:not([class]),
+.prIdentity > div > span:not([class]) { display: block; }
+.prIdentity > div > small {
   color: var(--ink-500);
   font-size: var(--text-xs);
   font-weight: var(--weight-strong);
   letter-spacing: 0.08em;
 }
-.prIdentity b { margin: 5px 0; color: var(--ink-900); font-size: var(--text-sm); }
-.prIdentity span { color: var(--ink-500); font-size: var(--text-xs); }
+.prIdentity > div > b:not([class]) { margin: 5px 0; color: var(--ink-900); font-size: var(--text-sm); }
+.prIdentity > div > span:not([class]) { color: var(--ink-500); font-size: var(--text-xs); }
 
 .prAdmin {
   margin: 0 0 16px;

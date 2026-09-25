@@ -80,8 +80,10 @@ async function raiseReport(page: Page, projectId: string, releaseId: string, sco
   expect(opened.ok(), `sccb/open on the ${scope} report: ${opened.status()}`).toBe(true);
   report = await opened.json();
   await apiLogin(page.request, "admin");
+  // Recording investigation does not start implementation (DEC-133); a person does that explicitly.
   for (const [path, body] of [
     ["investigation", { analysis: "Root cause identified in the corrective routing fixture." }],
+    ["implementation", {}],
     ["resolution", { correctiveAction: "Re-run the procedure once the correction is in place." }],
   ] as const) {
     const response = await page.request.post(`${apiBase}/api/problem-reports/${report.id}/${path}`, {
@@ -190,18 +192,31 @@ test("a corrective action opens Test Results, names the report, and survives a r
   const record = page.getByRole('dialog', { name: /Record a result for/ })
   await expect(record).toBeVisible()
   await record.getByLabel('Configuration under test').fill('FMS corrective rig')
+  await record.getByLabel('Outcome').selectOption('Pass')
   await record.getByLabel('Determination', { exact: true }).fill('The corrected behavior satisfies the effective controlled procedure.')
   await record.getByLabel('Evidence reference').fill('controlled://browser/pr-corrective-successor')
   await record.getByRole('button', { name: 'Record determination' }).click()
-  await expect(page.getByText(/selected as PR closure evidence/)).toBeVisible({ timeout: 30_000 })
+
+  // #1088: recording the pass moves nothing. The report stays in Verifying until the engineer sends it to
+  // SQA on this result, and the reason they give is kept with that transition.
+  const offer = page.getByRole('status', { name: 'Corrective verification action' })
+  await expect(offer).toContainText('Recording this pass did not move it', { timeout: 30_000 })
+  const recorded = await (await page.request.get(`${apiBase}/api/problem-reports/${raised.report.id}`)).json()
+  expect(recorded.state).toBe('Verifying')
+  expect(recorded.testEvidence).toHaveLength(0)
+  await offer.getByLabel('Reason (optional)').fill('The successor retest passed on the corrected build.')
+  await offer.getByRole('button', { name: `Send ${raised.report.displayNumber} to SQA` }).click()
+  await expect(page.getByText(/was sent to SQA on the/)).toBeVisible({ timeout: 30_000 })
 
   const detail = await (await page.request.get(`${apiBase}/api/problem-reports/${raised.report.id}`)).json()
   expect(detail.state).toBe('WaitingForSqaToClose')
   expect(detail.testEvidence).toHaveLength(1)
   expect(detail.testEvidence[0].artifactId).toBe(detail.resolutionVerificationExecutionId)
+  const sent = detail.revisions.find((revision: { eventType: string }) => revision.eventType === 'ResolutionVerified')
+  expect(sent.rationale).toBe('The successor retest passed on the corrected build.')
 
-  // A controlled correction cannot inherit the Pass selected above. The page returns to Verifying, names
-  // why, removes the SQA action, and retains the first selection only as history.
+  // A controlled correction cannot inherit the Pass selected above. It withdraws the basis without moving
+  // the report: it stays with SQA, the page says why it cannot be closed, and the first selection is history.
   const reportAddress = new URL(`${root}/problem-reports/${raised.report.id}`, page.url()).toString()
   await page.goto(reportAddress, { waitUntil: 'load' })
   await expect(page.locator('.prState')).toHaveText('Waiting for SQA to Close', { timeout: 30_000 })
@@ -211,9 +226,10 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await writeRichField(editor, 'Root cause', 'The scheduler and missing guard combined to produce the failure.')
   await editor.getByRole('button', { name: 'Check in' }).click()
   await expect(editor).toHaveCount(0, { timeout: 30_000 })
-  await expect(page.locator('.prState')).toHaveText('Verifying')
-  await expect(page.getByRole('status')).toContainText('Closure verification invalidated')
-  await expect(page.getByRole('status')).toContainText('Record a new passing successor result')
+  await expect(page.locator('.prState')).toHaveText('Waiting for SQA to Close')
+  await expect(page.getByRole('status').filter({ hasText: 'Closure basis withdrawn' })).toContainText('cannot be closed')
+  // And beside where Close would be, so a missing Close never reads as a permissions fault.
+  await expect(page.locator('.prStatePrereq')).toContainText('withdrew the result this report was sent to SQA on')
   await expect(page.getByRole('button', { name: /Move to Closed/ })).toHaveCount(0)
   await page.getByRole('button', { name: /History/ }).click()
   await expect(page.locator('.prTimeline').getByText('Closure Verification Invalidated By Change')).toBeVisible()
@@ -233,15 +249,27 @@ test("a corrective action opens Test Results, names the report, and survives a r
   await page.getByRole('button', { name: 'Raise release blocker' }).click()
   await expect(page.getByText('Requires a separate independent release-waiver decision.')).toBeVisible()
   await expect(page.getByText('Approve independent release waiver')).toHaveCount(0)
-  await page.getByRole('button', { name: /Select closure-supporting test result/ }).click()
+  // Still with SQA on a withdrawn basis. Re-verifying starts with a person returning it, with a reason.
+  await expect(page.locator('.prState')).toHaveText('Waiting for SQA to Close')
+  changed = await (await page.request.get(`${apiBase}/api/problem-reports/${raised.report.id}`)).json()
+  const returned = await page.request.post(`${apiBase}/api/problem-reports/${raised.report.id}/transition`, {
+    data: { expectedVersion: changed.version, targetState: 'Verifying', rationale: 'The corrective narrative changed; retest before SQA.' },
+  })
+  expect(returned.ok(), await returned.text()).toBeTruthy()
+  await page.reload({ waitUntil: 'load' })
+  await page.getByRole('button', { name: /Choose the closure-supporting result/ }).click()
   await expect(page.getByRole('heading', { name: 'Test Results' })).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: /Record successor execution/ }).click()
   const secondRecord = page.getByRole('dialog', { name: /Record a result for/ })
   await secondRecord.getByLabel('Configuration under test').fill('FMS corrected scheduler rig')
+  await secondRecord.getByLabel('Outcome').selectOption('Pass')
   await secondRecord.getByLabel('Determination', { exact: true }).fill('The revised closure candidate satisfies the effective procedure.')
   await secondRecord.getByLabel('Evidence reference').fill('controlled://browser/pr-reverified-successor')
   await secondRecord.getByRole('button', { name: 'Record determination' }).click()
-  await expect(page.getByText(/selected as PR closure evidence/)).toBeVisible({ timeout: 30_000 })
+  const secondOffer = page.getByRole('status', { name: 'Corrective verification action' })
+  await expect(secondOffer).toContainText('Recording this pass did not move it', { timeout: 30_000 })
+  await secondOffer.getByRole('button', { name: `Send ${raised.report.displayNumber} to SQA` }).click()
+  await expect(page.getByText(/was sent to SQA on the/)).toBeVisible({ timeout: 30_000 })
 
   // Release-waiver authority follows the current accountable Program Manager position. The deterministic
   // showcase assigns that position to program.manager; engineering.manager holds a different position and

@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("operator console surfaces expired work and keeps live claims unreplayable", async ({ page }) => {
   await page.goto("/tests/fixtures/webhook-delivery-operations.html");
 
-  await expect(page.getByRole("heading", { name: "Integration Command Center" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Integration Center" })).toBeVisible();
   await expect(page.getByText("1 expired claim(s)")).toBeVisible();
 
   const expired = page.locator(".deliveryList > div").filter({ hasText: "Expired requirement event" });

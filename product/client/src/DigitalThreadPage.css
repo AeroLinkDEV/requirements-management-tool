@@ -273,3 +273,5 @@ html .workspaceView > main.dtPage { padding: 0; }
   cursor: pointer;
 }
 .dtPageTablePager button:disabled { color: #94a3b8; cursor: default; }
+/* Export links meet the 24px target floor in compact density (design-system contract). */
+.dtPageReportExports a { display: inline-flex; align-items: center; min-height: 24px; }

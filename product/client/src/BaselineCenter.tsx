@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { PersonName } from "./People";
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useFormDraft } from "./autosave";
-import { stateLabel } from './presentation'
+import { requirementLevelLabel, stateLabel } from './presentation'
 import LegacyProcedureBootstrapPanel from './LegacyProcedureBootstrapPanel'
 import { ReopenBaselinePanel } from './ReopenBaselinePanel'
 import type { FormEvent } from "react";
@@ -108,7 +108,9 @@ export default function BaselineCenter({
     [swrd, setSwrd] = useState<Swrd>(),
     [creating, setCreating] = useState(false),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    // The manifest can hold thousands of revisions; render it progressively (#1091 BAS-1).
+    [manifestShown, setManifestShown] = useState(50);
   const loadList = useCallback(async () => {
     const [response, priorResponse] = await Promise.all([
       fetch(
@@ -217,7 +219,7 @@ export default function BaselineCenter({
             ← Command Center
           </button>
           <p className="eyebrow">
-            CONFIGURATION CONTROL / RELEASE {releaseVersion}
+            CONFIGURATION CONTROL / BUILD {releaseVersion}
           </p>
           <h1>Candidate Baselines</h1>
           <p>
@@ -474,11 +476,11 @@ export default function BaselineCenter({
                       <span>REQUIREMENT MANIFEST SHA-256</span>
                       <code>{swrd.requirementsHash}</code>
                     </div>
-                    {swrd.requirements.map((item) => (
+                    {swrd.requirements.slice(0, manifestShown).map((item) => (
                       <article className="manifestRequirement" key={item.id}>
                         <div>
                           <b>{item.displayNumber}</b>
-                          <span>{item.level}</span>
+                          <span>{requirementLevelLabel(item.level)}</span>
                         </div>
                         <p>{item.statement}</p>
                         <small>
@@ -487,6 +489,20 @@ export default function BaselineCenter({
                         </small>
                       </article>
                     ))}
+                    {swrd.requirements.length > manifestShown && (
+                      <div className="manifestMore">
+                        <span>
+                          Showing {manifestShown.toLocaleString()} of{" "}
+                          {swrd.requirements.length.toLocaleString()} revisions.
+                        </span>
+                        <button type="button" onClick={() => setManifestShown((count) => count + 200)}>
+                          Show 200 more
+                        </button>
+                        <button type="button" onClick={() => setManifestShown(swrd.requirements.length)}>
+                          Show all
+                        </button>
+                      </div>
+                    )}
                   </section>
                 )}
                 <div className="baselineColumns">

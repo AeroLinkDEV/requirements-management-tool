@@ -51,6 +51,7 @@ test('a lead chooses what the build runs, and the set says why each procedure is
   await row.getByRole('button', { name: /Record result|Record retest/ }).click()
   const record = page.getByRole('dialog', { name: new RegExp(`Record a result for ${number.replace(/\./g, '\\.')}`) })
   await expect(record).toBeVisible({ timeout: 30_000 })
+  await record.getByLabel('Outcome').selectOption('Pass')
   await record.getByLabel('Configuration under test').fill('FMS rig 2, data set B')
   await record.getByLabel('Determination', { exact: true }).fill('Sequencing held across the oceanic transition with no dropped waypoint.')
   // A Pass claims something was observed, so the product requires it to say where that observation lives.
@@ -64,6 +65,7 @@ test('a lead chooses what the build runs, and the set says why each procedure is
 
   // Taken back out again: the set is a working list and what it holds is reversible. The determination it
   // already carries is not — removing the plan never removes the record.
+  page.once('dialog', dialog => void dialog.accept())
   await row.getByRole('button', { name: 'Remove' }).click()
   await expect(page.locator('.testSetRow').filter({ hasText: number })).toHaveCount(0, { timeout: 30_000 })
 })
@@ -148,6 +150,7 @@ test('a procedure shows every run against this build, and a failure can be retes
   const retestTime = await retest.getByLabel('Execution time').inputValue()
   expect(new Date(retestTime).getTime()).toBeGreaterThan(new Date(failureTime).getTime())
   await retest.getByLabel('Configuration under test').fill('FMS rig 2, corrected build')
+  await retest.getByLabel('Outcome').selectOption('Pass')
   await retest.getByLabel('Determination', { exact: true }).fill(answer)
   await retest.getByLabel('Evidence reference').fill('rig2/oceanic-retest.log')
   await retest.getByRole('button', { name: 'Record determination' }).click()

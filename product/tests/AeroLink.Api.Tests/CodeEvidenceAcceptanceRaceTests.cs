@@ -214,6 +214,10 @@ public sealed class CodeEvidenceAcceptanceRaceTests
             {
                 options.BaseUrl = "https://gitlab.example";
                 options.ReadAccessToken = "test-only-token";
+                // #1092: the deferred tests hold the provider response open while they change the database.
+                // Under the production 15-second limit a slow runner turned that into a 502 before the
+                // recheck under test could answer. The limit is not what these tests are about.
+                options.MetadataRequestTimeoutSeconds = 300;
             });
             services.AddHttpClient<GitLabMetadataReader>().ConfigurePrimaryHttpMessageHandler(() => transport);
         }));

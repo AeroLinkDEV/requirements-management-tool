@@ -67,6 +67,8 @@ const subjectLabels: Record<string, string> = {
   SystemTest: 'System Test Change Request',
   HighLevelSoftwareCase: 'HLR Test Case Change Request',
   LowLevelSoftwareCase: 'LLR Test Case Change Request',
+  HighLevelSoftwareProcedure: 'HLR Test Procedure Change Request',
+  LowLevelSoftwareProcedure: 'LLR Test Procedure Change Request',
   // Legacy subject names are readable only for historical records returned by compatibility APIs.
   HighLevelSoftwareTest: 'Historical HLR Test Procedure Change Request',
   LowLevelSoftwareTest: 'Historical LLR Test Procedure Change Request',
@@ -413,7 +415,7 @@ export default function ApprovalConfigurationCenter({
                     <header className="procedureHeader">
                       <div>
                         <h2>{subjectLabels[artifact.subject] ?? artifact.subject}</h2>
-                        <p>{artifact.name} · version {artifact.version} · {artifact.mode?.toLowerCase()}</p>
+                        <p>Version {artifact.version} · {artifact.mode?.toLowerCase()}</p>
                       </div>
                       <div className="procedureHeaderActions">
                         {artifact.blockingStages > 0

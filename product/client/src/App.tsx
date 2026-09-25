@@ -180,9 +180,9 @@ type Metrics = {
  */
 const API = API_ORIGIN;
 
-function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, artifactKind, coverageReport, context, projectWide, density, ladder, onNavigate, onOpenCoverage, onSearch, onDisplay, onExitBuild, onSignOut }:{
+function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, artifactKind, coverageReport, context, buildSelectionHref, projectWide, density, ladder, onNavigate, onOpenCoverage, onSearch, onDisplay, onExitBuild, onSignOut }:{
   user:AuthUser;workspaces:Workspace[];activeId:string;selectedProjectId:string;selectedReleaseId:string;view:View;discipline:Discipline;context?:RouteContext;
-  artifactKind:string;coverageReport:boolean;projectWide:boolean;density:WorkspaceDensity;ladder:ProjectLadderProjection|null;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void;onOpenCoverage:(discipline:"systemTest"|"softwareTest",level?:"HighLevel"|"LowLevel")=>void;onSearch:()=>void;onDisplay:()=>void;onExitBuild:()=>void;onSignOut:()=>void;
+  artifactKind:string;coverageReport:boolean;buildSelectionHref?:string;projectWide:boolean;density:WorkspaceDensity;ladder:ProjectLadderProjection|null;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void;onOpenCoverage:(discipline:"systemTest"|"softwareTest",level?:"HighLevel"|"LowLevel")=>void;onSearch:()=>void;onDisplay:()=>void;onExitBuild:()=>void;onSignOut:()=>void;
 }) {
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
@@ -219,13 +219,13 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
     // click is. Both events, because a keyboard user never hovers anything.
     const warm = () => viewCode[target]?.warm();
     const linkContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);
-    return <a href={linkContext ? routePath(linkContext,target,area,undefined,kind) : "#"} className={`${topLevel?"navSectionLink ":""}${activeItem?"active":""}`.trim()} aria-label={accessibleLabel} aria-current={activeItem?"page":undefined} onPointerEnter={warm} onFocus={warm} onClick={event=>{event.preventDefault();onNavigate(target,area,undefined,kind)}}>
+    return <a href={linkContext ? routePath(linkContext,target,area,undefined,kind) : buildSelectionHref ?? "#"} className={`${topLevel?"navSectionLink ":""}${activeItem?"active":""}`.trim()} aria-label={accessibleLabel} aria-current={activeItem?"page":undefined} onPointerEnter={warm} onFocus={warm} onClick={event=>{event.preventDefault();onNavigate(target,area,undefined,kind)}}>
       <i aria-hidden="true"><Icon name={icon}/></i><span>{topLevel?label.toUpperCase():label}</span>
     </a>;
   };
   const coverageItem = (label:string, area:"systemTest"|"softwareTest", level?:"HighLevel"|"LowLevel") => {
     const activeItem = view === "procedureExplorer" && coverageReport && discipline === area && (!level || artifactKind === level);
-    const href = context ? coverageExplorerPath(context, area, level) : "#";
+    const href = context ? coverageExplorerPath(context, area, level) : buildSelectionHref ?? "#";
     return <a href={href} className={activeItem ? "active" : ""} aria-current={activeItem ? "page" : undefined} onClick={event => { event.preventDefault(); onOpenCoverage(area, level); }}>
       <i aria-hidden="true"><Icon name="coverage"/></i><span>{label}</span>
     </a>;
@@ -292,7 +292,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
          </details>}
         <div className="navStandalone">{item("Documentation Center","managedDocuments","library","system","Documentation Center",undefined,true)}</div>
         <div className="navStandalone">{item("Problem Reports","problemReports","problemReports","system","Problem Reports",undefined,true)}</div>
-        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Lifecycle Decision Room","release","release","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","baselines","system","Configuration Baselines / Legacy Verification Bootstrap")}{item("Digital Thread","lifecycle","digitalThread","system","Digital Thread")}</details>
+        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Release Readiness","release","release","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","baselines","system","Configuration Baselines / Legacy Verification Bootstrap")}{item("Digital Thread","lifecycle","digitalThread","system","Digital Thread")}</details>
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","peopleAuthority")}{item("Review Workflows","reviewWorkflows","workflow","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","integrations","system","Integration Command Center")}{item("System Operations","enterprise","operations","system","System Operations / Enterprise Control")}</details>}
       </nav>
       <footer><PersonAvatar userName={user.userName} displayName={user.displayName} size="large"/><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button><button className="workspaceDisplay" onClick={onDisplay} aria-label="Open workspace display settings"><span>Aa</span><div><b>Workspace display</b><small>{density} density</small></div><i aria-hidden="true">›</i></button></footer>
@@ -419,6 +419,18 @@ function App() {
   const { active, project, release, unavailable } = resolveWorkspaceContext(workspaces, route);
   const projectId = project?.project.id ?? "";
   const context:RouteContext|undefined=active&&project&&release?{programId:active.program.id,projectId:project.project.id,releaseId:release.id}:undefined;
+  // The Documentation Center is project-wide, so its address carries no build and `context` is empty there.
+  // The sidebar beside it still offers build-scoped workspaces, and without a build to route into, choosing one
+  // changed the view without an address and fell through to Command Center. The build the reader came from is
+  // remembered so those destinations return to it; a build is never guessed when there is none to return to.
+  const [lastBuild,setLastBuild]=useState<{projectId:string;releaseId:string}>();
+  useEffect(()=>{
+    if(project&&release)setLastBuild(current=>current?.projectId===project.project.id&&current.releaseId===release.id?current:{projectId:project.project.id,releaseId:release.id});
+  },[project,release]);
+  const returnRelease=view==="managedDocuments"&&project&&lastBuild?.projectId===project.project.id
+    ? project.releases.find(item=>item.id===lastBuild.releaseId)
+    : undefined;
+  const buildContext:RouteContext|undefined=context??(active&&project&&returnRelease?{programId:active.program.id,projectId:project.project.id,releaseId:returnRelease.id}:undefined);
   useEffect(() => {
     if (route.view === "managedDocuments" && route.releaseId && active && project) {
       writeHistory("replaceState", routePath({ programId: active.program.id, projectId: project.project.id, releaseId: "" }, "managedDocuments", "system", route.artifactId));
@@ -451,7 +463,7 @@ function App() {
         || (discipline === "softwareTest" && !ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.Verification))));
     if (absentExplicitRoute) updateRoute("view", "notFound");
   }, [ladder, discipline, view, updateRoute]);
-  const paletteContext = context ?? (view === "managedDocuments" && active && project
+  const paletteContext = buildContext ?? (view === "managedDocuments" && active && project
     ? { programId: active.program.id, projectId: project.project.id } : undefined);
   const paletteShortcutEnabled = !!paletteContext && !projectLevelViews.includes(view);
   useEffect(()=>{const handler=(event:KeyboardEvent)=>{if(paletteShortcutEnabled&&(event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){event.preventDefault();setPaletteOpen(true)}if(event.key==="Escape"){setPaletteOpen(false);setDisplayOpen(false)}};addEventListener("keydown",handler);return()=>removeEventListener("keydown",handler)},[paletteShortcutEnabled]);
@@ -514,7 +526,16 @@ function App() {
   // from a missing identifier was therefore indistinguishable from a working one, which is how
   // `/systems/change-requests/undefined` survived: it looked like a misclick.
   const viewsRequiringArtifact:View[]=["scr","testChangeRequest"];
+  // Opened directly, the Documentation Center has no build to return to. Choosing a build-scoped workspace
+  // from there asks which build rather than rendering Command Center under an address that never changed.
+  const chooseBuildInstead=(target:View)=>{
+    if(buildContext||view!=="managedDocuments"||target==="managedDocuments"||!project)return false;
+    updateRoute("view", "builds");updateRoute("artifactId", "");updateRoute("artifactKind", "");
+    writeHistory("pushState", projectAreaPath(project.project.id,"builds"));
+    return true;
+  };
   const navigate=(target:View,area:Discipline=discipline,artifactId?:string,artifactKind?:string,replace=false,stateIntent?:HistoryStateIntent,typeIntent?:HistoryTypeIntent)=>{
+    if(chooseBuildInstead(target))return;
     updateRoute("requirementProposalId", "");
     updateRoute("testChangeRequestProposalId", "");
     updateRoute("coverageReport", false);
@@ -526,7 +547,7 @@ function App() {
       setToast("That link is missing its destination, so nothing was opened. This is a defect — please report it.");
       return;
     }
-    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;updateRoute("view", target);updateRoute("discipline", area);updateRoute("historyStateIntent", nextStateIntent);updateRoute("historyTypeIntent", nextTypeIntent);updateRoute("historySelectionId", "");updateRoute("testChangeRequestSelectionId", "");updateRoute("artifactId", artifactId??"");updateRoute("artifactKind", artifactKind??"");updateRoute("threadView", undefined);updateRoute("artifactRevisionId", "");updateRoute("requirementRevisionId", "");updateRoute("artifactId", target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=context??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);writeHistory(replace?"replaceState":"pushState",path)}};
+    const nextStateIntent=target==="history"?stateIntent:undefined,nextTypeIntent=target==="history"?(typeIntent??(artifactKind==="Interface"?"Interface":area==="software"?"Software":"System")):undefined;updateRoute("view", target);updateRoute("discipline", area);updateRoute("historyStateIntent", nextStateIntent);updateRoute("historyTypeIntent", nextTypeIntent);updateRoute("historySelectionId", "");updateRoute("testChangeRequestSelectionId", "");updateRoute("artifactId", artifactId??"");updateRoute("artifactKind", artifactKind??"");updateRoute("threadView", undefined);updateRoute("artifactRevisionId", "");updateRoute("requirementRevisionId", "");updateRoute("artifactId", target==="scr"?artifactId??"":["scr"].includes(target)?selectedScrId:"");const navigationContext=buildContext??(target==="managedDocuments"&&active&&project?{programId:active.program.id,projectId:project.project.id,releaseId:""}:undefined);if(navigationContext){const path=routePath(navigationContext,target,area,artifactId,artifactKind,nextStateIntent,nextTypeIntent);writeHistory(replace?"replaceState":"pushState",path)}};
   /**
    * Navigate within the Digital Thread.
    *
@@ -551,10 +572,11 @@ function App() {
     }
   };
   const openCoverage = (area:"systemTest"|"softwareTest", level?:"HighLevel"|"LowLevel") => {
+    if (chooseBuildInstead("procedureExplorer")) return;
     const artifactKind = area === "softwareTest" ? (level === "LowLevel" ? "LowLevel" : "HighLevel") : "";
     updateRoute("requirementProposalId", ""); updateRoute("testChangeRequestProposalId", ""); updateRoute("view", "procedureExplorer"); updateRoute("discipline", area);
     updateRoute("coverageReport", true); updateRoute("artifactId", ""); updateRoute("artifactKind", artifactKind); updateRoute("artifactRevisionId", ""); updateRoute("requirementRevisionId", "");
-    if (context) writeHistory("pushState", coverageExplorerPath(context, area, level));
+    if (buildContext) writeHistory("pushState", coverageExplorerPath(buildContext, area, level));
   };
   const changeCoverageLevel = (level?: "HighLevel" | "LowLevel") => {
     // A Coverage level is shell state as well as an Explorer filter: it controls the canonical route,
@@ -735,7 +757,7 @@ function App() {
   const showImports=()=>{updateRoute("view", "baselineImports");writeHistory("pushState", importsPath)};
   const showPersonnel=()=>{updateRoute("view", "personnel");writeHistory("pushState", personnelPath)};
   const showProjectConfiguration=(section:"ladder"|"assurance"|"history"|"readiness"|"approvals"|"repository"="ladder")=>{updateRoute("view", "projectConfiguration");updateRoute("projectConfigurationSection", section);writeHistory("pushState", section==="approvals"?projectConfigurationApprovalsPath(openProjectId):section==="assurance"?projectConfigurationAssurancePath(openProjectId):section==="repository"?projectConfigurationRepositoryPath(openProjectId):projectConfigurationPath)};
-  if(view==="builds")return <SoftwareBuildsLanding user={user} projectName={project?.project.name??""} softwareProduct={project?.project.softwareProduct??""} releases={project?.releases??[]} onProjectOverview={showProjects} onImportedBaselines={showImports} onPersonnel={showPersonnel} onProjectConfiguration={()=>showProjectConfiguration()} onOpenBuild={(selected)=>{if(!active||!project||!project.releases.some(item=>item.id===selected.id))return;updateRoute("releaseId", selected.id);updateRoute("view", "dashboard");writeHistory("pushState", routePath({programId:active.program.id,projectId:project.project.id,releaseId:selected.id},"dashboard"))}} onSignOut={signOut}/>;
+  if(view==="builds")return <SoftwareBuildsLanding user={user} programCode={active?.program.code??""} projectName={project?.project.name??""} softwareProduct={project?.project.softwareProduct??""} releases={project?.releases??[]} onProjectOverview={showProjects} onImportedBaselines={showImports} onPersonnel={showPersonnel} onProjectConfiguration={()=>showProjectConfiguration()} onOpenBuild={(selected)=>{if(!active||!project||!project.releases.some(item=>item.id===selected.id))return;updateRoute("releaseId", selected.id);updateRoute("view", "dashboard");writeHistory("pushState", routePath({programId:active.program.id,projectId:project.project.id,releaseId:selected.id},"dashboard"))}} onSignOut={signOut}/>;
   // Rendered beside Software Builds rather than inside a build workspace, because an import does not belong
   // to a build — it creates one. There is no build to have entered when this page is what you need.
   if(view==="baselineImports"&&project)return <BaselineImportCenter user={user} api={API} projectId={project.project.id} onBackToBuilds={()=>{updateRoute("view", "builds");writeHistory("pushState", openProjectBuildsPath)}} onSignOut={signOut}/>;
@@ -746,8 +768,8 @@ function App() {
   // belongs beside them rather than inside a build.
   if(view==="approvalConfiguration"&&project)return <ApprovalConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} onBackToBuilds={()=>{updateRoute("view", "builds");writeHistory("pushState", openProjectBuildsPath)}} onSignOut={signOut}/>;
    if(view==="projectConfiguration"&&project)return <ProjectConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} initialSection={projectConfigurationSection} onBackToBuilds={()=>{updateRoute("view", "builds");writeHistory("pushState", openProjectBuildsPath)}} onOpenApprovalConfiguration={()=>showProjectConfiguration("approvals")} onActivated={value=>{setLadder({effectiveSteps:value.effectiveSteps,effectiveRelationships:value.effectiveRelationships});setLadderError("");}} onSignOut={signOut}/>;
-   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={active?.program.id??""} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} coverageReport={coverageReport} context={context} projectWide={view==="managedDocuments"} density={density} ladder={ladder} onNavigate={navigate} onOpenCoverage={openCoverage} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
-   const labels:Record<View,string>={projects:"Projects",projectSetup:"Create New Project",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",createInterfaceChange:"New Interface / ICD Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",codeMergeRequests:"Merge Requests",codeExplorer:"Code Explorer",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",teamwork:"Team Work",admin:"Administration",enterprise:"System Operations",integrations:"Integration Command Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
+   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={active?.program.id??""} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} coverageReport={coverageReport} context={buildContext} buildSelectionHref={!buildContext&&view==="managedDocuments"&&project?projectAreaPath(project.project.id,"builds"):undefined} projectWide={view==="managedDocuments"} density={density} ladder={ladder} onNavigate={navigate} onOpenCoverage={openCoverage} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
+   const labels:Record<View,string>={projects:"Projects",projectSetup:"Create New Project",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",createInterfaceChange:"New Interface / ICD Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",codeMergeRequests:"Merge Requests",codeExplorer:"Code Explorer",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",teamwork:"Team Work",admin:"People & Authority",enterprise:"System Operations",integrations:"Integration Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const coverageLabel = discipline === "systemTest" ? "System Coverage" : selectedArtifactKind === "LowLevel" ? "Software LLR Coverage" : selectedArtifactKind === "HighLevel" ? "Software HLR Coverage" : "Software Coverage";
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:view==="procedureExplorer"?coverageReport?coverageLabel:`${discipline==="softwareTest"?"Software Test Case/Procedure":"System Test Procedure"} Explorer`:labels[view];
   const copyLink=async()=>{try{await navigator.clipboard.writeText(location.href);setToast('Link copied to clipboard')}catch{setToast('This browser blocked clipboard access')}};
@@ -758,7 +780,7 @@ function App() {
   const experience=<ExperienceControls open={displayOpen} density={density} motion={motion} onDensityChange={next=>{setDensity(next);setToast(`${next==='compact'?'Compact':'Comfortable'} density applied`)}} onMotionChange={next=>{setMotion(next);setToast(`${next==='reduced'?'Reduced':'Purposeful'} motion applied`)}} onClose={()=>setDisplayOpen(false)}/>;
   const feedback=toast?<div className="experienceToast" role="status" aria-live="polite"><span>✓</span><b>{toast}</b></div>:null;
   const overlays=<>{palette}{experience}{feedback}</>;
-  const inShell=(content:React.ReactNode)=><div className="shell">{navigation}<div className="workspaceStage">{contextBar}<div className="workspaceView" key={`${active?.program.id}-${project?.project.id}-${release?.id}-${view}-${discipline}`}><Suspense fallback={<WorkspaceLoading/>}>{content}</Suspense></div></div>{overlays}</div>;
+  const inShell=(content:React.ReactNode)=><div className="shell"><a className="skipLink" href="#workspace-content">Skip to content</a>{navigation}<div className="workspaceStage" id="workspace-content" tabIndex={-1}>{contextBar}<div className="workspaceView" key={`${active?.program.id}-${project?.project.id}-${release?.id}-${view}-${discipline}`}><Suspense fallback={<WorkspaceLoading/>}>{content}</Suspense></div></div>{overlays}</div>;
   // Route recognition is independent of project policy. An invalid deep link must remain a
   // not-found response while the selected project's stored ladder is loading (or unavailable).
   if(view==="notFound")return inShell(<main className="artifactState"><div><span>?</span><h1>Page not found</h1><p>This AeroLink route is not recognized. Use quick navigation to find an authorized workspace or artifact.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
@@ -1213,7 +1235,7 @@ function App() {
         api={API}
         projectId={project.project.id}
         activeReleaseId={release?.id ?? ""}
-        releases={release ? [release] : []}
+        releases={project.releases}
         user={user}
         screen={view === "releaseImpact" ? "impact" : view === "releaseDecision" ? "decision" : "readiness"}
         selectedScrId={view === "releaseImpact" ? selectedArtifactId || undefined : undefined}
@@ -1336,8 +1358,9 @@ function App() {
     || summary.resolvedDecisions !== 0;
   return (
     <div className="shell">
+      <a className="skipLink" href="#workspace-content">Skip to content</a>
       {navigation}
-      <div className="workspaceStage"><div className="workspaceView" key={`${view}-${discipline}`}><main className="commandCenterPage">
+      <div className="workspaceStage" id="workspace-content" tabIndex={-1}><div className="workspaceView" key={`${view}-${discipline}`}><main className="commandCenterPage">
         <header>
           <div>
             <p className="eyebrow">
@@ -1360,7 +1383,7 @@ function App() {
             </p>
           </div>
           <div className="buildStateSeal"><b>{release?.isReleased?"✓ Released":"In Work"}</b></div>
-          <button onClick={() => navigate("release")}>Lifecycle Decision Room →</button>
+          <button onClick={() => navigate("release")}>Release Readiness →</button>
         </section>
         <section className="dashboardTriptych" aria-busy={dashboardLoading} aria-label="Build work summary">
           {dashboardError?<div role="alert"><p>{dashboardError}</p><button onClick={()=>void loadData()}>Retry build summary</button></div>:dashboardLoading?<>{Array.from({length:3},(_,index)=><div className="dashboardSkeleton dashboardAreaCard" key={index}><span className="skeletonLine medium"/><i className="skeletonMetric"/><span className="skeletonLine"/></div>)}</>:<>

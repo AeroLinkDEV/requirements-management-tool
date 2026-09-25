@@ -533,9 +533,9 @@ export default function EnterpriseControlCenter({
             ← Command Center
           </button>
           <p className="eyebrow">
-            ENTERPRISE HARDENING / CONTROLLED OPERATIONS
+            ADMINISTRATION / CONTROLLED OPERATIONS
           </p>
-          <h1>Enterprise Control</h1>
+          <h1>System Operations</h1>
           <p>
             Content integrity, change clarity, reusable intelligence, durable
             processing, controlled configuration, and qualification evidence.
@@ -629,7 +629,7 @@ export default function EnterpriseControlCenter({
               </section>
               <section><div className="sectionTitle"><div><h3>Recent delivery state</h3><p>Newest 100 entries; details are bounded operational status</p></div></div>
                 {notificationOperations.deliveries.length ? notificationOperations.deliveries.map((delivery) => <article className="signalRow" key={delivery.id}>
-                  <i className={delivery.state === "Failed" ? "attention" : "ok"}>{delivery.state === "Failed" ? "!" : "✓"}</i><div><b>{delivery.state} · {delivery.recipient} · {delivery.address}</b><span>{delivery.attempts} attempt{delivery.attempts === 1 ? "" : "s"} · {new Date(delivery.completedAt || delivery.createdAt).toLocaleString()}{delivery.detail ? ` · ${delivery.detail}` : ""}</span></div>
+                  <i className={delivery.state === "Failed" ? "attention" : delivery.state === "Sent" ? "ok" : "pending"}>{delivery.state === "Failed" ? "!" : delivery.state === "Sent" ? "✓" : "…"}</i><div><b>{delivery.state} · {delivery.recipient} · {delivery.address}</b><span>{delivery.attempts} attempt{delivery.attempts === 1 ? "" : "s"} · {new Date(delivery.completedAt || delivery.createdAt).toLocaleString()}{delivery.detail ? ` · ${delivery.detail}` : ""}</span></div>
                 </article>) : <div className="emptyEnterprise"><b>No email deliveries yet</b><p>Queue an administrator transport test after configuring SMTP.</p></div>}
               </section>
             </div>

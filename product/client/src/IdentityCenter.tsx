@@ -283,7 +283,7 @@ export function LoginPage({
                 CONTROLLED ENGINEERING WORKSPACE
               </p>
               <h1>
-                Requirements, Verification, Changes, Evidence, Document, and
+                Requirements, Verification, Changes, Evidence, Documents, and
                 more in one connected record
               </h1>
             </div>
@@ -948,6 +948,10 @@ export function MyWorkCenter({
                     <small>
                       Assigned {task.ageDays} day{task.ageDays === 1 ? "" : "s"}{" "}
                       ago · due {new Date(task.dueAt).toLocaleDateString()}
+                      {/* The overdue count above has to be findable in the list (#1091 LOW-7). */}
+                      {new Date(task.dueAt).getTime() < Date.now() && (
+                        <em className="workOverdue"> · Overdue</em>
+                      )}
                     </small>
                   </div>
                   <button>Open work item →</button>
@@ -1235,7 +1239,7 @@ export function AdministrationCenter({
         )}
       </section>
       {selected && (
-        <div className="identityModal">
+        <div className="identityModal" role="dialog" aria-modal="true">
           <div>
             {selected.id ? (
               <>
@@ -1357,7 +1361,7 @@ export function SignatureDialog({
   const [password, setPassword] = useState(""),
     [busy, setBusy] = useState(false);
   return (
-    <div className="identityModal signatureModal">
+    <div className="identityModal signatureModal" role="dialog" aria-modal="true" aria-label={title}>
       <div>
         <div className="signatureSeal">✓</div>
         <p className="eyebrow">ELECTRONIC SIGNATURE</p>

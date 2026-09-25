@@ -274,7 +274,10 @@ export default function DigitalThreadPage({
   const bareSelectionRef = useRef<string | null>(null)
   // Internal route feedback publishes exact identity without becoming a new board arrival.
   // Back/forward and external entries have no matching pending feedback and retain landing semantics.
-  const routeIdentity = `${active}|${projectId}|${releaseId}|${baselineId}|${focalKind ?? ""}|${focalId ?? ""}`
+  // The baseline is not part of it (#1085): it is page state, not the address. It resolves from "" when the
+  // build context lands, and the change network is read per build, so counting it here remounted the board and
+  // discarded whatever the reader had already typed or filtered.
+  const routeIdentity = `${active}|${projectId}|${releaseId}|${focalKind ?? ""}|${focalId ?? ""}`
   const pendingNetworkRoute = useRef<string | null>(null)
   const networkArrival = useRef({ route: routeIdentity, id: focalId, revision: 0 })
   if (networkArrival.current.route !== routeIdentity) {
@@ -603,7 +606,7 @@ export default function DigitalThreadPage({
     (id: string | null) => {
       setNetworkSelectionId(id)
       const node = network?.nodes.find(item => item.id === id) ?? null
-      pendingNetworkRoute.current = `network|${projectId}|${releaseId}|${baselineId}|${node && isChangeNode(node) ? "change-request" : ""}|${node && isChangeNode(node) ? node.id : ""}`
+      pendingNetworkRoute.current = `network|${projectId}|${releaseId}|${node && isChangeNode(node) ? "change-request" : ""}|${node && isChangeNode(node) ? node.id : ""}`
       if (node && isChangeNode(node)) {
         bareSelectionRef.current = null
         go("network", node.id, "change-request")
@@ -614,7 +617,7 @@ export default function DigitalThreadPage({
         go("network")
       }
     },
-    [go, network, projectId, releaseId, baselineId],
+    [go, network, projectId, releaseId],
   )
 
   const insideId = active === "network"

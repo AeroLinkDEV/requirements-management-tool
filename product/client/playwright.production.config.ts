@@ -81,6 +81,9 @@ export default defineConfig({
         // playwright.config.ts.
         'Logging__LogLevel__Microsoft.AspNetCore': 'Information',
         'Logging__LogLevel__Microsoft.EntityFrameworkCore.Database.Command': 'Warning',
+        // #939 stall diagnostics, as in playwright.config.ts. The first occurrence was on this build.
+        Diagnostics__StallReportSeconds: '10',
+        Diagnostics__SlowDatabaseMilliseconds: '2000',
         // Named explicitly rather than left to discovery, so a stale `dist` elsewhere on the machine can
         // never be the thing under test.
         Client__StaticFiles: join(clientDir, 'dist'),

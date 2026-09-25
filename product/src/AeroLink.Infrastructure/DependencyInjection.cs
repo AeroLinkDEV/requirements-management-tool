@@ -1,5 +1,7 @@
 using AeroLink.Domain.Assurance;
+using AeroLink.Infrastructure.Diagnostics;
 using AeroLink.Infrastructure.Notifications;
+using Microsoft.Extensions.Logging;
 using AeroLink.Domain.Contracts;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -31,11 +33,22 @@ public static class DependencyInjection
             throw new InvalidOperationException(
                 $"Database:Provider is '{provider}'. AeroLink supports 'PostgreSql' and 'Sqlite'.");
         services.AddSingleton<ReleasedExecutionEvidenceInterceptor>();
+        // #939 stall diagnostics. Both are opt-in; the browser harness sets them and nothing else does.
+        var slowDatabaseAfter = StallDiagnosticsSettings.SlowDatabaseAfter(configuration);
+        if (slowDatabaseAfter is { } slowThreshold)
+            services.AddSingleton(provider => new SlowDatabaseInterceptor(slowThreshold,
+                provider.GetRequiredService<ILogger<SlowDatabaseInterceptor>>()));
+        services.AddSingleton<InFlightRequests>();
+        if (StallDiagnosticsSettings.StallReportAfter(configuration) is { } stallThreshold)
+            services.AddHostedService(provider => new StallWatchdog(provider.GetRequiredService<InFlightRequests>(),
+                stallThreshold, provider.GetRequiredService<ILogger<StallWatchdog>>()));
         services.AddDbContext<AeroLinkDbContext>((serviceProvider, options) =>
         {
             if (isPostgres) options.UseNpgsql(connection);
             else options.UseSqlite(connection);
             options.AddInterceptors(serviceProvider.GetRequiredService<ReleasedExecutionEvidenceInterceptor>());
+            if (slowDatabaseAfter is not null)
+                options.AddInterceptors(serviceProvider.GetRequiredService<SlowDatabaseInterceptor>());
         });
         services.AddScoped<IChangeRequestRepository, ChangeRequestRepository>();
         services.AddScoped<IProgramRepository, ProgramRepository>();
@@ -46,7 +59,6 @@ public static class DependencyInjection
         services.AddScoped<VerificationProcedureAuthoringService>();
         services.AddScoped<LegacyProcedureManifestBootstrapper>();
         services.AddScoped<FmsShowcaseSeeder>();
-        services.AddScoped<SecondShowcaseSeeder>();
         services.AddScoped<ImportPracticeSeeder>();
         services.AddScoped<NotificationOutbox>();
         services.AddScoped<NotificationLinkBuilder>();
@@ -101,7 +113,9 @@ public static class DependencyInjection
         services.Configure<ProjectGitLabOptions>(configuration.GetSection("ProjectGitLab"));
         services.AddHttpClient<GitLabProjectConnectionProbe>(client => client.Timeout = TimeSpan.FromSeconds(15))
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false, MaxConnectionsPerServer = 4 });
-        services.AddHttpClient<GitLabMetadataReader>(client => client.Timeout = TimeSpan.FromSeconds(15))
+        // One limit for a metadata read: the client's and the reader's own whole-request timer agree.
+        services.AddHttpClient<GitLabMetadataReader>((provider, client) => client.Timeout =
+                provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ProjectGitLabOptions>>().Value.MetadataRequestTimeout)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false, MaxConnectionsPerServer = 4 });
         services.AddSingleton<GitLabDisplayMetadataCache>();
         services.AddScoped<SoftwareReleaseIdentityAuthority>();

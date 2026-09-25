@@ -441,23 +441,22 @@ public sealed class ProblemReport
         TransitionTo(ProblemReportState.Open, actor, null, now);
     }
 
-    public void BeginImplementation(string actor, DateTimeOffset now, bool automatic = false)
+    public void BeginImplementation(string actor, DateTimeOffset now)
     {
         Required(actor, "An implementation actor is required.");
         TransitionTo(ProblemReportState.Implementing, actor, null, now);
     }
 
-    public void RevertAutomaticImplementation(string actor, DateTimeOffset now)
-    {
-        TransitionTo(ProblemReportState.Open, actor, "Implementation source was removed.", now);
-    }
-
+    /// <summary>
+    /// Records investigation work. It never moves the report (#1088): an Open report stays Open until a person
+    /// starts implementation, however much analysis has been written against it.
+    /// </summary>
     public void BeginInvestigation(string actor, string analysis, string rootCause, string effects, string containment, DateTimeOffset now)
     {
         EnsureNotTerminal();
+        if (State is not (ProblemReportState.Open or ProblemReportState.Implementing))
+            throw new DomainException("Only an Open or Implementing problem report can record investigation work.");
         Analysis = Required(analysis, "Investigation analysis is required."); RootCause = rootCause?.Trim() ?? ""; Effects = effects?.Trim() ?? ""; Containment = containment?.Trim() ?? "";
-        if (State == ProblemReportState.Open) State = ProblemReportState.Implementing;
-        else if (State != ProblemReportState.Implementing) throw new DomainException("Only an Open or Implementing problem report can record investigation work.");
         Touch(now);
     }
 
@@ -468,11 +467,16 @@ public sealed class ProblemReport
         TransitionTo(ProblemReportState.Verifying, actor, null, now);
     }
 
-    public void RecordResolutionVerification(string actor, Guid executionId, DateTimeOffset now)
+    /// <summary>
+    /// A person sends a Verifying report to SQA on a passing result they have chosen. This is the only way
+    /// into WaitingForSqaToClose (#1088): the evidence and the decision to rely on it are one act, confirmed
+    /// by that person. Recording a passing result elsewhere never calls this on the recorder's behalf.
+    /// </summary>
+    public void RecordResolutionVerification(string actor, Guid executionId, DateTimeOffset now, string? rationale = null)
     {
         if (State != ProblemReportState.Verifying) throw new DomainException("Only a Verifying problem report can record closure-supporting evidence.");
         if (executionId == Guid.Empty) throw new DomainException("A successor test execution is required for resolution verification.");
-        ResolutionVerificationExecutionId = executionId; TransitionTo(ProblemReportState.WaitingForSqaToClose, actor, null, now);
+        ResolutionVerificationExecutionId = executionId; TransitionTo(ProblemReportState.WaitingForSqaToClose, actor, rationale, now);
     }
 
     public void ApproveClosure(string actor, Guid actorAccountId, DateTimeOffset now)
@@ -554,6 +558,15 @@ public sealed class ProblemReport
         // only strand it.
         if (source == ProblemReportState.Draft && target == ProblemReportState.ReadyForSccb && Category is null)
             throw new DomainException("Choose a category before sending this Problem Report to the SCCB.");
+        // SQA is asked to close on evidence, so neither the way in nor the way out may be taken without it
+        // (#1088). A report whose closure basis was withdrawn by a later change keeps its state and cannot
+        // be closed until a person returns it to Verifying and sends it again on a fresh passing result.
+        if (source == ProblemReportState.Verifying && target == ProblemReportState.WaitingForSqaToClose
+            && ResolutionVerificationExecutionId is null)
+            throw new DomainException("Choose the passing closure-supporting result before sending this Problem Report to SQA.");
+        if (source == ProblemReportState.WaitingForSqaToClose && target == ProblemReportState.Closed
+            && ResolutionVerificationExecutionId is null)
+            throw new DomainException("The closure basis for this Problem Report was withdrawn by a later change. Return it to Verifying and send it to SQA on a fresh passing result.");
 
         if (target == ProblemReportState.Rejected)
         {
@@ -592,20 +605,30 @@ public sealed class ProblemReport
     public bool InvalidateClosureVerification(string actor, DateTimeOffset now)
     {
         Required(actor, "An invalidation actor is required.");
-        if (State != ProblemReportState.WaitingForSqaToClose) return false;
+        if (!HasClosureBasis()) return false;
         InvalidateClosureVerificationForChange(); Touch(now); return true;
     }
+    /// <summary>
+    /// Waiting on SQA with the passing result it was sent on still standing. False once a later change has
+    /// withdrawn that basis, which leaves the state where it was and the report unclosable (#1088).
+    /// </summary>
+    public bool HasClosureBasis() =>
+        State == ProblemReportState.WaitingForSqaToClose && ResolutionVerificationExecutionId is not null;
     public bool PrepareControlledRelationshipChange(string actor, DateTimeOffset now)
     {
         Required(actor, "A controlled relationship actor is required."); EnsureNotTerminal();
         return InvalidateClosureVerification(actor, now);
     }
     private void Touch(DateTimeOffset now) { UpdatedAt = now; Version++; }
+    /// <summary>
+    /// A change to what SQA was asked to close on withdraws the closure basis. It does not move the report:
+    /// the lifecycle changes only by a person's explicit transition (#1088), so the report stays waiting on
+    /// SQA, and closure is refused until someone returns it to Verifying and sends it on fresh evidence.
+    /// </summary>
     private void InvalidateClosureVerificationForChange()
     {
         if (State != ProblemReportState.WaitingForSqaToClose) return;
         ResolutionVerificationExecutionId = null;
-        State = ProblemReportState.Verifying;
     }
     private void EnsureResponsible(string actor) { if (!string.Equals(actor, ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase)) throw new DomainException("Only the responsible engineer can perform this action."); }
     /// <summary>

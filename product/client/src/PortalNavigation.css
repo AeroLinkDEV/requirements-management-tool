@@ -88,7 +88,7 @@
   text-align: left;
 }
 .quickSearch span { font-size: 20px; color: #70d6c8; }
-.quickSearch kbd { margin-left: auto; font-size: 12px; color: #9aabc1; border: 1px solid #405675; border-radius: 8px; padding: 2px 5px; }
+.quickSearch kbd { white-space: nowrap; margin-left: auto; font-size: 12px; color: #9aabc1; border: 1px solid #405675; border-radius: 8px; padding: 2px 5px; }
 
 .contextBar {
   height: 48px;

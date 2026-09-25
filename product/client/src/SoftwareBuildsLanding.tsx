@@ -1,6 +1,6 @@
 import type { AuthUser } from "./IdentityCenter";
 import PortalHeader from "./PortalHeader";
-import { ProjectIcon } from "./ProjectsLanding";
+import { ProjectIcon, projectMark } from "./ProjectsLanding";
 import { buildVersionOrder, officialBuildName } from "./presentation";
 import type { WorkspaceRelease } from "./workspaceContext";
 import "./SoftwareBuildsLanding.css";
@@ -23,6 +23,32 @@ function statusFor(release: SelectableRelease, identity?: string) {
     : { key: "in-work", label: "In Work" };
 }
 
+/**
+ * The FMS showcase's mock history the owner asked to have back (#1047): builds 0.5 and 1.0 as they looked before
+ * #1038. They are pictures of the showcase's back story, not records. Shown only for the FMS showcase program,
+ * never counted, never opening a workspace, and badged Mock. A fresh project shows only its real builds.
+ */
+const fmsMockBuilds = [
+  { id: "fms-mock-0-5", version: "0.5", title: "Baseline release", description: "Initial baseline for core FMS capabilities." },
+  { id: "fms-mock-1-0", version: "1.0", title: "Feature release", description: "Adds advanced navigation and performance features." },
+] as const;
+
+type LineageEntry =
+  | { kind: "mock"; id: string; version: string; title: string; description: string }
+  | { kind: "real"; release: SelectableRelease };
+
+/**
+ * Whether to draw an arrow from one card to the next. A real arrow only where the next build's recorded
+ * predecessor is this build, never inferred from version order. A dashed demonstration arrow joins the FMS mock
+ * builds to each other and to the first real build. No arrow otherwise; that card's Predecessor line says where
+ * it branched from.
+ */
+function connectorBetween(from: LineageEntry, to: LineageEntry): "real" | "mock" | undefined {
+  if (from.kind === "mock") return "mock";
+  if (to.kind === "real" && to.release.predecessorReleaseId === from.release.id) return "real";
+  return undefined;
+}
+
 function sortReleases(releases: SelectableRelease[]) {
   return [...releases].sort((left, right) => {
     const leftOrder = buildVersionOrder(left.version);
@@ -36,6 +62,7 @@ function sortReleases(releases: SelectableRelease[]) {
 
 export default function SoftwareBuildsLanding({
   user,
+  programCode = "",
   releases,
   projectName,
   softwareProduct,
@@ -47,6 +74,8 @@ export default function SoftwareBuildsLanding({
   onSignOut,
 }: {
   user: AuthUser;
+  /** The governed program code; the FMS showcase gets its mark and its mock back story. */
+  programCode?: string;
   releases: SelectableRelease[];
   projectName: string;
   softwareProduct: string;
@@ -61,6 +90,10 @@ export default function SoftwareBuildsLanding({
   const releaseById = new Map(ordered.map(release => [release.id, release]));
   const releasedCount = ordered.filter(release => release.isReleased).length;
   const inWorkCount = ordered.length - releasedCount;
+  const lineage: LineageEntry[] = [
+    ...(programCode === "FMSLIVE" ? fmsMockBuilds.map(mock => ({ kind: "mock" as const, ...mock })) : []),
+    ...ordered.map(release => ({ kind: "real" as const, release })),
+  ];
 
   return (
     <div className="buildsLandingPage">
@@ -80,12 +113,12 @@ export default function SoftwareBuildsLanding({
             <button type="button" className="personnelButton" onClick={onPersonnel}>Personnel</button>
             <button type="button" className="approvalConfigurationButton" onClick={onProjectConfiguration}>Project configuration</button>
             <button type="button" className="importedBaselinesButton" onClick={onImportedBaselines}>Imported baselines</button>
-            <button type="button" className="projectOverviewButton" onClick={onProjectOverview}><span aria-hidden="true">←</span> Project overview</button>
+            <button type="button" className="projectOverviewButton" onClick={onProjectOverview}><span aria-hidden="true">←</span> All projects</button>
           </div>
         </header>
 
         <section className="buildProjectSummary" aria-labelledby="build-project-name">
-          <span className="buildProjectIcon"><ProjectIcon name="project" /></span>
+          <span className="buildProjectIcon"><ProjectIcon name={projectMark(programCode)} /></span>
           <div className="buildProjectContent">
             <h2 id="build-project-name">{projectName}</h2>
             <p>{softwareProduct}</p>
@@ -100,11 +133,37 @@ export default function SoftwareBuildsLanding({
         <section className="buildLineage" aria-labelledby="build-lineage-heading">
           <header>
             <h2 id="build-lineage-heading">Build lineage</h2>
-            <p>Builds are ordered by version. Predecessors show which build each one follows.</p>
+            <p>Builds are ordered by version. An arrow means the next build was recorded as following this one; a dashed arrow is mock showcase history.</p>
           </header>
           {ordered.length ? (
             <ol>
-              {ordered.map(release => {
+              {lineage.map((entry, index) => {
+                const next = lineage[index + 1];
+                const connector = next ? connectorBetween(entry, next) : undefined;
+                const arrow = connector && (
+                  <span
+                    className={connector === "mock" ? "buildConnector mock" : "buildConnector"}
+                    aria-hidden="true"
+                    title={connector === "mock" ? "Mock showcase history" : "Recorded predecessor"}
+                  >→</span>
+                );
+                if (entry.kind === "mock") {
+                  return (
+                    <li key={entry.id} data-mock-build={entry.version}>
+                      <article className="softwareBuildCard mock unavailable" aria-disabled="true">
+                        <div className="buildCardTop">
+                          <strong className="buildVersion">{officialBuildName(entry.version) ?? entry.version}</strong>
+                          <span className="buildStatus mock">Mock</span>
+                        </div>
+                        <h3>{entry.title}</h3>
+                        <p>{entry.description}</p>
+                        <button type="button" disabled title="A mock build has no controlled workspace">Mock build</button>
+                      </article>
+                      {arrow}
+                    </li>
+                  );
+                }
+                const release = entry.release;
                 const identity = officialBuildName(release.version);
                 const status = statusFor(release, identity);
                 const predecessor = release.predecessorReleaseId ? releaseById.get(release.predecessorReleaseId) : undefined;
@@ -136,22 +195,18 @@ export default function SoftwareBuildsLanding({
                         aria-label={enabled ? `Open build ${release.version} (${identity})` : `Open build ${release.version}`}
                         title={!enabled ? "This build has no supported official identity" : undefined}
                       >
-                        <span aria-hidden="true">↗</span> Open build
+                        Open build <span aria-hidden="true">→</span>
                       </button>
                     </article>
+                    {arrow}
                   </li>
                 );
               })}
             </ol>
           ) : (
-            <p className="buildLineageEmpty">This project has no software builds yet.</p>
+            <p className="buildLineageEmpty">This project has no software builds yet. Use <b>Imported baselines</b> above to bring in an existing baseline as its first build.</p>
           )}
         </section>
-
-        <aside className="buildDetailsHelper">
-          <span aria-hidden="true">◇</span>
-          <div><h2>Build details</h2><p>Select a build above to view its controlled workspace.</p></div>
-        </aside>
       </main>
     </div>
   );

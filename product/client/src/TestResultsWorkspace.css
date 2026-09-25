@@ -98,6 +98,13 @@
 .correctiveBanner p { margin: 3px 0 0; color: var(--ink-600); font-size: 12px; line-height: 1.45; }
 .correctiveBanner button { min-height: 38px; font-size: 13px; }
 .correctiveHint { max-width: 340px; color: #7a5a13; font-size: 12px; line-height: 1.45; }
+.correctiveActions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The report moves only when this is confirmed (#1088), so the offer takes the full banner width and
+   states that recording the pass left the report where it was. */
+.correctiveSend { flex: 1 1 100%; display: grid; gap: 8px; border-top: 1px solid #b9ddd5; padding-top: 10px; }
+.correctiveSend label { display: grid; gap: 4px; color: var(--ink-700); font-size: 12px; font-weight: 600; }
+.correctiveSend textarea { min-height: 56px; font: inherit; font-weight: 400; }
+.correctiveSend > div { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* Said rather than hidden. Somebody without Test Engineer authority in this Program needs to know the control
    is absent because of authority, not because the product cannot do it. */

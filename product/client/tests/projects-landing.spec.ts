@@ -15,7 +15,13 @@ test("successful login opens the authorized Projects selector with actual projec
   await expect(cards.first()).toBeVisible();
   expect(await cards.count()).toBeGreaterThan(0);
   await expect(page.locator("details.sampleProjectsSection")).toHaveCount(0);
-  await expect(page.getByText("Mock", { exact: true })).toHaveCount(0);
+  // #1047: the mock catalogue sits beside the real projects in the same grid, as before #1038. Each is badged
+  // Mock and is neither a link nor an authorized project card, so it can never open a build.
+  const mocks = page.locator("[data-project-list] [data-mock-project]");
+  await expect(mocks).toHaveCount(9);
+  await expect(mocks.getByText("Mock", { exact: true })).toHaveCount(9);
+  await expect(page.locator("[data-mock-project][data-project-card], a[data-mock-project]")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /GPS Receiver Modernization/ })).toHaveCount(0);
   const active = page.getByRole("link", { name: "Open FMS Product Development" });
   await expect(active).toBeVisible();
   await expect(active).toHaveAttribute("href", /^\/projects\/[^/]+\/builds$/);
