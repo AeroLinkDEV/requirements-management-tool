@@ -216,21 +216,13 @@ public sealed class ProcedureTraceApiTests
                 parentKind: parentKind, derivedRationale: derivedRationale);
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     [Fact]
     public async Task Trace_lists_every_exact_requirement_revision_with_state_and_provenance()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "trace.engineer");
+        await MemberSession.SignInAsync(client, "trace.engineer");
 
         using var response = await client.GetAsync(
             $"/api/test-procedures/{fixture.ProcedureId}/trace?releaseId={fixture.Release16Id}");
@@ -304,7 +296,7 @@ public sealed class ProcedureTraceApiTests
             db.ExactLinkSuspectEvents.AddRange(lifecycle.Events);
             await db.SaveChangesAsync();
         }
-        await LoginAsync(client, "trace.engineer");
+        await MemberSession.SignInAsync(client, "trace.engineer");
         var body = await client.GetFromJsonAsync<JsonElement>(
             $"/api/enterprise-requirements/{fixture.Requirement2Id}/impact?releaseId={fixture.Release16Id}&revisionId={fixture.Requirement2RevisionId}");
         var parent = Assert.Single(body.GetProperty("parents").EnumerateArray());
@@ -363,7 +355,7 @@ public sealed class ProcedureTraceApiTests
             await db.SaveChangesAsync();
             executionId = execution.Id;
         }
-        await LoginAsync(client, "trace.engineer");
+        await MemberSession.SignInAsync(client, "trace.engineer");
         var caseTrace = await client.GetFromJsonAsync<JsonElement>($"/api/test-cases/{caseId}/trace?releaseId={fixture.Release16Id}&revisionId={caseRevisionId}");
         var thread = caseTrace.GetProperty("thread");
         Assert.Equal(caseRevisionId, thread.GetProperty("focalId").GetGuid());
@@ -384,7 +376,7 @@ public sealed class ProcedureTraceApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "trace.engineer");
+        await MemberSession.SignInAsync(client, "trace.engineer");
         var url = $"/api/enterprise-requirements/{fixture.Requirement1Id}/impact";
         var body = await client.GetFromJsonAsync<JsonElement>(
             $"{url}?releaseId={fixture.Release16Id}&revisionId={fixture.Requirement1RevisionId}");
@@ -410,7 +402,7 @@ public sealed class ProcedureTraceApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "trace.engineer");
+        await MemberSession.SignInAsync(client, "trace.engineer");
 
         var build15 = await client.GetFromJsonAsync<JsonElement>(
             $"/api/test-procedures/{fixture.ProcedureId}/trace?releaseId={fixture.Release15Id}");
@@ -443,7 +435,7 @@ public sealed class ProcedureTraceApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "trace.engineer");
+        await MemberSession.SignInAsync(client, "trace.engineer");
 
         using var earlierRevision = await client.GetAsync(
             $"/api/test-procedures/{fixture.ProcedureId}/trace?releaseId={fixture.Release16Id}&revisionId={fixture.Revision00Id}");
@@ -462,7 +454,7 @@ public sealed class ProcedureTraceApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "trace.engineer");
+        await MemberSession.SignInAsync(client, "trace.engineer");
 
         using var response = await client.GetAsync(
             $"/api/test-procedures/{fixture.ZeroCoverageProcedureId}/trace?releaseId={fixture.Release15Id}");
@@ -479,7 +471,7 @@ public sealed class ProcedureTraceApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "trace.outsider");
+        await MemberSession.SignInAsync(client, "trace.outsider");
 
         using var response = await client.GetAsync(
             $"/api/test-procedures/{fixture.ProcedureId}/trace?releaseId={fixture.Release16Id}");
@@ -492,7 +484,7 @@ public sealed class ProcedureTraceApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedMultiSourceAsync(factory);
-        await LoginAsync(client, "trace.engineer");
+        await MemberSession.SignInAsync(client, "trace.engineer");
 
         using var response = await client.GetAsync(
             $"/api/test-procedures/{fixture.ProcedureId}/trace?releaseId={fixture.ReleaseId}");

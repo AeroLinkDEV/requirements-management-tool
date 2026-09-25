@@ -28,7 +28,7 @@ public sealed class CodeEvidenceAcceptanceRaceTests
         using var factory = Configure(new AeroLinkApiFactory(), transport);
         var data = await SeedAsync(factory.Services);
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var pending = client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", FilePayload(data, 0));
         await transport.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
         try
@@ -74,7 +74,7 @@ public sealed class CodeEvidenceAcceptanceRaceTests
         using var factory = Configure(new AeroLinkApiFactory(), transport);
         var data = await SeedAsync(factory.Services);
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         if (replacing)
         {
             using var accepted = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", MixedPayload(data, 0));
@@ -105,7 +105,7 @@ public sealed class CodeEvidenceAcceptanceRaceTests
         using var factory = Configure(new AeroLinkApiFactory(), transport);
         var data = await SeedAsync(factory.Services);
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
 
         var request = client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", FilePayload(data, 0));
         await transport.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -144,7 +144,7 @@ public sealed class CodeEvidenceAcceptanceRaceTests
         using var factory = Configure(new AeroLinkApiFactory(), transport);
         var data = await SeedAsync(factory.Services);
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
 
         using var first = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", MixedPayload(data, 0));
         Assert.True(first.StatusCode == HttpStatusCode.Created, await first.Content.ReadAsStringAsync());
@@ -178,7 +178,7 @@ public sealed class CodeEvidenceAcceptanceRaceTests
         using var factory = Configure(new AeroLinkApiFactory(), transport);
         var data = await SeedAsync(factory.Services, mergeMeaning: CodeRelationshipMeaning.RelatedContext);
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
 
         using var response = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", MergePayload(data, 0));
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
@@ -199,7 +199,7 @@ public sealed class CodeEvidenceAcceptanceRaceTests
         using var factory = Configure(new AeroLinkApiFactory(), transport);
         var data = await SeedAsync(factory.Services);
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
 
         using var response = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", FilePayload(data, 0));
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
@@ -411,10 +411,6 @@ public sealed class CodeEvidenceAcceptanceRaceTests
 
     private static HttpResponseMessage TreeResponse(string sha, string path, string type, string mode) =>
         JsonResponse($"[{{\"id\":\"{sha}\",\"name\":\"demo.c\",\"path\":\"{path}\",\"type\":\"{type}\",\"mode\":\"{mode}\"}}]");
-
-    private static async Task SignInAsync(HttpClient client, string userName) =>
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword })).StatusCode);
 
     private sealed record AcceptanceData(Guid ProjectId, Guid ReleaseId, string UserName, Guid UserId,
         Guid BaselineId, Guid ArtifactId, Guid RevisionId, Guid RepositoryId, long ConfigurationVersion,

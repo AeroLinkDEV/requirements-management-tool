@@ -164,14 +164,6 @@ public sealed class TestProcedureAuthoringApiTests
             unrelatedRevision.Id, otherBuildRevision.Id, wrongLevelRevision.Id, elsewhereRevision.Id);
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static async Task ConcludeTestWorkRequiredAsync(HttpClient client, Guid tcrId)
     {
         using var response = await client.PostAsJsonAsync($"/api/test-change-reviews/{tcrId}/conclusion",
@@ -185,7 +177,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
 
         using var response = await client.PostAsJsonAsync(
@@ -216,7 +208,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
 
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -258,7 +250,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
 
         using var proposed = await client.PostAsJsonAsync(
@@ -308,7 +300,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
 
         using var response = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes",
@@ -322,7 +314,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
 
         // Allocating a fresh number for a modification would silently turn it into a different procedure.
@@ -340,7 +332,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
 
         using var created = await client.PostAsJsonAsync(
@@ -389,7 +381,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
 
         async Task<(HttpStatusCode Status, string Body)> Propose(object body)
@@ -431,7 +423,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
 
         using var response = await client.PostAsJsonAsync(
@@ -468,7 +460,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
 
         var workspace = await client.GetFromJsonAsync<JsonElement>(
@@ -541,7 +533,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
 
         var targets = await client.GetFromJsonAsync<JsonElement>(
@@ -587,7 +579,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory, includeUnrelatedCurrentCoverage: true);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
 
         // The unrelated requirement is already selected in the target requirement baseline and is an
@@ -632,7 +624,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
 
         async Task<JsonElement> Refused(Guid removed, string? rationale)
@@ -693,7 +685,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
         using var authoredCase = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.TcrId}/case",
             new { title = "No procedure decision", problem = "Problem", analysis = "Analysis", solution = "Solution" });
@@ -720,7 +712,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.outsider");
+        await MemberSession.SignInAsync(client, "procedure.outsider");
 
         using var response = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes",
@@ -734,7 +726,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
 
         using var propose = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.ReleasedTcrId}/procedure-changes",
@@ -755,7 +747,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         await ConcludeTestWorkRequiredAsync(client, fixture.TcrId);
 
         using var created = await client.PostAsJsonAsync(
@@ -827,7 +819,7 @@ public sealed class TestProcedureAuthoringApiTests
         using var factory = new AeroLinkApiFactory(testLadderPolicy: ProcedureEnabledTestPolicy.Create());
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "procedure.engineer");
+        await MemberSession.SignInAsync(client, "procedure.engineer");
         using var derivedWithParent = await client.PostAsJsonAsync("/api/test-procedures/drafts", new
         {
             projectId = fixture.ProjectId, level = "HighLevel", title = "Invalid derived procedure",

@@ -25,7 +25,7 @@ public sealed class GitLabSourceApiTests
         using var configured = Configure(factory, transport);
         var data = await SeedAsync(configured.Services, programCode: FmsShowcaseSeeder.ProgramCode);
         using var client = configured.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var route = $"/api/projects/{data.ProjectId}/code/source?releaseId={data.ReleaseId}";
         var settings = configured.Services.GetRequiredService<IOptions<ProjectGitLabOptions>>().Value;
         async Task<JsonElement> Read() => await client.GetFromJsonAsync<JsonElement>(route);
@@ -77,7 +77,7 @@ public sealed class GitLabSourceApiTests
         using var configured = Configure(factory, transport);
         var data = await SeedAsync(configured.Services);
         using var client = configured.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var route = $"/api/projects/{data.ProjectId}/code/source";
         using var accepted = await client.PostAsJsonAsync(route, Request(data.ReleaseId));
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
@@ -107,7 +107,7 @@ public sealed class GitLabSourceApiTests
         var own = await SeedAsync(configured.Services);
         var other = await SeedAsync(configured.Services);
         using var client = configured.CreateClient();
-        await SignInAsync(client, own.UserName);
+        await MemberSession.SignInForReadsAsync(client, own.UserName);
         var route = $"/api/projects/{other.ProjectId}/code/source";
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync(route, Request(other.ReleaseId))).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync(route + "?releaseId=" + other.ReleaseId)).StatusCode);
@@ -122,7 +122,7 @@ public sealed class GitLabSourceApiTests
         using var configured = Configure(factory, transport);
         var data = await SeedAsync(configured.Services, role: ProgramRole.Reviewer);
         using var client = configured.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
 
         using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/source?releaseId={data.ReleaseId}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -144,7 +144,7 @@ public sealed class GitLabSourceApiTests
         using var configured = Configure(factory, transport);
         var data = await SeedAsync(configured.Services);
         using var client = configured.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var pending = client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/source", Request(data.ReleaseId));
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
         try
@@ -196,7 +196,7 @@ public sealed class GitLabSourceApiTests
             await db.SaveChangesAsync();
         }
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var url = $"/api/projects/{data.ProjectId}/code/files?releaseId={data.ReleaseId}&sourceSnapshotId={snapshotId}&pageSize=1";
         var first = await client.GetFromJsonAsync<System.Text.Json.JsonElement>(url);
         Assert.Equal(3, first.GetProperty("total").GetInt32());
@@ -236,8 +236,6 @@ public sealed class GitLabSourceApiTests
         await db.SaveChangesAsync();
         return (project.Id, release.Id, user.Id, user.UserName);
     }
-    private static async Task SignInAsync(HttpClient client, string userName) =>
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/auth/login", new { userName, password = AeroLinkApiFactory.MemberPassword })).StatusCode);
     private sealed class Transport(Func<CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
     {
         public int Calls { get; private set; }

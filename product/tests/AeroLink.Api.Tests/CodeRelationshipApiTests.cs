@@ -27,7 +27,7 @@ public sealed class CodeRelationshipApiTests
         using var factory = Configure(new AeroLinkApiFactory(), transport);
         var data = await SeedAsync(factory.Services);
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
 
         using var response = await client.PostAsJsonAsync(
             $"/api/projects/{data.ProjectId}/code/relationships/merge-requests", new { });
@@ -56,7 +56,7 @@ public sealed class CodeRelationshipApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?releaseId={data.ReleaseId}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -84,7 +84,7 @@ public sealed class CodeRelationshipApiTests
             await db.SaveChangesAsync();
         }
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/merge-requests/register?releaseId={data.ReleaseId}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -123,7 +123,7 @@ public sealed class CodeRelationshipApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/merge-requests/register?releaseId={data.ReleaseId}");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -168,7 +168,7 @@ public sealed class CodeRelationshipApiTests
             await db.SaveChangesAsync();
         }
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         const string relationshipKind = "merge-request";
         using var withdrawn = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/relationships/{relationshipKind}/{relationshipId}/withdraw", new { expectedVersion = 1L, rationale = "Context no longer applies." });
         Assert.Equal(HttpStatusCode.OK, withdrawn.StatusCode);
@@ -208,7 +208,7 @@ public sealed class CodeRelationshipApiTests
             await db.SaveChangesAsync();
         }
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         const string relationshipKind = "merge-request";
         using var withdrawn = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/relationships/{relationshipKind}/{relationshipId}/withdraw",
             new { expectedVersion = 1L, rationale = "No longer applicable." });
@@ -243,7 +243,7 @@ public sealed class CodeRelationshipApiTests
             await db.SaveChangesAsync();
         }
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         const string relationshipKind = "merge-request";
         using var response = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/relationships/{relationshipKind}/{relationshipId}/withdraw",
             new { expectedVersion = 1L, rationale = "No longer applicable." });
@@ -261,7 +261,7 @@ public sealed class CodeRelationshipApiTests
         using var factory = Configure(new AeroLinkApiFactory(), transport);
         var data = await SeedFileAsync(factory.Services, sha);
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         using var sourceHistory = await client.GetAsync($"/api/projects/{data.ProjectId}/code/source/history?releaseId={data.ReleaseId}");
         Assert.Equal(HttpStatusCode.OK, sourceHistory.StatusCode);
         using var sourceJson = JsonDocument.Parse(await sourceHistory.Content.ReadAsStringAsync());
@@ -311,7 +311,7 @@ public sealed class CodeRelationshipApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         using var first = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?releaseId={data.ReleaseId}&page=1&pageSize=1");
         using var firstJson = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
         Assert.Equal("MergeRequest", firstJson.RootElement.GetProperty("items")[0].GetProperty("relationshipKind").GetString());
@@ -358,7 +358,7 @@ public sealed class CodeRelationshipApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var exact = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?relationshipKind=File&sourceSnapshotId={data.SnapshotId}&path=src/Program.cs&pageSize=1");
         Assert.Equal(HttpStatusCode.OK, exact.StatusCode);
         using var exactJson = JsonDocument.Parse(await exact.Content.ReadAsStringAsync());
@@ -386,7 +386,7 @@ public sealed class CodeRelationshipApiTests
         using var factory = Configure(new AeroLinkApiFactory(), transport);
         var data = await SeedAsync(factory.Services);
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         using var response = await client.PostAsJsonAsync("/api/code-traceability", new
         {
             projectId = data.ProjectId, releaseId = data.ReleaseId, requirementArtifactId = Guid.NewGuid(),
@@ -407,7 +407,7 @@ public sealed class CodeRelationshipApiTests
         using var factory = Configure(new AeroLinkApiFactory(), transport);
         var data = await SeedAsync(factory.Services);
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         using var response = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", new
         {
             releaseId = data.ReleaseId, requirementArtifactId = Guid.NewGuid(), requirementRevisionId = Guid.NewGuid(),
@@ -468,7 +468,7 @@ public sealed class CodeRelationshipApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         using var response = await client.PostAsJsonAsync($"/api/projects/{data.ProjectId}/code/evidence", new
         {
             releaseId = data.ReleaseId, requirementArtifactId = artifactId, requirementRevisionId = revisionId,
@@ -576,7 +576,7 @@ public sealed class CodeRelationshipApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         object Payload(long selectorVersion) => new
         {
             releaseId = data.ReleaseId, expectedBaselineId = baselineId, requirementArtifactId = artifactId,
@@ -650,7 +650,7 @@ public sealed class CodeRelationshipApiTests
             await db.SaveChangesAsync();
         }
         using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?releaseId={data.ReleaseId}&includeWithdrawn=true");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -672,7 +672,7 @@ public sealed class CodeRelationshipApiTests
         var own = await SeedFileAsync(factory.Services, sha);
         var foreign = await SeedFileAsync(factory.Services, sha);
         using var client = factory.CreateClient();
-        await SignInAsync(client, own.UserName);
+        await MemberSession.SignInForReadsAsync(client, own.UserName);
         var request = new
         {
             releaseId = own.ReleaseId, sourceSnapshotId = own.SnapshotId, sourceSelectionEventId = (Guid?)null,
@@ -743,10 +743,6 @@ public sealed class CodeRelationshipApiTests
         await db.SaveChangesAsync();
         return (project.Id, release.Id, user.UserName, snapshot.Id, selection.Id, target.Id);
     }
-
-    private static async Task SignInAsync(HttpClient client, string userName) =>
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword })).StatusCode);
 
     private sealed class Remote(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {

@@ -61,20 +61,12 @@ public sealed class RosterAuthoritySeparationTests : IClassFixture<SharedApiHost
             peBaseOnly.UserName, pePrimary.UserName, peBackup.UserName, programManager.UserName, outsider.UserName);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     [Fact]
     public async Task Base_project_engineer_without_leadership_cannot_mutate_the_roster()
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.PeBaseOnlyName);
+        await MemberSession.SignInAsync(client, seeded.PeBaseOnlyName);
 
         // Reading is fine; mutating is not.
         var read = await client.GetAsync($"/api/projects/{seeded.ProjectId}/personnel");
@@ -90,7 +82,7 @@ public sealed class RosterAuthoritySeparationTests : IClassFixture<SharedApiHost
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.PePrimaryName);
+        await MemberSession.SignInAsync(client, seeded.PePrimaryName);
 
         var attempt = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.OutsiderId, role = nameof(ProgramRole.SystemEngineer) });
@@ -103,7 +95,7 @@ public sealed class RosterAuthoritySeparationTests : IClassFixture<SharedApiHost
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.PeBackupName);
+        await MemberSession.SignInAsync(client, seeded.PeBackupName);
 
         var attempt = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.OutsiderId, role = nameof(ProgramRole.SystemEngineer) });
@@ -116,7 +108,7 @@ public sealed class RosterAuthoritySeparationTests : IClassFixture<SharedApiHost
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.OutsiderName);
+        await MemberSession.SignInAsync(client, seeded.OutsiderName);
 
         var attempt = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.OutsiderId, role = nameof(ProgramRole.SystemEngineer) });
@@ -133,7 +125,7 @@ public sealed class RosterAuthoritySeparationTests : IClassFixture<SharedApiHost
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ProgramManagerName);
+        await MemberSession.SignInAsync(client, seeded.ProgramManagerName);
 
         var attempt = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.OutsiderId, role = nameof(ProgramRole.SystemEngineer) });
@@ -159,7 +151,7 @@ public sealed class RosterAuthoritySeparationTests : IClassFixture<SharedApiHost
             await db.SaveChangesAsync();
         }
 
-        await SignInAsync(client, baseOnly);
+        await MemberSession.SignInAsync(client, baseOnly);
         var attempt = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.OutsiderId, role = nameof(ProgramRole.SystemEngineer) });
         Assert.Equal(HttpStatusCode.Forbidden, attempt.StatusCode);
@@ -172,7 +164,7 @@ public sealed class RosterAuthoritySeparationTests : IClassFixture<SharedApiHost
 
         // The PE primary initially has authority.
         using var primaryClient = _host.CreateClient();
-        await SignInAsync(primaryClient, seeded.PePrimaryName);
+        await MemberSession.SignInAsync(primaryClient, seeded.PePrimaryName);
         var before = await primaryClient.GetAsync($"/api/projects/{seeded.ProjectId}/personnel");
         var beforeBody = await before.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(beforeBody.GetProperty("canManage").GetBoolean(),
@@ -191,7 +183,7 @@ public sealed class RosterAuthoritySeparationTests : IClassFixture<SharedApiHost
 
         // The authority is gone immediately: canManage flips to false.
         using var afterClient = _host.CreateClient();
-        await SignInAsync(afterClient, seeded.PePrimaryName);
+        await MemberSession.SignInAsync(afterClient, seeded.PePrimaryName);
         var after = await afterClient.GetAsync($"/api/projects/{seeded.ProjectId}/personnel");
         var afterBody = await after.Content.ReadFromJsonAsync<JsonElement>();
         Assert.False(afterBody.GetProperty("canManage").GetBoolean(),

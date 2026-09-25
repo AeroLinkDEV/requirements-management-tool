@@ -34,7 +34,7 @@ public sealed class VerificationProgramIsolationApiTests
         using var factory = new AeroLinkApiFactory();
         var scenario = await SeedAsync(factory);
         using var client = factory.CreateClient();
-        await LoginAsync(client, ProgramBUser);
+        await MemberSession.SignInForReadsAsync(client, ProgramBUser);
 
         var requests = new[]
         {
@@ -69,7 +69,7 @@ public sealed class VerificationProgramIsolationApiTests
         using var factory = new AeroLinkApiFactory();
         var scenario = await SeedAsync(factory);
         using var client = factory.CreateClient();
-        await LoginAsync(client, ProgramAUser);
+        await MemberSession.SignInForReadsAsync(client, ProgramAUser);
 
         using var traceability = await client.GetAsync(
             $"/api/traceability?projectId={scenario.ProjectAId}&baselineId={scenario.BaselineAId}&page=1&pageSize=25");
@@ -119,7 +119,7 @@ public sealed class VerificationProgramIsolationApiTests
         using var factory = new AeroLinkApiFactory();
         var scenario = await SeedAsync(factory);
         using var client = factory.CreateClient();
-        await LoginAsync(client, ProgramBUser);
+        await MemberSession.SignInForReadsAsync(client, ProgramBUser);
 
         await AssertBadRequestsAsync(client,
         [
@@ -184,13 +184,6 @@ public sealed class VerificationProgramIsolationApiTests
                 failures.Add($"{request} => {(int)response.StatusCode}, code={actualCode ?? "<none>"}, body={body}");
         }
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
-    }
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     private static async Task<Scenario> SeedAsync(AeroLinkApiFactory factory)

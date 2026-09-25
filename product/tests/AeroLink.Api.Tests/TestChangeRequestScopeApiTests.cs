@@ -78,21 +78,13 @@ public sealed class TestChangeRequestScopeApiTests
         return new(project.Id, release.Id, firstReview.Id, secondReview.Id, first.Id, second.Id, elsewhere.Id);
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     [Fact]
     public async Task An_approved_change_is_raised_to_be_assessed_and_numbered_only_once_it_needs_test_work()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "scope.engineer");
+        await MemberSession.SignInAsync(client, "scope.engineer");
 
         using var response = await client.GetAsync($"/api/releases/{fixture.ReleaseId}/test-change-reviews");
         var body = await response.Content.ReadAsStringAsync();
@@ -121,7 +113,7 @@ public sealed class TestChangeRequestScopeApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "scope.engineer");
+        await MemberSession.SignInAsync(client, "scope.engineer");
 
         var raised = JsonSerializer.Deserialize<JsonElement>(
             await client.GetStringAsync($"/api/releases/{fixture.ReleaseId}/test-change-reviews"))
@@ -147,7 +139,7 @@ public sealed class TestChangeRequestScopeApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "scope.engineer");
+        await MemberSession.SignInAsync(client, "scope.engineer");
 
         using var included = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.FirstReviewId}/change-requests", new { changeRequestId = fixture.SecondChangeId });
@@ -174,7 +166,7 @@ public sealed class TestChangeRequestScopeApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "scope.engineer");
+        await MemberSession.SignInAsync(client, "scope.engineer");
 
         // Assessed first, so the package doing the covering is a controlled test change request and the
         // refusal can name it as one.
@@ -205,7 +197,7 @@ public sealed class TestChangeRequestScopeApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "scope.engineer");
+        await MemberSession.SignInAsync(client, "scope.engineer");
 
         using var response = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.FirstReviewId}/change-requests", new { changeRequestId = fixture.OtherBuildChangeId });
@@ -219,7 +211,7 @@ public sealed class TestChangeRequestScopeApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "scope.outsider");
+        await MemberSession.SignInAsync(client, "scope.outsider");
 
         using var response = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.FirstReviewId}/change-requests", new { changeRequestId = fixture.SecondChangeId });

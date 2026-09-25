@@ -19,11 +19,11 @@ public sealed class ManagedDocumentRecoveryApiTests
         using var factory = new AeroLinkApiFactory(); using var administrator = factory.CreateClient();
         await ProblemReportApiTests.BootstrapAndLoginAsync(administrator); await SecurityBoundaryTests.AuthorizeMutationsAsync(administrator);
         var seeded = await SeedAsync(factory);
-        using var owner = factory.CreateClient(); await LoginAsync(owner, "recovery.author");
-        using var ownerSecondTab = factory.CreateClient(); await LoginAsync(ownerSecondTab, "recovery.author");
-        using var other = factory.CreateClient(); await LoginAsync(other, "recovery.other");
-        using var technical = factory.CreateClient(); await LoginAsync(technical, "recovery.technical");
-        using var quality = factory.CreateClient(); await LoginAsync(quality, "recovery.quality");
+        using var owner = factory.CreateClient(); await MemberSession.SignInAsync(owner, "recovery.author");
+        using var ownerSecondTab = factory.CreateClient(); await MemberSession.SignInAsync(ownerSecondTab, "recovery.author");
+        using var other = factory.CreateClient(); await MemberSession.SignInAsync(other, "recovery.other");
+        using var technical = factory.CreateClient(); await MemberSession.SignInAsync(technical, "recovery.technical");
+        using var quality = factory.CreateClient(); await MemberSession.SignInAsync(quality, "recovery.quality");
         using var enrollmentResponse = await owner.PostAsync($"/api/managed-documents/connector-enrollment?projectId={seeded.ProjectId}", null);
         var enrollment = await enrollmentResponse.Content.ReadFromJsonAsync<ConnectorEnrollmentManifest>(); Assert.NotNull(enrollment);
         using var created = await owner.PostAsJsonAsync("/api/managed-documents", new { projectId = seeded.ProjectId, acronym = "SDP", documentType = "Software Development Plan", title = "Recoverable plan", ownerId = "recovery.author", formalChangeSummary = "Exercise protected local recovery.", operationKey = Guid.NewGuid().ToString("N") });
@@ -176,12 +176,6 @@ public sealed class ManagedDocumentRecoveryApiTests
             expectedCandidateDocxAttachmentId = (Guid?)null, expectedCandidatePdfAttachmentId = (Guid?)null,
             expectedCandidateManifestHash = (string?)null, operationKey = Guid.NewGuid().ToString("N")
         });
-    }
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode); await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
     private static async Task<(Guid ProgramId, Guid ProjectId)> SeedAsync(AeroLinkApiFactory factory)

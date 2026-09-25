@@ -71,14 +71,6 @@ public sealed class SharedHostIsolationTests : IClassFixture<SharedApiHost>
         return new Seeded(homeProject.Id, homeProgram.Id, foreignProject.Id, member.Id, memberName, outsiderName);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     [Fact]
     public async Task A_shared_host_test_seeds_unique_data_and_cannot_cross_a_program_boundary()
     {
@@ -99,7 +91,7 @@ public sealed class SharedHostIsolationTests : IClassFixture<SharedApiHost>
         }
 
         using var member = _host.CreateClient();
-        await SignInAsync(member, seeded.MemberName);
+        await MemberSession.SignInAsync(member, seeded.MemberName);
         using var home = await member.GetAsync($"/api/projects/{seeded.HomeProjectId}/personnel");
         Assert.Equal(HttpStatusCode.OK, home.StatusCode);
         using var foreign = await member.GetAsync($"/api/projects/{seeded.ForeignProjectId}/personnel");
@@ -123,7 +115,7 @@ public sealed class SharedHostIsolationTests : IClassFixture<SharedApiHost>
 
         // A fresh client is a fresh session: the previous test's cookie container cannot carry over.
         using var outsider = _host.CreateClient();
-        await SignInAsync(outsider, seeded.OutsiderName);
+        await MemberSession.SignInAsync(outsider, seeded.OutsiderName);
         using var refused = await outsider.GetAsync($"/api/projects/{seeded.HomeProjectId}/personnel");
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
     }
@@ -139,7 +131,7 @@ public sealed class SharedHostIsolationTests : IClassFixture<SharedApiHost>
         var seeded = await SeedAsync(_host.Factory, tag);
 
         using var memberClient = _host.CreateClient();
-        await SignInAsync(memberClient, seeded.MemberName);
+        await MemberSession.SignInAsync(memberClient, seeded.MemberName);
         using var memberHome = await memberClient.GetAsync($"/api/projects/{seeded.HomeProjectId}/personnel");
         Assert.Equal(HttpStatusCode.OK, memberHome.StatusCode);
         using var memberForeign = await memberClient.GetAsync($"/api/projects/{seeded.ForeignProjectId}/personnel");
@@ -148,7 +140,7 @@ public sealed class SharedHostIsolationTests : IClassFixture<SharedApiHost>
         using var outsiderClient = _host.CreateClient();
         using var unauthenticated = await outsiderClient.GetAsync($"/api/auth/me");
         Assert.Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode);
-        await SignInAsync(outsiderClient, seeded.OutsiderName);
+        await MemberSession.SignInAsync(outsiderClient, seeded.OutsiderName);
         using var outsiderRefused = await outsiderClient.GetAsync($"/api/projects/{seeded.HomeProjectId}/personnel");
         Assert.Equal(HttpStatusCode.Forbidden, outsiderRefused.StatusCode);
         using var outsiderForeign = await outsiderClient.GetAsync($"/api/projects/{seeded.ForeignProjectId}/personnel");

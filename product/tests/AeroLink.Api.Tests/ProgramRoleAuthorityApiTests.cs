@@ -52,14 +52,6 @@ public sealed class ProgramRoleAuthorityApiTests
         return new(project.Id, release.Id, section.Id);
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static object Draft(Fixture fixture) => new
     {
         projectId = fixture.ProjectId,
@@ -91,7 +83,7 @@ public sealed class ProgramRoleAuthorityApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "precise.engineer");
+        await MemberSession.SignInAsync(client, "precise.engineer");
 
         using var response = await client.PostAsJsonAsync("/api/change-request-drafts", Draft(fixture));
         var body = await response.Content.ReadAsStringAsync();
@@ -106,7 +98,7 @@ public sealed class ProgramRoleAuthorityApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, user);
+        await MemberSession.SignInAsync(client, user);
 
         // Reads everything: membership alone is what grants that, and these roles are members.
         using var read = await client.GetAsync($"/api/change-requests?projectId={fixture.ProjectId}");

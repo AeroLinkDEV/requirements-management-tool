@@ -30,7 +30,7 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
     {
         var fixture = await SeedAsync(host.Factory);
         using var reviewer = host.CreateClient();
-        await LoginAsync(reviewer, fixture.FirstReviewer);
+        await MemberSession.SignInAsync(reviewer, fixture.FirstReviewer);
 
         using var created = await reviewer.PostAsJsonAsync(
             $"/api/change-requests/{fixture.ChangeRequestId}/review-comments",
@@ -43,7 +43,7 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
         Assert.Single(await CommentsFor(reviewer, fixture.ChangeRequestId));
 
         using var author = host.CreateClient();
-        await LoginAsync(author, fixture.Author);
+        await MemberSession.SignInAsync(author, fixture.Author);
         Assert.Empty(await CommentsFor(author, fixture.ChangeRequestId));
     }
 
@@ -52,7 +52,7 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
     {
         var fixture = await SeedAsync(host.Factory);
         using var reviewer = host.CreateClient();
-        await LoginAsync(reviewer, fixture.FirstReviewer);
+        await MemberSession.SignInAsync(reviewer, fixture.FirstReviewer);
         await PostCommentAsync(reviewer, fixture.ChangeRequestId, "Tolerance is not stated.");
 
         using var approved = await reviewer.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/approve",
@@ -60,7 +60,7 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
         Assert.Equal(HttpStatusCode.OK, approved.StatusCode);
 
         using var author = host.CreateClient();
-        await LoginAsync(author, fixture.Author);
+        await MemberSession.SignInAsync(author, fixture.Author);
         var visible = await CommentsFor(author, fixture.ChangeRequestId);
         var only = Assert.Single(visible);
         Assert.Equal("Published", only.GetProperty("state").GetString());
@@ -73,7 +73,7 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
     {
         var fixture = await SeedAsync(host.Factory);
         using var reviewer = host.CreateClient();
-        await LoginAsync(reviewer, fixture.FirstReviewer);
+        await MemberSession.SignInAsync(reviewer, fixture.FirstReviewer);
         await PostCommentAsync(reviewer, fixture.ChangeRequestId, "The review must stop before this is reworked.");
 
         using var cancelled = await reviewer.PostAsJsonAsync(
@@ -82,7 +82,7 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
         Assert.True(cancelled.StatusCode == HttpStatusCode.OK, await cancelled.Content.ReadAsStringAsync());
 
         using var author = host.CreateClient();
-        await LoginAsync(author, fixture.Author);
+        await MemberSession.SignInAsync(author, fixture.Author);
         var comment = Assert.Single(await CommentsFor(author, fixture.ChangeRequestId));
         Assert.Equal("Published", comment.GetProperty("state").GetString());
         Assert.False(comment.GetProperty("decisionRecorded").GetBoolean());
@@ -93,7 +93,7 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
     {
         var fixture = await SeedAsync(host.Factory);
         using var reviewer = host.CreateClient();
-        await LoginAsync(reviewer, fixture.FirstReviewer);
+        await MemberSession.SignInAsync(reviewer, fixture.FirstReviewer);
         await PostCommentAsync(reviewer, fixture.ChangeRequestId, "This wording needs another pass.");
 
         using var returned = await reviewer.PostAsJsonAsync(
@@ -102,7 +102,7 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
         Assert.True(returned.StatusCode == HttpStatusCode.OK, await returned.Content.ReadAsStringAsync());
 
         using var author = host.CreateClient();
-        await LoginAsync(author, fixture.Author);
+        await MemberSession.SignInAsync(author, fixture.Author);
         var comment = Assert.Single(await CommentsFor(author, fixture.ChangeRequestId));
         Assert.Equal("Published", comment.GetProperty("state").GetString());
         Assert.True(comment.GetProperty("decisionRecorded").GetBoolean());
@@ -113,11 +113,11 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
     {
         var fixture = await SeedAsync(host.Factory);
         using var reviewer = host.CreateClient();
-        await LoginAsync(reviewer, fixture.FirstReviewer);
+        await MemberSession.SignInAsync(reviewer, fixture.FirstReviewer);
         await PostCommentAsync(reviewer, fixture.ChangeRequestId, "This cycle was assigned to the wrong route.");
 
         using var author = host.CreateClient();
-        await LoginAsync(author, fixture.Author);
+        await MemberSession.SignInAsync(author, fixture.Author);
         using var restarted = await author.PostAsJsonAsync(
             $"/api/change-requests/{fixture.ChangeRequestId}/restart-review",
             new
@@ -137,7 +137,7 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
     {
         var fixture = await SeedAsync(host.Factory, ReviewMode.Parallel);
         using var first = host.CreateClient();
-        await LoginAsync(first, fixture.FirstReviewer);
+        await MemberSession.SignInAsync(first, fixture.FirstReviewer);
         await PostCommentAsync(first, fixture.ChangeRequestId, "Signed with reservations.");
         using var approved = await first.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/approve",
             new { password = AeroLinkApiFactory.MemberPassword, meaning = "I approve this change request." });
@@ -145,13 +145,13 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
 
         // The author has it already.
         using var author = host.CreateClient();
-        await LoginAsync(author, fixture.Author);
+        await MemberSession.SignInAsync(author, fixture.Author);
         Assert.Single(await CommentsFor(author, fixture.ChangeRequestId));
 
         // The second reviewer is still deciding, so reading it would weaken the signature they are about to
         // give. They see nothing until they have decided themselves.
         using var second = host.CreateClient();
-        await LoginAsync(second, fixture.SecondReviewer);
+        await MemberSession.SignInAsync(second, fixture.SecondReviewer);
         Assert.Empty(await CommentsFor(second, fixture.ChangeRequestId));
 
         using var alsoApproved = await second.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/approve",
@@ -165,11 +165,11 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
     {
         var fixture = await SeedAsync(host.Factory, ReviewMode.Parallel);
         using var first = host.CreateClient();
-        await LoginAsync(first, fixture.FirstReviewer);
+        await MemberSession.SignInAsync(first, fixture.FirstReviewer);
         var commentId = await PostCommentAsync(first, fixture.ChangeRequestId, "Mine to edit.");
 
         using var second = host.CreateClient();
-        await LoginAsync(second, fixture.SecondReviewer);
+        await MemberSession.SignInAsync(second, fixture.SecondReviewer);
         using var refused = await second.PutAsJsonAsync(
             $"/api/change-requests/{fixture.ChangeRequestId}/review-comments/{commentId}",
             new { body = "Not yours." });
@@ -197,11 +197,11 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
     {
         var fixture = await SeedAsync(host.Factory);
         using var reviewer = host.CreateClient();
-        await LoginAsync(reviewer, fixture.FirstReviewer);
+        await MemberSession.SignInAsync(reviewer, fixture.FirstReviewer);
         await PostCommentAsync(reviewer, fixture.ChangeRequestId, "Tolerance is not stated.");
 
         using var author = host.CreateClient();
-        await LoginAsync(author, fixture.Author);
+        await MemberSession.SignInAsync(author, fixture.Author);
 
         // A draft is not the author's to know about, so nothing appears yet.
         Assert.Empty(await MyWorkCommentsAsync(author));
@@ -236,7 +236,7 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
     {
         var fixture = await SeedAsync(host.Factory);
         using var reviewer = host.CreateClient();
-        await LoginAsync(reviewer, fixture.FirstReviewer);
+        await MemberSession.SignInAsync(reviewer, fixture.FirstReviewer);
 
         using var refused = await reviewer.PostAsJsonAsync(
             $"/api/change-requests/{fixture.ChangeRequestId}/review-comments",
@@ -295,12 +295,5 @@ public sealed class ReviewCommentApiTests(SharedApiHost host) : IClassFixture<Sh
         db.SystemChangeRequests.Add(scr);
         await db.SaveChangesAsync();
         return new Seeded(scr.Id, scr.RequirementChanges.Single().Id, author, first, second);
-    }
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        var login = await client.PostAsJsonAsync("/api/auth/login", new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 }

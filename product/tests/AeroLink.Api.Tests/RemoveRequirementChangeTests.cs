@@ -29,7 +29,7 @@ public sealed class RemoveRequirementChangeTests(SharedApiHost host) : IClassFix
     {
         var world = await SeedAsync(host.Factory);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         using var removed = await client.DeleteAsync(
             $"/api/change-requests/{world.ChangeRequestId}/requirements/{world.SecondChangeId}");
@@ -46,7 +46,7 @@ public sealed class RemoveRequirementChangeTests(SharedApiHost host) : IClassFix
     {
         var world = await SeedAsync(host.Factory);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         foreach (var id in new[] { world.FirstChangeId, world.SecondChangeId })
             Assert.Equal(HttpStatusCode.OK,
@@ -67,7 +67,7 @@ public sealed class RemoveRequirementChangeTests(SharedApiHost host) : IClassFix
     {
         var world = await SeedAsync(host.Factory, submit: true);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         using var refused = await client.DeleteAsync(
             $"/api/change-requests/{world.ChangeRequestId}/requirements/{world.SecondChangeId}");
@@ -79,7 +79,7 @@ public sealed class RemoveRequirementChangeTests(SharedApiHost host) : IClassFix
     {
         var world = await SeedAsync(host.Factory);
         using var stranger = host.CreateClient();
-        await LoginAsync(stranger, world.Reviewer);
+        await MemberSession.SignInForReadsAsync(stranger, world.Reviewer);
 
         using var refused = await stranger.DeleteAsync(
             $"/api/change-requests/{world.ChangeRequestId}/requirements/{world.SecondChangeId}");
@@ -91,7 +91,7 @@ public sealed class RemoveRequirementChangeTests(SharedApiHost host) : IClassFix
     {
         var world = await SeedAsync(host.Factory);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         using var refused = await client.DeleteAsync(
             $"/api/change-requests/{world.ChangeRequestId}/requirements/{Guid.NewGuid()}");
@@ -131,7 +131,7 @@ public sealed class RemoveRequirementChangeTests(SharedApiHost host) : IClassFix
         }
 
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
         Assert.Equal(HttpStatusCode.OK, (await client.DeleteAsync(
             $"/api/change-requests/{world.ChangeRequestId}/requirements/{world.SecondChangeId}")).StatusCode);
 
@@ -151,13 +151,6 @@ public sealed class RemoveRequirementChangeTests(SharedApiHost host) : IClassFix
 
     private sealed record World(Guid ProjectId, Guid ReleaseId, Guid ChangeRequestId, Guid FirstChangeId,
         Guid SecondChangeId, string FirstRequirement, string SecondRequirement, string Author, string Reviewer);
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
 
     private static async Task<World> SeedAsync(AeroLinkApiFactory factory, bool submit = false)
     {

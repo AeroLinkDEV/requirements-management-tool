@@ -29,7 +29,7 @@ public sealed class ReleasedSyntheticSourceSupplementApiTests
         using var app = Configure(factory, transport);
         var data = await SeedAsync(app.Services);
         using var client = app.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var route = Route(data);
         var preview = await client.PostAsJsonAsync($"/api/projects/{data.Manifest.ProjectId}/code/source/released-supplement/preview", data.Manifest);
         Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
@@ -84,7 +84,7 @@ public sealed class ReleasedSyntheticSourceSupplementApiTests
         var body = JsonSerializer.SerializeToNode(data.Manifest)!;
         if (refusal == "relationship") body["relationships"] = new JsonArray();
         using var client = app.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         foreach (var operation in new[] { "/preview", "/apply" })
         {
             var response = await client.PostAsJsonAsync(Route(data) + operation, body);
@@ -108,7 +108,7 @@ public sealed class ReleasedSyntheticSourceSupplementApiTests
         using var app = Configure(factory, transport);
         var data = await SeedAsync(app.Services);
         using var client = app.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var pending = client.PostAsJsonAsync(Route(data) + (change == "preview-role" ? "/preview" : "/apply"), data.Manifest);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
         try
@@ -188,8 +188,6 @@ public sealed class ReleasedSyntheticSourceSupplementApiTests
             Guid.NewGuid(), ReleasedSyntheticSourceSupplementService.PolicyId, ReleasedSyntheticSourceSupplementService.AuthorizationReference,
             "Dated source-only supplement for the synthetic released FMS 1.5 demonstration."));
     }
-    private static async Task SignInAsync(HttpClient client, string userName) =>
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/auth/login", new { userName, password = AeroLinkApiFactory.MemberPassword })).StatusCode);
     private sealed record Data(Guid UserId, string UserName, ReleasedSyntheticSourceSupplementManifest Manifest);
     private sealed class Transport(Func<CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
     {

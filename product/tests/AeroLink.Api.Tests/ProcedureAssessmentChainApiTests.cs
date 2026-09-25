@@ -23,7 +23,7 @@ public sealed class ProcedureAssessmentChainApiTests
         using var client = factory.CreateClient();
         var fixture = await SeedSubmittedCaseAsync(factory, "HighLevelSoftware");
 
-        await LoginAsync(client, "case.reviewer");
+        await MemberSession.SignInAsync(client, "case.reviewer");
         using (var approved = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.CaseReviewId}/approve", new
                {
                    password = AeroLinkApiFactory.MemberPassword,
@@ -60,7 +60,7 @@ public sealed class ProcedureAssessmentChainApiTests
                }))
             Assert.Equal(HttpStatusCode.BadRequest, repeated.StatusCode);
 
-        await LoginAsync(client, "case.author");
+        await MemberSession.SignInAsync(client, "case.author");
         using var concluded = await client.PostAsJsonAsync($"/api/test-change-reviews/{assessmentId}/conclusion", new
         {
             testChangeRequired = true,
@@ -86,7 +86,7 @@ public sealed class ProcedureAssessmentChainApiTests
         using var client = factory.CreateClient();
         var fixture = await SeedSubmittedCaseAsync(factory, "HighLevelSoftware");
 
-        await LoginAsync(client, "case.reviewer");
+        await MemberSession.SignInAsync(client, "case.reviewer");
         using (var approved = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.CaseReviewId}/approve", new
                {
                    password = AeroLinkApiFactory.MemberPassword,
@@ -106,7 +106,7 @@ public sealed class ProcedureAssessmentChainApiTests
                 .Select(x => x.Id).SingleAsync();
         }
 
-        await LoginAsync(client, "case.author");
+        await MemberSession.SignInAsync(client, "case.author");
         using var concluded = await client.PostAsJsonAsync($"/api/test-change-reviews/{assessmentId}/conclusion", new
         {
             testChangeRequired = false,
@@ -142,7 +142,7 @@ public sealed class ProcedureAssessmentChainApiTests
         using var client = factory.CreateClient();
         var fixture = await SeedSubmittedCaseAsync(factory, "LowLevelSoftware");
 
-        await LoginAsync(client, "case.reviewer");
+        await MemberSession.SignInAsync(client, "case.reviewer");
         using var approved = await client.PostAsJsonAsync($"/api/test-change-reviews/{fixture.CaseReviewId}/approve", new
         {
             password = AeroLinkApiFactory.MemberPassword,
@@ -211,16 +211,5 @@ public sealed class ProcedureAssessmentChainApiTests
         db.AddRange(source, review);
         await db.SaveChangesAsync();
         return new(project.Id, release.Id, review.Id);
-    }
-
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login", new
-        {
-            userName = user,
-            password = AeroLinkApiFactory.MemberPassword,
-        });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 }

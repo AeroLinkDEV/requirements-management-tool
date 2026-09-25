@@ -32,7 +32,7 @@ public sealed class TestProcedureRevisionHistoryApiTests : IClassFixture<SharedA
     {
         using var client = _host.CreateClient();
         var fixture = await SeedAsync(_host.Factory);
-        await LoginAsync(client, fixture.EngineerName);
+        await MemberSession.SignInAsync(client, fixture.EngineerName);
 
         using var oldListResponse = await client.GetAsync(
             $"/api/test-procedures?projectId={fixture.ProjectId}&releaseId={fixture.Release15Id}" +
@@ -285,7 +285,7 @@ Assert.Equal(HttpStatusCode.NotFound, mismatchedRevision.StatusCode);
             primaryNumber = primary.DisplayNumber;
             foldedNumber = folded.DisplayNumber;
         }
-        await LoginAsync(client, engineerName);
+        await MemberSession.SignInAsync(client, engineerName);
 
         var manualHistory = await JsonAsync(client,
             $"/api/test-procedures/{manualProcedureId}/history?revisionId={manualRevisionId}");
@@ -483,14 +483,6 @@ Assert.Equal(HttpStatusCode.NotFound, mismatchedRevision.StatusCode);
             "Exact procedure revision covers this requirement.", now,
             procedure.Id, procedureRevision.Id, TestProcedureChangeAction.ModifyExisting);
         return item;
-    }
-
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
     private static async Task<JsonElement> JsonAsync(HttpClient client, string path)

@@ -29,7 +29,7 @@ public sealed class AdministratorChangeRequestApiTests
 
         using (var unrelated = factory.CreateClient())
         {
-            await LoginAsync(unrelated, "unrelated.engineer");
+            await MemberSession.SignInAsync(unrelated, "unrelated.engineer");
             using var rejectedDefer = await unrelated.PostAsJsonAsync(
                 $"/api/change-requests/{scenario.ReadyId}/defer",
                 new { reason = "Spoofed author action.", actorId = "change.author" });
@@ -42,7 +42,7 @@ public sealed class AdministratorChangeRequestApiTests
 
         using (var wrongProject = factory.CreateClient())
         {
-            await LoginAsync(wrongProject, "other.program.engineer");
+            await MemberSession.SignInAsync(wrongProject, "other.program.engineer");
             using var rejected = await wrongProject.PostAsJsonAsync(
                 $"/api/change-requests/{scenario.ReadyId}/defer",
                 new { reason = "No access to the governed project." });
@@ -51,7 +51,7 @@ public sealed class AdministratorChangeRequestApiTests
 
         using (var author = factory.CreateClient())
         {
-            await LoginAsync(author, "change.author");
+            await MemberSession.SignInAsync(author, "change.author");
             using var authorDefer = await author.PostAsJsonAsync(
                 $"/api/change-requests/{scenario.AddRequirementId}/defer",
                 new { reason = "Author-owned lifecycle action." });
@@ -232,14 +232,6 @@ public sealed class AdministratorChangeRequestApiTests
                 targetSectionId: section.Id);
             return item;
         }
-    }
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
     private sealed record Scenario(Guid ProjectId, Guid ReadyId, Guid AddRequirementId, Guid ApprovedId);

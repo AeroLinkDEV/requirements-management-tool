@@ -17,7 +17,7 @@ public sealed class ProblemReportOwnerAuthorityApiTests
         using var factory = new AeroLinkApiFactory();
         var scenario = await SeedAsync(factory);
         using var owner = factory.CreateClient();
-        await LoginAsync(owner, "owner.engineer");
+        await MemberSession.SignInAsync(owner, "owner.engineer");
         var report = await CreateAsync(owner, scenario.ProjectId);
 
         var directory = await owner.GetFromJsonAsync<JsonElement>(
@@ -65,7 +65,7 @@ public sealed class ProblemReportOwnerAuthorityApiTests
             item.GetProperty("eventType").GetString() == "ResponsibleEngineerReassigned");
 
         using var newOwner = factory.CreateClient();
-        await LoginAsync(newOwner, "authority.system");
+        await MemberSession.SignInAsync(newOwner, "authority.system");
         using var work = await newOwner.PostAsJsonAsync($"/api/problem-reports/{report.Id}/ready-for-sccb",
             new { expectedVersion = acceptedVersion });
         Assert.Equal(HttpStatusCode.OK, work.StatusCode);
@@ -77,7 +77,7 @@ public sealed class ProblemReportOwnerAuthorityApiTests
         using var factory = new AeroLinkApiFactory();
         var scenario = await SeedAsync(factory);
         using var owner = factory.CreateClient();
-        await LoginAsync(owner, "owner.engineer");
+        await MemberSession.SignInAsync(owner, "owner.engineer");
         var report = await CreateAsync(owner, scenario.ProjectId);
 
         using (var scope = factory.Services.CreateScope())
@@ -95,7 +95,7 @@ public sealed class ProblemReportOwnerAuthorityApiTests
         Assert.Equal(HttpStatusCode.Forbidden, inaccessible.StatusCode);
 
         using var supervisor = factory.CreateClient();
-        await LoginAsync(supervisor, "owner.supervisor");
+        await MemberSession.SignInAsync(supervisor, "owner.supervisor");
         var exception = await supervisor.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{report.Id}");
         var capabilities = exception.GetProperty("capabilities");
         Assert.Equal("owner.engineer", exception.GetProperty("responsibleEngineerId").GetString());
@@ -105,7 +105,7 @@ public sealed class ProblemReportOwnerAuthorityApiTests
 
         using (var quality = factory.CreateClient())
         {
-            await LoginAsync(quality, "authority.quality");
+            await MemberSession.SignInAsync(quality, "authority.quality");
             using var refusedRecovery = await quality.PostAsJsonAsync($"/api/problem-reports/{report.Id}/owner", new
             {
                 expectedVersion = report.Version,
@@ -167,17 +167,6 @@ public sealed class ProblemReportOwnerAuthorityApiTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         return (body.GetProperty("id").GetGuid(), body.GetProperty("version").GetInt64());
-    }
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login", new
-        {
-            userName,
-            password = AeroLinkApiFactory.MemberPassword
-        });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
     private static async Task<Scenario> SeedAsync(AeroLinkApiFactory factory)

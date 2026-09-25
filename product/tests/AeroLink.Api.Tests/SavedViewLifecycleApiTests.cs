@@ -39,14 +39,6 @@ public sealed class SavedViewLifecycleApiTests
         return project.Id;
     }
 
-    private static async Task SignInAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static Task<HttpResponseMessage> CreateAsync(HttpClient client, Guid projectId, string name,
         string query = "{\"search\":\"oceanic\",\"sort\":\"identifier\"}", string columns = "[\"identifier\",\"statement\"]",
         bool shared = true) =>
@@ -59,7 +51,7 @@ public sealed class SavedViewLifecycleApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var projectId = await SeedAsync(factory);
-        await SignInAsync(client, Owner);
+        await MemberSession.SignInAsync(client, Owner);
 
         // A field the workspace cannot apply, a sort it cannot perform, and a column it cannot show.
         foreach (var (query, columns) in new[]
@@ -90,7 +82,7 @@ public sealed class SavedViewLifecycleApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var projectId = await SeedAsync(factory);
-        await SignInAsync(client, Owner);
+        await MemberSession.SignInAsync(client, Owner);
 
         using (var first = await CreateAsync(client, projectId, "Oceanic worklist"))
             Assert.Equal(HttpStatusCode.Created, first.StatusCode);
@@ -112,7 +104,7 @@ public sealed class SavedViewLifecycleApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var projectId = await SeedAsync(factory);
-        await SignInAsync(client, Owner);
+        await MemberSession.SignInAsync(client, Owner);
 
         using var created = await CreateAsync(client, projectId, "Original name");
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
@@ -135,7 +127,7 @@ public sealed class SavedViewLifecycleApiTests
             Assert.Equal(HttpStatusCode.OK, reshared.StatusCode);
 
         using var otherClient = factory.CreateClient();
-        await SignInAsync(otherClient, Other);
+        await MemberSession.SignInAsync(otherClient, Other);
         using (var stolen = await otherClient.PutAsJsonAsync($"/api/enterprise-requirements/views/{id}", new { name = "Not yours" }))
             Assert.Equal(HttpStatusCode.NotFound, stolen.StatusCode);
         using (var removed = await otherClient.DeleteAsync($"/api/enterprise-requirements/views/{id}"))
@@ -169,7 +161,7 @@ public sealed class SavedViewLifecycleApiTests
             await db.SaveChangesAsync();
         }
 
-        await SignInAsync(client, Owner);
+        await MemberSession.SignInAsync(client, Owner);
         using var response = await client.GetAsync($"/api/enterprise-requirements/workspace?projectId={projectId}&page=1&pageSize=5");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var views = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.GetProperty("views");

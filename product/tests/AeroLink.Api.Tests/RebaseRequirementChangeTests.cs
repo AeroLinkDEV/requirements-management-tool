@@ -28,7 +28,7 @@ public sealed class RebaseRequirementChangeTests(SharedApiHost host) : IClassFix
     {
         var world = await SeedAsync(host.Factory, holderState: ChangeRequestState.Approved);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         var offer = await client.GetFromJsonAsync<JsonElement>(
             $"/api/change-requests/{world.MineId}/requirements/{world.MyChangeId}/rebase");
@@ -55,7 +55,7 @@ public sealed class RebaseRequirementChangeTests(SharedApiHost host) : IClassFix
     {
         var world = await SeedAsync(host.Factory, holderState: ChangeRequestState.Approved);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         await client.PostAsJsonAsync($"/api/change-requests/{world.MineId}/requirements/{world.MyChangeId}/rebase",
             new { statement = "The system shall reload within 1.0 seconds." });
@@ -78,7 +78,7 @@ public sealed class RebaseRequirementChangeTests(SharedApiHost host) : IClassFix
     {
         var world = await SeedAsync(host.Factory, holderState: ChangeRequestState.InReview);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         var offer = await client.GetFromJsonAsync<JsonElement>(
             $"/api/change-requests/{world.MineId}/requirements/{world.MyChangeId}/rebase");
@@ -101,7 +101,7 @@ public sealed class RebaseRequirementChangeTests(SharedApiHost host) : IClassFix
         var world = await SeedAsync(host.Factory, holderState: ChangeRequestState.Approved,
             holderKind: RequirementChangeKind.Retire);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         var offer = await client.GetFromJsonAsync<JsonElement>(
             $"/api/change-requests/{world.MineId}/requirements/{world.MyChangeId}/rebase");
@@ -120,7 +120,7 @@ public sealed class RebaseRequirementChangeTests(SharedApiHost host) : IClassFix
     {
         var world = await SeedAsync(host.Factory, holderState: ChangeRequestState.Approved, approveMine: true);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         using var rebased = await client.PostAsJsonAsync(
             $"/api/change-requests/{world.MineId}/requirements/{world.MyChangeId}/rebase",
@@ -138,7 +138,7 @@ public sealed class RebaseRequirementChangeTests(SharedApiHost host) : IClassFix
     {
         var world = await SeedAsync(host.Factory, holderState: ChangeRequestState.Approved);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         await client.PostAsJsonAsync($"/api/change-requests/{world.MineId}/requirements/{world.MyChangeId}/rebase",
             new { statement = "The system shall reload within 1.0 seconds." });
@@ -152,13 +152,6 @@ public sealed class RebaseRequirementChangeTests(SharedApiHost host) : IClassFix
     }
 
     private sealed record World(Guid ProjectId, Guid MineId, Guid MyChangeId, string Author, string Reviewer);
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
 
     private static async Task<World> SeedAsync(AeroLinkApiFactory factory, ChangeRequestState holderState,
         RequirementChangeKind holderKind = RequirementChangeKind.Modify, bool approveMine = false)

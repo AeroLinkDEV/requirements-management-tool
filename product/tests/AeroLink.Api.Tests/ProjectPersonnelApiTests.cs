@@ -72,20 +72,12 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
             managerName, engineerName, deputyName, outsiderName);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     [Fact]
     public async Task A_program_manager_may_read_and_change_their_own_project_roster()
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var response = await client.GetAsync($"/api/projects/{seeded.ProjectId}/personnel");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -104,7 +96,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.DeputyName);
+        await MemberSession.SignInAsync(client, seeded.DeputyName);
 
         var read = await client.GetAsync($"/api/projects/{seeded.ProjectId}/personnel");
         Assert.Equal(HttpStatusCode.OK, read.StatusCode);
@@ -120,7 +112,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.OutsiderName);
+        await MemberSession.SignInAsync(client, seeded.OutsiderName);
 
         var response = await client.GetAsync($"/api/projects/{seeded.ProjectId}/personnel");
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -135,7 +127,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var response = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.DeputyId, role = nameof(ProgramRole.SystemEngineeringLead) });
@@ -149,7 +141,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var response = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.OutsiderId, role = nameof(ProgramRole.SystemEngineer) });
@@ -166,7 +158,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var ended = await client.DeleteAsync(
             $"/api/projects/{seeded.ProjectId}/personnel/{seeded.EngineerId}/roles/{nameof(ProgramRole.SystemEngineeringLead)}");
@@ -206,7 +198,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         await client.DeleteAsync($"/api/projects/{seeded.ProjectId}/personnel/{seeded.EngineerId}/roles/{nameof(ProgramRole.SystemEngineeringLead)}");
         var reassigned = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
@@ -225,7 +217,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         await client.DeleteAsync($"/api/projects/{seeded.ProjectId}/personnel/{seeded.DeputyId}/roles/{nameof(ProgramRole.SystemEngineer)}");
         var rejoined = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
@@ -243,7 +235,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         using (var before = _host.Factory.Services.CreateScope())
         {
@@ -271,7 +263,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var response = await client.PostAsJsonAsync(
             $"/api/projects/{seeded.ProjectId}/leadership/{nameof(ProjectLeadershipPosition.SystemEngineeringLead)}/backup",
@@ -288,7 +280,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var response = await client.PostAsJsonAsync(
             $"/api/projects/{seeded.ProjectId}/leadership/{nameof(ProjectLeadershipPosition.SystemEngineeringLead)}/backup",
@@ -306,7 +298,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var named = await client.PostAsJsonAsync(
             $"/api/projects/{seeded.ProjectId}/leadership/{nameof(ProjectLeadershipPosition.SystemEngineeringLead)}/backup",
@@ -331,7 +323,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var ended = await client.DeleteAsync(
             $"/api/projects/{seeded.ProjectId}/personnel/{seeded.EngineerId}/roles/{nameof(ProgramRole.SystemEngineer)}");
@@ -360,7 +352,7 @@ public sealed class ProjectPersonnelApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var response = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.DeputyId, role = nameof(ProgramRole.Administrator) });

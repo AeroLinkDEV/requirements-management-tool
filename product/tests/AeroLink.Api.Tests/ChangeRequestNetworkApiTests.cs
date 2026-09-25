@@ -69,13 +69,6 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
             otherBuild.Id, report.Id, memberName, outsiderName);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-    }
-
     private static async Task<JsonElement> NetworkAsync(HttpClient client, Fixture fixture, int? maxNodes = null)
     {
         var query = $"/api/change-requests/network?projectId={fixture.ProjectId}&releaseId={fixture.CurrentReleaseId}"
@@ -93,7 +86,7 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var body = await NetworkAsync(client, fixture);
         var ids = NodeIds(body);
@@ -110,7 +103,7 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var edges = (await NetworkAsync(client, fixture)).GetProperty("edges").EnumerateArray().ToList();
 
@@ -137,7 +130,7 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var levels = (await NetworkAsync(client, fixture)).GetProperty("orderedLevels")
             .EnumerateArray().Select(x => x.GetString()).ToList();
@@ -155,7 +148,7 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var ids = NodeIds(await NetworkAsync(client, fixture));
 
@@ -167,7 +160,7 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var body = await NetworkAsync(client, fixture);
         // The link is stored child → parent, but the network presents the story direction (#925 F5):
@@ -187,7 +180,7 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var body = await NetworkAsync(client, fixture);
         var report = body.GetProperty("nodes").EnumerateArray()
@@ -206,7 +199,7 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var body = await NetworkAsync(client, fixture, maxNodes: 1);
 
@@ -248,7 +241,7 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
             await db.SaveChangesAsync();
         }
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
         foreach (var route in new[] { $"/api/change-requests/{fixture.ParentId}/trace", $"/api/test-change-reviews/{reviewId}/trace" })
         {
             using var response = await client.GetAsync(route);
@@ -257,7 +250,7 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
             Assert.Equal("trace_work_limit", problem.GetProperty("code").GetString());
         }
         using var outsider = _host.CreateClient();
-        await SignInAsync(outsider, fixture.Outsider);
+        await MemberSession.SignInForReadsAsync(outsider, fixture.Outsider);
         using var forbidden = await outsider.GetAsync($"/api/change-requests/{fixture.ParentId}/trace");
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
         Assert.True((await NetworkAsync(client, fixture, 1)).GetProperty("truncated").GetBoolean());
@@ -269,13 +262,13 @@ public sealed class ChangeRequestNetworkApiTests : IClassFixture<SharedApiHost>
         var fixture = await SeedAsync(_host.Factory);
 
         using var outsider = _host.CreateClient();
-        await SignInAsync(outsider, fixture.Outsider);
+        await MemberSession.SignInForReadsAsync(outsider, fixture.Outsider);
         using var forbidden = await outsider.GetAsync(
             $"/api/change-requests/network?projectId={fixture.ProjectId}&releaseId={fixture.CurrentReleaseId}");
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
 
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
         using var missing = await client.GetAsync(
             $"/api/change-requests/network?projectId={fixture.ProjectId}&releaseId={Guid.NewGuid()}");
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);

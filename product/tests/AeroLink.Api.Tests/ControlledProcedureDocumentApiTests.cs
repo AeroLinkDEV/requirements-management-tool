@@ -74,14 +74,6 @@ public sealed class ControlledProcedureDocumentApiTests
         return new(project.Id, release.Id, baseline.Id, carrying.Id);
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static async Task MaterializeRequirementsAsync(HttpClient client, Guid baselineId)
     {
         using var response = await client.PostAsJsonAsync($"/api/baselines/{baselineId}/materialize-requirements", new { });
@@ -141,7 +133,7 @@ public sealed class ControlledProcedureDocumentApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
 
         using var generated = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/generate-documents", new { });
@@ -170,7 +162,7 @@ public sealed class ControlledProcedureDocumentApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
 
@@ -207,7 +199,7 @@ public sealed class ControlledProcedureDocumentApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
         using var selected = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests",
@@ -264,7 +256,7 @@ public sealed class ControlledProcedureDocumentApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
 
         // Baseline 1 carries two introduced procedures (.00 each) from one approved package.

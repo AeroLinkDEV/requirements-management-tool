@@ -28,7 +28,7 @@ public sealed class DeferredBacklogTests(SharedApiHost host) : IClassFixture<Sha
     {
         var world = await SeedAsync(host.Factory);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         // Build 1.7 does not carry it.
         var seventeen = await client.GetFromJsonAsync<JsonElement>(
@@ -61,7 +61,7 @@ public sealed class DeferredBacklogTests(SharedApiHost host) : IClassFixture<Sha
     {
         var world = await SeedAsync(host.Factory, alsoDeferInFourteen: true);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         var backlog = await client.GetFromJsonAsync<JsonElement>(
             $"/api/change-requests/deferred?projectId={world.ProjectId}");
@@ -76,7 +76,7 @@ public sealed class DeferredBacklogTests(SharedApiHost host) : IClassFixture<Sha
     {
         var world = await SeedAsync(host.Factory);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         using var brought = await client.PostAsJsonAsync(
             $"/api/change-requests/{world.DeferredId}/reinstate", new { intoReleaseId = world.Seventeen });
@@ -105,7 +105,7 @@ public sealed class DeferredBacklogTests(SharedApiHost host) : IClassFixture<Sha
     {
         var world = await SeedAsync(host.Factory);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         var system = await client.GetFromJsonAsync<JsonElement>(
             $"/api/change-requests/deferred?projectId={world.ProjectId}&type=System");
@@ -120,13 +120,6 @@ public sealed class DeferredBacklogTests(SharedApiHost host) : IClassFixture<Sha
 
     private sealed record World(Guid ProjectId, Guid Sixteen, Guid Seventeen, Guid DeferredId,
         Guid? OldDeferredId, string Author);
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
 
     private static async Task<World> SeedAsync(AeroLinkApiFactory factory, bool alsoDeferInFourteen = false)
     {

@@ -70,13 +70,6 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
         return (project.Id, member);
     }
 
-    private static async Task SignInAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-    }
-
     private static async Task<JsonElement> PageAsync(HttpClient client, Guid projectId, string query = "",
         string route = "/api/test-procedures")
     {
@@ -94,7 +87,7 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         var seeded = await SeedAsync(_host.Factory);
         var projectId = seeded.ProjectId;
-        await SignInAsync(client, seeded.MemberName);
+        await MemberSession.SignInForReadsAsync(client, seeded.MemberName);
 
         var first = await PageAsync(client, projectId, "&page=1&pageSize=10");
         Assert.Equal(40, first.GetProperty("totalCount").GetInt32());
@@ -120,7 +113,7 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         var seeded = await SeedAsync(_host.Factory);
         var projectId = seeded.ProjectId;
-        await SignInAsync(client, seeded.MemberName);
+        await MemberSession.SignInForReadsAsync(client, seeded.MemberName);
 
         var byNumber = await PageAsync(client, projectId, "&search=SYSTP-00000007");
         Assert.Equal(1, byNumber.GetProperty("totalCount").GetInt32());
@@ -160,7 +153,7 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         var seeded = await SeedAsync(_host.Factory);
         var projectId = seeded.ProjectId;
-        await SignInAsync(client, seeded.MemberName);
+        await MemberSession.SignInForReadsAsync(client, seeded.MemberName);
 
         foreach (var sort in new[] { "identifier", "title", "owner", "level" })
         {
@@ -192,7 +185,7 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
                 new TestProcedureRevision(system.Id, 0, "System", "Ready", "Run", "Pass", TestProcedureState.Draft, "test.author", now));
             await db.SaveChangesAsync();
         }
-        await SignInAsync(client, seeded.MemberName);
+        await MemberSession.SignInForReadsAsync(client, seeded.MemberName);
 
         var highCases = await PageAsync(client, projectId, "&scope=HighLevelSoftware", "/api/test-cases");
         var lowCases = await PageAsync(client, projectId, "&scope=LowLevelSoftware", "/api/test-cases");
@@ -215,7 +208,7 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
         // Notification and other external links use the current Case identity. The legacy Procedure resolver
         // remains available separately, but a current software link must land on the canonical Case route.
         using var direct = _host.Factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        await SignInAsync(direct, seeded.MemberName);
+        await MemberSession.SignInForReadsAsync(direct, seeded.MemberName);
         using var redirect = await direct.GetAsync($"/open/case/{highCaseId}");
         Assert.Equal(HttpStatusCode.Redirect, redirect.StatusCode);
         Assert.Contains($"/software-verification/cases?caseId={highCaseId}",
@@ -228,7 +221,7 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
         using var client = _host.CreateClient();
         var seeded = await SeedAsync(_host.Factory, 1);
         var projectId = seeded.ProjectId;
-        await SignInAsync(client, seeded.MemberName);
+        await MemberSession.SignInForReadsAsync(client, seeded.MemberName);
 
         Assert.Equal(["SYSTP-00000001.01"], Numbers(await PageAsync(client, projectId, "&search=SYSTP-00000001.01")));
     }
@@ -238,7 +231,7 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
     {
         using var client = _host.CreateClient();
         var seeded = await SeedAsync(_host.Factory, 0);
-        await SignInAsync(client, seeded.MemberName);
+        await MemberSession.SignInForReadsAsync(client, seeded.MemberName);
         Guid signatureId;
         Guid artifactId;
         const string oldHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -308,7 +301,7 @@ public sealed class ProcedureBrowsingApiTests : IClassFixture<SharedApiHost>
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow));
             await db.SaveChangesAsync();
 
-            await SignInAsync(client, outsiderName);
+            await MemberSession.SignInForReadsAsync(client, outsiderName);
         }
         using var response = await client.GetAsync($"/api/test-procedures?projectId={projectId}");
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);

@@ -29,13 +29,6 @@ public sealed class DownstreamAssessmentReopenApiTests : IClassFixture<SharedApi
         _host = host;
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
     private static UserAccount Account(string user, DateTimeOffset now) => new(user, user,
         $"{user}@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
 
@@ -86,7 +79,7 @@ public sealed class DownstreamAssessmentReopenApiTests : IClassFixture<SharedApi
     {
         var fixture = await SeedAsync(_host.Factory);
         using var engineer = _host.CreateClient();
-        await LoginAsync(engineer, fixture.EngineerName);
+        await MemberSession.SignInForReadsAsync(engineer, fixture.EngineerName);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(engineer);
 
         // Unclaimed.
@@ -105,7 +98,7 @@ public sealed class DownstreamAssessmentReopenApiTests : IClassFixture<SharedApi
     {
         var fixture = await SeedAsync(_host.Factory);
         using var engineer = _host.CreateClient();
-        await LoginAsync(engineer, fixture.EngineerName);
+        await MemberSession.SignInForReadsAsync(engineer, fixture.EngineerName);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(engineer);
         await engineer.PostAsJsonAsync($"/api/downstream-assessments/{fixture.AssessmentId}/assign",
             new { engineerId = fixture.EngineerName });
@@ -150,7 +143,7 @@ public sealed class DownstreamAssessmentReopenApiTests : IClassFixture<SharedApi
         var fixture = await SeedAsync(_host.Factory);
         using (var engineer = _host.CreateClient())
         {
-            await LoginAsync(engineer, fixture.EngineerName);
+            await MemberSession.SignInForReadsAsync(engineer, fixture.EngineerName);
             await SecurityBoundaryTests.AuthorizeMutationsAsync(engineer);
             await engineer.PostAsJsonAsync($"/api/downstream-assessments/{fixture.AssessmentId}/assign",
                 new { engineerId = fixture.EngineerName });
@@ -158,7 +151,7 @@ public sealed class DownstreamAssessmentReopenApiTests : IClassFixture<SharedApi
                 new { rationale = "The existing HLR behavior already satisfies the change." });
         }
         using var intruder = _host.CreateClient();
-        await LoginAsync(intruder, fixture.OtherName);
+        await MemberSession.SignInForReadsAsync(intruder, fixture.OtherName);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(intruder);
         Assert.False((await RowAsync(intruder, fixture)).GetProperty("capabilities").GetProperty("canReopen").GetBoolean());
         using var refused = await intruder.PostAsJsonAsync(
@@ -172,7 +165,7 @@ public sealed class DownstreamAssessmentReopenApiTests : IClassFixture<SharedApi
         var fixture = await SeedAsync(_host.Factory);
         using (var engineer = _host.CreateClient())
         {
-            await LoginAsync(engineer, fixture.EngineerName);
+            await MemberSession.SignInForReadsAsync(engineer, fixture.EngineerName);
             await SecurityBoundaryTests.AuthorizeMutationsAsync(engineer);
             await engineer.PostAsJsonAsync($"/api/downstream-assessments/{fixture.AssessmentId}/assign",
                 new { engineerId = fixture.EngineerName });
@@ -186,7 +179,7 @@ public sealed class DownstreamAssessmentReopenApiTests : IClassFixture<SharedApi
             Assert.False(inReview.GetProperty("capabilities").GetProperty("canReopen").GetBoolean());
         }
         using var approver = _host.CreateClient();
-        await LoginAsync(approver, fixture.ApproverName);
+        await MemberSession.SignInForReadsAsync(approver, fixture.ApproverName);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(approver);
         Assert.Equal(HttpStatusCode.OK, (await approver.PostAsync(
             $"/api/downstream-assessments/{fixture.AssessmentId}/approve", null)).StatusCode);
@@ -196,7 +189,7 @@ public sealed class DownstreamAssessmentReopenApiTests : IClassFixture<SharedApi
         // The engineer who wrote the conclusion no longer owns it once it is approved.
         using (var engineer = _host.CreateClient())
         {
-            await LoginAsync(engineer, fixture.EngineerName);
+            await MemberSession.SignInForReadsAsync(engineer, fixture.EngineerName);
             await SecurityBoundaryTests.AuthorizeMutationsAsync(engineer);
             Assert.False((await RowAsync(engineer, fixture)).GetProperty("capabilities").GetProperty("canReopen").GetBoolean());
             using var refused = await engineer.PostAsJsonAsync(
@@ -222,7 +215,7 @@ public sealed class DownstreamAssessmentReopenApiTests : IClassFixture<SharedApi
     {
         var fixture = await SeedAsync(_host.Factory);
         using var engineer = _host.CreateClient();
-        await LoginAsync(engineer, fixture.EngineerName);
+        await MemberSession.SignInForReadsAsync(engineer, fixture.EngineerName);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(engineer);
         await engineer.PostAsJsonAsync($"/api/downstream-assessments/{fixture.AssessmentId}/assign",
             new { engineerId = fixture.EngineerName });

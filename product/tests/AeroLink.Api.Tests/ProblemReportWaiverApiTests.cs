@@ -20,12 +20,12 @@ public sealed class ProblemReportWaiverApiTests
         await ProblemReportApiTests.BootstrapAndLoginAsync(administrator);
         var fixture = await SeedAsync(factory);
 
-        using var owner = factory.CreateClient(); await LoginAsync(owner, "waiver.owner");
-        using var reporter = factory.CreateClient(); await LoginAsync(reporter, "waiver.reporter");
-        using var outsider = factory.CreateClient(); await LoginAsync(outsider, "waiver.engineer");
-        using var testEngineer = factory.CreateClient(); await LoginAsync(testEngineer, "waiver.test");
-        using var approver = factory.CreateClient(); await LoginAsync(approver, "waiver.approver");
-        using var quality = factory.CreateClient(); await LoginAsync(quality, "waiver.quality");
+        using var owner = factory.CreateClient(); await MemberSession.SignInForReadsAsync(owner, "waiver.owner");
+        using var reporter = factory.CreateClient(); await MemberSession.SignInForReadsAsync(reporter, "waiver.reporter");
+        using var outsider = factory.CreateClient(); await MemberSession.SignInForReadsAsync(outsider, "waiver.engineer");
+        using var testEngineer = factory.CreateClient(); await MemberSession.SignInForReadsAsync(testEngineer, "waiver.test");
+        using var approver = factory.CreateClient(); await MemberSession.SignInForReadsAsync(approver, "waiver.approver");
+        using var quality = factory.CreateClient(); await MemberSession.SignInForReadsAsync(quality, "waiver.quality");
 
         var legacyDashboard = await quality.GetFromJsonAsync<JsonElement>($"/api/problem-reports/dashboard?projectId={fixture.ProjectId}");
         Assert.Equal(1, legacyDashboard.GetProperty("summary").GetProperty("releaseBlockers").GetInt32());
@@ -106,9 +106,9 @@ public sealed class ProblemReportWaiverApiTests
     {
         using var factory = new AeroLinkApiFactory();
         var fixture = await SeedPositionAuthorityAsync(factory);
-        using var baseClient = factory.CreateClient(); await LoginAsync(baseClient, "waiver.cm.base");
-        using var primaryClient = factory.CreateClient(); await LoginAsync(primaryClient, "waiver.cm.primary");
-        using var backupClient = factory.CreateClient(); await LoginAsync(backupClient, "waiver.cm.backup");
+        using var baseClient = factory.CreateClient(); await MemberSession.SignInForReadsAsync(baseClient, "waiver.cm.base");
+        using var primaryClient = factory.CreateClient(); await MemberSession.SignInForReadsAsync(primaryClient, "waiver.cm.primary");
+        using var backupClient = factory.CreateClient(); await MemberSession.SignInForReadsAsync(backupClient, "waiver.cm.backup");
 
         using (var refused = await baseClient.PostAsJsonAsync(
                    $"/api/problem-reports/{fixture.ReportId}/release-waiver", WaiverBody(fixture.Version)))
@@ -217,11 +217,4 @@ public sealed class ProblemReportWaiverApiTests
 
     private static UserAccount Account(string name, DateTimeOffset now) => new(name, name, $"{name}@example.test",
         IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
 }

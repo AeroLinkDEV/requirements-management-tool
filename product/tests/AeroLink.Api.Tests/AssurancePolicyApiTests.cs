@@ -66,14 +66,6 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
             engineer.Id);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static object RelaxCoverage(int expectedVersion, string approver, string rationale = "The customer runs this campaign.",
         bool airworthinessDesignated = false, string declaredLevel = "LevelB") => new
         {
@@ -95,7 +87,7 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.Engineer);
+        await MemberSession.SignInAsync(client, seeded.Engineer);
 
         var response = await client.GetAsync($"/api/projects/{seeded.ProjectId}/assurance-policy");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -131,7 +123,7 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ConfigurationManager);
+        await MemberSession.SignInAsync(client, seeded.ConfigurationManager);
 
         var before = await client.GetFromJsonAsync<JsonElement>($"/api/projects/{seeded.ProjectId}/assurance-policy");
         var baseline = before.GetProperty("levers").EnumerateArray()
@@ -164,7 +156,7 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ConfigurationManager);
+        await MemberSession.SignInAsync(client, seeded.ConfigurationManager);
 
         var noDeviation = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/assurance-policy", new
         {
@@ -196,7 +188,7 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ConfigurationManager);
+        await MemberSession.SignInAsync(client, seeded.ConfigurationManager);
 
         foreach (var (approver, expected) in new[]
         {
@@ -244,7 +236,7 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ConfigurationManager);
+        await MemberSession.SignInAsync(client, seeded.ConfigurationManager);
 
         var refused = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/assurance-policy",
             RelaxCoverage(0, seeded.Sqa, airworthinessDesignated: true));
@@ -276,7 +268,7 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
         }
 
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ConfigurationManager);
+        await MemberSession.SignInAsync(client, seeded.ConfigurationManager);
 
         var expired = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/assurance-policy",
             RelaxCoverage(0, seeded.Engineer));
@@ -306,7 +298,7 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ConfigurationManager);
+        await MemberSession.SignInAsync(client, seeded.ConfigurationManager);
 
         var first = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/assurance-policy",
             RelaxCoverage(0, seeded.Sqa));
@@ -361,7 +353,7 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ConfigurationManager);
+        await MemberSession.SignInAsync(client, seeded.ConfigurationManager);
 
         var beforeLadder = await client.GetFromJsonAsync<JsonElement>($"/api/projects/{seeded.ProjectId}/configuration");
         var beforeSteps = beforeLadder.GetProperty("effectiveSteps").GetRawText();
@@ -393,7 +385,7 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.Engineer);
+        await MemberSession.SignInAsync(client, seeded.Engineer);
 
         Assert.Equal(HttpStatusCode.OK,
             (await client.GetAsync($"/api/projects/{seeded.ProjectId}/assurance-policy")).StatusCode);
@@ -432,7 +424,7 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
         foreach (var userName in new[] { baseConfigurationManager, baseProgramManager })
         {
             using var client = _host.CreateClient();
-            await SignInAsync(client, userName);
+            await MemberSession.SignInAsync(client, userName);
             var read = await client.GetFromJsonAsync<JsonElement>(
                 $"/api/projects/{seeded.ProjectId}/assurance-policy");
             Assert.False(read.GetProperty("canManage").GetBoolean());
@@ -453,7 +445,7 @@ public sealed class AssurancePolicyApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ConfigurationManager);
+        await MemberSession.SignInAsync(client, seeded.ConfigurationManager);
 
         var created = await client.PostAsJsonAsync("/api/release-campaigns", new
         {

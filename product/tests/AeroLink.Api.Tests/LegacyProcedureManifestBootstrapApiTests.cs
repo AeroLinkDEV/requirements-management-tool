@@ -63,14 +63,6 @@ public sealed class LegacyProcedureManifestBootstrapApiTests
         return new Fixture(baseline.Id, procedure.Id, revision.Id);
     }
 
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     [Fact]
     public async Task Preview_confirmation_authority_and_idempotency_are_enforced_by_the_API()
     {
@@ -78,7 +70,7 @@ public sealed class LegacyProcedureManifestBootstrapApiTests
         var fixture = await SeedAsync(factory);
 
         using var reader = factory.CreateClient();
-        await LoginAsync(reader, "legacy.reader");
+        await MemberSession.SignInAsync(reader, "legacy.reader");
         using var deniedPreview = await reader.GetAsync(
             $"/api/baselines/{fixture.BaselineId}/legacy-procedure-manifest-bootstrap");
         Assert.Equal(HttpStatusCode.Forbidden, deniedPreview.StatusCode);
@@ -88,7 +80,7 @@ public sealed class LegacyProcedureManifestBootstrapApiTests
         Assert.Equal(HttpStatusCode.Forbidden, deniedMutation.StatusCode);
 
         using var cm = factory.CreateClient();
-        await LoginAsync(cm, "legacy.cm");
+        await MemberSession.SignInAsync(cm, "legacy.cm");
         using var previewResponse = await cm.GetAsync(
             $"/api/baselines/{fixture.BaselineId}/legacy-procedure-manifest-bootstrap");
         var previewBody = await previewResponse.Content.ReadAsStringAsync();

@@ -29,7 +29,7 @@ public sealed class ReviewLinkOutlivedCycleTests(SharedApiHost host) : IClassFix
     {
         var fixture = await SeedAsync(host.Factory);
         using var reviewer = host.CreateClient();
-        await LoginAsync(reviewer, fixture.Reviewer);
+        await MemberSession.SignInAsync(reviewer, fixture.Reviewer);
 
         // While the cycle is open there is a live decision, so nothing needs explaining.
         Assert.DoesNotContain("reviewEnded", await OpenLocationAsync(fixture.Reviewer, fixture.ChangeRequestId));
@@ -47,7 +47,7 @@ public sealed class ReviewLinkOutlivedCycleTests(SharedApiHost host) : IClassFix
     {
         var fixture = await SeedAsync(host.Factory);
         using var reviewer = host.CreateClient();
-        await LoginAsync(reviewer, fixture.Reviewer);
+        await MemberSession.SignInAsync(reviewer, fixture.Reviewer);
         using var returned = await reviewer.PostAsJsonAsync(
             $"/api/change-requests/{fixture.ChangeRequestId}/request-changes",
             new { reason = "Rework the tolerance." });
@@ -70,7 +70,7 @@ public sealed class ReviewLinkOutlivedCycleTests(SharedApiHost host) : IClassFix
     {
         var fixture = await SeedAsync(host.Factory);
         using var reviewer = host.CreateClient();
-        await LoginAsync(reviewer, fixture.Reviewer);
+        await MemberSession.SignInAsync(reviewer, fixture.Reviewer);
         using var returned = await reviewer.PostAsJsonAsync(
             $"/api/change-requests/{fixture.ChangeRequestId}/request-changes",
             new { reason = "Rework the tolerance." });
@@ -85,7 +85,7 @@ public sealed class ReviewLinkOutlivedCycleTests(SharedApiHost host) : IClassFix
     private async Task<string> OpenLocationAsync(string userName, Guid changeRequestId)
     {
         using var client = host.Factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        await LoginAsync(client, userName);
+        await MemberSession.SignInAsync(client, userName);
         using var response = await client.GetAsync($"/open/scr/{changeRequestId}");
         Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
         return response.Headers.Location!.ToString();
@@ -128,12 +128,5 @@ public sealed class ReviewLinkOutlivedCycleTests(SharedApiHost host) : IClassFix
 
         await db.SaveChangesAsync();
         return new Seeded(scr.Id, author, reviewer, bystander, outsider);
-    }
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        var login = await client.PostAsJsonAsync("/api/auth/login", new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 }

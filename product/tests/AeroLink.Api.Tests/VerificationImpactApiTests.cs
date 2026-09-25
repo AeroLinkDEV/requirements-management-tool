@@ -60,13 +60,6 @@ public sealed class VerificationImpactApiTests
         return new Fixture(release.Id, baseline.Id, project.Id);
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login", new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     /// <summary>
     /// The reviews listing ordered by a DateTimeOffset in the database, which SQLite refuses to translate, so
     /// the endpoint returned 500 on every call. The client checked only `response.ok` before storing the
@@ -79,7 +72,7 @@ public sealed class VerificationImpactApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory, ("lead.user", ProgramRole.TestLead));
-        await LoginAsync(client, "lead.user");
+        await MemberSession.SignInAsync(client, "lead.user");
 
         using var response = await client.GetAsync($"/api/releases/{fixture.ReleaseId}/test-change-reviews");
         var body = await response.Content.ReadAsStringAsync();
@@ -106,13 +99,13 @@ public sealed class VerificationImpactApiTests
         var fixture = await SeedAsync(factory,
             ("cm.user", ProgramRole.ConfigurationManager), ("lead.user", ProgramRole.TestLead), ("eng.user", ProgramRole.TestEngineer));
 
-        await LoginAsync(client, "cm.user");
+        await MemberSession.SignInAsync(client, "cm.user");
         using var frozen = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/freeze", new { });
         Assert.Equal(HttpStatusCode.OK, frozen.StatusCode);
 
         using (var engineer = factory.CreateClient())
         {
-            await LoginAsync(engineer, "eng.user");
+            await MemberSession.SignInAsync(engineer, "eng.user");
             var items = await engineer.GetFromJsonAsync<JsonElement>($"/api/releases/{fixture.ReleaseId}/verification-impact?outstandingOnly=true");
             Assert.Equal(1, items.GetArrayLength());
             var item = items[0];
@@ -127,7 +120,7 @@ public sealed class VerificationImpactApiTests
 
         using (var engineer = factory.CreateClient())
         {
-            await LoginAsync(engineer, "eng.user");
+            await MemberSession.SignInAsync(engineer, "eng.user");
             var remaining = await engineer.GetFromJsonAsync<JsonElement>($"/api/releases/{fixture.ReleaseId}/verification-impact?outstandingOnly=true");
             Assert.Equal(0, remaining.GetArrayLength());
         }
@@ -148,7 +141,7 @@ public sealed class VerificationImpactApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory, ("eng.user", ProgramRole.TestEngineer));
-        await LoginAsync(client, "eng.user");
+        await MemberSession.SignInAsync(client, "eng.user");
 
         // Method not allowed rather than not found: the collection is still there to be read, and only the
         // verb that wrote to it is gone. Asserting the exact status is the point — a 404 here would mean the
@@ -163,7 +156,7 @@ public sealed class VerificationImpactApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory, ("eng.user", ProgramRole.TestEngineer));
-        await LoginAsync(client, "eng.user");
+        await MemberSession.SignInAsync(client, "eng.user");
 
         var items = await client.GetFromJsonAsync<JsonElement>($"/api/releases/{fixture.ReleaseId}/verification-impact");
         var id = items[0].GetProperty("id").GetGuid();
@@ -184,7 +177,7 @@ public sealed class VerificationImpactApiTests
         var fixture = await SeedAsync(factory, ("cm.user", ProgramRole.ConfigurationManager), ("eng.user", ProgramRole.TestEngineer));
         using (var configurationManager = factory.CreateClient())
         {
-            await LoginAsync(configurationManager, "cm.user");
+            await MemberSession.SignInAsync(configurationManager, "cm.user");
             Assert.Equal(HttpStatusCode.OK,
                 (await configurationManager.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/freeze", new { })).StatusCode);
             Assert.Equal(HttpStatusCode.OK,
@@ -230,7 +223,7 @@ public sealed class VerificationImpactApiTests
         }
 
         using var client = factory.CreateClient();
-        await LoginAsync(client, "eng.user");
+        await MemberSession.SignInAsync(client, "eng.user");
         using (var linkExisting = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve",
                    new
                    {
@@ -291,7 +284,7 @@ public sealed class VerificationImpactApiTests
 
         using (var cm = factory.CreateClient())
         {
-            await LoginAsync(cm, "cm.user");
+            await MemberSession.SignInAsync(cm, "cm.user");
             Assert.Equal(HttpStatusCode.OK,
                 (await cm.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/freeze", new { })).StatusCode);
             Assert.Equal(HttpStatusCode.OK,
@@ -324,7 +317,7 @@ public sealed class VerificationImpactApiTests
         Guid itemId;
         using (var lead = factory.CreateClient())
         {
-            await LoginAsync(lead, "lead.user");
+            await MemberSession.SignInAsync(lead, "lead.user");
             var items = await lead.GetFromJsonAsync<JsonElement>(
                 $"/api/releases/{fixture.ReleaseId}/verification-impact");
             itemId = items[0].GetProperty("id").GetGuid();
@@ -335,7 +328,7 @@ public sealed class VerificationImpactApiTests
 
         using (var engineer = factory.CreateClient())
         {
-            await LoginAsync(engineer, "eng.user");
+            await MemberSession.SignInAsync(engineer, "eng.user");
             using var resolved = await engineer.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve", new
             {
                 outcome = "ProcedureCoverageConfirmed",
@@ -405,7 +398,7 @@ public sealed class VerificationImpactApiTests
         Guid id;
         using (var lead = factory.CreateClient())
         {
-            await LoginAsync(lead, "lead.user");
+            await MemberSession.SignInAsync(lead, "lead.user");
             var items = await lead.GetFromJsonAsync<JsonElement>($"/api/releases/{fixture.ReleaseId}/verification-impact");
             id = items[0].GetProperty("id").GetGuid();
 
@@ -419,7 +412,7 @@ public sealed class VerificationImpactApiTests
         }
 
         // The requirement author cannot distribute the work, nor decide what it means for verification.
-        await LoginAsync(client, "author.user");
+        await MemberSession.SignInAsync(client, "author.user");
         using var cannotAssign = await client.PostAsJsonAsync($"/api/verification-impact/{id}/assign", new { engineerId = "eng.user" });
         Assert.Equal(HttpStatusCode.Forbidden, cannotAssign.StatusCode);
         using var cannotResolve = await client.PostAsJsonAsync($"/api/verification-impact/{id}/resolve",
@@ -437,7 +430,7 @@ public sealed class VerificationImpactApiTests
         Guid reviewId;
         using (var engineer = factory.CreateClient())
         {
-            await LoginAsync(engineer, "eng.user");
+            await MemberSession.SignInAsync(engineer, "eng.user");
             var reviews = await engineer.GetFromJsonAsync<JsonElement>(
                 $"/api/releases/{fixture.ReleaseId}/test-change-reviews");
             var review = reviews.GetProperty("items")[0];
@@ -521,7 +514,7 @@ public sealed class VerificationImpactApiTests
 
         using (var cmClient = factory.CreateClient())
         {
-            await LoginAsync(cmClient, "cm.user");
+            await MemberSession.SignInAsync(cmClient, "cm.user");
             Assert.Equal(HttpStatusCode.OK,
                 (await cmClient.PostAsJsonAsync($"/api/baselines/{baselineId}/freeze", new { })).StatusCode);
             Assert.Equal(HttpStatusCode.OK,
@@ -575,7 +568,7 @@ public sealed class VerificationImpactApiTests
 
         using (var client = factory.CreateClient())
         {
-            await LoginAsync(client, "eng.user");
+            await MemberSession.SignInAsync(client, "eng.user");
             using var resolved = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve", new
             {
                 outcome = "ProcedureCoverageConfirmed",
@@ -598,7 +591,7 @@ public sealed class VerificationImpactApiTests
 
         using (var client = factory.CreateClient())
         {
-            await LoginAsync(client, "eng.user");
+            await MemberSession.SignInAsync(client, "eng.user");
             using var reopened = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/reopen",
                 new { rationale = "Reopen both exact parent Cases." });
             Assert.Equal(HttpStatusCode.OK, reopened.StatusCode);
@@ -675,7 +668,7 @@ public sealed class VerificationImpactApiTests
 
         using (var cmClient = factory.CreateClient())
         {
-            await LoginAsync(cmClient, "cm.user");
+            await MemberSession.SignInAsync(cmClient, "cm.user");
             Assert.Equal(HttpStatusCode.OK,
                 (await cmClient.PostAsJsonAsync($"/api/baselines/{baselineId}/freeze", new { })).StatusCode);
             Assert.Equal(HttpStatusCode.OK,
@@ -729,7 +722,7 @@ public sealed class VerificationImpactApiTests
 
         using (var client = factory.CreateClient())
         {
-            await LoginAsync(client, "eng.user");
+            await MemberSession.SignInAsync(client, "eng.user");
             using var resolved = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve", new
             {
                 outcome = "ProcedureCoverageConfirmed",
@@ -755,7 +748,7 @@ public sealed class VerificationImpactApiTests
 
         using (var client = factory.CreateClient())
         {
-            await LoginAsync(client, "eng.user");
+            await MemberSession.SignInAsync(client, "eng.user");
             using var reopened = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/reopen",
                 new { rationale = "Reopen the effective parent only." });
             Assert.Equal(HttpStatusCode.OK, reopened.StatusCode);
@@ -839,7 +832,7 @@ public sealed class VerificationImpactApiTests
 
         using (var cmClient = factory.CreateClient())
         {
-            await LoginAsync(cmClient, "cm.user");
+            await MemberSession.SignInAsync(cmClient, "cm.user");
             Assert.Equal(HttpStatusCode.OK,
                 (await cmClient.PostAsJsonAsync($"/api/baselines/{baselineId}/freeze", new { })).StatusCode);
             Assert.Equal(HttpStatusCode.OK,
@@ -925,7 +918,7 @@ public sealed class VerificationImpactApiTests
 
         using (var client = factory.CreateClient())
         {
-            await LoginAsync(client, "eng.user");
+            await MemberSession.SignInAsync(client, "eng.user");
 
             // Verification-impact selection: the fully dormant artifact has no Approved revision.
             using var dormantResolve = await client.PostAsJsonAsync(

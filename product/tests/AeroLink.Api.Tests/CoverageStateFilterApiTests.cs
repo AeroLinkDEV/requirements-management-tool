@@ -115,13 +115,6 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
         return new Fixture(project.Id, otherProject.Id, member, outsider);
     }
 
-    private static async Task SignInAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-    }
-
     private static async Task<JsonElement> WorkspaceAsync(HttpClient client, Guid projectId, string query = "")
     {
         using var response = await client.GetAsync(
@@ -138,7 +131,7 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.MemberName);
+        await MemberSession.SignInForReadsAsync(client, fixture.MemberName);
 
         Assert.Equal(["HLR-00000801"], Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=covered")));
         Assert.Equal(["HLR-00000802", "HLR-00000804"], Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=suspect")));
@@ -159,7 +152,7 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.MemberName);
+        await MemberSession.SignInForReadsAsync(client, fixture.MemberName);
 
         var covered = Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=covered"));
         Assert.DoesNotContain("HLR-00000804", covered);
@@ -179,7 +172,7 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.MemberName);
+        await MemberSession.SignInForReadsAsync(client, fixture.MemberName);
 
         var covered = Numbers(await WorkspaceAsync(client, fixture.ProjectId, "&coverageState=covered"));
 
@@ -202,7 +195,7 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.MemberName);
+        await MemberSession.SignInForReadsAsync(client, fixture.MemberName);
 
         // Level narrows the suspect set to the software requirements in it.
         Assert.Equal(["HLR-00000802", "HLR-00000804"],
@@ -231,7 +224,7 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.MemberName);
+        await MemberSession.SignInForReadsAsync(client, fixture.MemberName);
 
         using var response = await client.GetAsync(
             $"/api/enterprise-requirements/workspace?projectId={fixture.ProjectId}&page=1&pageSize=50&coverageState=partially");
@@ -246,7 +239,7 @@ public sealed class CoverageStateFilterApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.OutsiderName);
+        await MemberSession.SignInForReadsAsync(client, fixture.OutsiderName);
 
         using var response = await client.GetAsync(
             $"/api/enterprise-requirements/workspace?projectId={fixture.ProjectId}&page=1&pageSize=50&coverageState=uncovered");
