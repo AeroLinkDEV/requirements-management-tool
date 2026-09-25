@@ -1,0 +1,21 @@
+{
+  "requestId": "4721050cf22d45d1",
+  "attemptId": "20260922T182643-5d273a10",
+  "role": "qualification-probe",
+  "launch": {
+    "filePath": "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "arguments": "-NoProfile -NonInteractive -Command \"[IO.File]::WriteAllText('{READY_FILE}', (@{ requestId = '{REQUEST_ID}'; nonce = '{READY_NONCE}'; processId = $PID } | ConvertTo-Json)); Start-Sleep -Seconds 86400\"",
+    "workingDirectory": "",
+    "standardOutput": "C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\probe-state\\bootstrap\\transitions\\20260922T182643-5d273a10\\logs\\probe\\probe.stdout.log",
+    "standardError": "C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\probe-state\\bootstrap\\transitions\\20260922T182643-5d273a10\\logs\\probe\\probe.stderr.log",
+    "environment": {},
+    "restrictAdministrators": false
+  },
+  "readiness": {
+    "kind": "marker"
+  },
+  "readinessTimeoutSeconds": 60,
+  "requesterPid": 40464,
+  "expiresAtUtc": "2026-09-22T18:27:45.7076390Z",
+  "at": "2026-09-22T18:26:45.7076390Z"
+}

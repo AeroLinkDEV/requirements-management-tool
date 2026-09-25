@@ -1,0 +1,172 @@
+SELECT s."Id", s."CanonicalIdentity", s."IsReleased", s."PickerInsertionOrdinal", s."PredecessorReleaseId", s."ProjectId", s."ReleasedAt", s."Version", CASE
+    WHEN CASE
+        WHEN (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 OR strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 2) AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(s."Version", E' \t\n\r'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = '.' AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 >= 1 AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 <= 2 THEN 'SW-' || CASE
+            WHEN strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 THEN '0'
+            ELSE ''
+        END || substring(btrim(s."Version", E' \t\n\r'), 1, strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) || '.' || substring(btrim(s."Version", E' \t\n\r'), (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) + 1 + 1) || CASE
+            WHEN (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 = 1 THEN '0'
+            ELSE ''
+        END
+        WHEN length(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')))::int = 8 AND upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')) LIKE 'SW-%' AND strpos(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '.') - 1 = 5 AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = 'SW-.' THEN upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r'))
+    END IS NOT NULL THEN '0|' || COALESCE(CASE
+        WHEN (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 OR strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 2) AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(s."Version", E' \t\n\r'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = '.' AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 >= 1 AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 <= 2 THEN 'SW-' || CASE
+            WHEN strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 THEN '0'
+            ELSE ''
+        END || substring(btrim(s."Version", E' \t\n\r'), 1, strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) || '.' || substring(btrim(s."Version", E' \t\n\r'), (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) + 1 + 1) || CASE
+            WHEN (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 = 1 THEN '0'
+            ELSE ''
+        END
+        WHEN length(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')))::int = 8 AND upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')) LIKE 'SW-%' AND strpos(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '.') - 1 = 5 AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = 'SW-.' THEN upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r'))
+    END, '') || '|' || btrim(s."Version", E' \t\n\r') || '!' || lower(s."Id"::text)
+    ELSE '1|' || COALESCE(CASE
+        WHEN s."CanonicalIdentity" IS NULL THEN btrim(s."Version", E' \t\n\r')
+        ELSE btrim(s."CanonicalIdentity", E' \t\n\r')
+    END, '') || '|' || btrim(s."Version", E' \t\n\r') || '!' || lower(s."Id"::text)
+END COLLATE "C" AS "SortKey"
+FROM software_releases AS s
+WHERE s."ProjectId" = '2b73a74d-3b9c-4fad-814d-d1586c3806bd' AND (s."PickerInsertionOrdinal" IS NULL OR s."PickerInsertionOrdinal" <= 3) AND CASE
+    WHEN CASE
+        WHEN (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 OR strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 2) AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(s."Version", E' \t\n\r'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = '.' AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 >= 1 AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 <= 2 THEN 'SW-' || CASE
+            WHEN strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 THEN '0'
+            ELSE ''
+        END || substring(btrim(s."Version", E' \t\n\r'), 1, strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) || '.' || substring(btrim(s."Version", E' \t\n\r'), (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) + 1 + 1) || CASE
+            WHEN (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 = 1 THEN '0'
+            ELSE ''
+        END
+        WHEN length(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')))::int = 8 AND upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')) LIKE 'SW-%' AND strpos(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '.') - 1 = 5 AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = 'SW-.' THEN upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r'))
+    END IS NOT NULL THEN '0|' || COALESCE(CASE
+        WHEN (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 OR strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 2) AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(s."Version", E' \t\n\r'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = '.' AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 >= 1 AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 <= 2 THEN 'SW-' || CASE
+            WHEN strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 THEN '0'
+            ELSE ''
+        END || substring(btrim(s."Version", E' \t\n\r'), 1, strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) || '.' || substring(btrim(s."Version", E' \t\n\r'), (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) + 1 + 1) || CASE
+            WHEN (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 = 1 THEN '0'
+            ELSE ''
+        END
+        WHEN length(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')))::int = 8 AND upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')) LIKE 'SW-%' AND strpos(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '.') - 1 = 5 AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = 'SW-.' THEN upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r'))
+    END, '') || '|' || btrim(s."Version", E' \t\n\r') || '!' || lower(s."Id"::text)
+    ELSE '1|' || COALESCE(CASE
+        WHEN s."CanonicalIdentity" IS NULL THEN btrim(s."Version", E' \t\n\r')
+        ELSE btrim(s."CanonicalIdentity", E' \t\n\r')
+    END, '') || '|' || btrim(s."Version", E' \t\n\r') || '!' || lower(s."Id"::text)
+END COLLATE "C" > '0|SW-01.00|1.0!4c03c076-129a-4c8c-a974-5dcb3fecf847'
+ORDER BY CASE
+    WHEN CASE
+        WHEN (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 OR strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 2) AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(s."Version", E' \t\n\r'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = '.' AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 >= 1 AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 <= 2 THEN 'SW-' || CASE
+            WHEN strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 THEN '0'
+            ELSE ''
+        END || substring(btrim(s."Version", E' \t\n\r'), 1, strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) || '.' || substring(btrim(s."Version", E' \t\n\r'), (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) + 1 + 1) || CASE
+            WHEN (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 = 1 THEN '0'
+            ELSE ''
+        END
+        WHEN length(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')))::int = 8 AND upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')) LIKE 'SW-%' AND strpos(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '.') - 1 = 5 AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = 'SW-.' THEN upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r'))
+    END IS NOT NULL THEN '0|' || COALESCE(CASE
+        WHEN (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 OR strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 2) AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(s."Version", E' \t\n\r'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = '.' AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 >= 1 AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 <= 2 THEN 'SW-' || CASE
+            WHEN strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 THEN '0'
+            ELSE ''
+        END || substring(btrim(s."Version", E' \t\n\r'), 1, strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) || '.' || substring(btrim(s."Version", E' \t\n\r'), (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) + 1 + 1) || CASE
+            WHEN (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 = 1 THEN '0'
+            ELSE ''
+        END
+        WHEN length(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')))::int = 8 AND upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')) LIKE 'SW-%' AND strpos(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '.') - 1 = 5 AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = 'SW-.' THEN upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r'))
+    END, '') || '|' || btrim(s."Version", E' \t\n\r') || '!' || lower(s."Id"::text)
+    ELSE '1|' || COALESCE(CASE
+        WHEN s."CanonicalIdentity" IS NULL THEN btrim(s."Version", E' \t\n\r')
+        ELSE btrim(s."CanonicalIdentity", E' \t\n\r')
+    END, '') || '|' || btrim(s."Version", E' \t\n\r') || '!' || lower(s."Id"::text)
+END COLLATE "C"
+LIMIT 2
+
+Limit  (cost=9.20..9.21 rows=1 width=293) (actual rows=2 loops=1)
+  ->  Sort  (cost=9.20..9.21 rows=1 width=293) (actual rows=2 loops=1)
+        Sort Key: ((CASE WHEN (CASE WHEN ((((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) = 1) OR ((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) = 2)) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(("Version")::text, ' 	
+'::text), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = '.'::text) AND (((length(btrim(("Version")::text, ' 	
+'::text)) - (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1)) - 1) >= 1) AND (((length(btrim(("Version")::text, ' 	
+'::text)) - (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1)) - 1) <= 2)) THEN ((((('SW-'::text || CASE WHEN ((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) = 1) THEN '0'::text ELSE ''::text END) || "substring"(btrim(("Version")::text, ' 	
+'::text), 1, (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1))) || '.'::text) || "substring"(btrim(("Version")::text, ' 	
+'::text), (((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) + 1) + 1))) || CASE WHEN (((length(btrim(("Version")::text, ' 	
+'::text)) - (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1)) - 1) = 1) THEN '0'::text ELSE ''::text END) WHEN ((length(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text))) = 8) AND (upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)) ~~ 'SW-%'::text) AND ((strpos(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)), '.'::text) - 1) = 5) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = 'SW-.'::text)) THEN upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)) ELSE NULL::text END IS NOT NULL) THEN ((((('0|'::text || COALESCE(CASE WHEN ((((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) = 1) OR ((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) = 2)) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(("Version")::text, ' 	
+'::text), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = '.'::text) AND (((length(btrim(("Version")::text, ' 	
+'::text)) - (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1)) - 1) >= 1) AND (((length(btrim(("Version")::text, ' 	
+'::text)) - (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1)) - 1) <= 2)) THEN ((((('SW-'::text || CASE WHEN ((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) = 1) THEN '0'::text ELSE ''::text END) || "substring"(btrim(("Version")::text, ' 	
+'::text), 1, (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1))) || '.'::text) || "substring"(btrim(("Version")::text, ' 	
+'::text), (((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) + 1) + 1))) || CASE WHEN (((length(btrim(("Version")::text, ' 	
+'::text)) - (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1)) - 1) = 1) THEN '0'::text ELSE ''::text END) WHEN ((length(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text))) = 8) AND (upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)) ~~ 'SW-%'::text) AND ((strpos(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)), '.'::text) - 1) = 5) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = 'SW-.'::text)) THEN upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)) ELSE NULL::text END, ''::text)) || '|'::text) || btrim(("Version")::text, ' 	
+'::text)) || '!'::text) || lower(("Id")::text)) ELSE ((((('1|'::text || COALESCE(CASE WHEN ("CanonicalIdentity" IS NULL) THEN btrim(("Version")::text, ' 	
+'::text) ELSE btrim(("CanonicalIdentity")::text, ' 	
+'::text) END, ''::text)) || '|'::text) || btrim(("Version")::text, ' 	
+'::text)) || '!'::text) || lower(("Id")::text)) END)::text) COLLATE "C"
+        Sort Method: quicksort  Memory: 25kB
+        ->  Index Scan using "IX_software_releases_ProjectId_Id" on software_releases s  (cost=0.15..9.19 rows=1 width=293) (actual rows=2 loops=1)
+              Index Cond: ("ProjectId" = '2b73a74d-3b9c-4fad-814d-d1586c3806bd'::uuid)
+              Filter: ((("PickerInsertionOrdinal" IS NULL) OR ("PickerInsertionOrdinal" <= 3)) AND ((CASE WHEN (CASE WHEN ((((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) = 1) OR ((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) = 2)) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(("Version")::text, ' 	
+'::text), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = '.'::text) AND (((length(btrim(("Version")::text, ' 	
+'::text)) - (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1)) - 1) >= 1) AND (((length(btrim(("Version")::text, ' 	
+'::text)) - (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1)) - 1) <= 2)) THEN ((((('SW-'::text || CASE WHEN ((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) = 1) THEN '0'::text ELSE ''::text END) || "substring"(btrim(("Version")::text, ' 	
+'::text), 1, (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1))) || '.'::text) || "substring"(btrim(("Version")::text, ' 	
+'::text), (((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) + 1) + 1))) || CASE WHEN (((length(btrim(("Version")::text, ' 	
+'::text)) - (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1)) - 1) = 1) THEN '0'::text ELSE ''::text END) WHEN ((length(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text))) = 8) AND (upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)) ~~ 'SW-%'::text) AND ((strpos(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)), '.'::text) - 1) = 5) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = 'SW-.'::text)) THEN upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)) ELSE NULL::text END IS NOT NULL) THEN ((((('0|'::text || COALESCE(CASE WHEN ((((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) = 1) OR ((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) = 2)) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(("Version")::text, ' 	
+'::text), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = '.'::text) AND (((length(btrim(("Version")::text, ' 	
+'::text)) - (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1)) - 1) >= 1) AND (((length(btrim(("Version")::text, ' 	
+'::text)) - (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1)) - 1) <= 2)) THEN ((((('SW-'::text || CASE WHEN ((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) = 1) THEN '0'::text ELSE ''::text END) || "substring"(btrim(("Version")::text, ' 	
+'::text), 1, (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1))) || '.'::text) || "substring"(btrim(("Version")::text, ' 	
+'::text), (((strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1) + 1) + 1))) || CASE WHEN (((length(btrim(("Version")::text, ' 	
+'::text)) - (strpos(btrim(("Version")::text, ' 	
+'::text), '.'::text) - 1)) - 1) = 1) THEN '0'::text ELSE ''::text END) WHEN ((length(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text))) = 8) AND (upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)) ~~ 'SW-%'::text) AND ((strpos(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)), '.'::text) - 1) = 5) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = 'SW-.'::text)) THEN upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	
+'::text)) ELSE NULL::text END, ''::text)) || '|'::text) || btrim(("Version")::text, ' 	
+'::text)) || '!'::text) || lower(("Id")::text)) ELSE ((((('1|'::text || COALESCE(CASE WHEN ("CanonicalIdentity" IS NULL) THEN btrim(("Version")::text, ' 	
+'::text) ELSE btrim(("CanonicalIdentity")::text, ' 	
+'::text) END, ''::text)) || '|'::text) || btrim(("Version")::text, ' 	
+'::text)) || '!'::text) || lower(("Id")::text)) END)::text > '0|SW-01.00|1.0!4c03c076-129a-4c8c-a974-5dcb3fecf847'::text))
+              Rows Removed by Filter: 1
+Planning Time: 0.246 ms
+Execution Time: 0.092 ms

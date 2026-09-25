@@ -1,0 +1,62 @@
+{
+  "protocolVersion": 1,
+  "attemptId": "20260922T125526-71b60a97",
+  "attemptRoot": "D:\\aq-2a24b261\\Preflight\\bootstrap\\transitions\\20260922T125526-71b60a97",
+  "caller": "QualificationProbe",
+  "installationRoot": "D:\\aq-2a24b261\\Preflight",
+  "spool": "D:\\aq-2a24b261\\Preflight\\bootstrap\\transitions\\20260922T125526-71b60a97\\spool",
+  "logs": "D:\\aq-2a24b261\\Preflight\\bootstrap\\transitions\\20260922T125526-71b60a97\\logs",
+  "plan": {
+    "operation": "QualificationProbe",
+    "sourceRoot": "D:\\a\\requirements-management-tool\\requirements-management-tool",
+    "configPath": null,
+    "policy": "Preserve",
+    "scheduled": true,
+    "topology": {
+      "tunnelRunning": false,
+      "runtimeRunning": false
+    },
+    "runId": "AeroLinkQualification-2a24b261-Preflight-e987f765-run3",
+    "activeRecordPath": "D:\\aq-2a24b261\\Preflight\\bootstrap\\transitions\\qualification-runs\\AeroLinkQualification-2a24b261-Preflight-e987f765-run3.active.json"
+  },
+  "faults": {
+    "DelegateMutatorSeconds": 900
+  },
+  "qualification": {
+    "descriptorHash": "47E8C8054B647AEFF9395283198EE0C29B1C13F49374EE0B2E4D8F3D3E379E64",
+    "descriptor": {
+      "contextKind": "Task",
+      "contextName": "task|powershell.exe",
+      "definitionHash": "2B4065186506A1EC19109DC495C0E2595BC7076F70B17DD28BE1E2931F868EB4",
+      "placementProtocol": "aerolink-placement-1",
+      "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+      "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+      "principalSid": "[REDACTED windows-sid]",
+      "logonType": "Batch",
+      "sessionClass": "session0",
+      "tokenElevation": "True",
+      "tokenElevationType": "Default",
+      "integrityLevel": "High",
+      "administratorsGroup": "Enabled",
+      "immediateJobFlags": "0x1000"
+    },
+    "attestation": {
+      "taskPath": "\\AeroLinkQualification-2a24b261-Preflight-e987f765",
+      "instance": "{45E442B7-862A-4C15-B7A1-7A6364E79154}",
+      "enginePid": 1124,
+      "chain": "powershell.exe"
+    },
+    "token": "[REDACTED]"
+  },
+  "delegate": {
+    "script": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\scripts\\Invoke-AeroLinkTransitionActor.ps1",
+    "sourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68"
+  },
+  "requiredRoles": [
+    "qualification-probe"
+  ],
+  "outerPid": 1124,
+  "outerStartedAt": "2026-09-22T12:55:24.4653624Z",
+  "deadlineUtc": "2026-09-22T13:20:27.4595405Z",
+  "at": "2026-09-22T12:55:27.4673964Z"
+}

@@ -1,0 +1,22 @@
+import fs from 'node:fs'
+
+const p = 'C:/Sean Project/RMT-1040-ci-worktree/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs'
+let s = fs.readFileSync(p, 'utf8')
+if (s.includes('curl-trace')) {
+  console.log('trace already present')
+  process.exit(0)
+}
+const anchor = "  local status=0"
+if (!s.includes(anchor)) {
+  console.error('anchor not found')
+  process.exit(1)
+}
+const trace = [
+  "  {",
+  "    printf 'CURL method=[%s] url=[%s] dump=[%s] out=[%s] data=[%s]\\\\n' \"$method\" \"$url\" \"$dump\" \"$out\" \"$data\" >> \"$MOCK_STATE/curl-trace\"",
+  "  }",
+  anchor,
+].join('\n')
+s = s.replace(anchor, trace)
+fs.writeFileSync(p, s)
+console.log('trace installed')

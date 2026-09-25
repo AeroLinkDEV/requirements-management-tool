@@ -1,0 +1,15 @@
+{"phase":"pagination-extract","head":"collect_pages() {\n            local prefix=\"$1\" url=\"$2\" page complete=0\n            rm -f \"$prefix.page.\"* \"$prefix.hea","tail":"= \"1\" ]; then\n              echo \"::error::History pagination did not complete within the bounded walk: $prefix\"\n              exit 1\n            fi\n}"}
+---
+{"phase":"pagination-run","status":0,"stdout":"COLLECTED\n","stderr":"MOCK dump=C:\\Users\\seanm\\AppData\\Local\\Temp\\ci-debug-r7Rha2\\pg.headers.1 out=C:\\Users\\seanm\\AppData\\Local\\Temp\\ci-debug-r7Rha2\\pg.page.1 url=https://example/list?x=1&page=1&per_page=100 page=100 total=4\n"}
+---
+{"phase":"decision","stubMatch":"NONE","label":"ready-for-full-ci","status":0,"stdout":"DISPATCHED\n","stderr":""}
+---
+{"phase":"decision","stubMatch":"EXHAUSTED 100 failure 2026-09-23T10:19:05Z","label":"ready-for-full-ci","status":0,"stdout":"DISPATCHED\n","stderr":""}
+---
+{"phase":"decision","stubMatch":"NONE","label":"authority-maintenance-requested","status":0,"stdout":"","stderr":""}
+---
+{"phase":"decision","stubMatch":"EXHAUSTED 100 failure 2026-09-23T10:19:05Z","label":"documentation","status":1,"stdout":"::error::Exact-head Product run 100 completed unsuccessfully; a refresh cannot dispatch Full.\n","stderr":""}
+---
+{"phase":"decision","stubMatch":"FOUND 200 completed success","label":"documentation","status":0,"stdout":"PINNED 200\n","stderr":""}
+---
+{"phase":"decision","stubMatch":"PENDING 101","label":"documentation","status":1,"stdout":"::error::Unexpected Product-run matcher output: PENDING 101\n","stderr":""}

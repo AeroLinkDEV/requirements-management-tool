@@ -1,0 +1,61 @@
+Source: main @ 20242739
+Status: clean, current with origin/main. No update needed.
+      Checking what is already on http://127.0.0.1:5080...
+[0/4] Checking prerequisites...
+      .NET SDK: C:\Program Files\dotnet\dotnet.exe
+[1/4] Checking PostgreSQL...
+      Checking database upgrade posture...
+      Upgrade pending: 156 schema migration(s), 0 semantic upgrade(s).
+      Protecting the current database with a verified backup...
+No AeroLink schema has been applied to 'aerolink' yet (first start): there is no controlled-document storage to verify.
+No AeroLink schema has been applied to 'aerolink' yet (first start): there are no controlled attachments to inventory.
+No AeroLink schema has been applied to 'aerolink' yet (first start): there are no controlled attachments to inventory.
+No AeroLink schema has been applied to 'aerolink' yet (first start): there is no controlled-document storage to verify.
+AeroLink backup complete: D:\aq-2087a3e2\inst\backups\aerolink-20260922-152156.zip
+SHA-256: fbf75ff2b5027c934b4f798b9757192260bc0ac8d56fc070b0ce709871f3baf8
+      Backup verified: D:\aq-2087a3e2\inst\backups\aerolink-20260922-152156.zip
+      Restoring an isolated copy to validate the upgrade on...
+
+
+Valid                 : True
+Archive               : D:\aq-2087a3e2\inst\backups\aerolink-20260922-152156.zip
+ArchiveSha256         : fbf75ff2b5027c934b4f798b9757192260bc0ac8d56fc070b0ce709871f3baf8
+ManifestEntries       : 4
+ReferencedAttachments : 0
+ReferencedObjects     : 0
+ReferencedBytes       : 0
+UnreferencedObjects   : {}
+VerifiedAt            : 2026-09-22T15:21:57.9391637Z
+
+
+
+PostgreSQL is already accepting connections and answering real queries on 127.0.0.1:54329.
+No AeroLink schema has been applied to 'aerolink_upgrade_validation_557105607d' yet (first start): there are no controlled attachments to inventory.
+No AeroLink schema has been applied to 'aerolink_upgrade_validation_557105607d' yet (first start): there is no controlled-document storage to verify.
+Restore verified in database 'aerolink_upgrade_validation_557105607d': Program table not present yet (pre-migration restore; current-code validation deferred), 0 attachment row(s), 0 object(s), 0 byte(s), 0 API download(s). Evidence root: D:\aq-2087a3e2\inst\restore-validation\aerolink_upgrade_validation_557105607d\evidence
+      Applying this build's upgrade to the isolated copy...
+      Proving current AeroLink against the upgraded copy...
+      Isolated upgrade validated: ready in isolated read-only mode, anonymous access refused, 0 authenticated controlled read(s) byte-verified, 0 controlled attachment(s) verified against the upgraded copy.
+      Upgrading the local database...
+      The upgrade was validated on an isolated copy and then applied. The pre-upgrade backup is retained at D:\aq-2087a3e2\inst\backups\aerolink-20260922-152156.zip.
+[2/4] Building the client...
+      Preparing client dependencies (npm ci)...
+      Client built.
+[3/4] Starting AeroLink...
+[4/4] Waiting for AeroLink to be ready...
+      Ready, and serving the built client.
+
+AeroLink - HOME CANONICAL
+Source: main @ 20242739
+Production source: D:\aq-2087a3e2\prod
+Website and API: http://127.0.0.1:5080  (one origin, production build)
+Sign in: admin / AeroLink!2026
+Logs: D:\aq-2087a3e2\inst\logs
+Notification link origin: not configured (mail remains truthful but omits direct links).
+SMTP diagnostics: configure Notifications__Smtp__Host (and optional port/TLS/account settings) outside source control.
+
+Only this machine can reach it. To let colleagues on the same network open it, use
+START_AEROLINK_SHARED.bat instead.
+
+This is the production build with local demonstration configuration. It is not a production
+deployment: no TLS, demonstration credentials, and demonstration data are all enabled.

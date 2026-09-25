@@ -1,0 +1,9 @@
+{
+  "verified_at_utc": "2026-09-25T02:23:53.643924+00:00",
+  "source_manifest_entries": 1069,
+  "text_files_scanned": 955,
+  "published_hashes_verified": 938,
+  "strong_credential_pattern_findings": 0,
+  "failures": [],
+  "scope": "Public-export integrity, selected credential patterns and authored navigation only; not product/CI/deployment qualification."
+}

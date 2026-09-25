@@ -1,0 +1,9 @@
+{
+  "Head": "bf9dc3f039c93463209c6e0b205d8ccbccce8da1",
+  "ExpectedRequesterBranch": "glm/integrated-branch",
+  "RequestedBodyBranch": "glm/some-branch",
+  "RequestedBodyStatus": "completed",
+  "BodyFixtureExists": false,
+  "DeliveredBody": "{\"message\": \"injected failure\"}",
+  "Counters": "{\"listGets\": 1, \"pinnedGets\": 2, \"postSeen\": true, \"postCount\": 1}"
+}

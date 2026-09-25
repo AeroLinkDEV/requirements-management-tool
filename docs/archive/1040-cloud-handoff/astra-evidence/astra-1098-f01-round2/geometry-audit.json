@@ -1,0 +1,740 @@
+{
+  "candidate": "23bb25d987639ada3356a7003fa0380ba08e5042",
+  "runs": [
+    {
+      "run": 1,
+      "samples": [
+        {
+          "t": 1559.300000011921,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 2586.699999988079,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 3628.899999976158,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 4660.5,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 5694.899999976158,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 6729.699999988079,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "samples": [
+        {
+          "t": 1372.0999999642372,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 2388.300000011921,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 3434.800000011921,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 4489.899999976158,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 5533.199999988079,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 6639.300000011921,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "samples": [
+        {
+          "t": 1908.800000011921,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 2942.699999988079,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 3978.699999988079,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 5001,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 6033.5,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        },
+        {
+          "t": 7067.5,
+          "canvas": {
+            "x": 280,
+            "y": 252,
+            "width": 1640,
+            "height": 512,
+            "top": 252,
+            "right": 1920,
+            "bottom": 764,
+            "left": 280
+          },
+          "box": {
+            "x": 0,
+            "y": 88,
+            "width": 1640,
+            "height": 244
+          },
+          "viewportBox": {
+            "left": 280,
+            "top": 340,
+            "right": 1920,
+            "bottom": 584
+          },
+          "card": {
+            "top": 362.1538391113281,
+            "bottom": 568,
+            "left": 1674.15380859375,
+            "right": 1892,
+            "width": 217.84619140625,
+            "height": 205.84616088867188
+          },
+          "display": {
+            "x": 28,
+            "y": 101,
+            "zoom": 0.923077
+          },
+          "correctFits": true,
+          "originalProbeFits": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+import fs from 'node:fs'
+
+const p = 'C:/Sean Project/RMT-1040-ci-worktree/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs'
+let s = fs.readFileSync(p, 'utf8')
+const start = s.indexOf('curl() {')
+const end = s.indexOf("  return \"$status\"", start)
+if (start === -1 || end === -1) {
+  console.error('region not found', start, end)
+  process.exit(1)
+}
+let block = s.slice(start, end)
+// escape bash parameter expansions for the JS template literal, but keep the real JS interpolation of mock-curl.py path
+block = block.replace(/\$\{join\(state, 'mock-curl\.py'\)\}/g, '\u0000KEEP\u0000')
+block = block.replace(/\$\{/g, '\\${')
+block = block.replace(/\u0000KEEP\u0000/g, "${join(state, 'mock-curl.py')}")
+s = s.slice(0, start) + block + s.slice(end)
+fs.writeFileSync(p, s)
+console.log('escaped bash expansions inside the harness template block')

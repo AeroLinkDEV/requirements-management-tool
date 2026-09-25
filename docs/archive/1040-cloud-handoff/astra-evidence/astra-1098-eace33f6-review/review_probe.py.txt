@@ -1,0 +1,140 @@
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+
+ROOT = pathlib.Path(r'C:\Sean Project\RMT-1040-ci-worktree')
+OUT = pathlib.Path(__file__).parent
+wf = (ROOT / '.github/workflows/request-full-ci.yml').read_text(encoding='utf-8')
+start = wf.index('        run: |\n') + len('        run: |\n')
+end = wf.index('      - name: Mint the repository-scoped', start)
+step = '\n'.join(line[10:] if line.startswith('          ') else line
+                 for line in wf[start:end].splitlines()) + '\n'
+step = step.replace('${{ github.run_id }}', '7000').replace('${{ github.run_attempt }}', '1')
+definitions = step[:step.index('\nverify_live_pr\nnode ')]
+git_exec = subprocess.check_output(['git', '--exec-path'], text=True).strip()
+BASH = str((pathlib.Path(git_exec) / '../../../bin/bash.exe').resolve())
+SHA = 'a' * 40
+REF = 'glm/some-branch'
+BOT = {'login': 'github-actions[bot]'}
+
+def posix(path):
+    path = str(path).replace('\\', '/')
+    return '/' + path[0].lower() + path[2:] if len(path) > 1 and path[1] == ':' else path
+
+def block(anchor):
+    a = step.index(anchor)
+    a = step.index("<<'PY'", a)
+    a = step.index('\n', a) + 1
+    return step[a:step.index('\nPY', a)] + '\n'
+
+def product(id=101, status='completed', conclusion='success'):
+    return dict(id=id, head_sha=SHA, head_branch=REF, event='workflow_dispatch',
+                actor=BOT, triggering_actor=BOT, pull_requests=[{'number': 1066}],
+                run_attempt=1, status=status, conclusion=conclusion,
+                updated_at='2026-09-23T10:19:05Z')
+
+TRANSPORT = r'''
+python() { "$TEST_PYTHON" -B "$@"; }
+node() { printf 'QUEUE_GUARD_MOCK\n' >> "$MOCK_LOG"; }
+sleep() { printf 'SLEEP_MOCK\n' >> "$MOCK_LOG"; }
+curl() {
+  local method=GET out='' dump='' url=''
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --request) method="$2"; shift 2 ;;
+      --output) out="$2"; shift 2 ;;
+      --dump-header) dump="$2"; shift 2 ;;
+      --header|--data-binary) shift 2 ;;
+      --*) shift ;;
+      *) url="$1"; shift ;;
+    esac
+  done
+  printf '%s %s\n' "$method" "$url" >> "$MOCK_LOG"
+  if [ "$method" = POST ]; then
+    printf 'POST_RECORDED\n' >> "$MOCK_LOG"
+    if [ "${LOST_POST:-0}" = 1 ]; then return 28; fi
+    printf '{}\n' > "$out"
+    return 0
+  fi
+  case "$url" in
+    https://api.github.test/repos/org/repo/pulls/1066) cp "$RUNNER_TEMP/live.json" "$out" ;;
+    https://api.github.test/repos/org/repo/actions/workflows/ci.yml/runs\?*) cp "$RUNNER_TEMP/product-runs.json" "$out.mock"; mv "$out.mock" "$out" ;;
+    https://api.github.test/repos/org/repo/actions/runs/101) cp "$RUNNER_TEMP/run101.json" "$out" ;;
+    *) printf 'UNEXPECTED_API_URL %s\n' "$url" >&2; return 22 ;;
+  esac
+}
+'''
+
+def fixtures(where, stale=False, requester_envelope=False):
+    def put(name, value):
+        (where / name).write_text(json.dumps(value), encoding='utf-8')
+    put('live.json', {'state': 'open', 'head': {'sha': SHA, 'ref': REF, 'repo': {'full_name': 'org/repo'}},
+                      'labels': [{'name': 'ready-for-full-ci'}]})
+    put('product-runs.json', {'workflow_runs': [product(100, conclusion='failure')] if stale else []})
+    put('run101.json', product())
+    put('events.page.1', [{'id': 1, 'event': 'labeled', 'label': {'name': 'ready-for-full-ci'},
+                           'created_at': '2026-09-23T09:54:44Z' if stale else '2026-09-23T12:00:00Z'}])
+    runs = [{'id': 7000, 'head_sha': SHA, 'event': 'pull_request_target', 'run_attempt': 1,
+             'created_at': '2026-09-23T12:00:05Z'}]
+    put('requester.page.1', {'total_count': 1, 'workflow_runs': runs} if requester_envelope else runs)
+
+def shell_case(name, source, stale=False, lost=False):
+    where = pathlib.Path(tempfile.mkdtemp(prefix=name + '-', dir=OUT))
+    fixtures(where, stale)
+    env = dict(os.environ, RUNNER_TEMP=posix(where), TEST_PYTHON=posix(sys.executable),
+               HEAD_SHA=SHA, HEAD_REF=REF, PR_NUMBER='1066', BASE_SHA='b'*40,
+               GITHUB_API_URL='https://api.github.test', GITHUB_REPOSITORY='org/repo',
+               GITHUB_TOKEN=[REDACTED]
+               MOCK_LOG=posix(where / 'transport.log'), GITHUB_STEP_SUMMARY=posix(where / 'summary.txt'),
+               LOST_POST='1' if lost else '0')
+    path = where / 'step.sh'
+    path.write_text(TRANSPORT + source, encoding='utf-8', newline='\n')
+    run = subprocess.run([BASH, '--noprofile', '--norc', posix(path)], env=env,
+                         capture_output=True, text=True, timeout=20)
+    log = (where / 'transport.log').read_text() if (where / 'transport.log').exists() else ''
+    result = dict(case=name, exit=run.returncode, stdout=run.stdout.strip(), stderr=run.stderr.strip(),
+                  dispatch_posts=log.count('POST_RECORDED'), transport=log.splitlines())
+    print(json.dumps(result))
+    return result
+
+# Unmodified complete workflow run step; only GitHub runtime expressions and transport are supplied.
+r = shell_case('full-step-none', step)
+assert r['exit'] != 0 and r['dispatch_posts'] == 0 and 'UNEXPECTED_API_URL' in r['stderr']
+
+# The pin helper and the actual Python it writes disagree on their return protocol.
+r = shell_case('actual-pin-valid-success', definitions + '\nfetch_and_pin_run 101\necho PINNED_OK\n')
+assert r['exit'] == 1 and 'Unexpected pinned-run check output: SUCCEEDED' in r['stdout']
+
+# Isolate the gate/caller defect from the earlier broken transport: preload exactly the
+# flat page contents expected by the current gate and no-op only the collection function.
+r = shell_case('stale-gate-caller', definitions + '\ncollect_pages() { :; }\ndispatch_full_run\necho DISPATCHER_RETURNED\n', stale=True)
+assert 'REFUSED authorization predates' in r['stdout'] and r['dispatch_posts'] == 1
+
+# Isolate POST transport uncertainty after a permitted gate. The current strict shell
+# exits before the workflow can enter discovery, despite accepted-dispatch uncertainty.
+r = shell_case('lost-post-response', definitions + '\ncollect_pages() { :; }\ndispatch_full_run\necho ENTERED_DISCOVERY\n', lost=True)
+assert r['exit'] == 28 and r['dispatch_posts'] == 1 and 'ENTERED_DISCOVERY' not in r['stdout']
+
+# Real workflow-runs APIs return an envelope, not the flat array fed by candidate tests.
+where = pathlib.Path(tempfile.mkdtemp(prefix='real-envelope-', dir=OUT))
+fixtures(where, requester_envelope=True)
+gate = where / 'gate.py'
+gate.write_text(block('authorize_dispatch() {'), encoding='utf-8')
+r = subprocess.run([sys.executable, '-B', str(gate), str(where), SHA, REF, '1066', '7000', '1'],
+                   capture_output=True, text=True, timeout=20)
+print(json.dumps(dict(case='real-requester-envelope', exit=r.returncode, stdout=r.stdout.strip(), stderr=r.stderr.strip())))
+assert r.returncode != 0 and "'str' object has no attribute 'get'" in r.stderr
+
+# Mixed active+failed history: PENDING must identify the active attempt, not the newer failure.
+matcher = where / 'matcher.py'
+matcher.write_text(block('find_product_run() {'), encoding='utf-8')
+data = where / 'mixed.json'
+data.write_text(json.dumps({'workflow_runs': [product(100, 'in_progress', None), product(101, conclusion='failure')]}))
+r = subprocess.run([sys.executable, '-B', str(matcher), str(data), SHA, '1066', REF],
+                   env=dict(os.environ, BOUNDARY_ID='0'), capture_output=True, text=True, timeout=20)
+print(json.dumps(dict(case='mixed-running-and-failed', exit=r.returncode, stdout=r.stdout.strip(), expected='PENDING 100')))
+assert r.stdout.strip() == 'PENDING 101'
+print('ALL SIX INDEPENDENT REPRODUCTIONS CONFIRMED')

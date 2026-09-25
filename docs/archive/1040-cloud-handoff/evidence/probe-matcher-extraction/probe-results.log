@@ -1,0 +1,6 @@
+case1-empty: NONE
+case2-running-trusted: PENDING
+case3-two-successes: FOUND 200 completed success
+case4-failed-only: FOUND 100 completed failure
+case5-failure-plus-untrusted-failure: FOUND 100 completed failure
+case6-failed-plus-running: PENDING

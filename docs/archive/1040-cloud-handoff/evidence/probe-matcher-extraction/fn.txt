@@ -1,0 +1,49 @@
+          find_product_run() {
+            curl --fail-with-body --silent --show-error "${headers[@]}" \
+              "$api/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&event=workflow_dispatch&per_page=100" \
+              --output "$RUNNER_TEMP/product-runs.json"
+            python - "$RUNNER_TEMP/product-runs.json" "$HEAD_SHA" "$PR_NUMBER" "$HEAD_REF" <<'PY'
+          import json
+          import sys
+
+          path, head_sha, pr_number, head_ref = sys.argv[1:]
+          pr_number = int(pr_number)
+          with open(path, encoding="utf-8") as handle:
+              runs = json.load(handle).get("workflow_runs", [])
+          matches = []
+          for run in runs:
+              prs = {item.get("number") for item in run.get("pull_requests", [])}
+              if (
+                  run.get("head_sha") == head_sha
+                  and run.get("head_branch") == head_ref
+                  and run.get("event") == "workflow_dispatch"
+                  and run.get("actor", {}).get("login") == "github-actions[bot]"
+                  and run.get("triggering_actor", {}).get("login") == "github-actions[bot]"
+                  and pr_number in prs
+              ):
+                  matches.append(run)
+          # Every run reaching here is already trusted: exact head SHA, exact branch, dispatched by the bot on
+          # behalf of this PR. So a second one is not an ambiguity to refuse, it is another attempt at the same
+          # question. Refusing outright made a SHA permanently unbindable once a first attempt timed out and a
+          # retry dispatched a second, with a fresh commit the only escape.
+          successful = [
+              run for run in matches
+              if run.get("status") == "completed" and run.get("conclusion") == "success"
+          ]
+          if successful:
+              # A success at this exact SHA is authoritative however many attempts it took. Lowest id keeps the
+              # choice deterministic across polls.
+              run = min(successful, key=lambda item: item["id"])
+              print(f"FOUND {run['id']} completed success")
+          elif matches and all(run.get("status") == "completed" for run in matches):
+              # All attempts finished and none passed. Report one so the caller fails on the real conclusion
+              # rather than on a timeout that names nothing.
+              run = min(matches, key=lambda item: item["id"])
+              print(f"FOUND {run['id']} completed {run.get('conclusion')}")
+          elif matches:
+              # An attempt is still running. Wait for it; dispatching another is what created the deadlock.
+              print("PENDING")
+          else:
+              print("NONE")
+          PY
+          }

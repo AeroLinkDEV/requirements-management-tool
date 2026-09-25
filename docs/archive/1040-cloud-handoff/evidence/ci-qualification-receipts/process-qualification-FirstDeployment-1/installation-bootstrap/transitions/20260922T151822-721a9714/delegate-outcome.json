@@ -1,0 +1,24 @@
+{
+  "decision": "Completed",
+  "failures": [],
+  "pid": 1712,
+  "phase": "Delegate",
+  "at": "2026-09-22T15:29:52.4657019Z",
+  "detail": "AlreadyCurrent: Local production was restarted. No tunnel was running before this transition, so none was started.",
+  "mutated": true,
+  "sourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68",
+  "roles": [
+    {
+      "role": "postgres",
+      "restored": true,
+      "processId": 6372,
+      "evidence": "postmaster pid 6372 owns 'D:/aq-2087a3e2/inst/pgdata' on port 54329 and accepts connections"
+    },
+    {
+      "role": "api",
+      "restored": true,
+      "processId": 1428,
+      "evidence": "pid 1428 alone listens on 5080, is ready, and proves mode 'HOME-PRODUCTION' and source '202427396043a055fe98191b0fab2a16ab7ced68'"
+    }
+  ]
+}

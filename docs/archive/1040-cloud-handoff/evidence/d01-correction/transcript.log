@@ -1,0 +1,36 @@
+**********************
+Windows PowerShell transcript start
+Start time: 20260922084740
+Username: UPSTAIRSMCCARTH\seanm
+RunAs User: UPSTAIRSMCCARTH\seanm
+Configuration Name: 
+Machine: UPSTAIRSMCCARTH (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Sean Project\RMT-1040-glm-evidence\d01-correction\align-task-limits.ps1
+Process ID: 39056
+PSVersion: 5.1.26100.9444
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9444
+BuildVersion: 10.0.26100.9444
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+ELEVATED SCRIPT STARTED
+CONFIG AeroLinkRoot=C:\Sean Project\AeroLink Production
+Running Install-AeroLinkReconcileTask...
+SUCCESS: The scheduled task "AeroLinkProductionSourceReconcile" has successfully been created.
+
+TaskName                          IntervalMinutes LogonType SourceRoot
+--------                          --------------- --------- ----------
+AeroLinkProductionSourceReconcile              30 S4U       C:\Sean Project\AeroLink Production
+Running Install-AeroLinkRemoteDemoTask...
+C:\Users\seanm\AppData\Local\AeroLink\RemoteDemo\state\remote-demo-task.xml
+SUCCESS: The scheduled task "AeroLinkRemoteDemoRecovery" has successfully been created.
+AeroLinkRemoteDemoRecovery                        S4U       C:\Sean Project\AeroLink Production
+D01-CORRECTION-ERROR: Cannot index into a null array.
+at <ScriptBlock>, C:\Sean Project\RMT-1040-glm-evidence\d01-correction\align-task-limits.ps1: line 38
+**********************
+Windows PowerShell transcript end
+End time: 20260922084745
+**********************

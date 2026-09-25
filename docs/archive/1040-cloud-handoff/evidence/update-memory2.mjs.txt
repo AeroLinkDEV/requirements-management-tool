@@ -1,0 +1,18 @@
+import fs from 'node:fs'
+
+const p = 'C:/Users/seanm/.zcode/cli/memories/projects/requirements-management-tool-45760c6e59abbb2e/memory/glm-1040-checkpoint-a.md'
+let s = fs.readFileSync(p, 'utf8')
+s = s.replace(
+  'PR #1098 v2 RETURNED (36-implementation-v2-packet.md, head 41b75ced653eb918bdffa805079cfcf8de4d8eb3) after Astra executed the candidate and reproduced six defects (I01-I06) — awaiting Astra.',
+  'PR #1098 v3 RETURNED (37-implementation-v3-packet.md, head d35a7d1ebc63f116afbf5090373ea50e0ab72518) — I02 separator fixed (query-string-derived per page; mock validates per-endpoint URLs) and I06 harness repaired + EXECUTED in disposable Linux container (node:24, --network none, ro mount): 28/28 PASS 0 skipped; Windows 18 pass/10 skip/0 fail. Commits eace33f6→efe0f53a→41b75ced→d35a7d1e. Awaiting Astra.',
+)
+s = s.replace(
+  'Commits: eace33f6→efe0f53a (six fixes)→41b75ced (trace removal); PR #1098 body updated.',
+  'Commits: eace33f6→efe0f53a→41b75ced→d35a7d1e (I02+I06 fixes); PR #1098 body updated. More lessons: JSON round-trips eat one backslash level (case pattern *\\?* became *?* = matches-everything); prefer Edit-tool with fresh Reads or .mjs scripts for surgical fixes; poll verdicts must travel via files, never command-substitution (set -e swallows); local = only usable inside functions.',
+)
+s = s.replace(
+  'I02 collect_pages(prefix, base-url) + ?/& separator + per-endpoint shape validation',
+  'I02 collect_pages separator derived from the base-URL query string for EVERY page (page-number rule was wrong; *?* glob matches everything) + per-endpoint URL validation in mock',
+)
+fs.writeFileSync(p, s)
+console.log('memory updated to v3')

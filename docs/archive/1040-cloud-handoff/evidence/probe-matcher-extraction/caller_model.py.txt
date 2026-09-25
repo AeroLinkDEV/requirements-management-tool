@@ -1,0 +1,258 @@
+"""Proposed OFFLINE caller model for the same-head retry requester — a design probe,
+NOT the amended production workflow. Every decision is a real state transition driven
+by an injected API adapter; dispatch happens only through api.dispatch().
+
+v5 (common gate): requester eligibility and authorization-consumption checks sit at ONE
+gate immediately before EVERY dispatch POST — the NONE path does not bypass them. The
+requester itself must POSTDATE the authorization (an old queued requester may not borrow
+a newer label event), must be on its FIRST attempt (a rerun reconciles or refuses, it
+never dispatches), and no OTHER same-head requester run may be younger than the
+authorization (ties count as consumed — conservative). Incomplete or ambiguous history
+refuses. Refresh lanes never reach the gate.
+"""
+from datetime import datetime
+
+BOT = 'github-actions[bot]'
+
+
+def instant(text):
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(str(text).replace('Z', '+00:00'))
+    except ValueError:
+        return None
+
+
+def _login(value):
+    return value.get('login') if isinstance(value, dict) else None
+
+
+def trusted(run, sha, ref, pr):
+    """Exact trust/association filter — the SAME predicate for boundary, pin and recheck.
+    A malformed identity record is simply not trusted (and is refused if it is the
+    pinned identity being rechecked)."""
+    return (run.get('head_sha') == sha and run.get('head_branch') == ref
+            and run.get('event') == 'workflow_dispatch'
+            and _login(run.get('actor')) == BOT
+            and _login(run.get('triggering_actor')) == BOT
+            and pr in {i.get('number') for i in run.get('pull_requests', [])
+                       if isinstance(i, dict)})
+
+
+class Refusal(Exception):
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def freshness(events, runs, sha, ref, pr, complete=True,
+              requester_runs=(), self_run_id=None, self_run_attempt=1,
+              requester_complete=True, require_self=False):
+    """Strict freshness + the common dispatch gate. Validate every relevant record
+    BEFORE maxima; every refusal is conservative.
+
+    - A failed TRUSTED attempt whose updated_at is missing/unparsable is an unestablishable
+      boundary -> refusal (never 'no failure').
+    - ANY labeled(ready-for-full-ci) event with a missing/unparsable created_at -> refusal.
+    - Exact head/ref/PR/bot filtering for the failure boundary.
+    - Incomplete event history (rel=next present after the bounded walk) -> refusal.
+    - SPEND-ONCE GATE. With require_self=True (the dispatch gate always passes it) requester
+      verification is MANDATORY — a missing identity refuses; the timestamp-only unit-test
+      use may omit it:
+        * requester attempt != 1 -> REFUSE-REQUESTER-RERUN (a rerun reconciles or refuses;
+          it must never dispatch again — reruns keep GITHUB_RUN_ID, attempts increment);
+        * incomplete requester history -> refusal;
+        * the CURRENT requester's own record must exist, must carry the expected requester
+          identity (event=pull_request_target, this exact head SHA), and must carry a
+          parseable created_at — a missing or mismatched identity refuses;
+        * the own record must STRICTLY postdate the authorization (a tie refuses) — an old
+          queued requester may not borrow a newer label event;
+        * any OTHER same-head requester run (excluding only the current run identity)
+          created at-or-after the authorization (a tie consumes) -> consumed ->
+          REFUSE-AUTHORIZATION-CONSUMED; queued/running/failed/cancelled all count.
+    """
+    if not complete:
+        raise Refusal('REFUSE-INCOMPLETE-EVENT-HISTORY')
+    failures = [r for r in runs
+                if r.get('status') == 'completed' and r.get('conclusion') != 'success'
+                and trusted(r, sha, ref, pr)]
+    boundary = None
+    for r in failures:
+        t = instant(r.get('updated_at'))
+        if t is None:
+            raise Refusal('REFUSE-UNESTABLISHABLE-FAILURE-BOUNDARY')
+        boundary = t if boundary is None or t > boundary else boundary
+    labels = [e for e in events
+              if e.get('event') == 'labeled'
+              and (e.get('label') or {}).get('name') == 'ready-for-full-ci']
+    if not labels:
+        raise Refusal('REFUSE-NO-LABELED-EVENT')
+    latest = None
+    for e in labels:
+        t = instant(e.get('created_at'))
+        if t is None:
+            raise Refusal('REFUSE-UNESTABLISHABLE-AUTHORIZATION')
+        latest = t if latest is None or t > latest else latest
+    if require_self or self_run_id is not None:
+        if self_run_id is None:
+            raise Refusal('REFUSE-SELF-IDENTITY-UNRESOLVABLE')
+        if self_run_attempt != 1:
+            raise Refusal('REFUSE-REQUESTER-RERUN')
+        if not requester_complete:
+            raise Refusal('REFUSE-INCOMPLETE-REQUESTER-HISTORY')
+        own = None
+        for r in requester_runs:
+            if r.get('id') == self_run_id:
+                own = r
+                break
+        # identity validation BEFORE the timestamp is used or the record is excluded:
+        if (own is None or own.get('event') != 'pull_request_target'
+                or own.get('head_sha') != sha):
+            raise Refusal('REFUSE-SELF-IDENTITY-UNRESOLVABLE')
+        own_created = instant(own.get('created_at'))
+        if own_created is None:
+            raise Refusal('REFUSE-UNESTABLISHABLE-REQUESTER-HISTORY')
+        if not own_created > latest:                 # a tie refuses — conservative
+            raise Refusal('REFUSE-REQUESTER-PREDATES-AUTHORIZATION')
+        for r in requester_runs:
+            if r.get('head_sha') != sha or r.get('event') != 'pull_request_target':
+                continue
+            created = instant(r.get('created_at'))
+            if created is None:
+                raise Refusal('REFUSE-UNESTABLISHABLE-REQUESTER-HISTORY')
+            if r.get('id') == self_run_id and r.get('run_attempt') == self_run_attempt:
+                continue                             # exclude only the current run identity
+            if created >= latest:                    # a tie consumes — conservative
+                raise Refusal(f"REFUSE-AUTHORIZATION-CONSUMED {r.get('id')}")
+    if boundary is None:
+        return ('FRESH-NO-FAILURE', latest)      # NONE branch needs no boundary comparison
+    return ('FRESH' if latest > boundary else 'STALE', latest)
+
+
+class CallerModel:
+    """Decision-table model. lane: 'ready-for-full-ci' (dispatch lane) or other (refresh)."""
+
+    def __init__(self, api, lane, sha, ref, pr, self_run_id=None, self_run_attempt=1,
+                 max_ticks=64):
+        self.api, self.lane, self.sha, self.ref, self.pr = api, lane, sha, ref, pr
+        self.self_run_id, self.self_run_attempt = self_run_id, self_run_attempt
+        self.max_ticks = max_ticks
+        self.boundary_id = 0
+        self.pinned = None            # (run_id, run_attempt)
+        self.result = None            # ('BOUND', run_id, run_attempt)
+
+    # -- helpers -----------------------------------------------------------------
+    def _matcher(self, runs):
+        matches = [r for r in runs if trusted(r, self.sha, self.ref, self.pr)]
+        if not matches:
+            return ('NONE',)
+        good = [r for r in matches if r.get('status') == 'completed' and r.get('conclusion') == 'success']
+        if good:
+            r = min(good, key=lambda item: item['id'])
+            return ('FOUND', r['id'])
+        running = [r for r in matches if r.get('status') != 'completed']
+        if running:
+            return ('PENDING', max(running, key=lambda item: item['id'])['id'])
+        failed = [r for r in matches if r.get('status') == 'completed']
+        return ('EXHAUSTED', max(r['id'] for r in failed),
+                max(failed, key=lambda item: str(item.get('updated_at'))).get('conclusion'))
+
+    def _pin(self, run_id):
+        rec = self.api.get_run(run_id)
+        if not rec or not trusted(rec, self.sha, self.ref, self.pr):
+            raise Refusal('REFUSE-IDENTITY-UNRESOLVABLE')
+        self.pinned = (run_id, rec.get('run_attempt'))
+
+    def _dispatch_gate_and_post(self):
+        """THE single common gate: every dispatch POST passes through here. Requester
+        verification is MANDATORY (require_self) — a missing or mismatched identity
+        refuses with zero POSTs. Eligibility (first attempt), authorization validation
+        (strict timestamps, complete histories), self-postdating, and spend-once
+        consumption are checked exactly once, immediately before the POST."""
+        verdict, _ = freshness(self.api.read_events()[0], self.api.last_runs, self.sha,
+                               self.ref, self.pr, complete=self.api.events_complete,
+                               requester_runs=self.api.requester,
+                               self_run_id=self.self_run_id,
+                               self_run_attempt=self.self_run_attempt,
+                               requester_complete=self.api.requester_complete,
+                               require_self=True)
+        if verdict not in ('FRESH', 'FRESH-NO-FAILURE'):
+            raise Refusal(f'REFUSE-STALE-AUTHORIZATION ({verdict})')
+        self._dispatch_once()
+
+    def _dispatch_once(self):
+        """Dispatch with return_run_details: a successful response yields the run identity,
+        which is validated through the exact trust checks and pinned directly. A lost
+        response leaves the outcome UNCERTAIN: this requester falls back to discovery
+        (spend-once guarantees no other requester may dispatch this authorization), and
+        if the run never surfaces the bounded wait ends in refusal — never redispatch."""
+        resp = self.api.dispatch({'pull_request_number': self.pr,
+                                  'pull_request_head_sha': self.sha,
+                                  'return_run_details': True})
+        run_id = (resp or {}).get('workflow_run_id')
+        if run_id is not None:
+            self._pin(run_id)
+
+    # -- main ----------------------------------------------------------------------
+    def run(self):
+        if self.pinned is not None:
+            return self._poll_loop()                     # resume: identity already established
+        runs = self.api.list_runs()                      # global matcher: pre-pin only
+        self.api.last_runs = runs
+        m = self._matcher(runs)
+        if m[0] == 'FOUND':
+            self._pin(m[1])                              # recheck identity before binding
+        elif m[0] == 'PENDING':
+            self._pin(m[1])
+        elif m[0] == 'EXHAUSTED':
+            self.boundary_id = m[1]
+            if self.lane != 'ready-for-full-ci':
+                raise Refusal(f"REFUSE-REPORT-FAILURE {m[1]} {m[2]}")
+            self._dispatch_gate_and_post()
+        elif m[0] == 'NONE':
+            if self.lane == 'ready-for-full-ci':
+                self._dispatch_gate_and_post()           # the SAME gate — NONE does not bypass
+            # refresh lane: bounded wait for the separate dispatcher; never dispatches.
+        return self._poll_loop()
+
+    def _poll_loop(self):
+        for _ in range(self.max_ticks):
+            if self.pinned is None:
+                runs = self.api.list_runs()              # still waiting to pin (discovery)
+                self.api.last_runs = runs
+                # Post-dispatch discovery selects ONLY runs newer than the boundary, BEFORE
+                # matching: a pre-dispatch attempt that later reappears (e.g. rerun to
+                # success) can neither bind nor shadow the newly dispatched run. The
+                # initial-decision reuse of an authoritative success is unaffected — it
+                # happens before any dispatch, from the unfiltered list.
+                candidates = [r for r in runs if trusted(r, self.sha, self.ref, self.pr)
+                              and r['id'] > self.boundary_id]
+                m = self._matcher(candidates)
+                if m[0] == 'PENDING':
+                    self._pin(m[1])
+                elif m[0] == 'FOUND':
+                    self._pin(m[1])
+                elif m[0] == 'EXHAUSTED':
+                    newest = max(candidates, key=lambda item: item['id'])
+                    raise Refusal(f"REFUSE-ATTEMPT-FAILED {newest['id']} {newest.get('conclusion')}")
+                else:
+                    continue                              # NONE: keep waiting (bounded)
+                continue
+            # pinned: DIRECT poll of the pinned identity only — no global matcher from here on.
+            run_id, attempt = self.pinned
+            rec = self.api.get_run(run_id)
+            if not rec or not trusted(rec, self.sha, self.ref, self.pr):
+                raise Refusal('REFUSE-IDENTITY-UNRESOLVABLE')
+            if rec.get('run_attempt') != attempt:
+                raise Refusal(f"REFUSE-ATTEMPT-CHANGED {run_id} {attempt} -> {rec.get('run_attempt')}")
+            if rec.get('status') != 'completed':
+                continue
+            if rec.get('conclusion') == 'success':
+                jobs = self.api.jobs_for_attempt(run_id, attempt)   # per-attempt evidence
+                if jobs is None:
+                    raise Refusal(f'REFUSE-JOBS-NOT-PINNED-ATTEMPT {run_id} {attempt}')
+                self.result = ('BOUND', run_id, attempt)
+                return self.result
+            raise Refusal(f"REFUSE-ATTEMPT-FAILED {run_id} {rec.get('conclusion')}")
+        raise Refusal('REFUSE-BOUNDED-WAIT-EXHAUSTED')

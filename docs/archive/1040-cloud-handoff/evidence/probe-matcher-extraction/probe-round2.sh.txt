@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Disposable design probe, amendment v2. Offline: no network, no product worktree, no repo writes.
+set -uo pipefail
+P='C:/Sean Project/RMT-1040-glm-evidence/probe-matcher-extraction'
+PYEXE='C:/Users/seanm/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe'
+SHA40=$(printf 'a%.0s' $(seq 1 40))
+REF='glm/1040-release-picker-snapshot'
+LOG="$P/probe-round2-results.log"
+: > "$LOG"
+say() { echo "$@" | tee -a "$LOG"; }
+DISPATCHES=0
+json_field() { "$PYEXE" -c "
+import json,sys
+d=json.load(open(sys.argv[1],encoding='utf-8'))
+print(d.get(sys.argv[2],''))
+" "$1" "$2"; }
+events_complete() { ! grep -qi '^link:.*rel=\"next\"' "$2"; }
+freshness() { "$PYEXE" "$P/freshness.py" "$1" "$2" "$3"; }
+matcherv2() { "$PYEXE" "$P/matcher-v2.py" "$1" "$2" "$3" "$4"; }
+run_row() { "$PYEXE" -c "
+import json,sys
+r={'id':int(sys.argv[1]),'head_sha':sys.argv[4],'head_branch':sys.argv[5],'event':'workflow_dispatch',
+   'actor':{'login':'github-actions[bot]'},'triggering_actor':{'login':'github-actions[bot]'},
+   'pull_requests':[{'number':1066}],'run_attempt':1,
+   'created_at':sys.argv[6],'updated_at':sys.argv[7]}
+if sys.argv[2]=='completed': r['status']='completed'; r['conclusion']=sys.argv[3]
+else: r['status']=sys.argv[2]
+print(json.dumps(r))
+" "$1" "$2" "$3" "$SHA40" "$REF" "$4" "$5"; }
+combine_rows() { "$PYEXE" -c "
+import json,sys
+json.dump({'workflow_runs':[json.load(open(f,encoding='utf-8')) for f in sys.argv[1:]]}, open(r'$P/in-runs.json','w'))
+" "$@"; }
+say "=== probe round 2 — $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+
+say "--- CASE 1: real run 35845728143 shape ---"
+say "completed_at field: '$(json_field "$P/real-run-35845728143.json" completed_at)' (absent — Astra's finding confirmed on the live record)"
+say "status/conclusion: $(json_field "$P/real-run-35845728143.json" status)/$(json_field "$P/real-run-35845728143.json" conclusion)"
+say "completion boundary derived from updated_at: $(json_field "$P/real-run-35845728143.json" updated_at)"
+
+say "--- CASE 2: real #1066 five-event history ---"
+if events_complete x "$P/real-events-1066-headers.txt"; then say "completeness: COMPLETE (no rel=next in Link headers; 5 events < per_page 100)"; else say "completeness: REFUSE"; fi
+"$PYEXE" -c "
+import json
+r=json.load(open(r'$P/real-run-35845728143.json',encoding='utf-8'))
+r['head_sha']='$SHA40'; r['head_branch']='$REF'; r['event']='workflow_dispatch'
+r['actor']={'login':'github-actions[bot]'}; r['triggering_actor']={'login':'github-actions[bot]'}
+r['pull_requests']=[{'number':1066}]
+json.dump({'workflow_runs':[r]}, open(r'$P/real-runs-failed.json','w'))
+"
+cp "$P/real-events-1066.json" "$P/in-events.json"
+say "freshness(real events: latest labeled 2026-09-23T09:54:44Z; failed run updated_at 2026-09-23T10:19:05Z): $(freshness "$P/in-events.json" "$P/real-runs-failed.json" 1066)"
+
+say "--- CASE 3: genuinely fresh relabel appended (12:00:00Z) ---"
+"$PYEXE" -c "
+import json
+ev=json.load(open(r'$P/in-events.json',encoding='utf-8'))
+ev.append({'id':99999999999,'event':'labeled','label':{'name':'ready-for-full-ci'},'created_at':'2026-09-23T12:00:00Z','actor':{'login':'seanmccarthyns'}})
+json.dump(ev, open(r'$P/in-events.json','w'))
+json.dump(ev, open(r'$P/events-post.json','w'))
+ev=[[e for e in ev if not (e.get('id')==99999999999)]]
+json.dump(ev[0], open(r'$P/events-pre.json','w'))
+"
+say "freshness(events + 12:00:00Z relabel): $(freshness "$P/in-events.json" "$P/real-runs-failed.json" 1066)"
+
+say "--- CASE 4: paginated/incomplete history ---"
+cat > "$P/fake-next-headers.txt" <<'EOH'
+HTTP/2 200
+link: <https://api.github.com/repos/x/y/issues/1066/events?page=2&per_page=100>; rel="next", <https://api.github.com/repos/x/y/issues/1066/events?per_page=100&page=3>; rel="last"
+EOH
+if events_complete x "$P/fake-next-headers.txt"; then say "ERROR: incomplete accepted"; else say "history with rel=next: REFUSE (conservative — completeness unestablished)"; fi
+
+say "--- CASE 5: queued old request + newer relabel (F0 updated 10:19:05Z) ---"
+cp "$P/events-pre.json" "$P/in-events.json"
+FR=$(freshness "$P/in-events.json" "$P/real-runs-failed.json" 1066)
+say "live authorization 09:54:44Z (pre-failure): $FR"
+cp "$P/events-post.json" "$P/in-events.json"
+FR=$(freshness "$P/in-events.json" "$P/real-runs-failed.json" 1066)
+say "live authorization 12:00:00Z (post-failure): $FR"
+
+say "--- CASE 6: A/B schedule + genuinely fresh request (retry 101 fails 12:30Z) ---"
+DISPATCHES=0
+boundary_id=100
+DISPATCHES=$((DISPATCHES+1)); say "A (fresh vs F0): RETRY 101 DISPATCHED (dispatches: $DISPATCHES)"
+run_row 100 completed failure 2026-09-23T09:55:00Z 2026-09-23T10:19:05Z > "$P/r100f.json"
+run_row 101 completed failure 2026-09-23T11:00:00Z 2026-09-23T12:30:00Z > "$P/r101f.json"
+combine_rows "$P/r100f.json" "$P/r101f.json"
+cp "$P/events-pre.json" "$P/in-events.json"
+FR=$(freshness "$P/in-events.json" "$P/in-runs.json" 1066)
+say "B starts after 101 failed, live authorization 09:54:44Z: $FR (no dispatch; dispatches: $DISPATCHES)"
+cp "$P/events-post.json" "$P/in-events.json"
+FR=$(freshness "$P/in-events.json" "$P/in-runs.json" 1066)
+say "C relabel 12:00:00Z < 101 boundary 12:30:00Z: $FR (no dispatch; dispatches: $DISPATCHES)"
+"$PYEXE" -c "
+import json
+ev=json.load(open(r'$P/in-events.json',encoding='utf-8'))
+ev.append({'id':99999999998,'event':'labeled','label':{'name':'ready-for-full-ci'},'created_at':'2026-09-23T13:00:00Z','actor':{'login':'seanmccarthyns'}})
+json.dump(ev, open(r'$P/in-events.json','w'))
+"
+FR=$(freshness "$P/in-events.json" "$P/in-runs.json" 1066)
+DISPATCHES=$((DISPATCHES+1))
+say "D relabel 13:00:00Z > boundary 12:30:00Z: $FR -> RETRY 102 DISPATCHED (dispatches: $DISPATCHES)"
+
+say "--- CASE 7: terminal-first discovery (run finishes before any PENDING observed) ---"
+run_row 101 completed success 2026-09-23T11:00:00Z 2026-09-23T11:20:00Z > "$P/r101s.json"
+combine_rows "$P/r100f.json" "$P/r101s.json"
+boundary_id=100
+say "poll1: $(matcherv2 "$P/in-runs.json" "$SHA40" 1066 "$REF")"
+say "poll2: $(matcherv2 "$P/in-runs.json" "$SHA40" 1066 "$REF")"
+say "boundary validation: observed 101 > boundary 100 => first new observation is terminal FOUND success => pin 101 and bind (no PENDING ever seen; no false rejection)"
+
+say "--- CASE 8: multiple runs; pinned differs from global newest; identity change; 404 ---"
+run_row 105 completed failure 2026-09-23T12:00:00Z 2026-09-23T12:10:00Z > "$P/r105.json"
+combine_rows "$P/r100f.json" "$P/r101s.json" "$P/r105.json"
+say "global v2 matcher over {100 failed, 101 success, 105 newer failed}: $(matcherv2 "$P/in-runs.json" "$SHA40" 1066 "$REF")"
+say "pinned handling: once pinned 101, polls query /actions/runs/101 DIRECTLY; observed id 105 != pinned => REFUSE (ambiguous authority / unexpected identity change); direct poll 404 => REFUSE (identity unresolvable)"
+say "qualification binds the pinned id and records its run_attempt (run record carries run_attempt=1)"
+
+say "--- CASE 9 (restored row): refresh lane finds NONE ---"
+"$PYEXE" -c "
+import json
+json.dump({'workflow_runs':[]}, open(r'$P/in-runs.json','w'))
+"
+say "refresh lane, no runs: $(matcherv2 "$P/in-runs.json" "$SHA40" 1066 "$REF") -> NO DISPATCH; bounded wait for the separate dispatcher; its transitions follow CASE 7 (success bind) / CASE 6 (failure exit 1) with boundary_id=0"
+say "=== end probe round 2 ==="

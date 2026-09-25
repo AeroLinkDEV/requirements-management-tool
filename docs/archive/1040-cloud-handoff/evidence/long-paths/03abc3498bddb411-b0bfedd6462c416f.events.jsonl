@@ -1,0 +1,8 @@
+{"type":"Accepted","authorityPid":3608,"witnessDir":"D:\\aq-2087a3e2\\Preflight\\bootstrap\\transitions\\20260922T125603-105ccba9\\witness","breakaway":true,"descriptorHash":"3EC989F199DF235D7E045B1DFA7CACACC809DCD4777EBBA28477477E775587C2","qualification":"probe","at":"2026-09-22T12:56:06.3979240Z"}
+{"type":"StagingIntended","jobName":"Global\\AeroLinkStage-20260922T125603-105ccba9-b0bfedd6462c416f","at":"2026-09-22T12:56:06.3999355Z"}
+{"type":"StagingRegistered","jobName":"Global\\AeroLinkStage-20260922T125603-105ccba9-b0bfedd6462c416f","at":"2026-09-22T12:56:06.5721808Z"}
+{"type":"Created","processId":8660,"startedAt":"2026-09-22T12:56:06.6169139Z","image":"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe","at":"2026-09-22T12:56:06.6177013Z"}
+{"type":"Resumed","at":"2026-09-22T12:56:06.6197142Z"}
+{"type":"Ready","kind":"marker","evidence":"a marker bound to the request, nonce and pid 8660","readiness":{"kind":"marker"},"markerPath":"D:\\aq-2087a3e2\\Preflight\\bootstrap\\transitions\\20260922T125603-105ccba9\\spool\\ready\\b0bfedd6462c416f.007eee2e58fb43a9a4cd5ff25b61bf68.json","nonce":"007eee2e58fb43a9a4cd5ff25b61bf68","at":"2026-09-22T12:56:07.1651259Z"}
+{"type":"Committing","at":"2026-09-22T12:56:07.1671364Z"}
+{"type":"Registered","processId":8660,"startedAt":"2026-09-22T12:56:06.6169139Z","image":"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe","role":"qualification-probe","commitEvidence":"authority","readiness":"a marker bound to the request, nonce and pid 8660","at":"2026-09-22T12:56:07.1711568Z"}

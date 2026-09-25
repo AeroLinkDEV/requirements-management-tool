@@ -1,0 +1,19 @@
+{
+  "requestId": "befd94bf350146549d7a40a895f78006",
+  "pid": 872,
+  "decision": "Completed",
+  "exitCode": 0,
+  "restored": true,
+  "restorationRequired": false,
+  "detail": "the transition completed; 2 required role(s) verified by the outer",
+  "attempts": [
+    {
+      "AttemptId": "20260922T151822-721a9714",
+      "Decision": "Completed",
+      "ExitCode": 0,
+      "Detail": "the transition completed; 2 required role(s) verified by the outer"
+    }
+  ],
+  "token": "[REDACTED]",
+  "at": "2026-09-22T15:29:53.5459911Z"
+}

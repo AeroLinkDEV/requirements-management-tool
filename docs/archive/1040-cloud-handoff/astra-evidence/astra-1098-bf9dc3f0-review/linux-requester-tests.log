@@ -1,0 +1,40 @@
+✔ ready label requester is trusted-base, readiness-gated, same-repository, and dispatch-only (1.310555ms)
+✔ trusted binding requires Product own readiness authentication before accepting Full evidence (1.399805ms)
+✔ full workflow authenticates exact ready PR state before trusting dispatch inputs (0.249345ms)
+✔ immutable head readiness survives harmless base-branch advancement (0.324969ms)
+✔ label-dispatched Full reuses PR classification and exact indentation (0.214048ms)
+✔ Full runs only by trusted readiness while Fast stays on development PR updates (0.360406ms)
+✔ trusted readiness dispatch preserves ordinary PR browser and gate semantics (0.409099ms)
+✔ Product aggregate is a real PR-suite job gated by trusted exact-run verification (0.468922ms)
+✔ the actual required aggregate refuses every non-success prerequisite result (23.931286ms)
+✔ retry orchestration keeps one common gate before every dispatch POST and never dispatches from refresh lanes (0.524037ms)
+✔ the gate demands mandatory requester identity, first attempts, self-postdating and spend-once consumption (0.292076ms)
+✔ uncertain dispatch outcomes end in refusal; the dispatched run is pinned by response identity or boundary-filtered discovery (0.227923ms)
+✔ refresh lanes and stale/exhausted product states never dispatch; only a qualified readiness request does (0.177137ms)
+✔ the exact-head matcher verb selection executes against scripted transcripts (608.406274ms)
+✔ the common dispatch gate executes: freshness, spend-once, identity, ties, histories and shapes (1747.260164ms)
+✔ pinned Product identity checks execute: pin/poll modes, trust, attempt, and terminal states (639.783528ms)
+✔ the bounded pagination walk refuses truncated histories (150.205885ms)
+✔ the initial decision dispatches once for readiness labels and never for refreshes; authoritative success is reused (33.051289ms)
+✔ integrated: eligible NONE dispatches once, pins the response identity, and qualifies the pinned attempt (1105.997138ms)
+✔ integrated: eligible EXHAUSTED dispatch with a lost transport response recovers by discovery — one POST total (1174.453536ms)
+✔ integrated: a lost response that never resolves refuses after exactly one POST (10258.360064ms)
+✔ integrated: stale, consumed and missing-identity refusals post zero times (1502.966827ms)
+✔ integrated: a requester rerun refuses with zero POSTs (471.283173ms)
+✔ integrated: pinned-run trust and attempt changes refuse after a valid pin and a later poll (1846.24111ms)
+✔ integrated: a missing pinned record (404) refuses after the single dispatch (641.605134ms)
+✔ integrated: an existing authoritative success is reused without dispatch (673.791562ms)
+✔ integrated: failed qualification evidence refuses and the per-attempt jobs request is exact (942.489649ms)
+✔ integrated: multi-page event histories are walked with query-correct URLs and consumed by the gate (1105.308797ms)
+✔ integrated: post-pin transport failure with a stale success-shaped file refuses (856.211885ms)
+✔ integrated: post-pin failed HTTP carrying a success-shaped body refuses (842.158113ms)
+✔ integrated: post-pin 404 refuses (841.429436ms)
+✔ integrated: checker failure after pinning refuses without a bind (907.015503ms)
+ℹ tests 32
+ℹ suites 0
+ℹ pass 32
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26540.975928

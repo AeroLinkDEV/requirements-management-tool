@@ -1,0 +1,104 @@
+using System.Net.Http.Json;
+using System.Text.Json;
+using AeroLink.Domain.Programs;
+using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
+using Xunit;
+
+namespace AeroLink.Api.Tests;
+
+// RMT-1040 Checkpoint A diagnosis-only probe on a disposable PostgreSQL database. It demonstrates the
+// CURRENT defect (a build committed after page one leaks into the continuation) without implementing any
+// fix. This file is a temporary diagnostic and is removed before the approved implementation begins.
+public sealed class RmT1040PickerBaselineProbeTests
+{
+    [Fact]
+    public async Task Build_committed_after_page_one_leaks_into_the_release_continuation()
+    {
+        var raw = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
+        if (string.IsNullOrWhiteSpace(raw))
+            throw new InvalidOperationException("Probe requires an explicit disposable AEROLINK_MIGRATIONS_CONNECTION.");
+        var server = new NpgsqlConnectionStringBuilder(raw) { Database = "postgres" };
+        var host = (server.Host ?? "").Trim().Trim('[', ']');
+        if (server.Port == 54329 || !(host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || System.Net.IPAddress.TryParse(host, out var address) && System.Net.IPAddress.IsLoopback(address)))
+            throw new InvalidOperationException("Probe refuses non-loopback or persistent-port PostgreSQL.");
+        var database = "aerolink_1040_probe_" + Guid.NewGuid().ToString("N");
+        await using var admin = new NpgsqlConnection(server.ConnectionString);
+        await admin.OpenAsync();
+        await using (var create = new NpgsqlCommand($"CREATE DATABASE \"{database}\"", admin))
+            await create.ExecuteNonQueryAsync();
+        try
+        {
+            var connection = new NpgsqlConnectionStringBuilder(server.ConnectionString) { Database = database }.ConnectionString;
+            await using (var db = new AeroLinkDbContext(new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options))
+                await db.Database.MigrateAsync();
+
+            using var factory = new AeroLinkApiFactory(postgresConnection: connection);
+            using var client = factory.CreateClient();
+            await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+
+            Guid projectId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var data = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                var program = new ProgramRecord("RMT1040 probe program", "RMT1040PROBE");
+                var project = new ProjectRecord(program.Id, "RMT1040 probe project", "Software");
+                var r10 = new SoftwareRelease(project.Id, "1.0", true);
+                var r15 = new SoftwareRelease(project.Id, "1.5", false, r10.Id);
+                var r20 = new SoftwareRelease(project.Id, "2.0", true, r15.Id);
+                data.AddRange(program, project, r10, r15, r20);
+                await data.SaveChangesAsync();
+                projectId = project.Id;
+            }
+
+            var pageOneUrl = $"/api/managed-documents/link-options?projectId={projectId}&artifactType=Release&pageSize=2";
+            var pageOne = await client.GetFromJsonAsync<JsonElement>(pageOneUrl);
+            Console.WriteLine("PROBE pageOne=" + JsonSerializer.Serialize(pageOne));
+            var cursor = pageOne.GetProperty("nextCursor").GetString();
+            Assert.True(pageOne.GetProperty("hasMore").GetBoolean(), "page one must be short to start a traversal");
+            Assert.False(string.IsNullOrEmpty(cursor));
+
+            // The controlled concurrent fixture stand-in: two builds committed after page one succeeded.
+            // 1.2 sorts before the page-one cursor; 9.9 sorts after it.
+            Guid beforeCursorId, afterCursorId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var data = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                var before = new SoftwareRelease(projectId, "1.2", false);
+                var after = new SoftwareRelease(projectId, "9.9", false);
+                data.AddRange(before, after);
+                await data.SaveChangesAsync();
+                beforeCursorId = before.Id;
+                afterCursorId = after.Id;
+            }
+            Console.WriteLine($"PROBE committedAfterPageOne beforeCursorId={beforeCursorId} afterCursorId={afterCursorId}");
+
+            var pageTwo = await client.GetFromJsonAsync<JsonElement>($"{pageOneUrl}&cursor={Uri.EscapeDataString(cursor!)}");
+            Console.WriteLine("PROBE pageTwo=" + JsonSerializer.Serialize(pageTwo));
+            var continuationIds = pageTwo.GetProperty("items").EnumerateArray()
+                .Select(x => x.GetProperty("id").GetString()).ToHashSet();
+
+            // Baseline defect demonstration: the after-cursor build enters the continuation of the original
+            // traversal. Once the snapshot fix lands, this assertion must be inverted (excluded).
+            Assert.Contains(afterCursorId.ToString(), continuationIds);
+            // The before-cursor build stays outside this traversal's later pages (existing keyset behavior).
+            Assert.DoesNotContain(beforeCursorId.ToString(), continuationIds);
+
+            var fresh = await client.GetFromJsonAsync<JsonElement>($"/api/managed-documents/link-options?projectId={projectId}&artifactType=Release&pageSize=50");
+            Console.WriteLine("PROBE freshTraversal=" + JsonSerializer.Serialize(fresh));
+            var freshIds = fresh.GetProperty("items").EnumerateArray()
+                .Select(x => x.GetProperty("id").GetString()).ToHashSet();
+            Assert.Contains(afterCursorId.ToString(), freshIds);
+            Assert.Contains(beforeCursorId.ToString(), freshIds);
+            Assert.Equal(5, fresh.GetProperty("items").GetArrayLength());
+        }
+        finally
+        {
+            await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{database}\" WITH (FORCE)", admin);
+            await drop.ExecuteNonQueryAsync();
+        }
+    }
+}

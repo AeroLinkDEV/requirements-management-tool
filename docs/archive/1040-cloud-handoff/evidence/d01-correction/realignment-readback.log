@@ -1,0 +1,51 @@
+STATE AeroLinkProductionSourceReconcile Limit=PT2H15M Multiple=IgnoreNew Enabled=True LogonType=S4U Account=seanm RunLevel=Limited
+STATE AeroLinkRemoteDemoRecovery Limit=PT2H15M Multiple=IgnoreNew Enabled=True LogonType=S4U Account=seanm RunLevel=Limited
+Get-AeroLinkSha256Text : The term 'Get-AeroLinkSha256Text' is not recognized as the name of a cmdlet, function, script 
+file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct 
+and try again.
+At line:14 char:20
++   $installedHash = Get-AeroLinkSha256Text (Get-AeroLinkTaskDefinition ...
++                    ~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (Get-AeroLinkSha256Text:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+Get-AeroLinkSha256Text : The term 'Get-AeroLinkSha256Text' is not recognized as the name of a cmdlet, function, script 
+file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct 
+and try again.
+At line:8 char:20
++   $installedHash = Get-AeroLinkSha256Text (Get-AeroLinkTaskDefinition ...
++                    ~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (Get-AeroLinkSha256Text:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+Get-AeroLinkSha256Text : The term 'Get-AeroLinkSha256Text' is not recognized as the name of a cmdlet, function, script 
+file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct 
+and try again.
+At line:10 char:19
++   $contractHash = Get-AeroLinkSha256Text (Get-AeroLinkTaskDefinitionC ...
++                   ~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (Get-AeroLinkSha256Text:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+DESCRIPTOR Reconcile installed= contract= match=True
+Get-AeroLinkSha256Text : The term 'Get-AeroLinkSha256Text' is not recognized as the name of a cmdlet, function, script 
+file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct 
+and try again.
+At line:8 char:20
++   $installedHash = Get-AeroLinkSha256Text (Get-AeroLinkTaskDefinition ...
++                    ~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (Get-AeroLinkSha256Text:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+Get-AeroLinkSha256Text : The term 'Get-AeroLinkSha256Text' is not recognized as the name of a cmdlet, function, script 
+file, or operable program. Check the spelling of the name, or if a path was included, verify that the path is correct 
+and try again.
+At line:10 char:19
++   $contractHash = Get-AeroLinkSha256Text (Get-AeroLinkTaskDefinitionC ...
++                   ~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (Get-AeroLinkSha256Text:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+DESCRIPTOR Recovery installed= contract= match=True
+DESCRIPTOR Reconcile installed=2A6EF836D807AFF481823E616F4BBB5D4819650CC2E7865525A996896E881D8A contract=C5831727305F7E2DD8418EF9CFDC927F5532BCA9E36FE8D8FAC997E821FB380C match=False
+DESCRIPTOR Recovery installed=2EDD3806F32A191049E7BFBD971F05BA0A5C5EB148371D549EE99AB90AD10903 contract=0661FCAFCE9F49638302BD9903F1679BB4798D1C802206E98F2F9742D2DE019E match=False

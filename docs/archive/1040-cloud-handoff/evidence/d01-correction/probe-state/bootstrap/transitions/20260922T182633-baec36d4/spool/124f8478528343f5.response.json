@@ -1,0 +1,14 @@
+{
+  "requestId": "124f8478528343f5",
+  "outcome": "Succeeded",
+  "granted": true,
+  "currentHealth": "Running",
+  "restored": true,
+  "restorationObligation": "None",
+  "blocking": false,
+  "processId": 36544,
+  "startedAt": "2026-09-22T18:26:36.5095717Z",
+  "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "detail": "launch succeeded (commit evidence: authority); now: pid 36544 is running with its recorded identity",
+  "at": "2026-09-22T18:26:37.1010044Z"
+}

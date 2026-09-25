@@ -1,0 +1,51 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+
+const worktree = 'C:/Sean Project/RMT-1040-ci-worktree'
+const requester = readFileSync(join(worktree, '.github/workflows/request-full-ci.yml'), 'utf8').replace(/\r\n/g, '\n')
+const pythonExecutable = 'C:/Users/seanm/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe'
+const bash = 'C:/Program Files/Git/bin/bash.exe'
+
+// pull the same helpers from the test file by evaluating its module-scope? Simpler: re-implement minimal copies.
+function workflowRunBody() {
+  const stepAt = requester.indexOf('- name: Authenticate live ready PR, dispatch once, and bind exact Product success')
+  const runAt = requester.indexOf('        run: |', stepAt)
+  const bodyStart = runAt + '        run: |\n'.length
+  const nextStep = requester.indexOf('\n      - name: Mint', bodyStart)
+  const dedented = requester.slice(bodyStart, nextStep === -1 ? undefined : nextStep).replace(/^ {10}/gm, '')
+  return dedented
+    .replace(/^SELF_RUN_ID="\$\{\{ github\.run_id \}\}"\n/m, '')
+    .replace(/^SELF_RUN_ATTEMPT="\$\{\{ github\.run_attempt \}\}"\n/m, '')
+}
+
+const body = workflowRunBody()
+const scratch = mkdtempSync(join(tmpdir(), 'dbg-integrated-'))
+const state = join(scratch, 'state')
+mkdirSync(join(state, 'tmp'), { recursive: true })
+writeFileSync(join(state, 'scenario.json'), JSON.stringify({ dispatchResponse: 'details', revealAfter: 1, pinnedFinalAfter: 2 }))
+writeFileSync(join(state, 'events.page.1'), JSON.stringify([
+  { id: 1, event: 'labeled', label: { name: 'ready-for-full-ci' }, created_at: '2026-09-22T10:49:17Z', actor: { login: 'seanmccarthyns' } },
+  { id: 2, event: 'labeled', label: { name: 'ready-for-full-ci' }, created_at: '2026-09-23T12:00:00Z', actor: { login: 'seanmccarthyns' } },
+]))
+writeFileSync(join(state, 'events.headers.1'), 'HTTP/2 200\n')
+writeFileSync(join(state, 'requester.page.1'), JSON.stringify({ workflow_runs: [
+  { id: 7000, head_sha: 'a'.repeat(40), event: 'pull_request_target', created_at: '2026-09-23T12:00:05Z', updated_at: '2026-09-23T12:00:05Z', status: 'completed', conclusion: 'failure', run_attempt: 1 },
+]}))
+writeFileSync(join(state, 'requester.headers.1'), 'HTTP/2 200\n')
+writeFileSync(join(state, 'static-runs.json'), JSON.stringify({ workflow_runs: [] }))
+writeFileSync(join(state, 'run-101-initial.json'), JSON.stringify({ id: 101, head_sha: 'a'.repeat(40), head_branch: 'glm/integrated-branch', event: 'workflow_dispatch', actor: { login: 'github-actions[bot]' }, triggering_actor: { login: 'github-actions[bot]' }, pull_requests: [{ number: 1066 }], run_attempt: 1, status: 'in_progress', created_at: '2026-09-23T12:05:00Z', updated_at: '2026-09-23T12:10:00Z' }))
+writeFileSync(join(state, 'run-101-final.json'), JSON.stringify({ id: 101, head_sha: 'a'.repeat(40), head_branch: 'glm/integrated-branch', event: 'workflow_dispatch', actor: { login: 'github-actions[bot]' }, triggering_actor: { login: 'github-actions[bot]' }, pull_requests: [{ number: 1066 }], run_attempt: 1, status: 'completed', conclusion: 'success', created_at: '2026-09-23T12:05:00Z', updated_at: '2026-09-23T12:20:00Z' }))
+writeFileSync(join(state, 'jobs.json'), JSON.stringify({ jobs: [
+  { name: 'Classify changed product areas', steps: [{ name: 'Authenticate label-dispatched pull-request context', status: 'completed', conclusion: 'success' }] },
+  { name: 'Full Product evidence aggregate', status: 'completed', conclusion: 'success' },
+]}))
+writeFileSync(join(state, 'pr.json'), JSON.stringify({ state: 'open', head: { sha: 'a'.repeat(40), ref: 'glm/integrated-branch', repo: { full_name: 'owner/repo' } }, labels: [{ name: 'ready-for-full-ci' }] }))
+writeFileSync(join(state, 'counters.json'), JSON.stringify({ listGets: 0, pinnedGets: 0, postSeen: false, postCount: 0 }))
+writeFileSync(join(state, 'jobs-requests'), '')
+writeFileSync(join(state, 'summary.md'), '')
+
+// reuse the mock + harness built by the test file itself: import and call
+const testMod = await import('file:///' + join(worktree, 'product/test-planner/tests/full-ci-readiness-dispatch.test.mjs').split('\\').join('/')).catch(e => ({ err: String(e) }))
+console.log('module import err:', testMod.err ?? 'none (tests executed at import)')

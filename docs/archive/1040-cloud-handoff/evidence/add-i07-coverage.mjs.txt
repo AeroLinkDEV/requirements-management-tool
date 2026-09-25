@@ -1,0 +1,122 @@
+import fs from 'node:fs'
+
+const p = 'C:/Sean Project/RMT-1040-ci-worktree/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs'
+let s = fs.readFileSync(p, 'utf8')
+
+// 1. mock: pinned-read failure injection
+const before1 = "    '    threshold = int(scenario.get(\"pinnedFinalAfter\", 2))',\n    '    rec = plain',"
+const after1 = [
+  "    '    threshold = int(scenario.get(\"pinnedFinalAfter\", 2))',",
+  "    pinned_read_exit = scenario.get(\"pinnedReadExit\")",
+  "    if pinned_read_exit is not None and counters.get(\"pinnedGets\", 0) >= threshold:",
+  '        writej("counters.json", counters)',
+  "        raise SystemExit(int(pinned_read_exit))",
+  "    pinned_read_status = scenario.get(\"pinnedReadStatus\")",
+  "    if pinned_read_status is not None and counters.get(\"pinnedGets\", 0) >= threshold:",
+  '        code = int(pinned_read_status)',
+  '        resp = readj("pinned-read-body.json", {"message": "injected failure"})',
+  "        writej(\"counters.json\", counters)",
+  "        raise SystemExit(22)",
+  '    rec = plain',
+].join('\n')
+if (!s.includes(before1)) { console.error('mock anchor not found'); process.exit(1) }
+s = s.replace(before1, after1)
+
+// 2. buildIntegrated: raw verbatim records + leftover pinned response file
+const before2 = "  for (const [name, rec] of Object.entries(runRecords)) {\n    writeFileSync(join(state, `run-${name}.json`), JSON.stringify(rec))\n  }"
+const after2 = [
+  '  for (const [name, rec] of Object.entries(runRecords)) {',
+  '    writeFileSync(join(state, `run-${name}.json`), JSON.stringify(rec))',
+  '  }',
+  '  for (const [name, raw] of Object.entries(scenario.rawRunRecords ?? {})) {',
+  '    writeFileSync(join(state, `run-${name}.json`), raw)',
+  '  }',
+  '  if (scenario.prePinLeftover) {',
+  '    // an earlier success-shaped response file left behind by a previous read',
+  "    writeFileSync(join(state, 'tmp', 'pinned-101.json'), JSON.stringify(success101))",
+  '  }',
+].join('\n')
+if (!s.includes(before2)) { console.error('runRecords write loop not found'); process.exit(1) }
+s = s.replace(before2, after2)
+
+// 3. regression scenarios appended before the multi-page test
+const anchor = "test('integrated: multi-page event histories are walked with query-correct URLs and consumed by the gate', { skip: skipIntegrated }, () => {"
+const regressions = [
+  "test('integrated: post-pin transport failure with a stale success file refuses — no bind, no qualification, no redispatch', skipIntegrated, () => {",
+  '  const { state, run } = integratedState({',
+  '    requester: [integratedSelf], productRuns: [],',
+  "    runRecords: { '101-initial': inflight101, '101-final': success101 },",
+  "    dispatchResponse: 'details', pinnedFinalAfter: 2, pinnedReadExit: 28, prePinLeftover: true,",
+  '  })',
+  '  const outcome = run()',
+  '  assert.equal(outcome.status, 1)',
+  '  const evidence = diagnostic(state, outcome)',
+  '  assert.match(evidence, /pinned-run read failed/)',
+  '  assert.equal(counters(state).postCount, 1)',
+  "  assert.equal(readFileSync(join(state, 'summary.md'), 'utf8'), '')",
+  "  assert.equal(readFileSync(join(state, 'jobs-requests'), 'utf8'), '')",
+  '})',
+  '',
+  "test('integrated: post-pin failed HTTP carrying a success-shaped body refuses', skipIntegrated, () => {",
+  '  const { state, run } = integratedState({',
+  '    requester: [integratedSelf], productRuns: [],',
+  "    runRecords: { '101-initial': inflight101 },",
+  "    dispatchResponse: 'details', pinnedFinalAfter: 2, pinnedReadStatus: 500,",
+  '    pinnedReadBody: success101,',
+  '  })',
+  '  const outcome = run()',
+  '  assert.equal(outcome.status, 1)',
+  '  const evidence = diagnostic(state, outcome)',
+  '  assert.match(evidence, /pinned-run read failed/)',
+  '  assert.equal(counters(state).postCount, 1)',
+  "  assert.equal(readFileSync(join(state, 'summary.md'), 'utf8'), '')",
+  "  assert.equal(readFileSync(join(state, 'jobs-requests'), 'utf8'), '')",
+  '})',
+  '',
+  "test('integrated: post-pin 404 refuses', skipIntegrated, () => {",
+  '  const { state, run } = integratedState({',
+  '    requester: [integratedSelf], productRuns: [],',
+  "    runRecords: { '101-initial': inflight101 },",
+  "    dispatchResponse: 'details', pinnedFinalAfter: 2, pinnedReadStatus: 404,",
+  "    pinnedReadBody: { message: 'Not Found' },",
+  '  })',
+  '  const outcome = run()',
+  '  assert.equal(outcome.status, 1)',
+  '  const evidence = diagnostic(state, outcome)',
+  '  assert.match(evidence, /pinned-run read failed/)',
+  '  assert.equal(counters(state).postCount, 1)',
+  "  assert.equal(readFileSync(join(state, 'summary.md'), 'utf8'), '')",
+  "  assert.equal(readFileSync(join(state, 'jobs-requests'), 'utf8'), '')",
+  '})',
+  '',
+  "test('integrated: a checker crash after pinning refuses without a bind', skipIntegrated, () => {",
+  '  const { state, run } = integratedState({',
+  '    requester: [integratedSelf], productRuns: [],',
+  "    runRecords: { '101-initial': inflight101 },",
+  "    rawRunRecords: { '101-final': '[]' },",
+  "    dispatchResponse: 'details', pinnedFinalAfter: 2,",
+  '  })',
+  '  const outcome = run()',
+  '  assert.equal(outcome.status, 1)',
+  '  const evidence = diagnostic(state, outcome)',
+  '  assert.match(evidence, /verification failed/)',
+  '  assert.equal(counters(state).postCount, 1)',
+  "  assert.equal(readFileSync(join(state, 'summary.md'), 'utf8'), '')",
+  "  assert.equal(readFileSync(join(state, 'jobs-requests'), 'utf8'), '')",
+  '})',
+  '',
+].join('\n')
+if (!s.includes(anchor)) { console.error('multi-page anchor not found'); process.exit(1) }
+s = s.replace(anchor, regressions + '\n' + anchor)
+
+// 4. pagination unit mock: log requested URLs
+const before4 = "      \"  printf '[]\\\\n' > \\\"\\$out\\\"\","
+const after4 = [
+  "      \"  printf '%s\\\\n' \\\"\\$url\\\" >> \\\"\\$prefix.urls.log\\\"\",",
+  "      \"  printf '[]\\\\n' > \\\"\\$out\\\"\",",
+].join('\n')
+if (!s.includes(before4)) { console.error('pagination mock line not found'); process.exit(1) }
+s = s.replace(before4, after4)
+
+fs.writeFileSync(p, s)
+console.log('I07 coverage + URL logging installed')

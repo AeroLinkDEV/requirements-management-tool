@@ -1,0 +1,35 @@
+**********************
+Windows PowerShell transcript start
+Start time: 20260922194239
+Username: UPSTAIRSMCCARTH\seanm
+RunAs User: UPSTAIRSMCCARTH\seanm
+Configuration Name: 
+Machine: UPSTAIRSMCCARTH (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Sean Project\RMT-1040-glm-evidence\d01-correction\reconcile-retry\retry-reconcile.ps1
+Process ID: 21524
+PSVersion: 5.1.26100.9444
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9444
+BuildVersion: 10.0.26100.9444
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+RECONCILE-RETRY STARTED
+PRE dedicatedSha=202427396043a055fe98191b0fab2a16ab7ced68
+PRE driverSha256=FB77F24385E4E1D0F2B032995EB55CD559D45525137E2303C610ACC94004F668
+PRE installedLimit=PT2H15M
+DRIVER RUN STARTED (includes the actual PT2H15M hard-limit ending)...
+PS>TerminatingError(Get-ScheduledTask): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: No MSFT_ScheduledTask objects found with property 'TaskName' equal to 'AeroLinkContextQualification-3dab441d'.  Verify the value of the property and retry."
+Launch-context qualification of \AeroLinkProductionSourceReconcile: Qualified. probe survived every applicable path of the twin of \AeroLinkProductionSourceReconcile
+Evidence: C:\Sean Project\Requirements Management Tool\product\.local\bootstrap\transitions\qualification-runs\AeroLinkContextQualification-3dab441d.summary.json
+DRIVER_EXIT=0
+SUMMARY verdict=Qualified startedAt=2026-09-22T23:42:42.9119521Z
+ENDING-PATH RECORDS captured: 0
+INSTALLED-DEFINITION-HASH=3C624197393C500BF9B3B21C840073E0ACE5DE48C64DA72963F67C4DCC00C495
+RECONCILE-RETRY-VALIDATED
+**********************
+Windows PowerShell transcript end
+End time: 20260922215854
+**********************

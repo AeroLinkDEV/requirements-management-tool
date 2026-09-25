@@ -1,0 +1,247 @@
+RMT-1040 Round 3 design probe — PostgreSQL 17 sequence+fence repair
+Container rmt1040-r3-pg (throwaway, port 54332), probe db, run 2026-09-21T12:01:28Z
+
+=== writer A: BEGIN REPEATABLE READ; establish old snapshot (max=1 committed) ===
+BEGIN
+      ?column?      
+--------------------
+ A snapshot max = 0
+(1 row)
+
+ pg_sleep 
+----------
+ 
+(1 row)
+
+=== writer A: late INSERT under the OLD snapshot (expect nextval, NOT stale max) ===
+   Id   | PickerInsertionOrdinal 
+--------+------------------------
+ lateRR |                      2
+(1 row)
+
+INSERT 0 1
+COMMIT
+toff read (explicit Read Committed transaction) ===
+BEGIN
+ pg_advisory_xact_lock 
+-----------------------
+ 
+(1 row)
+
+  ?column?  
+------------
+ cutoff = 1
+(1 row)
+
+COMMIT
+=== Astra schedule result: all rows, then the continuation with cutoff = 2 ===
+   Id   | PickerInsertionOrdinal 
+--------+------------------------
+ r10    |                       
+ r15    |                       
+ r20    |                      1
+ lateRR |                      2
+(4 rows)
+
+             ?column?              
+-----------------------------------
+ continuation rows (ordinal <= 2):
+(1 row)
+
+   Id   | PickerInsertionOrdinal 
+--------+------------------------
+ lateRR |                      2
+ r20    |                      1
+(2 rows)
+
+
+------------------------------------------------------------------------
+CLEAN EVIDENCE RUN (supersedes the draft run above, whose final continuation
+query hand-typed <= 2 instead of the captured cutoff = 1; with the captured
+cutoff, lateRR | 2 is excluded. This run captures and uses real cutoffs and
+exercises both fence orders, SERIALIZABLE, and the guard triggers.)
+------------------------------------------------------------------------
+=== ROUND A / writer A (REPEATABLE READ): old snapshot established ===
+BEGIN
+      ?column?      
+--------------------
+ A snapshot max = 0
+(1 row)
+
+ pg_sleep 
+----------
+ 
+(1 row)
+
+=== ROUND A / writer A: late INSERT after fence+commit of others (expect fresh nextval, no stale max) ===
+    Id    | PickerInsertionOrdinal 
+----------+------------------------
+ lateRR_Q |                      4
+(1 row)
+
+INSERT 0 1
+COMMIT
+tted) ===
+BEGIN
+ pg_advisory_xact_lock 
+-----------------------
+ 
+(1 row)
+
+=== ROUND A / continuation with the CAPTURED cutoff (late writer must be absent) ===
+ captured_cutoff 
+-----------------
+               3
+(1 row)
+
+        note        
+--------------------
+ continuation rows:
+(1 row)
+
+  Id   | PickerInsertionOrdinal 
+-------+------------------------
+ r20_Q |                      3
+(1 row)
+
+COMMIT
+        ?column?        
+------------------------
+ lateRR_Q allocated = 4
+(1 row)
+
+=== ROUND B / writer A (SERIALIZABLE): INSERT allocates first, commit deferred 6s, lock held throughout ===
+BEGIN
+   Id    | PickerInsertionOrdinal 
+---------+------------------------
+ lateS_Q |                      5
+(1 row)
+
+INSERT 0 1
+ pg_sleep 
+----------
+ 
+(1 row)
+
+COMMIT
+for the uncommitted allocator, then include it ===
+BEGIN
+ pg_advisory_xact_lock 
+-----------------------
+ 
+(1 row)
+
+ERROR:  syntax error at or near "12"
+LINE 1: SELECT round(extract(epoch from (2026-09-21 12:03:25.962777+...
+                                                    ^
+=== GUARD 1: supplied ordinal must be rejected ===
+ERROR:  picker insertion ordinal is database-allocated and must not be supplied
+CONTEXT:  PL/pgSQL function aerolink_release_picker_alloc() line 4 at RAISE
+=== GUARD 2: Astra legacy attack — UPDATE legacy NULL row to 999 must be rejected ===
+ERROR:  picker insertion ordinal is immutable
+CONTEXT:  PL/pgSQL function aerolink_release_picker_immutable() line 2 at RAISE
+=== GUARD 3: allocated value overwrite and NULL-out must be rejected; unchanged same-value write passes ===
+ERROR:  picker insertion ordinal is immutable
+CONTEXT:  PL/pgSQL function aerolink_release_picker_immutable() line 2 at RAISE
+ERROR:  picker insertion ordinal is immutable
+CONTEXT:  PL/pgSQL function aerolink_release_picker_immutable() line 2 at RAISE
+UPDATE 1
+=== GUARD 4: ordinary lifecycle update (other column) passes; legacy rows still NULL; rollback leaves a permanent gap ===
+UPDATE 1
+BEGIN
+INSERT 0 1
+ROLLBACK
+      Id       | PickerInsertionOrdinal 
+---------------+------------------------
+ afterRollback |                      7
+(1 row)
+
+INSERT 0 1
+=== FINAL STATE ===
+      Id       | ProjectId | PickerInsertionOrdinal 
+---------------+-----------+------------------------
+ r10           | P         |                       
+ r15           | P         |                       
+ r20           | P         |                      1
+ lateRR        | P         |                      2
+ lateRR_Q      | P         |                      4
+ afterRollback | P         |                      7
+ r20_Q         | Q         |                      3
+ lateS_Q       | Q         |                      5
+(8 rows)
+
+
+------------------------------------------------------------------------
+ROUND B RETRY (the previous Round B session died at a broken timing
+expression under ON_ERROR_STOP before printing its continuation; this
+retry demonstrates the fence-wait-then-include case cleanly)
+------------------------------------------------------------------------
+=== ROUND B RETRY / writer A (SERIALIZABLE): allocate, hold 6s, commit ===
+BEGIN
+   Id    | PickerInsertionOrdinal 
+---------+------------------------
+ lateS_R |                      8
+(1 row)
+
+INSERT 0 1
+ pg_sleep 
+----------
+ 
+(1 row)
+
+COMMIT
+toff includes the committed late allocator ===
+BEGIN
+                      t0                      
+----------------------------------------------
+ fence entry at 2026-09-21 12:04:19.530608+00
+(1 row)
+
+ pg_advisory_xact_lock 
+-----------------------
+ 
+(1 row)
+
+                       t1                        
+-------------------------------------------------
+ fence acquired at 2026-09-21 12:04:23.504197+00
+(1 row)
+
+--- continuation at captured cutoff (lateS_R must be INCLUDED here) ---
+ captured_cutoff 
+-----------------
+               8
+(1 row)
+
+   Id    | PickerInsertionOrdinal 
+---------+------------------------
+ lateS_R |                      8
+(1 row)
+
+COMMIT
+
+------------------------------------------------------------------------
+INTERPRETATION (GLM, 2026-09-21)
+- Draft run: legacy migration shape proven (ADD COLUMN leaves r10/r15 NULL);
+  final continuation query there hand-typed "<= 2" instead of the captured
+  cutoff (=1) — superseded by the clean runs below, which use \gset cutoffs.
+- ROUND A (Astra's leak schedule, REPEATABLE READ late writer): stale
+  snapshot max=0; other writer committed ordinal 3; fence captured cutoff 3;
+  late INSERT allocated the GLOBAL nextval 4 (snapshot-independent — the
+  Round-2 MAX design would have reused the stale max and leaked); the
+  continuation at the captured cutoff excludes lateRR_Q | 4. LEAK CLOSED.
+- ROUND B (allocate-first, SERIALIZABLE): allocator took ordinal 8 and held
+  it uncommitted; the fence waited (entry 12:04:19.53Z, acquired
+  12:04:23.50Z, ~3.97 s), captured cutoff 8, and the continuation INCLUDES
+  lateS_R | 8 — a member committed before the boundary. Both fence orders
+  behave per contract.
+- GUARD 1 supplied ordinal rejected; GUARD 2 legacy NULL->999 rejected
+  (Astra's attack); GUARD 3 overwrite and NULL-out rejected, same-value
+  write passes; GUARD 4 ordinary column update passes, rollback leaves a
+  permanent unused value (7 after 5, never reused — harmless), legacy rows
+  still NULL at final state.
+- Probe-only holds used pg_sleep inside held transactions; the required
+  qualification at Checkpoint B uses bounded pg_locks/pg_stat_activity
+  observation instead of sleeps.
+- Container rmt1040-r3-pg removed after the run. No AeroLink persistent
+  database, repository state, or evidence outside this directory touched.

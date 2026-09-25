@@ -1,0 +1,3 @@
+{"case": "failed-get-stale-file", "exit": 1, "stdout": "REFUSED pinned-run read failed (curl exit 28)\n::error::Pinned Product run 101 (attempt 1): REFUSED pinned-run read failed.", "stderr": "", "dispatch_posts": 0, "transport": ["CURRENT_GET_FAILED_EXIT_28"]}
+{"case": "failed-get-response-body", "exit": 1, "stdout": "REFUSED pinned-run read failed (curl exit 22)\n::error::Pinned Product run 101 (attempt 1): REFUSED pinned-run read failed.", "stderr": "", "dispatch_posts": 0, "transport": ["CURRENT_GET_FAILED_EXIT_22_WITH_BODY"]}
+BOTH ORIGINAL FAILED-READ PROBES NOW REFUSE BEFORE AUTHORITATIVE=true

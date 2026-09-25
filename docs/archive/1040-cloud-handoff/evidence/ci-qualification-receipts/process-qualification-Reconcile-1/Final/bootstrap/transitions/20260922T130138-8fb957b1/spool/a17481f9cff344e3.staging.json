@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "jobName": "Global\\AeroLinkStage-20260922T130138-8fb957b1-a17481f9cff344e3",
+  "kind": "staging",
+  "attemptId": "20260922T130138-8fb957b1",
+  "observedBy": "witness",
+  "witnessPid": 2404,
+  "ownerExitEvidence": "signaled",
+  "verdict": "Committed",
+  "limitFlags": 0,
+  "at": "2026-09-22T15:16:37.7317082Z"
+}

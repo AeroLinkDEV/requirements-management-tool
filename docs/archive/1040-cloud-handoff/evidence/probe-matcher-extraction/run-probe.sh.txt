@@ -1,0 +1,5 @@
+set -euo pipefail
+headers=()
+api=https://invalid.example
+python() { "C:/Users/seanm/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe" "$@"; }
+curl() { cp "$PROBE_JSON" "$OUT_PATH"; }

@@ -1,0 +1,1847 @@
+# Instructions
+
+- Following Playwright test failed.
+- Explain why, be concise, respect Playwright best practices.
+- Provide a snippet of code with the fix, if possible.
+
+# Test info
+
+- Name: digital-thread-1046-interaction.spec.ts >> recovered strip space fits the selected card without an unnecessary bottom-dock change
+- Location: tests\digital-thread-1046-interaction.spec.ts:203:1
+
+# Error details
+
+```
+Error: expect(received).toBe(expected) // Object.is equality
+
+Expected: true
+Received: false
+
+Call Log:
+- Timeout 15000ms exceeded while waiting on the predicate
+```
+
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - banner [ref=e3]: "Synthetic #1046 reproduction — FMS-shaped, not HOME data"
+  - main [ref=e4]:
+    - main "Digital Thread" [ref=e5]:
+      - generic [ref=e6]:
+        - group "Digital Thread view" [ref=e7]:
+          - button "Change network" [pressed] [ref=e8] [cursor=pointer]
+          - button "Inside a change" [ref=e9] [cursor=pointer]
+          - button "Artifact thread" [disabled] [ref=e10]
+        - group "Representation" [ref=e12]:
+          - button "Map" [pressed] [ref=e13] [cursor=pointer]
+          - button "Table" [ref=e14] [cursor=pointer]
+      - generic [ref=e15]:
+        - generic [ref=e16]:
+          - group "Filter by level" [ref=e17]:
+            - button "System" [ref=e18] [cursor=pointer]
+            - button "HLR" [ref=e19] [cursor=pointer]
+            - button "LLR" [ref=e20] [cursor=pointer]
+            - button "Test" [ref=e21] [cursor=pointer]
+          - generic [ref=e22]:
+            - generic [ref=e23]: Find an identifier
+            - searchbox "Find an identifier" [ref=e24]
+        - group "Change network for this build" [ref=e27]:
+          - toolbar "Canvas framing controls" [ref=e28]:
+            - button "Zoom out" [ref=e29] [cursor=pointer]: −
+            - status "Current canvas scale" [ref=e30]: 92% · Detailed
+            - button "Zoom in" [ref=e31] [cursor=pointer]: +
+            - button "Fit selected story" [ref=e33] [cursor=pointer]
+            - button "Fit entire story" [ref=e34] [cursor=pointer]
+            - button "Fit board" [ref=e35] [cursor=pointer]
+          - generic:
+            - text: ▲ ▼ ◀ ▶ ▲
+            - generic: ▼
+            - text: ◀ ▶ ▲ ▼ ◀ ▶ ▲ ▼ ◀ ▶ ▲ ▼ ◀ ▶ ▲
+            - generic: ▼
+            - text: ◀ ▶
+          - generic [ref=e36]:
+            - generic [ref=e37]:
+              - generic [ref=e44]:
+                - text: PROBLEM REPORT
+                - emphasis [ref=e45]: "7"
+              - generic [ref=e46]:
+                - text: SYSTEM CHANGE
+                - emphasis [ref=e47]: "46"
+              - generic [ref=e48]:
+                - text: SOFTWARE HLR CHANGE
+                - emphasis [ref=e49]: "45"
+              - generic [ref=e50]:
+                - text: SOFTWARE LLR CHANGE
+                - emphasis [ref=e51]: "40"
+              - generic [ref=e52]:
+                - text: TEST CASE CHANGES
+                - emphasis [ref=e53]: "10"
+              - generic [ref=e54]:
+                - text: TEST PROCEDURE CHANGES
+                - emphasis [ref=e55]: "9"
+            - img:
+              - generic:
+                - generic: resolved by
+              - generic:
+                - generic: resolved by
+              - generic:
+                - generic: resolved by
+              - generic:
+                - generic: resolved by
+              - generic:
+                - generic: allocates to
+              - generic:
+                - generic: verified by
+            - generic [ref=e56]:
+              - button "PR PR-00002.00 Open Intermittent position-source disagreement during route capture Build 1.6" [ref=e57] [cursor=pointer]:
+                - generic [ref=e58]:
+                  - generic [ref=e59]:
+                    - generic [ref=e60]: PR
+                    - generic "This exact artifact is not openable in the current scope" [ref=e61]: PR-00002.00
+                    - generic [ref=e62]: Open
+                  - generic [ref=e63]: Intermittent position-source disagreement during route capture
+                  - generic [ref=e65]: Build 1.6
+              - button "PR PR-00005.00 Open Intermittent position-source disagreement during route capture Build 1.6" [ref=e66] [cursor=pointer]:
+                - generic [ref=e67]:
+                  - generic [ref=e68]:
+                    - generic [ref=e69]: PR
+                    - generic "This exact artifact is not openable in the current scope" [ref=e70]: PR-00005.00
+                    - generic [ref=e71]: Open
+                  - generic [ref=e72]: Intermittent position-source disagreement during route capture
+                  - generic [ref=e74]: Build 1.6
+              - button "PR PR-00006.00 Open Flight-plan sequencing mode is lost after a warm restart Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: PR
+                    - generic "This exact artifact is not openable in the current scope": PR-00006.00
+                    - generic: Open
+                  - generic: Flight-plan sequencing mode is lost after a warm restart
+                  - generic:
+                    - generic: Build 1.6
+              - button "PR PR-00007.00 Open Intermittent position-source disagreement during route capture Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: PR
+                    - generic "This exact artifact is not openable in the current scope": PR-00007.00
+                    - generic: Open
+                  - generic: Intermittent position-source disagreement during route capture
+                  - generic:
+                    - generic: Build 1.6
+              - button "PR PR-00008.00 Open Intermittent position-source disagreement during route capture Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: PR
+                    - generic "This exact artifact is not openable in the current scope": PR-00008.00
+                    - generic: Open
+                  - generic: Intermittent position-source disagreement during route capture
+                  - generic:
+                    - generic: Build 1.6
+              - button "PR PR-00009.00 Open Intermittent position-source disagreement during route capture Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: PR
+                    - generic "This exact artifact is not openable in the current scope": PR-00009.00
+                    - generic: Open
+                  - generic: Intermittent position-source disagreement during route capture
+                  - generic:
+                    - generic: Build 1.6
+              - button "PR PR-00010.00 Open Intermittent position-source disagreement during route capture Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: PR
+                    - generic "This exact artifact is not openable in the current scope": PR-00010.00
+                    - generic: Open
+                  - generic: Intermittent position-source disagreement during route capture
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00031.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6" [ref=e75] [cursor=pointer]:
+                - generic [ref=e76]:
+                  - generic [ref=e77]:
+                    - generic [ref=e78]: SYS
+                    - link "SRCR-00031.00" [ref=e79]:
+                      - /url: "#exact-sys-31"
+                    - generic [ref=e80]: Draft
+                  - generic [ref=e81]: Introduce round-robin routing capability for oceanic flight plans
+                  - generic [ref=e83]: Build 1.6
+              - button "SYS SRCR-00032.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6" [ref=e84] [cursor=pointer]:
+                - generic [ref=e85]:
+                  - generic [ref=e86]:
+                    - generic [ref=e87]: SYS
+                    - link "SRCR-00032.00" [ref=e88]:
+                      - /url: "#exact-sys-32"
+                    - generic [ref=e89]: Draft
+                  - generic [ref=e90]: Introduce round-robin routing capability for oceanic flight plans
+                  - generic [ref=e92]: Build 1.6
+              - button "1 SYS SRCR-00033.00 Approved [EXPLORATORY QA] Detect prolonged disagreement between independent position sources Build 1.6" [ref=e93] [cursor=pointer]:
+                - generic [ref=e94]:
+                  - generic "1 hop from this story's subject" [ref=e95]: "1"
+                  - generic [ref=e96]:
+                    - generic [ref=e97]: SYS
+                    - link "SRCR-00033.00" [ref=e98]:
+                      - /url: "#exact-sys-33"
+                    - generic [ref=e99]: Approved
+                  - generic [ref=e100]: "[EXPLORATORY QA] Detect prolonged disagreement between independent position sources"
+                  - generic [ref=e102]: Build 1.6
+              - button "SYS SRCR-00034.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00034.00":
+                      - /url: "#exact-sys-34"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00035.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00035.00":
+                      - /url: "#exact-sys-35"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00036.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00036.00":
+                      - /url: "#exact-sys-36"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00041.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00041.00":
+                      - /url: "#exact-sys-41"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00053.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00053.00":
+                      - /url: "#exact-sys-53"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00054.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00054.00":
+                      - /url: "#exact-sys-54"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00055.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00055.00":
+                      - /url: "#exact-sys-55"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00056.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00056.00":
+                      - /url: "#exact-sys-56"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00057.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00057.00":
+                      - /url: "#exact-sys-57"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00058.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00058.00":
+                      - /url: "#exact-sys-58"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00059.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00059.00":
+                      - /url: "#exact-sys-59"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00060.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00060.00":
+                      - /url: "#exact-sys-60"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00061.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00061.00":
+                      - /url: "#exact-sys-61"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00062.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00062.00":
+                      - /url: "#exact-sys-62"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00063.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00063.00":
+                      - /url: "#exact-sys-63"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00064.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00064.00":
+                      - /url: "#exact-sys-64"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00065.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00065.00":
+                      - /url: "#exact-sys-65"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00066.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00066.00":
+                      - /url: "#exact-sys-66"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00067.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00067.00":
+                      - /url: "#exact-sys-67"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00068.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00068.00":
+                      - /url: "#exact-sys-68"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00069.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00069.00":
+                      - /url: "#exact-sys-69"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00070.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00070.00":
+                      - /url: "#exact-sys-70"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00071.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00071.00":
+                      - /url: "#exact-sys-71"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00072.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00072.00":
+                      - /url: "#exact-sys-72"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00073.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00073.00":
+                      - /url: "#exact-sys-73"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00074.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00074.00":
+                      - /url: "#exact-sys-74"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00075.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00075.00":
+                      - /url: "#exact-sys-75"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00076.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00076.00":
+                      - /url: "#exact-sys-76"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00077.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00077.00":
+                      - /url: "#exact-sys-77"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00078.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00078.00":
+                      - /url: "#exact-sys-78"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00079.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00079.00":
+                      - /url: "#exact-sys-79"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00080.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00080.00":
+                      - /url: "#exact-sys-80"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00081.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00081.00":
+                      - /url: "#exact-sys-81"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00082.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00082.00":
+                      - /url: "#exact-sys-82"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00083.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00083.00":
+                      - /url: "#exact-sys-83"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00084.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00084.00":
+                      - /url: "#exact-sys-84"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00085.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00085.00":
+                      - /url: "#exact-sys-85"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00086.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00086.00":
+                      - /url: "#exact-sys-86"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00087.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00087.00":
+                      - /url: "#exact-sys-87"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00088.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00088.00":
+                      - /url: "#exact-sys-88"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00089.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00089.00":
+                      - /url: "#exact-sys-89"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00090.00 Approved Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00090.00":
+                      - /url: "#exact-sys-90"
+                    - generic: Approved
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "SYS SRCR-00091.00 Draft Introduce round-robin routing capability for oceanic flight plans Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: SYS
+                    - link "SRCR-00091.00":
+                      - /url: "#exact-sys-91"
+                    - generic: Draft
+                  - generic: Introduce round-robin routing capability for oceanic flight plans
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00076.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6" [ref=e103] [cursor=pointer]:
+                - generic [ref=e104]:
+                  - generic [ref=e105]:
+                    - generic [ref=e106]: HLR
+                    - link "HLRCR-00076.00" [ref=e107]:
+                      - /url: "#exact-hlr-76"
+                    - generic [ref=e108]: Draft
+                  - generic [ref=e109]: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic [ref=e111]: Build 1.6
+              - button "HLR HLRCR-00077.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6" [ref=e112] [cursor=pointer]:
+                - generic [ref=e113]:
+                  - generic [ref=e114]:
+                    - generic [ref=e115]: HLR
+                    - link "HLRCR-00077.00" [ref=e116]:
+                      - /url: "#exact-hlr-77"
+                    - generic [ref=e117]: Draft
+                  - generic [ref=e118]: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic [ref=e120]: Build 1.6
+              - button "HLR HLRCR-00082.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00082.00":
+                      - /url: "#exact-hlr-82"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00087.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00087.00":
+                      - /url: "#exact-hlr-87"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00103.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00103.00":
+                      - /url: "#exact-hlr-103"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00120.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00120.00":
+                      - /url: "#exact-hlr-120"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00122.00 Draft prolonged disagreement Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00122.00":
+                      - /url: "#exact-hlr-122"
+                    - generic: Draft
+                  - generic: prolonged disagreement
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00123.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00123.00":
+                      - /url: "#exact-hlr-123"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00124.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00124.00":
+                      - /url: "#exact-hlr-124"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00125.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00125.00":
+                      - /url: "#exact-hlr-125"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00126.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00126.00":
+                      - /url: "#exact-hlr-126"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00127.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00127.00":
+                      - /url: "#exact-hlr-127"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00128.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00128.00":
+                      - /url: "#exact-hlr-128"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00129.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00129.00":
+                      - /url: "#exact-hlr-129"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00130.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00130.00":
+                      - /url: "#exact-hlr-130"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00131.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00131.00":
+                      - /url: "#exact-hlr-131"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00132.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00132.00":
+                      - /url: "#exact-hlr-132"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00133.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00133.00":
+                      - /url: "#exact-hlr-133"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00134.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00134.00":
+                      - /url: "#exact-hlr-134"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00135.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00135.00":
+                      - /url: "#exact-hlr-135"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00136.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00136.00":
+                      - /url: "#exact-hlr-136"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00137.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00137.00":
+                      - /url: "#exact-hlr-137"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00138.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00138.00":
+                      - /url: "#exact-hlr-138"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00139.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00139.00":
+                      - /url: "#exact-hlr-139"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00140.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00140.00":
+                      - /url: "#exact-hlr-140"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00141.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00141.00":
+                      - /url: "#exact-hlr-141"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00142.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00142.00":
+                      - /url: "#exact-hlr-142"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00143.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00143.00":
+                      - /url: "#exact-hlr-143"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00144.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00144.00":
+                      - /url: "#exact-hlr-144"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00145.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00145.00":
+                      - /url: "#exact-hlr-145"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00146.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00146.00":
+                      - /url: "#exact-hlr-146"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00147.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00147.00":
+                      - /url: "#exact-hlr-147"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00148.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00148.00":
+                      - /url: "#exact-hlr-148"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00149.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00149.00":
+                      - /url: "#exact-hlr-149"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00150.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00150.00":
+                      - /url: "#exact-hlr-150"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00151.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00151.00":
+                      - /url: "#exact-hlr-151"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00152.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00152.00":
+                      - /url: "#exact-hlr-152"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00153.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00153.00":
+                      - /url: "#exact-hlr-153"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00154.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00154.00":
+                      - /url: "#exact-hlr-154"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00155.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00155.00":
+                      - /url: "#exact-hlr-155"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00156.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00156.00":
+                      - /url: "#exact-hlr-156"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00157.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00157.00":
+                      - /url: "#exact-hlr-157"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00158.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00158.00":
+                      - /url: "#exact-hlr-158"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00159.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00159.00":
+                      - /url: "#exact-hlr-159"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - button "HLR HLRCR-00160.00 Draft Implement bounded route sequencing and independent position-source integrity checks Build 1.6":
+                - generic:
+                  - generic:
+                    - generic: HLR
+                    - link "HLRCR-00160.00":
+                      - /url: "#exact-hlr-160"
+                    - generic: Draft
+                  - generic: Implement bounded route sequencing and independent position-source integrity checks
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00078.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6" [ref=e121] [cursor=pointer]':
+                - generic [ref=e122]:
+                  - generic [ref=e123]:
+                    - generic [ref=e124]: LLR
+                    - link "LLRCR-00078.00" [ref=e125]:
+                      - /url: "#exact-llr-0"
+                    - generic [ref=e126]: Draft
+                  - generic [ref=e127]: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic [ref=e129]: Build 1.6
+              - 'button "LLR LLRCR-00079.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6" [ref=e130] [cursor=pointer]':
+                - generic [ref=e131]:
+                  - generic [ref=e132]:
+                    - generic [ref=e133]: LLR
+                    - link "LLRCR-00079.00" [ref=e134]:
+                      - /url: "#exact-llr-1"
+                    - generic [ref=e135]: Draft
+                  - generic [ref=e136]: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic [ref=e138]: Build 1.6
+              - 'button "LLR LLRCR-00080.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00080.00":
+                      - /url: "#exact-llr-2"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00081.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00081.00":
+                      - /url: "#exact-llr-3"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00082.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00082.00":
+                      - /url: "#exact-llr-4"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00083.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00083.00":
+                      - /url: "#exact-llr-5"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00084.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00084.00":
+                      - /url: "#exact-llr-6"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00085.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00085.00":
+                      - /url: "#exact-llr-7"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00086.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00086.00":
+                      - /url: "#exact-llr-8"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00087.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00087.00":
+                      - /url: "#exact-llr-9"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00088.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00088.00":
+                      - /url: "#exact-llr-10"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00089.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00089.00":
+                      - /url: "#exact-llr-11"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00090.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00090.00":
+                      - /url: "#exact-llr-12"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00091.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00091.00":
+                      - /url: "#exact-llr-13"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00092.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00092.00":
+                      - /url: "#exact-llr-14"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00093.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00093.00":
+                      - /url: "#exact-llr-15"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00094.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00094.00":
+                      - /url: "#exact-llr-16"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00095.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00095.00":
+                      - /url: "#exact-llr-17"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00096.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00096.00":
+                      - /url: "#exact-llr-18"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00097.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00097.00":
+                      - /url: "#exact-llr-19"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00098.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00098.00":
+                      - /url: "#exact-llr-20"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00099.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00099.00":
+                      - /url: "#exact-llr-21"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00100.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00100.00":
+                      - /url: "#exact-llr-22"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00101.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00101.00":
+                      - /url: "#exact-llr-23"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00102.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00102.00":
+                      - /url: "#exact-llr-24"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00103.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00103.00":
+                      - /url: "#exact-llr-25"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00104.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00104.00":
+                      - /url: "#exact-llr-26"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00105.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00105.00":
+                      - /url: "#exact-llr-27"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00106.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00106.00":
+                      - /url: "#exact-llr-28"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00107.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00107.00":
+                      - /url: "#exact-llr-29"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00108.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00108.00":
+                      - /url: "#exact-llr-30"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00109.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00109.00":
+                      - /url: "#exact-llr-31"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00110.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00110.00":
+                      - /url: "#exact-llr-32"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00111.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00111.00":
+                      - /url: "#exact-llr-33"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00112.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00112.00":
+                      - /url: "#exact-llr-34"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00113.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00113.00":
+                      - /url: "#exact-llr-35"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00114.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00114.00":
+                      - /url: "#exact-llr-36"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00115.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00115.00":
+                      - /url: "#exact-llr-37"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00116.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00116.00":
+                      - /url: "#exact-llr-38"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - 'button "LLR LLRCR-00117.00 Draft FMS 1.6 change package: oceanic navigation and route sequencing Build 1.6"':
+                - generic:
+                  - generic:
+                    - generic: LLR
+                    - link "LLRCR-00117.00":
+                      - /url: "#exact-llr-39"
+                    - generic: Draft
+                  - generic: "FMS 1.6 change package: oceanic navigation and route sequencing"
+                  - generic:
+                    - generic: Build 1.6
+              - button "TCR HLRTCCR-000001.00 Draft Build 1.6 Assessing change request HLRCR-00128.00" [ref=e139] [cursor=pointer]:
+                - generic [ref=e140]:
+                  - generic [ref=e141]:
+                    - generic [ref=e142]: TCR
+                    - link "HLRTCCR-000001.00" [ref=e143]:
+                      - /url: "#exact-case-1"
+                    - generic [ref=e144]: Draft
+                  - generic [ref=e145]:
+                    - generic [ref=e146]: Build 1.6
+                    - generic [ref=e147]: Assessing change request HLRCR-00128.00
+              - button "TCR HLRTCCR-000002.00 Draft Build 1.6 Assessing change request HLRCR-00128.00" [ref=e148] [cursor=pointer]:
+                - generic [ref=e149]:
+                  - generic [ref=e150]:
+                    - generic [ref=e151]: TCR
+                    - link "HLRTCCR-000002.00" [ref=e152]:
+                      - /url: "#exact-case-2"
+                    - generic [ref=e153]: Draft
+                  - generic [ref=e154]:
+                    - generic [ref=e155]: Build 1.6
+                    - generic [ref=e156]: Assessing change request HLRCR-00128.00
+              - button "TCR HLRTCCR-000034.00 Draft Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "HLRTCCR-000034.00":
+                      - /url: "#exact-case-34"
+                    - generic: Draft
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR HLRTCCR-000035.00 Draft Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "HLRTCCR-000035.00":
+                      - /url: "#exact-case-35"
+                    - generic: Draft
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR HLRTCCR-000036.00 Draft Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "HLRTCCR-000036.00":
+                      - /url: "#exact-case-36"
+                    - generic: Draft
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR HLRTCCR-000046.00 Draft Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "HLRTCCR-000046.00":
+                      - /url: "#exact-case-46"
+                    - generic: Draft
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR HLRTCCR-000047.00 Draft Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "HLRTCCR-000047.00":
+                      - /url: "#exact-case-47"
+                    - generic: Draft
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR HLRTCCR-000048.00 Draft Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "HLRTCCR-000048.00":
+                      - /url: "#exact-case-48"
+                    - generic: Draft
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR HLRTCCR-000049.00 Draft Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "HLRTCCR-000049.00":
+                      - /url: "#exact-case-49"
+                    - generic: Draft
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR HLRTCCR-000050.00 Draft Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "HLRTCCR-000050.00":
+                      - /url: "#exact-case-50"
+                    - generic: Draft
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR SYSTPCR-000001.00 Approved Build 1.6 Assessing change request HLRCR-00128.00" [ref=e157] [cursor=pointer]:
+                - generic [ref=e158]:
+                  - generic [ref=e159]:
+                    - generic [ref=e160]: TCR
+                    - link "SYSTPCR-000001.00" [ref=e161]:
+                      - /url: "#exact-proc-1"
+                    - generic [ref=e162]: Approved
+                  - generic [ref=e163]:
+                    - generic [ref=e164]: Build 1.6
+                    - generic [ref=e165]: Assessing change request HLRCR-00128.00
+              - button "TCR SYSTPCR-000002.00 Approved Build 1.6 Assessing change request HLRCR-00128.00" [ref=e166] [cursor=pointer]:
+                - generic [ref=e167]:
+                  - generic [ref=e168]:
+                    - generic [ref=e169]: TCR
+                    - link "SYSTPCR-000002.00" [ref=e170]:
+                      - /url: "#exact-proc-2"
+                    - generic [ref=e171]: Approved
+                  - generic [ref=e172]:
+                    - generic [ref=e173]: Build 1.6
+                    - generic [ref=e174]: Assessing change request HLRCR-00128.00
+              - button "TCR SYSTPCR-000003.00 Approved Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "SYSTPCR-000003.00":
+                      - /url: "#exact-proc-3"
+                    - generic: Approved
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR SYSTPCR-000004.00 Approved Build 1.6 Assessing change request SRCR-00033.00 Level Procedure Revision 00 In build 1.6 Open this change" [pressed] [ref=e175] [cursor=pointer]:
+                - generic [ref=e176]:
+                  - generic [ref=e177]:
+                    - generic [ref=e178]: TCR
+                    - link "SYSTPCR-000004.00" [ref=e179]:
+                      - /url: "#exact-proc-4"
+                    - generic [ref=e180]: Approved
+                  - generic [ref=e181]:
+                    - generic [ref=e182]: Build 1.6
+                    - generic [ref=e183]: Assessing change request SRCR-00033.00
+                  - generic [ref=e184]:
+                    - generic [ref=e185]:
+                      - generic [ref=e186]: Level
+                      - generic [ref=e187]: Procedure
+                    - generic [ref=e188]:
+                      - generic [ref=e189]: Revision
+                      - generic [ref=e190]: "00"
+                    - generic [ref=e191]:
+                      - generic [ref=e192]: In build
+                      - generic [ref=e193]: "1.6"
+                    - button "Open this change" [ref=e195]
+              - button "TCR SYSTPCR-000005.00 Approved Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "SYSTPCR-000005.00":
+                      - /url: "#exact-proc-5"
+                    - generic: Approved
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR SYSTPCR-000013.00 Approved Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "SYSTPCR-000013.00":
+                      - /url: "#exact-proc-13"
+                    - generic: Approved
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR SYSTPCR-000037.00 Approved Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "SYSTPCR-000037.00":
+                      - /url: "#exact-proc-37"
+                    - generic: Approved
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR SYSTPCR-000038.00 Approved Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "SYSTPCR-000038.00":
+                      - /url: "#exact-proc-38"
+                    - generic: Approved
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+              - button "TCR SYSTPCR-000039.00 Approved Build 1.6 Assessing change request HLRCR-00128.00":
+                - generic:
+                  - generic:
+                    - generic: TCR
+                    - link "SYSTPCR-000039.00":
+                      - /url: "#exact-proc-39"
+                    - generic: Approved
+                  - generic:
+                    - generic: Build 1.6
+                    - generic: Assessing change request HLRCR-00128.00
+        - generic [ref=e196]: SYSTPCR-000004.00, Approved. 1 upstream and 0 downstream direct links.
+        - complementary "Detail for SYSTPCR-000004.00" [ref=e197]:
+          - generic [ref=e198]:
+            - button "Bottom" [pressed] [ref=e199] [cursor=pointer]
+            - button "Right" [ref=e200] [cursor=pointer]
+            - button "Auto" [ref=e201] [cursor=pointer]
+            - button "Close detail" [ref=e202] [cursor=pointer]: ×
+          - generic [ref=e203]:
+            - generic [ref=e204]:
+              - paragraph [ref=e205]: SELECTED RECORD
+              - generic [ref=e206]:
+                - link "SYSTPCR-000004.00" [ref=e207] [cursor=pointer]:
+                  - /url: "#exact-proc-4"
+                - generic [ref=e208]: Approved
+              - generic [ref=e209]:
+                - generic [ref=e210]:
+                  - term [ref=e211]: Controlled number
+                  - definition [ref=e212]: SYSTPCR-000004.00
+                - generic [ref=e213]:
+                  - term [ref=e214]: Source
+                  - definition [ref=e215]: Assessing change request SRCR-00033.00
+                - generic [ref=e216]:
+                  - term [ref=e217]: Assessment outcome
+                  - definition [ref=e218]: Change required
+                - generic [ref=e219]:
+                  - term [ref=e220]: Lifecycle state
+                  - definition [ref=e221]: Approved
+              - heading [level=3]
+            - generic [ref=e222]:
+              - generic [ref=e223]:
+                - paragraph [ref=e224]: UPSTREAM
+                - generic [ref=e225]: 1 records, all hops
+              - button "VERIFIED BY SRCR-00033.00" [ref=e227] [cursor=pointer]:
+                - generic [ref=e228]:
+                  - generic [ref=e229]: VERIFIED BY
+                  - generic [ref=e230]: SRCR-00033.00
+                - emphasis [ref=e231]: ›
+            - generic [ref=e232]:
+              - generic [ref=e233]:
+                - paragraph [ref=e234]: DOWNSTREAM
+                - generic [ref=e235]: 0 records, all hops
+              - paragraph [ref=e237]: No recorded relationships
+            - button "Open this change" [ref=e239] [cursor=pointer]
+      - group [ref=e240]:
+        - generic "Baseline evidence report" [ref=e241] [cursor=pointer]
+```
+
+# Test source
+
+```ts
+  1   | import { expect, test, type Page, type TestInfo } from '@playwright/test'
+  2   | import { waitForCanvasSettled, readCanvasState, observeCanvas } from './digital-thread-rendered-helpers'
+  3   | 
+  4   | // This dense owner-shaped fixture includes the application rail and six lanes. Its gesture
+  5   | // coordinates require the reviewed desktop frame, independently of the runner's defaults.
+  6   | test.use({ viewport: { width: 1920, height: 1000 } })
+  7   | 
+  8   | async function open(page: Page, path = '/tests/fixtures/digital-thread-1046.html?page=1') {
+  9   |   await observeCanvas(page)
+  10  |   await page.goto(path)
+  11  |   await waitForCanvasSettled(page)
+  12  | }
+  13  | async function body(page: Page, id: string, click = false) {
+  14  |   const r = (await page.locator(`[data-node-id="${id}"]`).boundingBox())!
+  15  |   const x = r.x + r.width / 2, y = r.y + Math.min(48, r.height - 12)
+  16  |   await page.mouse.move(x, y)
+  17  |   if (click) await page.mouse.click(x, y)
+  18  | }
+  19  | async function paint(page: Page) {
+  20  |   return (await page.evaluate(readCanvasState))!
+  21  | }
+  22  | async function evidence(page: Page, info: TestInfo) {
+  23  |   await info.attach('settled', { body: await page.screenshot(), contentType: 'image/png' })
+  24  |   await info.attach('lifecycle', { body: JSON.stringify(await page.evaluate(() => (window as any).__1046)), contentType: 'application/json' })
+  25  | }
+  26  | async function selectedFits(page: Page) {
+  27  |   await expect.poll(async () => page.evaluate(() => {
+  28  |     const p = (window as any).__1046.filter((e: any) => e.kind === 'paint').at(-1)
+  29  |     const c = document.querySelector(`[data-node-id="${p.selectedId}"]`)!.getBoundingClientRect()
+  30  |     const v = document.querySelector('.dtCanvas')!.getBoundingClientRect()
+  31  |     return c.top >= v.top + p.box.y - 1 && c.bottom <= v.top + p.box.y + p.box.height + 1 &&
+  32  |       c.left >= v.left + p.box.x - 1 && c.right <= v.left + p.box.x + p.box.width + 1
+> 33  |   })).toBe(true)
+      |       ^ Error: expect(received).toBe(expected) // Object.is equality
+  34  | }
+  35  | 
+  36  | test('foreground pixels win overlap; covered controls leave Tab and exposed background selects normally', async ({ page }, info) => {
+  37  |   await open(page, '/tests/fixtures/digital-thread-1046.html')
+  38  |   await body(page, 'pr-6')
+  39  |   await page.waitForTimeout(1500)
+  40  |   const proof = await page.evaluate(() => {
+  41  |     const linked = document.querySelector<HTMLElement>('[data-node-id="hlr-128"]')!
+  42  |     const r = linked.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2
+  43  |     const covered = [...document.querySelectorAll<HTMLElement>('[data-occluded="true"]')]
+  44  |     return { foreground: r.toJSON(), hit: document.elementFromPoint(x, y)?.closest('[data-node-id]')?.getAttribute('data-node-id'),
+  45  |       covered: covered.map(e => ({ id: e.dataset.nodeId, tab: e.tabIndex,
+  46  |         controls: [...e.querySelectorAll<HTMLElement>('a,button')].map(a => ({ tab: a.tabIndex, rect: a.getBoundingClientRect().toJSON() })) })) }
+  47  |   })
+  48  |   expect(proof.hit).toBe('hlr-128')
+  49  |   expect(proof.covered.length).toBeGreaterThan(0)
+  50  |   let coveredControls = 0
+  51  |   for (const card of proof.covered) {
+  52  |     expect(card.tab).toBe(-1)
+  53  |     for (const control of card.controls) {
+  54  |       const a = control.rect, b = proof.foreground
+  55  |       if (a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top) {
+  56  |         coveredControls++
+  57  |         expect(control.tab).toBe(-1)
+  58  |       }
+  59  |     }
+  60  |   }
+  61  |   expect(coveredControls).toBeGreaterThan(0)
+  62  |   await info.attach('occlusion', { body: JSON.stringify(proof), contentType: 'application/json' })
+  63  |   // Different lane, fully exposed body. A real click may select another subject during emphasis.
+  64  |   await body(page, 'sys-31', true)
+  65  |   await expect(page.locator('[data-node-id="sys-31"]')).toHaveAttribute('aria-pressed', 'true')
+  66  |   await evidence(page, info)
+  67  | })
+  68  | 
+  69  | test('stationary hover survives settled motion beyond dwell and deliberate motion selects a new hover', async ({ page }, info) => {
+  70  |   await open(page)
+  71  |   await body(page, 'pr-6')
+  72  |   await page.waitForTimeout(1800)
+  73  |   expect((await paint(page)).emphasisId).toBe('pr-6')
+  74  |   const start = await paint(page)
+  75  |   await page.waitForTimeout(650)
+  76  |   expect((await paint(page)).emphasisId).toBe('pr-6')
+  77  |   expect((await paint(page)).display).toEqual(start.display)
+  78  |   await body(page, 'sys-33')
+  79  |   await page.waitForTimeout(350)
+  80  |   expect((await paint(page)).emphasisId).toBe('sys-33')
+  81  |   // Activate during link motion rather than waiting for a settled board.
+  82  |   await body(page, 'sys-33', true)
+  83  |   await expect(page.locator('[data-node-id="sys-33"]')).toHaveAttribute('aria-pressed', 'true')
+  84  |   await waitForCanvasSettled(page)
+  85  |   await selectedFits(page)
+  86  |   await evidence(page, info)
+  87  | })
+  88  | 
+  89  | test('selection stays readable; manual pan and passive resize keep reader ownership; clear keeps camera', async ({ page }, info) => {
+  90  |   await open(page)
+  91  |   await body(page, 'sys-33', true)
+  92  |   await waitForCanvasSettled(page)
+  93  |   expect((await paint(page)).display.zoom).toBeGreaterThanOrEqual(0.81)
+  94  |   const beforePan = (await paint(page)).display
+  95  |   const c = (await page.locator('.dtCanvas').boundingBox())!
+  96  |   await page.mouse.move(c.x + 6, c.y + c.height - 50)
+  97  |   await page.mouse.down()
+  98  |   await page.mouse.move(c.x + 6, c.y + c.height - 230, { steps: 12 })
+  99  |   await page.mouse.up()
+  100 |   await waitForCanvasSettled(page)
+  101 |   // Ownership is proved by the unchanged painted camera after passive resize and clear below.
+  102 |   const owned = (await paint(page)).display
+  103 |   expect(owned).not.toEqual(beforePan)
+  104 |   await page.setViewportSize({ width: 1920, height: 990 })
+  105 |   await waitForCanvasSettled(page)
+  106 |   expect((await paint(page)).display).toEqual(owned)
+  107 |   await page.keyboard.press('Escape')
+  108 |   await page.waitForTimeout(1000)
+  109 |   expect((await paint(page)).display).toEqual(owned)
+  110 |   expect((await paint(page)).selectedId).toBeNull()
+  111 |   await evidence(page, info)
+  112 | })
+  113 | 
+  114 | for (const view of ['network', 'inside', 'artifact']) test(`${view} selected geometry across Bottom Right Auto docks`, async ({ page }, info) => {
+  115 |   await open(page, view === 'network' ? '/tests/fixtures/digital-thread-1046.html?page=1' :
+  116 |     `/tests/fixtures/${view === 'inside' ? 'inside-change' : 'artifact-thread'}.html?case=hlr`)
+  117 |   if (view === 'network') await body(page, 'sys-33', true)
+  118 |   await waitForCanvasSettled(page)
+  119 |   const selected = page.locator('.dtCanvasNode[aria-pressed="true"]')
+  120 |   await expect(selected).toHaveCount(1)
+  121 |   const identity = await selected.getAttribute('data-node-id')
+  122 |   for (const dock of ['Bottom', 'Right', 'Auto']) {
+  123 |     await page.getByRole('button', { name: dock, exact: true }).click()
+  124 |     await waitForCanvasSettled(page)
+  125 |     await selectedFits(page)
+  126 |     await expect(selected).toHaveAttribute('data-node-id', identity!)
+  127 |     await expect(page.locator('.dtCanvasOffscreen')).toHaveCount(0)
+  128 |     await info.attach(dock, { body: await page.screenshot(), contentType: 'image/png' })
+  129 |   }
+  130 |   await evidence(page, info)
+  131 | })
+  132 | 
+  133 | test('native keyboard activation and touch preserve exact selection under reduced motion', async ({ page, browser, baseURL }, info) => {
+```

@@ -1,0 +1,31 @@
+=== probe round 2 — 2026-09-23T16:05:54Z ===
+--- CASE 1: real run 35845728143 shape ---
+completed_at field: '' (absent — Astra's finding confirmed on the live record)
+status/conclusion: completed/failure
+completion boundary derived from updated_at: 2026-09-23T10:19:05Z
+--- CASE 2: real #1066 five-event history ---
+completeness: COMPLETE (no rel=next in Link headers; 5 events < per_page 100)
+freshness(real events: latest labeled 2026-09-23T09:54:44Z; failed run updated_at 2026-09-23T10:19:05Z): STALE (latest-labeled 2026-09-23T09:54:44+00:00 vs newest-failure-updated_at 2026-09-23T10:19:05+00:00)
+--- CASE 3: genuinely fresh relabel appended (12:00:00Z) ---
+freshness(events + 12:00:00Z relabel): FRESH (latest-labeled 2026-09-23T12:00:00+00:00 vs newest-failure-updated_at 2026-09-23T10:19:05+00:00)
+--- CASE 4: paginated/incomplete history ---
+history with rel=next: REFUSE (conservative — completeness unestablished)
+--- CASE 5: queued old request + newer relabel (F0 updated 10:19:05Z) ---
+live authorization 09:54:44Z (pre-failure): STALE (latest-labeled 2026-09-23T09:54:44+00:00 vs newest-failure-updated_at 2026-09-23T10:19:05+00:00)
+live authorization 12:00:00Z (post-failure): FRESH (latest-labeled 2026-09-23T12:00:00+00:00 vs newest-failure-updated_at 2026-09-23T10:19:05+00:00)
+--- CASE 6: A/B schedule + genuinely fresh request (retry 101 fails 12:30Z) ---
+A (fresh vs F0): RETRY 101 DISPATCHED (dispatches: 1)
+B starts after 101 failed, live authorization 09:54:44Z: STALE (latest-labeled 2026-09-23T09:54:44+00:00 vs newest-failure-updated_at 2026-09-23T12:30:00+00:00) (no dispatch; dispatches: 1)
+C relabel 12:00:00Z < 101 boundary 12:30:00Z: STALE (latest-labeled 2026-09-23T12:00:00+00:00 vs newest-failure-updated_at 2026-09-23T12:30:00+00:00) (no dispatch; dispatches: 1)
+D relabel 13:00:00Z > boundary 12:30:00Z: FRESH (latest-labeled 2026-09-23T13:00:00+00:00 vs newest-failure-updated_at 2026-09-23T12:30:00+00:00) -> RETRY 102 DISPATCHED (dispatches: 2)
+--- CASE 7: terminal-first discovery (run finishes before any PENDING observed) ---
+poll1: FOUND 101 success
+poll2: FOUND 101 success
+boundary validation: observed 101 > boundary 100 => first new observation is terminal FOUND success => pin 101 and bind (no PENDING ever seen; no false rejection)
+--- CASE 8: multiple runs; pinned differs from global newest; identity change; 404 ---
+global v2 matcher over {100 failed, 101 success, 105 newer failed}: FOUND 101 success
+pinned handling: once pinned 101, polls query /actions/runs/101 DIRECTLY; observed id 105 != pinned => REFUSE (ambiguous authority / unexpected identity change); direct poll 404 => REFUSE (identity unresolvable)
+qualification binds the pinned id and records its run_attempt (run record carries run_attempt=1)
+--- CASE 9 (restored row): refresh lane finds NONE ---
+refresh lane, no runs: NONE -> NO DISPATCH; bounded wait for the separate dispatcher; its transitions follow CASE 7 (success bind) / CASE 6 (failure exit 1) with boundary_id=0
+=== end probe round 2 ===

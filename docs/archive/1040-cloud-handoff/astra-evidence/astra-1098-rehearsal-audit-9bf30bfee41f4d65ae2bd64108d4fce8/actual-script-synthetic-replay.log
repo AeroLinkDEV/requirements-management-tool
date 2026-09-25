@@ -1,0 +1,47 @@
++ set -euo pipefail
++ SRC=C:/Users/seanm/AppData/Local/Temp/astra-1098-rehearsal-audit-9bf30bfee41f4d65ae2bd64108d4fce8/synthetic-source
++ BASE_SHA=7de014ac2dabc0d6325dc885a0908fb13d3595b0
+++ mktemp -d
++ WORK=/tmp/astra-1098-rehearsal-audit-9bf30bfee41f4d65ae2bd64108d4fce8/tmp.fE9grPTiX4
++ MIRROR=/tmp/astra-1098-rehearsal-audit-9bf30bfee41f4d65ae2bd64108d4fce8/tmp.fE9grPTiX4/rehearsal.git
++ git init --bare -b main /tmp/astra-1098-rehearsal-audit-9bf30bfee41f4d65ae2bd64108d4fce8/tmp.fE9grPTiX4/rehearsal.git
++ git -C C:/Users/seanm/AppData/Local/Temp/astra-1098-rehearsal-audit-9bf30bfee41f4d65ae2bd64108d4fce8/synthetic-source push -q /tmp/astra-1098-rehearsal-audit-9bf30bfee41f4d65ae2bd64108d4fce8/tmp.fE9grPTiX4/rehearsal.git 7de014ac2dabc0d6325dc885a0908fb13d3595b0:refs/heads/main
++ git -C C:/Users/seanm/AppData/Local/Temp/astra-1098-rehearsal-audit-9bf30bfee41f4d65ae2bd64108d4fce8/synthetic-source push -q /tmp/astra-1098-rehearsal-audit-9bf30bfee41f4d65ae2bd64108d4fce8/tmp.fE9grPTiX4/rehearsal.git HEAD:refs/heads/candidate
++ CLONE=/tmp/astra-1098-rehearsal-audit-9bf30bfee41f4d65ae2bd64108d4fce8/tmp.fE9grPTiX4/clone
++ git clone -q -b main /tmp/astra-1098-rehearsal-audit-9bf30bfee41f4d65ae2bd64108d4fce8/tmp.fE9grPTiX4/rehearsal.git /tmp/astra-1098-rehearsal-audit-9bf30bfee41f4d65ae2bd64108d4fce8/tmp.fE9grPTiX4/clone
++ cd /tmp/astra-1098-rehearsal-audit-9bf30bfee41f4d65ae2bd64108d4fce8/tmp.fE9grPTiX4/clone
++ git config user.email rehearsal@invalid
++ git config user.name rehearsal
+++ git rev-parse origin/main
++ B_PRE=7de014ac2dabc0d6325dc885a0908fb13d3595b0
+rehearsal: B_PRE=7de014ac2dabc0d6325dc885a0908fb13d3595b0
++ echo 'rehearsal: B_PRE=7de014ac2dabc0d6325dc885a0908fb13d3595b0'
++ git checkout -q -b install origin/candidate
++ git checkout -q main
++ git merge --no-ff --no-edit origin/candidate
++ :
+++ git diff --name-only 7de014ac2dabc0d6325dc885a0908fb13d3595b0..HEAD
++ DIFF_FILES=$'.github/workflows/request-full-ci.yml\nproduct/test-planner/tests/full-ci-readiness-dispatch.test.mjs'
++ '[' $'.github/workflows/request-full-ci.yml\nproduct/test-planner/tests/full-ci-readiness-dispatch.test.mjs' = $'.github/workflows/request-full-ci.yml\nproduct/test-planner/tests/full-ci-readiness-dispatch.test.mjs' ']'
++ pass 'install: candidate merged; diff scope is exactly the two reviewed files'
++ echo 'PASS: install: candidate merged; diff scope is exactly the two reviewed files'
+PASS: install: candidate merged; diff scope is exactly the two reviewed files
++ git checkout -q -b drill main
++ git merge --no-commit --no-ff origin/candidate
++ git merge --abort
++ true
+++ git status --porcelain
++ '[' -z '' ']'
+PASS: interruption drill: merge --abort restored a clean tree
++ pass 'interruption drill: merge --abort restored a clean tree'
++ echo 'PASS: interruption drill: merge --abort restored a clean tree'
++ git checkout -q -b revert main
++ git revert --no-edit -m 1 HEAD
+++ git diff 7de014ac2dabc0d6325dc885a0908fb13d3595b0..HEAD --name-only
++ REMAINING=
++ '[' -z '' ']'
++ pass 'revert: tree restored to B_PRE exactly; revert branch is the pre-qualified restoration'
++ echo 'PASS: revert: tree restored to B_PRE exactly; revert branch is the pre-qualified restoration'
+PASS: revert: tree restored to B_PRE exactly; revert branch is the pre-qualified restoration
++ echo 'rehearsal: ALL DRILLS PASSED'
+rehearsal: ALL DRILLS PASSED

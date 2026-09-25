@@ -1,0 +1,49 @@
+[
+  {
+    "url": "https://api.github.com/repos/AeroLinkDEV/requirements-management-tool/issues/comments/5683505931",
+    "html_url": "https://github.com/AeroLinkDEV/requirements-management-tool/issues/1040#issuecomment-5683505931",
+    "issue_url": "https://api.github.com/repos/AeroLinkDEV/requirements-management-tool/issues/1040",
+    "id": 5683505931,
+    "node_id": "IC_kwDOTXk0rM8AAAABUsNrCw",
+    "user": {
+      "login": "seanmccarthyns",
+      "id": 295123958,
+      "node_id": "U_kgDOEZc79g",
+      "avatar_url": "https://avatars.githubusercontent.com/u/295123958?v=4",
+      "gravatar_id": "",
+      "url": "https://api.github.com/users/seanmccarthyns",
+      "html_url": "https://github.com/seanmccarthyns",
+      "followers_url": "https://api.github.com/users/seanmccarthyns/followers",
+      "following_url": "https://api.github.com/users/seanmccarthyns/following{/other_user}",
+      "gists_url": "https://api.github.com/users/seanmccarthyns/gists{/gist_id}",
+      "starred_url": "https://api.github.com/users/seanmccarthyns/starred{/owner}{/repo}",
+      "subscriptions_url": "https://api.github.com/users/seanmccarthyns/subscriptions",
+      "organizations_url": "https://api.github.com/users/seanmccarthyns/orgs",
+      "repos_url": "https://api.github.com/users/seanmccarthyns/repos",
+      "events_url": "https://api.github.com/users/seanmccarthyns/events{/privacy}",
+      "received_events_url": "https://api.github.com/users/seanmccarthyns/received_events",
+      "type": "User",
+      "user_view_type": "public",
+      "site_admin": false
+    },
+    "created_at": "2026-09-15T15:57:36Z",
+    "updated_at": "2026-09-15T15:57:36Z",
+    "body": "## Independent review, 2026-09-15 — still live at current main, and the fix needs a schema decision\n\nRe-verified read-only against protected main `966c2c256d1444a4f77b431ba20ae613643af4fa`. Main has advanced past the `77eab32c` cited in the body; #1038, #1046/#1050 and #1052 have merged since.\n\n**Confirmed still present.** In `product/src/AeroLink.Api/ManagedDocumentEndpoints.cs`, every candidate branch except Release applies the snapshot predicate:\n\n    if (db.Database.IsNpgsql()) query = query.Where(x => x.CreatedAt <= snapshotAt);\n\nThat line is present in the `SystemChangeRequest`, `ProblemReport` and `TestChangeRequest` branches. The `Release` branch (around lines 857-865) has no equivalent — it filters by project and term, applies `SoftwareReleaseOrderingQuery.WithSortKey`, and pages by `SortKey` only. `snapshotAt` is still threaded into `LinkOptionPage` for the Release branch, so the response carries a snapshot value it never enforced.\n\n**Root cause confirmed.** `SoftwareRelease` (`product/src/AeroLink.Domain/Programs/ProgramRecord.cs`) exposes `Id`, `ProjectId`, `Version`, `CanonicalIdentity`, `PredecessorReleaseId`, `IsReleased`, `ReleasedAt`. There is **no** `CreatedAt`, so the predicate has nothing to filter on. `Id` is a random `Guid` and `ReleasedAt` is null for in-work builds, so neither is a usable creation-order surrogate.\n\n**Two design points the body leaves open:**\n\n1. **Backfill policy.** Adding `CreatedAt` needs a decision for existing rows. There is a direct in-repo precedent on the same entity — `CanonicalIdentity`'s doc comment: *\"Historical rows may be null until an explicit, audited migration backfills them; raw Version is never rewritten in that process.\"* Recommend the same shape: nullable column, historical rows null, explicit audited backfill, original facts never rewritten. A blanket `now()` backfill would make every historical release sort as newer than any snapshot taken before the migration, quietly breaking the guarantee it is meant to create.\n\n2. **Provider asymmetry.** The existing snapshot is `IsNpgsql()`-gated, so SQLite paths have never had frozen paging. Decide explicitly whether the Release fix matches that asymmetry or closes it, and record the choice — otherwise a SQLite-backed test can pass while proving nothing about the guarantee.\n\n**Sequencing dependency on #1041.** The acceptance here requires PostgreSQL qualification. #1041 is the defect that makes the changed-area planner's cleanup proof fail under Windows PowerShell 5.1 during exactly that PostgreSQL work. Land #1041 first, or this issue's PostgreSQL evidence has to be produced under PowerShell 7 with the scope explicitly recorded.\n\n**Recommend keeping this in its own PR.** It is the only one of #1040/#1041/#1043/#1053 that touches controlled domain data and adds a migration; the other three are tooling and operations. Combining a schema change with production-updater changes couples schema risk to runtime-restart risk in the same rollout — and those updater fixes exist precisely because that rollout path is fragile. It also destroys revert granularity: a picker-snapshot problem should be revertible without reverting the fixes keeping HOME alive.\n",
+    "author_association": "MEMBER",
+    "pin": null,
+    "reactions": {
+      "url": "https://api.github.com/repos/AeroLinkDEV/requirements-management-tool/issues/comments/5683505931/reactions",
+      "total_count": 0,
+      "+1": 0,
+      "-1": 0,
+      "laugh": 0,
+      "hooray": 0,
+      "confused": 0,
+      "heart": 0,
+      "rocket": 0,
+      "eyes": 0
+    },
+    "performed_via_github_app": null,
+    "minimized": null
+  }
+]

@@ -1,0 +1,727 @@
+Browser journeys (1/4)	UNKNOWN STEP	﻿2026-09-24T21:54:48.8258938Z Current runner version: '2.337.0'
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8283730Z ##[group]Runner Image Provisioner
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8284520Z Hosted Compute Agent
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8285065Z Version: 20260828.587
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8285755Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8286457Z Build Date: 2026-08-28T16:44:25Z
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8287123Z Worker ID: {ef1e67ac-8398-4436-b43e-4fb6daf05282}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8287801Z Azure Region: westus
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8288331Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8289719Z ##[group]Operating System
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8290344Z Microsoft Windows Server 2025
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8291224Z 10.0.26100
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8291750Z Datacenter
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8292257Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8292819Z ##[group]Runner Image
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8293391Z Image: windows-2025-vs2026
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8293960Z Version: 20260922.246.2
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8295706Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20260922.246/images/windows/Windows2025-VS2026-Readme.md
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8297320Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20260922.246
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8298263Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8299495Z ##[group]GITHUB_TOKEN Permissions
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8301340Z Actions: read
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8301931Z Contents: read
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8302470Z Metadata: read
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8303006Z PullRequests: read
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8303545Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8305507Z Secret source: Actions
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8306426Z Cache mode: write
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8307094Z Prepare workflow directory
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8896752Z Prepare all required actions
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:48.8944263Z Getting action download info
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:49.2573018Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:49.3849180Z Download action repository 'actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68' (SHA:a98b56852c35b8e3190ac28c8c2271da59106c68)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:49.8325433Z Download action repository 'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020' (SHA:820762786026740c76f36085b0efc47a31fe5020)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.0028633Z Download action repository 'actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9' (SHA:55cc8345863c7cc4c66a329aec7e433d2d1c52a9)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.1806944Z Download action repository 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a' (SHA:043fb46d1a93c77aae656e7c1c64a875d1fc6a0a)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.4092457Z Complete job name: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.5520007Z ##[group]Run echo "METRICS_TIMING_FILE=D:\a\_temp/ci-metrics/timing-browser-pr-1.json" >> "$GITHUB_ENV"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.5521425Z ^[[36;1mecho "METRICS_TIMING_FILE=D:\a\_temp/ci-metrics/timing-browser-pr-1.json" >> "$GITHUB_ENV"^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.5522623Z ^[[36;1mecho "METRICS_FRAGMENT_PATH=D:\a\_temp/ci-metrics/fragment-browser-pr-1.json" >> "$GITHUB_ENV"^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.5523913Z ^[[36;1mmkdir -p "D:\a\_temp/ci-metrics"^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.5524814Z ^[[36;1mprintf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "D:\a\_temp/ci-metrics/timing-browser-pr-1.json"^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.5579453Z shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.5580482Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.5580901Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.5581413Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.5581966Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:50.5582443Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1403308Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1404199Z with:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1404733Z   repository: AeroLinkDEV/requirements-management-tool
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1408651Z   token: ***
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1409096Z   ssh-strict: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1409526Z   ssh-user: git
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1412014Z   persist-credentials: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1412516Z   clean: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1412957Z   sparse-checkout-cone-mode: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1413478Z   fetch-depth: 1
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1413904Z   fetch-tags: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1414350Z   show-progress: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1414795Z   lfs: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1415204Z   submodules: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1415649Z   set-safe-directory: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1416151Z   allow-unsafe-pr-checkout: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1416714Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1417148Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1417710Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1418279Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1418957Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1419886Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.1420601Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.2893357Z Syncing repository: AeroLinkDEV/requirements-management-tool
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.2896240Z ##[group]Getting Git version info
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.2897133Z Working directory is 'D:\a\requirements-management-tool\requirements-management-tool'
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.4146205Z [command]"C:\Program Files\Git\bin\git.exe" version
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.7499098Z git version 2.55.0.windows.5
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.7544679Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.7560829Z Temporarily overriding HOME='D:\a\_temp\1250aaee-00f3-439f-8f17-44828311cebe' before making global git config changes
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.7562741Z Adding repository directory to the temporary git global config as a safe directory
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.7571603Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\requirements-management-tool\requirements-management-tool
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.8209783Z Deleting the contents of 'D:\a\requirements-management-tool\requirements-management-tool'
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.8215551Z ##[group]Determining repository object format
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.8217503Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.8225266Z ##[group]Initializing the repository
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.8276015Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\requirements-management-tool\requirements-management-tool
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.9149906Z Initialized empty Git repository in D:/a/requirements-management-tool/requirements-management-tool/.git/
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.9193855Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/AeroLinkDEV/requirements-management-tool
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.9823578Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.9825234Z ##[group]Disabling automatic garbage collection
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:51.9832755Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:52.0138216Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:52.0140491Z ##[group]Setting up auth
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:52.0142169Z Removing SSH command configuration
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:52.0150091Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:52.0448157Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:53.2445913Z Removing HTTP extra header
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:53.2461541Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:53.2763365Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:53.7947099Z Removing includeIf entries pointing to credentials config files
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:53.7963027Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:53.8265479Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:54.3804132Z [command]"C:\Program Files\Git\bin\git.exe" config --file D:\a\_temp\git-credentials-3def2037-973b-4939-a644-ecfc17f74780.config http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:54.4103494Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:D:/a/requirements-management-tool/requirements-management-tool/.git.path D:\a\_temp\git-credentials-3def2037-973b-4939-a644-ecfc17f74780.config
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:54.4400178Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:D:/a/requirements-management-tool/requirements-management-tool/.git/worktrees/*.path D:\a\_temp\git-credentials-3def2037-973b-4939-a644-ecfc17f74780.config
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:54.4738832Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-3def2037-973b-4939-a644-ecfc17f74780.config
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:54.5096122Z [command]"C:\Program Files\Git\bin\git.exe" config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-3def2037-973b-4939-a644-ecfc17f74780.config
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:54.5386370Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:54.5387177Z ##[group]Fetching the repository
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:54.5398325Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +23bb25d987639ada3356a7003fa0380ba08e5042:refs/remotes/origin/ci/request-full-ci-same-head-retry
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.3327445Z From https://github.com/AeroLinkDEV/requirements-management-tool
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.3329377Z  * [new ref]         23bb25d987639ada3356a7003fa0380ba08e5042 -> origin/ci/request-full-ci-same-head-retry
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.3376834Z [command]"C:\Program Files\Git\bin\git.exe" branch --list --remote origin/ci/request-full-ci-same-head-retry
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.3733796Z   origin/ci/request-full-ci-same-head-retry
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.3774706Z [command]"C:\Program Files\Git\bin\git.exe" rev-parse refs/remotes/origin/ci/request-full-ci-same-head-retry
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.4037060Z 23bb25d987639ada3356a7003fa0380ba08e5042
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.4069089Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.4069724Z ##[group]Determining the checkout info
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.4070900Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.4079689Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.4509375Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.4807630Z ##[group]Checking out the ref
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:57.4816122Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force -B ci/request-full-ci-same-head-retry refs/remotes/origin/ci/request-full-ci-same-head-retry
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.3292994Z Switched to a new branch 'ci/request-full-ci-same-head-retry'
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.3352227Z branch 'ci/request-full-ci-same-head-retry' set up to track 'origin/ci/request-full-ci-same-head-retry'.
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.3446179Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.3903299Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.4173110Z 23bb25d987639ada3356a7003fa0380ba08e5042
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.4555173Z ##[group]Run actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.4555611Z with:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.4555795Z   dotnet-version: 10.0.x
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.4556006Z   cache: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.4556172Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.4556338Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.4556580Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.4556951Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.4557572Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.4558033Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.4558633Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:54:58.8077412Z [command]"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -Sta -NoProfile -NonInteractive -ExecutionPolicy Unrestricted -Command & 'D:\a\_actions\actions\setup-dotnet\a98b56852c35b8e3190ac28c8c2271da59106c68\externals\install-dotnet.ps1' -SkipNonVersionedFiles -Runtime dotnet -Channel LTS
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:00.0229625Z dotnet-install: .NET Core Runtime with version '10.0.12' is already installed.
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:00.1856596Z [command]"C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -Sta -NoProfile -NonInteractive -ExecutionPolicy Unrestricted -Command & 'D:\a\_actions\actions\setup-dotnet\a98b56852c35b8e3190ac28c8c2271da59106c68\externals\install-dotnet.ps1' -SkipNonVersionedFiles -Channel 10.0
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:00.9403163Z dotnet-install: .NET Core SDK with version '10.0.401' is already installed.
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0517302Z ##[group]Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0517749Z with:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0517932Z   node-version: 24
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0518113Z   cache: npm
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0518377Z   cache-dependency-path: product/client/package-lock.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0518710Z   check-latest: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0521202Z   token: ***
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0521400Z   package-manager-cache: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0521630Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0521793Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0522030Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0522290Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0522615Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0523062Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0523427Z   DOTNET_ROOT: C:\Program Files\dotnet
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.0523655Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.2191396Z Found in cache @ C:\hostedtoolcache\windows\node\24.21.0\x64
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:01.2196903Z ##[group]Environment details
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:06.0226148Z node: v24.21.0
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:06.0226589Z npm: 11.19.0
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:06.0226884Z yarn: 1.22.22
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:06.0227419Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:06.1009294Z [command]C:\Windows\system32\cmd.exe /D /S /C "C:\hostedtoolcache\windows\node\24.21.0\x64\npm.cmd config get cache"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:06.5865080Z C:\npm\cache
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:07.0407593Z Cache hit for: node-cache-Windows-x64-npm-0e277d4af2a3e7adfd104aca5621acc886db3316520e2678cc38c8792e7afe7a
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:08.3205222Z Received 35242667 of 35242667 (100.0%), 34.9 MBs/sec
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:08.3207167Z Cache Size: ~34 MB (35242667 B)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:08.3384809Z [command]"C:\Program Files\Git\usr\bin\tar.exe" -xf D:/a/_temp/37e0d230-d8a8-42dc-8d3a-19613a474add/cache.tzst -P -C D:/a/requirements-management-tool/requirements-management-tool --force-local --use-compress-program "zstd -d"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:08.7101227Z Cache restored successfully
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:08.7143514Z Cache restored from key: node-cache-Windows-x64-npm-0e277d4af2a3e7adfd104aca5621acc886db3316520e2678cc38c8792e7afe7a
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2613633Z ##[group]Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2614045Z with:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2614233Z   path: ~/.nuget/packages
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2614629Z   key: nuget-Windows-020698d1a94ecadbd0d7a5731203dcf99f6908ad993af596838214b36470048f
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2615079Z   restore-keys: nuget-Windows-
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2615318Z   enableCrossOsArchive: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2615543Z   fail-on-cache-miss: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2615757Z   lookup-only: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2615957Z   save-always: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2616131Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2616301Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2616542Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2616811Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2617150Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2617840Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2618255Z   DOTNET_ROOT: C:\Program Files\dotnet
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.2618496Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:09.7728813Z Cache hit for: nuget-Windows-020698d1a94ecadbd0d7a5731203dcf99f6908ad993af596838214b36470048f
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:11.0777637Z Received 33554432 of 224694649 (14.9%), 31.7 MBs/sec
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:12.0836988Z Received 167772160 of 224694649 (74.7%), 79.4 MBs/sec
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:12.5096032Z Received 224694649 of 224694649 (100.0%), 87.8 MBs/sec
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:12.5101195Z Cache Size: ~214 MB (224694649 B)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:12.5144142Z [command]"C:\Program Files\Git\usr\bin\tar.exe" -xf D:/a/_temp/6d6879c6-c78e-460a-9d59-54dc59fd07b1/cache.tzst -P -C D:/a/requirements-management-tool/requirements-management-tool --force-local --use-compress-program "zstd -d"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.0337140Z Cache restored successfully
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.0606269Z Cache restored from key: nuget-Windows-020698d1a94ecadbd0d7a5731203dcf99f6908ad993af596838214b36470048f
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.0888751Z ##[group]Run dotnet restore product/src/AeroLink.Api/AeroLink.Api.csproj
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.0889364Z ^[[36;1mdotnet restore product/src/AeroLink.Api/AeroLink.Api.csproj^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.0889972Z ^[[36;1mdotnet build product/src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.1396403Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.1396819Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.1397045Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.1397346Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.1397685Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.1398103Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.1398672Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.1399141Z   DOTNET_ROOT: C:\Program Files\dotnet
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:21.1399451Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:28.4800016Z   Determining projects to restore...
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:30.8101417Z   Restored D:\a\requirements-management-tool\requirements-management-tool\product\src\AeroLink.DocumentSecurity\AeroLink.DocumentSecurity.csproj (in 231 ms).
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:30.8106911Z   Restored D:\a\requirements-management-tool\requirements-management-tool\product\src\AeroLink.Domain\AeroLink.Domain.csproj (in 231 ms).
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:30.8119482Z   Restored D:\a\requirements-management-tool\requirements-management-tool\product\src\AeroLink.ConnectorProtocol\AeroLink.ConnectorProtocol.csproj (in 231 ms).
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:31.3575247Z   Restored D:\a\requirements-management-tool\requirements-management-tool\product\src\AeroLink.Infrastructure\AeroLink.Infrastructure.csproj (in 999 ms).
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:31.3584599Z   Restored D:\a\requirements-management-tool\requirements-management-tool\product\src\AeroLink.Api\AeroLink.Api.csproj (in 530 ms).
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:42.8528742Z   AeroLink.ConnectorProtocol -> D:\a\requirements-management-tool\requirements-management-tool\product\src\AeroLink.ConnectorProtocol\bin\Release\net10.0\AeroLink.ConnectorProtocol.dll
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:42.8534690Z   AeroLink.DocumentSecurity -> D:\a\requirements-management-tool\requirements-management-tool\product\src\AeroLink.DocumentSecurity\bin\Release\net10.0\AeroLink.DocumentSecurity.dll
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:55:45.1373298Z   AeroLink.Domain -> D:\a\requirements-management-tool\requirements-management-tool\product\src\AeroLink.Domain\bin\Release\net10.0\AeroLink.Domain.dll
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:06.2149582Z   AeroLink.Infrastructure -> D:\a\requirements-management-tool\requirements-management-tool\product\src\AeroLink.Infrastructure\bin\Release\net10.0\AeroLink.Infrastructure.dll
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.2006992Z   AeroLink.Api -> D:\a\requirements-management-tool\requirements-management-tool\product\src\AeroLink.Api\bin\Release\net10.0\AeroLink.Api.dll
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.2283157Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.2293906Z Build succeeded.
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.2303024Z     0 Warning(s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.2304605Z     0 Error(s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.2304864Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.2305857Z Time Elapsed 00:01:58.44
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7886528Z ##[group]Run actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7886966Z with:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7887179Z   path: ~/AppData/Local/ms-playwright
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7887730Z   key: playwright-chromium-Windows-0e277d4af2a3e7adfd104aca5621acc886db3316520e2678cc38c8792e7afe7a
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7888270Z   enableCrossOsArchive: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7888517Z   fail-on-cache-miss: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7888749Z   lookup-only: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7888950Z   save-always: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7889150Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7889330Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7889578Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7889862Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7890220Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7890690Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7891116Z   DOTNET_ROOT: C:\Program Files\dotnet
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:30.7891366Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:31.3738282Z Cache hit for: playwright-chromium-Windows-0e277d4af2a3e7adfd104aca5621acc886db3316520e2678cc38c8792e7afe7a
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:32.6903033Z Received 37748736 of 305094402 (12.4%), 35.6 MBs/sec
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:33.7230336Z Received 155189248 of 305094402 (50.9%), 72.4 MBs/sec
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:34.7239561Z Received 268435456 of 305094402 (88.0%), 84.0 MBs/sec
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:35.1098828Z Received 305094402 of 305094402 (100.0%), 84.8 MBs/sec
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:35.1103956Z Cache Size: ~291 MB (305094402 B)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:35.1202842Z [command]"C:\Program Files\Git\usr\bin\tar.exe" -xf D:/a/_temp/2eaff980-e46f-404d-af30-5226f7fcd105/cache.tzst -P -C D:/a/requirements-management-tool/requirements-management-tool --force-local --use-compress-program "zstd -d"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.1279906Z Cache restored successfully
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.1619460Z Cache restored from key: playwright-chromium-Windows-0e277d4af2a3e7adfd104aca5621acc886db3316520e2678cc38c8792e7afe7a
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.1945402Z ##[group]Run npm ci
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.1945869Z ^[[36;1mnpm ci^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.1946661Z ^[[36;1m# No dependency install: `--with-deps` and `install-deps` install apt packages and do not apply on^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.1947934Z ^[[36;1m# Windows. The cache holds the browser binary, which is the whole of what is needed here.^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.1948809Z ^[[36;1mnpx playwright install chromium^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.2023398Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.2023755Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.2023951Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.2024217Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.2024509Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.2024888Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.2025372Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.2025792Z   DOTNET_ROOT: C:\Program Files\dotnet
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:39.2026050Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:43.7627278Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:43.7628084Z added 35 packages, and audited 36 packages in 4s
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:43.7628567Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:43.7630341Z 12 packages are looking for funding
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:43.7631980Z   run `npm fund` for details
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:43.7707411Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:43.7708266Z 2 high severity vulnerabilities
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:43.7709008Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:43.7709310Z To address all issues, run:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:43.7709751Z   npm audit fix
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:43.7709985Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:43.7710221Z Run `npm audit` for details.
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:46.7372888Z ##[group]Run node "D:\a\requirements-management-tool\requirements-management-tool/product/ci-metrics/bin/mark.mjs" setup-end
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:46.7374154Z ^[[36;1mnode "D:\a\requirements-management-tool\requirements-management-tool/product/ci-metrics/bin/mark.mjs" setup-end^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:46.7455820Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:46.7456188Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:46.7456385Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:46.7456669Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:46.7456956Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:46.7457321Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:46.7457820Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:46.7458228Z   DOTNET_ROOT: C:\Program Files\dotnet
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:46.7458860Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2594116Z ##[group]Run set -euo pipefail
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2594524Z ^[[36;1mset -euo pipefail^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2594815Z ^[[36;1mnpx playwright test --list > listed.txt^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2595260Z ^[[36;1mnode scripts/plan-journey-shard.mjs listed.txt 1 4 > plan.txt^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2595616Z ^[[36;1m^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2595820Z ^[[36;1mreadarray -t planned < plan.txt^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2596099Z ^[[36;1mexpected="${planned[0]}"^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2596357Z ^[[36;1mfiles=("${planned[@]:1}")^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2596593Z ^[[36;1m^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2596994Z ^[[36;1m# A plan of nothing would run the entire suite on every shard: green, and four times the work it was^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2597478Z ^[[36;1m# meant to divide.^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2597784Z ^[[36;1mif [ "${#files[@]}" -eq 0 ] || [ "$expected" = "0" ]; then^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2598268Z ^[[36;1m  echo "::error::Shard 1 planned no spec files. Discovery or the packing is broken."^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2598710Z ^[[36;1m  exit 1^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2598897Z ^[[36;1mfi^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2599193Z ^[[36;1mecho "Shard 1 of 4: $expected tests across ${#files[@]} spec files."^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2599546Z ^[[36;1m^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2599929Z ^[[36;1mnpx playwright test "${files[@]}" --reporter=list,json,./scripts/browser-storage-reporter.mjs^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2600374Z ^[[36;1m^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2600773Z ^[[36;1m# The plan anchors each name so a spec contained in a longer one cannot be pulled into a shard it was^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2601847Z ^[[36;1m# not given. This stays as the backstop: an anchor that stopped working, or a mistyped plan running^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2602526Z ^[[36;1m# fewer, fails silently otherwise. The report's own stats are compared against what the plan claimed.^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2603356Z ^[[36;1mactual="$(node -e "const s=require('./journey-durations-1.json').stats; console.log(s.expected + s.unexpected + s.flaky + s.skipped)")"^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2603995Z ^[[36;1mif [ "$actual" != "$expected" ]; then^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2604517Z ^[[36;1m  echo "::error::Shard 1 planned $expected tests but ran $actual. The file list does not match the plan."^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2605011Z ^[[36;1m  exit 1^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2605199Z ^[[36;1mfi^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2605478Z ^[[36;1mecho "Shard 1 ran exactly the $expected tests it planned."^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2620904Z shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2621815Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2622008Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2622271Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2622557Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2623038Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2623536Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2623933Z   DOTNET_ROOT: C:\Program Files\dotnet
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2624196Z   AEROLINK_E2E_SKIP_BUILD: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2624499Z   PLAYWRIGHT_JSON_OUTPUT_NAME: journey-durations-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2625032Z   AEROLINK_E2E_SHARD: 1
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:47.2625238Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T21:57:54.9894919Z Shard 1 of 4: 122 tests across 39 spec files.
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:06.0874931Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:06.0876231Z Running 122 tests using 1 worker
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:06.0893606Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:12.1992788Z   ok   1 [chromium] › tests\acceptance-closure.spec.ts:6:1 › acceptance closure proves governed revisioning, direct review work, publications, full trace and historical discovery (5.6s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:25.3763623Z   ok   2 [chromium] › tests\administrator-change-actions.spec.ts:17:1 › administrator actions work identically for another authors System and Software changes (13.0s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:28.3676847Z   ok   3 [chromium] › tests\aerolink-3-closure-recovery.spec.ts:4:1 › enterprise control exposes governed product-line reuse and evidence-based operations assurance (3.0s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:30.0904201Z   ok   4 [chromium] › tests\approval-configuration.spec.ts:21:1 › The legacy approval configuration deep link survives a reload (1.7s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:31.6783828Z   ok   5 [chromium] › tests\approval-configuration.spec.ts:31:1 › Every artifact type a procedure can govern is listed, configured or not (1.6s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:33.2653786Z   ok   6 [chromium] › tests\approval-configuration.spec.ts:45:1 › Selecting an artifact shows either its stages or why it has none (1.6s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:34.8545221Z   ok   7 [chromium] › tests\approval-configuration.spec.ts:68:1 › Editing an artifact locks navigation until the draft is saved or cancelled (1.6s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:37.8832194Z   ok   8 [chromium] › tests\assurance-policy.spec.ts:8:1 › Assurance policy states its basis, refuses an unauthorised relaxation, and records an approved one (3.0s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:46.6929051Z   ok   9 [chromium] › tests\autosave-draft-recovery.spec.ts:9:1 › unfinished authoring survives a reload, is offered rather than applied, and can be discarded (8.8s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:50.0353995Z   ok  10 [chromium] › tests\cancel-review.spec.ts:36:1 › an author stops a review they should not have started, and the history says why (3.3s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:52.8333824Z   ok  11 [chromium] › tests\cancel-review.spec.ts:103:1 › somebody with no part in a review is not offered the control (2.8s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:54.3994449Z   ok  12 [chromium] › tests\change-network-rendered.spec.ts:8:1 › hover emphasis is stationary and keyboard activation selects the exact subject (1.5s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:56.1506766Z   ok  13 [chromium] › tests\change-network-rendered.spec.ts:22:1 › touch pins the same complete story without relying on hover (1.7s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:01:57.5688557Z   ok  14 [chromium] › tests\change-network-rendered.spec.ts:40:1 › a dense story keeps individual records and offers working keyboard overflow navigation (1.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:01.0431138Z   ok  15 [chromium] › tests\change-network-rendered.spec.ts:61:1 › hover reveals a two-hop endpoint without moving the camera, and selection cannot be replaced by hover (3.5s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:02.3848585Z   ok  16 [chromium] › tests\change-network-rendered.spec.ts:128:3 › card badges › every badge fits its own box, including the three-letter ones (1.3s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:03.7340472Z   ok  17 [chromium] › tests\change-network-rendered.spec.ts:155:3 › card badges › a badge never overlaps the identifier beside it (1.3s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:06.5319156Z   ok  18 [chromium] › tests\change-network-rendered.spec.ts:187:5 › the detail panel never rests on a directly linked record › with the panel docked Bottom (2.8s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:09.4031882Z   ok  19 [chromium] › tests\change-network-rendered.spec.ts:187:5 › the detail panel never rests on a directly linked record › with the panel docked Right (2.9s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:12.3081136Z   ok  20 [chromium] › tests\change-network-rendered.spec.ts:187:5 › the detail panel never rests on a directly linked record › with the panel docked Auto (2.9s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:14.9073686Z   ok  21 [chromium] › tests\change-network-rendered.spec.ts:236:3 › the server-truth change chain (#925 F5/V5) › resolved by, allocates to, and verified by render along the story's arrows (2.6s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:15.5500524Z   ok  22 [chromium] › tests\code-source-rendered.spec.ts:4:1 › source confirmation sends the previewed commit and observed versions, then refreshes the selection (624ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:16.1490121Z   ok  23 [chromium] › tests\code-source-rendered.spec.ts:39:1 › a delayed preview cannot appear or be confirmed after changing builds (589ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:16.6361052Z   ok  24 [chromium] › tests\code-source-rendered.spec.ts:69:1 › changing builds clears the source held by the parent while the new selection loads (474ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:19.5248290Z   ok  25 [chromium] › tests\configured-reviewer-identity.spec.ts:22:1 › configured reviewer identity remains canonical from assignment through signature (2.9s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:22.2337736Z   ok  26 [chromium] › tests\deferred-backlog.spec.ts:15:1 › deferred work waits in its own tab until a build takes it, and the build that raised it keeps it (2.7s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:26.9525382Z   ok  27 [chromium] › tests\digital-thread-1046-interaction.spec.ts:36:1 › foreground pixels win overlap; covered controls leave Tab and exposed background selects normally (4.7s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:34.8502369Z   ok  28 [chromium] › tests\digital-thread-1046-interaction.spec.ts:69:1 › stationary hover survives settled motion beyond dwell and deliberate motion selects a new hover (7.9s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:42.0990898Z   ok  29 [chromium] › tests\digital-thread-1046-interaction.spec.ts:89:1 › selection stays readable; manual pan and passive resize keep reader ownership; clear keeps camera (7.2s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:48.9651955Z   ok  30 [chromium] › tests\digital-thread-1046-interaction.spec.ts:114:55 › network selected geometry across Bottom Right Auto docks (6.9s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:53.1972058Z   ok  31 [chromium] › tests\digital-thread-1046-interaction.spec.ts:114:55 › inside selected geometry across Bottom Right Auto docks (4.2s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:02:56.4242224Z   ok  32 [chromium] › tests\digital-thread-1046-interaction.spec.ts:114:55 › artifact selected geometry across Bottom Right Auto docks (3.2s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:03:00.3627483Z   ok  33 [chromium] › tests\digital-thread-1046-interaction.spec.ts:133:1 › native keyboard activation and touch preserve exact selection under reduced motion (3.9s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:03:09.7316404Z   ok  34 [chromium] › tests\digital-thread-1046-interaction.spec.ts:165:1 › external arrival and browser back forward preserve readable exact selection (9.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:03:12.8252057Z   ok  35 [chromium] › tests\digital-thread-1046-interaction.spec.ts:187:1 › a fixture card parks beneath an unmoved pointer beyond dwell without creating hover (3.1s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:03:29.3248421Z   x   36 [chromium] › tests\digital-thread-1046-interaction.spec.ts:203:1 › recovered strip space fits the selected card without an unnecessary bottom-dock change (16.3s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:03:47.1341251Z   x   37 [chromium] › tests\digital-thread-1046-interaction.spec.ts:203:1 › recovered strip space fits the selected card without an unnecessary bottom-dock change (retry #1) (16.6s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:03:51.1546802Z   ok  38 [chromium] › tests\digital-thread-1046-interaction.spec.ts:215:1 › relation-label status stays in toolbar clearance across Artifact docks (3.3s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:03:56.8549349Z   ok  39 [chromium] › tests\digital-thread-1046-interaction.spec.ts:243:1 › late linked-card height measurement preserves a usable foreground story (5.7s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:03.2819837Z   ok  40 [chromium] › tests\digital-thread-1046-interaction.spec.ts:273:1 › external page movement preserves hover until deliberate pointer movement (6.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:15.3975736Z   ok  41 [chromium] › tests\digital-thread-1046-interaction.spec.ts:287:1 › Tab never rests behind foreground and native focusability returns after clearing (12.1s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:20.5650255Z   ok  42 [chromium] › tests\document-review-comments.spec.ts:11:1 › a document reviewer comments on a revision, and the owner cannot see it while it is a draft (5.1s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:21.1342537Z   ok  43 [chromium] › tests\downstream-assessments-states.spec.ts:34:3 › the mixed queue is headed "Downstream Assessments" and describes itself truthfully (551ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:21.8585339Z   ok  44 [chromium] › tests\downstream-assessments-states.spec.ts:34:3 › the empty queue is headed "Downstream Assessments" and describes itself truthfully (709ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:22.3780003Z   ok  45 [chromium] › tests\downstream-assessments-states.spec.ts:34:3 › the failed queue is headed "Downstream Assessments" and describes itself truthfully (506ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:22.9597474Z   ok  46 [chromium] › tests\downstream-assessments-states.spec.ts:34:3 › the loading queue is headed "Downstream Assessments" and describes itself truthfully (567ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:23.4805171Z   ok  47 [chromium] › tests\downstream-assessments-states.spec.ts:49:1 › a mixed collection shows pending and dispositioned rows under the same heading (509ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:23.9199048Z   ok  48 [chromium] › tests\downstream-assessments-states.spec.ts:65:1 › an empty queue says so in the corrected terminology (428ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:24.4309922Z   ok  49 [chromium] › tests\downstream-assessments-states.spec.ts:73:1 › a failed load keeps the heading, states the failure, and can be retried (499ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:24.8441467Z   ok  50 [chromium] › tests\downstream-assessments-states.spec.ts:89:1 › the loading state says what it is loading, in the corrected terminology (402ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:28.8594060Z   ok  51 [chromium] › tests\draft-save-simplification.spec.ts:4:1 › a Draft needs only a title and never consumes an identifier for an empty form (4.0s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:31.6429214Z   ok  52 [chromium] › tests\draft-save-simplification.spec.ts:26:1 › proposal validation clears when the author corrects the proposal (2.8s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:41.5016272Z   ok  53 [chromium] › tests\form-semantics.spec.ts:208:1 › every controlled authoring form is programmatically what it looks like (9.8s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:04:53.2599726Z   ok  54 [chromium] › tests\form-semantics.spec.ts:235:1 › verification, review and administration forms carry the same semantics (11.7s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:00.0439271Z   ok  55 [chromium] › tests\lifecycle-decision-room.spec.ts:4:1 › Lifecycle Decision Room connects readiness, impact, evidence, people, and compact identifiers (6.8s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:05.4579582Z   ok  56 [chromium] › tests\lifecycle-decision-room.spec.ts:71:1 › a released build tells the story that let it ship, and offers no decision to take (5.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:12.9566362Z   ok  57 [chromium] › tests\market-ui-evolution.spec.ts:22:1 › market evolution views stay live, legible, and visually contained (7.5s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:16.3075765Z   ok  58 [chromium] › tests\mutation-failure-contract.spec.ts:12:1 › upload, job, identity, and conflict failures stay visible without false success or stuck controls (3.3s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:19.4759430Z   ok  59 [chromium] › tests\mutation-failure-contract.spec.ts:77:1 › a rejected approval preserves signature input and records no approval evidence (3.2s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:38.8712894Z   ok  60 [chromium] › tests\people-not-accounts.spec.ts:78:1 › no surface names a person by their account (19.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:38.9091694Z   ok  61 [chromium] › tests\people-portraits.spec.ts:22:3 › registry identity resolution › resolution order: caller record, casting, manifest directory, then generic (5ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:38.9184172Z   ok  62 [chromium] › tests\people-portraits.spec.ts:48:3 › FMS showcase portrait system › the manifest and the committed portrait files agree exactly (2ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:38.9418702Z   ok  63 [chromium] › tests\people-portraits.spec.ts:54:3 › FMS showcase portrait system › generated portraits are unique per identity; only the curated same-person pair is shared (16ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:38.9521576Z   ok  64 [chromium] › tests\people-portraits.spec.ts:75:3 › FMS showcase portrait system › every portrait stays within the asset-size ceiling (3ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:39.2077195Z   ok  65 [chromium] › tests\people-portraits.spec.ts:84:3 › FMS showcase portrait system › every manifest entry carries a display name and role (248ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:44.9719624Z   ok  66 [chromium] › tests\people-portraits.spec.ts:92:3 › FMS showcase portrait system › Team Work renders portraits for every strip member, with no initials fallback (5.8s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:47.3758014Z   ok  67 [chromium] › tests\people-portraits.spec.ts:125:3 › FMS showcase portrait system › Personnel renders portraits for leadership, assurance and roster members (2.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:05:57.0277295Z   ok  68 [chromium] › tests\problem-report-paging.spec.ts:12:1 › the Project queue and build picker reach every Problem Report beyond their first pages (9.6s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:05.8443068Z   ok  69 [chromium] › tests\problem-report-picker-scope.spec.ts:12:1 › build-specific PR pickers preserve the explicit target while the Project database stays Project-wide (8.8s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:10.1955549Z   ok  70 [chromium] › tests\problem-report-state-header.spec.ts:67:1 › the rail is the canonical lifecycle, and marks where this report is (4.3s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:14.3453017Z   ok  71 [chromium] › tests\problem-report-state-header.spec.ts:87:1 › rejecting is never a plain transition (4.1s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:18.8646942Z   ok  72 [chromium] › tests\problem-report-state-header.spec.ts:99:1 › offers are classified by where they sit on the rail (4.5s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:23.4617906Z   ok  73 [chromium] › tests\problem-report-state-header.spec.ts:136:1 › a backward move collects its rationale before it is performed (4.6s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:27.7687895Z   ok  74 [chromium] › tests\problem-report-state-header.spec.ts:159:1 › the state and its next action stay visible on every tab (4.3s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:27.8994736Z   -   75 [chromium] › tests\project-inception-restart-recovery.spec.ts:285:1 › prepare five disposable drafts for a separate API-process recovery invocation
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:28.0149406Z   -   76 [chromium] › tests\project-inception-restart-recovery.spec.ts:431:1 › resume all five drafts after the API process has been restarted
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:29.4040703Z   ok  77 [chromium] › tests\project-personnel.spec.ts:77:1 › Project Leadership renders eight positions in stable order on the showcase (1.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:31.7840791Z   ok  78 [chromium] › tests\project-personnel.spec.ts:101:1 › a leader can be assigned from an eligible member and replaced with another eligible member (2.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:34.2228648Z   ok  79 [chromium] › tests\project-personnel.spec.ts:145:1 › a standing backup is named and removed, and the roster records it separately from the primary (2.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:37.0101787Z   ok  80 [chromium] › tests\project-personnel.spec.ts:194:1 › a person is added from the directory with several base roles in one confirm (2.8s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:38.9294020Z   ok  81 [chromium] › tests\project-personnel.spec.ts:224:1 › an administrator edits the current identity of a disposable account, and the change is scoped to now (1.9s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:42.0727882Z   ok  82 [chromium] › tests\project-personnel.spec.ts:261:1 › a non-admin roster manager cannot create accounts or edit global identity (3.1s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:43.5340282Z   ok  83 [chromium] › tests\project-setup-permissions.spec.ts:3:1 › a nonadministrator can resume a draft but cannot accept or create a Project (1.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:45.2674100Z   ok  84 [chromium] › tests\project-setup-walkthrough.spec.ts:4:1 › an administrator can save and resume a project setup draft (1.7s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:48.0178915Z   ok  85 [chromium] › tests\project-setup-walkthrough.spec.ts:22:1 › a fresh setup finalizes into one In Work build and returns to its lineage selector (2.7s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:51.3252523Z   ok  86 [chromium] › tests\project-setup-walkthrough.spec.ts:58:1 › refreshes review rules after a saved ladder adds Interface and changes software verification (3.3s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:53.9969124Z   ok  87 [chromium] › tests\project-setup-walkthrough.spec.ts:106:1 › stages an external XLSX source through the server reconciliation envelope (2.7s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:06:57.0919302Z   ok  88 [chromium] › tests\records-name-people-and-builds.spec.ts:69:1 › a review cycle names the person waiting, their role, and whose turn it is (3.1s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:00.0623292Z   ok  89 [chromium] › tests\records-name-people-and-builds.spec.ts:113:1 › audit history reads as events, in the product's own abbreviation (3.0s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:03.2274973Z   ok  90 [chromium] › tests\records-name-people-and-builds.spec.ts:135:1 › an allocated change says which build it went into (3.2s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:06.4912512Z   ok  91 [chromium] › tests\records-name-people-and-builds.spec.ts:156:1 › the approver search answers on the first letter and never shows an account handle (3.2s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:09.1887782Z   ok  92 [chromium] › tests\released-execution-evidence.spec.ts:31:1 › released test results keep evidence history readable and expose no evidence mutation (2.7s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:09.9175445Z   ok  93 [chromium] › tests\requirement-redline-rendered.spec.ts:3:1 › long redlines explain full-field comparison and retain both changed tails (708ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:10.3478073Z   ok  94 [chromium] › tests\requirement-redline-rendered.spec.ts:21:1 › short redlines retain word highlighting without a long-field notice (418ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:10.8471280Z   ok  95 [chromium] › tests\requirement-redline-rendered.spec.ts:28:1 › incomplete comparison metadata cannot present an unchanged redline (487ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:12.3190988Z   ok  96 [chromium] › tests\resizable-workspace-panels.spec.ts:4:1 › Command Center presents a responsive, aligned three-way work summary (1.5s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:13.0855998Z   ok  97 [chromium] › tests\resizable-workspace-panels.spec.ts:23:1 › Reusable layout supports up and down resizing with keyboard access (755ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:13.7682579Z   ok  98 [chromium] › tests\resizable-workspace-panels.spec.ts:54:1 › Resizable layouts rebuild when a panel is added dynamically (672ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:15.1986555Z   ok  99 [chromium] › tests\resizable-workspace-panels.spec.ts:79:1 › Shared splitters stay between panels while inspector controls, dragging and saved sizes remain usable (1.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:20.2395212Z   ok 100 [chromium] › tests\rich-content-emphasis.spec.ts:50:1 › emphasis applied in the browser survives check-in and reload (5.0s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:25.4563888Z   ok 101 [chromium] › tests\rich-content-emphasis.spec.ts:90:1 › text that looks like markup is stored and shown as text (5.2s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:29.5185588Z   ok 102 [chromium] › tests\software-change-level-scope.spec.ts:4:1 › software change control keeps HLR and LLR context through links, refresh, history, and released builds (4.0s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:34.2395925Z   ok 103 [chromium] › tests\test-change-request-assignment.spec.ts:11:1 › answering a test change request makes it yours, and it is in My Work after refresh (4.7s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:38.3516612Z   ok 104 [chromium] › tests\upstream-change-request-authoring.spec.ts:4:1 › initial upstream authoring blocks Deferred with a popup and persists multiple exact approved revisions (4.1s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:45.2349644Z   ok 105 [chromium] › tests\verification-landing.spec.ts:13:1 › system verification offers its named destinations, including Coverage, on real work (6.9s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:50.1373199Z   ok 106 [chromium] › tests\verification-landing.spec.ts:70:1 › software verification offers named HLR and LLR destinations, including Coverage (4.9s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:51.1744289Z   ok 107 [chromium] › tests\workspace-navigation.spec.ts:34:1 › an authenticated root destination canonicalizes to the Projects portal (1.0s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:53.6405734Z   ok 108 [chromium] › tests\workspace-navigation.spec.ts:41:1 › delayed hydration retains a real project-card selection and exact build scope (2.5s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:54.4991835Z   ok 109 [chromium] › tests\workspace-navigation.spec.ts:69:1 › missing exact build never substitutes the current build (844ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:55.8455543Z   ok 110 [chromium] › tests\workspace-navigation.spec.ts:76:1 › project switches and browser history resolve the named project's own requests (1.3s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:56.7243402Z   ok 111 [chromium] › tests\workspace-navigation.spec.ts:101:1 › legacy project-wide document links discard obsolete build context (866ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:57.5605833Z   ok 112 [chromium] › tests\workspace-navigation.spec.ts:108:1 › a legacy Project slug remains readable when it identifies one authorized Project (825ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:58.4487764Z   ok 113 [chromium] › tests\workspace-navigation.spec.ts:115:1 › workspace failures have a truthful retry state (875ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:07:59.4662303Z   ok 114 [chromium] › tests\workspace-navigation.spec.ts:155:1 › malformed build data cannot display or request a fabricated workspace and retry retains intent (1.0s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:08:00.7111459Z   ok 115 [chromium] › tests\workspace-navigation.spec.ts:174:1 › late dashboard completion cannot overwrite a newer build (1.2s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:08:01.5842294Z   ok 116 [chromium] › tests\workspace-navigation.spec.ts:202:1 › a failed build read does not display another build's summary (862ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:08:01.5966846Z   ok 117 [chromium] › tests\workspace-navigation.spec.ts:210:1 › route resolution preserves exact history and rejects absent program, project and build (5ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:08:01.6062613Z   ok 118 [chromium] › tests\workspace-navigation.spec.ts:222:1 › new package authoring selection survives route parsing for each verification scope (2ms)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:08:06.9002418Z   ok 119 [chromium] › tests\zzz-post-414-picker-integrity.spec.ts:344:1 › a stale released-build context cannot overwrite the active build effective baseline (5.3s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:08:20.3219116Z   ok 120 [chromium] › tests\zzz-post-414-picker-integrity.spec.ts:441:1 › a multi-page requirement selection keeps the picker request line bounded and stays fully editable (13.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:09:16.7222244Z   ok 121 [chromium] › tests\zzz-post-414-picker-integrity.spec.ts:544:1 › the TCR driving-requirement picker stays bounded with a large selection (56.4s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:09:20.7808378Z   ok 122 [chromium] › tests\zzz-post-414-picker-integrity.spec.ts:636:1 › a failed picker response shows a visible error and recovers instead of silently freezing (4.0s)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:54.7584671Z   ok 123 [chromium] › tests\zzz-post-414-picker-integrity.spec.ts:689:1 › a Modify/Retire target picker stays bounded with a large existing-decision TCR (2.6m)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.2956129Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4165697Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4175089Z   1) [chromium] › tests\digital-thread-1046-interaction.spec.ts:203:1 › recovered strip space fits the selected card without an unnecessary bottom-dock change 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4176410Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4176971Z     Error: expect(received).toBe(expected) // Object.is equality
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4177508Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4177698Z     Expected: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4178229Z     Received: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4178489Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4178721Z     Call Log:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4179344Z     - Timeout 15000ms exceeded while waiting on the predicate
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4179867Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4180551Z       31 |     return c.top >= v.top + p.box.y - 1 && c.bottom <= v.top + p.box.y + p.box.height + 1 &&
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4181849Z       32 |       c.left >= v.left + p.box.x - 1 && c.right <= v.left + p.box.x + p.box.width + 1
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4182657Z     > 33 |   })).toBe(true)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4183141Z          |       ^
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4183550Z       34 | }
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4183962Z       35 |
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4185263Z       36 | test('foreground pixels win overlap; covered controls leave Tab and exposed background selects normally', async ({ page }, info) => {
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4187531Z         at selectedFits (D:\a\requirements-management-tool\requirements-management-tool\product\client\tests\digital-thread-1046-interaction.spec.ts:33:7)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4189838Z         at D:\a\requirements-management-tool\requirements-management-tool\product\client\tests\digital-thread-1046-interaction.spec.ts:206:9
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4191338Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4192259Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4193813Z     test-results\digital-thread-1046-intera-a4cee-ecessary-bottom-dock-change-chromium\test-failed-1.png
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4195809Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4196397Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4197412Z     Error Context: test-results\digital-thread-1046-intera-a4cee-ecessary-bottom-dock-change-chromium\error-context.md
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4198425Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4199472Z     attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4200972Z     test-results\digital-thread-1046-intera-a4cee-ecessary-bottom-dock-change-chromium\trace.zip
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4202070Z     Usage:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4202265Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4203260Z         npx playwright show-trace test-results\digital-thread-1046-intera-a4cee-ecessary-bottom-dock-change-chromium\trace.zip
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4204273Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4205000Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4205576Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4206298Z     Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4206891Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4207351Z     Error: expect(received).toBe(expected) // Object.is equality
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4207835Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4208066Z     Expected: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4208557Z     Received: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4208839Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4209036Z     Call Log:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4209680Z     - Timeout 15000ms exceeded while waiting on the predicate
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4210170Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4210846Z       31 |     return c.top >= v.top + p.box.y - 1 && c.bottom <= v.top + p.box.y + p.box.height + 1 &&
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4212209Z       32 |       c.left >= v.left + p.box.x - 1 && c.right <= v.left + p.box.x + p.box.width + 1
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4213176Z     > 33 |   })).toBe(true)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4213686Z          |       ^
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4214096Z       34 | }
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4214777Z       35 |
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4216071Z       36 | test('foreground pixels win overlap; covered controls leave Tab and exposed background selects normally', async ({ page }, info) => {
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4218375Z         at selectedFits (D:\a\requirements-management-tool\requirements-management-tool\product\client\tests\digital-thread-1046-interaction.spec.ts:33:7)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4220712Z         at D:\a\requirements-management-tool\requirements-management-tool\product\client\tests\digital-thread-1046-interaction.spec.ts:206:9
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4221815Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4222644Z     attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4224446Z     test-results\digital-thread-1046-intera-a4cee-ecessary-bottom-dock-change-chromium-retry1\test-failed-1.png
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4226152Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4226717Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4227809Z     Error Context: test-results\digital-thread-1046-intera-a4cee-ecessary-bottom-dock-change-chromium-retry1\error-context.md
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4228900Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4229683Z     attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4231238Z     test-results\digital-thread-1046-intera-a4cee-ecessary-bottom-dock-change-chromium-retry1\trace.zip
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4232526Z     Usage:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4232779Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4233882Z         npx playwright show-trace test-results\digital-thread-1046-intera-a4cee-ecessary-bottom-dock-change-chromium-retry1\trace.zip
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4235283Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4236014Z     ────────────────────────────────────────────────────────────────────────────────────────────────
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4236592Z 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4236769Z   1 failed
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4238373Z     [chromium] › tests\digital-thread-1046-interaction.spec.ts:203:1 › recovered strip space fits the selected card without an unnecessary bottom-dock change 
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4239705Z   2 skipped
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.4240151Z   119 passed (14.0m)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.5815727Z ##[error]Process completed with exit code 1.
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.6012587Z ##[group]Run node "D:\a\requirements-management-tool\requirements-management-tool/product/ci-metrics/bin/mark.mjs" test-end
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.6013718Z ^[[36;1mnode "D:\a\requirements-management-tool\requirements-management-tool/product/ci-metrics/bin/mark.mjs" test-end^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.6092454Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.6092932Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.6093197Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.6093563Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.6093948Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.6094352Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.6094853Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.6095574Z   DOTNET_ROOT: C:\Program Files\dotnet
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:56.6095882Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1697912Z ##[group]Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1698517Z with:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1698869Z   name: journey-durations-1-1
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1699244Z   path: product/client/journey-durations-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1699620Z   if-no-files-found: warn
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1699939Z   retention-days: 7
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1700213Z   compression-level: 6
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1700501Z   overwrite: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1700762Z   include-hidden-files: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1701081Z   archive: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1701382Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1701616Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1701963Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1702308Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1702762Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1703374Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1703830Z   DOTNET_ROOT: C:\Program Files\dotnet
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.1704183Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.3576231Z With the provided path, there will be 1 file uploaded
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.3581423Z Artifact name is valid!
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.3582955Z Root directory input is valid!
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.7424926Z Uploading artifact: journey-durations-1-1.zip
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:57.7474368Z Beginning upload of artifact content to blob storage
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:59.7757548Z Uploaded bytes 8388608
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:11:59.9962808Z Uploaded bytes 12557107
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.0752530Z Finished uploading artifact content to blob storage!
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.0756854Z SHA256 digest of uploaded artifact is 6d1b22b65b777aaa8cbebcfa566df83d3f943012b6640bde9ac7ab592d751b9c
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.0759487Z Finalizing artifact upload
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.4674794Z Artifact journey-durations-1-1 successfully finalized. Artifact ID 10836057840
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.4675976Z Artifact journey-durations-1-1 has been successfully uploaded! Final size is 12557107 bytes. Artifact ID is 10836057840
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.4687601Z Artifact download URL: https://github.com/AeroLinkDEV/requirements-management-tool/actions/runs/36064279956/artifacts/10836057840
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5064575Z ##[group]Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5065130Z with:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5065442Z   name: playwright-diagnostics-1-1
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5066059Z   path: product/client/playwright-report
+Browser journeys (1/4)	UNKNOWN STEP	product/client/test-results
+Browser journeys (1/4)	UNKNOWN STEP	product/client/api-logs
+Browser journeys (1/4)	UNKNOWN STEP	
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5066602Z   if-no-files-found: ignore
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5066903Z   retention-days: 7
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5067207Z   compression-level: 6
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5067495Z   overwrite: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5067811Z   include-hidden-files: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5068156Z   archive: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5068413Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5068676Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5068991Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5069630Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5070108Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5070761Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5071263Z   DOTNET_ROOT: C:\Program Files\dotnet
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.5071591Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.7089127Z Multiple search paths detected. Calculating the least common ancestor of all paths
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.7093360Z The least common ancestor is D:\a\requirements-management-tool\requirements-management-tool\product\client. This will be the root directory of the artifact
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.7095305Z With the provided path, there will be 16 files uploaded
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.7099602Z Artifact name is valid!
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:00.7101089Z Root directory input is valid!
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:01.1187007Z Uploading artifact: playwright-diagnostics-1-1.zip
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:01.1234488Z Beginning upload of artifact content to blob storage
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:02.6326836Z Uploaded bytes 4474748
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:02.7107098Z Finished uploading artifact content to blob storage!
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:02.7109760Z SHA256 digest of uploaded artifact is 56e7e7dbd7f31c3cb465fe7c89c1cdd40330217c9ef8625cd3caf9b2e8cb02e8
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:02.7111134Z Finalizing artifact upload
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1099198Z Artifact playwright-diagnostics-1-1 successfully finalized. Artifact ID 10836282261
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1100528Z Artifact playwright-diagnostics-1-1 has been successfully uploaded! Final size is 4474748 bytes. Artifact ID is 10836282261
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1108719Z Artifact download URL: https://github.com/AeroLinkDEV/requirements-management-tool/actions/runs/36064279956/artifacts/10836282261
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1424995Z ##[group]Run node "D:\a\requirements-management-tool\requirements-management-tool/product/ci-metrics/bin/write-fragment.mjs"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1426035Z ^[[36;1mnode "D:\a\requirements-management-tool\requirements-management-tool/product/ci-metrics/bin/write-fragment.mjs"^[[0m
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1496634Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1497015Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1497212Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1497494Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1497797Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1498347Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1498847Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1499243Z   DOTNET_ROOT: C:\Program Files\dotnet
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1499524Z   METRICS_JOB_RESULT: failure
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1499770Z   METRICS_NEEDS: changes
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1500052Z   METRICS_COUNTS_SOURCE: playwright-json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1500690Z   METRICS_PLAYWRIGHT_JSON_PATH: D:\a\requirements-management-tool\requirements-management-tool/product/client/journey-durations-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1501340Z   METRICS_CLASS_DOCS_ONLY: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1501607Z   METRICS_CLASS_BACKEND: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1501854Z   METRICS_CLASS_CLIENT: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1502096Z   METRICS_CLASS_BROWSER: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1502341Z   METRICS_CLASS_POSTGRESQL: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1502589Z   METRICS_CACHE_NUGET: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1502831Z   METRICS_CACHE_CHROMIUM: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.1503076Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.5766613Z [ci-metrics] Wrote fragment for Browser journeys (1/4) (result failure).
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7016123Z ##[group]Run actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7016616Z with:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7016850Z   name: ci-metrics-fragment-browser-pr-1-1
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7017222Z   path: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7017559Z   if-no-files-found: ignore
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7017797Z   retention-days: 30
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7018016Z   compression-level: 6
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7018288Z   overwrite: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7018512Z   include-hidden-files: false
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7018747Z   archive: true
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7018938Z env:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7019136Z   METRICS_JOB_ID: browser-pr
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7019406Z   METRICS_JOB_NAME: Browser journeys (1/4)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7019695Z   METRICS_MATRIX: {
+Browser journeys (1/4)	UNKNOWN STEP	  "shard": 1
+Browser journeys (1/4)	UNKNOWN STEP	}
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7020073Z   METRICS_TIMING_FILE: D:\a\_temp/ci-metrics/timing-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7020585Z   METRICS_FRAGMENT_PATH: D:\a\_temp/ci-metrics/fragment-browser-pr-1.json
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7020973Z   DOTNET_ROOT: C:\Program Files\dotnet
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.7021223Z ##[endgroup]
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.8881277Z With the provided path, there will be 1 file uploaded
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.8886799Z Artifact name is valid!
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:03.8888262Z Root directory input is valid!
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:04.2746630Z Uploading artifact: ci-metrics-fragment-browser-pr-1-1.zip
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:04.2792672Z Beginning upload of artifact content to blob storage
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:04.5849645Z Uploaded bytes 945
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:04.6600319Z Finished uploading artifact content to blob storage!
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:04.6601930Z SHA256 digest of uploaded artifact is 03499999ffbb049e4b1e283261d7ce4ab63718177d4cef2d08380eb7e9055015
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:04.6602849Z Finalizing artifact upload
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.0548294Z Artifact ci-metrics-fragment-browser-pr-1-1 successfully finalized. Artifact ID 10836127672
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.0549634Z Artifact ci-metrics-fragment-browser-pr-1-1 has been successfully uploaded! Final size is 945 bytes. Artifact ID is 10836127672
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.0557507Z Artifact download URL: https://github.com/AeroLinkDEV/requirements-management-tool/actions/runs/36064279956/artifacts/10836127672
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.0936055Z Post job cleanup.
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.2995253Z [command]"C:\Program Files\Git\bin\git.exe" version
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.3276374Z git version 2.55.0.windows.5
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.3339778Z Temporarily overriding HOME='D:\a\_temp\c3df6854-ec02-4fe8-b6cd-26e527822484' before making global git config changes
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.3340840Z Adding repository directory to the temporary git global config as a safe directory
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.3350871Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\requirements-management-tool\requirements-management-tool
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.3655339Z Removing SSH command configuration
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.3666147Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.3985993Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.9250193Z Removing HTTP extra header
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.9261928Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:05.9624661Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.4928472Z Removing includeIf entries pointing to credentials config files
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.4940890Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.5220915Z includeif.gitdir:D:/a/requirements-management-tool/requirements-management-tool/.git.path
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.5222565Z includeif.gitdir:D:/a/requirements-management-tool/requirements-management-tool/.git/worktrees/*.path
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.5225259Z includeif.gitdir:/github/workspace/.git.path
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.5226568Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.5273331Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:D:/a/requirements-management-tool/requirements-management-tool/.git.path
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.5532530Z D:\a\_temp\git-credentials-3def2037-973b-4939-a644-ecfc17f74780.config
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.5573951Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:D:/a/requirements-management-tool/requirements-management-tool/.git.path D\:\\a\\_temp\\git\-credentials\-3def2037\-973b\-4939\-a644\-ecfc17f74780\.config
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.5919960Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:D:/a/requirements-management-tool/requirements-management-tool/.git/worktrees/*.path
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.6176438Z D:\a\_temp\git-credentials-3def2037-973b-4939-a644-ecfc17f74780.config
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.6212483Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:D:/a/requirements-management-tool/requirements-management-tool/.git/worktrees/*.path D\:\\a\\_temp\\git\-credentials\-3def2037\-973b\-4939\-a644\-ecfc17f74780\.config
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.6500103Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/.git.path
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.6758256Z /github/runner_temp/git-credentials-3def2037-973b-4939-a644-ecfc17f74780.config
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.6796467Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-3def2037\-973b\-4939\-a644\-ecfc17f74780\.config
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.7091585Z [command]"C:\Program Files\Git\bin\git.exe" config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.7343741Z /github/runner_temp/git-credentials-3def2037-973b-4939-a644-ecfc17f74780.config
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.7387296Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-3def2037\-973b\-4939\-a644\-ecfc17f74780\.config
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:06.7685304Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:07.2858652Z Removing credentials config 'D:\a\_temp\git-credentials-3def2037-973b-4939-a644-ecfc17f74780.config'
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:07.3056368Z Cleaning up orphan processes
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:07.3186819Z Terminate orphan process: pid (7064) (dotnet)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:07.3426527Z Terminate orphan process: pid (1400) (dotnet)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:07.3590667Z Terminate orphan process: pid (3500) (dotnet)
+Browser journeys (1/4)	UNKNOWN STEP	2026-09-24T22:12:07.3675878Z Terminate orphan process: pid (1076) (conhost)

@@ -1,0 +1,45 @@
+import fs from 'node:fs'
+
+const p = 'C:/Sean Project/RMT-1040-ci-worktree/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs'
+let s = fs.readFileSync(p, 'utf8')
+
+const before1 = [
+  "    'export RUNNER_TEMP=\"' + statePosix + '/tmp\"',",
+  "    'export GITHUB_STEP_SUMMARY=\"' + statePosix + '/summary.md\"',",
+  "    'export MOCK_STATE=\"' + statePosix + '\"',",
+].join('\n')
+const after1 = [
+  "    'export RUNNER_TEMP=\"' + join(stateDir, 'tmp') + '\"',",
+  "    'export GITHUB_STEP_SUMMARY=\"' + join(stateDir, 'summary.md') + '\"',",
+  "    'export MOCK_STATE=\"' + stateDir + '\"',",
+].join('\n')
+if (!s.includes(before1)) {
+  console.error('path lines not found')
+  console.error('searched for:', JSON.stringify(before1))
+  process.exit(1)
+}
+s = s.replace(before1, after1)
+
+const before2 = '  const body = workflowRunBody()'
+const after2 = [
+  '  // the production loop keeps the 420-poll bound; this test-scaled copy bounds at 60 polls',
+  "  const body = workflowRunBody().replace('for attempt in $(seq 1 420); do', 'for attempt in $(seq 1 60); do')",
+].join('\n')
+if (!s.includes(before2)) {
+  console.error('body line not found')
+  process.exit(1)
+}
+s = s.replace(before2, after2)
+
+// the shim no longer needs a POSIX path entry form; stateDir is used in Windows form
+s = s.replace(
+  "  const shimPosix = '/' + shim[0].toLowerCase() + shim.slice(2).split(sep).join('/')\n",
+  '',
+)
+s = s.replace(
+  "  const statePosix = '/' + stateDir[0].toLowerCase() + stateDir.slice(2).split(sep).join('/')\n",
+  '',
+)
+
+fs.writeFileSync(p, s)
+console.log('harness windows paths + scaled loop applied')

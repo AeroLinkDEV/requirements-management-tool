@@ -1,0 +1,52 @@
+$ErrorActionPreference = 'Stop'
+$evidence = 'C:\Sean Project\RMT-1040-glm-evidence\d01-correction'
+Start-Transcript -Path (Join-Path $evidence 'transcript.log') | Out-Null
+try {
+    Write-Output 'ELEVATED SCRIPT STARTED'
+    Import-Module 'C:\Sean Project\AeroLink Production\product\scripts\AeroLinkProductionSource.psm1' -Force
+    Import-Module 'C:\Sean Project\AeroLink Production\product\scripts\AeroLinkRemoteDemo.psm1' -Force
+    $config = Get-AeroLinkRemoteDemoConfig
+    Write-Output ('CONFIG AeroLinkRoot=' + $config.AeroLinkRoot)
+
+    function Read-TaskState([string]$name) {
+        $t = Get-ScheduledTask -TaskName $name -ErrorAction Stop
+        [ordered]@{
+            state             = [string]$t.State
+            executionLimit    = [string]$t.Settings.ExecutionTimeLimit
+            multipleInstances = [string]$t.Settings.MultipleInstances
+            enabled           = [bool]$t.Settings.Enabled
+            logonType         = [string]$t.Principal.LogonType
+            runLevel          = [string]$t.Principal.RunLevel
+            account           = [string]$t.Principal.UserId
+            actionCount       = $t.Actions.Count
+            actionExecute     = $(if ($t.Actions.Count -gt 0) { [string]$t.Actions[0].Execute } else { '<none>' })
+            triggers          = @($t.Triggers | ForEach-Object { [string]$_.CimClass.CimClassName })
+        }
+    }
+
+    $before = @{}
+    foreach ($name in @('AeroLinkRemoteDemoRecovery', 'AeroLinkProductionSourceReconcile')) {
+        $before[$name] = Read-TaskState $name
+    }
+
+    Write-Output 'Running Install-AeroLinkReconcileTask...'
+    Install-AeroLinkReconcileTask -Config $config
+    Write-Output 'Running Install-AeroLinkRemoteDemoTask...'
+    Install-AeroLinkRemoteDemoTask -Config $config
+
+    foreach ($name in @('AeroLinkRemoteDemoRecovery', 'AeroLinkProductionSourceReconcile')) {
+        $after[$name] = Read-TaskState $name
+        Export-ScheduledTask -TaskName $name | Out-File (Join-Path $evidence "$name.exported.xml") -Encoding unicode
+    }
+
+    @{ before = $before; after = $after } | ConvertTo-Json -Depth 6 |
+        Out-File (Join-Path $evidence 'task-readback.json') -Encoding utf8
+    Write-Output 'D01-CORRECTION-COMPLETE'
+} catch {
+    Write-Output ('D01-CORRECTION-ERROR: ' + $_.Exception.Message)
+    Write-Output $_.ScriptStackTrace
+    'ERROR: ' + $_.Exception.Message | Out-File (Join-Path $evidence 'error.log') -Encoding utf8
+    exit 1
+} finally {
+    Stop-Transcript | Out-Null
+}

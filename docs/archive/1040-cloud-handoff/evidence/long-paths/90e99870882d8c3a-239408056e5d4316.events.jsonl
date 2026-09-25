@@ -1,0 +1,8 @@
+{"type":"Accepted","authorityPid":38988,"witnessDir":"C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\reconcile-retry\\probe-state-76b4c74f6e3c4d94973df9ac73acaff8\\bootstrap\\transitions\\20260922T234246-46bad5de\\witness","breakaway":true,"descriptorHash":"FAE9AB94DCDC36C0803493DF796969E7DB38263A9F23DBBBB9E1D18CD96A6A58","qualification":"probe","at":"2026-09-22T23:42:49.1481945Z"}
+{"type":"StagingIntended","jobName":"Global\\AeroLinkStage-20260922T234246-46bad5de-239408056e5d4316","at":"2026-09-22T23:42:49.1624943Z"}
+{"type":"StagingRegistered","jobName":"Global\\AeroLinkStage-20260922T234246-46bad5de-239408056e5d4316","at":"2026-09-22T23:42:49.2509081Z"}
+{"type":"Created","processId":24028,"startedAt":"2026-09-22T23:42:49.2813536Z","image":"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe","at":"2026-09-22T23:42:49.2888986Z"}
+{"type":"Resumed","at":"2026-09-22T23:42:49.2924093Z"}
+{"type":"Ready","kind":"marker","evidence":"a marker bound to the request, nonce and pid 24028","readiness":{"kind":"marker"},"markerPath":"C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\reconcile-retry\\probe-state-76b4c74f6e3c4d94973df9ac73acaff8\\bootstrap\\transitions\\20260922T234246-46bad5de\\spool\\ready\\239408056e5d4316.b7d57098f41345cdaaf40d78361efb23.json","nonce":"b7d57098f41345cdaaf40d78361efb23","at":"2026-09-22T23:42:49.8325446Z"}
+{"type":"Committing","at":"2026-09-22T23:42:49.8325446Z"}
+{"type":"Registered","processId":24028,"startedAt":"2026-09-22T23:42:49.2813536Z","image":"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe","role":"qualification-probe","commitEvidence":"authority","readiness":"a marker bound to the request, nonce and pid 24028","at":"2026-09-22T23:42:49.8456776Z"}

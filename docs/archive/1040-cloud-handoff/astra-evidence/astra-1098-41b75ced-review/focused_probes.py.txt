@@ -1,0 +1,51 @@
+import pathlib, subprocess, sys, json, os, tempfile
+OLD = pathlib.Path(r'C:\Users\seanm\AppData\Local\Temp\astra-1098-eace33f6-review\review_probe.py')
+# Reuse only the earlier independent harness definitions, not its old assertions.
+context = {'__file__': __file__}
+exec(OLD.read_text().split('# Unmodified complete workflow run step;')[0], context)
+definitions = context['definitions']
+original_fixtures = context['fixtures']
+def fixtures(where, stale=False, requester_envelope=False):
+    original_fixtures(where, stale, requester_envelope=True)
+context['fixtures'] = fixtures
+shell_case = context['shell_case']
+r = shell_case('fixed-stale-refusal', definitions + '\ncollect_pages() { :; }\ndispatch_full_run\necho UNEXPECTED_RETURN\n', stale=True)
+assert r['exit'] == 1 and r['dispatch_posts'] == 0 and 'Dispatch refused' in r['stdout']
+r = shell_case('fixed-pin-success', definitions + '\nfetch_and_pin_run 101\nprintf "PINNED=%s/%s\\n" "$PINNED_ID" "$PINNED_ATTEMPT"\n')
+assert r['exit'] == 0 and 'PINNED=101/1' in r['stdout']
+r = shell_case('fixed-uncertain-post', definitions + '\ncollect_pages() { :; }\ndispatch_full_run\necho ENTERED_DISCOVERY\n', lost=True)
+assert r['exit'] == 0 and r['dispatch_posts'] == 1 and 'ENTERED_DISCOVERY' in r['stdout']
+# Transport-capture probe: run the real collector over both endpoint URL shapes.
+# Two-page response headers force the actual page-two URL to be emitted.
+collector_mock = r'''
+curl() {
+  local dump='' out='' url=''
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dump-header) dump="$2"; shift 2 ;;
+      --output) out="$2"; shift 2 ;;
+      --header) shift 2 ;;
+      --*) shift ;;
+      *) url="$1"; shift ;;
+    esac
+  done
+  printf 'URL %s\n' "$url"
+  printf 'HTTP/2 200\n' > "$dump"
+  if [[ "$out" == *.page.1 ]]; then printf 'Link: <https://example.invalid/next>; rel="next"\n' >> "$dump"; fi
+  printf '[]\n' > "$out"
+}
+collect_pages "$RUNNER_TEMP/check-events" "$api/issues/1066/events"
+collect_pages "$RUNNER_TEMP/check-runs" "$api/actions/workflows/request-full-ci.yml/runs?head_sha=$HEAD_SHA&event=pull_request_target"
+'''
+r = shell_case('pagination-urls', definitions + collector_mock)
+assert '/events&page=2' in r['stdout']
+assert 'event=pull_request_target?page=1' in r['stdout']
+where = pathlib.Path(tempfile.mkdtemp(prefix='matcher-', dir=context['OUT']))
+source = where / 'matcher.py'
+source.write_text(context['block']('find_product_run() {'), encoding='utf-8')
+data = where / 'runs.json'
+data.write_text(json.dumps({'workflow_runs': [context['product'](100, 'in_progress', None), context['product'](101, conclusion='failure')]}))
+r = subprocess.run([sys.executable, '-B', str(source), str(data), context['SHA'], '1066', context['REF']], env=dict(os.environ, BOUNDARY_ID='0'), capture_output=True, text=True)
+print(json.dumps(dict(case='fixed-pending-selection', exit=r.returncode, stdout=r.stdout.strip())))
+assert r.returncode == 0 and r.stdout.strip() == 'PENDING 100'
+print('FOUR FUNCTION-LEVEL CORRECTIONS CONFIRMED; PAGINATION DEFECT REPRODUCED')

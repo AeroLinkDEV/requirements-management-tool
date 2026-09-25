@@ -1,0 +1,61 @@
+import fs from 'node:fs'
+
+const p = 'C:/Sean Project/RMT-1040-ci-worktree/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs'
+let s = fs.readFileSync(p, 'utf8')
+
+const before = [
+  '  local method="GET" dump="" out="" data="" code_file="" prev="" url="" arg',
+  '  for arg in "$@"; do',
+  '    case "$arg" in',
+  '      --request|--dump-header|--output|--data-binary|--write-out) prev="$arg" ;;',
+  '      --*) prev="" ;;',
+  '      *)',
+  '        case "$prev" in',
+  '          --request) method="$arg" ;;',
+  '          --dump-header) dump="$arg" ;;',
+  '          --output) out="$arg" ;;',
+  '          --data-binary) data="${arg#@}" ;;',
+  '          --write-out) code_file="$arg" ;;',
+  '          "") url="$arg" ;;',
+  '        esac',
+  '        prev=""',
+  '        ;;',
+  '    esac',
+  '  done',
+  '  local status=0',
+  '  python "' + "' + stateDir + '" + '/mock-curl.py" "$method" "$url" "$dump" "$out" "$data" || status=$?',
+  '  if [ -n "$code_file" ] && [ -f "$MOCK_STATE/last-code" ]; then cat "$MOCK_STATE/last-code" > "$code_file"; fi',
+].join('\n')
+
+const after = [
+  '  local method="GET" dump="" out="" data="" prev="" url="" arg',
+  '  for arg in "$@"; do',
+  '    case "$arg" in',
+  '      --request|--dump-header|--output|--data-binary) prev="$arg" ;;',
+  '      --write-out) prev="SKIP" ;;',
+  '      --*) prev="" ;;',
+  '      *)',
+  '        case "$prev" in',
+  '          --request) method="$arg" ;;',
+  '          --dump-header) dump="$arg" ;;',
+  '          --output) out="$arg" ;;',
+  '          --data-binary) data="${arg#@}" ;;',
+  '          SKIP) prev="" ;;',
+  '          "") url="$arg" ;;',
+  '        esac',
+  '        prev=""',
+  '        ;;',
+  '    esac',
+  '  done',
+  '  local status=0',
+  '  python "' + "' + stateDir + '" + '/mock-curl.py" "$method" "$url" "$dump" "$out" "$data" || status=$?',
+  '  cat "$MOCK_STATE/last-code"',
+].join('\n')
+
+if (!s.includes(before)) {
+  console.error('wrapper block not found')
+  process.exit(1)
+}
+s = s.replace(before, after)
+fs.writeFileSync(p, s)
+console.log('wrapper fixed')

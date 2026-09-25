@@ -1,0 +1,27 @@
+import fs from 'node:fs'
+
+const p = 'C:/Sean Project/RMT-1040-ci-worktree/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs'
+let s = fs.readFileSync(p, 'utf8')
+const lines = s.split('\n')
+const out = []
+let skipping = false
+let removed = 0
+for (const line of lines) {
+  if (line.includes('curl-trace')) {
+    // the trace block is: a lone "  {" line BEFORE this line, this line, and a lone "  }'," after it
+    if (out.length && out[out.length - 1].trim() === "'  {',") {
+      out.pop()
+      removed++
+      skipping = true
+      continue
+    }
+    continue
+  }
+  if (skipping && line.trim() === "'  }',") {
+    skipping = false
+    continue
+  }
+  out.push(line)
+}
+fs.writeFileSync(p, out.join('\n'))
+console.log('trace block removed,', removed, 'block(s)')

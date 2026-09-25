@@ -1,0 +1,20 @@
+{
+  "Obligation": {
+    "TeardownBegan": false,
+    "TunnelWasRunning": false,
+    "RuntimeWasRunning": false,
+    "PriorTunnel": false,
+    "PriorRuntime": false,
+    "Discharged": true,
+    "SourceRoot": "D:\\aq-2087a3e2\\prod",
+    "SourceBefore": "202427396043a055fe98191b0fab2a16ab7ced68",
+    "Policy": "Preserve",
+    "PublicOrigin": null,
+    "Stage": "Discharged",
+    "RuntimeIdentity": null,
+    "LocalReady": false,
+    "PublicProtected": false,
+    "OriginValid": false
+  },
+  "InstallationRoot": "D:\\aq-2087a3e2\\inst"
+}

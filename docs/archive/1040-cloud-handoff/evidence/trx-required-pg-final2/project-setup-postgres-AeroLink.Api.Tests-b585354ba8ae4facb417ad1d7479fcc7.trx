@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="4cfe2725-2dc6-4221-a644-07dc1f4b9d62" name="seanm@UPSTAIRSMCCARTH 2026-09-21 14:08:06" runUser="UPSTAIRSMCCARTH\seanm" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-09-21T14:08:06.4210338-04:00" queuing="2026-09-21T14:08:06.4210342-04:00" start="2026-09-21T14:07:34.9868157-04:00" finish="2026-09-21T14:08:55.5922651-04:00" />
+  <TestSettings name="default" id="6a1a209f-338a-4431-a453-885379504919">
+    <Deployment runDeploymentRoot="seanm_UPSTAIRSMCCARTH_2026-09-21_14_08_06" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="67ccc06b-a76f-41c0-83d4-9d1b2c673fd7" testId="c9f00029-307f-49bb-d048-3b81afda10dd" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Page_one_fence_waits_for_uncommitted_allocator_then_includes_the_committed_build" computerName="UPSTAIRSMCCARTH" duration="00:00:05.2378915" startTime="2026-09-21T14:08:29.7430630-04:00" endTime="2026-09-21T14:08:34.9798420-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="67ccc06b-a76f-41c0-83d4-9d1b2c673fd7" />
+    <UnitTestResult executionId="f116375f-b980-47a2-bffd-c0470cc4b98f" testId="9a6ba04f-8b3f-74a5-5f21-7c21a1b7df2e" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Stale_snapshot_writers_cannot_enter_frozen_release_continuations" computerName="UPSTAIRSMCCARTH" duration="00:00:10.9763980" startTime="2026-09-21T14:08:18.7673316-04:00" endTime="2026-09-21T14:08:29.7414894-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f116375f-b980-47a2-bffd-c0470cc4b98f" />
+    <UnitTestResult executionId="8344d0f6-075d-40cf-972b-32527a8d9f90" testId="c9148862-a59b-4d98-91b4-b651caa2eb6d" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Discard_cannot_win_against_a_finalization_that_already_claimed_the_setup" computerName="UPSTAIRSMCCARTH" duration="00:00:05.6253108" startTime="2026-09-21T14:08:13.1425656-04:00" endTime="2026-09-21T14:08:18.7646979-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8344d0f6-075d-40cf-972b-32527a8d9f90" />
+    <UnitTestResult executionId="42f7d29c-857f-4597-b29c-f6bbd2952530" testId="103b7d2f-aa3a-d91e-70e1-424a4c156c90" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Picker_upgrade_preserves_legacy_rows_and_freezes_continuations" computerName="UPSTAIRSMCCARTH" duration="00:00:05.8939302" startTime="2026-09-21T14:08:49.5736608-04:00" endTime="2026-09-21T14:08:55.4653440-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="42f7d29c-857f-4597-b29c-f6bbd2952530" />
+    <UnitTestResult executionId="28755f69-ddfe-466c-86cc-caae0028548f" testId="d5a24a25-609d-cedc-7792-6eea4add1270" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Fresh_project_services_and_deliberate_staffing_survive_host_restart_and_migration_reapplication" computerName="UPSTAIRSMCCARTH" duration="00:00:08.1168304" startTime="2026-09-21T14:08:34.9816176-04:00" endTime="2026-09-21T14:08:43.0970614-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="28755f69-ddfe-466c-86cc-caae0028548f" />
+    <UnitTestResult executionId="e2f13273-9729-4d4e-8b87-6877dcaf2580" testId="408b3222-2c02-8596-e306-7561bfb3108b" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Cancelled_page_one_releases_the_fence_without_stuck_writers" computerName="UPSTAIRSMCCARTH" duration="00:00:06.4735600" startTime="2026-09-21T14:08:43.0992424-04:00" endTime="2026-09-21T14:08:49.5710341-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e2f13273-9729-4d4e-8b87-6877dcaf2580" />
+    <UnitTestResult executionId="a2b1423e-f6a3-48c1-8b78-092e1788c382" testId="0362b28f-aad6-3f82-eeff-fa1aaa73b514" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Release_creation_and_legacy_import_acceptance_cannot_commit_equivalent_build_identities" computerName="UPSTAIRSMCCARTH" duration="00:00:06.7492220" startTime="2026-09-21T14:08:06.4124228-04:00" endTime="2026-09-21T14:08:13.1387676-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a2b1423e-f6a3-48c1-8b78-092e1788c382" />
+    <UnitTestResult executionId="b73e3007-5b40-4985-a0bf-3d45955752c2" testId="1a67eaf6-1b6a-8ee5-1636-3826934d21be" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Repository_edit_waits_for_verified_evidence_commit_and_cannot_rewrite_its_identity" computerName="UPSTAIRSMCCARTH" duration="00:00:29.9583200" startTime="2026-09-21T14:07:36.4453996-04:00" endTime="2026-09-21T14:08:06.3875009-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b73e3007-5b40-4985-a0bf-3d45955752c2" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Picker_upgrade_preserves_legacy_rows_and_freezes_continuations" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="103b7d2f-aa3a-d91e-70e1-424a4c156c90">
+      <Execution id="42f7d29c-857f-4597-b29c-f6bbd2952530" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Picker_upgrade_preserves_legacy_rows_and_freezes_continuations" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Discard_cannot_win_against_a_finalization_that_already_claimed_the_setup" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="c9148862-a59b-4d98-91b4-b651caa2eb6d">
+      <Execution id="8344d0f6-075d-40cf-972b-32527a8d9f90" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Discard_cannot_win_against_a_finalization_that_already_claimed_the_setup" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Cancelled_page_one_releases_the_fence_without_stuck_writers" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="408b3222-2c02-8596-e306-7561bfb3108b">
+      <Execution id="e2f13273-9729-4d4e-8b87-6877dcaf2580" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Cancelled_page_one_releases_the_fence_without_stuck_writers" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Repository_edit_waits_for_verified_evidence_commit_and_cannot_rewrite_its_identity" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="1a67eaf6-1b6a-8ee5-1636-3826934d21be">
+      <Execution id="b73e3007-5b40-4985-a0bf-3d45955752c2" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Repository_edit_waits_for_verified_evidence_commit_and_cannot_rewrite_its_identity" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Fresh_project_services_and_deliberate_staffing_survive_host_restart_and_migration_reapplication" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="d5a24a25-609d-cedc-7792-6eea4add1270">
+      <Execution id="28755f69-ddfe-466c-86cc-caae0028548f" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Fresh_project_services_and_deliberate_staffing_survive_host_restart_and_migration_reapplication" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Page_one_fence_waits_for_uncommitted_allocator_then_includes_the_committed_build" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="c9f00029-307f-49bb-d048-3b81afda10dd">
+      <Execution id="67ccc06b-a76f-41c0-83d4-9d1b2c673fd7" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Page_one_fence_waits_for_uncommitted_allocator_then_includes_the_committed_build" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Stale_snapshot_writers_cannot_enter_frozen_release_continuations" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="9a6ba04f-8b3f-74a5-5f21-7c21a1b7df2e">
+      <Execution id="f116375f-b980-47a2-bffd-c0470cc4b98f" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Stale_snapshot_writers_cannot_enter_frozen_release_continuations" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Release_creation_and_legacy_import_acceptance_cannot_commit_equivalent_build_identities" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="0362b28f-aad6-3f82-eeff-fa1aaa73b514">
+      <Execution id="a2b1423e-f6a3-48c1-8b78-092e1788c382" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Release_creation_and_legacy_import_acceptance_cannot_commit_equivalent_build_identities" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="c9f00029-307f-49bb-d048-3b81afda10dd" executionId="67ccc06b-a76f-41c0-83d4-9d1b2c673fd7" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9a6ba04f-8b3f-74a5-5f21-7c21a1b7df2e" executionId="f116375f-b980-47a2-bffd-c0470cc4b98f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c9148862-a59b-4d98-91b4-b651caa2eb6d" executionId="8344d0f6-075d-40cf-972b-32527a8d9f90" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="103b7d2f-aa3a-d91e-70e1-424a4c156c90" executionId="42f7d29c-857f-4597-b29c-f6bbd2952530" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d5a24a25-609d-cedc-7792-6eea4add1270" executionId="28755f69-ddfe-466c-86cc-caae0028548f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="408b3222-2c02-8596-e306-7561bfb3108b" executionId="e2f13273-9729-4d4e-8b87-6877dcaf2580" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0362b28f-aad6-3f82-eeff-fa1aaa73b514" executionId="a2b1423e-f6a3-48c1-8b78-092e1788c382" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="1a67eaf6-1b6a-8ee5-1636-3826934d21be" executionId="b73e3007-5b40-4985-a0bf-3d45955752c2" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="8" executed="8" passed="8" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 10.0.9)&#xD;
+[xUnit.net 00:00:00.63]   Discovering: AeroLink.Api.Tests&#xD;
+[xUnit.net 00:00:00.72]   Discovered:  AeroLink.Api.Tests&#xD;
+[xUnit.net 00:00:00.74]   Starting:    AeroLink.Api.Tests&#xD;
+warn: Microsoft.EntityFrameworkCore.Query[20504]&#xD;
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.&#xD;
+warn: Microsoft.EntityFrameworkCore.Query[20504]&#xD;
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.&#xD;
+warn: Microsoft.EntityFrameworkCore.Query[20504]&#xD;
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.&#xD;
+warn: Microsoft.EntityFrameworkCore.Query[20504]&#xD;
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.&#xD;
+warn: Microsoft.EntityFrameworkCore.Query[20504]&#xD;
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.&#xD;
+warn: Microsoft.EntityFrameworkCore.Query[20504]&#xD;
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.&#xD;
+fail: Microsoft.EntityFrameworkCore.Database.Command[20102]&#xD;
+      Failed executing DbCommand (6ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Boolean), @p3='?' (DbType = Guid), @p4='?' (DbType = Guid), @p5='?' (DbType = DateTime), @p6='?', @p13='?' (DbType = Guid), @p7='?' (DbType = DateTime), @p8='?', @p9='?' (DbType = Guid), @p10='?', @p11='?' (DbType = DateTime), @p12='?' (DbType = Int64), @p14='?' (DbType = Int64)], CommandType='Text', CommandTimeout='30']&#xD;
+      INSERT INTO software_releases ("Id", "CanonicalIdentity", "IsReleased", "PredecessorReleaseId", "ProjectId", "ReleasedAt", "Version")&#xD;
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6)&#xD;
+      RETURNING "PickerInsertionOrdinal";&#xD;
+      UPDATE baseline_imports SET "AcceptedAt" = @p7, "AcceptedBy" = @p8, "ReleaseId" = @p9, "State" = @p10, "UpdatedAt" = @p11, "Version" = @p12&#xD;
+      WHERE "Id" = @p13 AND "Version" = @p14;&#xD;
+fail: Microsoft.EntityFrameworkCore.Update[10000]&#xD;
+      An exception occurred in the database while saving changes for context type 'AeroLink.Infrastructure.Persistence.AeroLinkDbContext'.&#xD;
+      Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.&#xD;
+       ---&gt; Npgsql.PostgresException (0x80004005): 23505: duplicate key value violates unique constraint "IX_software_releases_ProjectId_CanonicalIdentity"&#xD;
+      DETAIL: Detail redacted as it may contain sensitive data. Specify 'Include Error Detail' in the connection string to include this information.&#xD;
+         at Npgsql.Internal.NpgsqlConnector.ReadMessageLong(Boolean async, DataRowLoadingMode dataRowLoadingMode, Boolean readingNotifications, Boolean isReadingPrependedMessage)&#xD;
+         at System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder`1.StateMachineBox`1.System.Threading.Tasks.Sources.IValueTaskSource&lt;TResult&gt;.GetResult(Int16 token)&#xD;
+         at Npgsql.NpgsqlDataReader.NextResult(Boolean async, Boolean isConsuming, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlDataReader.NextResult(Boolean async, Boolean isConsuming, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlCommand.ExecuteReader(Boolean async, CommandBehavior behavior, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlCommand.ExecuteReader(Boolean async, CommandBehavior behavior, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlCommand.ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+        Exception data:&#xD;
+          Severity: ERROR&#xD;
+          SqlState: 23505&#xD;
+          MessageText: duplicate key value violates unique constraint "IX_software_releases_ProjectId_CanonicalIdentity"&#xD;
+          Detail: Detail redacted as it may contain sensitive data. Specify 'Include Error Detail' in the connection string to include this information.&#xD;
+          SchemaName: public&#xD;
+          TableName: software_releases&#xD;
+          ConstraintName: IX_software_releases_ProjectId_CanonicalIdentity&#xD;
+          File: nbtinsert.c&#xD;
+          Line: 666&#xD;
+          Routine: _bt_check_unique&#xD;
+         --- End of inner exception stack trace ---&#xD;
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Storage.RelationalDatabase.SaveChangesAsync(IList`1 entries, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(IList`1 entriesToSave, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(StateManager stateManager, Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)&#xD;
+         at Npgsql.EntityFrameworkCore.PostgreSQL.Storage.Internal.NpgsqlExecutionStrategy.ExecuteAsync[TState,TResult](TState state, Func`4 operation, Func`4 verifySucceeded, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.DbContext.SaveChangesAsync(Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)&#xD;
+      Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.&#xD;
+       ---&gt; Npgsql.PostgresException (0x80004005): 23505: duplicate key value violates unique constraint "IX_software_releases_ProjectId_CanonicalIdentity"&#xD;
+      DETAIL: Detail redacted as it may contain sensitive data. Specify 'Include Error Detail' in the connection string to include this information.&#xD;
+         at Npgsql.Internal.NpgsqlConnector.ReadMessageLong(Boolean async, DataRowLoadingMode dataRowLoadingMode, Boolean readingNotifications, Boolean isReadingPrependedMessage)&#xD;
+         at System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder`1.StateMachineBox`1.System.Threading.Tasks.Sources.IValueTaskSource&lt;TResult&gt;.GetResult(Int16 token)&#xD;
+         at Npgsql.NpgsqlDataReader.NextResult(Boolean async, Boolean isConsuming, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlDataReader.NextResult(Boolean async, Boolean isConsuming, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlCommand.ExecuteReader(Boolean async, CommandBehavior behavior, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlCommand.ExecuteReader(Boolean async, CommandBehavior behavior, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlCommand.ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+        Exception data:&#xD;
+          Severity: ERROR&#xD;
+          SqlState: 23505&#xD;
+          MessageText: duplicate key value violates unique constraint "IX_software_releases_ProjectId_CanonicalIdentity"&#xD;
+          Detail: Detail redacted as it may contain sensitive data. Specify 'Include Error Detail' in the connection string to include this information.&#xD;
+          SchemaName: public&#xD;
+          TableName: software_releases&#xD;
+          ConstraintName: IX_software_releases_ProjectId_CanonicalIdentity&#xD;
+          File: nbtinsert.c&#xD;
+          Line: 666&#xD;
+          Routine: _bt_check_unique&#xD;
+         --- End of inner exception stack trace ---&#xD;
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Storage.RelationalDatabase.SaveChangesAsync(IList`1 entries, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(IList`1 entriesToSave, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(StateManager stateManager, Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)&#xD;
+         at Npgsql.EntityFrameworkCore.PostgreSQL.Storage.Internal.NpgsqlExecutionStrategy.ExecuteAsync[TState,TResult](TState state, Func`4 operation, Func`4 verifySucceeded, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.DbContext.SaveChangesAsync(Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)&#xD;
+[xUnit.net 00:01:19.81]   Finished:    AeroLink.Api.Tests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="UPSTAIRSMCCARTH" outcome="Warning" timestamp="2026-09-21T14:08:55.5579871-04:00">
+        <Text>Data collector 'Blame' message: All tests finished running, Sequence file will not be generated.</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>

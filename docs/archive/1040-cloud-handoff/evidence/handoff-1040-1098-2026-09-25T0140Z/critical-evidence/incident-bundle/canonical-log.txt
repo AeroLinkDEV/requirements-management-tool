@@ -1,0 +1,8 @@
+b6309fb01d46afe17e7aaa3e34fc0bc38be6e726 rehearsal <rehearsal@invalid> drill C: concurrent settings change
+a35b260b799cbfbea436ed5f63ff3c6ae1f23555 rehearsal <rehearsal@invalid> Revert "Show the mock projects and FMS mock builds beside the real ones (#1047 part A) (#1105)"
+77b96857868f35926cd439371af159f8af2230e2 seanmccarthyns <seanmccarthyns@gmail.com> Show the mock projects and FMS mock builds beside the real ones (#1047 part A) (#1105)
+8ddbad0f88219897e82ca043e1ef696f259cf946 seanmccarthyns <seanmccarthyns@gmail.com> Show explorer details as a drawer over the list below 1440px (#1091 TPX-1) (#1101)
+2002293c00c8918b1360866263b20fb71a914b80 seanmccarthyns <seanmccarthyns@gmail.com> Name procedure review workflows in words on Approval configuration (#1091) (#1104)
+625b5ce18aac57c3288aff6e34b57c5b3736fc0d seanmccarthyns <seanmccarthyns@gmail.com> Stop seeding the Configured Ladder Showcase (#1047, part B) (#1103)
+7581229f26ca79b18136cd8270ca5983b21ab619 seanmccarthyns <seanmccarthyns@gmail.com> Stop the deferred-provider race tests depending on a real 15-second timer (#1092) (#1102)
+ad2891bbc1d196ed6705a34451da73ddd405f214 seanmccarthyns <seanmccarthyns@gmail.com> Polish the remaining low findings from the product review (#1091) (#1100)

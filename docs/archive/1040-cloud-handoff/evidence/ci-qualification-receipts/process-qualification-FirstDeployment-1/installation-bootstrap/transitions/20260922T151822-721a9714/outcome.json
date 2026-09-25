@@ -1,0 +1,109 @@
+{
+  "decision": "Completed",
+  "stage": "chain",
+  "reason": "ChainExited",
+  "detail": "the transition completed; 2 required role(s) verified by the outer",
+  "failures": [],
+  "chainFailures": [],
+  "roleFailures": [],
+  "operation": {
+    "succeeded": true,
+    "roles": [
+      {
+        "role": "postgres",
+        "requested": false,
+        "restored": true,
+        "evidence": "existing instance: postmaster pid 6372 owns 'D:/aq-2087a3e2/inst/pgdata' on port 54329 and accepts connections",
+        "outcome": "NotRequested"
+      },
+      {
+        "role": "api",
+        "requested": true,
+        "restored": true,
+        "evidence": "readiness re-checked now: pid 1428 alone listens on 5080, is ready, and proves mode 'HOME-PRODUCTION' and source '202427396043a055fe98191b0fab2a16ab7ced68'; outer: pid 1428 alone listens on 5080, is ready, and proves mode 'HOME-PRODUCTION' and source '202427396043a055fe98191b0fab2a16ab7ced68'",
+        "outcome": "Succeeded"
+      }
+    ],
+    "restorationRequired": false
+  },
+  "cleanup": {
+    "transitionContainmentProven": true,
+    "launchesBlocking": false,
+    "collected": []
+  },
+  "recovery": {
+    "admissible": true,
+    "quiescence": "Quiescent",
+    "problems": []
+  },
+  "mutationStarted": true,
+  "restored": true,
+  "restorationRequired": false,
+  "launches": [
+    {
+      "requestId": "3d8c83bfe58f4a41",
+      "role": "api",
+      "outcome": "Succeeded",
+      "currentHealth": "Running",
+      "restored": true,
+      "blocking": false,
+      "processId": 1428,
+      "detail": "launch succeeded (commit evidence: authority); now: pid 1428 is running with its recorded identity",
+      "startedAt": "2026-09-22T15:26:40.8243395Z",
+      "image": "D:\\aq-2087a3e2\\prod\\product\\src\\AeroLink.Api\\bin\\Release\\net10.0\\AeroLink.Api.exe"
+    }
+  ],
+  "delegate": {
+    "decision": "Completed",
+    "failures": [],
+    "pid": 1712,
+    "phase": "Delegate",
+    "at": "2026-09-22T15:29:52.4657019Z",
+    "detail": "AlreadyCurrent: Local production was restarted. No tunnel was running before this transition, so none was started.",
+    "mutated": true,
+    "sourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68",
+    "roles": [
+      {
+        "role": "postgres",
+        "restored": true,
+        "processId": 6372,
+        "evidence": "postmaster pid 6372 owns 'D:/aq-2087a3e2/inst/pgdata' on port 54329 and accepts connections"
+      },
+      {
+        "role": "api",
+        "restored": true,
+        "processId": 1428,
+        "evidence": "pid 1428 alone listens on 5080, is ready, and proves mode 'HOME-PRODUCTION' and source '202427396043a055fe98191b0fab2a16ab7ced68'"
+      }
+    ]
+  },
+  "delegateOutcomeClass": "Valid",
+  "delegateExit": {
+    "pid": 1712,
+    "observation": "Observed",
+    "exitCode": 0,
+    "terminatedByOuter": false,
+    "detail": ""
+  },
+  "continuation": null,
+  "continuationOutcomeClass": "Absent",
+  "protocolVersion": 1,
+  "descriptorHash": "CD40AADFC667FBC75827AE524350E9813FBF802F2F4389133A7E567A40411CF6",
+  "plan": {
+    "operation": "FirstDeployment",
+    "sourceRoot": "D:\\aq-2087a3e2\\prod",
+    "configPath": null,
+    "policy": "Preserve",
+    "scheduled": false,
+    "topology": {
+      "tunnelRunning": false,
+      "runtimeRunning": true
+    }
+  },
+  "attemptId": "20260922T151822-721a9714",
+  "caller": "FirstDeployment",
+  "outerPid": 872,
+  "exitCode": 0,
+  "elapsedSeconds": 691.2,
+  "at": "2026-09-22T15:29:53.5301650Z"
+}

@@ -1,0 +1,793 @@
+{
+  "source": "browser-results-c2/managed-documentation-cent-c7ec6-ks-the-exact-selected-build-chromium-repeat1/trace.zip",
+  "source_sha256": "d1b926a786366b5405de43c3270a863e23aebfba7325c2ecbaeee00afeb4a543",
+  "note": "Raw archive withheld from public Git because browser traces may contain authentication/session data. Safe assertion contexts and action summaries follow; original CI artifacts are linked in CI-RUNS.md.",
+  "entries": [
+    {
+      "name": "resources/src@48d367dd496829627f7953a585cf675de1348572.txt",
+      "bytes": 17210
+    },
+    {
+      "name": "resources/src@8a6488b7b798010dfc39966821bb7dab0c4074a8.txt",
+      "bytes": 7860
+    },
+    {
+      "name": "resources/f313c65a8d1289e9ad0217a324b3f79c2238c94d",
+      "bytes": 9878
+    },
+    {
+      "name": "resources/78485ad26ab49de2007fe98b0854715a58aaf5b6",
+      "bytes": 4254
+    },
+    {
+      "name": "test.trace",
+      "bytes": 18913,
+      "events": [
+        {
+          "type": "context-options",
+          "browserName": "",
+          "platform": "win32",
+          "wallTime": 1790043476443
+        },
+        {
+          "type": "before",
+          "callId": "hook@1",
+          "class": "Test",
+          "method": "hook",
+          "startTime": 232706.44,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "fixture@27",
+          "parentId": "hook@1",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 232714.139,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@28",
+          "parentId": "fixture@27",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 232716.082,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@28",
+          "endTime": 232788.929
+        },
+        {
+          "type": "after",
+          "callId": "fixture@27",
+          "endTime": 232789.066
+        },
+        {
+          "type": "before",
+          "callId": "fixture@31",
+          "parentId": "hook@1",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 232790.314,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@32",
+          "parentId": "fixture@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 232791.653,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@32",
+          "endTime": 232797.344
+        },
+        {
+          "type": "after",
+          "callId": "fixture@31",
+          "endTime": 232803.469
+        },
+        {
+          "type": "before",
+          "callId": "fixture@33",
+          "parentId": "hook@1",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 232803.722,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@34",
+          "parentId": "fixture@33",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 232804.564,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@34",
+          "endTime": 232864.392
+        },
+        {
+          "type": "after",
+          "callId": "fixture@33",
+          "endTime": 232864.428
+        },
+        {
+          "type": "before",
+          "callId": "fixture@35",
+          "parentId": "hook@1",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 232864.789,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@36",
+          "parentId": "fixture@35",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 232865.425,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@36",
+          "endTime": 232866.299
+        },
+        {
+          "type": "after",
+          "callId": "fixture@35",
+          "endTime": 232867.315
+        },
+        {
+          "type": "after",
+          "callId": "hook@1",
+          "endTime": 232867.364
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@37",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 232872.501,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 105,
+              "column": 32,
+              "function": "apiLogin"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@37",
+          "endTime": 232927.597
+        },
+        {
+          "type": "before",
+          "callId": "expect@38",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 232931.265,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 106,
+              "column": 47,
+              "function": "apiLogin"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@38",
+          "endTime": 232931.511
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@39",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 232932.065,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center-picker-continuation.spec.ts",
+              "line": 48,
+              "column": 43
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@39",
+          "endTime": 232950.163
+        },
+        {
+          "type": "before",
+          "callId": "expect@40",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 232951.011,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center-picker-continuation.spec.ts",
+              "line": 58,
+              "column": 66
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@40",
+          "endTime": 232951.047
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@41",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 232952.012,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center-picker-continuation.spec.ts",
+              "line": 66,
+              "column": 36
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@41",
+          "endTime": 232954.721
+        },
+        {
+          "type": "before",
+          "callId": "expect@42",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 232955.475,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center-picker-continuation.spec.ts",
+              "line": 67,
+              "column": 52
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@42",
+          "endTime": 232955.51
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@43",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 232956.356,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center-picker-continuation.spec.ts",
+              "line": 69,
+              "column": 39
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@43",
+          "endTime": 232963.598
+        },
+        {
+          "type": "before",
+          "callId": "expect@44",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 232964.55,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center-picker-continuation.spec.ts",
+              "line": 72,
+              "column": 58
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@44",
+          "endTime": 232964.581
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@45",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 232965.319,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center-picker-continuation.spec.ts",
+              "line": 74,
+              "column": 42
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@45",
+          "endTime": 232968.533
+        },
+        {
+          "type": "before",
+          "callId": "expect@46",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 232969.248,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center-picker-continuation.spec.ts",
+              "line": 85,
+              "column": 64
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@46",
+          "endTime": 232970.001,
+          "error": {
+            "name": "",
+            "message": "Error: {\"error\":\"The document steward and responsible owner must be an active authorized member or delegate in this Program.\"}\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBeTruthy\u001b[2m()\u001b[22m\n\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: {\"error\":\"The document steward and responsible owner must be an active authorized member or delegate in this Program.\"}\n\n\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBeTruthy\u001b[2m()\u001b[22m\n\nReceived: \u001b[31mfalse\u001b[39m\n    at C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center-picker-continuation.spec.ts:85:64"
+          }
+        },
+        {
+          "type": "error",
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center-picker-continuation.spec.ts",
+              "line": 85,
+              "column": 64
+            }
+          ]
+        },
+        {
+          "type": "before",
+          "callId": "hook@47",
+          "class": "Test",
+          "method": "hook",
+          "startTime": 232970.36,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "fixture@48",
+          "parentId": "hook@47",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 232995.198,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "fixture@48",
+          "endTime": 233014.521
+        },
+        {
+          "type": "before",
+          "callId": "fixture@49",
+          "parentId": "hook@47",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 233014.669,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "fixture@49",
+          "endTime": 233014.704
+        },
+        {
+          "type": "before",
+          "callId": "fixture@50",
+          "parentId": "hook@47",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 233014.81,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@51",
+          "parentId": "fixture@50",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 233035.124,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@51",
+          "endTime": 233037.423
+        },
+        {
+          "type": "after",
+          "callId": "fixture@50",
+          "endTime": 233037.459
+        },
+        {
+          "type": "before",
+          "callId": "attach@9645801fc927720cf556fcf9dda7f057",
+          "class": "Test",
+          "method": "test.attach",
+          "startTime": 233040.038,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "attach@9645801fc927720cf556fcf9dda7f057",
+          "endTime": 233040.046
+        },
+        {
+          "type": "before",
+          "callId": "fixture@60",
+          "parentId": "hook@47",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 233040.578,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@60",
+          "endTime": 233040.592
+        },
+        {
+          "type": "before",
+          "callId": "fixture@61",
+          "parentId": "hook@47",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 233040.676,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@61",
+          "endTime": 233040.686
+        },
+        {
+          "type": "before",
+          "callId": "fixture@63",
+          "parentId": "hook@47",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 233040.893,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@63",
+          "endTime": 233040.905
+        },
+        {
+          "type": "before",
+          "callId": "fixture@70",
+          "parentId": "hook@47",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 233041.656,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@70",
+          "endTime": 233041.662
+        },
+        {
+          "type": "before",
+          "callId": "fixture@74",
+          "parentId": "hook@47",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 233042.013,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@74",
+          "endTime": 233042.019
+        },
+        {
+          "type": "before",
+          "callId": "fixture@76",
+          "parentId": "hook@47",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 233042.184,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@76",
+          "endTime": 233042.19
+        },
+        {
+          "type": "after",
+          "callId": "hook@47",
+          "endTime": 233042.769
+        },
+        {
+          "type": "before",
+          "callId": "hook@82",
+          "class": "Test",
+          "method": "hook",
+          "startTime": 233042.915,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "fixture@86",
+          "parentId": "hook@82",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 233043.56,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "fixture@86",
+          "endTime": 233071.438
+        },
+        {
+          "type": "before",
+          "callId": "fixture@90",
+          "parentId": "hook@82",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 233071.962,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@90",
+          "endTime": 233071.97
+        },
+        {
+          "type": "before",
+          "callId": "fixture@91",
+          "parentId": "hook@82",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 233072.057,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@91",
+          "endTime": 233072.066
+        },
+        {
+          "type": "after",
+          "callId": "hook@82",
+          "endTime": 233072.555
+        }
+      ]
+    },
+    {
+      "name": "1-trace.trace",
+      "bytes": 1583,
+      "events": [
+        {
+          "type": "context-options",
+          "browserName": "chromium",
+          "platform": "win32",
+          "wallTime": 1790043476547
+        },
+        {
+          "type": "before",
+          "callId": "call@6",
+          "class": "BrowserContext",
+          "method": "newPage",
+          "startTime": 232805.062
+        },
+        {
+          "type": "after",
+          "callId": "call@6",
+          "endTime": 232863.441
+        }
+      ]
+    },
+    {
+      "name": "1-trace.network",
+      "bytes": 0,
+      "events": [],
+      "note": "Network payload omitted to avoid publishing credentials and session data."
+    },
+    {
+      "name": "resources/page@48322c55995602b89c192efbd66c38c6-1790043476628.jpeg",
+      "bytes": 2459,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "1-trace.stacks",
+      "bytes": 334
+    },
+    {
+      "name": "0-trace.trace",
+      "bytes": 14609,
+      "events": [
+        {
+          "type": "context-options",
+          "browserName": "",
+          "platform": "win32",
+          "wallTime": 1790043476615
+        },
+        {
+          "type": "before",
+          "callId": "call@13",
+          "class": "APIRequestContext",
+          "method": "fetch",
+          "startTime": 232872.874
+        },
+        {
+          "type": "after",
+          "callId": "call@13",
+          "endTime": 232927.156
+        },
+        {
+          "type": "before",
+          "callId": "call@16",
+          "class": "APIRequestContext",
+          "method": "fetch",
+          "startTime": 232932.29
+        },
+        {
+          "type": "after",
+          "callId": "call@16",
+          "endTime": 232950.001
+        },
+        {
+          "type": "before",
+          "callId": "call@20",
+          "class": "APIRequestContext",
+          "method": "fetch",
+          "startTime": 232952.198
+        },
+        {
+          "type": "after",
+          "callId": "call@20",
+          "endTime": 232954.569
+        },
+        {
+          "type": "before",
+          "callId": "call@24",
+          "class": "APIRequestContext",
+          "method": "fetch",
+          "startTime": 232956.555
+        },
+        {
+          "type": "after",
+          "callId": "call@24",
+          "endTime": 232963.467
+        },
+        {
+          "type": "before",
+          "callId": "call@27",
+          "class": "APIRequestContext",
+          "method": "fetch",
+          "startTime": 232965.47
+        },
+        {
+          "type": "after",
+          "callId": "call@27",
+          "endTime": 232968.432
+        }
+      ]
+    },
+    {
+      "name": "0-trace.network",
+      "bytes": 9715,
+      "events": [],
+      "note": "Network payload omitted to avoid publishing credentials and session data."
+    },
+    {
+      "name": "resources/c803968955330d6fad86b95a7427432a23ddd200.json",
+      "bytes": 47
+    },
+    {
+      "name": "resources/4360fbe83b4183693565ceb320dd731c44fe9d11.json",
+      "bytes": 524
+    },
+    {
+      "name": "resources/df8f55702c117e688940d83c491685c379a80954.json",
+      "bytes": 218
+    },
+    {
+      "name": "resources/db0b5624b7d83942c9310367bc74764d0ddc8281.json",
+      "bytes": 344
+    },
+    {
+      "name": "resources/fbb8650d77c65443b77e604d570dc093055a1fa3.json",
+      "bytes": 603
+    },
+    {
+      "name": "resources/0f61a54f500ac1ad065f48927b71822bed7f4d0d.json",
+      "bytes": 70
+    },
+    {
+      "name": "resources/da39a3ee5e6b4b0d3255bfef95601890afd80709.dat",
+      "bytes": 0
+    },
+    {
+      "name": "resources/08201906f49e305ddbaecc1a5e4a04781b279d45.json",
+      "bytes": 302
+    },
+    {
+      "name": "resources/981ef7ce11e96a9c93ac80e5536207adb394cc8f.json",
+      "bytes": 119
+    },
+    {
+      "name": "0-trace.stacks",
+      "bytes": 334
+    }
+  ]
+}

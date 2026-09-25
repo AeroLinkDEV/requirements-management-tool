@@ -1,0 +1,110 @@
+import sqlite3, uuid, tempfile, os
+print('RMT-1040 Round 4 SQLite probe — final cohort-flag trigger set; SQLite', sqlite3.sqlite_version)
+
+P,Q = str(uuid.uuid4()), str(uuid.uuid4())
+def uid(): return str(uuid.uuid4())
+
+CREATE_TABLE = 'CREATE TABLE "software_releases" ("Id" TEXT PRIMARY KEY, "ProjectId" TEXT NOT NULL, "Version" TEXT NOT NULL, "PickerInsertionOrdinal" INTEGER)'
+
+TRIGGERS = [
+'''CREATE TRIGGER IF NOT EXISTS aerolink_release_picker_supplied_ins BEFORE INSERT ON "software_releases"
+FOR EACH ROW WHEN NEW."PickerInsertionOrdinal" IS NOT NULL OR NEW."PickerLegacyCohort" <> 0
+BEGIN SELECT RAISE(ABORT, 'picker insertion ordinal and cohort flag are database-owned'); END''',
+'''CREATE TRIGGER IF NOT EXISTS aerolink_release_picker_alloc_ins AFTER INSERT ON "software_releases"
+FOR EACH ROW WHEN NEW."PickerInsertionOrdinal" IS NULL
+BEGIN UPDATE "software_releases"
+      SET "PickerInsertionOrdinal" = (SELECT COALESCE(MAX("PickerInsertionOrdinal"), 0) + 1
+                                        FROM "software_releases" WHERE "ProjectId" = NEW."ProjectId")
+      WHERE "Id" = NEW."Id"; END''',
+'''CREATE TRIGGER IF NOT EXISTS aerolink_release_picker_immutable_upd BEFORE UPDATE ON "software_releases"
+FOR EACH ROW WHEN NEW."PickerLegacyCohort" IS NOT OLD."PickerLegacyCohort"
+    OR (NEW."PickerInsertionOrdinal" IS NOT OLD."PickerInsertionOrdinal"
+        AND NOT (OLD."PickerLegacyCohort" = 0 AND OLD."PickerInsertionOrdinal" IS NULL
+                 AND NEW."PickerInsertionOrdinal" IS NOT NULL))
+BEGIN SELECT RAISE(ABORT, 'picker insertion membership is immutable'); END''',
+]
+
+def install(db, first):
+    db.execute('BEGIN IMMEDIATE')
+    if first:
+        db.execute('ALTER TABLE "software_releases" ADD COLUMN "PickerLegacyCohort" INTEGER NOT NULL DEFAULT 0 CHECK ("PickerLegacyCohort" IN (0,1))')
+        db.execute('UPDATE "software_releases" SET "PickerLegacyCohort" = 1 WHERE "PickerInsertionOrdinal" IS NULL')
+    for stmt in TRIGGERS:
+        db.execute(stmt)
+    db.execute('COMMIT')
+
+FORBIDDEN = lambda db, sql: db.execute(sql)
+
+def run_scenario(path, recursive):
+    db = sqlite3.connect(path)
+    try:
+        db.isolation_level = None
+        _run_scenario_body(db, path, recursive)
+    finally:
+        db.close()
+
+def _run_scenario_body(db, path, recursive):
+    db.execute(f'PRAGMA recursive_triggers={recursive}')
+    db.execute(CREATE_TABLE)
+    legacy1, legacy2 = uid(), uid()
+    db.execute('INSERT INTO "software_releases" VALUES (?, ?, ?, NULL)', (legacy1, P, '1.0'))
+    db.execute('INSERT INTO "software_releases" VALUES (?, ?, ?, NULL)', (legacy2, P, '1.5'))
+    install(db, first=True)
+    state = db.execute('SELECT "Id","PickerInsertionOrdinal","PickerLegacyCohort" FROM "software_releases" ORDER BY "Version"').fetchall()
+    assert state == [(legacy1, None, 1), (legacy2, None, 1)], state
+    print(f'  install(first): legacy cohort marked {state}')
+
+    n1, n2, q1 = uid(), uid(), uid()
+    db.execute('BEGIN IMMEDIATE')
+    db.execute('INSERT INTO "software_releases" ("Id","ProjectId","Version") VALUES (?,?,?)', (n1, P, '2.0'))
+    db.execute('INSERT INTO "software_releases" ("Id","ProjectId","Version") VALUES (?,?,?)', (n2, P, '9.9'))
+    db.execute('INSERT INTO "software_releases" ("Id","ProjectId","Version") VALUES (?,?,?)', (q1, Q, '1.0'))
+    db.execute('COMMIT')
+    rows = {r[0]: r for r in db.execute('SELECT "Id","PickerInsertionOrdinal","PickerLegacyCohort" FROM "software_releases"').fetchall()}
+    assert (rows[n1][1], rows[n1][2]) == (1, 0) and (rows[n2][1], rows[n2][2]) == (2, 0) and (rows[q1][1], rows[q1][2]) == (1, 0), rows
+    print(f'  ordinary inserts allocated per project: P->1,2  Q->1  (flag 0); legacy retained {[(r[1], r[2]) for r in state]}')
+
+    db.close()
+    db = sqlite3.connect(path); db.isolation_level = None   # restart / copied-database case
+    db.execute(f'PRAGMA recursive_triggers={recursive}')
+    install(db, first=False)                                 # second startup must not reclassify
+    flags = db.execute('SELECT "PickerLegacyCohort", COUNT(*) FROM "software_releases" GROUP BY 1 ORDER BY 1').fetchall()
+    assert flags == [(0, 3), (1, 2)], flags
+    print(f'  restart install(first=False): no reclassification; cohort flags {flags}')
+
+    db.execute('BEGIN IMMEDIATE')
+    db.execute('UPDATE "software_releases" SET "Version"=? WHERE "Id"=?', ('2.0 (lifecycle)', n1))       # ordinary lifecycle update
+    db.execute('UPDATE "software_releases" SET "Version"=? WHERE "Id"=?', ('1.0 (lifecycle)', legacy1))
+    db.execute('UPDATE "software_releases" SET "PickerInsertionOrdinal"="PickerInsertionOrdinal" WHERE "Id"=?', (n1,))  # same-value whole-row write-back
+    db.execute('COMMIT')
+    print('  lifecycle updates on legacy and allocated rows passed; same-value ordinal write-back passed')
+
+    rejected = 0
+    for sql in [
+      f'UPDATE "software_releases" SET "PickerInsertionOrdinal"=999 WHERE "Id"=\'{legacy1}\'',   # legacy NULL -> value (Astra's attack)
+      f'UPDATE "software_releases" SET "PickerInsertionOrdinal"=999 WHERE "Id"=\'{n1}\'',        # allocated -> other value
+      f'UPDATE "software_releases" SET "PickerInsertionOrdinal"=NULL WHERE "Id"=\'{n1}\'',       # allocated -> NULL
+      f'UPDATE "software_releases" SET "PickerLegacyCohort"=0 WHERE "Id"=\'{legacy1}\'',         # cohort flag flipped off
+      f'UPDATE "software_releases" SET "PickerLegacyCohort"=1 WHERE "Id"=\'{n1}\'',              # cohort flag flipped on
+      f'UPDATE "software_releases" SET "Version"=\'x\', "PickerInsertionOrdinal"=5 WHERE "Id"=\'{n2}\'',  # mixed ordinary+ordinal
+      f'INSERT INTO "software_releases" ("Id","ProjectId","Version","PickerInsertionOrdinal") VALUES (\'{uid()}\',\'{P}\',\'forged\',777)',  # forged ordinal
+      f'INSERT INTO "software_releases" ("Id","ProjectId","Version","PickerLegacyCohort") VALUES (\'{uid()}\',\'{P}\',\'forgedLegacy\',1)',   # forged legacy row
+    ]:
+        try: FORBIDDEN(db, sql)
+        except sqlite3.IntegrityError: rejected += 1
+        else: raise AssertionError('Unexpectedly accepted: ' + sql)
+    print(f'  forbidden-mutation matrix: {rejected}/8 rejected with SQLITE_CONSTRAINT')
+
+    db.execute('BEGIN IMMEDIATE'); db.execute('INSERT INTO "software_releases" ("Id","ProjectId","Version") VALUES (?,?,?)', (uid(), Q, '2.0')); db.execute('ROLLBACK')
+    db.execute('INSERT INTO "software_releases" ("Id","ProjectId","Version") VALUES (?,?,?)', (uid(), Q, '2.0'))
+    gapnote = db.execute('SELECT "PickerInsertionOrdinal" FROM "software_releases" WHERE "ProjectId"=? ORDER BY "PickerInsertionOrdinal" DESC LIMIT 1', (Q,)).fetchone()[0]
+    print(f'  rollback then reinsert: Q max ordinal now {gapnote} (MAX+1 may reuse an uncommitted value; harmless, membership compares against the captured cutoff)')
+    final = db.execute('SELECT "PickerInsertionOrdinal","PickerLegacyCohort",COUNT(*) FROM "software_releases" GROUP BY 1,2 ORDER BY 1 NULLS FIRST').fetchall()
+    print('  final state (ordinal, flag, count):', final)
+    db.close()
+
+with tempfile.TemporaryDirectory() as tmp:
+    for recursive in (0, 1):
+        print(f'recursive_triggers={recursive}:')
+        run_scenario(os.path.join(tmp, f'probe{recursive}.db'), recursive)
+print('PROBE PASSED: ordinary allocation, legacy retention, 8 rejections, lifecycle updates, restart no-reclassification — under both recursive_triggers settings')

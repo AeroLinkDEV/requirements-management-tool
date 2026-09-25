@@ -1,0 +1,21 @@
+import fs from 'node:fs'
+
+const p = 'C:/Sean Project/RMT-1040-ci-worktree/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs'
+let s = fs.readFileSync(p, 'utf8')
+
+// In the JS source the embedded-python regex lines currently contain FOUR backslashes
+// before the ? (rendering a double backslash in Python). They must contain TWO (rendering
+// a single backslash: an escaped literal '?').
+const pairs = [
+  ['runs\\\\\\\\?head_sha', 'runs\\\\?head_sha'],
+  ['events\\\\\\\\?page', 'events\\\\?page'],
+]
+let count = 0
+for (const [before, after] of pairs) {
+  while (s.includes(before)) {
+    s = s.replace(before, after)
+    count++
+  }
+}
+fs.writeFileSync(p, s)
+console.log('regex escapes normalized,', count, 'replacements')

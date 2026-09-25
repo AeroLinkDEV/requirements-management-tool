@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="d76bb233-6792-44a5-a376-bc384207aec9" name="seanm@UPSTAIRSMCCARTH 2026-09-23 06:27:38" runUser="UPSTAIRSMCCARTH\seanm" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-09-23T06:27:38.3968091-04:00" queuing="2026-09-23T06:27:38.3968095-04:00" start="2026-09-23T06:27:30.3650426-04:00" finish="2026-09-23T06:27:38.4063117-04:00" />
+  <TestSettings name="default" id="0a03b44c-0652-40b6-8f75-267b33cfa9b0">
+    <Deployment runDeploymentRoot="seanm_UPSTAIRSMCCARTH_2026-09-23_06_27_38" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="472cfac1-3351-49b0-9bb1-4f55b9fe8a46" testId="6fc1289e-f42a-8913-7c87-c42ae0436e33" testName="AeroLink.Api.Tests.ProjectPersonnelApiTests.The_holder_cannot_be_their_own_backup" computerName="UPSTAIRSMCCARTH" duration="00:00:06.0731890" startTime="2026-09-23T06:27:32.1916669-04:00" endTime="2026-09-23T06:27:38.2720281-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="472cfac1-3351-49b0-9bb1-4f55b9fe8a46" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="AeroLink.Api.Tests.ProjectPersonnelApiTests.The_holder_cannot_be_their_own_backup" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\debug\net10.0\aerolink.api.tests.dll" id="6fc1289e-f42a-8913-7c87-c42ae0436e33">
+      <Execution id="472cfac1-3351-49b0-9bb1-4f55b9fe8a46" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Debug\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectPersonnelApiTests" name="The_holder_cannot_be_their_own_backup" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="6fc1289e-f42a-8913-7c87-c42ae0436e33" executionId="472cfac1-3351-49b0-9bb1-4f55b9fe8a46" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="1" executed="1" passed="1" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 10.0.9)&#xD;
+[xUnit.net 00:00:00.93]   Discovering: AeroLink.Api.Tests&#xD;
+[xUnit.net 00:00:01.04]   Discovered:  AeroLink.Api.Tests&#xD;
+[xUnit.net 00:00:01.06]   Starting:    AeroLink.Api.Tests&#xD;
+[xUnit.net 00:00:07.35]   Finished:    AeroLink.Api.Tests&#xD;
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

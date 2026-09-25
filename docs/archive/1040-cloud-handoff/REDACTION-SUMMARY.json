@@ -1,0 +1,30 @@
+{
+  "counts": {
+    "literal-browser-fill": 16,
+    "password-dom-snapshot": 2,
+    "windows-sid": 181,
+    "structured-sensitive-value": 147,
+    "assignment-secret": 1,
+    "signed-url": 1
+  },
+  "source_files": 1069,
+  "published_files": 940,
+  "diagnostic_summaries": [
+    "diagnostic-summaries/trace-8026f4e359.json",
+    "diagnostic-summaries/trace-cf4a9d9bf5.json",
+    "diagnostic-summaries/trace-d1b926a786.json",
+    "diagnostic-summaries/trace-cc77175f20.json",
+    "diagnostic-summaries/trace-c79e836d6f.json",
+    "diagnostic-summaries/trace-32e6062d27.json",
+    "diagnostic-summaries/trace-69df4728f2.json",
+    "diagnostic-summaries/trace-76d6bc1260.json",
+    "diagnostic-summaries/api-test-diagnostics-1-1-e67d93936b.json",
+    "diagnostic-summaries/trace-1eb43fa8a7.json",
+    "diagnostic-summaries/trace-f7a6d6bd64.json",
+    "diagnostic-summaries/playwright-diagnostics-4-1-9ce634025b.json",
+    "diagnostic-summaries/playwright-diagnostics-1-1-56e7e7dbd7.json",
+    "diagnostic-summaries/first-trace-fb04510df6.json",
+    "diagnostic-summaries/retry-trace-23534c17a3.json"
+  ],
+  "test_result_files": 29
+}

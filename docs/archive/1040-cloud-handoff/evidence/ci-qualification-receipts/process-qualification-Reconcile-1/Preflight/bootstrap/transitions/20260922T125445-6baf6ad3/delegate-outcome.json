@@ -1,0 +1,17 @@
+{
+  "decision": "Completed",
+  "failures": [],
+  "pid": 8352,
+  "phase": "Delegate",
+  "at": "2026-09-22T12:54:48.6315952Z",
+  "detail": "launch succeeded (commit evidence: authority); now: pid 8152 is running with its recorded identity",
+  "mutated": true,
+  "sourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68",
+  "roles": [
+    {
+      "role": "qualification-probe",
+      "restored": true,
+      "evidence": "launch succeeded (commit evidence: authority); now: pid 8152 is running with its recorded identity"
+    }
+  ]
+}

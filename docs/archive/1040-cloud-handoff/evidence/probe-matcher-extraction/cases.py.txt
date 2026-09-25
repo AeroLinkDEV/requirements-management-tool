@@ -1,0 +1,20 @@
+import json, sys
+SHA = 'a'*40
+REF = 'glm/1040-release-picker-snapshot'
+def run(id, status='completed', conclusion='success', actor='github-actions[bot]', trigger='github-actions[bot]'):
+    row = {"id": id, "head_sha": SHA, "head_branch": REF, "event": "workflow_dispatch",
+           "actor": {"login": actor}, "triggering_actor": {"login": trigger},
+           "pull_requests": [{"number": 1066}]}
+    if status == 'completed': row["status"] = "completed"; row["conclusion"] = conclusion
+    else: row["status"] = status
+    return row
+cases = {
+ 'case1-empty': [],
+ 'case2-running-trusted': [run(100, status='in_progress')],
+ 'case3-two-successes': [run(300), run(200)],
+ 'case4-failed-only': [run(100, conclusion='failure')],
+ 'case5-failure-plus-untrusted-failure': [run(100, conclusion='failure'), run(900, conclusion='failure', actor='seanmccarthyns', trigger='seanmccarthyns')],
+ 'case6-failed-plus-running': [run(100, conclusion='failure'), run(101, status='in_progress')],
+}
+name = sys.argv[1]
+json.dump({'workflow_runs': cases[name]}, open(sys.argv[2], 'w'))

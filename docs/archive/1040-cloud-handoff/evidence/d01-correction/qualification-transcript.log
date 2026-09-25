@@ -1,0 +1,46 @@
+**********************
+Windows PowerShell transcript start
+Start time: 20260922121013
+Username: UPSTAIRSMCCARTH\seanm
+RunAs User: UPSTAIRSMCCARTH\seanm
+Configuration Name: 
+Machine: UPSTAIRSMCCARTH (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Sean Project\RMT-1040-glm-evidence\d01-correction\run-home-qualification.ps1
+Process ID: 34608
+PSVersion: 5.1.26100.9444
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.9444
+BuildVersion: 10.0.26100.9444
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+D01-HOME-QUALIFICATION STARTED
+QUALIFYING AeroLinkProductionSourceReconcile (includes the actual hard-limit run; ~2h15m)...
+
+Name                           Value
+----                           -----
+processId                      38940
+state                          PidReused
+detail                         pid 38940 now has creation identity 134345681774099196, expected 134345670226788896
+processId                      38940
+state                          PidReused
+detail                         pid 38940 now has creation identity 134345681774099196, expected 134345670226788896
+PS>TerminatingError(Get-ScheduledTask): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: No MSFT_ScheduledTask objects found with property 'TaskName' equal to 'AeroLinkContextQualification-b59f4b8f'.  Verify the value of the property and retry."
+processId                      38940
+state                          PidReused
+detail                         pid 38940 now has creation identity 134345681774099196, expected 134345670226788896
+Launch-context qualification of \AeroLinkProductionSourceReconcile: CleanupFailed. no qualification record was written: a tree entry observed during the run (pid 28152) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 14036) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 35864) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 38628) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 19864) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 33456) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 39344) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 10916) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 39016) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 32564) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 30256) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 39480) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 8916) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 30072) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 40640) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 20068) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale / ; a tree entry observed during the run (pid 11532) was never proven gone (Ok): its ancestry cannot be bound: pid 2448 belongs to a later lifetime than pid 28152, so the relationship the inventory recorded is stale /
+Evidence: C:\Sean Project\Requirements Management Tool\product\.local\bootstrap\transitions\qualification-runs\AeroLinkContextQualification-b59f4b8f.summary.json
+QUALIFIED AeroLinkProductionSourceReconcile
+QUALIFYING AeroLinkRemoteDemoRecovery (includes the actual hard-limit run; ~2h15m)...
+PS>TerminatingError(Get-ScheduledTask): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: No MSFT_ScheduledTask objects found with property 'TaskName' equal to 'AeroLinkContextQualification-63762f55'.  Verify the value of the property and retry."
+Launch-context qualification of \AeroLinkRemoteDemoRecovery: Qualified. probe survived every applicable path of the twin of \AeroLinkRemoteDemoRecovery
+Evidence: C:\Sean Project\Requirements Management Tool\product\.local\bootstrap\transitions\qualification-runs\AeroLinkContextQualification-63762f55.summary.json
+QUALIFIED AeroLinkRemoteDemoRecovery
+D01-HOME-QUALIFICATION-COMPLETE
+**********************
+Windows PowerShell transcript end
+End time: 20260922164240
+**********************

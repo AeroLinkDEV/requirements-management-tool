@@ -1,0 +1,44 @@
+{
+  "runId": "AeroLinkQualification-2087a3e2-Preflight-ac147007-run3",
+  "attemptId": "20260922T125603-105ccba9",
+  "operation": "QualificationProbe",
+  "jobName": "Global\\AeroLinkTransition-20260922T125603-105ccba9",
+  "activeAt": "2026-09-22T12:56:07.4681695Z",
+  "qualification": {
+    "descriptorHash": "3EC989F199DF235D7E045B1DFA7CACACC809DCD4777EBBA28477477E775587C2",
+    "descriptor": {
+      "contextKind": "Task",
+      "contextName": "task|powershell.exe",
+      "definitionHash": "42AC833C015915326E4376E463084D2365DA8B8E79CAA2FB108C99121B277E67",
+      "placementProtocol": "aerolink-placement-1",
+      "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+      "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+      "principalSid": "[REDACTED windows-sid]",
+      "logonType": "Batch",
+      "sessionClass": "session0",
+      "tokenElevation": "True",
+      "tokenElevationType": "Default",
+      "integrityLevel": "High",
+      "administratorsGroup": "Enabled",
+      "immediateJobFlags": "0x1000"
+    },
+    "attestation": {
+      "taskPath": "\\AeroLinkQualification-2087a3e2-Preflight-ac147007",
+      "instance": "{E6DD89F1-5527-40EC-B825-45BE7AAA0AE5}",
+      "enginePid": 3608,
+      "chain": "powershell.exe"
+    },
+    "token": "[REDACTED]"
+  },
+  "probe": {
+    "processId": 8660,
+    "startedAt": "2026-09-22T12:56:06.6169139Z",
+    "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+  },
+  "mutator": {
+    "processId": 2220,
+    "startedAt": "2026-09-22T12:56:07.3642943Z",
+    "image": "C:\\Windows\\System32\\cmd.exe"
+  },
+  "at": "2026-09-22T12:56:07.4701783Z"
+}

@@ -1,0 +1,37 @@
+import json, sys
+from datetime import datetime
+
+def instant(text):
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+
+# usage: freshness.py <events.json> <runs.json> <pr_number>
+events = json.load(open(sys.argv[1], encoding='utf-8'))
+runs = json.load(open(sys.argv[2], encoding='utf-8')).get('workflow_runs', [])
+pr = int(sys.argv[3])
+TRUSTED = (lambda r: r.get('head_sha') and r.get('head_branch') and r.get('event') == 'workflow_dispatch'
+           and (r.get('actor') or {}).get('login') == 'github-actions[bot]'
+           and (r.get('triggering_actor') or {}).get('login') == 'github-actions[bot]'
+           and pr in {item.get('number') for item in r.get('pull_requests', [])})
+matches = [r for r in runs if TRUSTED(r)]
+failures = [r for r in matches if r.get('status') == 'completed' and r.get('conclusion') != 'success']
+if 'workflow_runs' not in json.load(open(sys.argv[2], encoding='utf-8')):
+    print('REFUSE-UNPARSABLE'); raise SystemExit
+labels = [instant(e.get('created_at')) for e in events
+          if e.get('event') == 'labeled' and (e.get('label') or {}).get('name') == 'ready-for-full-ci'
+          and instant(e.get('created_at'))]
+if not labels:
+    print('REFUSE-NO-LABELED-EVENT'); raise SystemExit
+latest = max(labels)
+boundaries = [instant(r.get('updated_at')) for r in failures]  # runs carry NO completed_at (verified)
+boundaries = [b for b in boundaries if b]
+if not boundaries:
+    print('FRESH-NO-FAILURE')  # NONE branch needs no freshness
+    raise SystemExit
+boundary = max(boundaries)
+print('FRESH' if latest > boundary else 'STALE',
+      f'(latest-labeled {latest.isoformat()} vs newest-failure-updated_at {boundary.isoformat()})')

@@ -1,0 +1,29 @@
+(Retained copy of the exact Checkpoint D packet submitted to Astra via Sean on 2026-09-22.)
+
+ASTRA REVIEW REQUEST — #1040 — CHECKPOINT D — INTEGRATION AND ROLLOUT READINESS
+
+**Requested decision and next action:**
+Approve queue admission for PR #1066 at the exact reviewed head `e0509c0c` (remove draft, enter the merge queue with auto-merge disabled until this review's authorized moment, per the merge-queue flow). Upon merge, Checkpoint E will verify the supported HOME deployment (source identity == merge commit, migration applied through the supported upgrade path) before any closure. No merge, rollout or issue closure has occurred.
+
+**Exact head:** PR #1066 head `e0509c0cb292d5c9f952cc108226d20ba918cb8e` — unchanged since the Round-3 approved candidate; worktree clean; branch pushed.
+
+**Exact-head Full Product evidence aggregate (R11):**
+- **Product quality gate** — run [35718088602](https://github.com/AeroLinkDEV/requirements-management-tool/actions/runs/35718088602): **success**, `workflow_dispatch`, head SHA `e0509c0c…`, base branch main, 27 m 6 s (10:49:31Z → 11:16:37Z). Completed jobs, all success: Classify changed product areas; CI metrics tooling tests; Operator and recovery script contracts; Client lint/type-check/build; PostgreSQL migrations and secure bootstrap; Browser journeys on the production build; Domain suite; Infrastructure suite; API test suites (1/3, 2/3, 3/3); Browser journeys (1–4/4). No failures, no skipped-required.
+- **Trusted requester** — "Request full merge validation" run [35718070777](https://github.com/AeroLinkDEV/requirements-management-tool/actions/runs/35718070777): **success**, 27 m 35 s, same head; the requester authenticated the live PR, exact head SHA, head ref, same-repository origin and the readiness label before dispatching, and completed the protected **"Report what this run validated"** context for that exact SHA (SUCCESS on the PR check rollup).
+- **PR check rollup** (all SUCCESS/COMPLETED): Full Product evidence aggregate; Report what this run validated; **Trusted merge-queue binding** (App-bound); Fast backend smoke; Fast client behavior and static checks; Fast feedback aggregate (advisory); overlap checks.
+
+**Fresh integration and queue state:** origin/main is now `3eafdea3491fce3346843cb0724cca409c8ed8a0` (#1078 merged after cf49875d). PR #1066: `mergeable: MERGEABLE`, `mergeStateStatus: CLEAN` — no conflicts with the advanced main; the branch already contains the cf49875d-era merge, and #1078's changes do not intersect the picker files. **No queue entries ahead; auto-merge is NOT enabled; the PR remains DRAFT.** The branch will enter the queue only after this review's authorized draft-removal/queue admission.
+
+**HOME backup/upgrade/rollout readiness (R11):**
+- HOME-PRODUCTION is live and healthy at source `3eafdea3` (read-only `/health/identity`: mode HOME-PRODUCTION, mainCurrency Current, checked 11:00 UTC today) — i.e., the supported HOME deployment has already automatically deployed current main **without** #1040; the HOME database has NOT yet seen migration `20260921140636`.
+- After #1040 merges, the supported automatic HOME deployment will: deploy the new main build; `maintenance analyze` (exit 10 = deterministic upgrade required); take the verified pre-upgrade backup; restore + upgrade an **isolated copy** and prove it serves; then apply the upgrade to the real database and restart serving. Rollback is the DEC-041/045 restore from the verified pre-upgrade backup.
+- Migration `20260921140636` is additive-only (nullable column, sequence, triggers; no rewrite of controlled columns) and was exercised on disposable PostgreSQL by the required runner's migration/bootstrap lane and the upgrade-preservation test; the launcher's deterministic-upgrade contract covers it. **A failure at any launcher step leaves the persistent database and evidence untouched** (nothing reaches them before the isolated-copy proof).
+- Picker-specific rollout risk: after upgrade, pre-existing rows are the NULL legacy cohort and remain selectable (upgrade-preservation test); new builds allocate through the fenced trigger (copied-host and scale tests). Old-reader binaries gain no picker guarantee (documented).
+
+**Remaining risks:** none blocking. Recorded for honesty: the pre-existing showcase spec is not repetition-safe (independent of #1040, demonstrated; CI runs single-shot mode); no clean exact-final-head full local API-suite rerun exists (local history documented; the Full Product run just completed IS the authoritative broad evidence for this head); browser evidence directories are per-run and attributed (`browser-results-c3` = combined 20-pass/2-fail requalification run, `browser-results-c2` = earlier run retaining the four accounted failures, `checkpoint-c2-browser` = Astra's independent two-pass evidence); PR body and evidence narrative corrected per C1040-C04 (56-candidate wording; c3 directory attribution; Debug/Release disposal-order cause not claimed).
+
+**Precise next action requested:** authorize Checkpoint D pass for queue admission — remove the draft state, let the branch enter the AeroLink merge queue (auto-merge remains disabled; admission is the authorized manual step), and after the composed candidate passes the queue's checks, complete the merge. Checkpoint E will then verify the HOME deployment (source identity == merge commit; migration `20260921140636` applied; read-only picker smoke on existing records) before any closure proposal.
+
+Please independently return PASS, CHANGES REQUIRED, or NOT REVIEWABLE, identify the exact SHA/design and scope reviewed, list actionable findings, and state which next phase may proceed. I will wait for Sean to relay your actual response.
+
+CHECKPOINT D — AWAITING ASTRA REVIEW. Queue admission, merge, rollout and issue closure remain gated.

@@ -1,0 +1,42 @@
+import fs from 'node:fs';
+import {createRequire} from 'node:module';
+const require = createRequire('C:/Sean Project/RMT-1040-ci-worktree/product/client/package.json');
+const { chromium } = require('playwright');
+const source = fs.readFileSync('C:/Sean Project/RMT-1040-glm-evidence/dt1046-local/geometry-probe.mjs','utf8');
+const read = source.match(/const READ = `([\s\S]*?)`/)[1].replace("return { kind: 'paint'", "return { canvasRect: v.toJSON(), kind: 'paint'");
+const result = {candidate:'23bb25d987639ada3356a7003fa0380ba08e5042',runs:[]};
+const browser = await chromium.launch();
+try {
+  for(let run=1;run<=3;run++) {
+    const context=await browser.newContext({viewport:{width:1920,height:1000}});
+    const page=await context.newPage();
+    await page.setViewportSize({width:1920,height:830});
+    await page.goto('http://127.0.0.1:5208/tests/fixtures/digital-thread-1046.html?page=1&focal=proc-4');
+    await page.locator('.dtCanvas').waitFor();
+    await page.evaluate(async()=>{
+      let previous='',stable=0;const deadline=performance.now()+15000;
+      while(performance.now()<deadline){
+        await new Promise(resolve=>requestAnimationFrame(resolve));
+        const scene=document.querySelector('.dtCanvasScene');
+        const signature=[scene?getComputedStyle(scene).transform:'',...[...document.querySelectorAll('.dtCanvasNode')].map(n=>`${n.style.transform}|${n.offsetHeight}`)].join(';');
+        stable=!scene?.classList.contains('is-easing')&&signature=[REDACTED]
+        if(stable>=10)return;
+      }
+      throw new Error('Geometry did not settle');
+    });
+    const samples=[];
+    for(let i=0;i<6;i++){
+      if(i)await page.waitForTimeout(1000);
+      const s=await page.evaluate(read),c=s.selectedRect,v=s.canvasRect,b=s.box;
+      const viewportBox={left:v.left+b.x,top:v.top+b.y,right:v.left+b.x+b.width,bottom:v.top+b.y+b.height};
+      const correct=c.top>=viewportBox.top-1&&c.bottom<=viewportBox.bottom+1&&c.left>=viewportBox.left-1&&c.right<=viewportBox.right+1;
+      const erroneous=c.top>=b.y-1&&c.bottom<=b.y+b.height+1&&c.left>=b.x-1&&c.right<=b.x+b.width+1;
+      samples.push({t:s.t,canvas:v,box:b,viewportBox,card:c,display:s.display,correctFits:correct,originalProbeFits:erroneous});
+    }
+    await page.screenshot({path:`C:/Users/seanm/AppData/Local/Temp/astra-1098-f01-round2/geometry-audit-${run}.png`});
+    result.runs.push({run,samples});
+    await context.close();
+  }
+}finally{await browser.close();}
+fs.writeFileSync('C:/Users/seanm/AppData/Local/Temp/astra-1098-f01-round2/geometry-audit.json',JSON.stringify(result,null,2));
+console.log(JSON.stringify(result.runs.map(r=>({run:r.run,samples:r.samples.length,correct:r.samples.map(s=>s.correctFits),erroneous:r.samples.map(s=>s.originalProbeFits),final:r.samples.at(-1)})),null,2));

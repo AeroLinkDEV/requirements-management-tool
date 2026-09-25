@@ -1,0 +1,24 @@
+# D1040-D01: HOME launch-context qualification for both installed picker-relevant tasks,
+# via the supported LOCAL driver from the dedicated production source (elevated, same operator).
+$ErrorActionPreference = 'Stop'
+$evidence = 'C:\Sean Project\RMT-1040-glm-evidence\d01-correction'
+Start-Transcript -Path (Join-Path $evidence 'qualification-transcript.log') | Out-Null
+try {
+    Write-Output 'D01-HOME-QUALIFICATION STARTED'
+    $driver = 'C:\Sean Project\AeroLink Production\product\scripts\Invoke-AeroLinkLaunchContextQualification.ps1'
+    $installationRoot = 'C:\Sean Project\Requirements Management Tool\product\.local'
+    $probeStateRoot = 'C:\Sean Project\RMT-1040-glm-evidence\d01-correction\probe-state'
+    New-Item -ItemType Directory -Path $probeStateRoot -Force | Out-Null
+    foreach ($name in @('AeroLinkProductionSourceReconcile', 'AeroLinkRemoteDemoRecovery')) {
+        Write-Output ('QUALIFYING ' + $name + ' (includes the actual hard-limit run; ~2h15m)...')
+        & $driver -InstallationRoot $installationRoot -TaskName $name -ProbeStateRoot $probeStateRoot
+        Write-Output ('QUALIFIED ' + $name)
+    }
+    Write-Output 'D01-HOME-QUALIFICATION-COMPLETE'
+} catch {
+    Write-Output ('D01-HOME-QUALIFICATION-ERROR: ' + $_.Exception.Message)
+    'ERROR: ' + $_.Exception.Message | Out-File (Join-Path $evidence 'qualification-error.log') -Encoding utf8
+    exit 1
+} finally {
+    Stop-Transcript | Out-Null
+}

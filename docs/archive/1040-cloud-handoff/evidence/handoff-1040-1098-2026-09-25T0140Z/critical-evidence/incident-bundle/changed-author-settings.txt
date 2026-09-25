@@ -1,0 +1,1 @@
+user.name=rehearsal user.email=rehearsal@invalid

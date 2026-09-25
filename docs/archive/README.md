@@ -44,6 +44,8 @@ One tiny root compatibility redirect remains at `CURRENT_PRODUCT_HANDOFF_2026-07
 
 ## Archive rules
 
+- [Issue #1040 cloud takeover evidence](1040-cloud-handoff/START-HERE.md): dated handoff, corrected incident/CI accounting and a cloud/local operator boundary. Historical evidence only; GitHub issue #1040 and its PRs remain the live authority.
+
 - Do not use these files to decide whether an issue is open, a PR is merged, or a route/state exists today.
 - Do not rewrite historical claims to make them match today's architecture. If a historical statement is now stale, that staleness is part of the record.
 - Minimal link/path fixes are acceptable when repository reorganization would otherwise make a historical reference unusable; semantic rewriting is not.

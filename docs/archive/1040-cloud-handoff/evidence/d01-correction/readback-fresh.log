@@ -1,0 +1,42 @@
+{
+    "TaskName":  "AeroLinkProductionSourceReconcile",
+    "State":  3,
+    "LastRunTime":  "\/Date(1790128823000)\/",
+    "LastTaskResult":  0
+}
+Get-AeroLinkServiceEndpoints : The term 'Get-AeroLinkServiceEndpoints' is not recognized as the name of a cmdlet, 
+function, script file, or operable program. Check the spelling of the name, or if a path was included, verify that the 
+path is correct and try again.
+At C:\Sean Project\RMT-1040-glm-evidence\d01-correction\readback-fresh.ps1:6 char:14
++ $endpoints = Get-AeroLinkServiceEndpoints
++              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (Get-AeroLinkServiceEndpoints:String) [], ParentContainsErrorRecordExcep 
+   tion
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+{
+    "service":  "AeroLink API",
+    "sourceSha":  "a3f29e9dd7f6ebc6208480461adf9c8bb6c0adb1",
+    "sourceShortSha":  "a3f29e9d",
+    "sourceIdentity":  "a3f29e9dd7f6ebc6208480461adf9c8bb6c0adb1",
+    "gitLabConfigurationFingerprint":  "5920c3a17ac1930ff7767b6e90d05a08dcd5bc82d89169ffe7731fc8c413b893",
+    "mode":  "HOME-PRODUCTION",
+    "mainCurrency":  {
+                         "state":  "Current",
+                         "checkedAtUtc":  "2026-09-23T02:00:21.7661405+00:00",
+                         "remoteSha":  "a3f29e9dd7f6ebc6208480461adf9c8bb6c0adb1"
+                     },
+    "instance":  {
+                     "id":  "bb1ea304-36d7-4176-9b27-4eb7d3e1000d",
+                     "label":  "HOME CANONICAL",
+                     "classification":  "HomeCanonical",
+                     "snapshot":  null
+                 },
+    "database":  {
+                     "name":  "aerolink"
+                 },
+    "schema":  {
+                   "latestAppliedMigration":  "20260920114500_ProtectReleasedSyntheticSourceSupplement"
+               },
+    "startedAtUtc":  "2026-09-23T02:03:04.5198664+00:00"
+}

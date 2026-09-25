@@ -1,0 +1,14 @@
+{
+  "requestId": "239408056e5d4316",
+  "outcome": "Succeeded",
+  "granted": true,
+  "currentHealth": "Running",
+  "restored": true,
+  "restorationObligation": "None",
+  "blocking": false,
+  "processId": 24028,
+  "startedAt": "2026-09-22T23:42:49.2813536Z",
+  "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "detail": "launch succeeded (commit evidence: authority); now: pid 24028 is running with its recorded identity",
+  "at": "2026-09-22T23:42:49.8835006Z"
+}

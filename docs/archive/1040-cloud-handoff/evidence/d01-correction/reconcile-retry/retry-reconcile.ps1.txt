@@ -1,0 +1,75 @@
+# D1040-D01 retry: ONE Reconcile-only HOME launch-context qualification via the unchanged supported
+# LOCAL driver from the dedicated production source. Per Astra direction: validate exit, summary verdict,
+# matching descriptor, receipt + integrity sidecar, ending observations and cleanup before reporting.
+$ErrorActionPreference = 'Stop'
+$evidence = 'C:\Sean Project\RMT-1040-glm-evidence\d01-correction\reconcile-retry'
+$dedicatedSource = 'C:\Sean Project\AeroLink Production'
+$installationRoot = 'C:\Sean Project\Requirements Management Tool\product\.local'
+$taskName = 'AeroLinkProductionSourceReconcile'
+$driver = Join-Path $dedicatedSource 'product\scripts\Invoke-AeroLinkLaunchContextQualification.ps1'
+Start-Transcript -Path (Join-Path $evidence 'retry-transcript.log') | Out-Null
+try {
+    Write-Output 'RECONCILE-RETRY STARTED'
+    # Identities captured BEFORE the run.
+    $dedicatedSha = (& git -C $dedicatedSource rev-parse HEAD).Trim()
+    $driverSha = (Get-FileHash $driver -Algorithm SHA256).Hash
+    $authoritySha = (Get-FileHash (Join-Path $dedicatedSource 'product\scripts\AeroLinkTransitionAuthority.psm1') -Algorithm SHA256).Hash
+    $kernelSha = (Get-FileHash (Join-Path $dedicatedSource 'product\scripts\AeroLinkTransitionKernel.psm1') -Algorithm SHA256).Hash
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    $installedLimit = [string]$task.Settings.ExecutionTimeLimit
+    $installedDefXml = Export-ScheduledTask -TaskName $taskName
+    Write-Output ('PRE dedicatedSha=' + $dedicatedSha)
+    Write-Output ('PRE driverSha256=' + $driverSha)
+    Write-Output ('PRE installedLimit=' + $installedLimit)
+
+    # Fresh owned disposable probe-state directory (unique per retry).
+    $probeStateRoot = Join-Path $evidence ('probe-state-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $probeStateRoot | Out-Null
+
+    Write-Output 'DRIVER RUN STARTED (includes the actual PT2H15M hard-limit ending)...'
+    & $driver -InstallationRoot $installationRoot -TaskName $taskName -ProbeStateRoot $probeStateRoot
+    $driverExit = $LASTEXITCODE
+    Write-Output ('DRIVER_EXIT=' + $driverExit)
+    if ($driverExit -ne 0) { throw "the qualification driver exited nonzero ($driverExit)." }
+
+    # Validate the newest summary for this task: verdict must be Qualified with a descriptor hash.
+    $runsDir = Join-Path $installationRoot 'bootstrap\transitions\qualification-runs'
+    $newest = Get-ChildItem -LiteralPath $runsDir -Filter '*.summary.json' |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if (-not $newest) { throw 'no qualification summary was written.' }
+    $summary = Get-Content -LiteralPath $newest.FullName -Raw | ConvertFrom-Json
+    Write-Output ('SUMMARY verdict=' + $summary.verdict + ' startedAt=' + $summary.startedAt)
+    if ($summary.verdict -ne 'Qualified') { throw "summary verdict is $($summary.verdict), not Qualified." }
+    $descriptorHash = [string]$summary.descriptorHash
+    if (-not $descriptorHash) { throw 'summary carries no descriptor hash.' }
+
+    # Receipt + integrity sidecar must exist for the descriptor hash.
+    $qualsDir = Join-Path $installationRoot 'bootstrap\transitions\qualifications'
+    $receiptPath = Join-Path $qualsDir ($descriptorHash + '.json')
+    $sidecarPath = Join-Path $qualsDir ($descriptorHash + '.json.sha256')
+    if (-not (Test-Path -LiteralPath $receiptPath)) { throw "receipt missing: $receiptPath" }
+    if (-not (Test-Path -LiteralPath $sidecarPath)) { throw "integrity sidecar missing: $sidecarPath" }
+
+    # Ending observations must be present in the run records (three endings).
+    $endingRecords = Get-ChildItem -LiteralPath $runsDir -Filter '*.json' |
+        Where-Object { $_.LastWriteTime -ge (Get-Date).AddMinutes(-170) -and $_.Name -ne $newest.Name }
+    Write-Output ('ENDING-PATH RECORDS captured: ' + @($endingRecords).Count)
+
+    # Installed definition hash must match the descriptor-bound definition.
+    $exportedNow = Export-ScheduledTask -TaskName $taskName
+    $canonicalNow = Get-AeroLinkTaskDefinitionCanonical -Xml $exportedNow
+    $installedHash = Get-AeroLinkSha256Text $canonicalNow
+    Write-Output ('INSTALLED-DEFINITION-HASH=' + $installedHash)
+
+    @{ dedicatedSha = $dedicatedSha; driverSha256 = $driverSha; summary = $newest.Name;
+       descriptorHash = $descriptorHash; receipt = $receiptPath; sidecar = $sidecarPath;
+       endingRecords = @($endingRecords | ForEach-Object { $_.FullName }) } |
+        ConvertTo-Json | Out-File (Join-Path $evidence 'retry-validation.json') -Encoding utf8
+    Write-Output 'RECONCILE-RETRY-VALIDATED'
+} catch {
+    Write-Output ('RECONCILE-RETRY-ERROR: ' + $_.Exception.Message)
+    'ERROR: ' + $_.Exception.Message | Out-File (Join-Path $evidence 'retry-error.log') -Encoding utf8
+    exit 1
+} finally {
+    Stop-Transcript | Out-Null
+}

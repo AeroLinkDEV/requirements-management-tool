@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "attemptId": "20260922T182633-baec36d4",
+  "jobName": "Global\\AeroLinkTransition-20260922T182633-baec36d4",
+  "observedBy": "outer",
+  "containmentProven": true,
+  "activeProcessesAfterTerminate": 0,
+  "discoveredBeforeTermination": [],
+  "at": "2026-09-22T18:26:37.6509370Z"
+}

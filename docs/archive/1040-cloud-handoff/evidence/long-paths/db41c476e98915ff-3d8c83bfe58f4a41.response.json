@@ -1,0 +1,14 @@
+{
+  "requestId": "3d8c83bfe58f4a41",
+  "outcome": "Succeeded",
+  "granted": true,
+  "currentHealth": "Running",
+  "restored": true,
+  "restorationObligation": "None",
+  "blocking": false,
+  "processId": 1428,
+  "startedAt": "2026-09-22T15:26:40.8243395Z",
+  "image": "D:\\aq-2087a3e2\\prod\\product\\src\\AeroLink.Api\\bin\\Release\\net10.0\\AeroLink.Api.exe",
+  "detail": "launch succeeded (commit evidence: authority); now: pid 1428 is running with its recorded identity",
+  "at": "2026-09-22T15:29:51.1674589Z"
+}

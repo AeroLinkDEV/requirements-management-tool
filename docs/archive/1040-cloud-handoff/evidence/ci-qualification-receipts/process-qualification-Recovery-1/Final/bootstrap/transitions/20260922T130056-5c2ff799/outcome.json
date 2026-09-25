@@ -1,0 +1,95 @@
+{
+  "decision": "Completed",
+  "stage": "chain",
+  "reason": "ChainExited",
+  "detail": "the transition completed; 1 required role(s) verified by the outer",
+  "failures": [],
+  "chainFailures": [],
+  "roleFailures": [],
+  "operation": {
+    "succeeded": true,
+    "roles": [
+      {
+        "role": "qualification-probe",
+        "requested": true,
+        "restored": true,
+        "evidence": "readiness re-checked now: a marker bound to the request, nonce and pid 1064",
+        "outcome": "Succeeded"
+      }
+    ],
+    "restorationRequired": false
+  },
+  "cleanup": {
+    "transitionContainmentProven": true,
+    "launchesBlocking": false,
+    "collected": []
+  },
+  "recovery": {
+    "admissible": true,
+    "quiescence": "Quiescent",
+    "problems": []
+  },
+  "mutationStarted": true,
+  "restored": true,
+  "restorationRequired": false,
+  "launches": [
+    {
+      "requestId": "f8caa67728db42a8",
+      "role": "qualification-probe",
+      "outcome": "Succeeded",
+      "currentHealth": "Running",
+      "restored": true,
+      "blocking": false,
+      "processId": 1064,
+      "detail": "launch succeeded (commit evidence: authority); now: pid 1064 is running with its recorded identity",
+      "startedAt": "2026-09-22T13:00:59.6874705Z",
+      "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    }
+  ],
+  "delegate": {
+    "decision": "Completed",
+    "failures": [],
+    "pid": 2676,
+    "phase": "Delegate",
+    "at": "2026-09-22T13:01:00.4221302Z",
+    "detail": "launch succeeded (commit evidence: authority); now: pid 1064 is running with its recorded identity",
+    "mutated": true,
+    "sourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68",
+    "roles": [
+      {
+        "role": "qualification-probe",
+        "restored": true,
+        "evidence": "launch succeeded (commit evidence: authority); now: pid 1064 is running with its recorded identity"
+      }
+    ]
+  },
+  "delegateOutcomeClass": "Valid",
+  "delegateExit": {
+    "pid": 2676,
+    "observation": "Observed",
+    "exitCode": 0,
+    "terminatedByOuter": false,
+    "detail": ""
+  },
+  "continuation": null,
+  "continuationOutcomeClass": "Absent",
+  "protocolVersion": 1,
+  "descriptorHash": "BB7670047660B02B666AE03493B3753212F990E3FB404CBAE9F249DB5CC48392",
+  "plan": {
+    "operation": "QualificationProbe",
+    "sourceRoot": "D:\\a\\requirements-management-tool\\requirements-management-tool",
+    "configPath": null,
+    "policy": "Preserve",
+    "scheduled": true,
+    "topology": {
+      "tunnelRunning": false,
+      "runtimeRunning": false
+    }
+  },
+  "attemptId": "20260922T130056-5c2ff799",
+  "caller": "QualificationProbe",
+  "outerPid": 3056,
+  "exitCode": 0,
+  "elapsedSeconds": 4.8,
+  "at": "2026-09-22T13:01:00.9309128Z"
+}

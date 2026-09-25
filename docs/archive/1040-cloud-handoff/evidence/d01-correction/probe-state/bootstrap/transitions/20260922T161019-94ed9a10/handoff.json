@@ -1,0 +1,58 @@
+{
+  "protocolVersion": 1,
+  "attemptId": "20260922T161019-94ed9a10",
+  "attemptRoot": "C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\probe-state\\bootstrap\\transitions\\20260922T161019-94ed9a10",
+  "caller": "QualificationProbe",
+  "installationRoot": "C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\probe-state",
+  "spool": "C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\probe-state\\bootstrap\\transitions\\20260922T161019-94ed9a10\\spool",
+  "logs": "C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\probe-state\\bootstrap\\transitions\\20260922T161019-94ed9a10\\logs",
+  "plan": {
+    "operation": "QualificationProbe",
+    "sourceRoot": "C:\\Sean Project\\AeroLink Production",
+    "configPath": null,
+    "policy": "Preserve",
+    "scheduled": true,
+    "topology": {
+      "tunnelRunning": false,
+      "runtimeRunning": false
+    }
+  },
+  "faults": {},
+  "qualification": {
+    "descriptorHash": "FAE9AB94DCDC36C0803493DF796969E7DB38263A9F23DBBBB9E1D18CD96A6A58",
+    "descriptor": {
+      "contextKind": "Task",
+      "contextName": "task|powershell.exe",
+      "definitionHash": "3C624197393C500BF9B3B21C840073E0ACE5DE48C64DA72963F67C4DCC00C495",
+      "placementProtocol": "aerolink-placement-1",
+      "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+      "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+      "principalSid": "[REDACTED windows-sid]",
+      "logonType": "Batch",
+      "sessionClass": "session0",
+      "tokenElevation": "True",
+      "tokenElevationType": "Default",
+      "integrityLevel": "High",
+      "administratorsGroup": "Enabled",
+      "immediateJobFlags": "0x1000"
+    },
+    "attestation": {
+      "taskPath": "\\AeroLinkContextQualification-b59f4b8f",
+      "instance": "{CACABA46-C468-4519-AD44-E12CEBC90AAA}",
+      "enginePid": 37384,
+      "chain": "powershell.exe"
+    },
+    "token": "[REDACTED]"
+  },
+  "delegate": {
+    "script": "C:\\Sean Project\\AeroLink Production\\product\\scripts\\Invoke-AeroLinkTransitionActor.ps1",
+    "sourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68"
+  },
+  "requiredRoles": [
+    "qualification-probe"
+  ],
+  "outerPid": 37384,
+  "outerStartedAt": "2026-09-22T16:10:17.6116590Z",
+  "deadlineUtc": "2026-09-22T16:15:20.6034462Z",
+  "at": "2026-09-22T16:10:20.6166834Z"
+}

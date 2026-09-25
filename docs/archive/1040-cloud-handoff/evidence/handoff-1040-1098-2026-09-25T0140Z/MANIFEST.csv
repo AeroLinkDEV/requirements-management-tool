@@ -1,0 +1,33 @@
+package-relative-path,original-absolute-path,description,size-bytes,sha256
+START-HERE.md,(newly written),handoff document,5525,written-document
+TECHNICAL-HANDOFF.md,(newly written),handoff document,10177,written-document
+EVIDENCE-LEDGER.md,(newly written),handoff document,6228,written-document
+REVIEW-STATUS.md,(newly written),handoff document,6194,written-document
+MANIFEST.csv,(newly written),handoff document,6515,written-document
+critical-evidence/45-trust-root-transition-proposal-v2.md,C:\Sean Project\RMT-1040-glm-evidence\45-trust-root-transition-proposal-v2.md,Latest transition proposal v3 (updated with executed rehearsal; supersedes 41b/43),0,written-document
+critical-evidence/44-f01-amendment.md,C:\Sean Project\RMT-1040-glm-evidence\44-f01-amendment.md,F01 coordinate correction + corrected main evidence,0,written-document
+critical-evidence/43-transition-proposal-revised.md,C:\Sean Project\RMT-1040-glm-evidence\43-transition-proposal-revised.md,Superseded by 45 — retained for history,0,written-document
+critical-evidence/42-f01-diagnostic-findings.md,C:\Sean Project\RMT-1040-glm-evidence\42-f01-diagnostic-findings.md,F01 findings (geometry section superseded by 44 amendment),0,written-document
+critical-evidence/41b-trust-root-transition-proposal.md,C:\Sean Project\RMT-1040-glm-evidence\41b-trust-root-transition-proposal.md,Superseded by 45 — retained for history,0,written-document
+critical-evidence/rehearsal-mirror.sh,C:\Sean Project\RMT-1040-glm-evidence\rehearsal-mirror.sh,REWRITTEN rehearsal script v2 (real preconditions; executed all-pass),0,written-document
+critical-evidence/rehearsal-v2-run.log,C:\Sean Project\RMT-1040-glm-evidence\rehearsal-v2-run.log,Executed rehearsal run log (all drills passed),0,written-document
+critical-evidence/incident-bundle/accidental-commits.bundle,C:\Users\seanm\AppData\Local\Temp\astra-1098-isolation-incident-78a8f2c8606a413dbea66a7188d1e356\accidental-commits.bundle,Astra-verified git bundle of the accidental canonical-main commits,2323,70f10dc231d4cc129ae7d0e561b7ee36124cd4e0de71ba08b0579757ab76a5eb
+critical-evidence/incident-bundle/accidental-main.patch,C:\Users\seanm\AppData\Local\Temp\astra-1098-isolation-incident-78a8f2c8606a413dbea66a7188d1e356\accidental-main.patch,Patch of the accidental canonical-main changes,23348,ab5b562f881cce2a1459cc39a47a0b6581ef0d78ff15deb41db3256f1e258e24
+critical-evidence/incident-bundle/canonical-head.txt,C:\Users\seanm\AppData\Local\Temp\astra-1098-isolation-incident-78a8f2c8606a413dbea66a7188d1e356\canonical-head.txt,Canonical HEAD at incident time (b6309fb0...),42,4f019463151375f88d60f2619a54838d4fb0a510c33b652a87b24abda23b4983
+critical-evidence/incident-bundle/canonical-log.txt,C:\Users\seanm\AppData\Local\Temp\astra-1098-isolation-incident-78a8f2c8606a413dbea66a7188d1e356\canonical-log.txt,Canonical main log at incident time,1265,01d14ffaeab99ae1a35dd32e6ba7159a2575f1ae9cedead8565f2a06657c6f40
+critical-evidence/incident-bundle/canonical-reflog.txt,C:\Users\seanm\AppData\Local\Temp\astra-1098-isolation-incident-78a8f2c8606a413dbea66a7188d1e356\canonical-reflog.txt,Canonical main reflog at incident time,2559,da1fb82cc451b883c016fbbb5e14a411d67326e65374bf6999f081676321a85b
+critical-evidence/incident-bundle/changed-author-settings.txt,C:\Users\seanm\AppData\Local\Temp\astra-1098-isolation-incident-78a8f2c8606a413dbea66a7188d1e356\changed-author-settings.txt,Repo-local author config observed (rehearsal/rehearsal@invalid),50,ec88963a3b2fcc24a808c64d240db703fb4391167f6e7454733c39bd3c88fc8b
+critical-evidence/incident-bundle/rehearsal-mirror-archived.sh,C:\Users\seanm\AppData\Local\Temp\astra-1098-isolation-incident-78a8f2c8606a413dbea66a7188d1e356\rehearsal-mirror-archived.sh,Archived v1 script (the incident-causing version),5846,20ee724eb5b3ec7e1317cf91990d8b258d04768f72ff01a3c7d0f2b3a99cbd5e
+critical-evidence/incident-bundle/rehearsal-mirror-current.sh,C:\Users\seanm\AppData\Local\Temp\astra-1098-isolation-incident-78a8f2c8606a413dbea66a7188d1e356\rehearsal-mirror-current.sh,Script state Astra archived mid-review,6644,c42f6a76887f9993d4122eb590a48b4e84e79fb07f74f0dd361122c8615156a2
+critical-evidence/incident-bundle/rehearsal-v2-run.log,C:\Users\seanm\AppData\Local\Temp\astra-1098-isolation-incident-78a8f2c8606a413dbea66a7188d1e356\rehearsal-v2-run.log,Astra-retained v1 rehearsal execution log (hollow drills),3330,941408bc9aa386db4397c4582fd2f5d54dc52ef4eb1b73dbafe4c4c9bd933977
+packets/39-implementation-v5-packet.md,C:\Sean Project\RMT-1040-glm-evidence\39-implementation-v5-packet.md,Packet: v5 candidate (regressions actually committed),0,written-document
+packets/40-implementation-v6-packet.md,C:\Sean Project\RMT-1040-glm-evidence\40-implementation-v6-packet.md,Packet: v6 candidate (fixture normalization) — Astra PASS for implementation/local qualification,0,written-document
+packets/41-qualification-failure-report.md,C:\Sean Project\RMT-1040-glm-evidence\41-qualification-failure-report.md,Packet: exact-head qualification FAILURE report,0,written-document
+packets/46-amendments-v2-packet.md,C:\Sean Project\RMT-1040-glm-evidence\46-amendments-v2-packet.md,Packet: amendments (rehearsal executed; proposal v3; accounting),0,written-document
+diagnostics/playwright-diagnostics-1-1.zip,C:\Sean Project\RMT-1040-glm-evidence\ci-gate-36064279956\playwright-diagnostics-1-1.zip,Copy of failed-journey diagnostics (context/screens/traces, both attempts),0,copied-artifact
+diagnostics/geometry-probe.mjs,C:\Sean Project\RMT-1040-glm-evidence\dt1046-local\geometry-probe.mjs,Standalone geometry probe source (disposable-state reproduction),0,copied-artifact
+diagnostics/geometry-sample.json,C:\Sean Project\RMT-1040-glm-evidence\dt1046-local\geometry-run1.json,Sample final geometry (one of five retained runs),0,copied-artifact
+referenced-artifact,R:\Sean Project\RMT-1040-glm-evidence\ci-gate-36064279956\playwright-diagnostics-1.zip,Shard-1 diagnostics (original retained outside package),4474748,referenced-not-copied
+referenced-artifact,C:\Sean Project\RMT-1040-glm-evidence\probe-matcher-extract\,Prototype dir: caller_model.py/test-caller-model.py (32/32 POSIX) + probe logs,referenced-not-copied,referenced-not-copied
+referenced-artifact,C:\Sean Project\RMT-1040-glm-evidence\trx-required-pg-c4\,Required PostgreSQL TRXs at merged head,referenced-not-copied,referenced-not-copied
+referenced-artifact,C:\Sean Project\RMT-1040-glm-evidence\trx-required-pg-final3\,Earlier required PostgreSQL TRXs at e0509c0c,referenced-not-copied,referenced-not-copied

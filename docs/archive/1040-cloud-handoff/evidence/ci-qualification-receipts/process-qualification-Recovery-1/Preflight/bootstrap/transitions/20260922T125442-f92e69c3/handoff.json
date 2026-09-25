@@ -1,0 +1,58 @@
+{
+  "protocolVersion": 1,
+  "attemptId": "20260922T125442-f92e69c3",
+  "attemptRoot": "D:\\aq-2a24b261\\Preflight\\bootstrap\\transitions\\20260922T125442-f92e69c3",
+  "caller": "QualificationProbe",
+  "installationRoot": "D:\\aq-2a24b261\\Preflight",
+  "spool": "D:\\aq-2a24b261\\Preflight\\bootstrap\\transitions\\20260922T125442-f92e69c3\\spool",
+  "logs": "D:\\aq-2a24b261\\Preflight\\bootstrap\\transitions\\20260922T125442-f92e69c3\\logs",
+  "plan": {
+    "operation": "QualificationProbe",
+    "sourceRoot": "D:\\a\\requirements-management-tool\\requirements-management-tool",
+    "configPath": null,
+    "policy": "Preserve",
+    "scheduled": true,
+    "topology": {
+      "tunnelRunning": false,
+      "runtimeRunning": false
+    }
+  },
+  "faults": {},
+  "qualification": {
+    "descriptorHash": "47E8C8054B647AEFF9395283198EE0C29B1C13F49374EE0B2E4D8F3D3E379E64",
+    "descriptor": {
+      "contextKind": "Task",
+      "contextName": "task|powershell.exe",
+      "definitionHash": "2B4065186506A1EC19109DC495C0E2595BC7076F70B17DD28BE1E2931F868EB4",
+      "placementProtocol": "aerolink-placement-1",
+      "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+      "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+      "principalSid": "[REDACTED windows-sid]",
+      "logonType": "Batch",
+      "sessionClass": "session0",
+      "tokenElevation": "True",
+      "tokenElevationType": "Default",
+      "integrityLevel": "High",
+      "administratorsGroup": "Enabled",
+      "immediateJobFlags": "0x1000"
+    },
+    "attestation": {
+      "taskPath": "\\AeroLinkQualification-2a24b261-Preflight-e987f765",
+      "instance": "{E016CECC-4C19-4D51-987A-4011B55A09EA}",
+      "enginePid": 3244,
+      "chain": "powershell.exe"
+    },
+    "token": "[REDACTED]"
+  },
+  "delegate": {
+    "script": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\scripts\\Invoke-AeroLinkTransitionActor.ps1",
+    "sourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68"
+  },
+  "requiredRoles": [
+    "qualification-probe"
+  ],
+  "outerPid": 3244,
+  "outerStartedAt": "2026-09-22T12:54:39.7455724Z",
+  "deadlineUtc": "2026-09-22T12:59:43.4981497Z",
+  "at": "2026-09-22T12:54:43.5039605Z"
+}

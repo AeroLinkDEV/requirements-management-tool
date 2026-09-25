@@ -1,0 +1,11 @@
+{
+  "source": "ci-full-head-027c985e/api-test-diagnostics-1-1.zip",
+  "source_sha256": "e67d93936b09ca50594ce09d64dcf9e6c20c04f0414dc335584ea3aa8fb4de71",
+  "note": "Raw archive withheld from public Git because browser traces may contain authentication/session data. Safe assertion contexts and action summaries follow; original CI artifacts are linked in CI-RUNS.md.",
+  "entries": [
+    {
+      "name": "shard.trx",
+      "bytes": 670150
+    }
+  ]
+}

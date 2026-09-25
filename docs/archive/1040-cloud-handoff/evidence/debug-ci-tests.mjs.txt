@@ -1,0 +1,85 @@
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { pathToFileURL } from 'node:url'
+
+const worktree = 'C:/Sean Project/RMT-1040-ci-worktree'
+const requester = readFileSync(join(worktree, '.github/workflows/request-full-ci.yml'), 'utf8')
+const bash = resolve(spawnSync('git', ['--exec-path'], { encoding: 'utf8' }).stdout.trim(), '../../../bin/bash.exe')
+
+const scratch = mkdtempSync(join(tmpdir(), 'ci-debug-'))
+const results = []
+
+// ---- pagination ----
+{
+  const start = requester.indexOf('collect_pages() {')
+  const from = requester.indexOf('\n', start) + 1
+  const end = requester.indexOf('\n          }', from)
+  const fn = requester.slice(start, end) + '\n}'
+  results.push({ phase: 'pagination-extract', head: fn.slice(0, 120), tail: fn.slice(-150) })
+  const mockCurl = [
+    'curl() {',
+    '  local dump="" out="" url="" prev=""',
+    '  for arg in "$@"; do',
+    '    case "$arg" in',
+    '      --dump-header|--output) prev="$arg" ;;',
+    '      --*) prev="" ;;',
+    '      *)',
+    '        if [ "$prev" = "--dump-header" ]; then dump="$arg"; prev=""',
+    '        elif [ "$prev" = "--output" ]; then out="$arg"; prev=""',
+    '        else url="$arg"',
+    '        fi ;;',
+    '    esac',
+    '  done',
+    '  local page',
+    '  page="$(printf \'%s\' "$url" | sed -n \'s/.*page=\\([0-9]*\\).*/\\1/p\')"',
+    '  { echo "MOCK dump=$dump out=$out url=$url page=$page total=$TOTAL_PAGES" >&2',
+    '  printf \'HTTP/2 200\\n\' > "$dump"',
+    '  if [ "$page" -lt "$TOTAL_PAGES" ]; then',
+    '    printf \'link: <https://example/list?page=%s>; rel="next"\\n\' "$((page + 1))" >> "$dump"',
+    '  fi',
+    '  printf \'[]\\n\' > "$out"; }',
+    '}',
+  ].join('\n')
+  const script = 'set -euo pipefail\nheaders=()\nTOTAL_PAGES=4\n' + fn + '\n' + mockCurl + '\ncollect_pages "' + join(scratch, 'pg') + '" "https://example/list?x=1"\necho COLLECTED\n'
+  writeFileSync(join(scratch, 'pg.sh'), script)
+  const r = spawnSync(bash, ['--noprofile', '--norc', join(scratch, 'pg.sh')], { encoding: 'utf8', timeout: 20000 })
+  results.push({ phase: 'pagination-run', status: r.status, stdout: r.stdout.slice(0, 200), stderr: r.stderr.slice(0, 800) })
+}
+
+// ---- decision ----
+{
+  const decisionStart = requester.indexOf('match="$(find_product_run)"')
+  const end = requester.indexOf('\n          esac', decisionStart)
+  const decision = requester.slice(decisionStart, end + '\n          esac'.length).replace(/^ {10}/gm, '')
+  const scriptFor = (stubMatch, label) => [
+    'set -euo pipefail',
+    `REQUEST_LABEL=${JSON.stringify(label)}`,
+    'BOUNDARY_ID=0',
+    `match=${JSON.stringify(stubMatch)}`,
+    'find_product_run() { printf \'%s\\n\' "$match"; }',
+    'dispatch_full_run() { echo DISPATCHED; }',
+    'fetch_and_pin_run() { echo "PINNED $1"; }',
+    'verify_live_pr() { :; }',
+    decision,
+  ].join('\n')
+  for (const [stubMatch, label] of [
+    ['NONE', 'ready-for-full-ci'],
+    ['EXHAUSTED 100 failure 2026-09-23T10:19:05Z', 'ready-for-full-ci'],
+    ['NONE', 'authority-maintenance-requested'],
+    ['EXHAUSTED 100 failure 2026-09-23T10:19:05Z', 'documentation'],
+    ['FOUND 200 completed success', 'documentation'],
+    ['PENDING 101', 'documentation'],
+  ]) {
+    const file = join(scratch, 'dec-' + Math.abs(hash(stubMatch + label)) + '.sh')
+    writeFileSync(file, scriptFor(stubMatch, label))
+    const r = spawnSync(bash, ['--noprofile', '--norc', file], { encoding: 'utf8', timeout: 20000 })
+    results.push({ phase: 'decision', stubMatch, label, status: r.status, stdout: r.stdout, stderr: r.stderr.slice(0, 300) })
+  }
+}
+
+function hash(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return h }
+
+writeFileSync(pathToFileURL === undefined ? 'x' : new URL('file:///C:/Sean%20Project/RMT-1040-glm-evidence/debug-ci-tests.out.txt'), results.map(r => JSON.stringify(r)).join('\n---\n'))
+console.log(results.map(r => JSON.stringify(r)).join('\n---\n'))

@@ -1,0 +1,48 @@
+{
+  "requestId": "3d8c83bfe58f4a41",
+  "attemptId": "20260922T151822-721a9714",
+  "role": "api",
+  "launch": {
+    "filePath": "D:\\aq-2087a3e2\\prod\\product\\src\\AeroLink.Api\\bin\\Release\\net10.0\\AeroLink.Api.exe",
+    "arguments": "--urls \"http://127.0.0.1:5080\"",
+    "workingDirectory": "D:\\aq-2087a3e2\\prod\\product\\src\\AeroLink.Api",
+    "standardOutput": "D:\\aq-2087a3e2\\inst\\logs\\production.stdout.log",
+    "standardError": "D:\\aq-2087a3e2\\inst\\logs\\production.stderr.log",
+    "environment": {
+      "Runtime__Mode": "HOME-PRODUCTION",
+      "Instance__InstanceId": "9296519d-829f-4c79-b6f3-2f59793ace4d",
+      "Notifications__BaseUrl": null,
+      "Runtime__SourceSha": "202427396043a055fe98191b0fab2a16ab7ced68",
+      "Runtime__SourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68",
+      "AllowedHosts": "localhost;127.0.0.1",
+      "ASPNETCORE_ENVIRONMENT": "Development",
+      "Client__StaticFiles": "D:\\aq-2087a3e2\\prod\\product\\client\\dist",
+      "Runtime__SourceRoot": "D:\\aq-2087a3e2\\prod",
+      "Instance__Label": "HOME CANONICAL",
+      "Runtime__GitLabConfigFingerprint": "unconfigured",
+      "Runtime__MainCurrencyPath": "D:\\aq-2087a3e2\\prod\\product\\.local\\main-currency.json",
+      "Instance__Classification": "HomeCanonical"
+    },
+    "restrictAdministrators": false,
+    "grantOperatorAccess": {
+      "expectedArguments": [
+        "--urls",
+        "http://127.0.0.1:5080"
+      ]
+    }
+  },
+  "readiness": {
+    "expectedClassification": "HomeCanonical",
+    "expectedGitLabConfigurationFingerprint": "unconfigured",
+    "port": 5080,
+    "expectedSourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68",
+    "kind": "api",
+    "baseUri": "http://127.0.0.1:5080",
+    "expectedMode": "HOME-PRODUCTION",
+    "expectedInstanceId": "9296519d-829f-4c79-b6f3-2f59793ace4d"
+  },
+  "readinessTimeoutSeconds": 600,
+  "requesterPid": 1712,
+  "expiresAtUtc": "2026-09-22T15:27:40.4022409Z",
+  "at": "2026-09-22T15:26:40.4042492Z"
+}

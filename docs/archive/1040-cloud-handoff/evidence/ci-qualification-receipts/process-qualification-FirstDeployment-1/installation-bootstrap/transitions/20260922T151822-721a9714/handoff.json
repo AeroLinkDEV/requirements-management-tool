@@ -1,0 +1,59 @@
+{
+  "protocolVersion": 1,
+  "attemptId": "20260922T151822-721a9714",
+  "attemptRoot": "D:\\aq-2087a3e2\\inst\\bootstrap\\transitions\\20260922T151822-721a9714",
+  "caller": "FirstDeployment",
+  "installationRoot": "D:\\aq-2087a3e2\\inst",
+  "spool": "D:\\aq-2087a3e2\\inst\\bootstrap\\transitions\\20260922T151822-721a9714\\spool",
+  "logs": "D:\\aq-2087a3e2\\inst\\bootstrap\\transitions\\20260922T151822-721a9714\\logs",
+  "plan": {
+    "operation": "FirstDeployment",
+    "sourceRoot": "D:\\aq-2087a3e2\\prod",
+    "configPath": null,
+    "policy": "Preserve",
+    "scheduled": false,
+    "topology": {
+      "tunnelRunning": false,
+      "runtimeRunning": true
+    }
+  },
+  "faults": {},
+  "qualification": {
+    "descriptorHash": "CD40AADFC667FBC75827AE524350E9813FBF802F2F4389133A7E567A40411CF6",
+    "descriptor": {
+      "contextKind": "Task",
+      "contextName": "task|powershell.exe",
+      "definitionHash": "ED1424680446E2090232834A381561C243FAD725A6E22F9742BF3B7AFA0C2391",
+      "placementProtocol": "aerolink-placement-1",
+      "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+      "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+      "principalSid": "[REDACTED windows-sid]",
+      "logonType": "Batch",
+      "sessionClass": "session0",
+      "tokenElevation": "True",
+      "tokenElevationType": "Default",
+      "integrityLevel": "High",
+      "administratorsGroup": "Enabled",
+      "immediateJobFlags": "0x1000"
+    },
+    "attestation": {
+      "taskPath": "\\AeroLinkHomeFirstDeployment_befd94bf350146549d7a40a895f78006",
+      "instance": "{916D04F3-5EE3-4EFB-97F6-3D42B14CD406}",
+      "enginePid": 872,
+      "chain": "powershell.exe"
+    },
+    "token": "[REDACTED]"
+  },
+  "delegate": {
+    "script": "D:\\aq-2087a3e2\\prod\\product\\scripts\\Invoke-AeroLinkTransitionActor.ps1",
+    "sourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68"
+  },
+  "requiredRoles": [
+    "postgres",
+    "api"
+  ],
+  "outerPid": 872,
+  "outerStartedAt": "2026-09-22T15:18:19.6936880Z",
+  "deadlineUtc": "2026-09-22T16:10:23.2663358Z",
+  "at": "2026-09-22T15:18:23.2741256Z"
+}

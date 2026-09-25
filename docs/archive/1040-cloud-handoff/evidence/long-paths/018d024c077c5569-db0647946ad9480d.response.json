@@ -1,0 +1,14 @@
+{
+  "requestId": "db0647946ad9480d",
+  "outcome": "Succeeded",
+  "granted": true,
+  "currentHealth": "Running",
+  "restored": true,
+  "restorationObligation": "None",
+  "blocking": false,
+  "processId": 41776,
+  "startedAt": "2026-09-22T23:43:33.4921331Z",
+  "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "detail": "launch succeeded (commit evidence: authority); now: pid 41776 is running with its recorded identity",
+  "at": "2026-09-22T23:43:34.0741219Z"
+}

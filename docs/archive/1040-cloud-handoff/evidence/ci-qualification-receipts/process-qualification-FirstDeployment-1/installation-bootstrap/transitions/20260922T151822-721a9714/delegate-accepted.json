@@ -1,0 +1,9 @@
+{
+  "pid": 1712,
+  "startedAt": "2026-09-22T15:18:23.2951535Z",
+  "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "sourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68",
+  "protocolVersion": 1,
+  "operation": "FirstDeployment",
+  "at": "2026-09-22T15:18:24.5375791Z"
+}

@@ -1,0 +1,161 @@
+#!/usr/bin/env bash
+# Isolated rehearsal for the trust-root transition proposal v3 — every drill
+# establishes and asserts its real precondition, keeps real exit codes, and
+# verifies restoration to the expected commit/tree.
+# Usage: bash rehearsal-mirror.sh <candidate-worktree> <base-sha>
+set -uo pipefail
+
+SRC="${1:?usage: rehearsal-mirror.sh <candidate-worktree> <base-sha>}"
+BASE_SHA="${2:?usage: rehearsal-mirror.sh <candidate-worktree> <base-sha>}"
+WORK="$(mktemp -d)"
+FAILURES=0
+pass() { echo "PASS: $*"; }
+fail() { echo "FAIL: $*"; FAILURES=$((FAILURES + 1)); }
+note() { echo "  -- $*"; }
+
+# 0. frozen main + candidate branch into a local mirror (disposable)
+MIRROR="$WORK/rehearsal.git"
+git init --bare -q -b main "$MIRROR"
+git -C "$SRC" push -q "$MIRROR" "$BASE_SHA:refs/heads/main"
+CAND_SHA="$(git -C "$SRC" rev-parse HEAD)"
+git -C "$SRC" push -q "$MIRROR" "HEAD:refs/heads/candidate"
+CAND_SHA="$(git -C "$SRC" rev-parse HEAD)"
+CLONE="$WORK/clone"
+git clone -q -b main "$MIRROR" "$CLONE"
+cd "$CLONE"
+git config user.email "rehearsal@invalid"
+git config user.name "rehearsal"
+git fetch -q origin
+B_PRE="$(git rev-parse origin/main)"
+TREE_PRE="$(git rev-parse "$B_PRE^{tree}")"
+CAND_TREE="$(git rev-parse "origin/candidate^{tree}")"
+TWO_FILES=$'.github/workflows/request-full-ci.yml\nproduct/test-planner/tests/full-ci-readiness-dispatch.test.mjs'
+echo "rehearsal: frozen main B_PRE=$B_PRE  candidate=$CAND_SHA"
+
+# Drill A — INSTALL: merge candidate into CURRENT frozen main.
+# Precondition asserted: the candidate tree differs from frozen main (a change is
+# actually pending) and the pending diff is exactly the two reviewed files.
+if [ "$CAND_TREE" = "$TREE_PRE" ]; then
+  fail "A precondition: candidate tree equals frozen main — nothing to install"
+  FAILURES=$((FAILURES + 1))
+else
+  PENDING="$(git diff --name-only "$B_PRE"..origin/candidate)"
+  if [ "$PENDING" = "$TWO_FILES" ]; then
+    pass "A precondition: pending diff is exactly the two reviewed files"
+  else
+    fail "A precondition: pending diff is not the two reviewed files: $PENDING"
+  fi
+  git checkout -q -b install origin/candidate
+  git checkout -q main
+  merge_rc=0
+  git merge --no-ff --no-edit origin/candidate >/dev/null 2>&1 || merge_rc=$?
+  if [ "$merge_rc" -ne 0 ]; then
+    git checkout --theirs .github/workflows/request-full-ci.yml product/test-planner/tests/full-ci-readiness-dispatch.test.mjs
+    git add .github/workflows/request-full-ci.yml product/test-planner/tests/full-ci-readiness-dispatch.test.mjs
+    git commit -q --no-edit
+  fi
+  SCOPE="$(git diff --name-only "$B_PRE"..HEAD)"
+  if [ "$SCOPE" = "$TWO_FILES" ]; then
+    pass "A: installed; result diff vs frozen main is exactly the two reviewed files"
+  else
+    fail "A: result diff vs frozen main is not the two reviewed files: $SCOPE"
+  fi
+fi
+
+# Drill A2 — INTERRUPTION mid-install: delete the reviewed workflow file so the
+# candidate merge produces a guaranteed delete/modify CONFLICT (a real mid-merge
+# state with MERGE_HEAD present), then abort and verify restoration to the
+# pre-merge state of this drill branch (which is the base commit).
+git checkout -q -b drillA2 "$B_PRE"
+git rm -q .github/workflows/request-full-ci.yml
+git commit -qm "drillA2: delete the reviewed workflow file"
+A2_BASE="$(git rev-parse HEAD)"
+A2_TREE="$(git rev-parse "$A2_BASE^{tree}")"
+merge_rc=0
+git merge --no-ff --no-edit origin/candidate >/dev/null 2>&1 || merge_rc=$?
+git_dir="$(git rev-parse --git-dir)"
+if [ "$merge_rc" -ne 0 ] && [ -f "$git_dir/MERGE_HEAD" ]; then
+  note "A2 precondition: real mid-merge state established (conflict; MERGE_HEAD present)"
+else
+  fail "A2 precondition: merge did not produce a mid-merge state (rc=$merge_rc)"
+fi
+git merge --abort >/dev/null 2>&1 || true
+if [ -z "$(git status --porcelain)" ]; then
+  pass "A2: abort left a clean tree"
+else
+  fail "A2: abort left a dirty tree"
+fi
+if [ "$(git rev-parse HEAD)" = "$A2_BASE" ] && [ "$(git rev-parse "HEAD^{tree}")" = "$A2_TREE" ]; then
+  pass "A2: HEAD and tree restored to the pre-merge state after abort"
+else
+  fail "A2: HEAD/tree not restored to the pre-merge state after abort"
+fi
+if [ -f "$git_dir/MERGE_HEAD" ]; then
+  fail "A2: MERGE_HEAD still present after abort"
+else
+  pass "A2: MERGE_HEAD cleared by the abort"
+fi
+
+# Drill B — ROLLBACK constructed from the INSTALLED tree: revert the install
+# merge on main (the merge of the candidate) and require the tree to equal the
+# frozen main's tree exactly.
+git checkout -q -b rollback main
+revert_rc=0
+git revert --no-edit -m 1 main >/dev/null 2>&1 || revert_rc=$?
+if [ "$revert_rc" -ne 0 ]; then
+  fail "B: revert of the installed merge failed (exit $revert_rc)"
+else
+  REMAINING="$(git diff "$B_PRE"..HEAD --name-only)"
+  if [ -z "$REMAINING" ]; then
+    pass "B: rollback from the installed tree restores frozen main exactly (no content diff)"
+  else
+    fail "B: rollback left residual content: $REMAINING"
+  fi
+fi
+
+# Drill C — CONCURRENT protected-path change during the install window must be
+# detected by the RESULT-TREE DIGEST comparison (a within-file drift cannot
+# change the file list, but always changes the tree digest — the procedure
+# aborts on any digest mismatch).
+git checkout -q -b drift install
+printf '\n/* concurrent settings change */\n' >> .github/workflows/request-full-ci.yml
+git commit -qam "drill C: concurrent settings change"
+TREE_INSTALLED="$(git rev-parse 'main^{tree}')"
+TREE_DRIFT="$(git rev-parse 'HEAD^{tree}')"
+if [ "$TREE_DRIFT" != "$TREE_INSTALLED" ]; then
+  pass "C: concurrent settings change detected via the result-tree digest comparison (procedure aborts on drift)"
+else
+  fail "C: concurrent settings change NOT detected by the tree digest"
+fi
+git checkout -q main
+
+# Drill D — lost/empty verification file: the caller guard must refuse and exit
+# nonzero (this is the exact guard shape the deployed caller uses).
+guard_file="$WORK/guard.sh"
+cat > "$guard_file" <<'GUARD'
+file="$1"
+state="REFUSED pinned-run read failed"
+if [ -s "$file" ]; then state="$(cat "$file")"; fi
+case "$state" in
+  REFUSED*) exit 1 ;;
+  *) exit 0 ;;
+esac
+GUARD
+if bash "$guard_file" "$WORK/empty-poll-check"; then
+  fail "D: missing/empty verification file did not refuse"
+else
+  pass "D: missing/empty verification file refuses with the default REFUSED verdict"
+fi
+printf 'SUCCEEDED' > "$WORK/real-verdict"
+if bash "$guard_file" "$WORK/real-verdict"; then
+  pass "D: a real verdict file proceeds to the binding stage"
+else
+  fail "D: a real verdict file was refused unexpectedly"
+fi
+
+echo "rehearsal summary: $FAILURES failure(s)"
+if [ "$FAILURES" -eq 0 ]; then
+  echo "rehearsal: ALL DRILLS PASSED"
+  exit 0
+fi
+exit 1

@@ -1,0 +1,561 @@
+"""Executable assertions for the offline caller model v5 (probe — not production code).
+Dispatch is recorded ONLY when the model actually calls api.dispatch(); POST counts are
+asserted on every dispatch-path case. Runs: python test-caller-model.py
+"""
+import sys
+from caller_model import CallerModel, Refusal, freshness, BOT, instant
+
+SHA = 'a' * 40
+REF = 'glm/1040-release-picker-snapshot'
+PR = 1066
+
+
+def run(id, status='completed', conclusion='success', updated='2026-09-23T10:19:05Z',
+        created='2026-09-23T09:55:00Z', actor=BOT, trigger=BOT, sha=SHA, ref=REF,
+        prs=(PR,), attempt=1, event='workflow_dispatch'):
+    r = {'id': id, 'head_sha': sha, 'head_branch': ref, 'event': event,
+         'actor': {'login': actor}, 'triggering_actor': {'login': trigger},
+         'pull_requests': [{'number': p} for p in prs], 'run_attempt': attempt,
+         'created_at': created, 'updated_at': updated}
+    if status == 'completed':
+        r['status'] = 'completed'
+        r['conclusion'] = conclusion
+    else:
+        r['status'] = status
+    return r
+
+
+def ev(id, kind, label, created, actor='seanmccarthyns'):
+    return {'id': id, 'event': kind,
+            'label': ({'name': label} if label else None),
+            'created_at': created, 'actor': {'login': actor}}
+
+
+def rr(id, created, status='completed', sha=SHA, attempt=1):
+    """A requester workflow run (event=pull_request_target). Any status counts."""
+    return {'id': id, 'head_sha': sha, 'event': 'pull_request_target',
+            'created_at': created, 'updated_at': created,
+            'status': status, 'conclusion': 'failure' if status == 'completed' else None,
+            'run_attempt': attempt}
+
+
+class Api:
+    """Scripted adapter. list_runs serves per-poll pages (clamped to the last); a
+    dispatched run becomes discoverable only reveal_after list_runs calls AFTER the
+    dispatch (delayed visibility). dispatch returns dispatch_response (None = the
+    response is 'lost' — uncertain outcome)."""
+
+    def __init__(self, runs_series=None, events=(), events_complete=True, run_records=None,
+                 reveal_after=0, jobs_by_attempt=None, dispatch_response=None,
+                 requester_runs=(), requester_complete=True, get_sequences=None):
+        self.calls = []
+        self.polls = 0
+        self.series = runs_series or [[]]
+        self.events = list(events)
+        self.events_complete = events_complete
+        self.records = dict(run_records or {})
+        self.reveal_after = reveal_after
+        self.jobs = dict(jobs_by_attempt or {})
+        self.dispatch_response = dispatch_response
+        self.requester = list(requester_runs)
+        self.requester_complete = requester_complete
+        self.get_sequences = dict(get_sequences or {})   # run_id -> [records..., final]
+        self.last_runs = []
+        self.pending = None
+        self.awaiting = None
+        self.since = 0
+
+    def list_runs(self):
+        self.calls.append('list_runs')
+        self.polls += 1
+        page = self.series[min(self.polls - 1, len(self.series) - 1)]
+        if self.awaiting is not None:
+            self.since += 1
+            if self.since > self.reveal_after:
+                page.append(self.awaiting)
+                self.records[self.awaiting['id']] = self.awaiting
+                self.awaiting = None
+        self.last_runs = page
+        return page
+
+    def get_run(self, run_id):
+        self.calls.append(f'get_run:{run_id}')
+        if run_id in self.get_sequences:
+            seq = self.get_sequences[run_id]
+            return seq.pop(0) if len(seq) > 1 else seq[0]
+        return self.records.get(run_id)
+
+    def read_events(self):
+        self.calls.append('read_events')
+        return self.events, self.events_complete
+
+    def requester_history(self):
+        self.calls.append('requester_history')
+        return self.requester, self.requester_complete
+
+    def dispatch(self, inputs):
+        self.calls.append(f"dispatch:{inputs['pull_request_head_sha'][:7]}:"
+                          f"return_run_details={inputs.get('return_run_details')}")
+        if self.pending is not None:
+            self.awaiting = self.pending
+            self.since = 0
+        return self.dispatch_response
+
+    def jobs_for_attempt(self, run_id, attempt):
+        self.calls.append(f'jobs:{run_id}@{attempt}')
+        return self.jobs.get((run_id, attempt))
+
+
+F0 = run(100, 'completed', 'failure', updated='2026-09-23T10:19:05Z')
+OK101 = run(101, 'completed', 'success', updated='2026-09-23T12:20:00Z', created='2026-09-23T12:05:00Z')
+E_FRESH = [ev(31593282856, 'labeled', 'ready-for-full-ci', '2026-09-22T10:49:17Z'),
+           ev(31614664099, 'unlabeled', 'ready-for-full-ci', '2026-09-22T16:21:33Z', 'github-actions[bot]'),
+           ev(31666183385, 'labeled', 'ready-for-full-ci', '2026-09-23T09:54:44Z'),
+           ev(99999999999, 'labeled', 'ready-for-full-ci', '2026-09-23T12:00:00Z')]
+E_REAL = E_FRESH[:-1]                # the real history: latest label 09:54:44Z (pre-failure)
+E_NOON = E_FRESH[-1]['created_at']   # 2026-09-23T12:00:00Z
+
+RESULTS = []
+
+
+def check(name, fn):
+    try:
+        fn()
+        RESULTS.append((name, 'PASS', ''))
+    except AssertionError as e:
+        RESULTS.append((name, 'FAIL', str(e)))
+    except Exception as e:
+        RESULTS.append((name, 'ERROR', f'{type(e).__name__}: {e}'))
+
+
+def expect_refusal(model, reason_prefix):
+    try:
+        model.run()
+    except Refusal as r:
+        assert r.reason.startswith(reason_prefix), f'wrong refusal: {r.reason}'
+        return r
+    raise AssertionError(f'expected refusal {reason_prefix}, got result {model.result}')
+
+
+def dispatches(api):
+    return [c for c in api.calls if c.startswith('dispatch')]
+
+
+# ---- 1-3: malformed-timestamp fail-open cases refuse --------------------------------
+def t1():
+    bad = dict(F0, updated_at='')
+    try:
+        freshness(E_REAL, [bad], SHA, REF, PR)
+    except Refusal as r:
+        assert r.reason == 'REFUSE-UNESTABLISHABLE-FAILURE-BOUNDARY', r.reason
+        return
+    raise AssertionError('missing updated_at was treated as no-failure (fail-open)')
+
+
+def t2():
+    bad = dict(F0, updated_at='invalid')
+    try:
+        freshness(E_REAL, [bad], SHA, REF, PR)
+    except Refusal as r:
+        assert r.reason == 'REFUSE-UNESTABLISHABLE-FAILURE-BOUNDARY', r.reason
+        return
+    raise AssertionError('invalid updated_at was treated as no-failure (fail-open)')
+
+
+def t3():
+    labels = [dict(E_REAL[-1], created_at='invalid')]   # newest label unreadable, older valid exists
+    events = E_REAL[:-1] + labels
+    try:
+        freshness(events, [F0], SHA, REF, PR)
+    except Refusal as r:
+        assert r.reason == 'REFUSE-UNESTABLISHABLE-AUTHORIZATION', r.reason
+        return
+    raise AssertionError('invalid newest label silently disappeared; older one selected')
+
+
+# ---- 4: exact trust filtering of the failure boundary -------------------------------
+def t4():
+    foreign = run(900, 'completed', 'failure', updated='2026-09-23T23:59:59Z', sha='b' * 40)
+    untrusted = run(901, 'completed', 'failure', updated='2026-09-23T23:59:59Z', trigger='seanmccarthyns')
+    other_pr = run(902, 'completed', 'failure', updated='2026-09-23T23:59:59Z', prs=(999,))
+    broken_untrusted = run(903, 'completed', 'failure', updated='', trigger='seanmccarthyns')
+    verdict, _ = freshness(E_REAL, [F0, foreign, untrusted, other_pr, broken_untrusted], SHA, REF, PR)
+    assert verdict == 'STALE', verdict                  # boundary comes from F0 alone (10:19:05Z)
+
+
+# ---- 5: successful dispatch response returns a run ID -> validated, pinned, bound ----
+def t5():
+    api = Api(runs_series=[[F0]], events=E_FRESH, dispatch_response={'workflow_run_id': 101},
+              run_records={101: OK101}, jobs_by_attempt={(101, 1): [{'name': 'x'}]},
+              requester_runs=[rr(7000, '2026-09-23T12:00:05Z')])
+    m = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    assert m.run() == ('BOUND', 101, 1)
+    assert len(dispatches(api)) == 1
+    assert 'get_run:101' in api.calls and 'jobs:101@1' in api.calls   # validated + per-attempt jobs
+    # negative: the returned identity fails the exact trust checks -> refuse, never pin it
+    api2 = Api(runs_series=[[F0]], events=E_FRESH, dispatch_response={'workflow_run_id': 555},
+               run_records={555: run(555, sha='b' * 40)}, jobs_by_attempt={(555, 1): [{'name': 'x'}]},
+               requester_runs=[rr(7000, '2026-09-23T12:00:05Z')])
+    m2 = CallerModel(api2, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    expect_refusal(m2, 'REFUSE-IDENTITY-UNRESOLVABLE')
+    assert len(dispatches(api2)) == 1
+
+
+# ---- 6: the gate governs EVERY dispatch path; uncertain outcome never re-attempted ---
+# Fixture-faithful coverage: t6a/c exercise EXHAUSTED successors ([[F0]] pages); t6b/d
+# exercise ACTUAL NONE successors ([[]] pages — no trusted run visible at all).
+def t6():
+    # EXHAUSTED path: A dispatches (response lost); the accepted run never surfaces;
+    # A ends in bounded refusal — exactly ONE dispatch.
+    api = Api(runs_series=[[F0]], events=E_FRESH, dispatch_response=None,
+              requester_runs=[rr(7000, '2026-09-23T12:00:05Z')])
+    a = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    expect_refusal(a, 'REFUSE-BOUNDED-WAIT-EXHAUSTED')
+    assert len(dispatches(api)) == 1
+    # EXHAUSTED-path successor (fixture [[F0]]): consumed, zero POSTs.
+    api2 = Api(runs_series=[[F0]], events=E_FRESH, dispatch_response=None,
+               requester_runs=[rr(7000, '2026-09-23T12:00:05Z'), rr(7001, '2026-09-23T12:00:30Z')])
+    b = CallerModel(api2, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7001)
+    r = expect_refusal(b, 'REFUSE-AUTHORIZATION-CONSUMED')
+    assert '7000' in r.reason
+    assert not dispatches(api2)
+    # ACTUAL NONE-path successor (fixture [[]]): B sees no trusted run at all — the common
+    # gate still refuses before any POST (this is the correction-1 counterexample).
+    api3 = Api(runs_series=[[]], events=E_FRESH, dispatch_response=None,
+               requester_runs=[rr(7000, '2026-09-23T12:00:05Z'), rr(7001, '2026-09-23T12:00:30Z')])
+    b2 = CallerModel(api3, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7001)
+    r2 = expect_refusal(b2, 'REFUSE-AUTHORIZATION-CONSUMED')
+    assert '7000' in r2.reason
+    assert not dispatches(api3)
+    # Third successor, also on a true NONE fixture: same refusal, zero POSTs.
+    api4 = Api(runs_series=[[]], events=E_FRESH, dispatch_response=None,
+               requester_runs=[rr(7000, '2026-09-23T12:00:05Z'), rr(7002, '2026-09-23T12:00:40Z')])
+    c = CallerModel(api4, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7002)
+    expect_refusal(c, 'REFUSE-AUTHORIZATION-CONSUMED')
+    assert not dispatches(api4)
+
+
+# ---- 7: a requester rerun never dispatches (correction 2) -----------------------------
+def t7():
+    # Attempt 1 dispatched (accepted, unobserved). The SAME run rerun as attempt 2 must
+    # reconcile or refuse — expected additional POST count: zero.
+    api = Api(runs_series=[[F0]], events=E_FRESH, dispatch_response=None,
+              requester_runs=[rr(7000, '2026-09-23T12:00:05Z', attempt=2)])
+    rerun = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000, self_run_attempt=2)
+    expect_refusal(rerun, 'REFUSE-REQUESTER-RERUN')
+    assert not dispatches(api)
+    # And the strict variant through the gate on a clean transcript:
+    api2 = Api(runs_series=[[]], events=E_FRESH, dispatch_response={'workflow_run_id': 101},
+               run_records={101: OK101}, jobs_by_attempt={(101, 1): [{'name': 'x'}]},
+               requester_runs=[rr(7000, '2026-09-23T12:00:05Z', attempt=2)])
+    rerun2 = CallerModel(api2, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000, self_run_attempt=2)
+    expect_refusal(rerun2, 'REFUSE-REQUESTER-RERUN')
+    assert not dispatches(api2)
+
+
+# ---- 8: an old requester cannot borrow a newer authorization (correction 3) -----------
+def t8():
+    # A (self created 12:00:05) predates the new authorization E** (13:00) -> the gate
+    # refuses A before any POST: A cannot consume E**.
+    events = E_FRESH + [ev(99999999998, 'labeled', 'ready-for-full-ci', '2026-09-23T13:00:00Z')]
+    api = Api(runs_series=[[F0]], events=events, dispatch_response=None,
+              requester_runs=[rr(7000, '2026-09-23T12:00:05Z')])
+    a = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    expect_refusal(a, 'REFUSE-REQUESTER-PREDATES-AUTHORIZATION')
+    assert not dispatches(a.api)
+    # B postdates E** and no requester run is younger than E** (A predates it) -> B may
+    # dispatch exactly once. Since A could never have consumed E**, the system stays closed.
+    api2 = Api(runs_series=[[F0], [F0, OK101]], events=events, dispatch_response=None,
+               requester_runs=[rr(7000, '2026-09-23T12:00:05Z'), rr(7001, '2026-09-23T13:00:30Z')],
+               run_records={101: OK101}, jobs_by_attempt={(101, 1): [{'name': 'x'}]})
+    api2.pending = dict(OK101)
+    b = CallerModel(api2, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7001)
+    assert b.run() == ('BOUND', 101, 1)
+    assert len(dispatches(api2)) == 1
+
+
+# ---- 9: timestamp ties are conservative on both sides ---------------------------------
+def t9():
+    SELF = rr(7001, '2026-09-23T12:30:00Z')              # the current requester, postdating E*
+    # A prior requester at exactly E* consumes it.
+    api = Api(events=E_FRESH, requester_runs=[rr(7000, E_NOON), SELF])
+    try:
+        freshness(E_FRESH, [], SHA, REF, PR, requester_runs=api.requester, self_run_id=7001)
+    except Refusal as r:
+        assert r.reason.startswith('REFUSE-AUTHORIZATION-CONSUMED'), r.reason
+    else:
+        raise AssertionError('a tie did not consume the authorization')
+    # The current requester at exactly E* does not qualify for it.
+    try:
+        freshness(E_FRESH, [], SHA, REF, PR, requester_runs=[rr(7000, E_NOON)], self_run_id=7000)
+    except Refusal as r:
+        assert r.reason == 'REFUSE-REQUESTER-PREDATES-AUTHORIZATION', r.reason
+    else:
+        raise AssertionError('a tie let the requester qualify for the authorization')
+
+
+# ---- 10: statuses all count; incomplete/unestablishable requester history refuses -----
+def t10():
+    SELF = rr(7001, '2026-09-23T12:30:00Z')
+    # queued (pending) / running / cancelled / completed requester runs all consume.
+    for status in ('pending', 'in_progress', 'cancelled', 'completed'):
+        api = Api(events=E_FRESH,
+                  requester_runs=[rr(7000, '2026-09-23T12:00:05Z', status=status), SELF])
+        try:
+            freshness(E_FRESH, [], SHA, REF, PR, requester_runs=api.requester, self_run_id=7001)
+        except Refusal as r:
+            assert r.reason.startswith('REFUSE-AUTHORIZATION-CONSUMED'), (status, r.reason)
+        else:
+            raise AssertionError(f'{status} requester run did not consume the authorization')
+    # incomplete history -> refuse
+    try:
+        freshness(E_FRESH, [], SHA, REF, PR, requester_runs=[SELF],
+                  self_run_id=7001, requester_complete=False)
+    except Refusal as r:
+        assert r.reason == 'REFUSE-INCOMPLETE-REQUESTER-HISTORY', r.reason
+    else:
+        raise AssertionError('incomplete requester history was accepted')
+    # unestablishable requester timestamp -> refuse (never silently skipped)
+    try:
+        freshness(E_FRESH, [], SHA, REF, PR, requester_runs=[SELF, rr(7000, '')],
+                  self_run_id=7001)
+    except Refusal as r:
+        assert r.reason == 'REFUSE-UNESTABLISHABLE-REQUESTER-HISTORY', r.reason
+    else:
+        raise AssertionError('a requester record with no timestamp was skipped')
+    # self identity absent from the history -> refuse
+    try:
+        freshness(E_FRESH, [], SHA, REF, PR, requester_runs=[], self_run_id=7001)
+    except Refusal as r:
+        assert r.reason == 'REFUSE-SELF-IDENTITY-UNRESOLVABLE', r.reason
+    else:
+        raise AssertionError('a requester that cannot see itself was allowed to dispatch')
+
+
+# ---- 11: delayed visibility — the first requester recovers its own dispatch ------------
+def t11():
+    api = Api(runs_series=[[F0], [F0], [F0, OK101]], events=E_FRESH, reveal_after=2,
+              dispatch_response=None, run_records={101: OK101},
+              jobs_by_attempt={(101, 1): [{'name': 'x'}]},
+              requester_runs=[rr(7000, '2026-09-23T12:00:05Z')])
+    api.pending = dict(OK101)
+    a = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    assert a.run() == ('BOUND', 101, 1)                  # A recovers its own uncertain dispatch
+    assert len(dispatches(api)) == 1
+
+
+# ---- 12: terminal-first discovery binds ------------------------------------------------
+def t12():
+    api = Api(runs_series=[[F0], [F0], [F0, OK101]], events=E_FRESH, dispatch_response=None,
+              run_records={101: OK101}, jobs_by_attempt={(101, 1): [{'name': 'x'}]},
+              requester_runs=[rr(7000, '2026-09-23T12:00:05Z')])
+    m = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    assert m.run() == ('BOUND', 101, 1)                  # 101 finished before any PENDING was observed
+    assert 'jobs:101@1' in api.calls, api.calls
+
+
+# ---- 13: attempt change, trust change, 404 while pinned --------------------------------
+def t13():
+    inflight = run(101, 'in_progress', updated='2026-09-23T12:10:00Z', created='2026-09-23T12:05:00Z')
+    api = Api(events=E_FRESH, run_records={101: inflight}, jobs_by_attempt={(101, 1): [{'name': 'x'}]})
+    m = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    m._pin(101)                                          # pins (101, attempt 1)
+    api.records[101] = dict(inflight, status='completed', conclusion='success', run_attempt=2)
+    expect_refusal(m, 'REFUSE-ATTEMPT-CHANGED')          # rerun kept the id, changed the attempt
+
+    human = dict(inflight, status='completed', conclusion='success', triggering_actor='seanmccarthyns')
+    api2 = Api(events=E_FRESH, run_records={101: human}, jobs_by_attempt={(101, 1): [{'name': 'x'}]})
+    m2 = CallerModel(api2, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    try:
+        m2._pin(101)                                     # trust identity changed -> not trusted
+    except Refusal as r:
+        assert r.reason == 'REFUSE-IDENTITY-UNRESOLVABLE', r.reason
+    else:
+        raise AssertionError('pin accepted a record whose trust identity changed')
+
+    api3 = Api(events=E_FRESH, run_records={}, jobs_by_attempt={(101, 1): [{'name': 'x'}]})
+    m3 = CallerModel(api3, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    try:
+        m3._pin(101)                                     # 404 / absent record
+    except Refusal as r:
+        assert r.reason == 'REFUSE-IDENTITY-UNRESOLVABLE', r.reason
+    else:
+        raise AssertionError('pin accepted an absent record')
+
+
+# ---- 14: jobs evidence must belong to the pinned attempt -------------------------------
+def t14():
+    api = Api(events=E_FRESH, run_records={101: OK101},
+              jobs_by_attempt={(101, 2): [{'name': 'later-rerun-jobs'}]})
+    m = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    m._pin(101)                                          # pinned attempt 1
+    expect_refusal(m, 'REFUSE-JOBS-NOT-PINNED-ATTEMPT')
+    assert not dispatches(api)
+
+
+# ---- 15: refresh lane never dispatches --------------------------------------------------
+def t15():
+    api = Api(runs_series=[[F0]], events=E_REAL)
+    m = CallerModel(api, 'refresh', SHA, REF, PR, self_run_id=7000)
+    expect_refusal(m, 'REFUSE-REPORT-FAILURE')
+    assert not dispatches(api)
+    api2 = Api(runs_series=[[], [], [OK101]], events=E_REAL,
+               run_records={101: OK101}, jobs_by_attempt={(101, 1): [{'name': 'x'}]})
+    m2 = CallerModel(api2, 'refresh', SHA, REF, PR, self_run_id=7001)
+    assert m2.run() == ('BOUND', 101, 1)
+    assert not dispatches(api2)
+
+
+# ---- 16: one consistent post-pin policy — no global polling after pinning ---------------
+def t16():
+    api = Api(events=E_FRESH, run_records={101: OK101}, jobs_by_attempt={(101, 1): [{'name': 'x'}]})
+    m = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    m._pin(101)
+    pinned_at = len(api.calls)
+    assert m.run() == ('BOUND', 101, 1)
+    post = api.calls[pinned_at:]
+    assert all(c.startswith('get_run:101') or c.startswith('jobs:101@')
+               for c in post), f'non-pinned observation after pinning: {post}'
+
+
+# ---- 18: an eligible NONE request dispatches exactly once -----------------------------
+def t18():
+    api = Api(runs_series=[[]], events=E_FRESH, dispatch_response={'workflow_run_id': 101},
+              run_records={101: OK101}, jobs_by_attempt={(101, 1): [{'name': 'x'}]},
+              requester_runs=[rr(7000, '2026-09-23T12:00:05Z')])
+    m = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    assert m.run() == ('BOUND', 101, 1)
+    assert len(dispatches(api)) == 1, api.calls
+    assert 'jobs:101@1' in api.calls
+
+
+# ---- 19: a stale authorization refuses at the gate with zero POSTs ---------------------
+def t19():
+    # real history: latest label 09:54:44Z, product failure boundary 10:19:05Z -> STALE
+    api = Api(runs_series=[[F0]], events=E_REAL,
+              requester_runs=[rr(7000, '2026-09-23T10:00:00Z')])
+    m = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    expect_refusal(m, 'REFUSE-STALE-AUTHORIZATION')
+    assert not dispatches(api)
+
+
+# ---- 20: incomplete event history refuses at the gate with zero POSTs ------------------
+def t20():
+    api = Api(runs_series=[[]], events=E_FRESH, events_complete=False,
+              requester_runs=[rr(7000, '2026-09-23T12:00:05Z')])
+    m = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    expect_refusal(m, 'REFUSE-INCOMPLETE-EVENT-HISTORY')
+    assert not dispatches(api)
+
+
+# ---- 21: an existing authoritative success is reusable without dispatch -----------------
+def t21():
+    api = Api(runs_series=[[OK101]], events=E_REAL,
+              run_records={101: OK101}, jobs_by_attempt={(101, 1): [{'name': 'x'}]},
+              requester_runs=[rr(7000, '2026-09-23T10:00:00Z')])
+    m = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    assert m.run() == ('BOUND', 101, 1)                  # full identity + qualification recheck
+    assert 'get_run:101' in api.calls and 'jobs:101@1' in api.calls
+    assert not dispatches(api)                           # reuse performs NO dispatch
+
+
+# ---- 22: a missing or mismatched requester identity refuses with zero POSTs -----------
+def t22():
+    # (a) no identity at all — the gate must not make verification optional
+    api = Api(runs_series=[[F0]], events=E_FRESH, dispatch_response={'workflow_run_id': 101},
+              run_records={101: OK101}, jobs_by_attempt={(101, 1): [{'name': 'x'}]})
+    m = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR)          # self_run_id defaults to None
+    expect_refusal(m, 'REFUSE-SELF-IDENTITY-UNRESOLVABLE')
+    assert not dispatches(api)
+    # (b) no identity plus an impossible attempt — still refused, zero POSTs
+    api2 = Api(runs_series=[[]], events=E_FRESH, dispatch_response={'workflow_run_id': 101},
+               run_records={101: OK101}, jobs_by_attempt={(101, 1): [{'name': 'x'}]})
+    m2 = CallerModel(api2, 'ready-for-full-ci', SHA, REF, PR, self_run_attempt=2)
+    expect_refusal(m2, 'REFUSE-SELF-IDENTITY-UNRESOLVABLE')
+    assert not dispatches(api2)
+    # (c) a self record with the requested ID but WRONG head and WRONG event: the gate
+    # validates the identity before using its timestamp or excluding it from consumption.
+    impostor = {'id': 7000, 'head_sha': 'b' * 40, 'head_branch': REF,
+                'event': 'workflow_dispatch', 'created_at': '2026-09-23T12:00:05Z',
+                'updated_at': '2026-09-23T12:00:05Z', 'status': 'completed',
+                'conclusion': 'failure', 'run_attempt': 1}
+    api3 = Api(runs_series=[[F0]], events=E_FRESH, dispatch_response={'workflow_run_id': 101},
+               run_records={101: OK101}, jobs_by_attempt={(101, 1): [{'name': 'x'}]},
+               requester_runs=[impostor])
+    m3 = CallerModel(api3, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    expect_refusal(m3, 'REFUSE-SELF-IDENTITY-UNRESOLVABLE')
+    assert not dispatches(api3)
+
+
+# ---- 23: post-dispatch discovery enforces the boundary for FOUND and PENDING -----------
+def t23():
+    # The pre-dispatch failed run 100 is rerun to SUCCESS on attempt 2 (same id, bot
+    # actors — a trusted record). Discovery must not bind it as the new request's result
+    # when an eligible newer run also exists: it binds (101, attempt 1).
+    rerun100 = dict(F0, status='completed', conclusion='success', run_attempt=2,
+                    updated='2026-09-23T12:15:00Z')
+    api = Api(runs_series=[[F0], [F0], [rerun100]], events=E_FRESH, dispatch_response=None,
+              reveal_after=2, run_records={101: OK101},
+              jobs_by_attempt={(101, 1): [{'name': 'x'}]},
+              requester_runs=[rr(7000, '2026-09-23T12:00:05Z')])
+    api.pending = dict(OK101)
+    m = CallerModel(api, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    assert m.run() == ('BOUND', 101, 1), m.result
+    assert len(dispatches(api)) == 1
+    # PENDING variant: the old run reruns in place (100, attempt 2, running) alongside the
+    # newer 101 — discovery pins the newer 101, not the pre-boundary 100, and completes.
+    inflight_old = dict(F0, status='in_progress', run_attempt=2, updated='2026-09-23T12:10:00Z')
+    inflight_new = run(101, 'in_progress', updated='2026-09-23T12:10:00Z', created='2026-09-23T12:05:00Z')
+    api2 = Api(runs_series=[[F0], [inflight_old]], events=E_FRESH,
+               dispatch_response=None, reveal_after=0,
+               get_sequences={101: [inflight_new, OK101]},
+               jobs_by_attempt={(101, 1): [{'name': 'x'}]},
+               requester_runs=[rr(7000, '2026-09-23T12:00:05Z')])
+    api2.pending = inflight_new
+    m2 = CallerModel(api2, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    assert m2.run() == ('BOUND', 101, 1), m2.result
+    assert 'get_run:101' in api2.calls and 'get_run:100' not in api2.calls
+    # Pre-boundary success ALONE must not bind: the requester keeps waiting (bounded) and
+    # ends in refusal — never claims the old run as its own result.
+    api3 = Api(runs_series=[[F0], [rerun100]], events=E_FRESH, dispatch_response=None,
+               run_records={}, jobs_by_attempt={(100, 2): [{'name': 'old'}]},
+               requester_runs=[rr(7000, '2026-09-23T12:00:05Z')])
+    m3 = CallerModel(api3, 'ready-for-full-ci', SHA, REF, PR, self_run_id=7000)
+    expect_refusal(m3, 'REFUSE-BOUNDED-WAIT-EXHAUSTED')
+    assert len(dispatches(api3)) == 1
+
+
+# ---- mutation self-test: a fail-open variant MUST be caught -----------------------------
+def t17():
+    def fail_open_freshness(events, runs, sha, ref, pr, complete=True, **_):
+        boundaries = [instant(r.get('updated_at')) for r in runs
+                      if r.get('status') == 'completed' and r.get('conclusion') != 'success']
+        boundaries = [b for b in boundaries if b]        # silently drops invalid records
+        labels = [instant(e.get('created_at')) for e in events
+                  if e.get('event') == 'labeled' and (e.get('label') or {}).get('name') == 'ready-for-full-ci']
+        labels = [t for t in labels if t]
+        if not boundaries:
+            return ('FRESH-NO-FAILURE', max(labels))
+        return ('FRESH' if max(labels) > max(boundaries) else 'STALE', max(labels))
+
+    bad = dict(F0, updated_at='invalid')
+    v, _ = fail_open_freshness(E_REAL, [bad], SHA, REF, PR)
+    assert v == 'FRESH-NO-FAILURE'                       # mutation reproduces the fail-open behavior
+    try:
+        freshness(E_REAL, [bad], SHA, REF, PR)           # the model's real helper refuses...
+    except Refusal:
+        return                                           # ...so an executable test catches the mutation
+    raise AssertionError('strict helper unexpectedly accepted')
+
+
+for name, fn in sorted(globals().items()):
+    if name.startswith('t') and name[1:].isdigit():
+        check(name, fn)
+
+width = max(len(n) for n, _, _ in RESULTS)
+failed = 0
+for name, verdict, detail in RESULTS:
+    print(f'{name.ljust(width)}  {verdict}' + (f'  {detail}' if detail else ''))
+    failed += verdict != 'PASS'
+print(f'{len(RESULTS) - failed}/{len(RESULTS)} passed')
+sys.exit(1 if failed else 0)

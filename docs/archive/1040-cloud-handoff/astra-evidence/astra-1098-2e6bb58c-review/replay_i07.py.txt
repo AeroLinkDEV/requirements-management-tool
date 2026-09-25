@@ -1,0 +1,7 @@
+import pathlib
+
+old = pathlib.Path(r'C:\Users\seanm\AppData\Local\Temp\astra-1098-d35a7d1e-review\poll_failure_probe.py')
+source = old.read_text()
+source = source.replace("assert r['exit'] == 0 and 'AUTHORITATIVE=true RUN=101 ATTEMPT=1' in r['stdout']", "assert r['exit'] != 0 and 'AUTHORITATIVE=true' not in r['stdout'] and 'REFUSED pinned-run read failed' in r['stdout']")
+source = source.replace("print('BOTH FAILED-READ PROBES REACHED AUTHORITATIVE=true; NO LIVE REQUESTS OR APP PUBLICATION')", "print('BOTH ORIGINAL FAILED-READ PROBES NOW REFUSE BEFORE AUTHORITATIVE=true')")
+exec(compile(source, str(old), 'exec'), {'__file__': __file__})

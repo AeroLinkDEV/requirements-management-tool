@@ -1,0 +1,62 @@
+{
+  "protocolVersion": 1,
+  "attemptId": "20260922T182643-5d273a10",
+  "attemptRoot": "C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\probe-state\\bootstrap\\transitions\\20260922T182643-5d273a10",
+  "caller": "QualificationProbe",
+  "installationRoot": "C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\probe-state",
+  "spool": "C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\probe-state\\bootstrap\\transitions\\20260922T182643-5d273a10\\spool",
+  "logs": "C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\probe-state\\bootstrap\\transitions\\20260922T182643-5d273a10\\logs",
+  "plan": {
+    "operation": "QualificationProbe",
+    "sourceRoot": "C:\\Sean Project\\AeroLink Production",
+    "configPath": null,
+    "policy": "Preserve",
+    "scheduled": true,
+    "topology": {
+      "tunnelRunning": false,
+      "runtimeRunning": false
+    },
+    "runId": "AeroLinkContextQualification-63762f55-run2",
+    "activeRecordPath": "C:\\Sean Project\\RMT-1040-glm-evidence\\d01-correction\\probe-state\\bootstrap\\transitions\\qualification-runs\\AeroLinkContextQualification-63762f55-run2.active.json"
+  },
+  "faults": {
+    "DelegateMutatorSeconds": 3600
+  },
+  "qualification": {
+    "descriptorHash": "437B04BB4FD25EC93DA7C179A85F81981A236EA046B0F4C97416BD454A3D09EF",
+    "descriptor": {
+      "contextKind": "Task",
+      "contextName": "task|powershell.exe",
+      "definitionHash": "66B06CB13B458C0CA9AD7303A1B10CD34FF9505DB4113873D10112163AC68857",
+      "placementProtocol": "aerolink-placement-1",
+      "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+      "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+      "principalSid": "[REDACTED windows-sid]",
+      "logonType": "Batch",
+      "sessionClass": "session0",
+      "tokenElevation": "True",
+      "tokenElevationType": "Default",
+      "integrityLevel": "High",
+      "administratorsGroup": "Enabled",
+      "immediateJobFlags": "0x1000"
+    },
+    "attestation": {
+      "taskPath": "\\AeroLinkContextQualification-63762f55",
+      "instance": "{A4A9E7FC-0150-431C-AD55-AB81F66B4073}",
+      "enginePid": 14436,
+      "chain": "powershell.exe"
+    },
+    "token": "[REDACTED]"
+  },
+  "delegate": {
+    "script": "C:\\Sean Project\\AeroLink Production\\product\\scripts\\Invoke-AeroLinkTransitionActor.ps1",
+    "sourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68"
+  },
+  "requiredRoles": [
+    "qualification-probe"
+  ],
+  "outerPid": 14436,
+  "outerStartedAt": "2026-09-22T18:26:41.4299208Z",
+  "deadlineUtc": "2026-09-22T18:29:44.2521787Z",
+  "at": "2026-09-22T18:26:44.2675385Z"
+}

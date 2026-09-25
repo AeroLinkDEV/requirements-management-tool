@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "jobName": "Global\\AeroLinkTransition-20260922T125603-105ccba9",
+  "kind": "transition",
+  "attemptId": "20260922T125603-105ccba9",
+  "observedBy": "witness",
+  "witnessPid": 1440,
+  "ownerExitEvidence": "signaled",
+  "discoveredBeforeTermination": [
+    {
+      "processId": 1228,
+      "startedAt": "2026-09-22T12:56:05.0160039Z",
+      "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    },
+    {
+      "processId": 7256,
+      "startedAt": "2026-09-22T12:56:05.0201369Z",
+      "image": "C:\\Windows\\System32\\conhost.exe"
+    },
+    {
+      "processId": 2220,
+      "startedAt": "2026-09-22T12:56:07.3642943Z",
+      "image": "C:\\Windows\\System32\\cmd.exe"
+    },
+    {
+      "processId": 3416,
+      "startedAt": "2026-09-22T12:56:07.3673096Z",
+      "image": "C:\\Windows\\System32\\conhost.exe"
+    },
+    {
+      "processId": 7668,
+      "startedAt": "2026-09-22T12:56:07.3858224Z",
+      "image": "C:\\Windows\\System32\\PING.EXE"
+    }
+  ],
+  "verdict": "Collected",
+  "containmentProven": true,
+  "activeProcessesAfterTerminate": 0,
+  "at": "2026-09-22T13:01:03.2998094Z"
+}

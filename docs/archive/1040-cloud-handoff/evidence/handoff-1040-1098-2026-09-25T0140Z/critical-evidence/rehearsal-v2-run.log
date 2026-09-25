@@ -1,0 +1,55 @@
+fatal: Remote branch main not found in upstream origin
+C:/Sean Project/RMT-1040-glm-evidence/rehearsal-mirror.sh: line 22: cd: /tmp/tmp.RN2vPCmu1T/clone: No such file or directory
+fatal: ambiguous argument 'origin/candidate^{tree}': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+rehearsal: frozen main B_PRE=0dddb0291420ee3630314bba8b9a5a3e6d367e95  candidate=23bb25d987639ada3356a7003fa0380ba08e5042
+fatal: ambiguous argument '0dddb0291420ee3630314bba8b9a5a3e6d367e95..origin/candidate': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+FAIL: A precondition: pending diff is not the two reviewed files: 
+fatal: 'origin/candidate' is not a commit and a branch 'install' cannot be created from it
+Updated 0 paths from the index
+On branch main
+Your branch is behind 'origin/main' by 3 commits, and can be fast-forwarded.
+  (use "git pull" to update your local branch)
+
+nothing to commit, working tree clean
+FAIL: A: result diff vs frozen main is not the two reviewed files: product/client/package.json
+product/client/playwright.config.ts
+product/client/playwright.rendered.config.ts
+product/client/scripts/socket-snapshot-reporter.mjs
+product/client/scripts/socket-snapshot-reporter.test.mjs
+product/client/src/App.tsx
+product/client/tests/workspace-navigation.spec.ts
+product/src/AeroLink.Infrastructure/Persistence/ProfessionalPublicationRenderer.cs
+product/tests/AeroLink.Api.Tests/ProjectSetupServiceQualificationTests.cs
+product/tests/AeroLink.Infrastructure.Tests/DraftPublicationLayoutTests.cs
+product/tests/AeroLink.Infrastructure.Tests/ReviewCommentPersistenceTests.cs
+FAIL: A2 precondition: expected an in-progress merge (MERGE_HEAD absent)
+PASS: A2: abort left a clean tree
+FAIL: A2: HEAD/tree not restored to frozen main after abort
+PASS: A2: MERGE_HEAD cleared by the abort
+fatal: 'install' is not a commit and a branch 'rollback' cannot be created from it
+FAIL: B: rollback left residual content: docs/showcase/FMS_LIVE_SHOWCASE_DATASET.md
+product/client/package.json
+product/client/playwright.config.ts
+product/client/playwright.rendered.config.ts
+product/client/scripts/socket-snapshot-reporter.mjs
+product/client/scripts/socket-snapshot-reporter.test.mjs
+product/client/src/App.tsx
+product/client/src/ProjectsLanding.tsx
+product/client/src/SoftwareBuildsLanding.css
+product/client/src/SoftwareBuildsLanding.tsx
+product/client/tests/projects-landing.spec.ts
+product/client/tests/software-builds.spec.ts
+product/client/tests/workspace-navigation.spec.ts
+product/src/AeroLink.Infrastructure/Persistence/ProfessionalPublicationRenderer.cs
+product/tests/AeroLink.Api.Tests/ProjectSetupServiceQualificationTests.cs
+product/tests/AeroLink.Infrastructure.Tests/DraftPublicationLayoutTests.cs
+product/tests/AeroLink.Infrastructure.Tests/ReviewCommentPersistenceTests.cs
+fatal: 'install' is not a commit and a branch 'drift' cannot be created from it
+PASS: C: concurrent protected-path change detected by the scope check (procedure would abort)
+PASS: D: missing/empty verification file refuses with the default REFUSED verdict
+PASS: D: a real verdict file proceeds to the binding stage
+rehearsal summary: 5 failure(s)

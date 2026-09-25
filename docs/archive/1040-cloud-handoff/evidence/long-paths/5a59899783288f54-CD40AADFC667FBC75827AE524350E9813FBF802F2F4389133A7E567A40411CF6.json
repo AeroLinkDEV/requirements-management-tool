@@ -1,0 +1,82 @@
+{
+  "qualifierVersion": "aerolink-qualifier-2",
+  "descriptorHash": "CD40AADFC667FBC75827AE524350E9813FBF802F2F4389133A7E567A40411CF6",
+  "descriptor": {
+    "contextKind": "Task",
+    "contextName": "task|powershell.exe",
+    "definitionHash": "ED1424680446E2090232834A381561C243FAD725A6E22F9742BF3B7AFA0C2391",
+    "placementProtocol": "aerolink-placement-1",
+    "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+    "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+    "principalSid": "[REDACTED windows-sid]",
+    "logonType": "Batch",
+    "sessionClass": "session0",
+    "tokenElevation": "True",
+    "tokenElevationType": "Default",
+    "integrityLevel": "High",
+    "administratorsGroup": "Enabled",
+    "immediateJobFlags": "0x1000"
+  },
+  "paths": {
+    "transientJob": {
+      "applicable": true,
+      "observed": true,
+      "survived": true,
+      "setupFailure": "",
+      "run": "run1",
+      "lastTaskResult": 0,
+      "ending": "SelfEnded at 17s; task result 0",
+      "recoveryProven": null,
+      "recoveryDetail": ""
+    },
+    "wrapperExit": {
+      "applicable": true,
+      "observed": true,
+      "survived": true,
+      "setupFailure": "",
+      "run": "run1",
+      "lastTaskResult": 0,
+      "ending": "SelfEnded at 17s; task result 0",
+      "recoveryProven": null,
+      "recoveryDetail": ""
+    },
+    "taskCompletion": {
+      "applicable": true,
+      "observed": true,
+      "survived": true,
+      "setupFailure": "",
+      "run": "run1",
+      "lastTaskResult": 0,
+      "ending": "SelfEnded at 17s; task result 0",
+      "recoveryProven": null,
+      "recoveryDetail": ""
+    },
+    "taskStop": {
+      "applicable": true,
+      "observed": true,
+      "survived": true,
+      "setupFailure": "",
+      "run": "run2",
+      "lastTaskResult": 267014,
+      "ending": "DriverStopped at 40s; task result 267014",
+      "recoveryProven": true,
+      "recoveryDetail": "the attempt proved containment and its transient mutator pid 4768 is no longer running"
+    },
+    "hardTimeout": {
+      "applicable": true,
+      "observed": true,
+      "survived": true,
+      "setupFailure": "",
+      "run": "run3",
+      "lastTaskResult": 267014,
+      "ending": "HardLimitFired at 8121s; task result 267014",
+      "recoveryProven": true,
+      "recoveryDetail": "the attempt proved containment and its transient mutator pid 3252 is no longer running"
+    }
+  },
+  "verdict": "Qualified",
+  "recoveryProven": true,
+  "recoveryDetail": "taskStop: the attempt proved containment and its transient mutator pid 4768 is no longer running; hardTimeout: the attempt proved containment and its transient mutator pid 3252 is no longer running",
+  "detail": "probe survived every applicable path of the twin of \\AeroLinkQualification-2087a3e2-FirstDeployment",
+  "at": "2026-09-22T15:18:10.4325073Z"
+}

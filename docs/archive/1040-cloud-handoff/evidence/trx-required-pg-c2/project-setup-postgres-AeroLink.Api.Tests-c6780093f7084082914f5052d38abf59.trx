@@ -1,0 +1,624 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="a9fe395d-89aa-44de-9cf1-9e4fbb7487bc" name="seanm@UPSTAIRSMCCARTH 2026-09-21 22:12:15" runUser="UPSTAIRSMCCARTH\seanm" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-09-21T22:12:15.5036241-04:00" queuing="2026-09-21T22:12:15.5036244-04:00" start="2026-09-21T22:11:43.3374852-04:00" finish="2026-09-21T22:13:35.2252614-04:00" />
+  <TestSettings name="default" id="114e351c-c593-4026-9a62-877fe74e1c23">
+    <Deployment runDeploymentRoot="seanm_UPSTAIRSMCCARTH_2026-09-21_22_12_15" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="a0ee2df0-e768-4986-a5bd-20f7ca199bab" testId="103b7d2f-aa3a-d91e-70e1-424a4c156c90" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Picker_upgrade_preserves_legacy_rows_and_freezes_continuations" computerName="UPSTAIRSMCCARTH" duration="00:00:07.0022131" startTime="2026-09-21T22:13:28.0342739-04:00" endTime="2026-09-21T22:13:35.0344049-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a0ee2df0-e768-4986-a5bd-20f7ca199bab" />
+    <UnitTestResult executionId="31a6aa6e-6f0f-431c-88ce-05e92d15a6dc" testId="408b3222-2c02-8596-e306-7561bfb3108b" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Cancelled_page_one_releases_the_fence_without_stuck_writers" computerName="UPSTAIRSMCCARTH" duration="00:00:05.8907508" startTime="2026-09-21T22:13:22.1420195-04:00" endTime="2026-09-21T22:13:28.0313541-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="31a6aa6e-6f0f-431c-88ce-05e92d15a6dc" />
+    <UnitTestResult executionId="b739c60d-e794-43df-9d0d-e99a6c3736b8" testId="9a6ba04f-8b3f-74a5-5f21-7c21a1b7df2e" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Stale_snapshot_writers_cannot_enter_frozen_release_continuations" computerName="UPSTAIRSMCCARTH" duration="00:00:14.7230484" startTime="2026-09-21T22:12:45.2631115-04:00" endTime="2026-09-21T22:12:59.9848926-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b739c60d-e794-43df-9d0d-e99a6c3736b8" />
+    <UnitTestResult executionId="49b6c447-7574-4e57-955a-4ca7651138b3" testId="874f0b55-2d7b-5b80-1f23-ded1d6bddc0d" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Picker_continuation_on_a_larger_fixture_stays_bounded_and_records_latency" computerName="UPSTAIRSMCCARTH" duration="00:00:09.5788864" startTime="2026-09-21T22:12:15.4937264-04:00" endTime="2026-09-21T22:12:25.0485850-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="49b6c447-7574-4e57-955a-4ca7651138b3" />
+    <UnitTestResult executionId="a1cc91f3-590c-4785-bafb-45012481dd7a" testId="c9f00029-307f-49bb-d048-3b81afda10dd" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Page_one_fence_waits_for_uncommitted_allocator_then_includes_the_committed_build" computerName="UPSTAIRSMCCARTH" duration="00:00:07.4531014" startTime="2026-09-21T22:12:59.9875060-04:00" endTime="2026-09-21T22:13:07.4385882-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a1cc91f3-590c-4785-bafb-45012481dd7a" />
+    <UnitTestResult executionId="3e728086-741e-4bc5-aae3-d34f8d050773" testId="1a67eaf6-1b6a-8ee5-1636-3826934d21be" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Repository_edit_waits_for_verified_evidence_commit_and_cannot_rewrite_its_identity" computerName="UPSTAIRSMCCARTH" duration="00:00:30.6798141" startTime="2026-09-21T22:11:44.8069573-04:00" endTime="2026-09-21T22:12:15.4675530-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="3e728086-741e-4bc5-aae3-d34f8d050773" />
+    <UnitTestResult executionId="e0a4ec70-56cb-442c-849e-0f9dfcef1529" testId="d5a24a25-609d-cedc-7792-6eea4add1270" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Fresh_project_services_and_deliberate_staffing_survive_host_restart_and_migration_reapplication" computerName="UPSTAIRSMCCARTH" duration="00:00:08.8741002" startTime="2026-09-21T22:13:13.2673658-04:00" endTime="2026-09-21T22:13:22.1400945-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e0a4ec70-56cb-442c-849e-0f9dfcef1529" />
+    <UnitTestResult executionId="d541ff5d-065f-4dba-8196-37f16083a2f2" testId="ffa8ad68-0691-a2c6-4254-afecedc5de5e" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Picker_database_guard_rejects_forbidden_membership_mutations" computerName="UPSTAIRSMCCARTH" duration="00:00:05.8262934" startTime="2026-09-21T22:13:07.4414392-04:00" endTime="2026-09-21T22:13:13.2654308-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d541ff5d-065f-4dba-8196-37f16083a2f2" />
+    <UnitTestResult executionId="6316d653-97a4-4b6d-9f72-8d17112cef49" testId="c9148862-a59b-4d98-91b4-b651caa2eb6d" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Discard_cannot_win_against_a_finalization_that_already_claimed_the_setup" computerName="UPSTAIRSMCCARTH" duration="00:00:06.5796924" startTime="2026-09-21T22:12:38.6838900-04:00" endTime="2026-09-21T22:12:45.2613893-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="6316d653-97a4-4b6d-9f72-8d17112cef49" />
+    <UnitTestResult executionId="df92910c-965a-4b06-bac3-c6d572504dd5" testId="0362b28f-aad6-3f82-eeff-fa1aaa73b514" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Release_creation_and_legacy_import_acceptance_cannot_commit_equivalent_build_identities" computerName="UPSTAIRSMCCARTH" duration="00:00:06.9424276" startTime="2026-09-21T22:12:25.0534824-04:00" endTime="2026-09-21T22:12:31.9913687-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="df92910c-965a-4b06-bac3-c6d572504dd5" />
+    <UnitTestResult executionId="a968e02e-1d28-49d9-a7c1-403e9893d1e0" testId="4291bb4e-275b-f236-da30-2345f3fa37d5" testName="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Picker_continuation_generated_sql_and_parameters_are_captured_for_plan_evidence" computerName="UPSTAIRSMCCARTH" duration="00:00:06.6895876" startTime="2026-09-21T22:12:31.9940912-04:00" endTime="2026-09-21T22:12:38.6813216-04:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a968e02e-1d28-49d9-a7c1-403e9893d1e0" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Picker_upgrade_preserves_legacy_rows_and_freezes_continuations" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="103b7d2f-aa3a-d91e-70e1-424a4c156c90">
+      <Execution id="a0ee2df0-e768-4986-a5bd-20f7ca199bab" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Picker_upgrade_preserves_legacy_rows_and_freezes_continuations" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Discard_cannot_win_against_a_finalization_that_already_claimed_the_setup" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="c9148862-a59b-4d98-91b4-b651caa2eb6d">
+      <Execution id="6316d653-97a4-4b6d-9f72-8d17112cef49" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Discard_cannot_win_against_a_finalization_that_already_claimed_the_setup" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Picker_continuation_on_a_larger_fixture_stays_bounded_and_records_latency" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="874f0b55-2d7b-5b80-1f23-ded1d6bddc0d">
+      <Execution id="49b6c447-7574-4e57-955a-4ca7651138b3" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Picker_continuation_on_a_larger_fixture_stays_bounded_and_records_latency" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Cancelled_page_one_releases_the_fence_without_stuck_writers" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="408b3222-2c02-8596-e306-7561bfb3108b">
+      <Execution id="31a6aa6e-6f0f-431c-88ce-05e92d15a6dc" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Cancelled_page_one_releases_the_fence_without_stuck_writers" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Repository_edit_waits_for_verified_evidence_commit_and_cannot_rewrite_its_identity" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="1a67eaf6-1b6a-8ee5-1636-3826934d21be">
+      <Execution id="3e728086-741e-4bc5-aae3-d34f8d050773" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Repository_edit_waits_for_verified_evidence_commit_and_cannot_rewrite_its_identity" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Fresh_project_services_and_deliberate_staffing_survive_host_restart_and_migration_reapplication" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="d5a24a25-609d-cedc-7792-6eea4add1270">
+      <Execution id="e0a4ec70-56cb-442c-849e-0f9dfcef1529" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Fresh_project_services_and_deliberate_staffing_survive_host_restart_and_migration_reapplication" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Picker_database_guard_rejects_forbidden_membership_mutations" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="ffa8ad68-0691-a2c6-4254-afecedc5de5e">
+      <Execution id="d541ff5d-065f-4dba-8196-37f16083a2f2" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Picker_database_guard_rejects_forbidden_membership_mutations" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Page_one_fence_waits_for_uncommitted_allocator_then_includes_the_committed_build" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="c9f00029-307f-49bb-d048-3b81afda10dd">
+      <Execution id="a1cc91f3-590c-4785-bafb-45012481dd7a" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Page_one_fence_waits_for_uncommitted_allocator_then_includes_the_committed_build" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Stale_snapshot_writers_cannot_enter_frozen_release_continuations" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="9a6ba04f-8b3f-74a5-5f21-7c21a1b7df2e">
+      <Execution id="b739c60d-e794-43df-9d0d-e99a6c3736b8" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Stale_snapshot_writers_cannot_enter_frozen_release_continuations" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Picker_continuation_generated_sql_and_parameters_are_captured_for_plan_evidence" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="4291bb4e-275b-f236-da30-2345f3fa37d5">
+      <Execution id="a968e02e-1d28-49d9-a7c1-403e9893d1e0" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Picker_continuation_generated_sql_and_parameters_are_captured_for_plan_evidence" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Release_creation_and_legacy_import_acceptance_cannot_commit_equivalent_build_identities" storage="c:\sean project\rmt-1040-worktree\product\tests\aerolink.api.tests\bin\release\net10.0\aerolink.api.tests.dll" id="0362b28f-aad6-3f82-eeff-fa1aaa73b514">
+      <Execution id="df92910c-965a-4b06-bac3-c6d572504dd5" />
+      <TestMethod codeBase="C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests" name="Release_creation_and_legacy_import_acceptance_cannot_commit_equivalent_build_identities" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="103b7d2f-aa3a-d91e-70e1-424a4c156c90" executionId="a0ee2df0-e768-4986-a5bd-20f7ca199bab" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="408b3222-2c02-8596-e306-7561bfb3108b" executionId="31a6aa6e-6f0f-431c-88ce-05e92d15a6dc" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9a6ba04f-8b3f-74a5-5f21-7c21a1b7df2e" executionId="b739c60d-e794-43df-9d0d-e99a6c3736b8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="874f0b55-2d7b-5b80-1f23-ded1d6bddc0d" executionId="49b6c447-7574-4e57-955a-4ca7651138b3" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c9f00029-307f-49bb-d048-3b81afda10dd" executionId="a1cc91f3-590c-4785-bafb-45012481dd7a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="1a67eaf6-1b6a-8ee5-1636-3826934d21be" executionId="3e728086-741e-4bc5-aae3-d34f8d050773" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d5a24a25-609d-cedc-7792-6eea4add1270" executionId="e0a4ec70-56cb-442c-849e-0f9dfcef1529" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ffa8ad68-0691-a2c6-4254-afecedc5de5e" executionId="d541ff5d-065f-4dba-8196-37f16083a2f2" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c9148862-a59b-4d98-91b4-b651caa2eb6d" executionId="6316d653-97a4-4b6d-9f72-8d17112cef49" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0362b28f-aad6-3f82-eeff-fa1aaa73b514" executionId="df92910c-965a-4b06-bac3-c6d572504dd5" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4291bb4e-275b-f236-da30-2345f3fa37d5" executionId="a968e02e-1d28-49d9-a7c1-403e9893d1e0" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="11" executed="11" passed="11" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 10.0.9)&#xD;
+[xUnit.net 00:00:00.49]   Discovering: AeroLink.Api.Tests&#xD;
+[xUnit.net 00:00:00.61]   Discovered:  AeroLink.Api.Tests&#xD;
+[xUnit.net 00:00:00.63]   Starting:    AeroLink.Api.Tests&#xD;
+warn: Microsoft.EntityFrameworkCore.Query[20504]&#xD;
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.&#xD;
+warn: Microsoft.EntityFrameworkCore.Query[20504]&#xD;
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.&#xD;
+warn: Microsoft.EntityFrameworkCore.Query[20504]&#xD;
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.&#xD;
+warn: Microsoft.EntityFrameworkCore.Query[20504]&#xD;
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.&#xD;
+warn: Microsoft.EntityFrameworkCore.Query[20504]&#xD;
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.&#xD;
+warn: Microsoft.EntityFrameworkCore.Query[20504]&#xD;
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.&#xD;
+PICKER_SCALE pageOneMs=144 continuationMs=35&#xD;
+PICKER_SCALE_PLAN: Limit  (cost=9.20..9.21 rows=1 width=293) (actual rows=101 loops=1)&#xD;
+PICKER_SCALE_PLAN:   -&gt;  Sort  (cost=9.20..9.21 rows=1 width=293) (actual rows=101 loops=1)&#xD;
+PICKER_SCALE_PLAN:         Sort Key: ((CASE WHEN (CASE WHEN ((((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) OR ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) = 2)) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = '.'::text) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &gt;= 1) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &lt;= 2)) THEN ((((('SW-'::text || CASE WHEN ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) THEN '0'::text ELSE ''::text END) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), 1, (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1))) || '.'::text) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), (((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) + 1) + 1))) || CASE WHEN (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) = 1) THEN '0'::text ELSE ''::text END) WHEN ((length(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text))) = 8) AND (upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) ~~ 'SW-%'::text) AND ((strpos(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)), '.'::text) - 1) = 5) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = 'SW-.'::text)) THEN upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) ELSE NULL::text END IS NOT NULL) THEN ((((('0|'::text || COALESCE(CASE WHEN ((((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) OR ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) = 2)) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = '.'::text) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &gt;= 1) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &lt;= 2)) THEN ((((('SW-'::text || CASE WHEN ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) THEN '0'::text ELSE ''::text END) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), 1, (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1))) || '.'::text) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), (((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) + 1) + 1))) || CASE WHEN (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) = 1) THEN '0'::text ELSE ''::text END) WHEN ((length(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text))) = 8) AND (upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) ~~ 'SW-%'::text) AND ((strpos(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)), '.'::text) - 1) = 5) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = 'SW-.'::text)) THEN upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) ELSE NULL::text END, ''::text)) || '|'::text) || btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) || '!'::text) || lower(("Id")::text)) ELSE ((((('1|'::text || COALESCE(CASE WHEN ("CanonicalIdentity" IS NULL) THEN btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text) ELSE btrim(("CanonicalIdentity")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text) END, ''::text)) || '|'::text) || btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) || '!'::text) || lower(("Id")::text)) END)::text) COLLATE "C"&#xD;
+PICKER_SCALE_PLAN:         Sort Method: top-N heapsort  Memory: 51kB&#xD;
+PICKER_SCALE_PLAN:         -&gt;  Index Scan using "IX_software_releases_ProjectId_CanonicalIdentity" on software_releases s  (cost=0.15..9.19 rows=1 width=293) (actual rows=501 loops=1)&#xD;
+PICKER_SCALE_PLAN:               Index Cond: ("ProjectId" = '581c8322-a9b3-4ded-aeb8-afab6f17c781'::uuid)&#xD;
+PICKER_SCALE_PLAN:               Filter: ((("PickerInsertionOrdinal" IS NULL) OR ("PickerInsertionOrdinal" &lt;= 601)) AND ((CASE WHEN (CASE WHEN ((((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) OR ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) = 2)) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = '.'::text) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &gt;= 1) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &lt;= 2)) THEN ((((('SW-'::text || CASE WHEN ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) THEN '0'::text ELSE ''::text END) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), 1, (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1))) || '.'::text) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), (((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) + 1) + 1))) || CASE WHEN (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) = 1) THEN '0'::text ELSE ''::text END) WHEN ((length(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text))) = 8) AND (upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) ~~ 'SW-%'::text) AND ((strpos(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)), '.'::text) - 1) = 5) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = 'SW-.'::text)) THEN upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) ELSE NULL::text END IS NOT NULL) THEN ((((('0|'::text || COALESCE(CASE WHEN ((((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) OR ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) = 2)) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = '.'::text) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &gt;= 1) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &lt;= 2)) THEN ((((('SW-'::text || CASE WHEN ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) THEN '0'::text ELSE ''::text END) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), 1, (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1))) || '.'::text) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), (((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1) + 1) + 1))) || CASE WHEN (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) = 1) THEN '0'::text ELSE ''::text END) WHEN ((length(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text))) = 8) AND (upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) ~~ 'SW-%'::text) AND ((strpos(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)), '.'::text) - 1) = 5) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = 'SW-.'::text)) THEN upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) ELSE NULL::text END, ''::text)) || '|'::text) || btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) || '!'::text) || lower(("Id")::text)) ELSE ((((('1|'::text || COALESCE(CASE WHEN ("CanonicalIdentity" IS NULL) THEN btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text) ELSE btrim(("CanonicalIdentity")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text) END, ''::text)) || '|'::text) || btrim(("Version")::text, ' 	&#xD;
+PICKER_SCALE_PLAN: &#xD;
+'::text)) || '!'::text) || lower(("Id")::text)) END)::text &gt; '1|3.099|3.099!253cf723-50b5-477c-9af4-58cb8f1f41b7'::text))&#xD;
+PICKER_SCALE_PLAN:               Rows Removed by Filter: 100&#xD;
+PICKER_SCALE_PLAN: Planning Time: 0.260 ms&#xD;
+PICKER_SCALE_PLAN: Execution Time: 2.339 ms&#xD;
+fail: Microsoft.EntityFrameworkCore.Database.Command[20102]&#xD;
+      Failed executing DbCommand (9ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?', @p2='?' (DbType = Boolean), @p3='?' (DbType = Guid), @p4='?' (DbType = Guid), @p5='?' (DbType = DateTime), @p6='?', @p13='?' (DbType = Guid), @p7='?' (DbType = DateTime), @p8='?', @p9='?' (DbType = Guid), @p10='?', @p11='?' (DbType = DateTime), @p12='?' (DbType = Int64), @p14='?' (DbType = Int64)], CommandType='Text', CommandTimeout='30']&#xD;
+      INSERT INTO software_releases ("Id", "CanonicalIdentity", "IsReleased", "PredecessorReleaseId", "ProjectId", "ReleasedAt", "Version")&#xD;
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6)&#xD;
+      RETURNING "PickerInsertionOrdinal";&#xD;
+      UPDATE baseline_imports SET "AcceptedAt" = @p7, "AcceptedBy" = @p8, "ReleaseId" = @p9, "State" = @p10, "UpdatedAt" = @p11, "Version" = @p12&#xD;
+      WHERE "Id" = @p13 AND "Version" = @p14;&#xD;
+fail: Microsoft.EntityFrameworkCore.Update[10000]&#xD;
+      An exception occurred in the database while saving changes for context type 'AeroLink.Infrastructure.Persistence.AeroLinkDbContext'.&#xD;
+      Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.&#xD;
+       ---&gt; Npgsql.PostgresException (0x80004005): 23505: duplicate key value violates unique constraint "IX_software_releases_ProjectId_CanonicalIdentity"&#xD;
+      DETAIL: Detail redacted as it may contain sensitive data. Specify 'Include Error Detail' in the connection string to include this information.&#xD;
+         at Npgsql.Internal.NpgsqlConnector.ReadMessageLong(Boolean async, DataRowLoadingMode dataRowLoadingMode, Boolean readingNotifications, Boolean isReadingPrependedMessage)&#xD;
+         at System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder`1.StateMachineBox`1.System.Threading.Tasks.Sources.IValueTaskSource&lt;TResult&gt;.GetResult(Int16 token)&#xD;
+         at Npgsql.NpgsqlDataReader.NextResult(Boolean async, Boolean isConsuming, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlDataReader.NextResult(Boolean async, Boolean isConsuming, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlCommand.ExecuteReader(Boolean async, CommandBehavior behavior, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlCommand.ExecuteReader(Boolean async, CommandBehavior behavior, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlCommand.ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+        Exception data:&#xD;
+          Severity: ERROR&#xD;
+          SqlState: 23505&#xD;
+          MessageText: duplicate key value violates unique constraint "IX_software_releases_ProjectId_CanonicalIdentity"&#xD;
+          Detail: Detail redacted as it may contain sensitive data. Specify 'Include Error Detail' in the connection string to include this information.&#xD;
+          SchemaName: public&#xD;
+          TableName: software_releases&#xD;
+          ConstraintName: IX_software_releases_ProjectId_CanonicalIdentity&#xD;
+          File: nbtinsert.c&#xD;
+          Line: 666&#xD;
+          Routine: _bt_check_unique&#xD;
+         --- End of inner exception stack trace ---&#xD;
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Storage.RelationalDatabase.SaveChangesAsync(IList`1 entries, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(IList`1 entriesToSave, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(StateManager stateManager, Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)&#xD;
+         at Npgsql.EntityFrameworkCore.PostgreSQL.Storage.Internal.NpgsqlExecutionStrategy.ExecuteAsync[TState,TResult](TState state, Func`4 operation, Func`4 verifySucceeded, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.DbContext.SaveChangesAsync(Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)&#xD;
+      Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.&#xD;
+       ---&gt; Npgsql.PostgresException (0x80004005): 23505: duplicate key value violates unique constraint "IX_software_releases_ProjectId_CanonicalIdentity"&#xD;
+      DETAIL: Detail redacted as it may contain sensitive data. Specify 'Include Error Detail' in the connection string to include this information.&#xD;
+         at Npgsql.Internal.NpgsqlConnector.ReadMessageLong(Boolean async, DataRowLoadingMode dataRowLoadingMode, Boolean readingNotifications, Boolean isReadingPrependedMessage)&#xD;
+         at System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder`1.StateMachineBox`1.System.Threading.Tasks.Sources.IValueTaskSource&lt;TResult&gt;.GetResult(Int16 token)&#xD;
+         at Npgsql.NpgsqlDataReader.NextResult(Boolean async, Boolean isConsuming, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlDataReader.NextResult(Boolean async, Boolean isConsuming, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlCommand.ExecuteReader(Boolean async, CommandBehavior behavior, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlCommand.ExecuteReader(Boolean async, CommandBehavior behavior, CancellationToken cancellationToken)&#xD;
+         at Npgsql.NpgsqlCommand.ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+        Exception data:&#xD;
+          Severity: ERROR&#xD;
+          SqlState: 23505&#xD;
+          MessageText: duplicate key value violates unique constraint "IX_software_releases_ProjectId_CanonicalIdentity"&#xD;
+          Detail: Detail redacted as it may contain sensitive data. Specify 'Include Error Detail' in the connection string to include this information.&#xD;
+          SchemaName: public&#xD;
+          TableName: software_releases&#xD;
+          ConstraintName: IX_software_releases_ProjectId_CanonicalIdentity&#xD;
+          File: nbtinsert.c&#xD;
+          Line: 666&#xD;
+          Routine: _bt_check_unique&#xD;
+         --- End of inner exception stack trace ---&#xD;
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.Storage.RelationalDatabase.SaveChangesAsync(IList`1 entries, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(IList`1 entriesToSave, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(StateManager stateManager, Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)&#xD;
+         at Npgsql.EntityFrameworkCore.PostgreSQL.Storage.Internal.NpgsqlExecutionStrategy.ExecuteAsync[TState,TResult](TState state, Func`4 operation, Func`4 verifySucceeded, CancellationToken cancellationToken)&#xD;
+         at Microsoft.EntityFrameworkCore.DbContext.SaveChangesAsync(Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)&#xD;
+PICKER_SQL_PAGED: SELECT s."Id", s."CanonicalIdentity", s."IsReleased", s."PickerInsertionOrdinal", s."PredecessorReleaseId", s."ProjectId", s."ReleasedAt", s."Version", CASE&#xD;
+    WHEN CASE&#xD;
+        WHEN (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 OR strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 2) AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(s."Version", E' \t\n\r'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = '.' AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 &gt;= 1 AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 &lt;= 2 THEN 'SW-' || CASE&#xD;
+            WHEN strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 THEN '0'&#xD;
+            ELSE ''&#xD;
+        END || substring(btrim(s."Version", E' \t\n\r'), 1, strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) || '.' || substring(btrim(s."Version", E' \t\n\r'), (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) + 1 + 1) || CASE&#xD;
+            WHEN (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 = 1 THEN '0'&#xD;
+            ELSE ''&#xD;
+        END&#xD;
+        WHEN length(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')))::int = 8 AND upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')) LIKE 'SW-%' AND strpos(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '.') - 1 = 5 AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = 'SW-.' THEN upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r'))&#xD;
+    END IS NOT NULL THEN '0|' || COALESCE(CASE&#xD;
+        WHEN (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 OR strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 2) AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(s."Version", E' \t\n\r'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = '.' AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 &gt;= 1 AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 &lt;= 2 THEN 'SW-' || CASE&#xD;
+            WHEN strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 THEN '0'&#xD;
+            ELSE ''&#xD;
+        END || substring(btrim(s."Version", E' \t\n\r'), 1, strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) || '.' || substring(btrim(s."Version", E' \t\n\r'), (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) + 1 + 1) || CASE&#xD;
+            WHEN (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 = 1 THEN '0'&#xD;
+            ELSE ''&#xD;
+        END&#xD;
+        WHEN length(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')))::int = 8 AND upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')) LIKE 'SW-%' AND strpos(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '.') - 1 = 5 AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = 'SW-.' THEN upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r'))&#xD;
+    END, '') || '|' || btrim(s."Version", E' \t\n\r') || '!' || lower(s."Id"::text)&#xD;
+    ELSE '1|' || COALESCE(CASE&#xD;
+        WHEN s."CanonicalIdentity" IS NULL THEN btrim(s."Version", E' \t\n\r')&#xD;
+        ELSE btrim(s."CanonicalIdentity", E' \t\n\r')&#xD;
+    END, '') || '|' || btrim(s."Version", E' \t\n\r') || '!' || lower(s."Id"::text)&#xD;
+END COLLATE "C" AS "SortKey"&#xD;
+FROM software_releases AS s&#xD;
+WHERE s."ProjectId" = '9e20d2b8-9630-45f7-b908-b981c7ab62f2' AND (s."PickerInsertionOrdinal" IS NULL OR s."PickerInsertionOrdinal" &lt;= 3) AND CASE&#xD;
+    WHEN CASE&#xD;
+        WHEN (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 OR strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 2) AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(s."Version", E' \t\n\r'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = '.' AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 &gt;= 1 AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 &lt;= 2 THEN 'SW-' || CASE&#xD;
+            WHEN strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 THEN '0'&#xD;
+            ELSE ''&#xD;
+        END || substring(btrim(s."Version", E' \t\n\r'), 1, strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) || '.' || substring(btrim(s."Version", E' \t\n\r'), (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) + 1 + 1) || CASE&#xD;
+            WHEN (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 = 1 THEN '0'&#xD;
+            ELSE ''&#xD;
+        END&#xD;
+        WHEN length(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')))::int = 8 AND upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')) LIKE 'SW-%' AND strpos(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '.') - 1 = 5 AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = 'SW-.' THEN upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r'))&#xD;
+    END IS NOT NULL THEN '0|' || COALESCE(CASE&#xD;
+        WHEN (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 OR strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 2) AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(s."Version", E' \t\n\r'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = '.' AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 &gt;= 1 AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 &lt;= 2 THEN 'SW-' || CASE&#xD;
+            WHEN strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 THEN '0'&#xD;
+            ELSE ''&#xD;
+        END || substring(btrim(s."Version", E' \t\n\r'), 1, strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) || '.' || substring(btrim(s."Version", E' \t\n\r'), (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) + 1 + 1) || CASE&#xD;
+            WHEN (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 = 1 THEN '0'&#xD;
+            ELSE ''&#xD;
+        END&#xD;
+        WHEN length(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')))::int = 8 AND upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')) LIKE 'SW-%' AND strpos(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '.') - 1 = 5 AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = 'SW-.' THEN upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r'))&#xD;
+    END, '') || '|' || btrim(s."Version", E' \t\n\r') || '!' || lower(s."Id"::text)&#xD;
+    ELSE '1|' || COALESCE(CASE&#xD;
+        WHEN s."CanonicalIdentity" IS NULL THEN btrim(s."Version", E' \t\n\r')&#xD;
+        ELSE btrim(s."CanonicalIdentity", E' \t\n\r')&#xD;
+    END, '') || '|' || btrim(s."Version", E' \t\n\r') || '!' || lower(s."Id"::text)&#xD;
+END COLLATE "C" &gt; '0|SW-01.00|1.0!3cb72ae8-ef63-4c6d-9786-366a9ad9b6a8'&#xD;
+ORDER BY CASE&#xD;
+    WHEN CASE&#xD;
+        WHEN (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 OR strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 2) AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(s."Version", E' \t\n\r'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = '.' AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 &gt;= 1 AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 &lt;= 2 THEN 'SW-' || CASE&#xD;
+            WHEN strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 THEN '0'&#xD;
+            ELSE ''&#xD;
+        END || substring(btrim(s."Version", E' \t\n\r'), 1, strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) || '.' || substring(btrim(s."Version", E' \t\n\r'), (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) + 1 + 1) || CASE&#xD;
+            WHEN (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 = 1 THEN '0'&#xD;
+            ELSE ''&#xD;
+        END&#xD;
+        WHEN length(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')))::int = 8 AND upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')) LIKE 'SW-%' AND strpos(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '.') - 1 = 5 AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = 'SW-.' THEN upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r'))&#xD;
+    END IS NOT NULL THEN '0|' || COALESCE(CASE&#xD;
+        WHEN (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 OR strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 2) AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(s."Version", E' \t\n\r'), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = '.' AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 &gt;= 1 AND (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 &lt;= 2 THEN 'SW-' || CASE&#xD;
+            WHEN strpos(btrim(s."Version", E' \t\n\r'), '.') - 1 = 1 THEN '0'&#xD;
+            ELSE ''&#xD;
+        END || substring(btrim(s."Version", E' \t\n\r'), 1, strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) || '.' || substring(btrim(s."Version", E' \t\n\r'), (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1) + 1 + 1) || CASE&#xD;
+            WHEN (length(btrim(s."Version", E' \t\n\r'))::int - (strpos(btrim(s."Version", E' \t\n\r'), '.') - 1)) - 1 = 1 THEN '0'&#xD;
+            ELSE ''&#xD;
+        END&#xD;
+        WHEN length(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')))::int = 8 AND upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')) LIKE 'SW-%' AND strpos(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '.') - 1 = 5 AND replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r')), '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', '') = 'SW-.' THEN upper(btrim(COALESCE(s."CanonicalIdentity", ''), E' \t\n\r'))&#xD;
+    END, '') || '|' || btrim(s."Version", E' \t\n\r') || '!' || lower(s."Id"::text)&#xD;
+    ELSE '1|' || COALESCE(CASE&#xD;
+        WHEN s."CanonicalIdentity" IS NULL THEN btrim(s."Version", E' \t\n\r')&#xD;
+        ELSE btrim(s."CanonicalIdentity", E' \t\n\r')&#xD;
+    END, '') || '|' || btrim(s."Version", E' \t\n\r') || '!' || lower(s."Id"::text)&#xD;
+END COLLATE "C"&#xD;
+LIMIT 2&#xD;
+PICKER_PLAN: Limit  (cost=9.20..9.21 rows=1 width=293) (actual rows=2 loops=1)&#xD;
+PICKER_PLAN:   -&gt;  Sort  (cost=9.20..9.21 rows=1 width=293) (actual rows=2 loops=1)&#xD;
+PICKER_PLAN:         Sort Key: ((CASE WHEN (CASE WHEN ((((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) OR ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) = 2)) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = '.'::text) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &gt;= 1) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &lt;= 2)) THEN ((((('SW-'::text || CASE WHEN ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) THEN '0'::text ELSE ''::text END) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), 1, (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1))) || '.'::text) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), (((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) + 1) + 1))) || CASE WHEN (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) = 1) THEN '0'::text ELSE ''::text END) WHEN ((length(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text))) = 8) AND (upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) ~~ 'SW-%'::text) AND ((strpos(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)), '.'::text) - 1) = 5) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = 'SW-.'::text)) THEN upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) ELSE NULL::text END IS NOT NULL) THEN ((((('0|'::text || COALESCE(CASE WHEN ((((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) OR ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) = 2)) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = '.'::text) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &gt;= 1) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &lt;= 2)) THEN ((((('SW-'::text || CASE WHEN ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) THEN '0'::text ELSE ''::text END) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), 1, (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1))) || '.'::text) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), (((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) + 1) + 1))) || CASE WHEN (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) = 1) THEN '0'::text ELSE ''::text END) WHEN ((length(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text))) = 8) AND (upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) ~~ 'SW-%'::text) AND ((strpos(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)), '.'::text) - 1) = 5) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = 'SW-.'::text)) THEN upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) ELSE NULL::text END, ''::text)) || '|'::text) || btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) || '!'::text) || lower(("Id")::text)) ELSE ((((('1|'::text || COALESCE(CASE WHEN ("CanonicalIdentity" IS NULL) THEN btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text) ELSE btrim(("CanonicalIdentity")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text) END, ''::text)) || '|'::text) || btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) || '!'::text) || lower(("Id")::text)) END)::text) COLLATE "C"&#xD;
+PICKER_PLAN:         Sort Method: quicksort  Memory: 25kB&#xD;
+PICKER_PLAN:         -&gt;  Index Scan using "IX_software_releases_ProjectId_Id" on software_releases s  (cost=0.15..9.19 rows=1 width=293) (actual rows=2 loops=1)&#xD;
+PICKER_PLAN:               Index Cond: ("ProjectId" = '9e20d2b8-9630-45f7-b908-b981c7ab62f2'::uuid)&#xD;
+PICKER_PLAN:               Filter: ((("PickerInsertionOrdinal" IS NULL) OR ("PickerInsertionOrdinal" &lt;= 3)) AND ((CASE WHEN (CASE WHEN ((((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) OR ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) = 2)) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = '.'::text) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &gt;= 1) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &lt;= 2)) THEN ((((('SW-'::text || CASE WHEN ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) THEN '0'::text ELSE ''::text END) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), 1, (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1))) || '.'::text) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), (((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) + 1) + 1))) || CASE WHEN (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) = 1) THEN '0'::text ELSE ''::text END) WHEN ((length(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text))) = 8) AND (upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) ~~ 'SW-%'::text) AND ((strpos(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)), '.'::text) - 1) = 5) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = 'SW-.'::text)) THEN upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) ELSE NULL::text END IS NOT NULL) THEN ((((('0|'::text || COALESCE(CASE WHEN ((((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) OR ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) = 2)) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = '.'::text) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &gt;= 1) AND (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) &lt;= 2)) THEN ((((('SW-'::text || CASE WHEN ((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) = 1) THEN '0'::text ELSE ''::text END) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), 1, (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1))) || '.'::text) || "substring"(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), (((strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1) + 1) + 1))) || CASE WHEN (((length(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) - (strpos(btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text), '.'::text) - 1)) - 1) = 1) THEN '0'::text ELSE ''::text END) WHEN ((length(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text))) = 8) AND (upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) ~~ 'SW-%'::text) AND ((strpos(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)), '.'::text) - 1) = 5) AND (replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)), '0'::text, ''::text), '1'::text, ''::text), '2'::text, ''::text), '3'::text, ''::text), '4'::text, ''::text), '5'::text, ''::text), '6'::text, ''::text), '7'::text, ''::text), '8'::text, ''::text), '9'::text, ''::text) = 'SW-.'::text)) THEN upper(btrim((COALESCE("CanonicalIdentity", ''::character varying))::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) ELSE NULL::text END, ''::text)) || '|'::text) || btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) || '!'::text) || lower(("Id")::text)) ELSE ((((('1|'::text || COALESCE(CASE WHEN ("CanonicalIdentity" IS NULL) THEN btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text) ELSE btrim(("CanonicalIdentity")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text) END, ''::text)) || '|'::text) || btrim(("Version")::text, ' 	&#xD;
+PICKER_PLAN: &#xD;
+'::text)) || '!'::text) || lower(("Id")::text)) END)::text &gt; '0|SW-01.00|1.0!3cb72ae8-ef63-4c6d-9786-366a9ad9b6a8'::text))&#xD;
+PICKER_PLAN:               Rows Removed by Filter: 1&#xD;
+PICKER_PLAN: Planning Time: 0.247 ms&#xD;
+PICKER_PLAN: Execution Time: 0.096 ms&#xD;
+PICKER_FENCE_WAIT: pid=2972 waitEventType=Lock query=SELECT pg_advisory_xact_lock(hashtext('aerolink-release-picker:' || $1))&#xD;
+PICKER_FENCE_WAIT: pid=2980 waitEventType=Lock query=SELECT pg_advisory_xact_lock(hashtext('aerolink-release-picker:' || $1))&#xD;
+[xUnit.net 00:01:50.91]   Finished:    AeroLink.Api.Tests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="UPSTAIRSMCCARTH" outcome="Warning" timestamp="2026-09-21T22:13:35.1859337-04:00">
+        <Text>Data collector 'Blame' message: All tests finished running, Sequence file will not be generated.</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>

@@ -1,0 +1,332 @@
+diff --git a/.github/workflows/request-full-ci.yml b/.github/workflows/request-full-ci.yml
+index d0e17767..6964872a 100644
+--- a/.github/workflows/request-full-ci.yml
++++ b/.github/workflows/request-full-ci.yml
+@@ -352,3 +352,5 @@ jobs:
+             exit 1
+           fi
+           echo "The trusted default-branch requester verified exact Product success for this pull-request head." >> "$GITHUB_STEP_SUMMARY"
++
++/* concurrent settings change */
+diff --git a/docs/showcase/FMS_LIVE_SHOWCASE_DATASET.md b/docs/showcase/FMS_LIVE_SHOWCASE_DATASET.md
+index e684e25d..27d0f78f 100644
+--- a/docs/showcase/FMS_LIVE_SHOWCASE_DATASET.md
++++ b/docs/showcase/FMS_LIVE_SHOWCASE_DATASET.md
+@@ -17,8 +17,8 @@ The showcase coexists with the clean **Create a new program** workflow. Its prog
+ 
+ After authentication, the user selects **FMS Product Development** on the Projects page and then chooses a
+ Software Build. Build 1.5 opens this released dataset as a read-only historical workspace. Build 1.6 opens the
+-in-work successor and scopes normal queries and mutations to that release. Builds 0.5 and 1.0 are mock lineage
+-cards, badged Mock, joined by dashed arrows, never counted and never opening a workspace (#1047). Historical Build 1.5 evidence may appear inside 1.6 when clearly labelled, but it never switches
++in-work successor and scopes normal queries and mutations to that release. Builds 0.5 and 1.0 are lineage-only
++placeholders. Historical Build 1.5 evidence may appear inside 1.6 when clearly labelled, but it never switches
+ the active workspace. A final **Plan next build** card is a non-record placeholder and creates no future release
+ or version. See DEC-070 and DEC-088.
+ 
+diff --git a/product/client/src/App.tsx b/product/client/src/App.tsx
+index 39440b37..a595503e 100644
+--- a/product/client/src/App.tsx
++++ b/product/client/src/App.tsx
+@@ -735,7 +735,7 @@ function App() {
+   const showImports=()=>{updateRoute("view", "baselineImports");writeHistory("pushState", importsPath)};
+   const showPersonnel=()=>{updateRoute("view", "personnel");writeHistory("pushState", personnelPath)};
+   const showProjectConfiguration=(section:"ladder"|"assurance"|"history"|"readiness"|"approvals"|"repository"="ladder")=>{updateRoute("view", "projectConfiguration");updateRoute("projectConfigurationSection", section);writeHistory("pushState", section==="approvals"?projectConfigurationApprovalsPath(openProjectId):section==="assurance"?projectConfigurationAssurancePath(openProjectId):section==="repository"?projectConfigurationRepositoryPath(openProjectId):projectConfigurationPath)};
+-  if(view==="builds")return <SoftwareBuildsLanding user={user} programCode={active?.program.code??""} projectName={project?.project.name??""} softwareProduct={project?.project.softwareProduct??""} releases={project?.releases??[]} onProjectOverview={showProjects} onImportedBaselines={showImports} onPersonnel={showPersonnel} onProjectConfiguration={()=>showProjectConfiguration()} onOpenBuild={(selected)=>{if(!active||!project||!project.releases.some(item=>item.id===selected.id))return;updateRoute("releaseId", selected.id);updateRoute("view", "dashboard");writeHistory("pushState", routePath({programId:active.program.id,projectId:project.project.id,releaseId:selected.id},"dashboard"))}} onSignOut={signOut}/>;
++  if(view==="builds")return <SoftwareBuildsLanding user={user} projectName={project?.project.name??""} softwareProduct={project?.project.softwareProduct??""} releases={project?.releases??[]} onProjectOverview={showProjects} onImportedBaselines={showImports} onPersonnel={showPersonnel} onProjectConfiguration={()=>showProjectConfiguration()} onOpenBuild={(selected)=>{if(!active||!project||!project.releases.some(item=>item.id===selected.id))return;updateRoute("releaseId", selected.id);updateRoute("view", "dashboard");writeHistory("pushState", routePath({programId:active.program.id,projectId:project.project.id,releaseId:selected.id},"dashboard"))}} onSignOut={signOut}/>;
+   // Rendered beside Software Builds rather than inside a build workspace, because an import does not belong
+   // to a build — it creates one. There is no build to have entered when this page is what you need.
+   if(view==="baselineImports"&&project)return <BaselineImportCenter user={user} api={API} projectId={project.project.id} onBackToBuilds={()=>{updateRoute("view", "builds");writeHistory("pushState", openProjectBuildsPath)}} onSignOut={signOut}/>;
+diff --git a/product/client/src/ProjectsLanding.tsx b/product/client/src/ProjectsLanding.tsx
+index f2a98bb6..9c8cfb8f 100644
+--- a/product/client/src/ProjectsLanding.tsx
++++ b/product/client/src/ProjectsLanding.tsx
+@@ -7,70 +7,14 @@ import { setupDraftDisplayName, type DiscardSetupOutcome } from "./projectSetupD
+ import { projectAreaPath } from "./routing";
+ import "./ProjectsLanding.css";
+ 
+-export type ProjectIconName =
+-  | "project" | "fms" | "import" | "satellite" | "navigation" | "certification" | "coverage"
+-  | "integrity" | "route" | "sensors" | "map" | "display";
++export type ProjectIconName = "project";
+ 
+-/**
+- * Project marks. A real project gets a distinctive mark only when it is the showcase that mark was drawn for
+- * (FMS, the import practice); every other authorized project keeps the neutral mark, so FMS imagery is never
+- * put on somebody else's work.
+- */
+-export function ProjectIcon({ name }: { name: ProjectIconName }) {
+-  const paths: Record<ProjectIconName, React.ReactNode> = {
+-    project: <><rect x="4" y="5" width="26" height="24" rx="3" /><path d="M4 12h26M10 5v7m14-7v7M10 18h14M10 23h9" /></>,
+-    fms: <><rect x="5" y="4" width="22" height="26" rx="3"/><rect x="9" y="8" width="14" height="10" rx="1"/><path d="M9 23h2m3 0h2m3 0h2M9 27h2m3 0h2m3 0h2"/></>,
+-    import: <><path d="M17 4v16m0 0-6-6m6 6 6-6"/><path d="M5 23v4a3 3 0 0 0 3 3h18a3 3 0 0 0 3-3v-4"/></>,
+-    satellite: <><path d="m13 13 6 6m-8-4 6-6 6 6-6 6zM8 7l5 5-4 4-5-5zm16 16 5 5-5 2-4-4z"/><path d="M20 11c4-3 8-2 10 0M22 8c5-4 9-3 11-1"/></>,
+-    navigation: <><circle cx="17" cy="17" r="13"/><path d="m21 10-3 9-9 3 3-9zM17 1v4m0 24v4M1 17h4m24 0h4"/></>,
+-    certification: <><path d="M7 3h15l6 6v20H7zM22 3v7h6M11 15h12m-12 5h8"/><circle cx="23" cy="24" r="5"/><path d="m20 29-1 4 4-2 3 2 1-5"/></>,
+-    coverage: <><path d="M17 25V14m-4 11h8M9 31h16"/><circle cx="17" cy="10" r="2"/><path d="M10 17a10 10 0 0 1 14 0M6 13a15 15 0 0 1 22 0M3 9a20 20 0 0 1 28 0"/></>,
+-    integrity: <><path d="M17 3 29 8v8c0 8-5 13-12 16C10 29 5 24 5 16V8z"/><path d="m11 17 4 4 8-9"/></>,
+-    route: <><circle cx="6" cy="27" r="3"/><circle cx="14" cy="12" r="3"/><path d="M8 25c4-2 2-7 5-10m4-2c5 1 6 7 10 6"/><path d="m24 7 7 3-6 3 1-3z"/></>,
+-    sensors: <><circle cx="17" cy="17" r="4"/><circle cx="17" cy="17" r="9"/><path d="M17 3v3m0 22v3M3 17h3m22 0h3M7 7l3 3m14 14 3 3m0-20-3 3M10 24l-3 3"/><path d="m25 25 5 5m0-5-5 5"/></>,
+-    map: <><path d="m4 7 8-3 10 3 8-3v24l-8 3-10-3-8 3zM12 4v24M22 7v24"/><path d="M17 14c0-3 5-3 5 0 0 2-2.5 5-2.5 5S17 16 17 14z"/></>,
+-    display: <><rect x="3" y="5" width="28" height="23" rx="3"/><path d="M8 22V11h18M10 19l4-4 4 2 5-6M12 32h10m-5-4v4"/></>,
+-  };
+-  return <svg viewBox="0 0 34 34" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
+-}
+-
+-/** The two showcase programs whose marks were drawn for them. Keyed by governed program code, never by name. */
+-const showcaseMarks: Record<string, ProjectIconName> = { FMSLIVE: "fms", IMPORTLAB: "import" };
+-
+-/** The mark for a governed program: its drawn showcase mark, or the neutral project mark. */
+-export const projectMark = (programCode: string): ProjectIconName => showcaseMarks[programCode] ?? "project";
+-
+-/**
+- * The mock catalogue the owner asked to have back beside the real projects (#1047), as it looked before #1038.
+- * These are pictures of what a portfolio could hold, not records: never links, never counted as authorized
+- * projects, never opening a build, and each carries a Mock badge so none can be taken for real work.
+- */
+-const mockProjects: readonly { id: string; name: string; description: string; icon: ProjectIconName }[] = [
+-  { id: "gps-receiver-modernization", name: "GPS Receiver Modernization", description: "Upgrade planning and architecture study.", icon: "satellite" },
+-  { id: "integrated-navigation-suite", name: "Integrated Navigation Suite", description: "Concept phase for integrated navigation subsystem.", icon: "navigation" },
+-  { id: "fms-certification-block-2", name: "FMS Certification Block 2", description: "Certification planning and requirements package.", icon: "certification" },
+-  { id: "waas-sbas-upgrade", name: "WAAS / SBAS Upgrade", description: "Upgrade planning for performance and coverage.", icon: "coverage" },
+-  { id: "gnss-integrity-monitor", name: "GNSS Integrity Monitor", description: "Integrity monitoring and fault-detection concept.", icon: "integrity" },
+-  { id: "flight-planning-core", name: "Flight Planning Core", description: "Core algorithms and route-optimization planning.", icon: "route" },
+-  { id: "multi-sensor-position-engine", name: "Multi-Sensor Position Engine", description: "Fusion algorithms and sensor-integration concept.", icon: "sensors" },
+-  { id: "avionics-map-database", name: "Avionics Map Database", description: "Database architecture and update strategy.", icon: "map" },
+-  { id: "fms-hmi-refresh", name: "FMS HMI Refresh", description: "User-interface modernization and usability study.", icon: "display" },
+-];
+-
+-function MockProjectCard({ mock }: { mock: (typeof mockProjects)[number] }) {
+-  return (
+-    <article className="projectCard mockProjectCard" data-mock-project={mock.id} aria-disabled="true">
+-      <div className="projectCardTop">
+-        <span className="projectIcon"><ProjectIcon name={mock.icon} /></span>
+-        <span className="projectBadge mock">Mock</span>
+-      </div>
+-      <h2>{mock.name}</h2>
+-      <p>{mock.description}</p>
+-      <footer>
+-        <small><span aria-hidden="true">□</span>Mock project</small>
+-      </footer>
+-    </article>
+-  );
++/** A neutral project mark; the portal never assigns FMS imagery to another authorized project. */
++export function ProjectIcon({ name: _name }: { name: ProjectIconName }) {
++  return <svg viewBox="0 0 34 34" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
++    <rect x="4" y="5" width="26" height="24" rx="3" />
++    <path d="M4 12h26M10 5v7m14-7v7M10 18h14M10 23h9" />
++  </svg>;
+ }
+ 
+ function ProjectCard({ project, onOpen }: { project: AuthorizedProject; onOpen: () => void }) {
+@@ -88,7 +32,7 @@ function ProjectCard({ project, onOpen }: { project: AuthorizedProject; onOpen:
+       aria-label={`Open ${project.name}`}
+     >
+       <div className="projectCardTop">
+-        <span className="projectIcon"><ProjectIcon name={projectMark(project.programCode)} /></span>
++        <span className="projectIcon"><ProjectIcon name="project" /></span>
+       </div>
+       <h2>{project.name}</h2>
+       <p>{project.softwareProduct}</p>
+@@ -177,7 +121,6 @@ export default function ProjectsLanding({
+           <section className="projectsSections" aria-label="Authorized projects">
+             <div className="projectsGrid" data-project-list>
+               {projects.map(project => <ProjectCard key={project.id} project={project} onOpen={() => onOpenProject(project)} />)}
+-              {mockProjects.map(mock => <MockProjectCard key={mock.id} mock={mock} />)}
+             </div>
+             {setupDraftsSection}
+           </section>
+diff --git a/product/client/src/SoftwareBuildsLanding.css b/product/client/src/SoftwareBuildsLanding.css
+index 1e2b812e..4c2dfd66 100644
+--- a/product/client/src/SoftwareBuildsLanding.css
++++ b/product/client/src/SoftwareBuildsLanding.css
+@@ -78,11 +78,6 @@ body:has(.buildsLandingPage) { min-width: 0; }
+ .buildLineage li { position: relative; min-width: 0; }
+ .buildConnector { position: absolute; z-index: 2; top: 50%; right: -39px; width: 26px; height: 26px; display: grid; place-items: center; transform: translateY(-50%); border: 1px solid #8697a9; border-radius: 50%; background: var(--canvas); color: #354b65; font-size: 18px; }
+ .buildConnector::before { content: ""; position: absolute; z-index: -1; right: 25px; width: 28px; border-top: 1px solid #8797a8; }
+-/* #1047: mock showcase history is drawn, but never the same as recorded ancestry. */
+-.buildConnector.mock { border-style: dashed; }
+-.buildConnector.mock::before { border-top-style: dashed; }
+-/* The last card in a grid row has no neighbour to its right; an arrow there would point at nothing. */
+-.buildLineage li:nth-child(5n) > .buildConnector { display: none; }
+ 
+ .softwareBuildCard {
+   min-height: 212px;
+@@ -102,8 +97,6 @@ body:has(.buildsLandingPage) { min-width: 0; }
+ .buildStatus.in-work { border: 1px solid #58a2d4; background: #eef7fd; color: #12659d; }
+ .buildStatus.planned { border: 1px solid #b7a8d8; background: #f4f0fb; color: #624b96; }
+ .softwareBuildCard:has(.buildStatus.planned){border-style:dashed;background:#faf9fc}
+-.buildStatus.mock { border: 1px solid #c9cfd8; background: #eef0f3; color: #5f6b7a; }
+-.softwareBuildCard.mock { border-style: dashed; background: #fafbfc; }
+ .softwareBuildCard h3 { margin: 14px 0 5px; font: 650 14px var(--font-display); }
+ .softwareBuildCard > p { flex: 1; margin: 0 0 13px; color: #536376; font-size: 12px; line-height: 1.45; }
+ .softwareBuildCard .buildLifecycleDescription { flex: 0 0 auto; }
+diff --git a/product/client/src/SoftwareBuildsLanding.tsx b/product/client/src/SoftwareBuildsLanding.tsx
+index 67317347..98919ba4 100644
+--- a/product/client/src/SoftwareBuildsLanding.tsx
++++ b/product/client/src/SoftwareBuildsLanding.tsx
+@@ -1,6 +1,6 @@
+ import type { AuthUser } from "./IdentityCenter";
+ import PortalHeader from "./PortalHeader";
+-import { ProjectIcon, projectMark } from "./ProjectsLanding";
++import { ProjectIcon } from "./ProjectsLanding";
+ import { buildVersionOrder, officialBuildName } from "./presentation";
+ import type { WorkspaceRelease } from "./workspaceContext";
+ import "./SoftwareBuildsLanding.css";
+@@ -23,32 +23,6 @@ function statusFor(release: SelectableRelease, identity?: string) {
+     : { key: "in-work", label: "In Work" };
+ }
+ 
+-/**
+- * The FMS showcase's mock history the owner asked to have back (#1047): builds 0.5 and 1.0 as they looked before
+- * #1038. They are pictures of the showcase's back story, not records. Shown only for the FMS showcase program,
+- * never counted, never opening a workspace, and badged Mock. A fresh project shows only its real builds.
+- */
+-const fmsMockBuilds = [
+-  { id: "fms-mock-0-5", version: "0.5", title: "Baseline release", description: "Initial baseline for core FMS capabilities." },
+-  { id: "fms-mock-1-0", version: "1.0", title: "Feature release", description: "Adds advanced navigation and performance features." },
+-] as const;
+-
+-type LineageEntry =
+-  | { kind: "mock"; id: string; version: string; title: string; description: string }
+-  | { kind: "real"; release: SelectableRelease };
+-
+-/**
+- * Whether to draw an arrow from one card to the next. A real arrow only where the next build's recorded
+- * predecessor is this build, never inferred from version order. A dashed demonstration arrow joins the FMS mock
+- * builds to each other and to the first real build. No arrow otherwise; that card's Predecessor line says where
+- * it branched from.
+- */
+-function connectorBetween(from: LineageEntry, to: LineageEntry): "real" | "mock" | undefined {
+-  if (from.kind === "mock") return "mock";
+-  if (to.kind === "real" && to.release.predecessorReleaseId === from.release.id) return "real";
+-  return undefined;
+-}
+-
+ function sortReleases(releases: SelectableRelease[]) {
+   return [...releases].sort((left, right) => {
+     const leftOrder = buildVersionOrder(left.version);
+@@ -62,7 +36,6 @@ function sortReleases(releases: SelectableRelease[]) {
+ 
+ export default function SoftwareBuildsLanding({
+   user,
+-  programCode = "",
+   releases,
+   projectName,
+   softwareProduct,
+@@ -74,8 +47,6 @@ export default function SoftwareBuildsLanding({
+   onSignOut,
+ }: {
+   user: AuthUser;
+-  /** The governed program code; the FMS showcase gets its mark and its mock back story. */
+-  programCode?: string;
+   releases: SelectableRelease[];
+   projectName: string;
+   softwareProduct: string;
+@@ -90,10 +61,6 @@ export default function SoftwareBuildsLanding({
+   const releaseById = new Map(ordered.map(release => [release.id, release]));
+   const releasedCount = ordered.filter(release => release.isReleased).length;
+   const inWorkCount = ordered.length - releasedCount;
+-  const lineage: LineageEntry[] = [
+-    ...(programCode === "FMSLIVE" ? fmsMockBuilds.map(mock => ({ kind: "mock" as const, ...mock })) : []),
+-    ...ordered.map(release => ({ kind: "real" as const, release })),
+-  ];
+ 
+   return (
+     <div className="buildsLandingPage">
+@@ -118,7 +85,7 @@ export default function SoftwareBuildsLanding({
+         </header>
+ 
+         <section className="buildProjectSummary" aria-labelledby="build-project-name">
+-          <span className="buildProjectIcon"><ProjectIcon name={projectMark(programCode)} /></span>
++          <span className="buildProjectIcon"><ProjectIcon name="project" /></span>
+           <div className="buildProjectContent">
+             <h2 id="build-project-name">{projectName}</h2>
+             <p>{softwareProduct}</p>
+@@ -133,37 +100,11 @@ export default function SoftwareBuildsLanding({
+         <section className="buildLineage" aria-labelledby="build-lineage-heading">
+           <header>
+             <h2 id="build-lineage-heading">Build lineage</h2>
+-            <p>Builds are ordered by version. An arrow means the next build was recorded as following this one; a dashed arrow is mock showcase history.</p>
++            <p>Builds are ordered by version. Predecessors show which build each one follows.</p>
+           </header>
+           {ordered.length ? (
+             <ol>
+-              {lineage.map((entry, index) => {
+-                const next = lineage[index + 1];
+-                const connector = next ? connectorBetween(entry, next) : undefined;
+-                const arrow = connector && (
+-                  <span
+-                    className={connector === "mock" ? "buildConnector mock" : "buildConnector"}
+-                    aria-hidden="true"
+-                    title={connector === "mock" ? "Mock showcase history" : "Recorded predecessor"}
+-                  >→</span>
+-                );
+-                if (entry.kind === "mock") {
+-                  return (
+-                    <li key={entry.id} data-mock-build={entry.version}>
+-                      <article className="softwareBuildCard mock unavailable" aria-disabled="true">
+-                        <div className="buildCardTop">
+-                          <strong className="buildVersion">{officialBuildName(entry.version) ?? entry.version}</strong>
+-                          <span className="buildStatus mock">Mock</span>
+-                        </div>
+-                        <h3>{entry.title}</h3>
+-                        <p>{entry.description}</p>
+-                        <button type="button" disabled title="A mock build has no controlled workspace">Mock build</button>
+-                      </article>
+-                      {arrow}
+-                    </li>
+-                  );
+-                }
+-                const release = entry.release;
++              {ordered.map(release => {
+                 const identity = officialBuildName(release.version);
+                 const status = statusFor(release, identity);
+                 const predecessor = release.predecessorReleaseId ? releaseById.get(release.predecessorReleaseId) : undefined;
+@@ -198,7 +139,6 @@ export default function SoftwareBuildsLanding({
+                         Open build <span aria-hidden="true">→</span>
+                       </button>
+                     </article>
+-                    {arrow}
+                   </li>
+                 );
+               })}
+diff --git a/product/client/tests/projects-landing.spec.ts b/product/client/tests/projects-landing.spec.ts
+index 759d635c..2b002836 100644
+--- a/product/client/tests/projects-landing.spec.ts
++++ b/product/client/tests/projects-landing.spec.ts
+@@ -15,13 +15,7 @@ test("successful login opens the authorized Projects selector with actual projec
+   await expect(cards.first()).toBeVisible();
+   expect(await cards.count()).toBeGreaterThan(0);
+   await expect(page.locator("details.sampleProjectsSection")).toHaveCount(0);
+-  // #1047: the mock catalogue sits beside the real projects in the same grid, as before #1038. Each is badged
+-  // Mock and is neither a link nor an authorized project card, so it can never open a build.
+-  const mocks = page.locator("[data-project-list] [data-mock-project]");
+-  await expect(mocks).toHaveCount(9);
+-  await expect(mocks.getByText("Mock", { exact: true })).toHaveCount(9);
+-  await expect(page.locator("[data-mock-project][data-project-card], a[data-mock-project]")).toHaveCount(0);
+-  await expect(page.getByRole("link", { name: /GPS Receiver Modernization/ })).toHaveCount(0);
++  await expect(page.getByText("Mock", { exact: true })).toHaveCount(0);
+   const active = page.getByRole("link", { name: "Open FMS Product Development" });
+   await expect(active).toBeVisible();
+   await expect(active).toHaveAttribute("href", /^\/projects\/[^/]+\/builds$/);
+diff --git a/product/client/tests/software-builds.spec.ts b/product/client/tests/software-builds.spec.ts
+index ff3bfe5a..00162bf5 100644
+--- a/product/client/tests/software-builds.spec.ts
++++ b/product/client/tests/software-builds.spec.ts
+@@ -66,16 +66,6 @@ test('FMS selection opens the actual, ordered Software Builds lineage', async ({
+   await expect(current.getByRole('button', { name: /Open build 1\.6/ })).toBeEnabled()
+   await expect(current).toContainText('Predecessor')
+ 
+-  // #1047: the FMS showcase keeps its mock back story, 0.5 and 1.0, ahead of the real builds. They are badged
+-  // Mock, cannot open a workspace, are not counted, and join the lineage with dashed arrows only.
+-  const mocks = page.locator('[data-mock-build]')
+-  expect(await mocks.evaluateAll(items => items.map(item => item.getAttribute('data-mock-build')))).toEqual(['0.5', '1.0'])
+-  await expect(mocks.getByText('Mock', { exact: true })).toHaveCount(2)
+-  await expect(mocks.locator('button:not(:disabled)')).toHaveCount(0)
+-  await expect(mocks.locator('[data-build-card]')).toHaveCount(0)
+-  await expect(mocks.locator('.buildConnector.mock')).toHaveCount(2)
+-  await expect(page.locator('.buildProjectContent dd').first()).toHaveText(String(expectedVersions.length))
+-
+   if (process.env.AEROLINK_BUILDS_SCREENSHOT)
+     await page.screenshot({ path: process.env.AEROLINK_BUILDS_SCREENSHOT, fullPage: true })
+ })

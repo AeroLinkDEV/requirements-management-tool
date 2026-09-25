@@ -1,0 +1,1742 @@
+AeroLink changed validation plan (Full)
+Planner: aerolink-test-planner/v1 / 1ea0226f2355e6146ac4166d16c016ed5e5458e15896289104320f64c3fb91f1
+Changed paths: 18; merge base: b64301b168ed98d4054cb893932978c4d090f745
+Safety: persistent PostgreSQL and product/.local evidence roots are untouched; the planner performs no fetch or rebase.
+Execution note: a fresh-checkout build may restore configured packages; no Git fetch or rebase is performed.
+Full merge evidence remains with GitHub Actions.
+Resource posture:
+  PostgreSQL: Full mode requires an isolated disposable Docker service; persistent PostgreSQL is never touched
+  SQLite: Full mode uses the repository broader disposable SQLite/browser subset; Fast mode does not claim SQLite evidence
+  Browser: selected browser smoke lane may start browser processes when execution is allowed
+  Evidence filesystem: persistent product/.local evidence roots are untouched; any disposable lane owns its temporary paths
+
+Classification:
+  docsOnly     False
+  backend      True
+  client       True
+  browser      True
+  postgresql   True
+  Reason: Broad validation forced by product/test-contracts/api-host-classification.json; this path can change the planner, workflow, or shared product contract.
+
+Local plan:
+  - Build the solution
+      dotnet build product/AeroLink.slnx --configuration Release
+      A compile error costs a full CI cycle to discover and seconds to find here.
+  - Domain suite
+      dotnet test product/tests/AeroLink.Domain.Tests --configuration Release --no-build
+      Fast, no host construction, and covers most backend rule changes.
+  - Infrastructure suite
+      dotnet test product/tests/AeroLink.Infrastructure.Tests --configuration Release --no-build
+      This change directly affects showcase seed/upgrade coverage or broad test-planner behavior, so Fast restores the complete Infrastructure suite locally.
+  - Client lint, type-check and build
+      npm --prefix product/client run lint && npm --prefix product/client run build
+      The client gate is under a minute in CI but blocks the whole merge.
+  - Browser smoke journeys
+      npm --prefix product/client run test:smoke
+      Client changes keep the showcase usability smoke; the full journey set still belongs in CI.
+  - Operator and recovery script contracts
+      Full mode can run the same non-documentation script-contract family in the disposable checkout; Fast leaves this hosted family CI-only.
+  - PostgreSQL migration and secure bootstrap
+      Full mode may run this only through a uniquely named disposable Docker PostgreSQL service; an unavailable Docker runtime fails as not-proven, so a local pass is not evidence. Persistent PostgreSQL and product evidence are never used.
+
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  AeroLink.DocumentSecurity -> C:\Sean Project\RMT-1040-worktree\product\src\AeroLink.DocumentSecurity\bin\Release\net10.0\AeroLink.DocumentSecurity.dll
+  AeroLink.Domain -> C:\Sean Project\RMT-1040-worktree\product\src\AeroLink.Domain\bin\Release\net10.0\AeroLink.Domain.dll
+  AeroLink.ConnectorProtocol -> C:\Sean Project\RMT-1040-worktree\product\src\AeroLink.ConnectorProtocol\bin\Release\net10.0\AeroLink.ConnectorProtocol.dll
+  AeroLink.DocumentConnector -> C:\Sean Project\RMT-1040-worktree\product\tools\AeroLink.DocumentConnector\bin\Release\net10.0-windows\AeroLink.DocumentConnector.dll
+  AeroLink.Domain.Tests -> C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Domain.Tests\bin\Release\net10.0\AeroLink.Domain.Tests.dll
+  AeroLink.Infrastructure -> C:\Sean Project\RMT-1040-worktree\product\src\AeroLink.Infrastructure\bin\Release\net10.0\AeroLink.Infrastructure.dll
+  AeroLink.Scale -> C:\Sean Project\RMT-1040-worktree\product\tools\AeroLink.Scale\bin\Release\net10.0\AeroLink.Scale.dll
+  AeroLink.Api -> C:\Sean Project\RMT-1040-worktree\product\src\AeroLink.Api\bin\Release\net10.0\AeroLink.Api.dll
+  AeroLink.Api.Tests -> C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll
+  AeroLink.Infrastructure.Tests -> C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Infrastructure.Tests\bin\Release\net10.0\AeroLink.Infrastructure.Tests.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:02.77
+Test run for C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\bin\Release\net10.0\AeroLink.Api.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:01:49.26]     AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Release_ordinal_is_database_owned_across_ef_lifecycle_saves_on_sqlite [FAIL]
+  Failed AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Release_ordinal_is_database_owned_across_ef_lifecycle_saves_on_sqlite [21 s]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 1
+Actual:   2
+  Stack Trace:
+     at AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Release_ordinal_is_database_owned_across_ef_lifecycle_saves_on_sqlite() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ReleasePickerMembershipApiTests.cs:line 242
+--- End of stack trace from previous location ---
+[xUnit.net 00:39:01.06]     AeroLink.Api.Tests.CodeRelationshipApiTests.Relationship_file_filters_bind_snapshot_and_use_exact_ordinal_path_before_paging [FAIL]
+  Failed AeroLink.Api.Tests.CodeRelationshipApiTests.Relationship_file_filters_bind_snapshot_and_use_exact_ordinal_path_before_paging [1 m 43 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.CodeRelationshipApiTests.SignInAsync(HttpClient client, String userName) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\CodeRelationshipApiTests.cs:line 729
+   at AeroLink.Api.Tests.CodeRelationshipApiTests.Relationship_file_filters_bind_snapshot_and_use_exact_ordinal_path_before_paging() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\CodeRelationshipApiTests.cs:line 332
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:39:02.17]     AeroLink.Api.Tests.ProblemReportCheckoutApiTests.Only_Software_Quality_is_offered_the_revive_on_a_rejected_report [FAIL]
+  Failed AeroLink.Api.Tests.ProblemReportCheckoutApiTests.Only_Software_Quality_is_offered_the_revive_on_a_rejected_report [1 m 42 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ProblemReportApiTests.BootstrapAndLoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportApiTests.cs:line 666
+   at AeroLink.Api.Tests.ProblemReportCheckoutApiTests.Only_Software_Quality_is_offered_the_revive_on_a_rejected_report() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportCheckoutApiTests.cs:line 1273
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:39:05.00]     AeroLink.Api.Tests.RequirementFilterExactnessApiTests.Hydration_still_answers_a_revision_id_with_itself [FAIL]
+  Failed AeroLink.Api.Tests.RequirementFilterExactnessApiTests.Hydration_still_answers_a_revision_id_with_itself [1 m 41 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.RequirementFilterExactnessApiTests.SignInAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\RequirementFilterExactnessApiTests.cs:line 78
+   at AeroLink.Api.Tests.RequirementFilterExactnessApiTests.Hydration_still_answers_a_revision_id_with_itself() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\RequirementFilterExactnessApiTests.cs:line 236
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:39:14.16]     AeroLink.Api.Tests.ProjectLeadershipApiTests.A_retired_position_role_cannot_be_newly_granted_through_global_administration(retiredRole: SoftwareEngineeringLead) [FAIL]
+  Failed AeroLink.Api.Tests.ProjectLeadershipApiTests.A_retired_position_role_cannot_be_newly_granted_through_global_administration(retiredRole: SoftwareEngineeringLead) [1 m 42 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.SecurityBoundaryTests.BootstrapAsync(HttpClient client, String secret, String password) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SecurityBoundaryTests.cs:line 560
+   at AeroLink.Api.Tests.SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SecurityBoundaryTests.cs:line 565
+   at AeroLink.Api.Tests.ProjectLeadershipApiTests.A_retired_position_role_cannot_be_newly_granted_through_global_administration(ProgramRole retiredRole) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProjectLeadershipApiTests.cs:line 255
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:39:38.72]     AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.An_inactive_or_wrong_system_approver_is_refused [FAIL]
+  Failed AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.An_inactive_or_wrong_system_approver_is_refused [1 m 54 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.LoginAsync(HttpClient client, String user, String password) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\TestChangeRequestReviewWorkflowTests.cs:line 173
+   at AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.CreateWorkflowAsync(HttpClient client, Guid projectId, String mode, String appliesTo, ValueTuple`3[] stages) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\TestChangeRequestReviewWorkflowTests.cs:line 191
+   at AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.An_inactive_or_wrong_system_approver_is_refused() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\TestChangeRequestReviewWorkflowTests.cs:line 1757
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:39:53.51]     AeroLink.Api.Tests.CorrectiveActionRoutingApiTests.The_corrective_action_resolves_its_discipline_procedure_and_report_from_the_record [FAIL]
+  Failed AeroLink.Api.Tests.CorrectiveActionRoutingApiTests.The_corrective_action_resolves_its_discipline_procedure_and_report_from_the_record [1 m 40 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.CorrectiveActionRoutingApiTests.The_corrective_action_resolves_its_discipline_procedure_and_report_from_the_record() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\CorrectiveActionRoutingApiTests.cs:line 100
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:39:57.58]     AeroLink.Api.Tests.ManualTestChangeRequestApiTests.Returning_to_open_permits_impact_rework_and_resubmission_hashes_differently [FAIL]
+  Failed AeroLink.Api.Tests.ManualTestChangeRequestApiTests.Returning_to_open_permits_impact_rework_and_resubmission_hashes_differently [1 m 41 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ManualTestChangeRequestApiTests.LoginAsync(HttpClient client, String user) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ManualTestChangeRequestApiTests.cs:line 112
+   at AeroLink.Api.Tests.ManualTestChangeRequestApiTests.PrepareSubmittableNoChangePackageAsync(AeroLinkApiFactory factory, HttpClient client, Guid autoTcrId, Guid itemId) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ManualTestChangeRequestApiTests.cs:line 1199
+   at AeroLink.Api.Tests.ManualTestChangeRequestApiTests.Returning_to_open_permits_impact_rework_and_resubmission_hashes_differently() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ManualTestChangeRequestApiTests.cs:line 1459
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:40:03.28]     AeroLink.Api.Tests.ProjectRepositoryApiTests.Verification_rechecks_fresh_identity_after_the_remote_wait(revoked: "session") [FAIL]
+  Failed AeroLink.Api.Tests.ProjectRepositoryApiTests.Verification_rechecks_fresh_identity_after_the_remote_wait(revoked: "session") [1 m 41 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ProjectRepositoryApiTests.SignIn(HttpClient client, String name) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProjectRepositoryApiTests.cs:line 164
+   at AeroLink.Api.Tests.ProjectRepositoryApiTests.Verification_rechecks_fresh_identity_after_the_remote_wait(String revoked) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProjectRepositoryApiTests.cs:line 67
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:40:17.43]     AeroLink.Api.Tests.CodeTargetApiTests.Target_search_accepts_the_displayed_revision_identifier(kind: "RequirementRevision") [FAIL]
+  Failed AeroLink.Api.Tests.CodeTargetApiTests.Target_search_accepts_the_displayed_revision_identifier(kind: "RequirementRevision") [1 m 42 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ShowcaseApiFixture.LoginAdministratorAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ShowcaseApiFixture.cs:line 62
+   at AeroLink.Api.Tests.CodeTargetApiTests.Target_search_accepts_the_displayed_revision_identifier(String kind) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\CodeTargetApiTests.cs:line 23
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:40:22.25]     AeroLink.Api.Tests.SecurityHardeningTests.The_unsubscribe_link_is_reachable_without_a_session [FAIL]
+  Failed AeroLink.Api.Tests.SecurityHardeningTests.The_unsubscribe_link_is_reachable_without_a_session [1 m 41 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.SecurityHardeningTests.The_unsubscribe_link_is_reachable_without_a_session() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SecurityHardeningTests.cs:line 29
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:40:24.71]     AeroLink.Api.Tests.SearchableAuthoringPickerApiTests.Approved_procedure_picker_hydrates_a_procedure_beyond_the_first_page [FAIL]
+  Failed AeroLink.Api.Tests.SearchableAuthoringPickerApiTests.Approved_procedure_picker_hydrates_a_procedure_beyond_the_first_page [1 m 43 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.SearchableAuthoringPickerApiTests.LoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SearchableAuthoringPickerApiTests.cs:line 162
+   at AeroLink.Api.Tests.SearchableAuthoringPickerApiTests.Approved_procedure_picker_hydrates_a_procedure_beyond_the_first_page() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SearchableAuthoringPickerApiTests.cs:line 194
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:40:31.11]     AeroLink.Api.Tests.ProjectSetupVerificationProfileApiTests.New_project_default_finalizes_with_case_and_procedure [FAIL]
+  Failed AeroLink.Api.Tests.ProjectSetupVerificationProfileApiTests.New_project_default_finalizes_with_case_and_procedure [1 m 43 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.SecurityBoundaryTests.BootstrapAsync(HttpClient client, String secret, String password) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SecurityBoundaryTests.cs:line 560
+   at AeroLink.Api.Tests.SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SecurityBoundaryTests.cs:line 565
+   at AeroLink.Api.Tests.ProjectSetupVerificationProfileApiTests.New_project_default_finalizes_with_case_and_procedure() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProjectSetupVerificationProfileApiTests.cs:line 1070
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:40:34.21]     AeroLink.Api.Tests.ManagedDocumentApiTests.Successor_is_bound_to_the_verified_released_docx_and_missing_parent_fails_closed [FAIL]
+  Failed AeroLink.Api.Tests.ManagedDocumentApiTests.Successor_is_bound_to_the_verified_released_docx_and_missing_parent_fails_closed [1 m 42 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ProblemReportApiTests.BootstrapAndLoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportApiTests.cs:line 666
+   at AeroLink.Api.Tests.ManagedDocumentApiTests.Successor_is_bound_to_the_verified_released_docx_and_missing_parent_fails_closed() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ManagedDocumentApiTests.cs:line 923
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:40:44.23]     AeroLink.Api.Tests.ProblemReportCheckoutApiTests.A_non_member_cannot_download_current_or_frozen_problem_report_output [FAIL]
+  Failed AeroLink.Api.Tests.ProblemReportCheckoutApiTests.A_non_member_cannot_download_current_or_frozen_problem_report_output [1 m 42 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ProblemReportApiTests.BootstrapAndLoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportApiTests.cs:line 666
+   at AeroLink.Api.Tests.ProblemReportCheckoutApiTests.A_non_member_cannot_download_current_or_frozen_problem_report_output() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportCheckoutApiTests.cs:line 765
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:40:44.24]     AeroLink.Api.Tests.CodeRelationshipApiTests.Relationship_read_hides_mutation_capabilities_from_a_view_only_role [FAIL]
+  Failed AeroLink.Api.Tests.CodeRelationshipApiTests.Relationship_read_hides_mutation_capabilities_from_a_view_only_role [1 m 43 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.CodeRelationshipApiTests.SignInAsync(HttpClient client, String userName) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\CodeRelationshipApiTests.cs:line 729
+   at AeroLink.Api.Tests.CodeRelationshipApiTests.Relationship_read_hides_mutation_capabilities_from_a_view_only_role() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\CodeRelationshipApiTests.cs:line 611
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:40:47.49]     AeroLink.Api.Tests.RequirementFilterExactnessApiTests.An_unsupported_filter_field_or_value_is_refused_with_a_stable_code [FAIL]
+  Failed AeroLink.Api.Tests.RequirementFilterExactnessApiTests.An_unsupported_filter_field_or_value_is_refused_with_a_stable_code [1 m 42 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.RequirementFilterExactnessApiTests.SignInAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\RequirementFilterExactnessApiTests.cs:line 78
+   at AeroLink.Api.Tests.RequirementFilterExactnessApiTests.An_unsupported_filter_field_or_value_is_refused_with_a_stable_code() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\RequirementFilterExactnessApiTests.cs:line 150
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:40:55.73]     AeroLink.Api.Tests.ProjectLeadershipApiTests.A_retired_position_role_cannot_be_newly_granted_through_global_administration(retiredRole: SystemEngineeringLead) [FAIL]
+  Failed AeroLink.Api.Tests.ProjectLeadershipApiTests.A_retired_position_role_cannot_be_newly_granted_through_global_administration(retiredRole: SystemEngineeringLead) [1 m 41 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.SecurityBoundaryTests.BootstrapAsync(HttpClient client, String secret, String password) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SecurityBoundaryTests.cs:line 560
+   at AeroLink.Api.Tests.SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SecurityBoundaryTests.cs:line 565
+   at AeroLink.Api.Tests.ProjectLeadershipApiTests.A_retired_position_role_cannot_be_newly_granted_through_global_administration(ProgramRole retiredRole) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProjectLeadershipApiTests.cs:line 255
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:42:28.11]     AeroLink.Api.Tests.RequirementFilterExactnessApiTests.An_owner_matches_the_owner_field_and_not_an_unrelated_attribute_that_mentions_them [FAIL]
+  Failed AeroLink.Api.Tests.RequirementFilterExactnessApiTests.An_owner_matches_the_owner_field_and_not_an_unrelated_attribute_that_mentions_them [1 m 40 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.RequirementFilterExactnessApiTests.SignInAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\RequirementFilterExactnessApiTests.cs:line 78
+   at AeroLink.Api.Tests.RequirementFilterExactnessApiTests.An_owner_matches_the_owner_field_and_not_an_unrelated_attribute_that_mentions_them() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\RequirementFilterExactnessApiTests.cs:line 134
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:42:41.84]     AeroLink.Api.Tests.ProblemReportDispositionApiTests.Legacy_disposition_route_accepts_only_rejected_with_rationale_and_respects_terminal_state [FAIL]
+  Failed AeroLink.Api.Tests.ProblemReportDispositionApiTests.Legacy_disposition_route_accepts_only_rejected_with_rationale_and_respects_terminal_state [1 m 41 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ProblemReportApiTests.BootstrapAndLoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportApiTests.cs:line 666
+   at AeroLink.Api.Tests.ProblemReportDispositionApiTests.Legacy_disposition_route_accepts_only_rejected_with_rationale_and_respects_terminal_state() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportDispositionApiTests.cs:line 18
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:42:41.84]     AeroLink.Api.Tests.ChangeRequestNumberOrderingTests.Postgres_orders_both_registers_numerically_before_paging [SKIP]
+  Skipped AeroLink.Api.Tests.ChangeRequestNumberOrderingTests.Postgres_orders_both_registers_numerically_before_paging [1 ms]
+[xUnit.net 00:43:01.69]     AeroLink.Api.Tests.VerificationVocabularyApiTests.Re_spelling_a_configured_member_controlled_records_declare_is_refused [FAIL]
+  Failed AeroLink.Api.Tests.VerificationVocabularyApiTests.Re_spelling_a_configured_member_controlled_records_declare_is_refused [1 m 42 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.VerificationVocabularyApiTests.SignInAsync(HttpClient client, String userName) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\VerificationVocabularyApiTests.cs:line 64
+   at AeroLink.Api.Tests.VerificationVocabularyApiTests.Re_spelling_a_configured_member_controlled_records_declare_is_refused() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\VerificationVocabularyApiTests.cs:line 313
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:43:04.03]     AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.An_inactive_stage_approver_cannot_approve_before_their_turn [FAIL]
+  Failed AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.An_inactive_stage_approver_cannot_approve_before_their_turn [1 m 43 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.LoginAsync(HttpClient client, String user, String password) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\TestChangeRequestReviewWorkflowTests.cs:line 173
+   at AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.CreateWorkflowAsync(HttpClient client, Guid projectId, String mode, String appliesTo, ValueTuple`3[] stages) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\TestChangeRequestReviewWorkflowTests.cs:line 191
+   at AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.CreateWorkflowAsync(HttpClient client, Guid projectId, String mode, ValueTuple`3[] stages) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\TestChangeRequestReviewWorkflowTests.cs:line 181
+   at AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.An_inactive_stage_approver_cannot_approve_before_their_turn() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\TestChangeRequestReviewWorkflowTests.cs:line 600
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:43:07.05]     AeroLink.Api.Tests.PersonnelDirectoryApiTests.The_directory_searches_name_username_and_email_and_skips_current_members [FAIL]
+  Failed AeroLink.Api.Tests.PersonnelDirectoryApiTests.The_directory_searches_name_username_and_email_and_skips_current_members [1 m 42 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.PersonnelDirectoryApiTests.AdminAsync(AeroLinkApiFactory factory) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\PersonnelDirectoryApiTests.cs:line 59
+   at AeroLink.Api.Tests.PersonnelDirectoryApiTests.The_directory_searches_name_username_and_email_and_skips_current_members() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\PersonnelDirectoryApiTests.cs:line 89
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:43:16.71]     AeroLink.Api.Tests.ChangeRequestRenameApiTests.A_created_change_request_is_numbered_for_the_level_it_may_change(type: "Software", level: "HighLevel", expected: "HLRCR") [FAIL]
+  Failed AeroLink.Api.Tests.ChangeRequestRenameApiTests.A_created_change_request_is_numbered_for_the_level_it_may_change(type: "Software", level: "HighLevel", expected: "HLRCR") [1 m 43 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ProblemReportApiTests.BootstrapAndLoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportApiTests.cs:line 666
+   at AeroLink.Api.Tests.ChangeRequestRenameApiTests.A_created_change_request_is_numbered_for_the_level_it_may_change(String type, String level, String expected) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ChangeRequestRenameApiTests.cs:line 53
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:43:17.51]     AeroLink.Api.Tests.BaselineImportApiTests.Reconciled_package_selection_accepts_and_binds_to_existing_draft_release [FAIL]
+  Failed AeroLink.Api.Tests.BaselineImportApiTests.Reconciled_package_selection_accepts_and_binds_to_existing_draft_release [1 m 43 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ProblemReportApiTests.BootstrapAndLoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportApiTests.cs:line 666
+   at AeroLink.Api.Tests.BaselineImportApiTests.Reconciled_package_selection_accepts_and_binds_to_existing_draft_release() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\BaselineImportApiTests.cs:line 93
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:43:22.94]     AeroLink.Api.Tests.ManualTestChangeRequestApiTests.A_malformed_procedure_decision_refuses_the_whole_package [FAIL]
+  Failed AeroLink.Api.Tests.ManualTestChangeRequestApiTests.A_malformed_procedure_decision_refuses_the_whole_package [1 m 44 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ManualTestChangeRequestApiTests.LoginAsync(HttpClient client, String user) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ManualTestChangeRequestApiTests.cs:line 112
+   at AeroLink.Api.Tests.ManualTestChangeRequestApiTests.A_malformed_procedure_decision_refuses_the_whole_package() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ManualTestChangeRequestApiTests.cs:line 276
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:43:27.32]     AeroLink.Api.Tests.RequirementProposalOptionsApiTests.Existing_draft_rejects_a_stale_expected_version_after_the_draft_changes [FAIL]
+  Failed AeroLink.Api.Tests.RequirementProposalOptionsApiTests.Existing_draft_rejects_a_stale_expected_version_after_the_draft_changes [1 m 43 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.RequirementProposalOptionsApiTests.SignInAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\RequirementProposalOptionsApiTests.cs:line 290
+   at AeroLink.Api.Tests.RequirementProposalOptionsApiTests.Existing_draft_rejects_a_stale_expected_version_after_the_draft_changes() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\RequirementProposalOptionsApiTests.cs:line 152
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:43:44.75]     AeroLink.Api.Tests.CodeTargetApiTests.Target_search_accepts_the_displayed_revision_identifier(kind: "ProblemReportRevision") [FAIL]
+  Failed AeroLink.Api.Tests.CodeTargetApiTests.Target_search_accepts_the_displayed_revision_identifier(kind: "ProblemReportRevision") [1 m 45 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ShowcaseApiFixture.LoginAdministratorAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ShowcaseApiFixture.cs:line 62
+   at AeroLink.Api.Tests.CodeTargetApiTests.Target_search_accepts_the_displayed_revision_identifier(String kind) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\CodeTargetApiTests.cs:line 23
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:43:47.34]     AeroLink.Api.Tests.SecurityHardeningTests.An_upload_that_is_not_the_image_it_claims_to_be_is_refused [FAIL]
+  Failed AeroLink.Api.Tests.SecurityHardeningTests.An_upload_that_is_not_the_image_it_claims_to_be_is_refused [1 m 45 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.SecurityHardeningTests.BootstrapWorkspaceAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SecurityHardeningTests.cs:line 129
+   at AeroLink.Api.Tests.SecurityHardeningTests.An_upload_that_is_not_the_image_it_claims_to_be_is_refused() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SecurityHardeningTests.cs:line 83
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:43:54.54]     AeroLink.Api.Tests.SearchableAuthoringPickerApiTests.Requirement_picker_hydrates_an_exact_revision_beyond_the_first_page [FAIL]
+  Failed AeroLink.Api.Tests.SearchableAuthoringPickerApiTests.Requirement_picker_hydrates_an_exact_revision_beyond_the_first_page [1 m 45 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.SearchableAuthoringPickerApiTests.LoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SearchableAuthoringPickerApiTests.cs:line 162
+   at AeroLink.Api.Tests.SearchableAuthoringPickerApiTests.Requirement_picker_hydrates_an_exact_revision_beyond_the_first_page() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SearchableAuthoringPickerApiTests.cs:line 174
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:43:57.73]     AeroLink.Api.Tests.ProjectSetupVerificationProfileApiTests.A_supported_subject_spelling_reads_the_same_in_the_verdict_and_at_the_gate [FAIL]
+  Failed AeroLink.Api.Tests.ProjectSetupVerificationProfileApiTests.A_supported_subject_spelling_reads_the_same_in_the_verdict_and_at_the_gate [1 m 44 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.SecurityBoundaryTests.BootstrapAsync(HttpClient client, String secret, String password) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SecurityBoundaryTests.cs:line 560
+   at AeroLink.Api.Tests.SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\SecurityBoundaryTests.cs:line 565
+   at AeroLink.Api.Tests.ProjectSetupVerificationProfileApiTests.A_supported_subject_spelling_reads_the_same_in_the_verdict_and_at_the_gate() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProjectSetupVerificationProfileApiTests.cs:line 836
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:44:09.91]     AeroLink.Api.Tests.GovernanceEvidenceApiTests.Quality_portfolio_retains_objectives_attributable_waivers_evidence_and_controlled_export [FAIL]
+  Failed AeroLink.Api.Tests.GovernanceEvidenceApiTests.Quality_portfolio_retains_objectives_attributable_waivers_evidence_and_controlled_export [1 m 44 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.GovernanceEvidenceApiTests.BootstrapAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\GovernanceEvidenceApiTests.cs:line 118
+   at AeroLink.Api.Tests.GovernanceEvidenceApiTests.Quality_portfolio_retains_objectives_attributable_waivers_evidence_and_controlled_export() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\GovernanceEvidenceApiTests.cs:line 46
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:44:10.30]     AeroLink.Api.Tests.ProblemReportCheckoutApiTests.Concurrent_supporting_attachment_mutations_preserve_history_and_map_quota_conflicts [FAIL]
+[xUnit.net 00:44:10.39]     AeroLink.Api.Tests.ManagedDocumentApiTests.Create_requires_a_caller_operation_key_and_distinct_keys_do_not_collapse_equal_intent [FAIL]
+  Failed AeroLink.Api.Tests.ProblemReportCheckoutApiTests.Concurrent_supporting_attachment_mutations_preserve_history_and_map_quota_conflicts [1 m 45 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ProblemReportApiTests.BootstrapAndLoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportApiTests.cs:line 666
+   at AeroLink.Api.Tests.ProblemReportCheckoutApiTests.Concurrent_supporting_attachment_mutations_preserve_history_and_map_quota_conflicts() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportCheckoutApiTests.cs:line 1520
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+  Failed AeroLink.Api.Tests.ManagedDocumentApiTests.Create_requires_a_caller_operation_key_and_distinct_keys_do_not_collapse_equal_intent [1 m 45 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ProblemReportApiTests.BootstrapAndLoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportApiTests.cs:line 666
+   at AeroLink.Api.Tests.ManagedDocumentApiTests.Create_requires_a_caller_operation_key_and_distinct_keys_do_not_collapse_equal_intent() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ManagedDocumentApiTests.cs:line 868
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:44:12.77]     AeroLink.Api.Tests.CodeReviewLifecycleApiTests.Reopened_and_rematerialized_baseline_preserves_signed_v1_history_and_reviews_new_source_as_v2 [FAIL]
+  Failed AeroLink.Api.Tests.CodeReviewLifecycleApiTests.Reopened_and_rematerialized_baseline_preserves_signed_v1_history_and_reviews_new_source_as_v2 [1 m 44 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.CodeReviewLifecycleApiTests.Ok(HttpClient client, String url, Object body) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\CodeReviewLifecycleApiTests.cs:line 123
+   at AeroLink.Api.Tests.CodeReviewLifecycleApiTests.Reopened_and_rematerialized_baseline_preserves_signed_v1_history_and_reviews_new_source_as_v2() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\CodeReviewLifecycleApiTests.cs:line 67
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:44:25.74]     AeroLink.Api.Tests.ChangeRequestNumberOrderingTests.Sqlite_orders_both_registers_numerically_before_paging [FAIL]
+  Failed AeroLink.Api.Tests.ChangeRequestNumberOrderingTests.Sqlite_orders_both_registers_numerically_before_paging [1 m 43 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ChangeRequestNumberOrderingTests.AssertOrderingAsync(String connection) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ChangeRequestNumberOrderingTests.cs:line 60
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:44:44.09]     AeroLink.Api.Tests.VerificationVocabularyApiTests.A_revision_still_pins_its_spelling_even_though_the_requirement_was_later_retired [FAIL]
+  Failed AeroLink.Api.Tests.VerificationVocabularyApiTests.A_revision_still_pins_its_spelling_even_though_the_requirement_was_later_retired [1 m 42 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.VerificationVocabularyApiTests.SignInAsync(HttpClient client, String userName) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\VerificationVocabularyApiTests.cs:line 64
+   at AeroLink.Api.Tests.VerificationVocabularyApiTests.A_revision_still_pins_its_spelling_even_though_the_requirement_was_later_retired() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\VerificationVocabularyApiTests.cs:line 524
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:44:49.42]     AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.A_base_role_only_configuration_manager_cannot_fill_a_configuration_manager_stage [FAIL]
+  Failed AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.A_base_role_only_configuration_manager_cannot_fill_a_configuration_manager_stage [1 m 45 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.LoginAsync(HttpClient client, String user, String password) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\TestChangeRequestReviewWorkflowTests.cs:line 173
+   at AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.CreateWorkflowAsync(HttpClient client, Guid projectId, String mode, String appliesTo, ValueTuple`3[] stages) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\TestChangeRequestReviewWorkflowTests.cs:line 191
+   at AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.A_base_role_only_configuration_manager_cannot_fill_a_configuration_manager_stage() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\TestChangeRequestReviewWorkflowTests.cs:line 1457
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:44:51.39]     AeroLink.Api.Tests.ReleaseCampaignExactIntentApiTests.Cancel_review_preserves_history_and_an_old_tab_cannot_sign_the_next_cycle [FAIL]
+  Failed AeroLink.Api.Tests.ReleaseCampaignExactIntentApiTests.Cancel_review_preserves_history_and_an_old_tab_cannot_sign_the_next_cycle [1 m 42 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ProblemReportApiTests.BootstrapAndLoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportApiTests.cs:line 666
+   at AeroLink.Api.Tests.ReleaseCampaignExactIntentApiTests.Cancel_review_preserves_history_and_an_old_tab_cannot_sign_the_next_cycle() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ReleaseCampaignExactIntentApiTests.cs:line 232
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:44:58.46]     AeroLink.Api.Tests.ChangeRequestRenameApiTests.A_created_change_request_is_numbered_for_the_level_it_may_change(type: "System", level: null, expected: "SRCR") [FAIL]
+  Failed AeroLink.Api.Tests.ChangeRequestRenameApiTests.A_created_change_request_is_numbered_for_the_level_it_may_change(type: "System", level: null, expected: "SRCR") [1 m 41 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ProblemReportApiTests.BootstrapAndLoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportApiTests.cs:line 666
+   at AeroLink.Api.Tests.ChangeRequestRenameApiTests.A_created_change_request_is_numbered_for_the_level_it_may_change(String type, String level, String expected) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ChangeRequestRenameApiTests.cs:line 53
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:45:00.33]     AeroLink.Api.Tests.BaselineImportApiTests.A_released_build_in_the_workspace_does_not_refuse_an_import [FAIL]
+  Failed AeroLink.Api.Tests.BaselineImportApiTests.A_released_build_in_the_workspace_does_not_refuse_an_import [1 m 42 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ProblemReportApiTests.BootstrapAndLoginAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ProblemReportApiTests.cs:line 666
+   at AeroLink.Api.Tests.BaselineImportApiTests.A_released_build_in_the_workspace_does_not_refuse_an_import() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\BaselineImportApiTests.cs:line 793
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:45:06.31]     AeroLink.Api.Tests.ManualTestChangeRequestApiTests.HLR_and_LLR_packages_are_numbered_and_raised_independently [FAIL]
+  Failed AeroLink.Api.Tests.ManualTestChangeRequestApiTests.HLR_and_LLR_packages_are_numbered_and_raised_independently [1 m 43 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ManualTestChangeRequestApiTests.LoginAsync(HttpClient client, String user) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ManualTestChangeRequestApiTests.cs:line 112
+   at AeroLink.Api.Tests.ManualTestChangeRequestApiTests.HLR_and_LLR_packages_are_numbered_and_raised_independently() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ManualTestChangeRequestApiTests.cs:line 843
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:45:09.27]     AeroLink.Api.Tests.RequirementProposalOptionsApiTests.Existing_retire_or_stale_modify_proposals_are_not_advertised_as_reopenable [FAIL]
+  Failed AeroLink.Api.Tests.RequirementProposalOptionsApiTests.Existing_retire_or_stale_modify_proposals_are_not_advertised_as_reopenable [1 m 41 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.RequirementProposalOptionsApiTests.SignInAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\RequirementProposalOptionsApiTests.cs:line 290
+   at AeroLink.Api.Tests.RequirementProposalOptionsApiTests.Existing_retire_or_stale_modify_proposals_are_not_advertised_as_reopenable() in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\RequirementProposalOptionsApiTests.cs:line 225
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:45:26.64]     AeroLink.Api.Tests.CodeTargetApiTests.Target_search_accepts_the_displayed_revision_identifier(kind: "RequirementProposal") [FAIL]
+  Failed AeroLink.Api.Tests.CodeTargetApiTests.Target_search_accepts_the_displayed_revision_identifier(kind: "RequirementProposal") [1 m 41 s]
+  Error Message:
+   System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+---- System.Net.Http.HttpRequestException : Error while copying content to a stream.
+-------- System.IO.IOException : 
+------------ System.IO.IOException : The client aborted the request.
+  Stack Trace:
+     at System.Net.Http.HttpClient.HandleFailure(Exception e, Boolean telemetryStarted, HttpResponseMessage response, CancellationTokenSource cts, CancellationToken cancellationToken, CancellationTokenSource pendingRequestsCts)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at AeroLink.Api.Tests.ShowcaseApiFixture.LoginAdministratorAsync(HttpClient client) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\ShowcaseApiFixture.cs:line 62
+   at AeroLink.Api.Tests.CodeTargetApiTests.Target_search_accepts_the_displayed_revision_identifier(String kind) in C:\Sean Project\RMT-1040-worktree\product\tests\AeroLink.Api.Tests\CodeTargetApiTests.cs:line 23
+--- End of stack trace from previous location ---
+----- Inner Stack Trace -----
+   at System.Net.Http.HttpContent.WrapStreamCopyException(Exception e)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsync(Int64 maxBufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.AwaitTaskContinuation.RunOrScheduleAction(IAsyncStateMachineBox box, Boolean allowInlining)
+   at System.Threading.Tasks.Task.RunContinuations(Object continuationObject)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.SetExistingTaskResult(Task`1 task, TResult result)
+   at Microsoft.AspNetCore.Mvc.Testing.Handlers.RedirectHandler.SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1.AsyncStateMachineBox`1.MoveNext()
+   at System.Threading.Tasks.Task.InnerInvoke()
+   at System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state)
+   at System.Threading.Tasks.Task.ExecuteWithThreadLocal(Task& currentTaskSlot, Thread threadPoolThread)
+   at System.Threading.Thread.StartCallback()
+--- End of stack trace from previous location ---
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+   at System.Net.Http.HttpClient.<SendAsync>g__Core|83_0(HttpRequestMessage request, HttpCompletionOption completionOption, CancellationTokenSource cts, Boolean disposeCts, CancellationTokenSource pendingRequestsCts, CancellationToken originalCancellationToken)
+----- Inner Stack Trace -----
+   at Microsoft.AspNetCore.TestHost.ResponseBodyReaderStream.ReadAsync(Memory`1 buffer, CancellationToken cancellationToken)
+   at System.IO.Stream.<CopyToAsync>g__Core|30_0(Stream source, Stream destination, Int32 bufferSize, CancellationToken cancellationToken)
+   at System.Net.Http.HttpContent.LoadIntoBufferAsyncCore(Task serializeToStreamTask, LimitArrayPoolWriteStream tempBuffer)
+----- Inner Stack Trace -----
+
+[xUnit.net 00:53:12.32]     AeroLink.Api.Tests.ProblemReportPostgresQualificationTests.Postgres_serializes_check_in_and_attachment_without_500_or_stale_manifest [SKIP]
+Data collector 'Blame' message: All tests finished running, Sequence file will not be generated.
+  Skipped AeroLink.Api.Tests.ProblemReportPostgresQualificationTests.Postgres_serializes_check_in_and_attachment_without_500_or_stale_manifest [1 ms]
+Results File: C:\Users\seanm\AppData\Local\Temp\aerolink-test-diagnostics\20260921-161922-23152-f4147ac5-api-suite\api-suite.trx
+
+Failed!  - Failed:    44, Passed:  1093, Skipped:     2, Total:  1139, Duration: 53 m 11 s - AeroLink.Api.Tests.dll (net10.0)
+Durable test diagnostics (API suite): C:\Users\seanm\AppData\Local\Temp\aerolink-test-diagnostics\20260921-161922-23152-f4147ac5-api-suite
+AEROLINK_TEST_PLAN_RESULT={"planner":{"version":"aerolink-test-planner/v1","hash":"1ea0226f2355e6146ac4166d16c016ed5e5458e15896289104320f64c3fb91f1"},"source":{"base":"b64301b168ed98d4054cb893932978c4d090f745","head":"HEAD","baseSha":"b64301b168ed98d4054cb893932978c4d090f745","headSha":"44fb423a49f5bb2b5b37b19f140f878868144033","mergeBase":"b64301b168ed98d4054cb893932978c4d090f745","paths":"git-diff"},"event":"pull_request","areas":{"docsOnly":false,"backend":true,"client":true,"browser":true,"postgresql":true},"unknownPaths":[],"ci":{"selected":["changes","backend-api","backend-core-domain","backend-core-infrastructure","client","script-contracts","browser-pr","browser-production","postgresql-smoke","gate","metrics-tooling","metrics-report"],"skipped":["warm-chromium-cache","browser-full"]},"execution":{"schemaVersion":1,"mode":"Full","status":"failed","authoritative":false,"selectedCiJobs":["changes","backend-api","backend-core-domain","backend-core-infrastructure","client","script-contracts","browser-pr","browser-production","postgresql-smoke","gate","metrics-tooling","metrics-report"],"executedCiJobs":["backend-api","backend-core-domain","backend-core-infrastructure"],"ciOnlyJobs":["changes","client","script-contracts","browser-pr","browser-production","postgresql-smoke","gate","metrics-tooling","metrics-report"],"resources":{"persistentPostgreSqlTouched":false,"persistentEvidenceRootTouched":false,"disposableDockerPostgreSql":"required for Full; unique container, Docker-assigned loopback port and labeled volume","networkAccessPossible":true},"timing":{"totalMs":3197882,"steps":[{"label":"Build the solution","status":"passed","elapsedMs":3010,"ciJobs":["backend-api","backend-core-domain","backend-core-infrastructure"]},{"label":"API suite","status":"failed","elapsedMs":3194526,"ciJobs":["backend-api"]}]},"error":"dotnet exited with code 1. Durable test diagnostics (API suite): C:\\Users\\seanm\\AppData\\Local\\Temp\\aerolink-test-diagnostics\\20260921-161922-23152-f4147ac5-api-suite"}}
+dotnet exited with code 1. Durable test diagnostics (API suite): 
+C:\Users\seanm\AppData\Local\Temp\aerolink-test-diagnostics\20260921-161922-23152-f4147ac5-api-suite
+At C:\Sean Project\RMT-1040-worktree\product\scripts\AeroLinkTestDiagnostics.psm1:70 char:9
++         throw "$FilePath exited with code $exitCode. Durable test dia ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (dotnet exited w...47ac5-api-suite:String) [], RuntimeException
+    + FullyQualifiedErrorId : dotnet exited with code 1. Durable test diagnostics (API suite): C:\Users\seanm\AppData\ 
+   Local\Temp\aerolink-test-diagnostics\20260921-161922-23152-f4147ac5-api-suite
+ 

@@ -1,0 +1,18 @@
+RMT-1040 Round 4 SQLite probe — final cohort-flag trigger set; SQLite 3.53.1
+recursive_triggers=0:
+  install(first): legacy cohort marked [('53837a30-eed7-402e-b749-e2f9b9b3fd59', None, 1), ('c6a254b9-44e8-475f-9ae5-a38a9c37cc11', None, 1)]
+  ordinary inserts allocated per project: P->1,2  Q->1  (flag 0); legacy retained [(None, 1), (None, 1)]
+  restart install(first=False): no reclassification; cohort flags [(0, 3), (1, 2)]
+  lifecycle updates on legacy and allocated rows passed; same-value ordinal write-back passed
+  forbidden-mutation matrix: 8/8 rejected with SQLITE_CONSTRAINT
+  rollback then reinsert: Q max ordinal now 2 (MAX+1 may reuse an uncommitted value; harmless, membership compares against the captured cutoff)
+  final state (ordinal, flag, count): [(None, 1, 2), (1, 0, 2), (2, 0, 2)]
+recursive_triggers=1:
+  install(first): legacy cohort marked [('055ea88d-1f87-45d7-b1e7-7df230956fc4', None, 1), ('d0394f7a-8609-4ab9-8c7a-8e5f214a1399', None, 1)]
+  ordinary inserts allocated per project: P->1,2  Q->1  (flag 0); legacy retained [(None, 1), (None, 1)]
+  restart install(first=False): no reclassification; cohort flags [(0, 3), (1, 2)]
+  lifecycle updates on legacy and allocated rows passed; same-value ordinal write-back passed
+  forbidden-mutation matrix: 8/8 rejected with SQLITE_CONSTRAINT
+  rollback then reinsert: Q max ordinal now 2 (MAX+1 may reuse an uncommitted value; harmless, membership compares against the captured cutoff)
+  final state (ordinal, flag, count): [(None, 1, 2), (1, 0, 2), (2, 0, 2)]
+PROBE PASSED: ordinary allocation, legacy retention, 8 rejections, lifecycle updates, restart no-reclassification — under both recursive_triggers settings

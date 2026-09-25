@@ -1,0 +1,30 @@
+**********************
+Windows PowerShell transcript start
+Start time: 20260922125438
+Username: runnervmvmocb\runneradmin
+RunAs User: runnervmvmocb\runneradmin
+Configuration Name: 
+Machine: runnervmvmocb (Microsoft Windows NT 10.0.26100.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.EXE -command . 'D:\a\_temp\d38f418e-36cc-4b27-a0ea-a486b6491b7a.ps1'
+Process ID: 8428
+PSVersion: 5.1.26100.33296
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.33296
+BuildVersion: 10.0.26100.33296
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Beginning Reconcile Preflight at 2026-09-22T12:54:40.1675788Z
+PS>TerminatingError(Get-ScheduledTask): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: No MSFT_ScheduledTask objects found with property 'TaskName' equal to 'AeroLinkQualification-f9ff1b42-Preflight-21f404f8'.  Verify the value of the property and retry."
+Launch-context qualification of \AeroLinkQualification-f9ff1b42-Reconcile: Qualified. probe survived every applicable path of the twin of \AeroLinkQualification-f9ff1b42-Reconcile
+Evidence: D:\aq-f9ff1b42\inst\bootstrap\transitions\qualification-runs\AeroLinkQualification-f9ff1b42-Preflight-21f404f8.summary.json
+Beginning Reconcile Final at 2026-09-22T13:00:52.4160326Z
+PS>TerminatingError(Get-ScheduledTask): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: No MSFT_ScheduledTask objects found with property 'TaskName' equal to 'AeroLinkQualification-f9ff1b42-Final-c8bfeada'.  Verify the value of the property and retry."
+Launch-context qualification of \AeroLinkQualification-f9ff1b42-Reconcile: Qualified. probe survived every applicable path of the twin of \AeroLinkQualification-f9ff1b42-Reconcile
+Evidence: D:\aq-f9ff1b42\inst\bootstrap\transitions\qualification-runs\AeroLinkQualification-f9ff1b42-Final-c8bfeada.summary.json
+**********************
+Windows PowerShell transcript end
+End time: 20260922151702
+**********************

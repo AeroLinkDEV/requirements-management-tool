@@ -1,0 +1,3 @@
+{"case": "failed-get-stale-file", "exit": 0, "stdout": "AUTHORITATIVE=true RUN=101 ATTEMPT=1", "stderr": "", "dispatch_posts": 0, "transport": ["CURRENT_GET_FAILED_EXIT_28"]}
+{"case": "failed-get-response-body", "exit": 0, "stdout": "AUTHORITATIVE=true RUN=101 ATTEMPT=1", "stderr": "", "dispatch_posts": 0, "transport": ["CURRENT_GET_FAILED_EXIT_22_WITH_BODY"]}
+BOTH FAILED-READ PROBES REACHED AUTHORITATIVE=true; NO LIVE REQUESTS OR APP PUBLICATION

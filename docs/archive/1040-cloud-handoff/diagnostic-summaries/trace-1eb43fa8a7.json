@@ -1,0 +1,958 @@
+{
+  "source": "ci-full-head-027c985e/browser4/test-results/audit-value-containment-a--100f2-of-taking-the-page-sideways-chromium/trace.zip",
+  "source_sha256": "1eb43fa8a76ff84bf22f7a3f58ba18aacfbc292e991f9619b11cef7c190a85a0",
+  "note": "Raw archive withheld from public Git because browser traces may contain authentication/session data. Safe assertion contexts and action summaries follow; original CI artifacts are linked in CI-RUNS.md.",
+  "entries": [
+    {
+      "name": "resources/src@8731a3e657cfb1ff7ecb272c1a98a8e43c8d95fb.txt",
+      "bytes": 2366
+    },
+    {
+      "name": "resources/src@bd8b8793ad6a2d236b05484493826963a51f1379.txt",
+      "bytes": 17210
+    },
+    {
+      "name": "resources/944565ca3b24361fd587a7297db9c9e171c24263",
+      "bytes": 12314
+    },
+    {
+      "name": "resources/3d316d454213a048303c6216ec05640482ef6e54",
+      "bytes": 387839
+    },
+    {
+      "name": "test.trace",
+      "bytes": 16103,
+      "events": [
+        {
+          "type": "context-options",
+          "browserName": "",
+          "platform": "win32",
+          "wallTime": 1790157823955
+        },
+        {
+          "type": "before",
+          "callId": "hook@1",
+          "class": "Test",
+          "method": "hook",
+          "startTime": 227844.638,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "fixture@22",
+          "parentId": "hook@1",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 227847.846,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@23",
+          "parentId": "fixture@22",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 227848.408,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@23",
+          "endTime": 227850.831
+        },
+        {
+          "type": "after",
+          "callId": "fixture@22",
+          "endTime": 227852.021
+        },
+        {
+          "type": "before",
+          "callId": "fixture@24",
+          "parentId": "hook@1",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 227852.255,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@25",
+          "parentId": "fixture@24",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 227852.992,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@25",
+          "endTime": 227908.12
+        },
+        {
+          "type": "after",
+          "callId": "fixture@24",
+          "endTime": 227908.16
+        },
+        {
+          "type": "before",
+          "callId": "fixture@26",
+          "parentId": "hook@1",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 227908.85,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@27",
+          "parentId": "fixture@26",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 227909.974,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@27",
+          "endTime": 227910.936
+        },
+        {
+          "type": "after",
+          "callId": "fixture@26",
+          "endTime": 227912.131
+        },
+        {
+          "type": "after",
+          "callId": "hook@1",
+          "endTime": 227912.164
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@28",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 227912.952,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\audit-value-containment.spec.ts",
+              "line": 16,
+              "column": 14
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@28",
+          "endTime": 227917.875
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@29",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 227918.741,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\auth.ts",
+              "line": 105,
+              "column": 32,
+              "function": "apiLogin"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@29",
+          "endTime": 229352.289
+        },
+        {
+          "type": "before",
+          "callId": "expect@30",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 229353.436,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\auth.ts",
+              "line": 106,
+              "column": 47,
+              "function": "apiLogin"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@30",
+          "endTime": 229353.474
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 229354.044,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\auth.ts",
+              "line": 63,
+              "column": 14,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@31",
+          "endTime": 229759.748
+        },
+        {
+          "type": "before",
+          "callId": "expect@32",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 229760.833,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\auth.ts",
+              "line": 68,
+              "column": 38,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@32",
+          "endTime": 229856.452
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@33",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 229857.383,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\auth.ts",
+              "line": 69,
+              "column": 20,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@33",
+          "endTime": 229863.625
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@34",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 229864.594,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\auth.ts",
+              "line": 73,
+              "column": 18,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@34",
+          "endTime": 229877.439
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@35",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 229878.042,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\auth.ts",
+              "line": 74,
+              "column": 37,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@35",
+          "endTime": 229888.99
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@36",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 229889.601,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\auth.ts",
+              "line": 75,
+              "column": 60,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@36",
+          "endTime": 229939.382
+        },
+        {
+          "type": "before",
+          "callId": "expect@37",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 229939.93,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\auth.ts",
+              "line": 76,
+              "column": 87,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@37",
+          "endTime": 244946.789,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('heading', { name: /Create your first program|Projects/ })\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('heading', { name: /Create your first program|Projects/ })\u001b[22m\n",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('heading', { name: /Create your first program|Projects/ })\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('heading', { name: /Create your first program|Projects/ })\u001b[22m\n\n    at login (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\auth.ts:76:87)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\audit-value-containment.spec.ts:18:3"
+          }
+        },
+        {
+          "type": "error",
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\auth.ts",
+              "line": 76,
+              "column": 87,
+              "function": "login"
+            },
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\audit-value-containment.spec.ts",
+              "line": 18,
+              "column": 3
+            }
+          ]
+        },
+        {
+          "type": "before",
+          "callId": "hook@38",
+          "class": "Test",
+          "method": "hook",
+          "startTime": 244947.259,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "fixture@39",
+          "parentId": "hook@38",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 245102.64,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "fixture@39",
+          "endTime": 245121.857
+        },
+        {
+          "type": "before",
+          "callId": "fixture@40",
+          "parentId": "hook@38",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 245122.116,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "fixture@40",
+          "endTime": 245122.154
+        },
+        {
+          "type": "before",
+          "callId": "fixture@41",
+          "parentId": "hook@38",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 245122.318,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@42",
+          "parentId": "fixture@41",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 245194.998,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@42",
+          "endTime": 245198.743
+        },
+        {
+          "type": "after",
+          "callId": "fixture@41",
+          "endTime": 245198.778
+        },
+        {
+          "type": "before",
+          "callId": "attach@389b20273d8a2f31d723e68241dda156",
+          "class": "Test",
+          "method": "test.attach",
+          "startTime": 245203.21,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "attach@389b20273d8a2f31d723e68241dda156",
+          "endTime": 245203.22
+        },
+        {
+          "type": "before",
+          "callId": "fixture@51",
+          "parentId": "hook@38",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 245203.884,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@51",
+          "endTime": 245203.897
+        },
+        {
+          "type": "before",
+          "callId": "fixture@52",
+          "parentId": "hook@38",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 245204.017,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@52",
+          "endTime": 245204.027
+        },
+        {
+          "type": "before",
+          "callId": "fixture@54",
+          "parentId": "hook@38",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 245204.402,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@54",
+          "endTime": 245204.442
+        },
+        {
+          "type": "before",
+          "callId": "fixture@61",
+          "parentId": "hook@38",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 245205.453,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@61",
+          "endTime": 245205.462
+        },
+        {
+          "type": "before",
+          "callId": "fixture@65",
+          "parentId": "hook@38",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 245205.922,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@65",
+          "endTime": 245205.929
+        },
+        {
+          "type": "before",
+          "callId": "fixture@67",
+          "parentId": "hook@38",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 245206.205,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@67",
+          "endTime": 245206.212
+        },
+        {
+          "type": "after",
+          "callId": "hook@38",
+          "endTime": 245207.043
+        },
+        {
+          "type": "before",
+          "callId": "hook@73",
+          "class": "Test",
+          "method": "hook",
+          "startTime": 245207.218,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "fixture@77",
+          "parentId": "hook@73",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 245207.847,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "fixture@77",
+          "endTime": 245245.222
+        },
+        {
+          "type": "before",
+          "callId": "fixture@81",
+          "parentId": "hook@73",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 245245.746,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@81",
+          "endTime": 245245.755
+        },
+        {
+          "type": "before",
+          "callId": "fixture@82",
+          "parentId": "hook@73",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 245245.836,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@82",
+          "endTime": 245245.841
+        },
+        {
+          "type": "after",
+          "callId": "hook@73",
+          "endTime": 245246.291
+        }
+      ]
+    },
+    {
+      "name": "1-trace.trace",
+      "bytes": 319151,
+      "events": [
+        {
+          "type": "context-options",
+          "browserName": "chromium",
+          "platform": "win32",
+          "wallTime": 1790157823963
+        },
+        {
+          "type": "before",
+          "callId": "call@5832",
+          "class": "BrowserContext",
+          "method": "newPage",
+          "startTime": 227853.169
+        },
+        {
+          "type": "after",
+          "callId": "call@5832",
+          "endTime": 227907.621
+        },
+        {
+          "type": "before",
+          "callId": "call@5839",
+          "class": "Page",
+          "method": "setViewportSize",
+          "startTime": 227913.095
+        },
+        {
+          "type": "after",
+          "callId": "call@5839",
+          "endTime": 227916.631
+        },
+        {
+          "type": "before",
+          "callId": "call@5844",
+          "class": "Frame",
+          "method": "goto",
+          "startTime": 229354.227
+        },
+        {
+          "type": "after",
+          "callId": "call@5844",
+          "endTime": 229683.308
+        },
+        {
+          "type": "before",
+          "callId": "call@5846",
+          "class": "Frame",
+          "method": "expect",
+          "startTime": 229761.642
+        },
+        {
+          "type": "after",
+          "callId": "call@5846",
+          "endTime": 229850.384
+        },
+        {
+          "type": "before",
+          "callId": "call@5848",
+          "class": "Frame",
+          "method": "isVisible",
+          "startTime": 229857.733
+        },
+        {
+          "type": "after",
+          "callId": "call@5848",
+          "endTime": 229862.146
+        },
+        {
+          "type": "before",
+          "callId": "call@5850",
+          "class": "Frame",
+          "method": "fill",
+          "startTime": 229864.781
+        },
+        {
+          "type": "after",
+          "callId": "call@5850",
+          "endTime": 229875.644
+        },
+        {
+          "type": "before",
+          "callId": "call@5852",
+          "class": "Frame",
+          "method": "fill",
+          "startTime": 229878.176
+        },
+        {
+          "type": "after",
+          "callId": "call@5852",
+          "endTime": 229887.774
+        },
+        {
+          "type": "before",
+          "callId": "call@5854",
+          "class": "Frame",
+          "method": "click",
+          "startTime": 229889.746
+        },
+        {
+          "type": "after",
+          "callId": "call@5854",
+          "endTime": 229937.986
+        },
+        {
+          "type": "before",
+          "callId": "call@5856",
+          "class": "Frame",
+          "method": "expect",
+          "startTime": 229940.382
+        },
+        {
+          "type": "after",
+          "callId": "call@5856",
+          "endTime": 244943.647,
+          "error": {
+            "message": "Expect failed",
+            "stack": "ExpectError: Expect failed\n    at _Frame.expect (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\node_modules\\playwright-core\\lib\\coreBundle.js:23429:17)\n    at _FrameDispatcher.expect (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\node_modules\\playwright-core\\lib\\coreBundle.js:53562:11)\n    at _ProgressController.run (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\node_modules\\playwright-core\\lib\\coreBundle.js:11762:27)\n    at _FrameDispatcher._runCommand (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\node_modules\\playwright-core\\lib\\coreBundle.js:18203:18)\n    at DispatcherConnection.dispatch (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\node_modules\\playwright-core\\lib\\coreBundle.js:18408:27)",
+            "name": "ExpectError"
+          }
+        }
+      ]
+    },
+    {
+      "name": "1-trace.network",
+      "bytes": 228595,
+      "events": [],
+      "note": "Network payload omitted to avoid publishing credentials and session data."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157824071.jpeg",
+      "bytes": 2024,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157825526.jpeg",
+      "bytes": 2024,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157825826.jpeg",
+      "bytes": 2027,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157825881.jpeg",
+      "bytes": 10890,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157825885.jpeg",
+      "bytes": 10891,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157825896.jpeg",
+      "bytes": 10891,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157825915.jpeg",
+      "bytes": 11049,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157825941.jpeg",
+      "bytes": 12997,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157825949.jpeg",
+      "bytes": 12989,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157825974.jpeg",
+      "bytes": 27849,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157825988.jpeg",
+      "bytes": 27884,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157825998.jpeg",
+      "bytes": 28054,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157826012.jpeg",
+      "bytes": 28053,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157826063.jpeg",
+      "bytes": 27572,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157826078.jpeg",
+      "bytes": 27585,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157826094.jpeg",
+      "bytes": 27632,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157826111.jpeg",
+      "bytes": 27630,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157826128.jpeg",
+      "bytes": 27634,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157826143.jpeg",
+      "bytes": 27657,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157826160.jpeg",
+      "bytes": 27662,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157826177.jpeg",
+      "bytes": 27642,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157826194.jpeg",
+      "bytes": 27649,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157826210.jpeg",
+      "bytes": 27649,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@af50a8319e17411e89bb269e5f39d522-1790157841216.jpeg",
+      "bytes": 27649,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/111bea8f0c69aa438c8752bca520e0e3498db9a1.html",
+      "bytes": 739
+    },
+    {
+      "name": "resources/f72de1b517cde90adb98bb420fc98564f8f7d0dd.css",
+      "bytes": 3193
+    },
+    {
+      "name": "resources/d7c94b4e5ad6062eb1102c5e7f78915d563a508b.woff2",
+      "bytes": 14212
+    },
+    {
+      "name": "resources/fc31558149b2585f34abf097e50bb06a368f2379.woff2",
+      "bytes": 14348
+    },
+    {
+      "name": "resources/7cf8a1c146c537f2871906016d37007c61c7fe6c.woff2",
+      "bytes": 14200
+    },
+    {
+      "name": "resources/aa241af22727be87d01df74f939fed8f9b5ecaa0.json",
+      "bytes": 52
+    },
+    {
+      "name": "resources/bcd22c3078bf91d77d2dabb96a752c29499c066f.woff2",
+      "bytes": 14144
+    },
+    {
+      "name": "resources/c3ddfb1bc217df453b41b49dba72402079b7111a.woff2",
+      "bytes": 14172
+    },
+    {
+      "name": "resources/a8ffae88154f12784ae56c4aa31fc84321629965.json",
+      "bytes": 69
+    },
+    {
+      "name": "resources/9dbce5cd9c2b4c23b27fccbe0d8bb43f.jsonl",
+      "bytes": 87
+    },
+    {
+      "name": "resources/c803968955330d6fad86b95a7427432a23ddd200.json",
+      "bytes": 47
+    },
+    {
+      "name": "1-trace.stacks",
+      "bytes": 586
+    },
+    {
+      "name": "0-trace.trace",
+      "bytes": 3422,
+      "events": [
+        {
+          "type": "context-options",
+          "browserName": "",
+          "platform": "win32",
+          "wallTime": 1790157824023
+        },
+        {
+          "type": "before",
+          "callId": "call@5841",
+          "class": "APIRequestContext",
+          "method": "fetch",
+          "startTime": 227918.907
+        },
+        {
+          "type": "after",
+          "callId": "call@5841",
+          "endTime": 229352.097
+        }
+      ]
+    },
+    {
+      "name": "0-trace.network",
+      "bytes": 2134,
+      "events": [],
+      "note": "Network payload omitted to avoid publishing credentials and session data."
+    },
+    {
+      "name": "resources/f3642e27adfdb73e098930beb863ea8d0acc95af.json",
+      "bytes": 513
+    },
+    {
+      "name": "0-trace.stacks",
+      "bytes": 586
+    }
+  ]
+}

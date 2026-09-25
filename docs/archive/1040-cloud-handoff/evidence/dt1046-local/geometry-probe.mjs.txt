@@ -1,0 +1,93 @@
+// Standalone geometry probe v2: node geometry-probe.mjs <baseUrl> <outJson> [screenshot]
+// Loads the digital-thread-1046 fixture as the failing journey does (1920x830,
+// ?page=1&focal=proc-4), waits for canvas settlement, then polls the journey's
+// containment predicate for up to 15s and dumps the final geometry.
+import { createRequire } from 'node:module'
+import fs from 'node:fs'
+
+const require = createRequire('C:/Sean Project/RMT-1040-ci-worktree/product/client/package.json')
+const { chromium } = require('playwright')
+
+const baseUrl = process.argv[2] ?? 'http://localhost:5199'
+const outFile = process.argv[3] ?? 'geometry.json'
+const shot = outFile.replace(/\.json$/, '.png')
+
+const READ = `(() => {
+  const canvas = document.querySelector('.dtCanvas')
+  const scene = document.querySelector('.dtCanvasScene')
+  if (!canvas || !scene) return null
+  const v = canvas.getBoundingClientRect()
+  const toolbar = canvas.querySelector('.dtCanvasControls').getBoundingClientRect()
+  const heading = canvas.querySelector('.dtCanvasLaneHead')
+  const top = Math.max(40, Math.ceil(toolbar.bottom - v.top + Math.max(0, -parseFloat(getComputedStyle(heading).top)) + 8))
+  const panel = document.querySelector('.dtnPanel, .dticPanel, .dtaPanel')
+  const r = panel && panel.getBoundingClientRect()
+  const left = r && /Panel-left/.test(panel.className) ? Math.ceil(r.right - v.left + 12) : 0
+  const right = r && /Panel-right/.test(panel.className) ? Math.ceil(v.right - r.left + 12) : 0
+  const bottom = r && /Panel-bottom/.test(panel.className) ? Math.ceil(v.bottom - r.top + 12) : 0
+  const matrix = new DOMMatrix(getComputedStyle(scene).transform)
+  const cards = [...canvas.querySelectorAll('.dtCanvasNode')]
+  const sel = cards.find(c => c.getAttribute('aria-pressed') === 'true')
+  const sr = sel && sel.getBoundingClientRect()
+  return { kind: 'paint', t: performance.now(), selectedId: sel ? sel.dataset.nodeId : null,
+    box: { x: left, y: top, width: v.width - left - right, height: v.height - top - bottom },
+    display: { x: matrix.e, y: matrix.f, zoom: matrix.a },
+    selectedRect: sr ? { top: sr.top, bottom: sr.bottom, left: sr.left, right: sr.right, width: sr.width, height: sr.height } : null,
+    panelClass: panel ? panel.className : null,
+    heights: cards.map(c => [c.dataset.nodeId, c.offsetHeight]),
+    cards: cards.map(c => { const q = c.getBoundingClientRect(); return { id: c.dataset.nodeId, rect: { top: q.top, bottom: q.bottom, left: q.left, right: q.right, width: q.width, height: q.height }, transform: c.style.transform, clip: c.style.clipPath } }) }
+})()`
+
+const browser = await chromium.launch()
+const page = await browser.newPage({ viewport: { width: 1920, height: 830 } })
+await page.goto(baseUrl + '/tests/fixtures/digital-thread-1046.html?page=1&focal=proc-4')
+await page.locator('.dtCanvas').waitFor({ state: 'visible', timeout: 15000 })
+// settlement: sampled in-page, stable 10 frames
+await page.waitForFunction(() => {
+  const scene = document.querySelector('.dtCanvasScene')
+  if (!scene) return false
+  const sig = [scene.style.transform, ...[...document.querySelectorAll('.dtCanvasNode')].map(n => n.style.transform + '|' + n.offsetHeight)].join(';')
+  window.__stable = (!scene.classList.contains('is-easing') && window.__prev === sig ? (window.__stable || 0) + 1 : 0)
+  window.__prev = sig
+  return window.__stable >= 10
+}, undefined, { timeout: 15000 }).catch(() => {})
+// history sampled from node side, mirroring observeCanvas
+const history = []
+let prevSig = ''
+let prevT = 0
+for (let i = 0; i < 150; i++) {
+  const s = await page.evaluate(READ)
+  if (s) {
+    const sig = JSON.stringify({ ...s, t: 0 })
+    if (sig !== prevSig || s.t - prevT > 200) { history.push(s); prevSig = sig; prevT = s.t }
+  }
+  await new Promise(r => setTimeout(r, 100))
+  if (i > 20 && history.length && performance.now() === 0) break
+}
+// containment predicate exactly as selectedFits, polled 15s (selectedId passed as arg)
+let fits = false
+{
+  const deadline = Date.now() + 15000
+  while (Date.now() < deadline) {
+    const s = history.filter(e => e.kind === 'paint').at(-1)
+    if (s && s.selectedId) {
+      const r = await page.evaluate(sel => {
+        const c = document.querySelector('[data-node-id=' + JSON.stringify(sel) + ']')
+        return c ? (q => ({ top: q.top, bottom: q.bottom, left: q.left, right: q.right }))(c.getBoundingClientRect()) : null
+      }, s.selectedId)
+      if (r) {
+        if (r.top >= s.box.y - 1 && r.bottom <= s.box.y + s.box.height + 1 && r.left >= s.box.x - 1 && r.right <= s.box.x + s.box.width + 1) { fits = true; break }
+      }
+    }
+    await new Promise(r2 => setTimeout(r2, 250))
+  }
+}
+const finalState = history.at(-1) ?? null
+const stillFits = finalState && finalState.selectedRect
+  ? finalState.selectedRect.top >= finalState.box.y - 1 && finalState.selectedRect.bottom <= finalState.box.y + finalState.box.height + 1 &&
+    finalState.selectedRect.left >= finalState.box.x - 1 && finalState.selectedRect.right <= finalState.box.x + finalState.box.width + 1
+  : null
+await page.screenshot({ path: shot })
+await browser.close()
+fs.writeFileSync(outFile, JSON.stringify({ fitsAfterPoll: fits, stillFits, finalState, historyCount: history.length }, null, 2))
+console.log(JSON.stringify({ fitsAfterPoll: fits, stillFits, selectedId: finalState && finalState.selectedId, panel: finalState && finalState.panelClass }))

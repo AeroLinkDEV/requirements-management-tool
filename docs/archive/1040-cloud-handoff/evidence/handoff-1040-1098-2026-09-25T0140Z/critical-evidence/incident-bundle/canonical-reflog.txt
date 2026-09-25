@@ -1,0 +1,20 @@
+b6309fb01d46afe17e7aaa3e34fc0bc38be6e726 HEAD@{2026-09-24 21:03:59 -0400} checkout: moving from main to main
+b6309fb01d46afe17e7aaa3e34fc0bc38be6e726 HEAD@{2026-09-24 21:03:59 -0400} commit: drill C: concurrent settings change
+a35b260b799cbfbea436ed5f63ff3c6ae1f23555 HEAD@{2026-09-24 21:03:59 -0400} revert: Revert "Show the mock projects and FMS mock builds beside the real ones (#1047 part A) (#1105)"
+77b96857868f35926cd439371af159f8af2230e2 HEAD@{2026-09-24 21:03:57 -0400} checkout: moving from main to main
+77b96857868f35926cd439371af159f8af2230e2 HEAD@{2026-09-24 21:03:18 -0400} checkout: moving from drillA2 to main
+bb8a6622a08742cc75f9879efb53ce8aa331b2fe HEAD@{2026-09-24 21:03:18 -0400} commit: drill C: concurrent settings change
+5978b673cbaa7f1683ff8aba7332e18ccb5cdbc0 HEAD@{2026-09-24 21:03:17 -0400} revert: Revert "Show the mock projects and FMS mock builds beside the real ones (#1047 part A) (#1105)"
+77b96857868f35926cd439371af159f8af2230e2 HEAD@{2026-09-24 21:03:16 -0400} checkout: moving from main to drillA2
+77b96857868f35926cd439371af159f8af2230e2 HEAD@{2026-09-24 21:03:15 -0400} checkout: moving from main to main
+77b96857868f35926cd439371af159f8af2230e2 HEAD@{2026-09-24 14:43:09 -0400} pull --ff --recurse-submodules --progress origin: Fast-forward
+625b5ce18aac57c3288aff6e34b57c5b3736fc0d HEAD@{2026-09-24 10:34:58 -0400} merge origin/main: Fast-forward
+97fb5d8bae7e051b871139417033cb8f9ec4007e HEAD@{2026-09-22 19:52:14 -0400} pull --ff --recurse-submodules --progress origin: Fast-forward
+1725a6522727c120c1d10c6cb661801a6f9a6ba3 HEAD@{2026-09-22 17:14:51 -0400} pull --ff --recurse-submodules --progress origin: Fast-forward
+329f075703fd60ff281830712b528a557f359b94 HEAD@{2026-09-22 12:01:18 -0400} pull --ff-only origin main: Fast-forward
+d2200fa8c1f3496d16f96813eb603ae5fd4b68ce HEAD@{2026-09-22 11:17:25 -0400} pull --ff-only origin main: Fast-forward
+202427396043a055fe98191b0fab2a16ab7ced68 HEAD@{2026-09-22 08:21:36 -0400} pull --ff-only origin main: Fast-forward
+a0f66d350049af0a3223ca0409e6862fa2b71633 HEAD@{2026-09-22 05:04:19 -0400} pull --ff-only origin main: Fast-forward
+b64301b168ed98d4054cb893932978c4d090f745 HEAD@{2026-09-21 23:20:52 -0400} checkout: moving from design/problem-report-right-pane-mockups to main
+6cab94984f7690e8960251dbfb41dc7d73fab147 HEAD@{2026-09-21 23:18:55 -0400} commit: Add Problem Report right-pane proposal mockups
+b64301b168ed98d4054cb893932978c4d090f745 HEAD@{2026-09-21 23:18:18 -0400} checkout: moving from main to design/problem-report-right-pane-mockups

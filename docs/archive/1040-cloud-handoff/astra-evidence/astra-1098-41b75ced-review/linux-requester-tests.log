@@ -1,0 +1,177 @@
+✔ ready label requester is trusted-base, readiness-gated, same-repository, and dispatch-only (0.986398ms)
+✔ trusted binding requires Product own readiness authentication before accepting Full evidence (0.130428ms)
+✔ full workflow authenticates exact ready PR state before trusting dispatch inputs (0.256824ms)
+✔ immutable head readiness survives harmless base-branch advancement (1.188754ms)
+✔ label-dispatched Full reuses PR classification and exact indentation (0.218085ms)
+✔ Full runs only by trusted readiness while Fast stays on development PR updates (0.321602ms)
+✔ trusted readiness dispatch preserves ordinary PR browser and gate semantics (0.16274ms)
+✔ Product aggregate is a real PR-suite job gated by trusted exact-run verification (0.38338ms)
+✔ the actual required aggregate refuses every non-success prerequisite result (21.255783ms)
+✔ retry orchestration keeps one common gate before every dispatch POST and never dispatches from refresh lanes (0.90306ms)
+✔ the gate demands mandatory requester identity, first attempts, self-postdating and spend-once consumption (0.275434ms)
+✔ uncertain dispatch outcomes end in refusal; the dispatched run is pinned by response identity or boundary-filtered discovery (0.257129ms)
+✔ refresh lanes and stale/exhausted product states never dispatch; only a qualified readiness request does (0.11028ms)
+✔ the exact-head matcher verb selection executes against scripted transcripts (224.997794ms)
+✔ the common dispatch gate executes: freshness, spend-once, identity, ties, histories and shapes (369.028031ms)
+✔ pinned Product identity checks execute: pin/poll modes, trust, attempt, and terminal states (195.599908ms)
+✔ the bounded pagination walk refuses truncated histories (34.726179ms)
+✔ the initial decision dispatches once for readiness labels and never for refreshes; authoritative success is reused (25.459628ms)
+✖ integrated: eligible NONE dispatches once, pins the response identity, and qualifies the pinned attempt (286.428125ms)
+✖ integrated: eligible EXHAUSTED dispatch with a lost response recovers by discovery — one POST total (4542.10916ms)
+✔ integrated: a lost response that never resolves refuses after exactly one POST (4950.256222ms)
+✖ integrated: stale, consumed and missing-identity refusals post zero times (253.413365ms)
+✔ integrated: a requester rerun refuses with zero POSTs (177.753914ms)
+✖ integrated: pinned-run trust changes and attempt changes refuse after the single dispatch (280.630307ms)
+✖ integrated: a missing pinned record (404) refuses after the single dispatch (251.690646ms)
+✖ integrated: an existing authoritative success is reused without dispatch (256.217853ms)
+✖ integrated: failed qualification evidence refuses and the per-attempt jobs request is exact (266.750194ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 20
+ℹ fail 7
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12305.075599
+
+✖ failing tests:
+
+test at product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:775:1
+✖ integrated: eligible NONE dispatches once, pins the response identity, and qualifies the pinned attempt (286.428125ms)
+  AssertionError [ERR_ASSERTION]: ||||
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///src/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:782:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:752:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual'
+  }
+
+test at product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:790:1
+✖ integrated: eligible EXHAUSTED dispatch with a lost response recovers by discovery — one POST total (4542.10916ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///src/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:797:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:752:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual'
+  }
+
+test at product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:812:1
+✖ integrated: stale, consumed and missing-identity refusals post zero times (253.413365ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  22 !== 1
+  
+      at TestContext.<anonymous> (file:///src/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:817:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:752:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 22,
+    expected: 1,
+    operator: 'strictEqual'
+  }
+
+test at product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:847:1
+✖ integrated: pinned-run trust changes and attempt changes refuse after the single dispatch (280.630307ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /trust identity changed/. Input:
+  
+  ''
+  
+      at TestContext.<anonymous> (file:///src/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:858:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:752:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '',
+    expected: /trust identity changed/,
+    operator: 'match'
+  }
+
+test at product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:875:1
+✖ integrated: a missing pinned record (404) refuses after the single dispatch (251.690646ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  22 !== 1
+  
+      at TestContext.<anonymous> (file:///src/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:880:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:752:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 22,
+    expected: 1,
+    operator: 'strictEqual'
+  }
+
+test at product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:884:1
+✖ integrated: an existing authoritative success is reused without dispatch (256.217853ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  22 !== 0
+  
+      at TestContext.<anonymous> (file:///src/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:890:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:752:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 22,
+    expected: 0,
+    operator: 'strictEqual'
+  }
+
+test at product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:895:1
+✖ integrated: failed qualification evidence refuses and the per-attempt jobs request is exact (266.750194ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /Product aggregate is not authoritative success/. Input:
+  
+  ''
+  
+      at TestContext.<anonymous> (file:///src/product/test-planner/tests/full-ci-readiness-dispatch.test.mjs:909:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:752:18)
+      at Test.postRun (node:internal/test_runner/test:1191:19)
+      at Test.run (node:internal/test_runner/test:1119:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:752:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '',
+    expected: /Product aggregate is not authoritative success/,
+    operator: 'match'
+  }

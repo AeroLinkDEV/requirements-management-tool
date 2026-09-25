@@ -1,0 +1,14 @@
+{
+  "requestId": "71b8d41293a44df6",
+  "outcome": "Succeeded",
+  "granted": true,
+  "currentHealth": "Running",
+  "restored": true,
+  "restorationObligation": "None",
+  "blocking": false,
+  "processId": 8152,
+  "startedAt": "2026-09-22T12:54:47.9644985Z",
+  "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+  "detail": "launch succeeded (commit evidence: authority); now: pid 8152 is running with its recorded identity",
+  "at": "2026-09-22T12:54:48.5800113Z"
+}

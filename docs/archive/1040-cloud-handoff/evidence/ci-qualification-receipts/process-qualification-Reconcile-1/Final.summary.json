@@ -1,0 +1,344 @@
+{
+  "tool": "aerolink-context-qualification",
+  "sourceTask": "\\AeroLinkQualification-f9ff1b42-Reconcile",
+  "twin": "AeroLinkQualification-f9ff1b42-Final-c8bfeada",
+  "sourceDefinitionHash": "63B9130C61D99437B5D9CF12DE6C787BABF4FB29C1D9102656DE00A9F95A7C05",
+  "exportedXmlSha256": "BE180A50368230D4F011BE227524BDB5442D1EE7C885E64B564C234C10209357",
+  "executionTimeLimit": "02:15:00",
+  "runs": [
+    {
+      "run": "run1",
+      "record": {
+        "runId": "AeroLinkQualification-f9ff1b42-Final-c8bfeada-run1",
+        "pid": 4344,
+        "at": "2026-09-22T13:00:54.9636248Z",
+        "contextValid": true,
+        "contextReason": "attested by ancestry",
+        "descriptor": {
+          "contextKind": "Task",
+          "contextName": "task|powershell.exe",
+          "definitionHash": "63B9130C61D99437B5D9CF12DE6C787BABF4FB29C1D9102656DE00A9F95A7C05",
+          "placementProtocol": "aerolink-placement-1",
+          "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+          "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+          "principalSid": "[REDACTED windows-sid]",
+          "logonType": "Batch",
+          "sessionClass": "session0",
+          "tokenElevation": "True",
+          "tokenElevationType": "Default",
+          "integrityLevel": "High",
+          "administratorsGroup": "Enabled",
+          "immediateJobFlags": "0x1000"
+        },
+        "descriptorHash": "F3BB2735642A5DCFB1B357EA219903AD8C37F64A9BF26981375355524C3F5FA3",
+        "attestation": {
+          "taskPath": "\\AeroLinkQualification-f9ff1b42-Final-c8bfeada",
+          "instance": "{0B8BF418-E399-4800-BC30-94DF04C9DBDF}",
+          "enginePid": 4344,
+          "chain": "powershell.exe"
+        },
+        "token": "[REDACTED]",
+        "breakawayPermittedByImmediateJob": true,
+        "decision": "Completed",
+        "attemptId": "20260922T130055-6c99ba09",
+        "containmentProven": true,
+        "probe": {
+          "processId": 8172,
+          "startedAt": "2026-09-22T13:00:58.3380385Z",
+          "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+        },
+        "detail": "the transition completed; 1 required role(s) verified by the outer",
+        "publishedAt": "2026-09-22T13:00:59.5705307Z"
+      },
+      "paths": [
+        "transientJob",
+        "wrapperExit",
+        "taskCompletion"
+      ],
+      "survival": {
+        "wrapperExit": true,
+        "taskCompletion": true,
+        "transientJob": true,
+        "ending": "SelfEnded at 7s; task result 0"
+      },
+      "lastTaskResult": 0,
+      "endingClass": "Valid",
+      "endingDetail": ""
+    },
+    {
+      "run": "run2",
+      "record": {
+        "runId": "AeroLinkQualification-f9ff1b42-Final-c8bfeada-run2",
+        "attemptId": "20260922T130104-702a3cfb",
+        "operation": "QualificationProbe",
+        "jobName": "Global\\AeroLinkTransition-20260922T130104-702a3cfb",
+        "activeAt": "2026-09-22T13:01:08.6166366Z",
+        "qualification": {
+          "descriptorHash": "F3BB2735642A5DCFB1B357EA219903AD8C37F64A9BF26981375355524C3F5FA3",
+          "descriptor": {
+            "contextKind": "Task",
+            "contextName": "task|powershell.exe",
+            "definitionHash": "63B9130C61D99437B5D9CF12DE6C787BABF4FB29C1D9102656DE00A9F95A7C05",
+            "placementProtocol": "aerolink-placement-1",
+            "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+            "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+            "principalSid": "[REDACTED windows-sid]",
+            "logonType": "Batch",
+            "sessionClass": "session0",
+            "tokenElevation": "True",
+            "tokenElevationType": "Default",
+            "integrityLevel": "High",
+            "administratorsGroup": "Enabled",
+            "immediateJobFlags": "0x1000"
+          },
+          "attestation": {
+            "taskPath": "\\AeroLinkQualification-f9ff1b42-Final-c8bfeada",
+            "instance": "{8FB9B5C0-B174-4E47-8A7D-338E5F565326}",
+            "enginePid": 2800,
+            "chain": "powershell.exe"
+          },
+          "token": "[REDACTED]"
+        },
+        "probe": {
+          "processId": 1968,
+          "startedAt": "2026-09-22T13:01:07.8428076Z",
+          "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+        },
+        "mutator": {
+          "processId": 7904,
+          "startedAt": "2026-09-22T13:01:08.5123826Z",
+          "image": "C:\\Windows\\System32\\cmd.exe"
+        },
+        "at": "2026-09-22T13:01:08.6206787Z"
+      },
+      "paths": [
+        "taskStop"
+      ],
+      "survival": {
+        "attempt": {
+          "attemptId": "20260922T130104-702a3cfb",
+          "receiptClass": "Valid",
+          "containmentProven": true,
+          "observedBy": "witness",
+          "detail": "completion observed by witness",
+          "quiescence": "Quiescent"
+        },
+        "ending": "DriverStopped at 31s; task result 267014",
+        "taskStop": true,
+        "active": {
+          "runId": "AeroLinkQualification-f9ff1b42-Final-c8bfeada-run2",
+          "attemptId": "20260922T130104-702a3cfb",
+          "operation": "QualificationProbe",
+          "jobName": "Global\\AeroLinkTransition-20260922T130104-702a3cfb",
+          "activeAt": "2026-09-22T13:01:08.6166366Z",
+          "qualification": {
+            "descriptorHash": "F3BB2735642A5DCFB1B357EA219903AD8C37F64A9BF26981375355524C3F5FA3",
+            "descriptor": {
+              "contextKind": "Task",
+              "contextName": "task|powershell.exe",
+              "definitionHash": "63B9130C61D99437B5D9CF12DE6C787BABF4FB29C1D9102656DE00A9F95A7C05",
+              "placementProtocol": "aerolink-placement-1",
+              "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+              "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+              "principalSid": "[REDACTED windows-sid]",
+              "logonType": "Batch",
+              "sessionClass": "session0",
+              "tokenElevation": "True",
+              "tokenElevationType": "Default",
+              "integrityLevel": "High",
+              "administratorsGroup": "Enabled",
+              "immediateJobFlags": "0x1000"
+            },
+            "attestation": {
+              "taskPath": "\\AeroLinkQualification-f9ff1b42-Final-c8bfeada",
+              "instance": "{8FB9B5C0-B174-4E47-8A7D-338E5F565326}",
+              "enginePid": 2800,
+              "chain": "powershell.exe"
+            },
+            "token": "[REDACTED]"
+          },
+          "probe": {
+            "processId": 1968,
+            "startedAt": "2026-09-22T13:01:07.8428076Z",
+            "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+          },
+          "mutator": {
+            "processId": 7904,
+            "startedAt": "2026-09-22T13:01:08.5123826Z",
+            "image": "C:\\Windows\\System32\\cmd.exe"
+          },
+          "at": "2026-09-22T13:01:08.6206787Z"
+        },
+        "recovery": {
+          "Proven": true,
+          "Detail": "the attempt proved containment and its transient mutator pid 7904 is no longer running"
+        },
+        "mutatorState": "Gone"
+      },
+      "lastTaskResult": 267014,
+      "endingClass": "Valid",
+      "endingDetail": ""
+    },
+    {
+      "run": "run3",
+      "record": {
+        "runId": "AeroLinkQualification-f9ff1b42-Final-c8bfeada-run3",
+        "attemptId": "20260922T130138-8fb957b1",
+        "operation": "QualificationProbe",
+        "jobName": "Global\\AeroLinkTransition-20260922T130138-8fb957b1",
+        "activeAt": "2026-09-22T13:01:41.8522861Z",
+        "qualification": {
+          "descriptorHash": "F3BB2735642A5DCFB1B357EA219903AD8C37F64A9BF26981375355524C3F5FA3",
+          "descriptor": {
+            "contextKind": "Task",
+            "contextName": "task|powershell.exe",
+            "definitionHash": "63B9130C61D99437B5D9CF12DE6C787BABF4FB29C1D9102656DE00A9F95A7C05",
+            "placementProtocol": "aerolink-placement-1",
+            "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+            "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+            "principalSid": "[REDACTED windows-sid]",
+            "logonType": "Batch",
+            "sessionClass": "session0",
+            "tokenElevation": "True",
+            "tokenElevationType": "Default",
+            "integrityLevel": "High",
+            "administratorsGroup": "Enabled",
+            "immediateJobFlags": "0x1000"
+          },
+          "attestation": {
+            "taskPath": "\\AeroLinkQualification-f9ff1b42-Final-c8bfeada",
+            "instance": "{91199247-93AB-4D0C-9362-01626FFD1EFF}",
+            "enginePid": 4308,
+            "chain": "powershell.exe"
+          },
+          "token": "[REDACTED]"
+        },
+        "probe": {
+          "processId": 6180,
+          "startedAt": "2026-09-22T13:01:40.9497404Z",
+          "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+        },
+        "mutator": {
+          "processId": 9112,
+          "startedAt": "2026-09-22T13:01:41.7472956Z",
+          "image": "C:\\Windows\\System32\\cmd.exe"
+        },
+        "at": "2026-09-22T13:01:41.8551253Z"
+      },
+      "paths": [
+        "hardTimeout"
+      ],
+      "survival": {
+        "hardTimeout": true,
+        "attempt": {
+          "attemptId": "20260922T130138-8fb957b1",
+          "receiptClass": "Valid",
+          "containmentProven": true,
+          "observedBy": "witness",
+          "detail": "completion observed by witness",
+          "quiescence": "Quiescent"
+        },
+        "ending": "HardLimitFired at 8121s; task result 267014",
+        "active": {
+          "runId": "AeroLinkQualification-f9ff1b42-Final-c8bfeada-run3",
+          "attemptId": "20260922T130138-8fb957b1",
+          "operation": "QualificationProbe",
+          "jobName": "Global\\AeroLinkTransition-20260922T130138-8fb957b1",
+          "activeAt": "2026-09-22T13:01:41.8522861Z",
+          "qualification": {
+            "descriptorHash": "F3BB2735642A5DCFB1B357EA219903AD8C37F64A9BF26981375355524C3F5FA3",
+            "descriptor": {
+              "contextKind": "Task",
+              "contextName": "task|powershell.exe",
+              "definitionHash": "63B9130C61D99437B5D9CF12DE6C787BABF4FB29C1D9102656DE00A9F95A7C05",
+              "placementProtocol": "aerolink-placement-1",
+              "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+              "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+              "principalSid": "[REDACTED windows-sid]",
+              "logonType": "Batch",
+              "sessionClass": "session0",
+              "tokenElevation": "True",
+              "tokenElevationType": "Default",
+              "integrityLevel": "High",
+              "administratorsGroup": "Enabled",
+              "immediateJobFlags": "0x1000"
+            },
+            "attestation": {
+              "taskPath": "\\AeroLinkQualification-f9ff1b42-Final-c8bfeada",
+              "instance": "{91199247-93AB-4D0C-9362-01626FFD1EFF}",
+              "enginePid": 4308,
+              "chain": "powershell.exe"
+            },
+            "token": "[REDACTED]"
+          },
+          "probe": {
+            "processId": 6180,
+            "startedAt": "2026-09-22T13:01:40.9497404Z",
+            "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+          },
+          "mutator": {
+            "processId": 9112,
+            "startedAt": "2026-09-22T13:01:41.7472956Z",
+            "image": "C:\\Windows\\System32\\cmd.exe"
+          },
+          "at": "2026-09-22T13:01:41.8551253Z"
+        },
+        "recovery": {
+          "Proven": true,
+          "Detail": "the attempt proved containment and its transient mutator pid 9112 is no longer running"
+        },
+        "mutatorState": "Gone"
+      },
+      "lastTaskResult": 267014,
+      "endingClass": "Valid",
+      "endingDetail": ""
+    }
+  ],
+  "startedAt": "2026-09-22T13:00:53.2080041Z",
+  "probeStateRoot": "D:\\aq-f9ff1b42\\Final",
+  "recoveryProven": true,
+  "recoveryDetail": "taskStop: the attempt proved containment and its transient mutator pid 7904 is no longer running; hardTimeout: the attempt proved containment and its transient mutator pid 9112 is no longer running",
+  "runDescriptorHashes": {
+    "run1": "F3BB2735642A5DCFB1B357EA219903AD8C37F64A9BF26981375355524C3F5FA3",
+    "run2": "F3BB2735642A5DCFB1B357EA219903AD8C37F64A9BF26981375355524C3F5FA3",
+    "run3": "F3BB2735642A5DCFB1B357EA219903AD8C37F64A9BF26981375355524C3F5FA3"
+  },
+  "verdict": "Qualified",
+  "treeUnresolved": [],
+  "probesProvenStopped": [
+    {
+      "processId": 8172,
+      "state": "Gone"
+    },
+    {
+      "processId": 1968,
+      "state": "Gone"
+    },
+    {
+      "processId": 6180,
+      "state": "Gone"
+    }
+  ],
+  "twinRemaining": false,
+  "cleanupErrors": [],
+  "cleanupNotes": [],
+  "detail": "probe survived every applicable path of the twin of \\AeroLinkQualification-f9ff1b42-Reconcile",
+  "descriptorHash": "F3BB2735642A5DCFB1B357EA219903AD8C37F64A9BF26981375355524C3F5FA3",
+  "descriptor": {
+    "contextKind": "Task",
+    "contextName": "task|powershell.exe",
+    "definitionHash": "63B9130C61D99437B5D9CF12DE6C787BABF4FB29C1D9102656DE00A9F95A7C05",
+    "placementProtocol": "aerolink-placement-1",
+    "kernelSourceHash": "6B369B67A6D3B78C5064FB84CAF52D428959F866BE879EC3C5D8F1210FBE699E",
+    "hostImage": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+    "principalSid": "[REDACTED windows-sid]",
+    "logonType": "Batch",
+    "sessionClass": "session0",
+    "tokenElevation": "True",
+    "tokenElevationType": "Default",
+    "integrityLevel": "High",
+    "administratorsGroup": "Enabled",
+    "immediateJobFlags": "0x1000"
+  },
+  "finishedAt": "2026-09-22T15:17:00.9835737Z"
+}

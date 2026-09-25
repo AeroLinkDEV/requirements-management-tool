@@ -1,0 +1,39 @@
+import pathlib, subprocess, sys, json
+
+OLD = pathlib.Path(r'C:\Users\seanm\AppData\Local\Temp\astra-1098-eace33f6-review\review_probe.py')
+context = {'__file__': __file__}
+exec(OLD.read_text().split('# Unmodified complete workflow run step;')[0], context)
+defs = context['definitions']
+step = context['step']
+loop_start = step.index('authoritative="false"')
+loop_end = step.index('\n# Qualification evidence', loop_start)
+loop = step[loop_start:loop_end]
+
+# Probe the actual helper/caller contract, with a failed current API read and an
+# existing response file. No workflow code is changed; only transport is mocked.
+setup = r'''
+PINNED_ID=101
+PINNED_ATTEMPT=1
+cp "$RUNNER_TEMP/run101.json" "$RUNNER_TEMP/pinned-101.json"
+verify_live_pr() { :; }
+curl() { printf 'CURRENT_GET_FAILED_EXIT_28\n' >> "$MOCK_LOG"; return 28; }
+'''
+r = context['shell_case']('failed-get-stale-file', defs + setup + loop + '\nprintf "AUTHORITATIVE=%s RUN=%s ATTEMPT=%s\\n" "$authoritative" "$run_id" "$PINNED_ATTEMPT"\n')
+assert r['exit'] == 0 and 'AUTHORITATIVE=true RUN=101 ATTEMPT=1' in r['stdout']
+assert 'CURRENT_GET_FAILED_EXIT_28' in r['transport']
+
+# Independently, a non-2xx read carrying a success-shaped body is also accepted.
+# The function must propagate the transport failure, regardless of JSON content.
+setup = r'''
+PINNED_ID=101
+PINNED_ATTEMPT=1
+verify_live_pr() { :; }
+curl() {
+  printf 'CURRENT_GET_FAILED_EXIT_22_WITH_BODY\n' >> "$MOCK_LOG"
+  cp "$RUNNER_TEMP/run101.json" "$RUNNER_TEMP/pinned-101.json"
+  return 22
+}
+'''
+r = context['shell_case']('failed-get-response-body', defs + setup + loop + '\nprintf "AUTHORITATIVE=%s RUN=%s ATTEMPT=%s\\n" "$authoritative" "$run_id" "$PINNED_ATTEMPT"\n')
+assert r['exit'] == 0 and 'AUTHORITATIVE=true RUN=101 ATTEMPT=1' in r['stdout']
+print('BOTH FAILED-READ PROBES REACHED AUTHORITATIVE=true; NO LIVE REQUESTS OR APP PUBLICATION')

@@ -1,0 +1,34 @@
+**********************
+Windows PowerShell transcript start
+Start time: 20260922125449
+Username: runnervmvmocb\runneradmin
+RunAs User: runnervmvmocb\runneradmin
+Configuration Name: 
+Machine: runnervmvmocb (Microsoft Windows NT 10.0.26100.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.EXE -command . 'D:\a\_temp\598beff1-2f79-4633-94f1-8ce6ff9c9db2.ps1'
+Process ID: 6956
+PSVersion: 5.1.26100.33296
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.33296
+BuildVersion: 10.0.26100.33296
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+
+
+Beginning FirstDeployment Preflight at 2026-09-22T12:55:16.3152482Z
+PS>TerminatingError(Get-ScheduledTask): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: No MSFT_ScheduledTask objects found with property 'TaskName' equal to 'AeroLinkQualification-2087a3e2-Preflight-ac147007'.  Verify the value of the property and retry."
+Launch-context qualification of \AeroLinkQualification-2087a3e2-FirstDeployment: Qualified. probe survived every applicable path of the twin of \AeroLinkQualification-2087a3e2-FirstDeployment
+Evidence: D:\aq-2087a3e2\inst\bootstrap\transitions\qualification-runs\AeroLinkQualification-2087a3e2-Preflight-ac147007.summary.json
+Beginning FirstDeployment Final at 2026-09-22T13:01:37.1240155Z
+PS>TerminatingError(Get-ScheduledTask): "The running command stopped because the preference variable "ErrorActionPreference" or common parameter is set to Stop: No MSFT_ScheduledTask objects found with property 'TaskName' equal to 'AeroLinkQualification-2087a3e2-Final-dd911e1d'.  Verify the value of the property and retry."
+Launch-context qualification of \AeroLinkQualification-2087a3e2-FirstDeployment: Qualified. probe survived every applicable path of the twin of \AeroLinkQualification-2087a3e2-FirstDeployment
+Evidence: D:\aq-2087a3e2\inst\bootstrap\transitions\qualification-runs\AeroLinkQualification-2087a3e2-Final-dd911e1d.summary.json
+
+
+**********************
+Windows PowerShell transcript end
+End time: 20260922153000
+**********************

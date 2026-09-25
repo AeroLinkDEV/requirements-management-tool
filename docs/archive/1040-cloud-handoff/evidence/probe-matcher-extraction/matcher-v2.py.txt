@@ -1,0 +1,31 @@
+import json, sys
+
+# usage: matcher-v2.py <runs.json> <head_sha> <pr_number> <head_ref>
+# Proposed matcher v2 contract:
+#   NONE                       no trusted matches
+#   PENDING <id>               a trusted match is running (id = newest running)
+#   PRE <id>                   all matches are completed-unsuccessful (pre-dispatch history;
+#                              id = newest) — caller treats id <= boundary_id as discovery
+#   EXHAUSTED <id> <concl>     same, emitted when id > boundary_id by the caller shell
+#   FOUND <id> success         lowest-id completed success (unchanged precedence)
+runs = json.load(open(sys.argv[1], encoding='utf-8')).get('workflow_runs', [])
+sha, pr, ref = sys.argv[2], int(sys.argv[3]), sys.argv[4]
+TRUSTED = (lambda r: r.get('head_sha') == sha and r.get('head_branch') == ref
+           and r.get('event') == 'workflow_dispatch'
+           and (r.get('actor') or {}).get('login') == 'github-actions[bot]'
+           and (r.get('triggering_actor') or {}).get('login') == 'github-actions[bot]'
+           and pr in {item.get('number') for item in r.get('pull_requests', [])})
+matches = [r for r in runs if TRUSTED(r)]
+if not matches:
+    print('NONE'); raise SystemExit
+successful = [r for r in matches if r.get('status') == 'completed' and r.get('conclusion') == 'success']
+if successful:
+    run = min(successful, key=lambda item: item['id'])
+    print(f"FOUND {run['id']} success"); raise SystemExit
+running = [r for r in matches if r.get('status') != 'completed']
+if running:
+    run = max(running, key=lambda item: item['id'])
+    print(f"PENDING {run['id']}"); raise SystemExit
+failed = [r for r in matches if r.get('status') == 'completed' and r.get('conclusion') != 'success']
+newest = max(failed, key=lambda item: item['updated_at'])
+print(f"PRE {max(r['id'] for r in failed)}")

@@ -1,0 +1,95 @@
+{
+  "decision": "Completed",
+  "stage": "chain",
+  "reason": "ChainExited",
+  "detail": "the transition completed; 1 required role(s) verified by the outer",
+  "failures": [],
+  "chainFailures": [],
+  "roleFailures": [],
+  "operation": {
+    "succeeded": true,
+    "roles": [
+      {
+        "role": "qualification-probe",
+        "requested": true,
+        "restored": true,
+        "evidence": "readiness re-checked now: a marker bound to the request, nonce and pid 36544",
+        "outcome": "Succeeded"
+      }
+    ],
+    "restorationRequired": false
+  },
+  "cleanup": {
+    "transitionContainmentProven": true,
+    "launchesBlocking": false,
+    "collected": []
+  },
+  "recovery": {
+    "admissible": true,
+    "quiescence": "Quiescent",
+    "problems": []
+  },
+  "mutationStarted": true,
+  "restored": true,
+  "restorationRequired": false,
+  "launches": [
+    {
+      "requestId": "124f8478528343f5",
+      "role": "qualification-probe",
+      "outcome": "Succeeded",
+      "currentHealth": "Running",
+      "restored": true,
+      "blocking": false,
+      "processId": 36544,
+      "detail": "launch succeeded (commit evidence: authority); now: pid 36544 is running with its recorded identity",
+      "startedAt": "2026-09-22T18:26:36.5095717Z",
+      "image": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    }
+  ],
+  "delegate": {
+    "decision": "Completed",
+    "failures": [],
+    "pid": 29840,
+    "phase": "Delegate",
+    "at": "2026-09-22T18:26:37.3119555Z",
+    "detail": "launch succeeded (commit evidence: authority); now: pid 36544 is running with its recorded identity",
+    "mutated": true,
+    "sourceIdentity": "202427396043a055fe98191b0fab2a16ab7ced68",
+    "roles": [
+      {
+        "role": "qualification-probe",
+        "restored": true,
+        "evidence": "launch succeeded (commit evidence: authority); now: pid 36544 is running with its recorded identity"
+      }
+    ]
+  },
+  "delegateOutcomeClass": "Valid",
+  "delegateExit": {
+    "pid": 29840,
+    "observation": "Observed",
+    "exitCode": 0,
+    "terminatedByOuter": false,
+    "detail": ""
+  },
+  "continuation": null,
+  "continuationOutcomeClass": "Absent",
+  "protocolVersion": 1,
+  "descriptorHash": "437B04BB4FD25EC93DA7C179A85F81981A236EA046B0F4C97416BD454A3D09EF",
+  "plan": {
+    "operation": "QualificationProbe",
+    "sourceRoot": "C:\\Sean Project\\AeroLink Production",
+    "configPath": null,
+    "policy": "Preserve",
+    "scheduled": true,
+    "topology": {
+      "tunnelRunning": false,
+      "runtimeRunning": false
+    }
+  },
+  "attemptId": "20260922T182633-baec36d4",
+  "caller": "QualificationProbe",
+  "outerPid": 4312,
+  "exitCode": 0,
+  "elapsedSeconds": 4.3,
+  "at": "2026-09-22T18:26:37.8851878Z"
+}

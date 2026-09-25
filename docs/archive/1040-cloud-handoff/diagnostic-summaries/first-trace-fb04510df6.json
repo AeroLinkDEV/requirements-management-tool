@@ -1,0 +1,1794 @@
+{
+  "source": "[Astra temporary review]/astra-1098-failed-gate-review/first-trace.zip",
+  "source_sha256": "fb04510df64791d258c8c59dbc20fc29fc42bf08c585566eb86c0b14057426cf",
+  "note": "Raw archive withheld from public Git because browser traces may contain authentication/session data. Safe assertion contexts and action summaries follow; original CI artifacts are linked in CI-RUNS.md.",
+  "entries": [
+    {
+      "name": "resources/src@1a8d6ca061156801e976d236ad91e9310b241e7d.txt",
+      "bytes": 16468
+    },
+    {
+      "name": "resources/src@04f70ae34b1fa8374c7ab1c8a47bae27c0b42639.txt",
+      "bytes": 3501
+    },
+    {
+      "name": "resources/01ff3e57c98b83953b203809589238ea31fd4bdc",
+      "bytes": 96749
+    },
+    {
+      "name": "resources/f15eec2cc0d268f591ec37f1cba1e29cd75fe3e9",
+      "bytes": 191583
+    },
+    {
+      "name": "test.trace",
+      "bytes": 52983,
+      "events": [
+        {
+          "type": "context-options",
+          "browserName": "",
+          "platform": "win32",
+          "wallTime": 1790287392824
+        },
+        {
+          "type": "before",
+          "callId": "hook@1",
+          "class": "Test",
+          "method": "hook",
+          "startTime": 316943.891,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "fixture@22",
+          "parentId": "hook@1",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 316949.275,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@23",
+          "parentId": "fixture@22",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 316950.106,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@23",
+          "endTime": 316952.363
+        },
+        {
+          "type": "after",
+          "callId": "fixture@22",
+          "endTime": 316953.681
+        },
+        {
+          "type": "before",
+          "callId": "fixture@24",
+          "parentId": "hook@1",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 316953.927,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@25",
+          "parentId": "fixture@24",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 316954.622,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@25",
+          "endTime": 317013.35
+        },
+        {
+          "type": "after",
+          "callId": "fixture@24",
+          "endTime": 317013.401
+        },
+        {
+          "type": "after",
+          "callId": "hook@1",
+          "endTime": 317013.435
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@26",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 317014.834,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 204,
+              "column": 14
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@26",
+          "endTime": 317020.918
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@27",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 317021.811,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-rendered-helpers.ts",
+              "line": 29,
+              "column": 3,
+              "function": "observeCanvas"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@27",
+          "endTime": 317022.896
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@28",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 317023.97,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 10,
+              "column": 14,
+              "function": "open"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@28",
+          "endTime": 317524.006
+        },
+        {
+          "type": "before",
+          "callId": "expect@29",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 317525.23,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-rendered-helpers.ts",
+              "line": 49,
+              "column": 43,
+              "function": "waitForCanvasSettled"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@29",
+          "endTime": 317939.466
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@30",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 317940.862,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-rendered-helpers.ts",
+              "line": 50,
+              "column": 14,
+              "function": "waitForCanvasSettled"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@30",
+          "endTime": 318796.744
+        },
+        {
+          "type": "before",
+          "callId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 318797.692,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 33,
+              "column": 7,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@32",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 318798.902,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@32",
+          "endTime": 318816.365
+        },
+        {
+          "type": "before",
+          "callId": "expect@33",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 318816.95,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@33",
+          "endTime": 318819.135,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@34",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 318919.562,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@34",
+          "endTime": 318936.9
+        },
+        {
+          "type": "before",
+          "callId": "expect@35",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 318937.88,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@35",
+          "endTime": 318938.239,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@36",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 319191.074,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@36",
+          "endTime": 319208.972
+        },
+        {
+          "type": "before",
+          "callId": "expect@37",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 319209.54,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@37",
+          "endTime": 319209.845,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@38",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 319711.461,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@38",
+          "endTime": 319729.52
+        },
+        {
+          "type": "before",
+          "callId": "expect@39",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 319730.052,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@39",
+          "endTime": 319730.305,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@40",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 320732.191,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@40",
+          "endTime": 320747.201
+        },
+        {
+          "type": "before",
+          "callId": "expect@41",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 320747.691,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@41",
+          "endTime": 320748.086,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@42",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 321749.392,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@42",
+          "endTime": 321762.026
+        },
+        {
+          "type": "before",
+          "callId": "expect@43",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 321762.761,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@43",
+          "endTime": 321763.029,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@44",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 322763.768,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@44",
+          "endTime": 322779.818
+        },
+        {
+          "type": "before",
+          "callId": "expect@45",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 322780.599,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@45",
+          "endTime": 322780.86,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@46",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 323782.666,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@46",
+          "endTime": 323797.101
+        },
+        {
+          "type": "before",
+          "callId": "expect@47",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 323797.62,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@47",
+          "endTime": 323797.866,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@48",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 324800.299,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@48",
+          "endTime": 324822.517
+        },
+        {
+          "type": "before",
+          "callId": "expect@49",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 324823.03,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@49",
+          "endTime": 324823.369,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@50",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 325825.343,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@50",
+          "endTime": 325839.76
+        },
+        {
+          "type": "before",
+          "callId": "expect@51",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 325840.336,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@51",
+          "endTime": 325840.614,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@52",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 326842.138,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@52",
+          "endTime": 326868.614
+        },
+        {
+          "type": "before",
+          "callId": "expect@53",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 326869.511,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@53",
+          "endTime": 326869.752,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@54",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 327871.04,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@54",
+          "endTime": 327892.958
+        },
+        {
+          "type": "before",
+          "callId": "expect@55",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 327893.501,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@55",
+          "endTime": 327893.752,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@56",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 328895.504,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@56",
+          "endTime": 328917.5
+        },
+        {
+          "type": "before",
+          "callId": "expect@57",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 328918.064,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@57",
+          "endTime": 328918.323,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@58",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 329919.12,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@58",
+          "endTime": 329935.753
+        },
+        {
+          "type": "before",
+          "callId": "expect@59",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 329936.63,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@59",
+          "endTime": 329936.892,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@60",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 330939.082,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@60",
+          "endTime": 330958.03
+        },
+        {
+          "type": "before",
+          "callId": "expect@61",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 330958.524,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@61",
+          "endTime": 330958.766,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@62",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 331960.823,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@62",
+          "endTime": 331980.496
+        },
+        {
+          "type": "before",
+          "callId": "expect@63",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 331981.354,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@63",
+          "endTime": 331981.605,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@64",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 332983.075,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@64",
+          "endTime": 333000.29
+        },
+        {
+          "type": "before",
+          "callId": "expect@65",
+          "parentId": "expect@31",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 333001.167,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 27,
+              "column": 3,
+              "function": "selectedFits"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@65",
+          "endTime": 333001.404,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:27:3)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:3"
+          }
+        },
+        {
+          "type": "after",
+          "callId": "expect@31",
+          "endTime": 333001.659,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n\nCall Log:\n- Timeout 15000ms exceeded while waiting on the predicate",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32mtrue\u001b[39m\nReceived: \u001b[31mfalse\u001b[39m\n\nCall Log:\n- Timeout 15000ms exceeded while waiting on the predicate\n    at selectedFits (D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:33:7)\n    at D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts:206:9"
+          }
+        },
+        {
+          "type": "error",
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 33,
+              "column": 7,
+              "function": "selectedFits"
+            },
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 206,
+              "column": 9
+            }
+          ]
+        },
+        {
+          "type": "before",
+          "callId": "hook@66",
+          "class": "Test",
+          "method": "hook",
+          "startTime": 333002.512,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "fixture@67",
+          "parentId": "hook@66",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 333100.104,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "fixture@67",
+          "endTime": 333100.24
+        },
+        {
+          "type": "before",
+          "callId": "fixture@68",
+          "parentId": "hook@66",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 333100.534,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@69",
+          "parentId": "fixture@68",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 333268.885,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@69",
+          "endTime": 333276.62
+        },
+        {
+          "type": "after",
+          "callId": "fixture@68",
+          "endTime": 333276.659
+        },
+        {
+          "type": "before",
+          "callId": "attach@424f18a79eecae7d1f7bd6418582b585",
+          "class": "Test",
+          "method": "test.attach",
+          "startTime": 333281.018,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "attach@424f18a79eecae7d1f7bd6418582b585",
+          "endTime": 333281.037
+        },
+        {
+          "type": "before",
+          "callId": "fixture@78",
+          "parentId": "hook@66",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 333281.882,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@78",
+          "endTime": 333281.903
+        },
+        {
+          "type": "before",
+          "callId": "fixture@79",
+          "parentId": "hook@66",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 333282.115,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@79",
+          "endTime": 333282.187
+        },
+        {
+          "type": "before",
+          "callId": "fixture@81",
+          "parentId": "hook@66",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 333282.654,
+          "stack": [
+            {
+              "file": "D:\\a\\requirements-management-tool\\requirements-management-tool\\product\\client\\tests\\digital-thread-1046-interaction.spec.ts",
+              "line": 6,
+              "column": 6
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@81",
+          "endTime": 333282.695
+        },
+        {
+          "type": "before",
+          "callId": "fixture@88",
+          "parentId": "hook@66",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 333283.583,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@88",
+          "endTime": 333283.592
+        },
+        {
+          "type": "before",
+          "callId": "fixture@92",
+          "parentId": "hook@66",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 333284.121,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@92",
+          "endTime": 333284.13
+        },
+        {
+          "type": "before",
+          "callId": "fixture@94",
+          "parentId": "hook@66",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 333284.364,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@94",
+          "endTime": 333284.373
+        },
+        {
+          "type": "after",
+          "callId": "hook@66",
+          "endTime": 333285
+        },
+        {
+          "type": "before",
+          "callId": "hook@100",
+          "class": "Test",
+          "method": "hook",
+          "startTime": 333285.223,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "fixture@104",
+          "parentId": "hook@100",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 333285.973,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "fixture@104",
+          "endTime": 333330.932
+        },
+        {
+          "type": "before",
+          "callId": "fixture@108",
+          "parentId": "hook@100",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 333331.853,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@108",
+          "endTime": 333331.877
+        },
+        {
+          "type": "before",
+          "callId": "fixture@109",
+          "parentId": "hook@100",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 333332.077,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@109",
+          "endTime": 333332.091
+        },
+        {
+          "type": "after",
+          "callId": "hook@100",
+          "endTime": 333333.092
+        }
+      ]
+    },
+    {
+      "name": "0-trace.trace",
+      "bytes": 302404,
+      "events": [
+        {
+          "type": "context-options",
+          "browserName": "chromium",
+          "platform": "win32",
+          "wallTime": 1790287392834
+        },
+        {
+          "type": "before",
+          "callId": "call@2577",
+          "class": "BrowserContext",
+          "method": "newPage",
+          "startTime": 316954.743
+        },
+        {
+          "type": "after",
+          "callId": "call@2577",
+          "endTime": 317012.423
+        },
+        {
+          "type": "before",
+          "callId": "call@2579",
+          "class": "Page",
+          "method": "setViewportSize",
+          "startTime": 317014.983
+        },
+        {
+          "type": "after",
+          "callId": "call@2579",
+          "endTime": 317019.567
+        },
+        {
+          "type": "before",
+          "callId": "call@2581",
+          "class": "Page",
+          "method": "addInitScript",
+          "startTime": 317021.972
+        },
+        {
+          "type": "after",
+          "callId": "call@2581",
+          "endTime": 317022.82
+        },
+        {
+          "type": "before",
+          "callId": "call@2583",
+          "class": "Frame",
+          "method": "goto",
+          "startTime": 317024.129
+        },
+        {
+          "type": "after",
+          "callId": "call@2583",
+          "endTime": 317383.945
+        },
+        {
+          "type": "before",
+          "callId": "call@2585",
+          "class": "Frame",
+          "method": "expect",
+          "startTime": 317526.014
+        },
+        {
+          "type": "after",
+          "callId": "call@2585",
+          "endTime": 317906.712
+        },
+        {
+          "type": "before",
+          "callId": "call@2587",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 317948.54
+        },
+        {
+          "type": "after",
+          "callId": "call@2587",
+          "endTime": 318784.613
+        },
+        {
+          "type": "before",
+          "callId": "call@2589",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 318799.132
+        },
+        {
+          "type": "after",
+          "callId": "call@2589",
+          "endTime": 318808.072
+        },
+        {
+          "type": "before",
+          "callId": "call@2591",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 318919.756
+        },
+        {
+          "type": "after",
+          "callId": "call@2591",
+          "endTime": 318928.8
+        },
+        {
+          "type": "before",
+          "callId": "call@2593",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 319191.251
+        },
+        {
+          "type": "after",
+          "callId": "call@2593",
+          "endTime": 319201.672
+        },
+        {
+          "type": "before",
+          "callId": "call@2595",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 319711.633
+        },
+        {
+          "type": "after",
+          "callId": "call@2595",
+          "endTime": 319721.639
+        },
+        {
+          "type": "before",
+          "callId": "call@2597",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 320732.397
+        },
+        {
+          "type": "after",
+          "callId": "call@2597",
+          "endTime": 320741.556
+        },
+        {
+          "type": "before",
+          "callId": "call@2599",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 321749.529
+        },
+        {
+          "type": "after",
+          "callId": "call@2599",
+          "endTime": 321756.603
+        },
+        {
+          "type": "before",
+          "callId": "call@2601",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 322764.024
+        },
+        {
+          "type": "after",
+          "callId": "call@2601",
+          "endTime": 322773.335
+        },
+        {
+          "type": "before",
+          "callId": "call@2603",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 323782.859
+        },
+        {
+          "type": "after",
+          "callId": "call@2603",
+          "endTime": 323790.928
+        },
+        {
+          "type": "before",
+          "callId": "call@2605",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 324800.574
+        },
+        {
+          "type": "after",
+          "callId": "call@2605",
+          "endTime": 324816.536
+        },
+        {
+          "type": "before",
+          "callId": "call@2607",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 325825.521
+        },
+        {
+          "type": "after",
+          "callId": "call@2607",
+          "endTime": 325833.69
+        },
+        {
+          "type": "before",
+          "callId": "call@2609",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 326842.337
+        },
+        {
+          "type": "after",
+          "callId": "call@2609",
+          "endTime": 326857.264
+        },
+        {
+          "type": "before",
+          "callId": "call@2611",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 327871.302
+        },
+        {
+          "type": "after",
+          "callId": "call@2611",
+          "endTime": 327881.022
+        },
+        {
+          "type": "before",
+          "callId": "call@2613",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 328895.685
+        },
+        {
+          "type": "after",
+          "callId": "call@2613",
+          "endTime": 328909.892
+        },
+        {
+          "type": "before",
+          "callId": "call@2615",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 329919.298
+        },
+        {
+          "type": "after",
+          "callId": "call@2615",
+          "endTime": 329927.998
+        },
+        {
+          "type": "before",
+          "callId": "call@2617",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 330939.263
+        },
+        {
+          "type": "after",
+          "callId": "call@2617",
+          "endTime": 330947.417
+        },
+        {
+          "type": "before",
+          "callId": "call@2619",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 331961.006
+        },
+        {
+          "type": "after",
+          "callId": "call@2619",
+          "endTime": 331973.946
+        },
+        {
+          "type": "before",
+          "callId": "call@2621",
+          "class": "Frame",
+          "method": "evaluateExpression",
+          "startTime": 332983.258
+        },
+        {
+          "type": "after",
+          "callId": "call@2621",
+          "endTime": 332992.295
+        }
+      ]
+    },
+    {
+      "name": "0-trace.network",
+      "bytes": 96315,
+      "events": [],
+      "note": "Network payload omitted to avoid publishing credentials and session data."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287392956.jpeg",
+      "bytes": 1934,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287392965.jpeg",
+      "bytes": 1934,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393280.jpeg",
+      "bytes": 1937,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393421.jpeg",
+      "bytes": 18583,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393438.jpeg",
+      "bytes": 18583,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393450.jpeg",
+      "bytes": 18583,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393781.jpeg",
+      "bytes": 18583,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393805.jpeg",
+      "bytes": 27575,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393830.jpeg",
+      "bytes": 27564,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393841.jpeg",
+      "bytes": 27556,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393857.jpeg",
+      "bytes": 27543,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393875.jpeg",
+      "bytes": 27877,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393890.jpeg",
+      "bytes": 27862,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393908.jpeg",
+      "bytes": 28731,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393926.jpeg",
+      "bytes": 29160,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393943.jpeg",
+      "bytes": 29654,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393963.jpeg",
+      "bytes": 30135,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287393981.jpeg",
+      "bytes": 30120,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394002.jpeg",
+      "bytes": 30143,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394019.jpeg",
+      "bytes": 30508,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394035.jpeg",
+      "bytes": 30378,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394052.jpeg",
+      "bytes": 30317,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394069.jpeg",
+      "bytes": 30404,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394086.jpeg",
+      "bytes": 30620,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394103.jpeg",
+      "bytes": 30902,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394120.jpeg",
+      "bytes": 30799,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394136.jpeg",
+      "bytes": 30760,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394153.jpeg",
+      "bytes": 30767,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394170.jpeg",
+      "bytes": 30769,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394187.jpeg",
+      "bytes": 30756,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394206.jpeg",
+      "bytes": 30773,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394228.jpeg",
+      "bytes": 30743,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394246.jpeg",
+      "bytes": 30736,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394263.jpeg",
+      "bytes": 30747,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394281.jpeg",
+      "bytes": 30826,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394299.jpeg",
+      "bytes": 30779,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394319.jpeg",
+      "bytes": 30755,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394336.jpeg",
+      "bytes": 30716,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@aa242cba0da89c026834359950798f8c-1790287394536.jpeg",
+      "bytes": 30720,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/41df6c4930cf572a6821dd0ad8af971f566f703e.html",
+      "bytes": 464
+    },
+    {
+      "name": "resources/7cf8a1c146c537f2871906016d37007c61c7fe6c.woff2",
+      "bytes": 14200
+    },
+    {
+      "name": "resources/bcd22c3078bf91d77d2dabb96a752c29499c066f.woff2",
+      "bytes": 14144
+    },
+    {
+      "name": "resources/fc31558149b2585f34abf097e50bb06a368f2379.woff2",
+      "bytes": 14348
+    },
+    {
+      "name": "resources/a23ce89a07cbb69c8455fefe4848eb1e.jsonl",
+      "bytes": 90
+    },
+    {
+      "name": "0-trace.stacks",
+      "bytes": 1552
+    }
+  ]
+}

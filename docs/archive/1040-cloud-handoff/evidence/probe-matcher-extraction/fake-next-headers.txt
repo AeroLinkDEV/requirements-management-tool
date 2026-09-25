@@ -1,0 +1,2 @@
+HTTP/2 200
+link: <https://api.github.com/repos/x/y/issues/1066/events?page=2&per_page=100>; rel="next", <https://api.github.com/repos/x/y/issues/1066/events?per_page=100&page=3>; rel="last"

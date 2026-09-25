@@ -1,0 +1,1545 @@
+{
+  "source": "browser-results-c3/managed-documentation-cent-dc22d-ter-across-build-navigation-chromium-repeat1/trace.zip",
+  "source_sha256": "32e6062d27682c8b9e8270707d42b44455939ade2de8e3f1010e979f3173ff73",
+  "note": "Raw archive withheld from public Git because browser traces may contain authentication/session data. Safe assertion contexts and action summaries follow; original CI artifacts are linked in CI-RUNS.md.",
+  "entries": [
+    {
+      "name": "resources/src@48d367dd496829627f7953a585cf675de1348572.txt",
+      "bytes": 17210
+    },
+    {
+      "name": "resources/src@2f61fdba303034b994def4c49fdd52730d75f319.txt",
+      "bytes": 27419
+    },
+    {
+      "name": "resources/f30425814cbca1d83bd86c414f604085097b17fb",
+      "bytes": 20398
+    },
+    {
+      "name": "resources/e3168886c54ab4385bf5ac9afcc41851107fc4b4",
+      "bytes": 137191
+    },
+    {
+      "name": "test.trace",
+      "bytes": 20492,
+      "events": [
+        {
+          "type": "context-options",
+          "browserName": "",
+          "platform": "win32",
+          "wallTime": 1790046076876
+        },
+        {
+          "type": "before",
+          "callId": "hook@1",
+          "class": "Test",
+          "method": "hook",
+          "startTime": 224786.112,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "fixture@27",
+          "parentId": "hook@1",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 224793.853,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@28",
+          "parentId": "fixture@27",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 224795.794,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@28",
+          "endTime": 224869.789
+        },
+        {
+          "type": "after",
+          "callId": "fixture@27",
+          "endTime": 224869.892
+        },
+        {
+          "type": "before",
+          "callId": "fixture@31",
+          "parentId": "hook@1",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 224870.819,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@32",
+          "parentId": "fixture@31",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 224871.694,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@32",
+          "endTime": 224876.305
+        },
+        {
+          "type": "after",
+          "callId": "fixture@31",
+          "endTime": 224879.106
+        },
+        {
+          "type": "before",
+          "callId": "fixture@33",
+          "parentId": "hook@1",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 224879.372,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@34",
+          "parentId": "fixture@33",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 224880.396,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@34",
+          "endTime": 224936.111
+        },
+        {
+          "type": "after",
+          "callId": "fixture@33",
+          "endTime": 224936.144
+        },
+        {
+          "type": "after",
+          "callId": "hook@1",
+          "endTime": 224936.178
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@35",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 224940.973,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 63,
+              "column": 14,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@35",
+          "endTime": 225213.83
+        },
+        {
+          "type": "before",
+          "callId": "expect@36",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 225217.805,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 68,
+              "column": 38,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@36",
+          "endTime": 225259.84
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@37",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 225260.533,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 69,
+              "column": 20,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@37",
+          "endTime": 225264.913
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@38",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 225265.759,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 73,
+              "column": 18,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@38",
+          "endTime": 225275.213
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@39",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 225276.064,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 74,
+              "column": 37,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@39",
+          "endTime": 225285.665
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@40",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 225286.743,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 75,
+              "column": 60,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@40",
+          "endTime": 225337.014
+        },
+        {
+          "type": "before",
+          "callId": "expect@41",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 225337.873,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 76,
+              "column": 87,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@41",
+          "endTime": 225426.527
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@42",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 225427.36,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 77,
+              "column": 85,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@42",
+          "endTime": 225432.152
+        },
+        {
+          "type": "before",
+          "callId": "expect@43",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 225433.974,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 88,
+              "column": 8,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@43",
+          "endTime": 225439.297
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@44",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 225440.627,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 89,
+              "column": 19,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@44",
+          "endTime": 225505.764
+        },
+        {
+          "type": "before",
+          "callId": "expect@45",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 225506.38,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 90,
+              "column": 70,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@45",
+          "endTime": 225513.017
+        },
+        {
+          "type": "before",
+          "callId": "expect@46",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 225513.847,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 99,
+              "column": 8,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@46",
+          "endTime": 225521.71
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@47",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 225522.343,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 100,
+              "column": 17,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@47",
+          "endTime": 225593.534
+        },
+        {
+          "type": "before",
+          "callId": "expect@48",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 225594.132,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\auth.ts",
+              "line": 101,
+              "column": 69,
+              "function": "login"
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@48",
+          "endTime": 225599.918
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@49",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 225600.458,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts",
+              "line": 58,
+              "column": 66
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@49",
+          "endTime": 225656.689
+        },
+        {
+          "type": "before",
+          "callId": "expect@50",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 225657.315,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts",
+              "line": 59,
+              "column": 22
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@50",
+          "endTime": 225677.236
+        },
+        {
+          "type": "before",
+          "callId": "expect@51",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 225677.746,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts",
+              "line": 60,
+              "column": 77
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@51",
+          "endTime": 225991.67
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@52",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 225992.889,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts",
+              "line": 62,
+              "column": 10
+            }
+          ]
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@53",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 225993.656,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts",
+              "line": 63,
+              "column": 68
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@53",
+          "endTime": 226077.198
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@52",
+          "endTime": 226084.813
+        },
+        {
+          "type": "before",
+          "callId": "expect@54",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 226085.256,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts",
+              "line": 65,
+              "column": 45
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@54",
+          "endTime": 226085.415
+        },
+        {
+          "type": "before",
+          "callId": "expect@55",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 226186.112,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts",
+              "line": 67,
+              "column": 21
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@55",
+          "endTime": 226186.283
+        },
+        {
+          "type": "before",
+          "callId": "expect@56",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 226187.317,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts",
+              "line": 69,
+              "column": 33
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@56",
+          "endTime": 226187.489
+        },
+        {
+          "type": "before",
+          "callId": "expect@57",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 226187.909,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts",
+              "line": 70,
+              "column": 32
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@57",
+          "endTime": 226187.938
+        },
+        {
+          "type": "before",
+          "callId": "expect@58",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 226188.217,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts",
+              "line": 71,
+              "column": 38
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@58",
+          "endTime": 226188.284
+        },
+        {
+          "type": "before",
+          "callId": "expect@59",
+          "class": "Test",
+          "method": "expect",
+          "startTime": 226188.699,
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts",
+              "line": 72,
+              "column": 59
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "expect@59",
+          "endTime": 241197.005,
+          "error": {
+            "name": "",
+            "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByText('7 of 7 matching records')\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByText('7 of 7 matching records')\u001b[22m\n",
+            "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByText('7 of 7 matching records')\nExpected: visible\nTimeout: 15000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 15000ms\u001b[22m\n\u001b[2m  - waiting for getByText('7 of 7 matching records')\u001b[22m\n\n    at C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts:72:59"
+          }
+        },
+        {
+          "type": "error",
+          "stack": [
+            {
+              "file": "C:\\Sean Project\\RMT-1040-worktree\\product\\client\\tests\\managed-documentation-center.spec.ts",
+              "line": 72,
+              "column": 59
+            }
+          ]
+        },
+        {
+          "type": "before",
+          "callId": "hook@60",
+          "class": "Test",
+          "method": "hook",
+          "startTime": 241197.452,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "fixture@61",
+          "parentId": "hook@60",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 241233.359,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "fixture@61",
+          "endTime": 241233.485
+        },
+        {
+          "type": "before",
+          "callId": "fixture@62",
+          "parentId": "hook@60",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 241233.628,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "pw:api@63",
+          "parentId": "fixture@62",
+          "class": "Test",
+          "method": "pw:api",
+          "startTime": 241435.415,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "pw:api@63",
+          "endTime": 241439.921
+        },
+        {
+          "type": "after",
+          "callId": "fixture@62",
+          "endTime": 241439.964
+        },
+        {
+          "type": "before",
+          "callId": "attach@41f5cc82b607f228833c74054f38afe6",
+          "class": "Test",
+          "method": "test.attach",
+          "startTime": 241444.302,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "attach@41f5cc82b607f228833c74054f38afe6",
+          "endTime": 241444.316
+        },
+        {
+          "type": "before",
+          "callId": "fixture@72",
+          "parentId": "hook@60",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 241445.275,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@72",
+          "endTime": 241445.301
+        },
+        {
+          "type": "before",
+          "callId": "fixture@73",
+          "parentId": "hook@60",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 241445.429,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@73",
+          "endTime": 241445.452
+        },
+        {
+          "type": "before",
+          "callId": "fixture@75",
+          "parentId": "hook@60",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 241445.711,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@75",
+          "endTime": 241445.725
+        },
+        {
+          "type": "before",
+          "callId": "fixture@82",
+          "parentId": "hook@60",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 241446.31,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@82",
+          "endTime": 241446.317
+        },
+        {
+          "type": "before",
+          "callId": "fixture@86",
+          "parentId": "hook@60",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 241446.646,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@86",
+          "endTime": 241446.653
+        },
+        {
+          "type": "before",
+          "callId": "fixture@88",
+          "parentId": "hook@60",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 241446.8,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@88",
+          "endTime": 241446.806
+        },
+        {
+          "type": "after",
+          "callId": "hook@60",
+          "endTime": 241447.354
+        },
+        {
+          "type": "before",
+          "callId": "hook@94",
+          "class": "Test",
+          "method": "hook",
+          "startTime": 241447.511,
+          "stack": []
+        },
+        {
+          "type": "before",
+          "callId": "fixture@98",
+          "parentId": "hook@94",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 241448.077,
+          "stack": []
+        },
+        {
+          "type": "after",
+          "callId": "fixture@98",
+          "endTime": 241497.55
+        },
+        {
+          "type": "before",
+          "callId": "fixture@102",
+          "parentId": "hook@94",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 241498.25,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@102",
+          "endTime": 241498.262
+        },
+        {
+          "type": "before",
+          "callId": "fixture@103",
+          "parentId": "hook@94",
+          "class": "Test",
+          "method": "fixture",
+          "startTime": 241498.371,
+          "stack": [
+            {
+              "file": "project#chromium",
+              "line": 1,
+              "column": 1
+            }
+          ]
+        },
+        {
+          "type": "after",
+          "callId": "fixture@103",
+          "endTime": 241498.379
+        },
+        {
+          "type": "after",
+          "callId": "hook@94",
+          "endTime": 241499.097
+        }
+      ]
+    },
+    {
+      "name": "0-trace.trace",
+      "bytes": 422309,
+      "events": [
+        {
+          "type": "context-options",
+          "browserName": "chromium",
+          "platform": "win32",
+          "wallTime": 1790046076979
+        },
+        {
+          "type": "before",
+          "callId": "call@6",
+          "class": "BrowserContext",
+          "method": "newPage",
+          "startTime": 224881.064
+        },
+        {
+          "type": "after",
+          "callId": "call@6",
+          "endTime": 224935.226
+        },
+        {
+          "type": "before",
+          "callId": "call@8",
+          "class": "Frame",
+          "method": "goto",
+          "startTime": 224941.429
+        },
+        {
+          "type": "after",
+          "callId": "call@8",
+          "endTime": 225185.009
+        },
+        {
+          "type": "before",
+          "callId": "call@10",
+          "class": "Frame",
+          "method": "expect",
+          "startTime": 225220.054
+        },
+        {
+          "type": "after",
+          "callId": "call@10",
+          "endTime": 225258.027
+        },
+        {
+          "type": "before",
+          "callId": "call@12",
+          "class": "Frame",
+          "method": "isVisible",
+          "startTime": 225260.669
+        },
+        {
+          "type": "after",
+          "callId": "call@12",
+          "endTime": 225263.87
+        },
+        {
+          "type": "before",
+          "callId": "call@14",
+          "class": "Frame",
+          "method": "fill",
+          "startTime": 225265.91
+        },
+        {
+          "type": "after",
+          "callId": "call@14",
+          "endTime": 225273.944
+        },
+        {
+          "type": "before",
+          "callId": "call@16",
+          "class": "Frame",
+          "method": "fill",
+          "startTime": 225276.25
+        },
+        {
+          "type": "after",
+          "callId": "call@16",
+          "endTime": 225284.617
+        },
+        {
+          "type": "before",
+          "callId": "call@18",
+          "class": "Frame",
+          "method": "click",
+          "startTime": 225286.911
+        },
+        {
+          "type": "after",
+          "callId": "call@18",
+          "endTime": 225335.147
+        },
+        {
+          "type": "before",
+          "callId": "call@20",
+          "class": "Frame",
+          "method": "expect",
+          "startTime": 225338.366
+        },
+        {
+          "type": "after",
+          "callId": "call@20",
+          "endTime": 225420.975
+        },
+        {
+          "type": "before",
+          "callId": "call@22",
+          "class": "Frame",
+          "method": "queryCount",
+          "startTime": 225427.551
+        },
+        {
+          "type": "after",
+          "callId": "call@22",
+          "endTime": 225430.216
+        },
+        {
+          "type": "before",
+          "callId": "call@24",
+          "class": "Frame",
+          "method": "expect",
+          "startTime": 225434.723
+        },
+        {
+          "type": "after",
+          "callId": "call@24",
+          "endTime": 225437.773
+        },
+        {
+          "type": "before",
+          "callId": "call@26",
+          "class": "Frame",
+          "method": "click",
+          "startTime": 225440.833
+        },
+        {
+          "type": "after",
+          "callId": "call@26",
+          "endTime": 225499.659
+        },
+        {
+          "type": "before",
+          "callId": "call@28",
+          "class": "Frame",
+          "method": "expect",
+          "startTime": 225506.845
+        },
+        {
+          "type": "after",
+          "callId": "call@28",
+          "endTime": 225511.881
+        },
+        {
+          "type": "before",
+          "callId": "call@30",
+          "class": "Frame",
+          "method": "expect",
+          "startTime": 225514.309
+        },
+        {
+          "type": "after",
+          "callId": "call@30",
+          "endTime": 225520.696
+        },
+        {
+          "type": "before",
+          "callId": "call@32",
+          "class": "Frame",
+          "method": "click",
+          "startTime": 225522.462
+        },
+        {
+          "type": "after",
+          "callId": "call@32",
+          "endTime": 225577.687
+        },
+        {
+          "type": "before",
+          "callId": "call@34",
+          "class": "Frame",
+          "method": "expect",
+          "startTime": 225594.652
+        },
+        {
+          "type": "after",
+          "callId": "call@34",
+          "endTime": 225598.153
+        },
+        {
+          "type": "before",
+          "callId": "call@36",
+          "class": "Frame",
+          "method": "click",
+          "startTime": 225600.628
+        },
+        {
+          "type": "after",
+          "callId": "call@36",
+          "endTime": 225652.154
+        },
+        {
+          "type": "before",
+          "callId": "call@38",
+          "class": "Frame",
+          "method": "expect",
+          "startTime": 225658.369
+        },
+        {
+          "type": "after",
+          "callId": "call@38",
+          "endTime": 225669.055
+        },
+        {
+          "type": "before",
+          "callId": "call@40",
+          "class": "Frame",
+          "method": "expect",
+          "startTime": 225678.152
+        },
+        {
+          "type": "after",
+          "callId": "call@40",
+          "endTime": 225977.941
+        },
+        {
+          "type": "before",
+          "callId": "call@42",
+          "class": "Page",
+          "method": "__waitInfo__",
+          "startTime": 225994.099
+        },
+        {
+          "type": "before",
+          "callId": "call@45",
+          "class": "Frame",
+          "method": "click",
+          "startTime": 225994.174
+        },
+        {
+          "type": "after",
+          "callId": "call@45",
+          "endTime": 226074.991
+        },
+        {
+          "type": "after",
+          "callId": "call@42",
+          "endTime": 226085.796
+        },
+        {
+          "type": "before",
+          "callId": "call@49",
+          "class": "Frame",
+          "method": "expect",
+          "startTime": 226189.091
+        },
+        {
+          "type": "after",
+          "callId": "call@49",
+          "endTime": 241192.443,
+          "error": {
+            "message": "Expect failed",
+            "stack": "ExpectError: Expect failed\n    at _Frame.expect (C:\\Sean Project\\RMT-1040-worktree\\product\\client\\node_modules\\playwright-core\\lib\\coreBundle.js:23429:17)\n    at _FrameDispatcher.expect (C:\\Sean Project\\RMT-1040-worktree\\product\\client\\node_modules\\playwright-core\\lib\\coreBundle.js:53562:11)\n    at _ProgressController.run (C:\\Sean Project\\RMT-1040-worktree\\product\\client\\node_modules\\playwright-core\\lib\\coreBundle.js:11762:27)\n    at _FrameDispatcher._runCommand (C:\\Sean Project\\RMT-1040-worktree\\product\\client\\node_modules\\playwright-core\\lib\\coreBundle.js:18203:18)\n    at DispatcherConnection.dispatch (C:\\Sean Project\\RMT-1040-worktree\\product\\client\\node_modules\\playwright-core\\lib\\coreBundle.js:18408:27)",
+            "name": "ExpectError"
+          }
+        }
+      ]
+    },
+    {
+      "name": "0-trace.network",
+      "bytes": 292659,
+      "events": [],
+      "note": "Network payload omitted to avoid publishing credentials and session data."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077060.jpeg",
+      "bytes": 2459,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077098.jpeg",
+      "bytes": 2459,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077259.jpeg",
+      "bytes": 2462,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077322.jpeg",
+      "bytes": 13866,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077335.jpeg",
+      "bytes": 14594,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077347.jpeg",
+      "bytes": 16194,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077366.jpeg",
+      "bytes": 35985,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077384.jpeg",
+      "bytes": 36693,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077397.jpeg",
+      "bytes": 37097,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077446.jpeg",
+      "bytes": 36372,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077467.jpeg",
+      "bytes": 36364,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077481.jpeg",
+      "bytes": 36372,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077502.jpeg",
+      "bytes": 18307,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077520.jpeg",
+      "bytes": 36935,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077550.jpeg",
+      "bytes": 36935,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077613.jpeg",
+      "bytes": 36071,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077621.jpeg",
+      "bytes": 36551,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077680.jpeg",
+      "bytes": 18369,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077702.jpeg",
+      "bytes": 28789,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077714.jpeg",
+      "bytes": 47061,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077737.jpeg",
+      "bytes": 51668,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077751.jpeg",
+      "bytes": 53122,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077769.jpeg",
+      "bytes": 54572,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077781.jpeg",
+      "bytes": 24667,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077803.jpeg",
+      "bytes": 27724,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077816.jpeg",
+      "bytes": 28668,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077835.jpeg",
+      "bytes": 29044,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077848.jpeg",
+      "bytes": 29445,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077870.jpeg",
+      "bytes": 29264,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077884.jpeg",
+      "bytes": 29681,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077908.jpeg",
+      "bytes": 29704,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077916.jpeg",
+      "bytes": 30068,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077941.jpeg",
+      "bytes": 30270,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077950.jpeg",
+      "bytes": 30440,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077974.jpeg",
+      "bytes": 30468,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046077983.jpeg",
+      "bytes": 30479,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078006.jpeg",
+      "bytes": 30461,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078017.jpeg",
+      "bytes": 30610,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078038.jpeg",
+      "bytes": 30440,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078048.jpeg",
+      "bytes": 30541,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078067.jpeg",
+      "bytes": 30573,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078081.jpeg",
+      "bytes": 30631,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078097.jpeg",
+      "bytes": 52188,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078115.jpeg",
+      "bytes": 66628,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078188.jpeg",
+      "bytes": 66210,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078208.jpeg",
+      "bytes": 65592,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078216.jpeg",
+      "bytes": 65589,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078232.jpeg",
+      "bytes": 65585,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078248.jpeg",
+      "bytes": 65578,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078265.jpeg",
+      "bytes": 65600,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078282.jpeg",
+      "bytes": 65607,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078298.jpeg",
+      "bytes": 65579,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078316.jpeg",
+      "bytes": 65573,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/page@28795941be67137f3f020307a9307a07-1790046078339.jpeg",
+      "bytes": 65573,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/111bea8f0c69aa438c8752bca520e0e3498db9a1.html",
+      "bytes": 739
+    },
+    {
+      "name": "resources/f72de1b517cde90adb98bb420fc98564f8f7d0dd.css",
+      "bytes": 3193
+    },
+    {
+      "name": "resources/fc31558149b2585f34abf097e50bb06a368f2379.woff2",
+      "bytes": 14348
+    },
+    {
+      "name": "resources/d7c94b4e5ad6062eb1102c5e7f78915d563a508b.woff2",
+      "bytes": 14212
+    },
+    {
+      "name": "resources/7cf8a1c146c537f2871906016d37007c61c7fe6c.woff2",
+      "bytes": 14200
+    },
+    {
+      "name": "resources/aa241af22727be87d01df74f939fed8f9b5ecaa0.json",
+      "bytes": 52
+    },
+    {
+      "name": "resources/bcd22c3078bf91d77d2dabb96a752c29499c066f.woff2",
+      "bytes": 14144
+    },
+    {
+      "name": "resources/c3ddfb1bc217df453b41b49dba72402079b7111a.woff2",
+      "bytes": 14172
+    },
+    {
+      "name": "resources/a8ffae88154f12784ae56c4aa31fc84321629965.json",
+      "bytes": 69
+    },
+    {
+      "name": "resources/adbb69335a101d8275e89a791977fb31c4e947a9.json",
+      "bytes": 258
+    },
+    {
+      "name": "resources/d52c57ed57898472dc81ca6f617f3ab8fceed30a.json",
+      "bytes": 57
+    },
+    {
+      "name": "resources/359451d8f22457260be541b1b2617de874b25155.json",
+      "bytes": 577
+    },
+    {
+      "name": "resources/9c1b26def2f5f682010b5e203416a2aa048495e6.png",
+      "bytes": 206640,
+      "note": "Image remains in the original artifact; not republished without pixel review."
+    },
+    {
+      "name": "resources/97d170e1550eee4afc0af065b78cda302a97674c.json",
+      "bytes": 2
+    },
+    {
+      "name": "resources/9119e25aea0d43666d5111f67cac3f7386d6832a.json",
+      "bytes": 397
+    },
+    {
+      "name": "resources/a01f4c4d9747ea121caeda062b6dda67cac3e203.json",
+      "bytes": 1589
+    },
+    {
+      "name": "resources/a99df32d9d361ebbcbed05da02733e848c8bb386.json",
+      "bytes": 13217
+    },
+    {
+      "name": "resources/4a162522c119ff3359ccdd5339e6a4eac9b30d28.woff2",
+      "bytes": 14304
+    },
+    {
+      "name": "resources/d76b3e72cf92f447bec816ec558a95a3da8e7bc7.json",
+      "bytes": 17118
+    },
+    {
+      "name": "resources/780b2f7d981855c9e13614578c3a3c2473649c93.json",
+      "bytes": 461
+    },
+    {
+      "name": "resources/62de0e66626674d8fb4ce8560746bbb980240f94.json",
+      "bytes": 77
+    },
+    {
+      "name": "resources/1c236cd414f9c3875c4c63a107199fd531938390.json",
+      "bytes": 5818
+    },
+    {
+      "name": "resources/aac2f931c0ff379fb26e94ce7d808e2be59ada6e.json",
+      "bytes": 5820
+    },
+    {
+      "name": "resources/5e0d3ad7fb16af4379547bdf0fd4e26d9e58df06.json",
+      "bytes": 4078
+    },
+    {
+      "name": "resources/640dc09a4cdae5b7d8b6201289cf6d171384dc00.json",
+      "bytes": 570
+    },
+    {
+      "name": "resources/2ad5bf59a238842ea4454983369c44a2.jsonl",
+      "bytes": 90
+    },
+    {
+      "name": "0-trace.stacks",
+      "bytes": 830
+    }
+  ]
+}

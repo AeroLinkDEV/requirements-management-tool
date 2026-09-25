@@ -1,0 +1,10 @@
+$ErrorActionPreference = 'Stop'
+$t = Get-ScheduledTask -TaskName AeroLinkProductionSourceReconcile
+$i = $t | Get-ScheduledTaskInfo
+[pscustomobject]@{ TaskName = $t.TaskName; State = $t.State; LastRunTime = $i.LastRunTime; LastTaskResult = $i.LastTaskResult } | ConvertTo-Json
+Import-Module 'C:\Sean Project\AeroLink Production\product\scripts\AeroLinkRuntimeIdentity.psm1' -Force
+$endpoints = Get-AeroLinkServiceEndpoints
+$id = Get-AeroLinkRuntimeIdentity -BaseUri $endpoints.ApiBaseUri
+if ($id) {
+    [pscustomobject]@{ mode = $id.mode; sourceIdentity = $id.sourceIdentity; mainCurrency = $id.mainCurrency; instanceId = $id.instance.id; instanceClassification = $id.instance.classification } | ConvertTo-Json
+} else { 'IDENTITY-UNAVAILABLE' }
