@@ -107,9 +107,9 @@ Use the repository's test-planning contract instead of guessing what to run.
 - Do not force-merge or bypass required checks.
 - Record exact validation commands/results in the PR when the change is material.
 - For visual changes, add focused browser proof and screenshots where they materially improve review.
-- An implementation task is done when its focused PR is open against `main`, the planner-selected tests and generators
-  pass at the PR head (SHA recorded), the PR body records that validation, and out-of-scope findings are filed as
-  issues. Merging is not part of "done" unless the task says so.
+- An implementation task is done when its PR is merged to `main`, with the planner-selected tests and generators
+  passing, the validation recorded in the PR body, and out-of-scope findings filed as issues, or when the PR is
+  closed or handed off with a recorded reason.
 
 ## Windows launchers and operator compatibility
 
@@ -168,8 +168,7 @@ End every long run (one that changes files, pushes, or spans more than one issue
 - Weaken tests, branch protection, or required checks merely to get a PR merged.
 - Treat a historical handoff as the live backlog without refreshing GitHub.
 - Move stable Windows launcher paths without an external-dependency audit.
-- Force-push a branch that has an open PR without asking the owner first. A force-push removes the PR from auto-merge;
-  re-arm it afterwards.
+- Leave a PR disarmed after force-pushing its branch. A force-push removes the PR from auto-merge; re-arm it.
 - Copy a large Case/Procedure or discipline-specific UI when the existing architecture is intended to be parameterized/shared.
 
 When in doubt, preserve controlled truth first, then optimize convenience.
