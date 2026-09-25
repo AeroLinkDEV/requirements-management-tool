@@ -164,8 +164,10 @@ async function main() {
         log: line => console.log(line),
       })
       return
-    } catch {
-      // Missing configuration, request, evidence or current identity is a refusal, never an exception.
+    } catch (error) {
+      // Missing configuration, request, evidence or current identity is a refusal, never an exception. The log
+      // names the cause (our own error text, never a response body) so a refusal can be diagnosed (#1164).
+      console.log(`[merge-authority] maintenance review not prepared: ${safeMessage(error)}`)
       decision.reasons.push('maintenance-review-not-prepared: opt-in, configuration or current evidence failed verification')
     }
   }
