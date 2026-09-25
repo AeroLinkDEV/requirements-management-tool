@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 
@@ -16,7 +16,7 @@ const requesterWorkflow = readFileSync(requesterWorkflowPath, 'utf8')
 
 test('Fast phase 1 is explicitly advisory, versioned and bounded', () => {
   assert.equal(manifest.schemaVersion, 1)
-  assert.equal(manifest.id, 'aerolink-fast-ci/v2')
+  assert.equal(manifest.id, 'aerolink-fast-ci/v3')
   assert.equal(manifest.authoritative, false)
   assert.equal(manifest.targetMs, 240000)
   assert.equal(manifest.safety.persistentPostgreSql, 'forbidden')
@@ -77,6 +77,20 @@ test('Fast client adds explicit isolated behavior checks and Full retains heavyw
   for (const expected of ['complete API suite', 'complete infrastructure suite', 'PostgreSQL', 'production-browser', 'full browser']) {
     assert.match(fullOnly, new RegExp(expected, 'i'))
   }
+})
+
+test('Fast runs the Node contract suites that Full owns, and its aggregate fails when they fail', () => {
+  // #1152 B1: the hosted boundary contracts failed ten Full runs in two weeks while Fast stayed green.
+  assert.deepEqual(manifest.contracts.suites, ['product/test-contracts/tests', 'product/test-planner/tests'])
+  for (const suite of manifest.contracts.suites) {
+    assert.ok(workflow.includes(`'${suite}' { }`), `Fast workflow has no reviewed arm for ${suite}`)
+    assert.ok(readdirSync(join(repoRoot, suite)).some((name) => name.endsWith('.test.mjs')), `${suite} has no contract tests`)
+    // Additive only: Full must keep running the same directory.
+    assert.ok(fullWorkflow.includes(`-LiteralPath ${suite} -Filter '*.test.mjs'`), `Full no longer runs ${suite}`)
+  }
+  assert.ok(workflow.includes('needs: [backend-fast, client-fast, contracts-fast]'), 'the Fast aggregate does not wait for contracts-fast')
+  assert.ok(workflow.includes("$contracts -ne 'success'"), 'a contracts failure does not fail the Fast aggregate')
+  assert.ok(workflow.includes('[Math]::Max([Math]::Max($backendMs, $clientMs), $contractsMs)'), 'contracts time is outside the Fast budget')
 })
 
 test('Fast workflow contains no persistent-database or persistent-evidence escape hatch', () => {

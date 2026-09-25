@@ -141,10 +141,56 @@ jobs:
         run: |
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Fast feedback is advisory. Heavy browser/PostgreSQL evidence remains in the unchanged Product quality gate.'
 
+  # The Node contract suites that Full runs inside its Domain job, after a whole-solution build they do not
+  # use. In the 2026-09-11..25 window the hosted boundary contracts were the only failing step in ten Full
+  # runs, each found about 25 minutes in; here they need a checkout and Node only (#1152 B1). Windows, like
+  # the Full owner, because the planner suites exercise the Windows launcher and path behaviour. Full keeps
+  # running both suites; this job adds earlier feedback and removes nothing.
+  contracts-fast:
+    name: Fast repository contracts
+    runs-on: windows-latest
+    timeout-minutes: 10
+    outputs:
+      elapsed_ms: ${{ steps.run.outputs.elapsed_ms }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Run explicit Fast contract manifest
+        id: run
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Get-Content -Raw -LiteralPath product/test-planner/fast-ci-manifest.json | ConvertFrom-Json
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          try {
+            foreach ($suite in @($manifest.contracts.suites)) {
+              switch ($suite) {
+                'product/test-contracts/tests' { }
+                'product/test-planner/tests' { }
+                default { throw "Unreviewed Fast contract suite: $suite" }
+              }
+              # Directory-driven, as in Full: a new contract file must not be silently omitted.
+              $tests = @(Get-ChildItem -LiteralPath $suite -Filter '*.test.mjs' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
+              if ($tests.Count -eq 0) { throw "No contract tests were found under $suite." }
+              & node --test $tests
+              if ($LASTEXITCODE -ne 0) { throw "Fast contract suite failed: $suite" }
+            }
+          }
+          finally {
+            $clock.Stop()
+            "elapsed_ms=$([int64]$clock.ElapsedMilliseconds)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+
   fast-feedback:
     name: Fast feedback aggregate (advisory)
     if: always()
-    needs: [backend-fast, client-fast]
+    needs: [backend-fast, client-fast, contracts-fast]
     runs-on: windows-latest
     timeout-minutes: 5
     steps:
@@ -154,14 +200,17 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $backend = '${{ needs.backend-fast.result }}'
           $client = '${{ needs.client-fast.result }}'
+          $contracts = '${{ needs.contracts-fast.result }}'
           $backendMs = [int64]('0${{ needs.backend-fast.outputs.elapsed_ms }}')
           $clientMs = [int64]('0${{ needs.client-fast.outputs.elapsed_ms }}')
-          $commandCriticalPathMs = [Math]::Max($backendMs, $clientMs)
+          $contractsMs = [int64]('0${{ needs.contracts-fast.outputs.elapsed_ms }}')
+          $commandCriticalPathMs = [Math]::Max([Math]::Max($backendMs, $clientMs), $contractsMs)
           @(
             '## Advisory Fast PR feedback',
             '',
             "- backend-fast: $backend ($backendMs ms command time)",
             "- client-fast: $client ($clientMs ms command time)",
+            "- contracts-fast: $contracts ($contractsMs ms command time)",
             "- command critical path: $commandCriticalPathMs ms",
             '- target: 240000 ms',
             '- API-independent client logic and rendered fixtures: additive Fast proof; all identities remain in Full',
@@ -170,5 +219,5 @@ jobs:
             '- workflow start-to-aggregate timing must be measured from Actions job timestamps before phase 2'
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-          if ($backend -ne 'success' -or $client -ne 'success') { throw 'Advisory Fast feedback failed.' }
+          if ($backend -ne 'success' -or $client -ne 'success' -or $contracts -ne 'success') { throw 'Advisory Fast feedback failed.' }
           if ($commandCriticalPathMs -gt 240000) { throw "Advisory Fast command critical path exceeded 240000 ms: $commandCriticalPathMs ms." }
