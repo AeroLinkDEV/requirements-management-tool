@@ -11,6 +11,7 @@ using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 public static class ManagedDocumentEndpoints
 {
@@ -820,12 +821,22 @@ public static class ManagedDocumentEndpoints
         if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
         var size = ManagedDocumentPaging.PageSize(pageSize); if (size.Error is not null) return size.Error;
         var term = search?.Trim().ToLowerInvariant() ?? ""; string type; try { type = ManagedDocumentRelationshipPolicy.CanonicalType(artifactType); } catch (DomainException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        var filterKey = type == "Release" ? ManagedDocumentPaging.FilterKey(projectId, type, term, "canonical-release-order-v1")
+        var filterKey = type == "Release" ? ManagedDocumentPaging.FilterKey(projectId, type, term, "canonical-release-order-v2")
             : ManagedDocumentPaging.FilterKey(projectId, type, term);
-        var decoded = ManagedDocumentPaging.Decode(cursor, "link-options", filterKey); if (decoded.Error is not null) return decoded.Error;
-        var after = decoded.Cursor?.Value; var snapshotAt = decoded.Cursor?.SnapshotAt ?? DateTimeOffset.UtcNow;
-        var afterRevision = 0;
-        if (after is not null && !int.TryParse(decoded.Cursor!.TieBreaker, out afterRevision)) return ManagedDocumentPaging.InvalidCursor();
+        long? releaseCutoff = null; string? after; DateTimeOffset snapshotAt; var afterRevision = 0;
+        if (type == "Release")
+        {
+            var releaseCursor = ManagedDocumentPaging.DecodeReleaseCursor(cursor, filterKey);
+            if (releaseCursor.Error is not null) return releaseCursor.Error;
+            after = releaseCursor.Cursor?.Value; snapshotAt = releaseCursor.Cursor?.SnapshotAt ?? DateTimeOffset.UtcNow;
+            releaseCutoff = releaseCursor.Cursor?.CutoffOrdinal;
+        }
+        else
+        {
+            var decoded = ManagedDocumentPaging.Decode(cursor, "link-options", filterKey); if (decoded.Error is not null) return decoded.Error;
+            after = decoded.Cursor?.Value; snapshotAt = decoded.Cursor?.SnapshotAt ?? DateTimeOffset.UtcNow;
+            if (after is not null && !int.TryParse(decoded.Cursor!.TieBreaker, out afterRevision)) return ManagedDocumentPaging.InvalidCursor();
+        }
         if (type == "ChangeRequest")
         {
             var query = db.SystemChangeRequests.AsNoTracking().Where(x => x.ProjectId == projectId);
@@ -856,23 +867,98 @@ public static class ManagedDocumentEndpoints
         }
         if (type == "Release")
         {
-            var query = db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId);
-            if (term.Length > 0) query = query.Where(x => x.Version.ToLower().Contains(term));
-            var ordered = SoftwareReleaseOrderingQuery.WithSortKey(query, db.Database.IsNpgsql() ? "C" : "BINARY");
-            if (after is not null) ordered = ordered.Where(x => string.Compare(x.SortKey, after) > 0);
-            var found = await ordered.OrderBy(x => x.SortKey).Take(size.Value + 1).ToListAsync(ct);
-            return LinkOptionPage(found.Select(x => new LinkOptionRow(x.Release.Id, $"BUILD-{x.Release.Version}", $"Build {x.Release.Version}", x.Release.IsReleased ? "Released" : "In work", x.SortKey, 0)).ToList(), type, size.Value, filterKey, snapshotAt);
+            // The Release picker freezes candidate membership: page one establishes the cutoff under the
+            // shared project fence and never spans the request; continuations filter membership in the
+            // database before the existing canonical keyset page. A build committed later is visible only
+            // to a fresh page-one traversal.
+            var collation = db.Database.IsNpgsql() ? "C" : "BINARY";
+            if (releaseCutoff is null)
+            {
+                var isolation = db.Database.IsNpgsql() ? System.Data.IsolationLevel.ReadCommitted : System.Data.IsolationLevel.Serializable;
+                await using var transaction = await db.Database.BeginTransactionAsync(isolation, ct);
+                try
+                {
+                    await AcquireReleasePickerFenceAsync(db, projectId, ct);
+                }
+                catch (Npgsql.PostgresException ex) when (ex.SqlState == Npgsql.PostgresErrorCodes.LockNotAvailable)
+                {
+                    // A writer is still committing a build in this project. Waiting longer would hold the
+                    // request open behind an arbitrary transaction; the caller retries page one instead.
+                    await transaction.RollbackAsync(CancellationToken.None);
+                    return ReleasePickerBusy();
+                }
+                var pageOneCutoff = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
+                    .MaxAsync(x => (long?)x.PickerInsertionOrdinal, ct) ?? 0;
+                var pageOne = await ReleaseCandidateQuery(db, projectId, term, collation, after, pageOneCutoff)
+                    .Take(size.Value + 1).ToListAsync(ct);
+                await transaction.CommitAsync(ct);
+                return ReleaseOptionPage(pageOne, size.Value, filterKey, snapshotAt, pageOneCutoff);
+            }
+            var continuation = await ReleaseCandidateQuery(db, projectId, term, collation, after, releaseCutoff.Value)
+                .Take(size.Value + 1).ToListAsync(ct);
+            return ReleaseOptionPage(continuation, size.Value, filterKey, snapshotAt, releaseCutoff.Value);
         }
         return Results.BadRequest(new { error = "Choose a supported lifecycle artifact type." });
     }
 
-    private static IResult LinkOptionPage(List<LinkOptionRow> rows, string type, int pageSize, string filterKey, DateTimeOffset snapshotAt)
+    private static IQueryable<SoftwareReleaseOrderingQuery.Row> ReleaseCandidateQuery(AeroLinkDbContext db,
+        Guid projectId, string term, string collation, string? after, long cutoff)
+    {
+        var query = db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId);
+        if (term.Length > 0) query = query.Where(x => x.Version.ToLower().Contains(term));
+        query = query.Where(x => x.PickerInsertionOrdinal == null || x.PickerInsertionOrdinal <= cutoff);
+        var ordered = SoftwareReleaseOrderingQuery.WithSortKey(query, collation);
+        if (after is not null) ordered = ordered.Where(x => string.Compare(x.SortKey, after) > 0);
+        return ordered.OrderBy(x => x.SortKey);
+    }
+
+    // Page one waits at most this long for a writer that is allocating a build in the same project. The
+    // wait is bounded by lock_timeout, scoped to the page-one transaction, rather than by the connection's
+    // general command timeout, and it ends in a recoverable 503 instead of an unhandled server error.
+    internal static readonly TimeSpan ReleasePickerFenceWait = TimeSpan.FromSeconds(5);
+
+    private static IResult ReleasePickerBusy() => Results.Json(new
+    {
+        error = "Another build is being recorded in this project. Try again in a few seconds.",
+        code = "picker_busy"
+    }, statusCode: StatusCodes.Status503ServiceUnavailable);
+
+    private static async Task AcquireReleasePickerFenceAsync(AeroLinkDbContext db, Guid projectId, CancellationToken ct)
+    {
+        if (!db.Database.IsNpgsql()) return; // SQLite: the immediate serializable write transaction is the fence.
+        var connection = db.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+        command.CommandText = $"SET LOCAL lock_timeout = '{(int)ReleasePickerFenceWait.TotalMilliseconds}ms'; " +
+            "SELECT pg_advisory_xact_lock(hashtext('aerolink-release-picker:' || @project_id))";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "@project_id";
+        parameter.Value = projectId;
+        command.Parameters.Add(parameter);
+        await command.ExecuteScalarAsync(ct);
+    }
+
+    private static IResult ReleaseOptionPage(List<SoftwareReleaseOrderingQuery.Row> found, int pageSize,
+        string filterKey, DateTimeOffset snapshotAt, long cutoff)
+    {
+        var rows = found.Select(x => new LinkOptionRow(x.Release.Id, $"BUILD-{x.Release.Version}", $"Build {x.Release.Version}",
+            x.Release.IsReleased ? "Released" : "In work", x.SortKey, 0)).ToList();
+        return LinkOptionPage(rows, "Release", pageSize, filterKey, snapshotAt, cutoff);
+    }
+
+    private static IResult LinkOptionPage(List<LinkOptionRow> rows, string type, int pageSize, string filterKey, DateTimeOffset snapshotAt, long? releaseCutoff = null)
     {
         var hasMore = rows.Count > pageSize; if (hasMore) rows.RemoveAt(rows.Count - 1); var last = rows.LastOrDefault();
+        string? nextCursor = null;
+        if (hasMore && last is not null)
+        {
+            nextCursor = releaseCutoff is null
+                ? ManagedDocumentPaging.Encode("link-options", filterKey, snapshotAt, last.SortNumber, last.Revision.ToString())
+                : ManagedDocumentPaging.EncodeReleaseCursor(filterKey, snapshotAt, last.SortNumber, releaseCutoff.Value);
+        }
         return Results.Ok(new
         {
-            pageSize, hasMore,
-            nextCursor = hasMore && last is not null ? ManagedDocumentPaging.Encode("link-options", filterKey, snapshotAt, last.SortNumber, last.Revision.ToString()) : null,
+            pageSize, hasMore, nextCursor,
             items = rows.Select(x => new { x.Id, x.DisplayNumber, x.Title, x.Secondary, relationships = ManagedDocumentRelationshipPolicy.Relationships(type) })
         });
     }

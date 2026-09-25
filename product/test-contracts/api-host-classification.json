@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 155,
-    "tests": 985,
-    "knownCases": 1125,
+    "classes": 157,
+    "tests": 1000,
+    "knownCases": 1140,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -14,9 +14,9 @@
       "unknownCaseTests": 0
     },
     "fresh-host": {
-      "classes": 60,
-      "tests": 367,
-      "knownCases": 431,
+      "classes": 62,
+      "tests": 382,
+      "knownCases": 446,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -555,6 +555,19 @@
       ]
     },
     {
+      "cls": "ReleasePickerMembershipApiTests",
+      "tests": 10,
+      "knownCases": 10,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Host use is unknown for one or more invocations; isolate it until method-level evidence is completed.",
+      "intents": [
+        "auth-policy",
+        "ef-translation",
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ProblemReportHistoricalIdentityApiTests",
       "tests": 8,
       "knownCases": 8,
@@ -740,6 +753,19 @@
       "reason": "Reviewed #563 hold: this class bootstraps an empty database or workspace. A class-scoped SharedApiHost would make first-install state and fixed bootstrap identities order-dependent. Keep fresh-host until a bootstrap-once fixture and per-test workspace tagging are proven.",
       "intents": [
         "http-boundary"
+      ]
+    },
+    {
+      "cls": "ReleasePickerSqliteGuardTests",
+      "tests": 5,
+      "knownCases": 5,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Customizes host state (factory-host-options); sharing could change the subject or leak configuration.",
+      "intents": [
+        "ef-translation",
+        "filesystem",
+        "in-process-logic"
       ]
     },
     {

@@ -81,6 +81,13 @@ public sealed class SoftwareRelease
     public Guid? PredecessorReleaseId { get; private set; }
     public bool IsReleased { get; private set; }
     public DateTimeOffset? ReleasedAt { get; private set; }
+    /// <summary>
+    /// Operational link-options membership ordinal, allocated by the database inside the shared project
+    /// fence. It freezes Release picker candidate membership across cursor pages; it is not a creation
+    /// timestamp, not a controlled identity, and never orders or labels builds. Rows present at upgrade
+    /// keep null as the documented legacy cohort.
+    /// </summary>
+    public long? PickerInsertionOrdinal { get; private set; }
     internal void SetCanonicalIdentity(string canonicalIdentity) => CanonicalIdentity = canonicalIdentity;
     public void MarkReleased(DateTimeOffset now) { if (IsReleased) throw new InvalidOperationException("The software release is already released."); IsReleased = true; ReleasedAt = now; }
 }
