@@ -151,7 +151,7 @@ test('a software HLR trace navigates to the exact software requirement revision'
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('button', { name: 'Software' }).last().click()
+  await page.getByRole('group', { name: 'Verification scope' }).getByRole('button', { name: 'Software', exact: true }).click()
   await page.getByRole('link', { name: 'Test Case/Procedure Explorer' }).click()
   await expect(page).toHaveURL(/software-verification\/test-artifacts$/, { timeout: 30_000 })
   await page.getByLabel('Level filter').selectOption('HighLevel')

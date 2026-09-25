@@ -79,7 +79,7 @@ test('software HLR and LLR each have their own test set', async ({ page }) => {
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('button', { name: 'Software' }).last().click()
+  await page.getByRole('group', { name: 'Verification scope' }).getByRole('button', { name: 'Software', exact: true }).click()
 
   await page.getByRole('link', { name: 'Software HLR Test Results' }).click()
   await expect(page).toHaveURL(/software-verification\/hlr\/results$/, { timeout: 30_000 })

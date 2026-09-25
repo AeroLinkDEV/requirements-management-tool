@@ -58,6 +58,7 @@ import "./ShowcaseRefresh.css";
 import "./ExperiencePolish.css";
 import "./People.css";
 import "./CohesionPass.css";
+import ProblemReportsCommandCard from "./ProblemReportsCommandCard";
 
 const projectLevelViews: View[] = ["projects", "projectSetup", "builds", "baselineImports", "personnel", "approvalConfiguration", "projectConfiguration"];
 
@@ -1290,6 +1291,7 @@ function App() {
         onOpenVerification={(resolved) => navigate("testingCoverage", resolved === "System" ? "systemTest" : "softwareTest", undefined,
           resolved === "LowLevelSoftware" ? "LowLevel" : resolved === "HighLevelSoftware" ? "HighLevel" : undefined)}
         onOpenManagedDocument={(id) => navigate("managedDocuments","system",id)}
+        onOpenProblemReport={(id) => openProblemReport(id)}
       />
     );
   if (view === "teamwork" && project)
@@ -1398,6 +1400,8 @@ function App() {
               <button className="verificationOpen" onClick={()=>navigate("verification","systemTest")}>Open Verification →</button>
             </section>
           </>}
+          {project && <ProblemReportsCommandCard api={API} projectId={project.project.id} releaseId={release?.id ?? ""} releaseVersion={release?.version ?? ""}
+            onOpenList={targetBuild=>openProblemReport(undefined,undefined,targetBuild)} onOpenReport={id=>openProblemReport(id)}/>}
         </section>
       </main></div></div>
       {overlays}

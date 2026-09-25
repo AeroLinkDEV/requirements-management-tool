@@ -121,7 +121,7 @@ test('software HLR and LLR each have their own change request page', async ({ pa
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('button', { name: 'Software' }).last().click()
+  await page.getByRole('group', { name: 'Verification scope' }).getByRole('button', { name: 'Software', exact: true }).click()
 
   await page.getByRole('link', { name: 'Software Test Change Requests' }).click()
   await expect(page).toHaveURL(/software-verification\/hlr\/change-requests$/, { timeout: 30_000 })

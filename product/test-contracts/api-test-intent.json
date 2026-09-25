@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 984,
-    "cases": 1124,
+    "tests": 985,
+    "cases": 1125,
     "classes": 155,
-    "hostedTests": 935,
-    "hostedCases": 1053,
+    "hostedTests": 936,
+    "hostedCases": 1054,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 15,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 609,
-      "cases": 695,
+      "tests": 610,
+      "cases": 696,
       "unknownCases": 0,
       "classes": 121
     },
@@ -7806,6 +7806,24 @@
       "sourceLines": {
         "start": 15,
         "end": 94
+      }
+    },
+    {
+      "cls": "ProblemReportActiveMetricApiTests",
+      "test": "My_work_lists_problem_reports_by_the_same_authority_as_their_actions_without_a_due_date",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 96,
+        "end": 185
       }
     },
     {

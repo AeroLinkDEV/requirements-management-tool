@@ -179,7 +179,7 @@ test('the Software Explorer opens on all artifacts and can move to the configure
   await login(page, 'admin')
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('button', { name: 'Software' }).last().click()
+  await page.getByRole('group', { name: 'Verification scope' }).getByRole('button', { name: 'Software', exact: true }).click()
 
   await page.getByRole('link', { name: 'Test Case/Procedure Explorer' }).click()
   await expect(page).toHaveURL(/software-verification\/test-artifacts$/, { timeout: 30_000 })
@@ -218,7 +218,7 @@ test('the shared Explorer deep-link can inspect active software Procedures with 
   })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('button', { name: 'Software' }).last().click()
+  await page.getByRole('group', { name: 'Verification scope' }).getByRole('button', { name: 'Software', exact: true }).click()
   await page.getByRole('link', { name: 'Test Case/Procedure Explorer' }).click()
   await expect(page).toHaveURL(/software-verification\/test-artifacts/, { timeout: 30_000 })
 
@@ -575,7 +575,7 @@ test('the combined Explorer carries Case identity into the verification change c
     }) })
   })
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('button', { name: 'Software' }).last().click()
+  await page.getByRole('group', { name: 'Verification scope' }).getByRole('button', { name: 'Software', exact: true }).click()
   await page.getByRole('link', { name: 'Test Case/Procedure Explorer' }).click()
   await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
   await page.locator('.procedureRow').first().click()
@@ -658,7 +658,7 @@ test('the Case chooser adds an exact eligible Draft and focuses its persisted pr
       { catalogueEntry: 'HighLevel', capabilities: 7, enabledArtifactKinds: ['Case', 'Procedure'] },
     ] }) }))
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('button', { name: 'Software' }).last().click()
+  await page.getByRole('group', { name: 'Verification scope' }).getByRole('button', { name: 'Software', exact: true }).click()
   await page.getByRole('link', { name: 'Test Case/Procedure Explorer' }).click()
   await expect(page.getByRole('heading', { name: 'Software Test Case/Procedure Explorer' })).toBeVisible({ timeout: 30_000 })
   await page.locator('.procedureRow').first().click()
