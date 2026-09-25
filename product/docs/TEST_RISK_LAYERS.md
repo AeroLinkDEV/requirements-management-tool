@@ -2,7 +2,7 @@
 
 AeroLink places a test at the **lowest layer that can still catch the class of defect the test exists to catch**. Faster is useful only when the lower layer preserves the same defect sensitivity; moving a test downward merely to avoid a host is not an optimization if it stops proving a database, HTTP, security, filesystem, or rendering boundary.
 
-This policy complements the source-derived API inventories in `product/test-contracts/` and the route-coverage guard. It does not replace either one.
+This policy complements the route-coverage guard in `product/test-contracts/`. It does not replace it.
 
 ## Domain tests
 
@@ -108,10 +108,10 @@ Before moving or deleting a test, answer all of the following:
 
 If the answer to #2 is no, or #3 is yes for the risk being asserted, the test stays at the integration layer.
 
-When a test is deleted rather than moved, also record in the commit or pull request: the test and its location, the failure it could actually detect, the stronger test that still owns the contract (or why no contract exists), and any test-only production seam the deletion lets you remove. A candidate missing any of these is not ready to delete. Deleting an API test changes the generated inventories in `product/test-contracts/`; regenerate them from source as described in `API_TEST_INTENT_INVENTORY.md` and never hand-merge them.
+When a test is deleted rather than moved, also record in the commit or pull request: the test and its location, the failure it could actually detect, the stronger test that still owns the contract (or why no contract exists), and any test-only production seam the deletion lets you remove. A candidate missing any of these is not ready to delete. Deleting an API test must leave the route-coverage guard green without adding to `grandfathered-uncovered.json`.
 
 ## Evidence and measurement
 
-`product/test-contracts/api-test-intent.json` and `api-host-classification.json` are the source-derived placement inventories. `product/docs/API_TEST_INTENT_INVENTORY.md` explains how they are generated.
+Placement is decided per test with the checklist above, from the test source and the code it exercises. The committed API test-intent and host-classification inventories that served the closed #563 and #566 programmes were retired by #1152; recover them from Git history if that work is ever reopened.
 
 Placement changes are not declared successful from counts alone. Closeout evidence must preserve route/security/persistence behavior and, where performance is claimed, measure Windows wall clock, CPU, and host-start behavior rather than extrapolating from theoretical factory counts.

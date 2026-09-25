@@ -90,13 +90,9 @@ mark with evidence; list the files read with no candidates.
 
 - One coherent owner-area batch per commit. Delete obsolete test-only exports, wrappers, and dead production paths
   rather than preserving aliases. Do not add replacement tests that restate the implementation.
-- Removing or adding API test methods changes `product/test-contracts/api-test-intent.json`,
-  `api-host-classification.json`, and the summary in `product/docs/API_TEST_INTENT_INVENTORY.md`. Run the three
-  generators under `product/test-contracts/tools/` twice and require identical output. Then update the pinned totals
-  in `product/test-contracts/tests/inventory.test.mjs` from the generator output (lesson 9 in
-  `docs/ENGINEERING_LESSONS.md`) and run `node --test product/test-contracts/tests/*.test.mjs`.
-- Read the host-classification diff, not just its totals. Moving a helper out of a class can hide a service
-  replacement from the static classifier and wrongly reclassify the class as reusable.
+- Removing or adding API test methods changes no committed inventory. Run
+  `node --test product/test-contracts/tests/*.test.mjs`; the route guard computes coverage from source, and
+  `node product/test-contracts/tools/report-route-coverage.mjs` prints what it sees.
 - Never add to `product/test-contracts/grandfathered-uncovered.json` to make a deletion pass. Route coverage must stay
   green without it.
 - Changes under `product/test-contracts/`, `product/test-planner/`, or `.github/` force broad CI, and the latter two

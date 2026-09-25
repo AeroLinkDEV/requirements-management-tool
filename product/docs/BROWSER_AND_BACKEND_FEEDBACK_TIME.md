@@ -631,7 +631,9 @@ migration are not planned work, and the incremental-conversion instruction this 
 withdrawn. Do not convert the reusable classes, publish class-by-shard attribution for that rollout, or
 commission randomized full-concurrency runs to qualify it. #677 subsequently retired
 `measure-api-host-reuse.ps1`, the tool that produced the evidence such a rollout would need, so restarting
-this would mean rebuilding measurement that was removed on purpose.
+this would mean rebuilding measurement that was removed on purpose. #1152 then retired the committed
+inventories this section cites (`api-test-intent.json`, `api-host-classification.json` and their generators),
+because every PR that touched an API test had to regenerate them. They remain in Git history.
 
 [#942](https://github.com/AeroLinkDEV/requirements-management-tool/issues/942)'s F11 discussion revisited the
 rule-matrix migration data recorded above and concluded that closing #566 was right: the migratable share of
