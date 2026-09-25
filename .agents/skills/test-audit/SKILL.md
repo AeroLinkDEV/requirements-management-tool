@@ -24,8 +24,9 @@ tier (`product/docs/BROWSER_AND_BACKEND_FEEDBACK_TIME.md`).
 
 ## 2. Audit mode (a focused sweep)
 
-Keep discovery read-only and report evidence before editing. For a broad scope, split the work into lanes that
-match the test tiers:
+Keep discovery read-only and record the evidence (the R/F/C/D ledger below) before editing. Stop for review only
+when the task asked for an audit without fixes. For a broad scope, split the work into lanes that match the test
+tiers:
 
 - `product/tests/AeroLink.Api.Tests` (hosted API);
 - `product/tests/AeroLink.Infrastructure.Tests` and `AeroLink.Domain.Tests`;
@@ -60,6 +61,9 @@ untested guard, a never-run suite) is its own GitHub issue unless the fix is tri
 
 Every **D** needs the deletion evidence from `TEST_RISK_LAYERS.md`. A candidate missing a field is not ready.
 
+The audit is done when every test file in the named scope has been read and each candidate carries a complete R/F/C/D
+mark with evidence; list the files read with no candidates.
+
 ## 3. Campaign mode (one owner area's whole test surface)
 
 1. **Baseline.** Record the area's test and support line counts and each test file's result at a pinned `main` SHA.
@@ -79,6 +83,8 @@ Every **D** needs the deletion evidence from `TEST_RISK_LAYERS.md`. A candidate 
    run that shows the old behavior.
 8. **Reconcile.** Merge `main` rather than rebasing a long campaign, carry any new `main` tests into their keepers,
    and rerun the area on the merged head.
+9. **Done** when every declaration in the baseline has a mark, the preservation review found no contract without a
+   keeper, and the area is green on the merged head apart from baseline failures already filed as issues.
 
 ## Editing and validation
 
@@ -103,5 +109,6 @@ Every **D** needs the deletion evidence from `TEST_RISK_LAYERS.md`. A candidate 
 
 ## Handoff
 
-Report the removed low-value categories; production simplifications; retained false positives and why they stay;
+Use the three reporting headings in `AGENTS.md` (Blocked on me, Changed, Found). Under them, report the removed
+low-value categories; production simplifications; retained false positives and why they stay;
 the proof actually run; production versus test line counts; issues filed; and follow-ups.

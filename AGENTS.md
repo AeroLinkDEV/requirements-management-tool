@@ -107,6 +107,9 @@ Use the repository's test-planning contract instead of guessing what to run.
 - Do not force-merge or bypass required checks.
 - Record exact validation commands/results in the PR when the change is material.
 - For visual changes, add focused browser proof and screenshots where they materially improve review.
+- An implementation task is done when its focused PR is open against `main`, the planner-selected tests and generators
+  pass at the PR head (SHA recorded), the PR body records that validation, and out-of-scope findings are filed as
+  issues. Merging is not part of "done" unless the task says so.
 
 ## Windows launchers and operator compatibility
 
@@ -144,6 +147,16 @@ current documentation. Turn actionable findings into GitHub Issues; capture last
 retain historical reports in the archive.
 
 Update `PROJECT_STATE.md` in the same PR when a change materially alters product architecture, supported lifecycle, important user-visible authority, or a major product boundary. Do not update it for every small bug fix.
+
+## Reporting
+
+End every long run (one that changes files, pushes, or spans more than one issue) with exactly three headings:
+
+- **Blocked on me**: decisions or actions only the owner can take, each with the link or exact command needed; write
+  "Nothing" if empty.
+- **Changed**: branches, commits, PRs, issues, and files changed, with the validation run and its result at the
+  recorded SHA.
+- **Found**: defects, risks, or surprises discovered, each with its filed issue link or the reason it was not filed.
 
 ## Things agents must never do for convenience
 

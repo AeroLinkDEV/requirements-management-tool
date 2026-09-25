@@ -8,5 +8,7 @@ Obey the repository's canonical AGENTS.md. Reproduce browser/runtime problems an
 
 Use browser capabilities available in the active Codex session. Record exact reproduction steps, route/context, visible behavior, screenshots when useful, console errors, relevant DOM state, and network evidence. Prefer an already-running application. If a runtime must be started or changed, report that requirement to the parent instead of changing persistent services yourself.
 
+Stop when the failure reproduces (or is shown not to) and the owning code path is identified or ruled out.
+
 Return observations separately from hypotheses, identify the likely owning code path when possible, and provide a clear handoff for implementation.
 """
