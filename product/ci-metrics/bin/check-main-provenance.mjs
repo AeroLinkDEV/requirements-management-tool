@@ -1,14 +1,16 @@
-// Trusted provenance checker for #562: shadow audit by workflow_run and fail-safe enforcement on main push.
+// Trusted provenance checker: shadow audit by workflow_run and fail-safe enforcement on main push.
 //
-// Triggered by workflow_run for every completed quality-gate run. For a main push it resolves the merged
-// pull request, locates validated-tree manifests from that PR's successful gate runs, and decides whether
-// the pushed tree was already validated. Phase A is observation only: the post-merge product gate still
-// runs, and canSkip is always false in the output.
+// For a main push it resolves the merged pull request and asks GitHub whether the merge queue already
+// proved that exact commit: a successful merge_group Product run on the pushed SHA, and the Merge
+// Authority App's binding check on the same SHA (#1147, #1152 A1). The earlier lookup (#562) searched
+// for `pull_request` Product runs, which have not existed since #561, so it could never match.
 
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { readSingleJsonFromZip } from '../lib/zip.mjs'
-import { decideProvenance, validateManifest, bindManifest, collectMergedPaths, GATE_DEFINING_PATHS, normalizeProvenanceTrigger, applyProvenanceMode } from '../lib/provenance.mjs'
+import {
+  decideQueueProvenance, collectMergedPaths, GATE_DEFINING_PATHS, normalizeProvenanceTrigger, applyProvenanceMode,
+  QUEUE_BINDING_CHECK_NAME,
+} from '../lib/provenance.mjs'
 
 const env = (name) => process.env[name] ?? ''
 
@@ -58,33 +60,6 @@ async function fetchMergedPaths(prNumber, { token, apiUrl, repository }) {
   })
 }
 
-async function latestManifestForRun(runId, { token, apiUrl, repository }) {
-  const artifacts = await listAll(`/repos/${repository}/actions/runs/${runId}/artifacts`, { token, apiUrl })
-  const prefix = `validated-tree-${runId}-`
-  let best = null
-  for (const artifact of artifacts) {
-    if (!artifact.name.startsWith(prefix)) continue
-    const attempt = Number(artifact.name.slice(prefix.length))
-    if (!Number.isInteger(attempt) || attempt < 1) continue
-    if (best === null || attempt > best.attempt) best = { artifact, attempt }
-  }
-  if (!best) return null
-  const response = await fetch(`${apiUrl}/repos/${repository}/actions/artifacts/${best.artifact.id}/zip`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-  })
-  if (!response.ok) return null
-  const zip = Buffer.from(await response.arrayBuffer())
-  try {
-    return { manifest: readSingleJsonFromZip(zip), attempt: best.attempt }
-  } catch {
-    return null
-  }
-}
-
 function escapeMarkdown(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -113,7 +88,7 @@ async function main() {
   let result
   if (!isMainPush) {
     result = {
-      schemaVersion: 'aerolink-main-provenance/v1',
+      schemaVersion: 'aerolink-main-provenance/v2',
       mode,
       triggeringRun: { id: run?.id ?? null, event: run?.event ?? null, branch: run?.head_branch ?? null },
       outcome: 'not-applicable',
@@ -124,51 +99,23 @@ async function main() {
     const pushTree = await fetchTree(pushSha, { token, apiUrl, repository })
     const closedPrs = await listAll(`/repos/${repository}/pulls?state=closed&sort=updated&direction=desc`, { token, apiUrl })
     const mergedPr = closedPrs.find((pr) => pr.merged_at && pr.merge_commit_sha === pushSha && pr.head?.ref) ?? null
-    const manifests = []
-    const manifestErrors = []
+    // GitHub's own records, read with the workflow token. Nothing here comes from an artifact the tested
+    // run wrote about itself.
+    let queueRuns = []
+    let aggregateJobs = []
+    let bindingChecks = []
     if (mergedPr) {
-      const runs = await listAll(`/repos/${repository}/actions/workflows/ci.yml/runs`, { token, apiUrl })
-      const created = Date.parse(mergedPr.created_at)
-      const merged = Date.parse(mergedPr.merged_at)
-      const cutoff = merged + 24 * 60 * 60 * 1000
-      const candidates = runs
-        .filter((candidate) => candidate.event === 'pull_request' && candidate.head_branch === mergedPr.head.ref && candidate.conclusion === 'success')
-        .filter((candidate) => {
-          const at = Date.parse(candidate.created_at)
-          return Number.isFinite(at) && at >= created - 60 * 60 * 1000 && at <= cutoff
-        })
-        .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
-      for (const candidate of candidates.slice(0, 10)) {
-        const downloaded = await latestManifestForRun(candidate.id, { token, apiUrl, repository })
-        if (!downloaded) {
-          manifestErrors.push({ runId: candidate.id, reason: 'No validated-tree manifest artifact found.' })
-          continue
-        }
-        const manifest = downloaded.manifest
-        const errors = validateManifest(manifest)
-        if (errors.length > 0) {
-          manifestErrors.push({ runId: candidate.id, reason: `Manifest failed validation: ${errors.join('; ')}` })
-          continue
-        }
-        const checkoutTree = await fetchTree(manifest.checkedOut.commitSha, { token, apiUrl, repository })
-        const bound = bindManifest(manifest, {
-          repository,
-          workflow: 'Product quality gate',
-          runId: candidate.id,
-          runAttempt: candidate.run_attempt ?? 1,
-          artifactAttempt: downloaded.attempt,
-          prNumber: mergedPr.number,
-          expectedHeadSha: candidate.head_sha,
-          expectedBaseSha: mergedPr.base?.sha ?? null,
-          expectedMergeRef: `refs/pull/${mergedPr.number}/merge`,
-          checkoutCommitTree: checkoutTree,
-        })
-        if (!bound.ok) {
-          manifestErrors.push({ runId: candidate.id, reason: bound.reason })
-          continue
-        }
-        manifests.push(manifest)
+      const runsBody = await api(`/repos/${repository}/actions/workflows/ci.yml/runs?event=merge_group&head_sha=${pushSha}&per_page=100`, { token, apiUrl })
+      queueRuns = Array.isArray(runsBody?.workflow_runs) ? runsBody.workflow_runs : []
+      const newest = queueRuns
+        .filter((candidate) => candidate.head_sha === pushSha && candidate.conclusion === 'success')
+        .sort((a, b) => b.id - a.id)[0]
+      if (newest) {
+        const jobsBody = await api(`/repos/${repository}/actions/runs/${newest.id}/jobs?filter=latest&per_page=100`, { token, apiUrl })
+        aggregateJobs = Array.isArray(jobsBody?.jobs) ? jobsBody.jobs : []
       }
+      const checksBody = await api(`/repos/${repository}/commits/${pushSha}/check-runs?check_name=${encodeURIComponent(QUEUE_BINDING_CHECK_NAME)}&filter=all&per_page=100`, { token, apiUrl })
+      bindingChecks = Array.isArray(checksBody?.check_runs) ? checksBody.check_runs : []
     }
     // Fail closed: if GitHub will not tell us what the merge changed, we cannot rule out that it
     // changed the gate itself, so the decision must be the same as if it had.
@@ -180,26 +127,27 @@ async function main() {
       changedPathsError = error.message
       changedPaths = [...GATE_DEFINING_PATHS]
     }
-    const decision = applyProvenanceMode(decideProvenance({
-      pushTreeSha: pushTree,
+    const decision = applyProvenanceMode(decideQueueProvenance({
+      pushSha,
       mergedPr,
-      manifests,
-      now: Date.now(),
       changedPaths,
+      queueRuns,
+      aggregateJobs,
+      bindingChecks,
+      now: Date.now(),
     }), mode)
     result = {
-      schemaVersion: 'aerolink-main-provenance/v1',
+      schemaVersion: 'aerolink-main-provenance/v2',
       mode,
       triggeringRun: { id: run?.id ?? null, event: run?.event ?? null, branch: run?.head_branch ?? null },
       push: { commitSha: pushSha, treeSha: pushTree },
       mergedPr: mergedPr ? { number: mergedPr.number, mergedAt: mergedPr.merged_at, headRef: mergedPr.head.ref } : null,
-      manifestsFound: manifests.length,
-      manifestErrors: manifestErrors.slice(0, 20),
+      queueRunsFound: queueRuns.length,
+      bindingChecksFound: bindingChecks.length,
       outcome: decision.outcome,
       canSkip: decision.canSkip,
       reason: decision.reason,
       source: decision.source ?? null,
-      rejected: decision.rejected ?? [],
       selfModifying: decision.selfModifying === true,
       changedPathsUnavailable: changedPathsError,
     }
@@ -209,19 +157,19 @@ async function main() {
   lines.push(`# Main-push provenance check (${escapeMarkdown(result.mode)})`)
   lines.push('')
   lines.push(result.mode === 'enforce'
-    ? '- Mode: enforce (trusted exact-tree matches may skip the redundant post-merge product retest)'
+    ? '- Mode: enforce (a commit the merge queue already proved may skip the redundant post-merge product retest)'
     : '- Mode: shadow (observation only; the post-merge gate still runs)')
   lines.push(`- Outcome: ${escapeMarkdown(result.outcome)}`)
-  if (result.push) lines.push(`- Pushed tree: \`${escapeMarkdown(result.push.treeSha)}\``)
-  if (result.source) lines.push(`- Validated by PR #${result.source.pr}, run ${result.source.runId} attempt ${result.source.attempt}, tree \`${escapeMarkdown(result.source.treeSha)}\``)
+  if (result.push) lines.push(`- Pushed commit: \`${escapeMarkdown(result.push.commitSha)}\` (tree \`${escapeMarkdown(result.push.treeSha)}\`)`)
+  if (result.source) lines.push(`- Proved by the merge-queue candidate for PR #${result.source.pr}: run ${result.source.runId} attempt ${result.source.attempt}, binding check ${result.source.bindingCheckId}`)
   if (result.reason) lines.push(`- Reason: ${escapeMarkdown(result.reason)}`)
   if (result.selfModifying) lines.push('- This merge changed the gate\'s own definition, so main validates it once independently regardless of tree match.')
   if (result.changedPathsUnavailable) {
     lines.push(`- The merge's changed-file list could not be read (${escapeMarkdown(result.changedPathsUnavailable)}); treated as gate-defining and sent to fallback.`)
   }
-  if (result.outcome === 'provenanced-match' && result.manifestsFound > 0) {
+  if (result.outcome === 'provenanced-match') {
     lines.push(result.canSkip
-      ? '- Trusted tree match: backend-api, backend-core-domain, backend-core-infrastructure, client, script-contracts, and postgresql-smoke may skip; lightweight cache warming remains.'
+      ? '- Exact queue-proved commit: backend-api, backend-core-domain, backend-core-infrastructure, client, script-contracts, and postgresql-smoke may skip; lightweight cache warming remains.'
       : '- Would skip under enforcement: backend-api, backend-core-domain, backend-core-infrastructure, client, script-contracts, postgresql-smoke (lightweight cache warming would remain).')
   }
   result.markdown = lines.join('\n')

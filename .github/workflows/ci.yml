@@ -184,14 +184,19 @@ jobs:
   #
   # So one small job on main does nothing but download the browser under the shared key. It gates nothing and
   # blocks nothing; if it fails the browser jobs simply download Chromium as they did before.
+  #
+  # It also warms the NuGet cache. The backend jobs used to save that entry on every main push, but a main push
+  # whose exact commit the merge queue already proved now skips them (#1147), and queue and pull-request runs
+  # can only save caches scoped to their own refs. Without this, a dependency change would leave main with no
+  # entry for the new key, and every later run would restore an older one and download the difference.
   warm-chromium-cache:
-    name: Warm the Chromium cache
+    name: Warm the Chromium and NuGet caches
     if: github.event_name == 'push'
     runs-on: windows-latest
     timeout-minutes: 10
     env:
       METRICS_JOB_ID: warm-chromium-cache
-      METRICS_JOB_NAME: Warm the Chromium cache
+      METRICS_JOB_NAME: Warm the Chromium and NuGet caches
     steps:
       - name: Capture job start
         continue-on-error: true
@@ -224,6 +229,23 @@ jobs:
         run: |
           npm ci
           npx playwright install chromium
+      - name: Cache NuGet packages
+        id: nuget
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('product/**/*.csproj', 'product/**/*.props', 'product/**/*.targets') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - name: Install .NET 10
+        if: steps.nuget.outputs.cache-hit != 'true'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v5.2.0
+        with:
+          dotnet-version: 10.0.x
+      # Restore only. The entry is saved under the main-scoped key when the job ends.
+      - name: Restore NuGet packages
+        if: steps.nuget.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: dotnet restore product/AeroLink.slnx
       - name: Mark setup complete
         if: always()
         continue-on-error: true
@@ -239,6 +261,7 @@ jobs:
           METRICS_JOB_RESULT: ${{ job.status }}
           METRICS_NEEDS: ""
           METRICS_CACHE_CHROMIUM: ${{ steps.chromium.outputs.cache-hit }}
+          METRICS_CACHE_NUGET: ${{ steps.nuget.outputs.cache-hit }}
         run: node "${{ github.workspace }}/product/ci-metrics/bin/write-fragment.mjs"
       - name: Upload metrics fragment
         if: always()
