@@ -1014,7 +1014,9 @@ test.describe("inside a change", () => {
     const network = await (await request.get(
       `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
     const tcr = (network.nodes ?? []).find((node: { kind: string }) => node.kind === "TestChangeRequest")
-    test.skip(!tcr, "this build carries no Test Change Request to open")
+    // The showcase seed is deterministic and carries a Test Change Request. A seed drift must fail here rather
+    // than silently turn this journey into a skip (#1127).
+    expect(tcr, "the showcase build should carry a Test Change Request").toBeTruthy()
 
     const asked: string[] = []
     await page.route("**/proposal-content*", async route => {
@@ -1044,7 +1046,8 @@ test.describe("inside a change", () => {
     const network = await (await request.get(
       `${apiBase}/api/change-requests/network?projectId=${projectId}&releaseId=${releaseId}`)).json()
     const changes = (network.nodes ?? []).filter((node: { kind: string }) => node.kind !== "ProblemReport")
-    test.skip(changes.length < 2, "this build carries fewer than two changes to move between")
+    // Deterministic seed: fewer than two changes is a seed regression, not a reason to skip (#1127).
+    expect(changes.length, "the showcase build should carry at least two changes").toBeGreaterThanOrEqual(2)
     const [first, second] = changes as { id: string; displayNumber: string }[]
 
     await page.goto(`${threadRoot(page)}/traceability/change-requests/${first.id}?view=inside`)
