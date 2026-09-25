@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 999,
-    "cases": 1139,
+    "tests": 1000,
+    "cases": 1140,
     "classes": 157,
-    "hostedTests": 942,
-    "hostedCases": 1060,
+    "hostedTests": 943,
+    "hostedCases": 1061,
     "nonHostedTests": 34,
     "nonHostedCases": 48,
     "unknownHostTests": 23,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 616,
-      "cases": 702,
+      "tests": 617,
+      "cases": 703,
       "unknownCases": 0,
       "classes": 123
     },
@@ -12215,8 +12215,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 374,
-        "end": 461
+        "start": 405,
+        "end": 492
       }
     },
     {
@@ -12229,8 +12229,8 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 88,
-        "end": 112
+        "start": 119,
+        "end": 143
       }
     },
     {
@@ -12243,8 +12243,8 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 114,
-        "end": 150
+        "start": 145,
+        "end": 181
       }
     },
     {
@@ -12257,8 +12257,8 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 237,
-        "end": 273
+        "start": 268,
+        "end": 304
       }
     },
     {
@@ -12291,8 +12291,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 463,
-        "end": 521
+        "start": 494,
+        "end": 552
       }
     },
     {
@@ -12309,8 +12309,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 175,
-        "end": 235
+        "start": 206,
+        "end": 266
       }
     },
     {
@@ -12327,8 +12327,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 275,
-        "end": 372
+        "start": 306,
+        "end": 403
       }
     },
     {
@@ -12341,8 +12341,24 @@
       "hosted": "unknown",
       "hostEvidence": [],
       "sourceLines": {
-        "start": 152,
-        "end": 173
+        "start": 183,
+        "end": 204
+      }
+    },
+    {
+      "cls": "ReleasePickerMembershipApiTests",
+      "test": "Searched_release_continuation_freezes_membership_on_both_sides_of_the_cursor",
+      "kind": "Fact",
+      "intent": "http-boundary",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 88,
+        "end": 117
       }
     },
     {

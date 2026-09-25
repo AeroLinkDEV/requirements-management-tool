@@ -371,6 +371,7 @@
         "ProjectSetupInceptionApiTests",
         "ProjectSetupKestrelQualificationTests",
         "ProjectSetupPostgresQualificationTests",
+        "ProjectSetupPostgresQualificationTests.ReleasePickerSnapshot",
         "ProjectSetupServiceQualificationTests",
         "ProjectSetupSourceOptionsApiTests",
         "RebaseRequirementChangeTests",
@@ -482,7 +483,8 @@
       "file": "BaselineImportEndpoints.cs",
       "coveredBy": [
         "BaselineImportApiTests",
-        "ProjectSetupPostgresQualificationTests"
+        "ProjectSetupPostgresQualificationTests",
+        "ProjectSetupPostgresQualificationTests.ReleasePickerSnapshot"
       ]
     },
     {
@@ -2575,6 +2577,7 @@
         "ProcedureDiscussionApiTests",
         "ProjectSetupApiTests",
         "ProjectSetupBoundaryRegressionApiTests",
+        "ProjectSetupPostgresQualificationTests.ReleasePickerSnapshot",
         "SecurityHardeningTests",
         "TestProcedureDocumentApiTests",
         "VerificationVocabularyApiTests"

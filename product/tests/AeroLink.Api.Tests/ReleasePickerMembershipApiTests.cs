@@ -86,6 +86,37 @@ public sealed class ReleasePickerMembershipApiTests
     }
 
     [Fact]
+    public async Task Searched_release_continuation_freezes_membership_on_both_sides_of_the_cursor()
+    {
+        var (projectId, client, factory) = await SeedAsync("PICKER102",
+            ("1.0", true), ("1.5", false), ("1.6", false), ("1.7", false), ("2.0", true));
+        using var _ = factory;
+
+        var seen = new List<string>();
+        var page = await PageAsync(client, projectId, pageSize: 2, search: "1.");
+        seen.AddRange(DisplayNumbers(page));
+        Assert.Equal(["BUILD-1.0", "BUILD-1.5"], seen);
+
+        // Matching builds committed before and after the cursor, plus a non-matching one.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            db.AddRange(new SoftwareRelease(projectId, "1.1", false), new SoftwareRelease(projectId, "1.9", false),
+                new SoftwareRelease(projectId, "3.1", false));
+            await db.SaveChangesAsync();
+        }
+        while (page.GetProperty("hasMore").GetBoolean())
+        {
+            page = await PageAsync(client, projectId, pageSize: 2, page.GetProperty("nextCursor").GetString(), search: "1.");
+            seen.AddRange(DisplayNumbers(page));
+        }
+        Assert.Equal(["BUILD-1.0", "BUILD-1.5", "BUILD-1.6", "BUILD-1.7"], seen);
+
+        var fresh = await PageAsync(client, projectId, pageSize: 50, search: "1.");
+        Assert.Equal(["BUILD-1.0", "BUILD-1.1", "BUILD-1.5", "BUILD-1.6", "BUILD-1.7", "BUILD-1.9"], DisplayNumbers(fresh));
+    }
+
+    [Fact]
     public async Task Old_release_v1_cursor_fails_closed_with_a_start_again_path()
     {
         var (projectId, client, factory) = await SeedAsync("PICKER102", ("1.0", true), ("1.5", false), ("2.0", true));

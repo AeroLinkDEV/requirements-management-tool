@@ -814,7 +814,17 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 "the cancelled request was never observed waiting on this project's advisory fence");
             await cancellation.CancelAsync();
 
+            var cancelledAt = System.Diagnostics.Stopwatch.StartNew();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelledRequest.WaitAsync(TimeSpan.FromSeconds(20)));
+
+            // Server-side proof: while the writer STILL holds the fence, the reader's ungranted wait must
+            // disappear well before the page-one lock_timeout could end it on its own. Only cancellation
+            // reaching PostgreSQL can remove it that early; a client-only abort would leave it waiting.
+            Assert.True(await WaitForNoFenceWaiterAsync(connection, projectId, TimeSpan.FromSeconds(2.5)),
+                "the cancelled page one was still waiting on the fence in PostgreSQL");
+            Assert.True(cancelledAt.Elapsed < ManagedDocumentEndpoints.ReleasePickerFenceWait,
+                $"cancellation took {cancelledAt.Elapsed}, which the lock_timeout alone could explain");
+            Assert.Equal(1L, await CountProjectFenceLocksAsync(connection, projectId)); // only the writer's granted lock
 
             // The canceled reader leaves no lock on the owned key/database; the writer proceeds unharmed.
             await using (var rollback = writer.CreateCommand()) { rollback.CommandText = "ROLLBACK"; await rollback.ExecuteNonQueryAsync(); }
@@ -827,6 +837,244 @@ public sealed partial class ProjectSetupPostgresQualificationTests
 
             var fresh = await LinkOptionsPageAsync(client, projectId, pageSize: 50);
             Assert.Equal(["BUILD-1.0"], DisplayNumbers(fresh));
+        });
+    }
+    private static async Task<long> CountUngrantedFenceWaitersAsync(string connection, Guid projectId)
+        => await ScalarAsync(connection,
+            """
+            SELECT COUNT(*) FROM pg_locks
+            WHERE locktype = 'advisory' AND NOT granted
+              AND objid = hashtext('aerolink-release-picker:' || @p)
+              AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+            """,
+            parameters => parameters.AddWithValue("p", projectId));
+
+    private static async Task<bool> WaitForNoFenceWaiterAsync(string connection, Guid projectId, TimeSpan within)
+    {
+        var deadline = DateTimeOffset.UtcNow + within;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (await CountUngrantedFenceWaitersAsync(connection, projectId) == 0) return true;
+            await Task.Delay(50);
+        }
+        return await CountUngrantedFenceWaitersAsync(connection, projectId) == 0;
+    }
+
+    private static async Task<NpgsqlConnection> HoldFenceWithUncommittedInsertAsync(string connection, Guid projectId, string version)
+    {
+        var writer = new NpgsqlConnection(connection);
+        await writer.OpenAsync();
+        await using (var begin = writer.CreateCommand()) { begin.CommandText = "BEGIN"; await begin.ExecuteNonQueryAsync(); }
+        await using var insert = writer.CreateCommand();
+        insert.CommandText = "INSERT INTO software_releases (\"Id\", \"ProjectId\", \"Version\", \"IsReleased\") VALUES (@id, @p, @v, false)";
+        insert.Parameters.AddWithValue("id", Guid.NewGuid());
+        insert.Parameters.AddWithValue("p", projectId);
+        insert.Parameters.AddWithValue("v", version);
+        await insert.ExecuteNonQueryAsync();
+        return writer;
+    }
+
+    private static async Task<long?> OrdinalAsync(string connection, Guid releaseId)
+    {
+        await using var c = new NpgsqlConnection(connection);
+        await c.OpenAsync();
+        await using var command = c.CreateCommand();
+        command.CommandText = "SELECT \"PickerInsertionOrdinal\" FROM software_releases WHERE \"Id\" = @id";
+        command.Parameters.AddWithValue("id", releaseId);
+        var value = await command.ExecuteScalarAsync();
+        return value is null or DBNull ? null : Convert.ToInt64(value);
+    }
+
+    [RequiredSetupPostgresFact]
+    public async Task Page_one_fence_wait_is_bounded_and_ends_in_a_recoverable_busy_response()
+    {
+        await WithDatabaseAsync(async connection =>
+        {
+            using var factory = new AeroLinkApiFactory(postgresConnection: connection);
+            var client = factory.CreateClient();
+            await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+            var projectId = await SeedPickerProjectAsync(factory, "PICKERBUSY");
+            await using var writer = await HoldFenceWithUncommittedInsertAsync(connection, projectId, "9.9");
+
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
+            using var busy = await client.GetAsync(
+                $"/api/managed-documents/link-options?projectId={projectId}&artifactType=Release&pageSize=50");
+            elapsed.Stop();
+            Console.WriteLine($"PICKER_FENCE_BUSY: status={(int)busy.StatusCode} elapsedMs={elapsed.ElapsedMilliseconds}");
+
+            // Bounded by the page-one lock_timeout, not by the connection's 30-second command timeout, and
+            // answered with a recoverable response rather than an unhandled server error.
+            Assert.Equal(System.Net.HttpStatusCode.ServiceUnavailable, busy.StatusCode);
+            var body = await busy.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("picker_busy", body.GetProperty("code").GetString());
+            Assert.True(elapsed.Elapsed >= ManagedDocumentEndpoints.ReleasePickerFenceWait - TimeSpan.FromMilliseconds(500),
+                $"page one gave up after {elapsed.Elapsed}, before its fence wait bound");
+            Assert.True(elapsed.Elapsed < ManagedDocumentEndpoints.ReleasePickerFenceWait + TimeSpan.FromSeconds(10),
+                $"page one waited {elapsed.Elapsed}, beyond its fence wait bound");
+
+            // The refused reader left no waiter, and its transaction-scoped lock_timeout did not leak into
+            // the pooled connection: the writer still holds the only fence lock.
+            Assert.Equal(0L, await CountUngrantedFenceWaitersAsync(connection, projectId));
+            Assert.Equal(1L, await CountProjectFenceLocksAsync(connection, projectId));
+
+            // Retrying after the writer commits establishes a fresh boundary that includes its build.
+            await using (var commit = writer.CreateCommand()) { commit.CommandText = "COMMIT"; await commit.ExecuteNonQueryAsync(); }
+            var retried = await LinkOptionsPageAsync(client, projectId, pageSize: 50);
+            Assert.Equal(["BUILD-1.0", "BUILD-9.9"], DisplayNumbers(retried));
+            Assert.Equal(0L, await CountProjectFenceLocksAsync(connection, projectId));
+        });
+    }
+
+    [RequiredSetupPostgresFact]
+    public async Task Searched_release_continuation_freezes_membership_on_both_sides_of_the_cursor()
+    {
+        await WithDatabaseAsync(async connection =>
+        {
+            using var factory = new AeroLinkApiFactory(postgresConnection: connection);
+            var client = factory.CreateClient();
+            await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(client);
+            var projectId = await SeedPickerProjectAsync(factory, "PICKERSEARCH");
+            foreach (var version in new[] { "1.5", "1.6", "1.7", "2.0" }) await InsertRawReleaseAsync(connection, projectId, version);
+
+            async Task<JsonElement> SearchPageAsync(int pageSize, string? cursor = null)
+            {
+                var url = $"/api/managed-documents/link-options?projectId={projectId}&artifactType=Release&pageSize={pageSize}&search=1.";
+                if (cursor is not null) url += $"&cursor={Uri.EscapeDataString(cursor)}";
+                using var response = await client.GetAsync(url);
+                Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+                return await response.Content.ReadFromJsonAsync<JsonElement>();
+            }
+
+            var seen = new List<string>();
+            var page = await SearchPageAsync(2);
+            seen.AddRange(DisplayNumbers(page));
+            Assert.Equal(["BUILD-1.0", "BUILD-1.5"], seen);
+
+            // Matching builds committed before and after the cursor, plus a non-matching one.
+            await InsertRawReleaseAsync(connection, projectId, "1.1");
+            await InsertRawReleaseAsync(connection, projectId, "1.9");
+            await InsertRawReleaseAsync(connection, projectId, "3.1");
+            while (page.GetProperty("hasMore").GetBoolean())
+            {
+                page = await SearchPageAsync(2, page.GetProperty("nextCursor").GetString());
+                seen.AddRange(DisplayNumbers(page));
+            }
+            Assert.Equal(["BUILD-1.0", "BUILD-1.5", "BUILD-1.6", "BUILD-1.7"], seen);
+
+            var fresh = await SearchPageAsync(50);
+            Assert.Equal(["BUILD-1.0", "BUILD-1.1", "BUILD-1.5", "BUILD-1.6", "BUILD-1.7", "BUILD-1.9"], DisplayNumbers(fresh));
+        });
+    }
+
+    [RequiredSetupPostgresFact]
+    public async Task Release_ordinal_is_read_back_by_ef_and_never_written_by_lifecycle_saves_on_postgres()
+    {
+        await WithDatabaseAsync(async connection =>
+        {
+            using var factory = new AeroLinkApiFactory(postgresConnection: connection);
+            var projectId = await SeedPickerProjectAsync(factory, "PICKEREF");
+            Guid releaseId; long allocated;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                var release = new SoftwareRelease(projectId, "4.0", isReleased: false);
+                db.Releases.Add(release);
+                await db.SaveChangesAsync();
+                // RETURNING carries the trigger-allocated value back into the tracked entity.
+                Assert.NotNull(release.PickerInsertionOrdinal);
+                allocated = release.PickerInsertionOrdinal!.Value;
+                Assert.Equal(allocated, await OrdinalAsync(connection, release.Id));
+                release.MarkReleased(DateTimeOffset.UtcNow);
+                await db.SaveChangesAsync();
+                releaseId = release.Id;
+            }
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                var reloaded = await db.Releases.SingleAsync(x => x.Id == releaseId);
+                Assert.True(reloaded.IsReleased);
+                Assert.Equal(allocated, reloaded.PickerInsertionOrdinal);
+                // A modified-state save never includes the column, so the immutability trigger is never engaged.
+                db.Entry(reloaded).State = EntityState.Modified;
+                await db.SaveChangesAsync();
+            }
+            Assert.Equal(allocated, await OrdinalAsync(connection, releaseId));
+        });
+    }
+
+    [RequiredSetupPostgresFact]
+    public async Task Every_supported_release_writer_receives_a_fenced_membership_ordinal_on_postgres()
+    {
+        await WithDatabaseAsync(async connection =>
+        {
+            using var factory = new AeroLinkApiFactory(postgresConnection: connection);
+            var ordinals = new List<(string Path, long Ordinal)>();
+            async Task RecordAsync(string path, Guid releaseId)
+            {
+                var ordinal = await OrdinalAsync(connection, releaseId);
+                Assert.True(ordinal is not null, $"{path} created a release without a membership ordinal");
+                ordinals.Add((path, ordinal!.Value));
+            }
+
+            // 1. Guided project setup (ProjectSetupService). It bootstraps the administrator itself.
+            var setup = await ProjectSetupServiceQualificationTests.QualifyAsync(factory);
+            await RecordAsync("project setup", setup.ReleaseId);
+            using var client = factory.CreateClient();
+            using (var login = await client.PostAsJsonAsync("/api/auth/login", new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword }))
+                Assert.True(login.IsSuccessStatusCode, await login.Content.ReadAsStringAsync());
+            await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
+
+            // 2. Workspace creation's initial build (WorkspaceEndpoints).
+            using (var workspace = await client.PostAsJsonAsync("/api/workspaces", new
+            {
+                programName = "Picker writer program", programCode = "PICKWRITE",
+                projectName = "Picker writer project", softwareProduct = "Picker writer product",
+                initialRelease = "1.0", initialReleaseIsReleased = true
+            }))
+            {
+                Assert.True(workspace.IsSuccessStatusCode, await workspace.Content.ReadAsStringAsync());
+                var projectId = (await workspace.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("project").GetProperty("id").GetGuid();
+                var initial = await ScalarAsync<Guid>(connection,
+                    "SELECT \"Id\" FROM software_releases WHERE \"ProjectId\" = @p AND \"Version\" = '1.0'",
+                    parameters => parameters.AddWithValue("p", projectId));
+                await RecordAsync("workspace creation", initial);
+
+                // 3. Ordinary successor creation (/api/releases).
+                await RecordAsync("release creation", await CreateReleaseViaApiAsync(client, projectId, "1.1"));
+            }
+
+            // 4. Baseline import acceptance (BaselineImportEndpoints).
+            Guid importId;
+            using (var scope = factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+                var program = new ProgramRecord("Picker import fixture", "PICKIMPORT");
+                var project = new ProjectRecord(program.Id, "Picker import fixture", "Software");
+                var now = DateTimeOffset.UtcNow;
+                var import = new AeroLink.Domain.Imports.BaselineImport(project.Id, "Fixture source", "1", "Fixture baseline", now,
+                    "fixture.reqif", new string('a', 64), 1, AeroLink.Domain.Imports.ImportedArtifactKinds.Requirements,
+                    "fixture.extractor", now, "admin", now);
+                import.RecordAnalysis(now);
+                import.RecordMapping("{}", now);
+                import.NoteSourceRecordsAccountedFor(1, now);
+                import.RecordReconciliation("{\"objectsIn\":1}", now);
+                var source = new AeroLink.Domain.Imports.SourceIdentity(project.Id, import.Id, "Fixture source", "Requirements", "1", "SOURCE-1", now);
+                db.AddRange(program, project, import, source,
+                    new AeroLink.Domain.Imports.BaselineImportSourceIdentityMembership(import.Id, source.Id, true, now));
+                await db.SaveChangesAsync();
+                importId = import.Id;
+            }
+            using (var accepted = await client.PostAsJsonAsync($"/api/baseline-imports/{importId}/accept", new { version = "2.0" }))
+                Assert.True(accepted.IsSuccessStatusCode, await accepted.Content.ReadAsStringAsync());
+            var importedRelease = await ScalarAsync<Guid>(connection,
+                "SELECT \"ReleaseId\" FROM baseline_imports WHERE \"Id\" = @id", parameters => parameters.AddWithValue("id", importId));
+            await RecordAsync("baseline import acceptance", importedRelease);
+
+            // Sequential writes allocate strictly increasing ordinals from the one global sequence, so each
+            // lands after every cutoff a page one could have captured before it.
+            Console.WriteLine("PICKER_WRITER_ORDINALS: " + string.Join(", ", ordinals.Select(x => $"{x.Path}={x.Ordinal}")));
+            Assert.Equal(ordinals.Select(x => x.Ordinal).OrderBy(x => x), ordinals.Select(x => x.Ordinal));
+            Assert.Equal(ordinals.Count, ordinals.Select(x => x.Ordinal).Distinct().Count());
         });
     }
 }

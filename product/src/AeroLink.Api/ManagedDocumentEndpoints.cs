@@ -876,7 +876,17 @@ public static class ManagedDocumentEndpoints
             {
                 var isolation = db.Database.IsNpgsql() ? System.Data.IsolationLevel.ReadCommitted : System.Data.IsolationLevel.Serializable;
                 await using var transaction = await db.Database.BeginTransactionAsync(isolation, ct);
-                await AcquireReleasePickerFenceAsync(db, projectId, ct);
+                try
+                {
+                    await AcquireReleasePickerFenceAsync(db, projectId, ct);
+                }
+                catch (Npgsql.PostgresException ex) when (ex.SqlState == Npgsql.PostgresErrorCodes.LockNotAvailable)
+                {
+                    // A writer is still committing a build in this project. Waiting longer would hold the
+                    // request open behind an arbitrary transaction; the caller retries page one instead.
+                    await transaction.RollbackAsync(CancellationToken.None);
+                    return ReleasePickerBusy();
+                }
                 var pageOneCutoff = await db.Releases.AsNoTracking().Where(x => x.ProjectId == projectId)
                     .MaxAsync(x => (long?)x.PickerInsertionOrdinal, ct) ?? 0;
                 var pageOne = await ReleaseCandidateQuery(db, projectId, term, collation, after, pageOneCutoff)
@@ -902,13 +912,25 @@ public static class ManagedDocumentEndpoints
         return ordered.OrderBy(x => x.SortKey);
     }
 
+    // Page one waits at most this long for a writer that is allocating a build in the same project. The
+    // wait is bounded by lock_timeout, scoped to the page-one transaction, rather than by the connection's
+    // general command timeout, and it ends in a recoverable 503 instead of an unhandled server error.
+    internal static readonly TimeSpan ReleasePickerFenceWait = TimeSpan.FromSeconds(5);
+
+    private static IResult ReleasePickerBusy() => Results.Json(new
+    {
+        error = "Another build is being recorded in this project. Try again in a few seconds.",
+        code = "picker_busy"
+    }, statusCode: StatusCodes.Status503ServiceUnavailable);
+
     private static async Task AcquireReleasePickerFenceAsync(AeroLinkDbContext db, Guid projectId, CancellationToken ct)
     {
         if (!db.Database.IsNpgsql()) return; // SQLite: the immediate serializable write transaction is the fence.
         var connection = db.Database.GetDbConnection();
         await using var command = connection.CreateCommand();
         command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
-        command.CommandText = "SELECT pg_advisory_xact_lock(hashtext('aerolink-release-picker:' || @project_id))";
+        command.CommandText = $"SET LOCAL lock_timeout = '{(int)ReleasePickerFenceWait.TotalMilliseconds}ms'; " +
+            "SELECT pg_advisory_xact_lock(hashtext('aerolink-release-picker:' || @project_id))";
         var parameter = command.CreateParameter();
         parameter.ParameterName = "@project_id";
         parameter.Value = projectId;
