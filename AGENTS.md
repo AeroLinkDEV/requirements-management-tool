@@ -108,6 +108,9 @@ Use the repository's test-planning contract instead of guessing what to run.
   Escalate to the owner only for a functional decision, and then ask one specific question with the options.
 - Routine CI-maintenance approvals are delegated (DEC-124, DEC-135). A waiting approval is not the owner's job.
   Approval-machinery changes take the same delegated path (DEC-142), and the owner is notified after each merge.
+- **Open a protected-path PR only if you can approve it yourself (DEC-143).** That applies to `.github/`,
+  `product/test-planner/` and `product/ci-metrics/`. Approve it promptly when its binding waits. A cloud
+  session, Codex, or any session that cannot approve hands that work to one that can.
 - Use one focused branch/worktree per implementation task; read-only tasks do not require one.
 - Keep unrelated cleanup out of feature PRs.
 - Rebase/update only when the repository's actual merge state requires it; do not churn a green PR from habit.

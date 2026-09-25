@@ -2695,3 +2695,12 @@ choices are created as focused issues only when their trigger and acceptance bou
 - **Consequence:** for an approval-machinery change, nobody but the working agent reviews it before merge. A defect that passes CI and also weakens the gate can merge. The owner catches it afterwards, from the post-merge notice, and reverts.
 - **Installation:** the change closing #1145 was itself approval machinery, so the owner merged it through a manual ruleset bypass, merge and restore. It is the last change merged that way.
 - **Supersedes:** DEC-141.
+
+### DEC-143 - Protected-Path PRs Come Only From Sessions That Can Approve Them
+
+- **Date:** 2026-09-25
+- **Status:** Accepted
+- **Authority:** The owner stated in the Claude conversation on 2026-09-25: "if there is any decision / approval / action required which does not involve a functional impact to how AeroLink operates, then I want my agents to handle this as autonomously as possible !!". He then chose this rule (option "B") after being told the maintenance approval step cannot be made automatic. Claude transcribes the statements here. They affirm DEC-140.
+- **Context:** a protected-path PR (`.github/`, `product/test-planner/`, `product/ci-metrics/`) needs the maintenance environment approval. An agent can submit that approval only for its own PR: Claude Code refuses an approval routed through another session. Making the approval automatic (#1165) is refused as a CI bypass. So a protected-path PR whose owning session is absent, or cannot approve, falls to the owner. #1151 timed out at the head of the queue on 2026-09-25 for that reason.
+- **Decision:** only a session that can submit its own maintenance approval opens a protected-path PR. That is a local Claude session whose permission settings allow the DEC-135 approval call. Such a session submits the approval promptly when the binding waits. A cloud session, Codex, or any session that cannot approve hands protected-path work to such a session instead of opening the PR itself. The receiving session then owns the PR and its approval.
+- **Consequence:** the owner is asked for a maintenance approval only if the owning session is lost mid-flight. Functional decisions still go to the owner under DEC-140.
