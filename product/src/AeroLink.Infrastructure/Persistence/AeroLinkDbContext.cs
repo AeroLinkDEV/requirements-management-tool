@@ -71,6 +71,7 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ProjectVerificationVocabulary> ProjectVerificationVocabularies => Set<ProjectVerificationVocabulary>();
     public DbSet<ProjectFeatureSet> ProjectFeatureSets => Set<ProjectFeatureSet>();
     public DbSet<ProjectFeatureSetHistory> ProjectFeatureSetHistories => Set<ProjectFeatureSetHistory>();
+    public DbSet<ProblemReportImportBatch> ProblemReportImportBatches => Set<ProblemReportImportBatch>();
     public DbSet<ProjectVerificationMethod> ProjectVerificationMethods => Set<ProjectVerificationMethod>();
     public DbSet<SoftwareRelease> Releases => Set<SoftwareRelease>();
     public DbSet<SoftwareBuild> SoftwareBuilds => Set<SoftwareBuild>();
@@ -603,6 +604,18 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.Version).IsConcurrencyToken();
             b.Property(x => x.UpdatedBy).HasMaxLength(200);
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ProblemReportImportBatch>(b =>
+        {
+            b.ToTable("problem_report_import_batches");
+            b.HasKey(x => x.Id);
+            b.HasIndex(x => x.ProjectId);
+            b.Property(x => x.SourceSystem).HasMaxLength(200);
+            b.Property(x => x.FileName).HasMaxLength(400);
+            b.Property(x => x.SourceHash).HasMaxLength(64);
+            b.Property(x => x.PreviewHash).HasMaxLength(64);
+            b.Property(x => x.ImportedBy).HasMaxLength(200);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ProjectFeatureSetHistory>(b =>
         {
@@ -1937,7 +1950,10 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         });
         modelBuilder.Entity<ProblemReport>(b =>
         {
-            b.ToTable("problem_reports"); b.HasKey(x => x.Id); b.Property(x => x.ReportNumber).HasMaxLength(80).IsRequired();
+            b.ToTable("problem_reports"); b.HasKey(x => x.Id);
+            b.Property(x => x.SourceSystem).HasMaxLength(200); b.Property(x => x.SourceKey).HasMaxLength(200);
+            b.Property(x => x.SourceReportedBy).HasMaxLength(300); b.Property(x => x.SourceState).HasMaxLength(200);
+            b.HasIndex(x => new { x.ProjectId, x.SourceSystem, x.SourceKey }); b.Property(x => x.ReportNumber).HasMaxLength(80).IsRequired();
             b.Property(x => x.Title).HasMaxLength(300).IsRequired(); b.Property(x => x.Problem).HasMaxLength(8000).IsRequired(); b.Property(x => x.ProblemRich).HasMaxLength(32000); b.Property(x => x.AdditionalInformation).HasMaxLength(8000); b.Property(x => x.AdditionalInformationRich).HasMaxLength(32000); b.Property(x => x.Analysis).HasMaxLength(8000); b.Property(x => x.ReportedBy).HasMaxLength(100).IsRequired(); b.Property(x => x.ResponsibleEngineerId).HasMaxLength(100).IsRequired();
             b.Property(x => x.Classification).HasMaxLength(100).IsRequired(); b.Property(x => x.Origin).HasMaxLength(200).IsRequired(); b.Property(x => x.AffectedConfiguration).HasMaxLength(1000);
             b.Property(x => x.RootCause).HasMaxLength(8000); b.Property(x => x.Effects).HasMaxLength(8000); b.Property(x => x.Containment).HasMaxLength(8000); b.Property(x => x.CorrectiveAction).HasMaxLength(8000); b.Property(x => x.SystemAircraftImpact).HasMaxLength(8000); b.Property(x => x.ImpactAssessmentJson).HasMaxLength(4000); b.Property(x => x.DispositionRationale).HasMaxLength(8000);

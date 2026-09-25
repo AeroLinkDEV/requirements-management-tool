@@ -424,6 +424,7 @@ app.MapAssurancePolicyEndpoints();
 app.MapVerificationVocabularyEndpoints();
 app.MapProjectFeatureEndpoints();
 app.MapReleaseWithoutReadinessEndpoint();
+app.MapProblemReportImportEndpoints();
 app.MapChangeRequestEndpoints();
 app.MapDownstreamAssessmentEndpoints();
 app.MapBaselineImportEndpoints();

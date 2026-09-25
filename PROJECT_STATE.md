@@ -306,6 +306,10 @@ until a person returns it to Verifying. Any rationale given on a transition is k
 In a project that does not use Verification, the report is sent to SQA on an attested statement of how the
 correction was verified instead of a test result (DEC-137); SQA still closes it independently.
 
+Problem Reports can be imported from another tool's CSV/XLSX export (DEC-139): every row is previewed and the import is
+signed; source keys, reporters, dates and statuses stay source facts, source-closed reports arrive read-only as Closed in
+source, and an already-imported key is skipped on re-import.
+
 Upstream change requests and exact Case origins provide inherited Problem Report context for downstream authoring. Authors explicitly select direct links under the existing project/build and review-version rules; source approval does not automatically copy those links into a new verification assessment. Refreshing source context does not change independently accepted links or frozen review history. Software Procedure packages retain their exact Case origin when secondary Problem Reports are explicitly linked.
 
 ## Baselines, builds, and release control

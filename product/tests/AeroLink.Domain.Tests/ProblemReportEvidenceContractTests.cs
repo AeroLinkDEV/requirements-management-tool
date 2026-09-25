@@ -29,7 +29,10 @@ public sealed class ProblemReportEvidenceContractTests
             json.RootElement.GetProperty("schemaVersion").GetInt32());
         // The attested statement (#1113) is written only when present, so every report sent on a test result
         // keeps exactly the schema-6 bytes and hash it had before the field existed.
-        var presentWhenSet = new[] { nameof(ProblemReportEvidenceSnapshot.ResolutionAttestation) };
+        var presentWhenSet = new[] { nameof(ProblemReportEvidenceSnapshot.ResolutionAttestation),
+            nameof(ProblemReportEvidenceSnapshot.SourceSystem), nameof(ProblemReportEvidenceSnapshot.SourceKey),
+            nameof(ProblemReportEvidenceSnapshot.SourceReportedBy), nameof(ProblemReportEvidenceSnapshot.SourceCreatedAt),
+            nameof(ProblemReportEvidenceSnapshot.SourceState), nameof(ProblemReportEvidenceSnapshot.ClosedInSource) };
         foreach (var field in evidenceFields.Except(presentWhenSet))
             Assert.True(json.RootElement.TryGetProperty(JsonNamingPolicy.CamelCase.ConvertName(field), out _),
                 $"Problem Report field {field} is absent from immutable evidence.");

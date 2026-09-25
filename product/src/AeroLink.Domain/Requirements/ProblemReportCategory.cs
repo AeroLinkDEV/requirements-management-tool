@@ -40,6 +40,9 @@ public enum ProblemReportCategoryProvenance
     /// <summary>A person chose this category on this record.</summary>
     Selected,
 
+    /// <summary>Mapped from the source tool's value by the person who imported the report (#1114).</summary>
+    ImportMapped,
+
     /// <summary>Assigned by the category migration from a retired kind. Not a judgement anybody made.</summary>
     MigrationDerived,
 }

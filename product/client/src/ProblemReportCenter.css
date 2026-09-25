@@ -1087,3 +1087,6 @@
   .prImpactGrid { grid-template-columns: 1fr; }
   .prDetailHead { align-items: flex-start; flex-direction: column; }
 }
+.prHeaderActions { display: flex; gap: 8px; align-items: center; }
+.prHeaderActions .secondaryAction { border: 1px solid #ccd8e4; border-radius: 8px; background: white; color: #23657a; padding: 10px 14px; font-weight: 700; cursor: pointer; }
+.prSourceFacts { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; background: #f3f6f9; color: #43516a; font-size: 13px; }

@@ -18,6 +18,7 @@ import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useLocalDraft } from "./autosave";
 import "./ProblemReportCenter.css";
 import type { ProjectFeature } from "./projectFeatures";
+import ProblemReportImportPanel from "./ProblemReportImportPanel";
 
 type Link = {
   artifactType: string;
@@ -128,6 +129,13 @@ type Report = {
   dispositionRationale?: string;
   /** Present when the report was sent to SQA on an attested statement (#1113). */
   resolutionAttestation?: string | null;
+  /** Source facts of an imported report (#1114). */
+  sourceSystem?: string | null;
+  sourceKey?: string | null;
+  sourceReportedBy?: string | null;
+  sourceCreatedAt?: string | null;
+  sourceState?: string | null;
+  closedInSource?: boolean | null;
   duplicateDiagnostic?: DuplicateDiagnostic;
   category?: SelectedCategory | null;
   workaround?: string;
@@ -402,6 +410,7 @@ export default function ProblemReportCenter({
     category: "",
     categoryFamily: "",
   });
+  const [showImport, setShowImport] = useState(false);
   const [showCreate, setShowCreate] = useState(false),
     [showEdit, setShowEdit] = useState(false),
     [tab, setTab] = useState<"record" | "history" | "code">("record"),
@@ -1026,10 +1035,28 @@ export default function ProblemReportCenter({
           <p className="eyebrow">ASSURANCE / PROBLEM REPORTS</p>
           <h1>Problem Reports</h1>
         </div>
-        <button className="primaryAction" onClick={() => setShowCreate(true)}>
-          + Record problem
-        </button>
+        <div className="prHeaderActions">
+          <button
+            type="button"
+            className="secondaryAction"
+            onClick={() => setShowImport((value) => !value)}
+          >
+            Import…
+          </button>
+          <button className="primaryAction" onClick={() => setShowCreate(true)}>
+            + Record problem
+          </button>
+        </div>
       </header>
+      {showImport && (
+        <ProblemReportImportPanel
+          api={api}
+          projectId={projectId}
+          releases={releases}
+          onClose={() => setShowImport(false)}
+          onImported={() => void refresh()}
+        />
+      )}
       {error && (
         <div className="workspaceError" role="alert">
           {error}
@@ -1278,6 +1305,19 @@ export default function ProblemReportCenter({
                   the Record tab, and a reader on Code or History needs them just as much. This was the
                   last section of the Record tab, so reaching the only thing to do next meant scrolling
                   past the whole narrative first. */}
+              {selected.sourceKey && (
+                <p className="prSourceFacts" role="note">
+                  {selected.closedInSource && <b>Closed in source · read-only. </b>}
+                  Imported from {selected.sourceSystem} {selected.sourceKey}
+                  {selected.sourceReportedBy && (
+                    <> · reported in source by {selected.sourceReportedBy}</>
+                  )}
+                  {selected.sourceCreatedAt && (
+                    <> on {new Date(selected.sourceCreatedAt).toLocaleDateString()}</>
+                  )}
+                  {selected.sourceState && <> · source status “{selected.sourceState}”</>}
+                </p>
+              )}
               {!isHistorical && (
                 <ProblemReportStateHeader
                   state={selected.state}

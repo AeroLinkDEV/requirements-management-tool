@@ -1,0 +1,21 @@
+/* Problem Report import (#1114). */
+.prImport { margin: 0 0 18px; padding: 18px 20px; border: 1px solid #dfe5ed; border-radius: 12px; background: white; }
+.prImport > header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.prImport h2 { margin: 0 0 4px; font-size: 17px; }
+.prImport p { margin: 0 0 12px; color: #5d6a80; font-size: 13px; max-width: 80ch; }
+.prImport label { display: grid; gap: 4px; font-size: 12px; font-weight: 600; color: #43516a; }
+.prImport input, .prImport select { font: inherit; font-weight: 400; padding: 6px 8px; border: 1px solid #d5dce6; border-radius: 8px; min-inline-size: 0; }
+.prImportStep { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 8px 0 14px; }
+.prImport fieldset { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 10px 14px; margin: 0 0 14px; padding: 12px 14px; border: 1px solid #e5e9ef; border-radius: 10px; }
+.prImport legend { padding: 0 6px; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #5f7890; }
+.prImportRows { inline-size: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 14px; }
+.prImportRows caption { text-align: start; font-weight: 700; padding: 6px 0; }
+.prImportRows th, .prImportRows td { text-align: start; padding: 6px 8px; border-bottom: 1px solid #eef1f5; }
+.prImportRows tr.skip td { color: #7a5d00; }
+.prImportCommit { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.prImport button { border: 1px solid #ccd8e4; border-radius: 8px; background: white; color: #23657a; padding: 8px 12px; font-weight: 700; cursor: pointer; }
+.prImportCommit button { background: #176c76; border-color: #176c76; color: white; }
+.prImport button:disabled { opacity: .55; cursor: default; }
+.prImportNote { color: #7a5d00 !important; }
+.prImportError { color: #a33648 !important; }
+.prImportDone { color: #1b6b4f !important; font-weight: 600; }
