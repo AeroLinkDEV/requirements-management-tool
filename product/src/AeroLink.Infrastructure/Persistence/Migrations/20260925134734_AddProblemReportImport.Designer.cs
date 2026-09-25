@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    [Migration("20260925073029_AddProblemReportImport")]
+    [Migration("20260925134734_AddProblemReportImport")]
     partial class AddProblemReportImport
     {
         /// <inheritdoc />
@@ -5599,7 +5599,9 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<bool>("ReleasedWithoutReadiness")
-                        .HasColumnType("boolean");
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<string>("Version")
                         .IsRequired()
