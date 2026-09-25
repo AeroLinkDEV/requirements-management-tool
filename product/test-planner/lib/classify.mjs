@@ -29,8 +29,12 @@ export function normalizePath(path) {
  * Documentation roots and files are explicit. A nested product path containing a `docs`, `design`, or
  * `showcase` directory is not documentation by convention: it remains product code and must not make the change
  * docs-only. Root Markdown files are repository documentation; product documentation has its own root.
+ *
+ * The root `.agents`, `.claude` and `.codex` directories hold coding-agent instructions, skills and agent
+ * configuration. Only coding agents read them; no workflow, script, or product suite does, so they are
+ * documentation for classification purposes.
  */
-const DOCUMENTATION_ROOTS = /^(?:docs|design|showcase|product\/docs)(?:\/|$)/i
+const DOCUMENTATION_ROOTS = /^(?:docs|design|showcase|product\/docs|\.agents|\.claude|\.codex)(?:\/|$)/i
 const DOCUMENTATION_FILES = /^[^/]+\.md$/i
 
 function isDocumentationPath(path) {

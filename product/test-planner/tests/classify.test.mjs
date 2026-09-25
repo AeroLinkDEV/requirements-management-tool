@@ -155,6 +155,30 @@ test('an unrecognised product path runs broad validation rather than nothing', (
   assert.equal(tooling.postgresql, true)
 })
 
+test('agent-instruction folders are documentation, not unknown product code', () => {
+  // #1141: these paths used to fall through to the unclassified fallback, so a change to agent instructions
+  // alone paid for the full backend, client, browser and PostgreSQL sweep that cannot observe them.
+  const instructions = of([
+    'AGENTS.md',
+    '.agents/skills/test-audit/SKILL.md',
+    '.claude/skills/test-audit/SKILL.md',
+    '.codex/agents/coder.toml',
+    '.codex/config.toml',
+  ])
+  assert.equal(instructions.docsOnly, true)
+  assert.equal(instructions.unclassified, false)
+  for (const area of ['backend', 'client', 'browser', 'postgresql']) {
+    assert.equal(instructions[area], false, `an instruction-only change must not select ${area}`)
+  }
+
+  // Only the root folders qualify; a nested look-alike under product/ is still product code.
+  assert.equal(of(['product/client/.codex/config.toml']).docsOnly, false)
+
+  const mixed = of(['.codex/agents/coder.toml', 'product/client/src/App.tsx'])
+  assert.equal(mixed.docsOnly, false)
+  assert.equal(mixed.client, true)
+})
+
 test('a documentation file alongside product code does not make the change docs-only', () => {
   const result = of(['README.md', 'product/client/src/App.tsx'])
   assert.equal(result.docsOnly, false)
