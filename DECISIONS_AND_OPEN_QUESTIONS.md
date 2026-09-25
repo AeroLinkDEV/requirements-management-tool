@@ -2659,7 +2659,7 @@ choices are created as focused issues only when their trigger and acceptance bou
 ### DEC-142 - Agents Merge Approval-Machinery Changes Themselves; Work Stops Only Where the Owner Asks
 
 - **Date:** 2026-09-25
-- **Status:** Accepted. Installation pending ([#1145](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1145)).
+- **Status:** Accepted. Installed by the change that closes [#1145](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1145), together with the #1149 readiness fix.
 - **Authority:** After DEC-141 was explained to him, the owner stated in the Claude conversation on 2026-09-25: "I dont want to get invovled by needing multiple agents to agree before something gets pushed/merged. Rather in certain circumstances I will specifically ask that an agent stop at key points of implementation prior to moving to next steps. But if I'm not making those specifications clear at the time, then of course an agent is free to go full autonomous and merge, etc". He confirmed the consequences below by replying "yes". Claude transcribes the statements here.
 - **Decision:** A change to the merge-approval machinery (the trusted requester, the binding and maintenance workflows, and the merge-authority modules) takes the same delegated maintenance path as other protected CI maintenance. The agent doing the work submits the approval under DEC-124 and DEC-135 after the same qualification, including for a change it authored. No second agent has to agree.
 - **Checkpoints:** an agent stops at a key point of implementation only when the owner has asked it to for that piece of work. Otherwise it runs to merged under DEC-140.
@@ -2668,5 +2668,5 @@ choices are created as focused issues only when their trigger and acceptance bou
   - Every other control stays in force: required checks, full native proof on the exact composed candidate, the packet digest, live revalidation by the protected publisher, no force-merge and no fabricated checks.
   - DEC-121's invariant still holds: the installed kernel on `main` judges a candidate, and the candidate never judges itself.
 - **Consequence:** for an approval-machinery change, nobody but the working agent reviews it before merge. A defect that passes CI and also weakens the gate can merge. The owner catches it afterwards, from the post-merge notice, and reverts.
-- **Until installed:** an approval-machinery change still needs the owner's manual ruleset bypass, merge and restore. Installing this mechanism (#1145, which also carries the #1149 readiness fix) is the last such change.
+- **Installation:** the change closing #1145 was itself approval machinery, so the owner merged it through a manual ruleset bypass, merge and restore. It is the last change merged that way.
 - **Supersedes:** DEC-141.

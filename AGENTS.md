@@ -107,7 +107,7 @@ Use the repository's test-planning contract instead of guessing what to run.
 - **Decide non-functional matters yourself ([DEC-140](DECISIONS_AND_OPEN_QUESTIONS.md#dec-140---agents-own-non-functional-decisions-the-owner-owns-functional-ones)).**
   Escalate to the owner only for a functional decision, and then ask one specific question with the options.
 - Routine CI-maintenance approvals are delegated (DEC-124, DEC-135). A waiting approval is not the owner's job.
-  Once #1145 installs DEC-142, approval-machinery changes take the same delegated path.
+  Approval-machinery changes take the same delegated path (DEC-142), and the owner is notified after each merge.
 - Use one focused branch/worktree per implementation task; read-only tasks do not require one.
 - Keep unrelated cleanup out of feature PRs.
 - Rebase/update only when the repository's actual merge state requires it; do not churn a green PR from habit.
