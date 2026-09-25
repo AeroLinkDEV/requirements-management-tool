@@ -1310,8 +1310,8 @@ public sealed partial class ManagedDocumentApiTests
         Assert.Equal(HttpStatusCode.Redirect, anonymousAttempt.StatusCode);
         Assert.Equal("/", anonymousAttempt.Headers.Location!.ToString());
 
-        // An authenticated account in this same database with no membership in the Program. The document
-        // exists here, so only the project-access check can send it to the root (#1120).
+        // An authenticated account in this same database with no Program membership: the document exists
+        // here, so only the project-access check can send it to the root (#1120).
         const string outsider = "managed.document.outsider";
         using (var seed = factory.Services.CreateScope())
         {

@@ -70,8 +70,16 @@ public sealed class DocumentReviewLinkOutlivedTests(SharedApiHost host) : IClass
 
         // Same host, same database: the document exists, so only the project-access check can send the
         // outsider to the root. A second factory would answer from the not-found branch instead (#1120).
-        Assert.Equal("/", await OpenLocationAsync(fixture.Outsider, fixture.DocumentId));
-        Assert.Equal("/", await OpenLocationAsync(fixture.Outsider, fixture.RevisionId));
+        using var outsider = host.Factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var login = await outsider.PostAsJsonAsync("/api/auth/login",
+            new { userName = fixture.Outsider, password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        foreach (var id in new[] { fixture.DocumentId, fixture.RevisionId })
+        {
+            using var attempt = await outsider.GetAsync($"/open/managed-document/{id}");
+            Assert.Equal(HttpStatusCode.Redirect, attempt.StatusCode);
+            Assert.Equal("/", attempt.Headers.Location!.ToString());
+        }
     }
 
     private static async Task ReturnAsync(AeroLinkApiFactory factory, Guid revisionId, string actor)
