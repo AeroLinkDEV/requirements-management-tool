@@ -144,3 +144,4 @@ try {
 } catch { $failures.Add("Unexpected test failure: $($_.Exception.Message) [$($_.ScriptStackTrace)]") }
 finally {foreach($p in $roots){$tempRoot=[IO.Path]::GetFullPath([IO.Path]::GetTempPath());$resolved=[IO.Path]::GetFullPath($p);if(!$resolved.StartsWith($tempRoot,[StringComparison]::OrdinalIgnoreCase)-or $resolved.Length -le $tempRoot.Length+8){throw 'Refusing to remove a test path outside the unique temporary test directory.'};if(Test-Path $resolved){Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue}}}
 if($failures.Count){$failures|%{Write-Error $_};throw "Source/relationship utility tests failed: $($failures.Count)"};Write-Host 'AeroLink source/relationship utility tests passed.' -ForegroundColor Green
+exit 0
