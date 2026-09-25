@@ -64,10 +64,10 @@ public sealed class ProjectLeadershipMigrationQualificationTests
         await db.Database.MigrateAsync(stopBefore);
     }
 
-    [Fact]
+    [MigrationsServerFact]
     public async Task The_upgrade_backfills_leadership_from_legacy_memberships_and_is_idempotent()
     {
-        if (!ServerConfigured(out var server)) return; // qualification requires the disposable server
+        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
         var serverDatabase = new NpgsqlConnectionStringBuilder(server).Database;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -140,10 +140,10 @@ public sealed class ProjectLeadershipMigrationQualificationTests
         }
     }
 
-    [Fact]
+    [MigrationsServerFact]
     public async Task Conflicting_project_engineer_and_project_engineering_lead_holders_fail_closed()
     {
-        if (!ServerConfigured(out var server)) return; // qualification requires the disposable server
+        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
         var serverDatabase = new NpgsqlConnectionStringBuilder(server).Database;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -176,6 +176,18 @@ public sealed class ProjectLeadershipMigrationQualificationTests
         {
             var database = new NpgsqlConnectionStringBuilder(connection).Database;
             if (database != serverDatabase) await DropDatabaseAsync(server, database);
+        }
+    }
+
+    /// <summary>
+    /// Reports Skipped, not Passed, when no disposable PostgreSQL server is configured (#1121).
+    /// </summary>
+    private sealed class MigrationsServerFactAttribute : FactAttribute
+    {
+        public MigrationsServerFactAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionVariable)))
+                Skip = $"PostgreSQL migration qualification skipped: set {ConnectionVariable} to a disposable server.";
         }
     }
 }

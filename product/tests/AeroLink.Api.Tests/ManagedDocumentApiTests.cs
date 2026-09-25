@@ -1310,10 +1310,25 @@ public sealed partial class ManagedDocumentApiTests
         Assert.Equal(HttpStatusCode.Redirect, anonymousAttempt.StatusCode);
         Assert.Equal("/", anonymousAttempt.Headers.Location!.ToString());
 
-        using var foreignFactory = new AeroLinkApiFactory(); using var foreignClient = foreignFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false }); await ProblemReportApiTests.BootstrapAndLoginAsync(foreignClient);
-        using var foreignAttempt = await foreignClient.GetAsync($"/open/managed-document/{documentId}");
-        Assert.Equal(HttpStatusCode.Redirect, foreignAttempt.StatusCode);
-        Assert.Equal("/", foreignAttempt.Headers.Location!.ToString());
+        // An authenticated account in this same database with no Program membership: the document exists
+        // here, so only the project-access check can send it to the root (#1120).
+        const string outsider = "managed.document.outsider";
+        using (var seed = factory.Services.CreateScope())
+        {
+            var db = seed.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            db.Add(new UserAccount(outsider, "Managed Document Outsider", $"{outsider}@example.test",
+                IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+        using var outsiderClient = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var outsiderLogin = await outsiderClient.PostAsJsonAsync("/api/auth/login", new { userName = outsider, password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, outsiderLogin.StatusCode);
+        foreach (var id in new[] { documentId, revisionId })
+        {
+            using var outsiderAttempt = await outsiderClient.GetAsync($"/open/managed-document/{id}");
+            Assert.Equal(HttpStatusCode.Redirect, outsiderAttempt.StatusCode);
+            Assert.Equal("/", outsiderAttempt.Headers.Location!.ToString());
+        }
     }
 
     [Fact]

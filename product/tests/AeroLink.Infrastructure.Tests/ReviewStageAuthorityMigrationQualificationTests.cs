@@ -75,10 +75,10 @@ public sealed class ReviewStageAuthorityMigrationQualificationTests
         return await command.ExecuteNonQueryAsync();
     }
 
-    [Fact]
+    [MigrationsServerFact]
     public async Task The_upgrade_adds_authority_additively_and_never_gusses_historical_semantics()
     {
-        if (!ServerConfigured(out var server)) return; // qualification requires the disposable server
+        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
         var database = new NpgsqlConnectionStringBuilder(server).Database;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -185,10 +185,10 @@ public sealed class ReviewStageAuthorityMigrationQualificationTests
         }
     }
 
-    [Fact]
+    [MigrationsServerFact]
     public async Task A_clean_install_applies_the_full_chain_and_is_idempotent()
     {
-        if (!ServerConfigured(out var server)) return;
+        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
         var connection = await CreateDisposableDatabaseAsync(server);
         try
         {
@@ -226,5 +226,17 @@ public sealed class ReviewStageAuthorityMigrationQualificationTests
         db.AddRange(program, project);
         await db.SaveChangesAsync();
         return project.Id;
+    }
+
+    /// <summary>
+    /// Reports Skipped, not Passed, when no disposable PostgreSQL server is configured (#1121).
+    /// </summary>
+    private sealed class MigrationsServerFactAttribute : FactAttribute
+    {
+        public MigrationsServerFactAttribute()
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionVariable)))
+                Skip = $"PostgreSQL migration qualification skipped: set {ConnectionVariable} to a disposable server.";
+        }
     }
 }

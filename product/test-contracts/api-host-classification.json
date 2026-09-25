@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 157,
-    "tests": 1000,
-    "knownCases": 1140,
+    "classes": 156,
+    "tests": 997,
+    "knownCases": 1142,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,14 +15,14 @@
     },
     "fresh-host": {
       "classes": 62,
-      "tests": 382,
-      "knownCases": 446,
+      "tests": 381,
+      "knownCases": 450,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
-      "classes": 5,
-      "tests": 11,
-      "knownCases": 16,
+      "classes": 4,
+      "tests": 9,
+      "knownCases": 14,
       "unknownCaseTests": 0
     },
     "reusable-host": {
@@ -488,8 +488,8 @@
     },
     {
       "cls": "CodeRelationshipApiTests",
-      "tests": 17,
-      "knownCases": 17,
+      "tests": 16,
+      "knownCases": 21,
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (service-replacement); sharing could change the subject or leak configuration.",
@@ -1184,17 +1184,6 @@
       "cls": "RuntimeIdentityTests",
       "tests": 6,
       "knownCases": 6,
-      "unknownCaseTests": 0,
-      "classification": "migration-candidate",
-      "reason": "Every test is in-process logic or a rule matrix; it needs a database or nothing, not a host.",
-      "intents": [
-        "in-process-logic"
-      ]
-    },
-    {
-      "cls": "WorkspaceReleaseOrderingTests",
-      "tests": 2,
-      "knownCases": 2,
       "unknownCaseTests": 0,
       "classification": "migration-candidate",
       "reason": "Every test is in-process logic or a rule matrix; it needs a database or nothing, not a host.",

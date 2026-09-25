@@ -40,13 +40,15 @@ public sealed class ProgramRoleModelCharacterizationTests
     [Theory]
     [MemberData(nameof(EveryProgramRoleValue))]
     public void Every_role_value_is_exactly_classified_as_singular_or_not(ProgramRole role)
-        => Assert.Equal(
-            SingularAsOfSnapshot.Contains(role),
-            SingularProgramRoles.IsSingular(role));
-
-    [Fact]
-    public void The_snapshot_records_exactly_five_singular_values()
-        => Assert.Equal(5, SingularAsOfSnapshot.Length);
+    {
+        // Exactly one snapshot must name the role. A value missing from both would otherwise read as
+        // "not singular" on both sides and pass, which is the silent default this test exists to refuse.
+        var singular = SingularAsOfSnapshot.Contains(role);
+        var nonSingular = NonSingularAsOfSnapshot.Contains(role);
+        Assert.True(singular ^ nonSingular,
+            $"{role} must be classified in exactly one of the singular and non-singular snapshots.");
+        Assert.Equal(singular, SingularProgramRoles.IsSingular(role));
+    }
 
     /// <summary>
     /// #816 retires ProjectEngineeringLead. Until Slice 2 performs that migration, it is still a singular

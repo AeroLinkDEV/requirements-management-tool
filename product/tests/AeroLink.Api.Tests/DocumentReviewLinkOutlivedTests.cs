@@ -21,7 +21,7 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class DocumentReviewLinkOutlivedTests(SharedApiHost host) : IClassFixture<SharedApiHost>
 {
-    private sealed record Seeded(Guid DocumentId, Guid RevisionId, string Owner, string Reviewer, string Bystander);
+    private sealed record Seeded(Guid DocumentId, Guid RevisionId, string Owner, string Reviewer, string Bystander, string Outsider);
 
     [Fact]
     public async Task A_document_reviewer_whose_review_closed_is_told_so()
@@ -68,13 +68,18 @@ public sealed class DocumentReviewLinkOutlivedTests(SharedApiHost host) : IClass
         var fixture = await SeedAsync(host.Factory);
         await ReturnAsync(host.Factory, fixture.RevisionId, fixture.Reviewer);
 
-        using var foreignFactory = new AeroLinkApiFactory();
-        using var foreign = foreignFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        await ProblemReportApiTests.BootstrapAndLoginAsync(foreign);
-        using var attempt = await foreign.GetAsync($"/open/managed-document/{fixture.DocumentId}");
-
-        Assert.Equal(HttpStatusCode.Redirect, attempt.StatusCode);
-        Assert.Equal("/", attempt.Headers.Location!.ToString());
+        // Same host, same database: the document exists, so only the project-access check can send the
+        // outsider to the root. A second factory would answer from the not-found branch instead (#1120).
+        using var outsider = host.Factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        using var login = await outsider.PostAsJsonAsync("/api/auth/login",
+            new { userName = fixture.Outsider, password = AeroLinkApiFactory.MemberPassword });
+        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        foreach (var id in new[] { fixture.DocumentId, fixture.RevisionId })
+        {
+            using var attempt = await outsider.GetAsync($"/open/managed-document/{id}");
+            Assert.Equal(HttpStatusCode.Redirect, attempt.StatusCode);
+            Assert.Equal("/", attempt.Headers.Location!.ToString());
+        }
     }
 
     private static async Task ReturnAsync(AeroLinkApiFactory factory, Guid revisionId, string actor)
@@ -109,6 +114,7 @@ public sealed class DocumentReviewLinkOutlivedTests(SharedApiHost host) : IClass
         var owner = $"owner.{tag}";
         var reviewer = $"reviewer.{tag}";
         var bystander = $"bystander.{tag}";
+        var outsider = $"outsider.{tag}";
 
         var program = new ProgramRecord($"Doc Link Program {tag}", $"DLP{tag}");
         var project = new ProjectRecord(program.Id, "Software", "Doc Link Software");
@@ -138,7 +144,11 @@ public sealed class DocumentReviewLinkOutlivedTests(SharedApiHost host) : IClass
         db.Add(second);
         db.Add(new ProgramMembership(second.Id, program.Id, ProgramRole.Approver, "test.setup", now));
 
+        // An authenticated account with no membership in this Program.
+        db.Add(new UserAccount(outsider, outsider, $"{outsider}@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now));
+
         await db.SaveChangesAsync();
-        return new Seeded(document.Id, revision.Id, owner, reviewer, bystander);
+        return new Seeded(document.Id, revision.Id, owner, reviewer, bystander, outsider);
     }
 }

@@ -1,10 +1,12 @@
-using System.Reflection;
 using AeroLink.Domain.Programs;
-using AeroLink.Api;
 
-namespace AeroLink.Api.Tests;
+namespace AeroLink.Domain.Tests;
 
-public sealed class WorkspaceReleaseOrderingTests
+/// <summary>
+/// Governed software-build ordering. Moved from AeroLink.Api.Tests, where it reached this rule by reflecting into
+/// a private one-line forwarder in WorkspaceEndpoints; the rule itself lives in the Domain.
+/// </summary>
+public sealed class SoftwareReleaseOrderingTests
 {
     [Fact]
     public void Release_projections_sort_by_canonical_numeric_identity_and_preserve_raw_values()
@@ -42,12 +44,8 @@ public sealed class WorkspaceReleaseOrderingTests
         Assert.Null(historical.CanonicalIdentity);
     }
 
-    private static IReadOnlyList<SoftwareRelease> Order(IEnumerable<SoftwareRelease> releases)
-    {
-        var method = typeof(WorkspaceEndpoints).GetMethod("OrderReleasesAscending",
-            BindingFlags.NonPublic | BindingFlags.Static)!;
-        return (IReadOnlyList<SoftwareRelease>)method.Invoke(null, [releases])!;
-    }
+    private static IReadOnlyList<SoftwareRelease> Order(IEnumerable<SoftwareRelease> releases) =>
+        SoftwareReleaseOrdering.Ascending(releases);
 
     private static SoftwareRelease HistoricalRelease(Guid projectId, string version)
     {

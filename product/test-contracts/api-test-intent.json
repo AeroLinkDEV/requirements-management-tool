@@ -1,13 +1,13 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 1000,
-    "cases": 1140,
-    "classes": 157,
-    "hostedTests": 943,
-    "hostedCases": 1061,
-    "nonHostedTests": 34,
-    "nonHostedCases": 48,
+    "tests": 997,
+    "cases": 1142,
+    "classes": 156,
+    "hostedTests": 942,
+    "hostedCases": 1065,
+    "nonHostedTests": 32,
+    "nonHostedCases": 46,
     "unknownHostTests": 23,
     "unknownHostCases": 31,
     "hostedCandidateTests": 18,
@@ -21,8 +21,8 @@
     "http-boundary": {
       "label": "HTTP boundary: route, status, JSON shape",
       "level": "API (must stay hosted)",
-      "tests": 617,
-      "cases": 703,
+      "tests": 616,
+      "cases": 707,
       "unknownCases": 0,
       "classes": 122
     },
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 45,
-      "cases": 45,
+      "tests": 43,
+      "cases": 43,
       "unknownCases": 0,
-      "classes": 19
+      "classes": 18
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -4088,8 +4088,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 674,
-        "end": 698
+        "start": 664,
+        "end": 688
       }
     },
     {
@@ -4130,11 +4130,11 @@
     },
     {
       "cls": "CodeRelationshipApiTests",
-      "test": "Relationship_read_hides_mutation_capabilities_for_a_released_build",
-      "kind": "Fact",
+      "test": "Relationship_read_offers_only_the_mutation_the_role_build_and_row_state_allow",
+      "kind": "Theory",
       "intent": "http-boundary",
-      "cases": 1,
-      "caseEvidence": "Fact",
+      "cases": 6,
+      "caseEvidence": "InlineData",
       "hosted": "hosted",
       "hostEvidence": [
         "factory-construction",
@@ -4142,26 +4142,8 @@
         "factory-services"
       ],
       "sourceLines": {
-        "start": 649,
-        "end": 672
-      }
-    },
-    {
-      "cls": "CodeRelationshipApiTests",
-      "test": "Relationship_read_hides_mutation_capabilities_from_a_view_only_role",
-      "kind": "Fact",
-      "intent": "http-boundary",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "hosted",
-      "hostEvidence": [
-        "factory-construction",
-        "factory-client",
-        "factory-services"
-      ],
-      "sourceLines": {
-        "start": 624,
-        "end": 647
+        "start": 629,
+        "end": 662
       }
     },
     {
@@ -5283,13 +5265,12 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
         "factory-client",
         "factory-services"
       ],
       "sourceLines": {
         "start": 65,
-        "end": 78
+        "end": 83
       }
     },
     {
@@ -6299,8 +6280,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1345,
-        "end": 1369
+        "start": 1360,
+        "end": 1384
       }
     },
     {
@@ -6313,11 +6294,12 @@
       "hosted": "hosted",
       "hostEvidence": [
         "factory-construction",
-        "factory-client"
+        "factory-client",
+        "factory-services"
       ],
       "sourceLines": {
         "start": 1287,
-        "end": 1317
+        "end": 1332
       }
     },
     {
@@ -6492,8 +6474,8 @@
         "factory-client"
       ],
       "sourceLines": {
-        "start": 1319,
-        "end": 1343
+        "start": 1334,
+        "end": 1358
       }
     },
     {
@@ -13170,13 +13152,12 @@
       "caseEvidence": "Fact",
       "hosted": "hosted",
       "hostEvidence": [
-        "factory-construction",
         "factory-client",
         "factory-services"
       ],
       "sourceLines": {
         "start": 68,
-        "end": 87
+        "end": 83
       }
     },
     {
@@ -17417,34 +17398,6 @@
       "sourceLines": {
         "start": 228,
         "end": 266
-      }
-    },
-    {
-      "cls": "WorkspaceReleaseOrderingTests",
-      "test": "Historical_rows_without_canonical_identity_still_use_their_valid_raw_identity",
-      "kind": "Fact",
-      "intent": "in-process-logic",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "not-hosted",
-      "hostEvidence": [],
-      "sourceLines": {
-        "start": 26,
-        "end": 43
-      }
-    },
-    {
-      "cls": "WorkspaceReleaseOrderingTests",
-      "test": "Release_projections_sort_by_canonical_numeric_identity_and_preserve_raw_values",
-      "kind": "Fact",
-      "intent": "in-process-logic",
-      "cases": 1,
-      "caseEvidence": "Fact",
-      "hosted": "not-hosted",
-      "hostEvidence": [],
-      "sourceLines": {
-        "start": 9,
-        "end": 24
       }
     }
   ]
