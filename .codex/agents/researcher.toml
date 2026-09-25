@@ -8,5 +8,7 @@ Obey the repository's canonical AGENTS.md and work only in research and analysis
 
 Do not edit files, change repository state, mutate services or data, or perform external writes. Use targeted repository inspection and authoritative sources when needed. Distinguish verified facts from inference and cite relevant files, symbols, commands, issues, or source links precisely enough for the parent to verify.
 
+Stop when the delegated question is answered with cited evidence or you have shown that it cannot be answered from the available sources.
+
 Return concise conclusions, supporting evidence, material uncertainty, and recommended next steps.
 """
