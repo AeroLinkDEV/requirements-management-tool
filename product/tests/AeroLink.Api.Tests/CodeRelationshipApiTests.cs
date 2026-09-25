@@ -621,11 +621,23 @@ public sealed class CodeRelationshipApiTests
             x => Assert.Equal("src/demo.c", x.FilePath));
     }
 
-    [Fact]
-    public async Task Relationship_read_hides_mutation_capabilities_from_a_view_only_role()
+    /// <summary>
+    /// The read projection's capabilities are what the UI offers. Each row needs a discriminating control: a
+    /// mutating engineer on an in-work build is offered exactly the action the row's state allows, while a
+    /// view-only role or a released build is offered neither, whatever the row's state.
+    /// </summary>
+    [Theory]
+    [InlineData(ProgramRole.Engineer, false, false, true, false)]
+    [InlineData(ProgramRole.Engineer, false, true, false, true)]
+    [InlineData(ProgramRole.Reviewer, false, false, false, false)]
+    [InlineData(ProgramRole.Reviewer, false, true, false, false)]
+    [InlineData(ProgramRole.Engineer, true, false, false, false)]
+    [InlineData(ProgramRole.Engineer, true, true, false, false)]
+    public async Task Relationship_read_offers_only_the_mutation_the_role_build_and_row_state_allow(
+        ProgramRole role, bool releaseIsReleased, bool withdrawn, bool canWithdraw, bool canReAdd)
     {
         using var factory = Configure(new AeroLinkApiFactory(), new Remote(_ => new(HttpStatusCode.ServiceUnavailable)));
-        var data = await SeedAsync(factory.Services, role: ProgramRole.Reviewer);
+        var data = await SeedAsync(factory.Services, releaseIsReleased: releaseIsReleased, role: role);
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -633,42 +645,20 @@ public sealed class CodeRelationshipApiTests
             var row = new GitLabMergeRequestRelationship(data.ProjectId, data.ReleaseId, "https://gitlab.example", 17, 22,
                 2200, null, null, "group/project", "https://gitlab.example/group/project/-/merge_requests/22",
                 "Recorded context", target, CodeRelationshipMeaning.RelatedContext, data.UserName, DateTimeOffset.UtcNow);
+            if (withdrawn) row.Withdraw(row.Version, data.UserName, "Recorded against the wrong change.", DateTimeOffset.UtcNow);
             db.Add(row);
             await db.SaveChangesAsync();
         }
         using var client = factory.CreateClient();
         await SignInAsync(client, data.UserName);
-        using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?releaseId={data.ReleaseId}");
+        using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?releaseId={data.ReleaseId}&includeWithdrawn=true");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var capabilities = Assert.Single(json.RootElement.GetProperty("items").EnumerateArray()).GetProperty("capabilities");
-        Assert.False(capabilities.GetProperty("canWithdraw").GetBoolean());
-        Assert.False(capabilities.GetProperty("canReAdd").GetBoolean());
-    }
-
-    [Fact]
-    public async Task Relationship_read_hides_mutation_capabilities_for_a_released_build()
-    {
-        using var factory = Configure(new AeroLinkApiFactory(), new Remote(_ => new(HttpStatusCode.ServiceUnavailable)));
-        var data = await SeedAsync(factory.Services, releaseIsReleased: true);
-        using (var scope = factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
-            var target = CodeRelationshipTarget.ForChangeRequestRevision(Guid.NewGuid(), 1, "SCR-1.01");
-            var row = new GitLabMergeRequestRelationship(data.ProjectId, data.ReleaseId, "https://gitlab.example", 17, 23,
-                2300, null, null, "group/project", "https://gitlab.example/group/project/-/merge_requests/23",
-                "Recorded context", target, CodeRelationshipMeaning.RelatedContext, data.UserName, DateTimeOffset.UtcNow);
-            db.Add(row);
-            await db.SaveChangesAsync();
-        }
-        using var client = factory.CreateClient();
-        await SignInAsync(client, data.UserName);
-        using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/code/relationships?releaseId={data.ReleaseId}");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var capabilities = Assert.Single(json.RootElement.GetProperty("items").EnumerateArray()).GetProperty("capabilities");
-        Assert.False(capabilities.GetProperty("canWithdraw").GetBoolean());
-        Assert.False(capabilities.GetProperty("canReAdd").GetBoolean());
+        var item = Assert.Single(json.RootElement.GetProperty("items").EnumerateArray());
+        Assert.Equal(!withdrawn, item.GetProperty("isActive").GetBoolean());
+        var capabilities = item.GetProperty("capabilities");
+        Assert.Equal(canWithdraw, capabilities.GetProperty("canWithdraw").GetBoolean());
+        Assert.Equal(canReAdd, capabilities.GetProperty("canReAdd").GetBoolean());
     }
 
     [Fact]

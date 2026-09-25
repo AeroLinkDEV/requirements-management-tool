@@ -22,7 +22,7 @@ namespace AeroLink.Api.Tests;
 /// </summary>
 public sealed class ReviewLinkOutlivedCycleTests(SharedApiHost host) : IClassFixture<SharedApiHost>
 {
-    private sealed record Seeded(Guid ChangeRequestId, string Author, string Reviewer, string Bystander);
+    private sealed record Seeded(Guid ChangeRequestId, string Author, string Reviewer, string Bystander, string Outsider);
 
     [Fact]
     public async Task A_reviewer_whose_cycle_closed_is_told_so()
@@ -76,14 +76,10 @@ public sealed class ReviewLinkOutlivedCycleTests(SharedApiHost host) : IClassFix
             new { reason = "Rework the tolerance." });
         Assert.Equal(HttpStatusCode.OK, returned.StatusCode);
 
-        // A different deployment's user entirely: no Program membership here at all.
-        using var foreignFactory = new AeroLinkApiFactory();
-        using var foreign = foreignFactory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        await ProblemReportApiTests.BootstrapAndLoginAsync(foreign);
-        using var attempt = await foreign.GetAsync($"/open/scr/{fixture.ChangeRequestId}");
-
-        Assert.Equal(HttpStatusCode.Redirect, attempt.StatusCode);
-        Assert.Equal("/", attempt.Headers.Location!.ToString());
+        // Same host, same database, no Program membership: the record exists, so only the project-access
+        // check can send the outsider to the root. A second factory would answer from the not-found branch
+        // instead and never reach that check (#1120).
+        Assert.Equal("/", await OpenLocationAsync(fixture.Outsider, fixture.ChangeRequestId));
     }
 
     private async Task<string> OpenLocationAsync(string userName, Guid changeRequestId)
@@ -104,6 +100,7 @@ public sealed class ReviewLinkOutlivedCycleTests(SharedApiHost host) : IClassFix
         var author = $"author.{tag}";
         var reviewer = $"reviewer.{tag}";
         var bystander = $"bystander.{tag}";
+        var outsider = $"outsider.{tag}";
 
         var program = new ProgramRecord($"Outlived Link Program {tag}", $"OLP{tag}");
         var project = new ProjectRecord(program.Id, "Software", "Outlived Software");
@@ -125,8 +122,12 @@ public sealed class ReviewLinkOutlivedCycleTests(SharedApiHost host) : IClassFix
             "The FMS shall make the active flight plan available within 1.5 seconds.", "Latency", "Test", now);
         scr.SubmitForReview(author, [new(reviewer, "Marcus Hale")], now);
         db.SystemChangeRequests.Add(scr);
+        // An authenticated account with no membership in this Program.
+        db.Add(new UserAccount(outsider, outsider, $"{outsider}@example.test",
+            IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now));
+
         await db.SaveChangesAsync();
-        return new Seeded(scr.Id, author, reviewer, bystander);
+        return new Seeded(scr.Id, author, reviewer, bystander, outsider);
     }
 
     private static async Task LoginAsync(HttpClient client, string userName)
