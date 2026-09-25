@@ -332,7 +332,7 @@ public sealed class WebhookDestinationPolicyTests
         connection.Open();
         var services = new ServiceCollection();
         services.AddDbContext<AeroLinkDbContext>(options => options.UseSqlite(connection));
-        services.AddDataProtection();
+        services.AddDataProtection().UseEphemeralDataProtectionProvider();
         services.AddScoped<IntegrationSecurityService>();
         services.AddSingleton<IWebhookDnsResolver, SystemWebhookDnsResolver>();
         services.AddSingleton<WebhookDestinationPolicy>();
