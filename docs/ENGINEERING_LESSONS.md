@@ -68,6 +68,8 @@ The API/test contract manifests and pinned totals are generated evidence. Hand-e
 
 **Practice:** regenerate from source, update pinned totals from the generator output, run the contract tests, then run the generators again and require a clean diff.
 
+**Later:** a committed artifact that every parallel PR must regenerate becomes the place those PRs collide. The API inventories and route manifest were touched by 29 of 79 PRs in two weeks, so #1152 retired them and made the route guard compute from source. Before committing a generated artifact, ask whether the check can compute it at run time instead.
+
 ## 10. `dotnet test` is not the same claim as “the solution compiles”
 
 A test project builds its dependency graph, not every tool/project in the repository.

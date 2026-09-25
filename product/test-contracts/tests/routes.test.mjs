@@ -20,14 +20,14 @@ const repoRoot = join(here, '..', '..', '..')
 const apiDirectory = join(repoRoot, 'product', 'src', 'AeroLink.Api')
 const testsDirectory = join(repoRoot, 'product', 'tests', 'AeroLink.Api.Tests')
 
-const manifest = JSON.parse(readFileSync(join(here, '..', 'route-coverage.json'), 'utf8'))
 const grandfathered = new Set(JSON.parse(readFileSync(join(here, '..', 'grandfathered-uncovered.json'), 'utf8')).uncovered)
 const current = buildRouteCoverage(apiDirectory, testsDirectory)
 
 const keyOf = (route) => routeKey(route.method, route.path)
 
 // ---------------------------------------------------------------------------------------------------------
-// The safety property. Asked against the frozen baseline, never against the regenerable manifest.
+// The safety property. Coverage is computed from source on every run and asked against the frozen baseline.
+// Nothing is regenerated, so there is no command that can make a lost route agree with itself.
 // ---------------------------------------------------------------------------------------------------------
 
 test('no mutating route lacks hosted boundary evidence unless it was grandfathered', () => {
@@ -41,23 +41,18 @@ test('no mutating route lacks hosted boundary evidence unless it was grandfather
   )
 })
 
-test('a route that loses its last hosted test still fails after the manifest is regenerated', () => {
-  // The round-1 defect. The old guard compared the tree against the generated manifest, and the documented
-  // fix for a failure was to regenerate — which made the manifest agree with the loss. This proves the
-  // replacement does not care what the manifest says.
+test('a route that loses its last hosted test fails the guard', () => {
+  // The round-1 defect. The old guard compared the tree against a generated manifest, and the documented
+  // fix for a failure was to regenerate it, which made the manifest agree with the loss. The guard now asks
+  // only the frozen baseline.
   const victim = current.find((route) => route.coveredBy.length > 0)
   assert.ok(victim, 'expected at least one covered route')
 
   const afterLoss = current.map((route) => (route === victim ? { ...route, coveredBy: [] } : route))
-  // Regeneration is simulated by deriving the baseline from the *new* state, exactly as a generator that
-  // rewrote both files would have done.
-  const regeneratedManifestSaysFine = afterLoss.filter((route) => route.coveredBy.length === 0).length > 0
-
-  assert.ok(regeneratedManifestSaysFine, 'sanity: the loss is present in the regenerated observation')
   assert.deepEqual(uncoveredOutsideBaseline(afterLoss, grandfathered), [keyOf(victim)])
 })
 
-test('a new route with no hosted evidence still fails after the manifest is regenerated', () => {
+test('a new route with no hosted evidence fails the guard', () => {
   const invented = { method: 'POST', path: '/api/probe/newly-added', file: 'Probe.cs', coveredBy: [] }
   const afterAddition = [...current, invented]
   assert.deepEqual(uncoveredOutsideBaseline(afterAddition, grandfathered), ['POST /api/probe/newly-added'])
@@ -110,26 +105,6 @@ test('an exercised method does not cover a different method on the same path', (
   assert.deepEqual(put.coveredBy, ['ViewsApiTests'], 'the exercised method is covered')
   assert.deepEqual(del.coveredBy, [], 'the unexercised method is not')
   assert.deepEqual(uncoveredOutsideBaseline(coverage, new Set()), ['DELETE /api/views/{}'])
-})
-
-// ---------------------------------------------------------------------------------------------------------
-// Keeping the observation honest. These self-heal on regeneration, which is why they are not the safeguard.
-// ---------------------------------------------------------------------------------------------------------
-
-test('the committed manifest matches the current source, coverage included', () => {
-  // Compared deeply rather than by key. Key-only matching let a route keep a stale `coveredBy` list while a
-  // test named "matches the current source" passed, which is how an observation quietly stops describing
-  // anything.
-  const shape = (routes) =>
-    [...routes]
-      .map((route) => `${keyOf(route)} <- ${[...route.coveredBy].sort().join(',')}`)
-      .sort()
-  assert.deepEqual(
-    shape(manifest.routes),
-    shape(current),
-    `route-coverage.json no longer describes the tree. Regenerate it:\n` +
-      `  node product/test-contracts/tools/generate-route-manifest.mjs`,
-  )
 })
 
 // ---------------------------------------------------------------------------------------------------------
