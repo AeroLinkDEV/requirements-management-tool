@@ -86,3 +86,38 @@ export function maintenanceReviewSummary(review) {
     'Protected tree changes (both sides, including modes and removals):', '```json', changes, '```', '',
   ].join('\n')
 }
+
+const shaPattern = /^[0-9a-f]{40}$/
+
+// The run summary is readable only on github.com. The same identities and approval line also go to the job log,
+// which the REST API serves, so an agent without web access can verify the packet and approve (#1166). Only
+// SHAs, integers and the digest are logged: never changed paths or ruleset data, and every line carries a prefix
+// so no value can start a runner workflow command.
+function maintenanceReviewLogLines(review) {
+  const { evidence, preparer } = review?.packet ?? {}
+  const shas = [evidence?.pr?.head?.sha, evidence?.run?.headSha, evidence?.candidateTreeSha,
+    preparer?.commitSha, preparer?.treeSha]
+  const numbers = [evidence?.pr?.number, evidence?.run?.runId, evidence?.run?.runAttempt,
+    review?.binding?.id, review?.binding?.attempt]
+  if (!shas.every(value => shaPattern.test(value ?? '')) || !numbers.every(positive) ||
+      !digestPattern.test(review?.digest ?? '')) throw new Error('Maintenance review identities are not loggable.')
+  return [
+    'PENDING: exact owner environment approval is required',
+    `Review packet: PR #${evidence.pr.number} head ${evidence.pr.head.sha}`,
+    `Review packet: composed candidate ${evidence.run.headSha} tree ${evidence.candidateTreeSha}`,
+    `Review packet: protected main/preparer ${preparer.commitSha} tree ${preparer.treeSha}`,
+    `Review packet: Product run ${evidence.run.runId} attempt ${evidence.run.runAttempt}`,
+    `Review packet: binding workflow ${review.binding.id} attempt ${review.binding.attempt}`,
+    ...(review.packet.assessment?.kernelChanges?.length ? ['Review packet: changes the approval machinery (DEC-142)'] : []),
+    `Approval comment: APPROVE MAINTENANCE ${review.digest}`,
+  ].map(line => `[merge-authority] ${line}`)
+}
+
+// One call writes the summary, the digest output the publisher verifies against, and the log, so the three
+// cannot disagree. Log lines are validated before anything is written.
+export function announceMaintenanceReview(review, { appendSummary, appendOutput, log }) {
+  const lines = maintenanceReviewLogLines(review)
+  appendSummary(maintenanceReviewSummary(review))
+  appendOutput(`maintenance-digest=${review.digest}\n`)
+  for (const line of lines) log(line)
+}
