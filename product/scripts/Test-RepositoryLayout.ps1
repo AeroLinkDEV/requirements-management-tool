@@ -221,6 +221,20 @@ foreach ($script in $launcherScripts) {
     }
 }
 
+# Each decision identifier names exactly one decision, because code, issues and later decisions cite it.
+# Parallel pull requests pick the next number independently. On 2026-09-25 the agent-autonomy decisions had
+# to be renumbered from DEC-136/137 to DEC-140/141 because three open PRs already claimed DEC-136 to DEC-139
+# (#1148). Two such PRs merge cleanly as text, since each adds its own section, so the composed merge-queue
+# candidate is the first tree that holds both headings. Failing here ejects the later entry before main
+# carries two decisions under one number (#1152 D2).
+$decisionsPath = Join-Path $RepositoryRoot 'DECISIONS_AND_OPEN_QUESTIONS.md'
+if (Test-Path -LiteralPath $decisionsPath -PathType Leaf) {
+    $decisionIds = @([regex]::Matches([IO.File]::ReadAllText($decisionsPath), '(?m)^#{2,6}[ \t]+(DEC-\d+)\b') | ForEach-Object { $_.Groups[1].Value })
+    foreach ($duplicate in @($decisionIds | Group-Object | Where-Object { $_.Count -gt 1 })) {
+        Fail "DECISIONS_AND_OPEN_QUESTIONS.md has $($duplicate.Count) decisions headed $($duplicate.Name). Each decision identifier must be unique; renumber the newer one."
+    }
+}
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     Write-Host "Repository layout contract FAILED ($($failures.Count) failure(s))." -ForegroundColor Red

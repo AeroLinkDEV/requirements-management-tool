@@ -135,7 +135,7 @@ Any launcher-path change requires an explicit dependency audit and appropriate c
 Use one home for each kind of knowledge; keep active work out of repository prose:
 
 - **Current product truth:** `PROJECT_STATE.md`.
-- **Accepted long-lived product decisions:** `DECISIONS_AND_OPEN_QUESTIONS.md` (append a superseding decision; do not rewrite history).
+- **Accepted long-lived product decisions:** `DECISIONS_AND_OPEN_QUESTIONS.md` (append a superseding decision; do not rewrite history). Before numbering a new decision, check open PRs for `### DEC-` headings and take the next unclaimed number; the layout guard fails a tree that holds two decisions under one number.
 - **Live backlog/findings:** GitHub Issues; Pull Requests own implementation, review, and merge state.
 - **Agent/repository safety:** `AGENTS.md`.
 - **Durable lessons:** `docs/ENGINEERING_LESSONS.md`.
