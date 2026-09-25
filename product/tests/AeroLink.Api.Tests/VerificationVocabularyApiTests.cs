@@ -59,14 +59,6 @@ public sealed class VerificationVocabularyApiTests
         return new(project.Id, release.Id, section.Id, managerName, authorName, approverName);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static object DraftBody(Seeded seeded, string verificationMethod, string title = "Oceanic sequencing") => new
     {
         projectId = seeded.ProjectId,
@@ -157,7 +149,7 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         using var read = await client.GetAsync($"/api/projects/{seeded.ProjectId}/verification-methods");
         Assert.Equal(HttpStatusCode.OK, read.StatusCode);
@@ -195,7 +187,7 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.AuthorName);
+        await MemberSession.SignInAsync(client, seeded.AuthorName);
 
         using var read = await client.GetAsync($"/api/projects/{seeded.ProjectId}/verification-methods");
         Assert.Equal(HttpStatusCode.OK, read.StatusCode);
@@ -222,7 +214,7 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         using var first = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/verification-methods", new
         {
@@ -276,9 +268,9 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.AuthorName);
+        await MemberSession.SignInAsync(client, seeded.AuthorName);
         await CreateDraftAsync(client, DraftBody(seeded, "Test"));
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         using var refused = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/verification-methods", new
         {
@@ -310,7 +302,7 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         using (var narrowed = await client.PutAsJsonAsync(
                    $"/api/projects/{seeded.ProjectId}/verification-methods", new
                    {
@@ -390,7 +382,7 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         // Nothing declares "Inspection", so nothing is stranded by correcting its spelling.
         using var accepted = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/verification-methods", new
@@ -415,7 +407,7 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         using (var narrowed = await client.PutAsJsonAsync(
                    $"/api/projects/{seeded.ProjectId}/verification-methods", new
                    {
@@ -470,7 +462,7 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         using (var narrowed = await client.PutAsJsonAsync(
                    $"/api/projects/{seeded.ProjectId}/verification-methods", new
                    {
@@ -521,7 +513,7 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         using (var narrowed = await client.PutAsJsonAsync(
                    $"/api/projects/{seeded.ProjectId}/verification-methods", new
                    {
@@ -573,7 +565,7 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.AuthorName);
+        await MemberSession.SignInAsync(client, seeded.AuthorName);
 
         var draft = await CreateDraftAsync(client, DraftBody(seeded, "Test"));
         using var submit = await SubmitAsync(client, seeded, draft);
@@ -592,12 +584,12 @@ public sealed class VerificationVocabularyApiTests
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
 
-        await SignInAsync(client, seeded.AuthorName);
+        await MemberSession.SignInAsync(client, seeded.AuthorName);
         var before = await CreateDraftAsync(client, DraftBody(seeded, "Similarity", "Similarity before"));
         using var refused = await SubmitAsync(client, seeded, before);
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
 
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         using var configured = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/verification-methods", new
         {
             expectedVersion = 1,
@@ -611,7 +603,7 @@ public sealed class VerificationVocabularyApiTests
         using var authoringBody = JsonDocument.Parse(await authoring.Content.ReadAsStringAsync());
         Assert.Contains("Similarity", Methods(authoringBody.RootElement));
 
-        await SignInAsync(client, seeded.AuthorName);
+        await MemberSession.SignInAsync(client, seeded.AuthorName);
         using var reread = await client.GetAsync($"/api/change-requests/{before.Id}");
         using var rereadBody = JsonDocument.Parse(await reread.Content.ReadAsStringAsync());
         using var accepted = await SubmitAsync(client, seeded,
@@ -631,14 +623,14 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         using (var narrowed = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/verification-methods", new
                {
                    expectedVersion = 1, reason = "This programme verifies by test only", methods = new[] { "Test" },
                }))
             Assert.True(narrowed.IsSuccessStatusCode, await narrowed.Content.ReadAsStringAsync());
 
-        await SignInAsync(client, seeded.AuthorName);
+        await MemberSession.SignInAsync(client, seeded.AuthorName);
         var draft = await CreateDraftAsync(client, DraftBody(seeded, declared));
         using var submit = await SubmitAsync(client, seeded, draft);
 
@@ -664,9 +656,9 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.AuthorName);
+        await MemberSession.SignInAsync(client, seeded.AuthorName);
         await CreateDraftAsync(client, DraftBody(seeded, "Testing", "Historical wording"));
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         using var read = await client.GetAsync($"/api/projects/{seeded.ProjectId}/verification-methods");
         using var body = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
@@ -713,7 +705,7 @@ public sealed class VerificationVocabularyApiTests
         }
 
         using var client2 = factory.CreateClient();
-        await SignInAsync(client2, seeded.ManagerName);
+        await MemberSession.SignInAsync(client2, seeded.ManagerName);
         using var read = await client2.GetAsync($"/api/projects/{seeded.ProjectId}/verification-methods");
         using var body = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
         var row = body.RootElement.GetProperty("nonConforming").EnumerateArray()
@@ -737,7 +729,7 @@ public sealed class VerificationVocabularyApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var seeded = await SeedAsync(factory);
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         using (var configured = await client.PutAsJsonAsync(
                    $"/api/projects/{seeded.ProjectId}/verification-methods", new
                    {
@@ -809,7 +801,7 @@ public sealed class VerificationVocabularyApiTests
             await db.SaveChangesAsync();
         }
 
-        await SignInAsync(client, seeded.AuthorName);
+        await MemberSession.SignInAsync(client, seeded.AuthorName);
         using (var read = await client.GetAsync($"/api/projects/{seeded.ProjectId}/verification-methods"))
         {
             using var body = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
@@ -847,7 +839,7 @@ public sealed class VerificationVocabularyApiTests
             await db.SaveChangesAsync();
         }
 
-        await SignInAsync(client, seeded.AuthorName);
+        await MemberSession.SignInAsync(client, seeded.AuthorName);
         var draft = await CreateDraftAsync(client, DraftBody(seeded, "Testing"));
         using var submit = await SubmitAsync(client, seeded, draft);
         Assert.Equal(HttpStatusCode.BadRequest, submit.StatusCode);

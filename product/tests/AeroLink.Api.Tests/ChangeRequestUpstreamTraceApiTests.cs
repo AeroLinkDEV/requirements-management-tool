@@ -31,7 +31,7 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
             await db.SaveChangesAsync();
         }
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Author);
+        await MemberSession.SignInAsync(client, fixture.Author);
         foreach (var endpoint in new[] {
             $"/api/change-requests/{fixture.ChildId}/upstream-candidates",
             $"/api/authoring/upstream-change-requests?projectId={fixture.ProjectId}&releaseId={fixture.CurrentReleaseId}&type=Software&softwareLevel=HighLevel" })
@@ -142,14 +142,6 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
             approverName, outsiderName);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static async Task<(Guid SessionId, long Version, JsonObject Draft)> CheckoutAsync(
         HttpClient client, Guid changeRequestId)
     {
@@ -176,7 +168,7 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
     {
         var fixture = await SeedAsync(_host.Factory, withDerivedEdge: false);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Author);
+        await MemberSession.SignInAsync(client, fixture.Author);
 
         Guid parentId;
         using (var scope = _host.Factory.Services.CreateScope())
@@ -287,7 +279,7 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
     {
         var fixture = await SeedAsync(_host.Factory, withDerivedEdge: true);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Author);
+        await MemberSession.SignInAsync(client, fixture.Author);
 
         var candidates = await client.GetFromJsonAsync<JsonElement>(
             $"/api/change-requests/{fixture.ChildId}/upstream-candidates?limit=25");
@@ -402,7 +394,7 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
     {
         var fixture = await SeedAsync(_host.Factory, withDerivedEdge: true);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Author);
+        await MemberSession.SignInAsync(client, fixture.Author);
 
         using var response = await client.GetAsync($"/api/change-requests/{fixture.ChildId}/trace");
         var body = await response.Content.ReadAsStringAsync();
@@ -437,7 +429,7 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
         Assert.Equal("Answered", historyItem.GetProperty("traceState").GetProperty("upstream").GetString());
 
         using var outsider = _host.CreateClient();
-        await SignInAsync(outsider, fixture.Outsider);
+        await MemberSession.SignInAsync(outsider, fixture.Outsider);
         using var refused = await outsider.GetAsync($"/api/change-requests/{fixture.ChildId}/trace");
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
         var refusedBody = await refused.Content.ReadAsStringAsync();
@@ -452,7 +444,7 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
     {
         var fixture = await SeedAsync(_host.Factory, withDerivedEdge: false);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Outsider);
+        await MemberSession.SignInAsync(client, fixture.Outsider);
 
         using var detail = await client.GetAsync($"/api/change-requests/{fixture.ChildId}");
         Assert.Equal(HttpStatusCode.Forbidden, detail.StatusCode);
@@ -477,7 +469,7 @@ public sealed class ChangeRequestUpstreamTraceApiTests : IClassFixture<SharedApi
     {
         var fixture = await SeedAsync(_host.Factory, withDerivedEdge: false);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Author);
+        await MemberSession.SignInAsync(client, fixture.Author);
 
         async Task AssertRefusedAsync(Guid upstreamId, string expected)
         {

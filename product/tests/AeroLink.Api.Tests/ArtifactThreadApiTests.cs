@@ -43,7 +43,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var focalId = focalKind switch
         {
@@ -70,7 +70,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         using var response = await client.GetAsync(Url(world, "Baseline", world.BuildId));
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -83,7 +83,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
@@ -101,7 +101,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.SupersededSystemRevisionId);
         var system = Nodes(thread, "Requirement")
@@ -120,7 +120,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var builds = Nodes(thread, "Build").Select(x => x.GetProperty("id").GetString()).ToList();
@@ -136,7 +136,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var execution = Nodes(thread, "Execution").First();
@@ -158,7 +158,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Procedure", world.SystemProcedureRevisionId);
 
@@ -175,7 +175,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var edges = thread.GetProperty("edges").EnumerateArray().ToList();
@@ -203,7 +203,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var edges = thread.GetProperty("edges").EnumerateArray().ToList();
@@ -229,7 +229,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
 
@@ -249,7 +249,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Execution", world.PassExecutionId);
         var execution = Nodes(thread, "Execution")
@@ -270,7 +270,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var executions = Nodes(thread, "Execution").Select(x => x.GetProperty("id").GetString()).ToList();
@@ -288,7 +288,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.InterfaceRevisionId);
         var verification = thread.GetProperty("verification");
@@ -309,7 +309,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         Assert.True(thread.GetProperty("verification").GetProperty("isApplicable").GetBoolean());
@@ -323,7 +323,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Outsider);
+        await MemberSession.SignInForReadsAsync(client, world.Outsider);
 
         using var response = await client.GetAsync(Url(world, "Requirement", world.HighLevelRevisionId));
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -334,7 +334,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         // Authorized for this Project, asking for another Project's requirement through it. Answering would let
         // an authorized caller read across the boundary by supplying a foreign identity.
@@ -347,7 +347,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var raw = thread.GetRawText();
@@ -364,7 +364,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         // The same exact procedure revision was run in two builds under two baselines. Each request now carries
         // a fact able to choose between them, and neither may return the other's history. Without a
@@ -387,7 +387,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId,
             buildId: world.BuildId);
@@ -400,7 +400,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         using var response = await client.GetAsync(
             $"/api/artifact-thread?projectId={world.ProjectId}&baselineId={world.ForeignBaselineId}"
@@ -415,7 +415,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var requirements = Nodes(thread, "Requirement").Select(x => x.GetProperty("id").GetString()).ToList();
@@ -433,7 +433,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.SystemRevisionId);
         var requirements = Nodes(thread, "Requirement").Select(x => x.GetProperty("id").GetString()).ToList();
@@ -464,7 +464,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.LowLevelRevisionId);
         var requirements = Nodes(thread, "Requirement").Select(x => x.GetProperty("id").GetString()).ToList();
@@ -490,7 +490,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         // Existence alone is not identity. Serving a Procedure under the word Case would place it in the wrong
         // lane and describe it as something the controlled record does not say it is.
@@ -508,7 +508,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var edges = thread.GetProperty("edges").EnumerateArray().ToList();
@@ -533,7 +533,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var byId = thread.GetProperty("nodes").EnumerateArray()
@@ -552,7 +552,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
 
@@ -576,7 +576,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Execution", world.LonelyExecutionId,
             baselineId: world.LonelyBaselineId);
@@ -605,7 +605,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Build", world.LonelyBuildId,
             baselineId: world.LonelyBaselineId);
@@ -621,7 +621,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Procedure", world.UncoveredProcedureRevisionId,
             baselineId: world.LonelyBaselineId);
@@ -640,7 +640,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Case", world.LonelyCaseRevisionId,
             baselineId: world.LonelyBaselineId);
@@ -660,7 +660,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var focalId = focalKind == "Execution" ? world.PeerRunInFirstBuildId : world.BuildId;
         var thread = await ThreadAsync(client, world, focalKind, focalId);
@@ -682,7 +682,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
 
@@ -701,7 +701,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Execution", world.LonelyExecutionId,
             baselineId: world.LonelyBaselineId);
@@ -718,7 +718,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Procedure", world.FirstProcedureRevisionId);
         var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
@@ -738,7 +738,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Case", world.CaseRevisionId);
         var cases = Nodes(thread, "Case").Select(x => x.GetProperty("id").GetString()).ToList();
@@ -758,7 +758,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Execution", world.PassExecutionId);
         var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
@@ -774,7 +774,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var procedures = Nodes(thread, "Procedure").Select(x => x.GetProperty("id").GetString()).ToList();
@@ -810,7 +810,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Procedure", world.MaterializedProcedureRevisionId);
 
@@ -839,7 +839,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Procedure", world.FirstProcedureRevisionId);
 
@@ -856,7 +856,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var thread = await ThreadAsync(client, world, "Procedure", world.MaterializedProcedureRevisionId);
         var raw = thread.GetRawText();
@@ -893,7 +893,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var focalId = focalKind switch
         {
@@ -975,7 +975,7 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         }
 
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
         var thread = await ThreadAsync(client, world, "Requirement", world.HighLevelRevisionId);
         var bodyReferences = thread.GetProperty("nodes").EnumerateArray()
             .Single(x => x.GetProperty("id").GetString() == world.HighLevelRevisionId.ToString())
@@ -1012,13 +1012,6 @@ public sealed class ArtifactThreadApiTests : IClassFixture<SharedApiHost>
         Assert.Single(focal);
         Assert.Equal(focalId.ToString(), focal[0].GetProperty("id").GetString());
         return body;
-    }
-
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
     }
 
     private sealed record World(

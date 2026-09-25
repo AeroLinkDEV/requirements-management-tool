@@ -27,13 +27,6 @@ public sealed class LiveTestRegressionApiTests : IClassFixture<SharedApiHost>
         _host = host;
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
     private static UserAccount Account(string user, DateTimeOffset now) => new(user, user,
         $"{user}@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
 
@@ -77,7 +70,7 @@ public sealed class LiveTestRegressionApiTests : IClassFixture<SharedApiHost>
         }
 
         using var client = _host.CreateClient();
-        await LoginAsync(client, memberName);
+        await MemberSession.SignInForReadsAsync(client, memberName);
         var page = await client.GetFromJsonAsync<JsonElement>(
             $"/api/test-procedures?projectId={projectId}&releaseId={releaseId}&scope=System&page=1&pageSize=25");
         var row = page.GetProperty("items")[0];
@@ -133,14 +126,14 @@ public sealed class LiveTestRegressionApiTests : IClassFixture<SharedApiHost>
 
         using (var reviewer = _host.CreateClient())
         {
-            await LoginAsync(reviewer, reviewerName);
+            await MemberSession.SignInForReadsAsync(reviewer, reviewerName);
             var rows = await reviewer.GetFromJsonAsync<JsonElement>(
                 $"/api/downstream-assessments?projectId={projectId}&releaseId={releaseId}");
             Assert.False(rows[0].GetProperty("capabilities").GetProperty("canAssign").GetBoolean());
         }
         using (var engineer = _host.CreateClient())
         {
-            await LoginAsync(engineer, engineerName);
+            await MemberSession.SignInForReadsAsync(engineer, engineerName);
             var rows = await engineer.GetFromJsonAsync<JsonElement>(
                 $"/api/downstream-assessments?projectId={projectId}&releaseId={releaseId}");
             Assert.True(rows[0].GetProperty("capabilities").GetProperty("canAssign").GetBoolean());
@@ -163,7 +156,7 @@ public sealed class LiveTestRegressionApiTests : IClassFixture<SharedApiHost>
         }
         using (var historicalReader = _host.CreateClient())
         {
-            await LoginAsync(historicalReader, engineerName);
+            await MemberSession.SignInForReadsAsync(historicalReader, engineerName);
             var rows = await historicalReader.GetFromJsonAsync<JsonElement>(
                 $"/api/downstream-assessments?projectId={projectId}&releaseId={releaseId}");
             Assert.False(rows[0].GetProperty("capabilities").GetProperty("canEdit").GetBoolean());
@@ -199,7 +192,7 @@ public sealed class LiveTestRegressionApiTests : IClassFixture<SharedApiHost>
         }
 
         using var client = _host.CreateClient();
-        await LoginAsync(client, readerName);
+        await MemberSession.SignInForReadsAsync(client, readerName);
         var detail = await client.GetFromJsonAsync<JsonElement>($"/api/change-requests/{changeRequestId}");
         var added = detail.GetProperty("audit").EnumerateArray()
             .Single(x => x.GetProperty("eventType").GetString() == "RequirementChangeAdded");

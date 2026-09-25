@@ -34,7 +34,7 @@ public sealed class TeamWorkProjectionApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedBaseAsync(factory);
-        await SignInAsync(client, fixture.Viewer);
+        await MemberSession.SignInForReadsAsync(client, fixture.Viewer);
 
         using var authorized = await client.GetAsync($"/api/team-work?projectId={fixture.ProjectId}");
         Assert.Equal(HttpStatusCode.OK, authorized.StatusCode);
@@ -45,7 +45,7 @@ public sealed class TeamWorkProjectionApiTests
             person => person.GetProperty("userName").GetString() == fixture.Outsider);
 
         using var outsider = factory.CreateClient();
-        await SignInAsync(outsider, fixture.Outsider);
+        await MemberSession.SignInForReadsAsync(outsider, fixture.Outsider);
         using var forbidden = await outsider.GetAsync($"/api/team-work?projectId={fixture.ProjectId}");
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
 
@@ -59,7 +59,7 @@ public sealed class TeamWorkProjectionApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedMatrixAsync(factory);
-        await SignInAsync(client, fixture.Viewer);
+        await MemberSession.SignInForReadsAsync(client, fixture.Viewer);
 
         using var response = await client.GetAsync($"/api/team-work?projectId={fixture.ProjectId}");
         var json = await ReadSuccessAsync(response);
@@ -285,7 +285,7 @@ public sealed class TeamWorkProjectionApiTests
             await db.SaveChangesAsync();
         }
 
-        await SignInAsync(client, fixture.Viewer);
+        await MemberSession.SignInForReadsAsync(client, fixture.Viewer);
         using (var edit = await client.PutAsJsonAsync($"/api/projects/{fixture.ProjectId}/configuration", new
         {
             expectedVersion = 1,
@@ -386,7 +386,7 @@ public sealed class TeamWorkProjectionApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         var fixture = await SeedRoutingAsync(factory);
-        await SignInAsync(client, fixture.Viewer);
+        await MemberSession.SignInForReadsAsync(client, fixture.Viewer);
 
         using var projection = await client.GetAsync(
             $"/api/team-work?projectId={fixture.ProjectId}&releaseId={fixture.ReleaseB}");
@@ -417,7 +417,7 @@ public sealed class TeamWorkProjectionApiTests
         using var factory = new AeroLinkApiFactory(commandInterceptor: counter);
         using var client = factory.CreateClient();
         var fixture = await SeedBaseAsync(factory);
-        await SignInAsync(client, fixture.Viewer);
+        await MemberSession.SignInForReadsAsync(client, fixture.Viewer);
 
         counter.Clear();
         using var first = await client.GetAsync($"/api/team-work?projectId={fixture.ProjectId}");
@@ -477,13 +477,6 @@ public sealed class TeamWorkProjectionApiTests
         var text = await response.Content.ReadAsStringAsync();
         Assert.True(response.IsSuccessStatusCode, $"Expected success, got {(int)response.StatusCode}: {text}");
         return JsonDocument.Parse(text);
-    }
-
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     private static async Task<Seed> SeedBaseAsync(AeroLinkApiFactory factory)

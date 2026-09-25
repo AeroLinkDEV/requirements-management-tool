@@ -36,7 +36,7 @@ public sealed class ChangeRequestReviewRationaleApiTests : IClassFixture<SharedA
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await LoginAsync(client, fixture.ReviewerName);
+        await MemberSession.SignInAsync(client, fixture.ReviewerName);
 
         using var approved = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/approve",
             new
@@ -73,7 +73,7 @@ public sealed class ChangeRequestReviewRationaleApiTests : IClassFixture<SharedA
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await LoginAsync(client, fixture.ReviewerName);
+        await MemberSession.SignInAsync(client, fixture.ReviewerName);
 
         using var returned = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/request-changes",
             new { reason = "The trigger wording needs the exact verified HLR reference." });
@@ -89,7 +89,7 @@ public sealed class ChangeRequestReviewRationaleApiTests : IClassFixture<SharedA
 
         // The author reworks and resubmits. Cycle two starts fresh; cycle one stays readable with its Returned step.
         using var author = _host.CreateClient();
-        await LoginAsync(author, fixture.AuthorName);
+        await MemberSession.SignInAsync(author, fixture.AuthorName);
         using var resubmitted = await author.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/submit",
             new { approvers = new[] { new { userId = fixture.ReviewerName } } });
         Assert.Equal(HttpStatusCode.OK, resubmitted.StatusCode);
@@ -104,7 +104,7 @@ public sealed class ChangeRequestReviewRationaleApiTests : IClassFixture<SharedA
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await LoginAsync(client, fixture.OtherName);
+        await MemberSession.SignInAsync(client, fixture.OtherName);
 
         using var refused = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/request-changes",
             new { reason = "I am not the active reviewer but I want changes." });
@@ -143,12 +143,5 @@ public sealed class ChangeRequestReviewRationaleApiTests : IClassFixture<SharedA
         db.SystemChangeRequests.Add(scr);
         await db.SaveChangesAsync();
         return new Seeded(scr.Id, project.Id, authorName, reviewerName, otherName);
-    }
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        var login = await client.PostAsJsonAsync("/api/auth/login", new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 }

@@ -34,7 +34,7 @@ public sealed class VerificationProgramIsolationApiTests
         using var factory = new AeroLinkApiFactory();
         var scenario = await SeedAsync(factory);
         using var client = factory.CreateClient();
-        await LoginAsync(client, ProgramBUser);
+        await MemberSession.SignInForReadsAsync(client, ProgramBUser);
 
         var requests = new[]
         {
@@ -69,7 +69,7 @@ public sealed class VerificationProgramIsolationApiTests
         using var factory = new AeroLinkApiFactory();
         var scenario = await SeedAsync(factory);
         using var client = factory.CreateClient();
-        await LoginAsync(client, ProgramAUser);
+        await MemberSession.SignInForReadsAsync(client, ProgramAUser);
 
         using var traceability = await client.GetAsync(
             $"/api/traceability?projectId={scenario.ProjectAId}&baselineId={scenario.BaselineAId}&page=1&pageSize=25");
@@ -80,6 +80,13 @@ public sealed class VerificationProgramIsolationApiTests
             trace.GetProperty("items")[0].GetProperty("revisionId").GetGuid());
         Assert.Equal(EvidenceFileName, trace.GetProperty("items")[0].GetProperty("tests")[0]
             .GetProperty("executions")[0].GetProperty("evidence")[0].GetProperty("originalFileName").GetString());
+        // The neutral Case/Procedure fields and their pre-Case aliases name the same exact revision (#722).
+        var traced = trace.GetProperty("items")[0].GetProperty("tests")[0];
+        Assert.Equal(scenario.ProcedureAId, traced.GetProperty("artifactId").GetGuid());
+        Assert.Equal(scenario.ProcedureAId, traced.GetProperty("procedureId").GetGuid());
+        Assert.Equal("Procedure", traced.GetProperty("artifactKind").GetString());
+        Assert.Equal(scenario.ProcedureRevisionAId, traced.GetProperty("artifactRevisionId").GetGuid());
+        Assert.Equal("Approved", traced.GetProperty("artifactState").GetString());
 
         using var executions = await client.GetAsync(
             $"/api/test-executions?projectId={scenario.ProjectAId}&releaseId={scenario.ReleaseAId}&buildId={scenario.BuildAId}");
@@ -87,6 +94,8 @@ public sealed class VerificationProgramIsolationApiTests
         var executionRows = await executions.Content.ReadFromJsonAsync<JsonElement>();
         var execution = Assert.Single(executionRows.EnumerateArray());
         Assert.Equal(scenario.ExecutionAId, execution.GetProperty("id").GetGuid());
+        Assert.Equal(scenario.ProcedureRevisionAId, execution.GetProperty("artifactRevisionId").GetGuid());
+        Assert.Equal(scenario.ProcedureRevisionAId, execution.GetProperty("procedureRevisionId").GetGuid());
         Assert.Equal(EvidenceFileName, execution.GetProperty("evidence")[0].GetProperty("originalFileName").GetString());
 
         using var coverage = await client.GetAsync(
@@ -110,7 +119,7 @@ public sealed class VerificationProgramIsolationApiTests
         using var factory = new AeroLinkApiFactory();
         var scenario = await SeedAsync(factory);
         using var client = factory.CreateClient();
-        await LoginAsync(client, ProgramBUser);
+        await MemberSession.SignInForReadsAsync(client, ProgramBUser);
 
         await AssertBadRequestsAsync(client,
         [
@@ -175,13 +184,6 @@ public sealed class VerificationProgramIsolationApiTests
                 failures.Add($"{request} => {(int)response.StatusCode}, code={actualCode ?? "<none>"}, body={body}");
         }
         Assert.True(failures.Count == 0, string.Join(Environment.NewLine, failures));
-    }
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     private static async Task<Scenario> SeedAsync(AeroLinkApiFactory factory)

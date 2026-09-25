@@ -28,7 +28,7 @@ public sealed class ProcedureControlledDocumentApiTests
         using var factory = new AeroLinkApiFactory(testLadderPolicy: policy);
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory, policy);
-        await LoginAsync(client, "document.cm");
+        await MemberSession.SignInAsync(client, "document.cm");
 
         var procedureRegisters = await client.GetFromJsonAsync<JsonElement>(
             $"/api/projects/{fixture.ProjectId}/test-procedure-documents?scope=Software");
@@ -250,17 +250,6 @@ public sealed class ProcedureControlledDocumentApiTests
 
     private static int Occurrences(string value, string expected) =>
         value.Split(expected, StringSplitOptions.None).Length - 1;
-
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login", new
-        {
-            userName = user,
-            password = AeroLinkApiFactory.MemberPassword,
-        });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
 
     private static ILadderPolicy ProcedurePolicy()
     {

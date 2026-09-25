@@ -77,13 +77,13 @@ public sealed class OpenDigitalThreadTests
         }
 
         using var baseClient = factory.CreateClient();
-        await SignInAsync(baseClient, "integration.cm.base");
+        await MemberSession.SignInAsync(baseClient, "integration.cm.base");
         using var refused = await baseClient.PostAsJsonAsync("/api/integrations/service-identities",
             new { projectId, name = "Base only", scopes = new[] { "requirements:read" } });
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
 
         using var delegatedClient = factory.CreateClient();
-        await SignInAsync(delegatedClient, "integration.cm.delegate");
+        await MemberSession.SignInAsync(delegatedClient, "integration.cm.delegate");
         using var accepted = await delegatedClient.PostAsJsonAsync("/api/integrations/service-identities",
             new { projectId, name = "Delegated pipeline", scopes = new[] { "requirements:read" } });
         Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
@@ -146,14 +146,6 @@ public sealed class OpenDigitalThreadTests
     {
         using var bootstrap=new HttpRequestMessage(HttpMethod.Post,"/api/setup/bootstrap"){Content=JsonContent.Create(new{displayName="AeroLink Administrator",email="admin@example.test",password=AeroLinkApiFactory.AdministratorPassword})};bootstrap.Headers.Add("X-AeroLink-Bootstrap-Secret",AeroLinkApiFactory.BootstrapSecret);using var created=await client.SendAsync(bootstrap);Assert.Equal(HttpStatusCode.Created,created.StatusCode);
         using var login=await client.PostAsJsonAsync("/api/auth/login",new{userName="admin",password=AeroLinkApiFactory.AdministratorPassword});Assert.Equal(HttpStatusCode.OK,login.StatusCode);
-    }
-
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
     private static async Task<Guid> CreateProjectAsync(AeroLinkApiFactory factory)

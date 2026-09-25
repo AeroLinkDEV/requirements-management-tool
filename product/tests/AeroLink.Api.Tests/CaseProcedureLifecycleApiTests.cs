@@ -23,7 +23,7 @@ public sealed class CaseProcedureLifecycleApiTests
 
         using (var viewer = factory.CreateClient())
         {
-            await LoginAsync(viewer, "case.viewer");
+            await MemberSession.SignInAsync(viewer, "case.viewer");
             using var denied = await viewer.PostAsJsonAsync(
                 $"/api/case-procedure-links/{fixture.LinkId}/lifecycle/acknowledge",
                 new { rationale = "A project member cannot make a verification disposition." });
@@ -31,7 +31,7 @@ public sealed class CaseProcedureLifecycleApiTests
         }
 
         using var engineer = factory.CreateClient();
-        await LoginAsync(engineer, "case.lifecycle");
+        await MemberSession.SignInAsync(engineer, "case.lifecycle");
         using (var acknowledge = await engineer.PostAsJsonAsync(
                    $"/api/case-procedure-links/{fixture.LinkId}/lifecycle/acknowledge",
                    new { rationale = "The exact Procedure relationship is under controlled assessment." }))
@@ -130,16 +130,5 @@ public sealed class CaseProcedureLifecycleApiTests
         db.ExactLinkSuspectEvents.AddRange(lifecycle.Events);
         await db.SaveChangesAsync();
         return new(link.Id, caseRevision1.Id);
-    }
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login", new
-        {
-            userName,
-            password = AeroLinkApiFactory.MemberPassword,
-        });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 }

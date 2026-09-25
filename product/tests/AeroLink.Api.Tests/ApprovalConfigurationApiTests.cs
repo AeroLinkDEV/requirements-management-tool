@@ -73,14 +73,6 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         return new(project.Id, program.Id, manager.Id, lead.Id, deputy.Id, managerName, leadName, deputyName);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static async Task<ConfigurationResponse> ReadAsync(HttpClient client, Guid projectId)
     {
         var response = await client.GetAsync($"/api/projects/{projectId}/approval-configuration");
@@ -97,7 +89,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
             new("Release approval", ProgramRole.ProgramManager, ReviewStageKind.Approval),
         ]);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var system = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System");
         Assert.True(system.Configured);
@@ -126,7 +118,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
             new("Airworthiness review", ProgramRole.Airworthiness),
         ]);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var system = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System");
         Assert.Equal(1, system.BlockingStages);
@@ -147,7 +139,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
             new("Assurance review", ProgramRole.SoftwareQualityAnalyst),
         ]);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var before = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System");
         Assert.Equal(1, before.BlockingStages);
@@ -173,7 +165,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
             new("Discipline review", ProgramRole.SystemEngineeringLead),
         ]);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         Assert.Equal(0, (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "System").BlockingStages);
 
@@ -194,7 +186,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory, [new("Discipline review", ProgramRole.SystemEngineeringLead)]);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var software = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Single(x => x.Subject == "Software");
         Assert.False(software.Configured);
@@ -208,7 +200,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory, [new("Discipline review", ProgramRole.SystemEngineeringLead)]);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var subjects = (await ReadAsync(client, seeded.ProjectId)).Artifacts.Select(x => x.Subject).ToList();
         Assert.Equal(
@@ -221,7 +213,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory, [new("Initial review", ProgramRole.SystemEngineer)]);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         const string subject = nameof(ReviewSubject.System);
 
         var first = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/{subject}", new
@@ -264,7 +256,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory, [new("Initial review", ProgramRole.SystemEngineer)]);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.LeadName);
+        await MemberSession.SignInAsync(client, seeded.LeadName);
 
         var response = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/approval-configuration/System", new
         {
@@ -299,7 +291,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         }
 
         using var baseClient = _host.CreateClient();
-        await SignInAsync(baseClient, baseName);
+        await MemberSession.SignInAsync(baseClient, baseName);
         Assert.False((await ReadAsync(baseClient, seeded.ProjectId)).CanManage);
         var refused = await baseClient.PutAsJsonAsync(
             $"/api/projects/{seeded.ProjectId}/approval-configuration/{nameof(ReviewSubject.System)}", new
@@ -310,7 +302,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
 
         using var holderClient = _host.CreateClient();
-        await SignInAsync(holderClient, holderName);
+        await MemberSession.SignInAsync(holderClient, holderName);
         Assert.True((await ReadAsync(holderClient, seeded.ProjectId)).CanManage);
         var accepted = await holderClient.PutAsJsonAsync(
             $"/api/projects/{seeded.ProjectId}/approval-configuration/{nameof(ReviewSubject.System)}", new
@@ -340,7 +332,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         }
 
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         var response = await client.PostAsJsonAsync($"/api/review-workflows/{currentId}/revise", new
         {
             name = "Racing revision",
@@ -371,7 +363,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         await db.SaveChangesAsync();
 
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         var body = await client.GetFromJsonAsync<JsonElement>(
             $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
         var candidate = body.GetProperty("stages")[0].GetProperty("candidates")
@@ -396,7 +388,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         await db.SaveChangesAsync();
 
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         var body = await client.GetFromJsonAsync<JsonElement>(
             $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
         var candidates = body.GetProperty("stages")[0].GetProperty("candidates").EnumerateArray();
@@ -430,7 +422,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var applicable = await client.GetFromJsonAsync<JsonElement>(
             $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
@@ -474,7 +466,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         }
 
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         var applicable = await client.GetFromJsonAsync<JsonElement>(
             $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
         var candidate = applicable.GetProperty("stages")[0].GetProperty("candidates")
@@ -518,7 +510,7 @@ public sealed class ApprovalConfigurationApiTests : IClassFixture<SharedApiHost>
         }
 
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
         var applicable = await client.GetFromJsonAsync<JsonElement>(
             $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
         var candidate = applicable.GetProperty("stages")[0].GetProperty("candidates")

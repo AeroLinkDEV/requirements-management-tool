@@ -61,14 +61,6 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
         return new(project.Id, program.Id, high.Id, member);
     }
 
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private sealed record DocumentRow(Guid Id, string DocumentNumber, string Title, string Level,
         string Description, int ArtifactCount, int ProcedureCount, SectionRow[] Sections);
     private sealed record SectionRow(Guid Id, string Heading, int Position, int ArtifactCount, int ProcedureCount);
@@ -78,7 +70,7 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await LoginAsync(client, seeded.MemberName);
+        await MemberSession.SignInAsync(client, seeded.MemberName);
 
         var response = await client.GetAsync(
             $"/api/projects/{seeded.ProjectId}/test-procedure-documents?scope=HighLevelSoftware");
@@ -101,7 +93,7 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await LoginAsync(client, seeded.MemberName);
+        await MemberSession.SignInAsync(client, seeded.MemberName);
 
         var documents = await client.GetFromJsonAsync<DocumentRow[]>(
             $"/api/projects/{seeded.ProjectId}/test-case-documents");
@@ -119,7 +111,7 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await LoginAsync(client, seeded.MemberName);
+        await MemberSession.SignInAsync(client, seeded.MemberName);
 
         var documents = (await (await client.GetAsync(
             $"/api/projects/{seeded.ProjectId}/test-procedure-documents"))
@@ -137,7 +129,7 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await LoginAsync(client, seeded.MemberName);
+        await MemberSession.SignInAsync(client, seeded.MemberName);
 
         var documents = (await (await client.GetAsync(
             $"/api/projects/{seeded.ProjectId}/test-procedure-documents?scope=HighLevelSoftware"))
@@ -226,7 +218,7 @@ public sealed class TestProcedureDocumentApiTests : IClassFixture<SharedApiHost>
     {
         var first = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await LoginAsync(client, first.MemberName);
+        await MemberSession.SignInAsync(client, first.MemberName);
 
         Guid secondProjectId;
         using (var scope = _host.Factory.Services.CreateScope())

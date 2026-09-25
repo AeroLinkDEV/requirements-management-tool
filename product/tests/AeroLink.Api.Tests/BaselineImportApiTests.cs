@@ -853,12 +853,12 @@ public sealed class BaselineImportApiTests
         // An engineer has every right to work inside this Program. Declaring that a whole baseline arrived
         // from somewhere else, already released, is not that kind of act — it is Program setup, so it takes
         // the authority that establishes a Project.
-        await SignInAsync(client, "import.engineer");
+        await MemberSession.SignInAsync(client, "import.engineer");
         using var refused = await client.PostAsJsonAsync("/api/baseline-imports", StartBody(projectId));
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
 
         // The Configuration Manager membership is eligibility, not the Program-setup authority itself.
-        await SignInAsync(client, "import.cm");
+        await MemberSession.SignInAsync(client, "import.cm");
         using var baseOnlyRefused = await client.PostAsJsonAsync("/api/baseline-imports", StartBody(projectId));
         Assert.Equal(HttpStatusCode.Forbidden, baseOnlyRefused.StatusCode);
 
@@ -876,7 +876,7 @@ public sealed class BaselineImportApiTests
         var id = (await allowed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
 
         // The same holds for every later gate, not only for starting one.
-        await SignInAsync(client, "import.engineer");
+        await MemberSession.SignInAsync(client, "import.engineer");
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync($"/api/baseline-imports/{id}/analysis", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await RecordSourceRecordsAsync(client, id, SourceRecord(1234))).StatusCode);
         // Reading is not the same as asserting: anyone in the Program can see where a requirement came from.
@@ -920,21 +920,13 @@ public sealed class BaselineImportApiTests
             predecessorBaselineId = (Guid?)null,
             name = "Authority baseline",
         };
-        await SignInAsync(client, "baseline.authority.base");
+        await MemberSession.SignInAsync(client, "baseline.authority.base");
         using var refused = await client.PostAsJsonAsync("/api/baselines", request);
         Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
 
-        await SignInAsync(client, "baseline.authority.holder");
+        await MemberSession.SignInAsync(client, "baseline.authority.holder");
         using var accepted = await client.PostAsJsonAsync("/api/baselines", request);
         Assert.Equal(HttpStatusCode.Created, accepted.StatusCode);
-    }
-
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
     [Fact]

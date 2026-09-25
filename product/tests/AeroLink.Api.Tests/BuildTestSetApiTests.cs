@@ -63,21 +63,13 @@ public sealed class BuildTestSetApiTests
             draft.Revision.Id, other.Revision.Id);
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     [Fact]
     public async Task A_build_reports_a_set_for_each_discipline_starting_empty()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "plan.lead");
+        await MemberSession.SignInAsync(client, "plan.lead");
 
         using var response = await client.GetAsync($"/api/releases/{fixture.ReleaseId}/test-sets");
         var body = await response.Content.ReadAsStringAsync();
@@ -94,7 +86,7 @@ public sealed class BuildTestSetApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "plan.lead");
+        await MemberSession.SignInAsync(client, "plan.lead");
 
         using var response = await client.PostAsJsonAsync(
             $"/api/releases/{fixture.ReleaseId}/test-sets/System/procedures",
@@ -106,6 +98,11 @@ public sealed class BuildTestSetApiTests
         Assert.Equal(1, result.GetProperty("added").GetInt32());
         var procedure = result.GetProperty("set").GetProperty("procedures").EnumerateArray().Single();
         Assert.Equal("SYSTP-000901.00", procedure.GetProperty("displayNumber").GetString());
+        // The neutral field and its pre-Case alias name the same exact revision, under both list names (#722).
+        Assert.Equal(fixture.ApprovedRevisionId, procedure.GetProperty("artifactRevisionId").GetGuid());
+        Assert.Equal(fixture.ApprovedRevisionId, procedure.GetProperty("procedureRevisionId").GetGuid());
+        Assert.Equal(result.GetProperty("set").GetProperty("procedures").GetRawText(),
+            result.GetProperty("set").GetProperty("artifacts").GetRawText());
         Assert.Equal("CoverageArea", procedure.GetProperty("reason").GetString());
         Assert.Equal("Integrity and Monitoring", procedure.GetProperty("note").GetString());
         Assert.Equal("plan.lead", procedure.GetProperty("addedBy").GetString());
@@ -124,7 +121,7 @@ public sealed class BuildTestSetApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "plan.lead");
+        await MemberSession.SignInAsync(client, "plan.lead");
         var payload = new { procedureRevisionIds = new[] { fixture.ApprovedRevisionId }, reason = "ChangedRequirement", note = "SYSR-000901" };
 
         using var first = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-sets/System/procedures", payload);
@@ -149,7 +146,7 @@ public sealed class BuildTestSetApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "plan.lead");
+        await MemberSession.SignInAsync(client, "plan.lead");
 
         var target = useDraft ? fixture.DraftRevisionId : fixture.OtherProjectRevisionId;
         using var response = await client.PostAsJsonAsync(
@@ -166,7 +163,7 @@ public sealed class BuildTestSetApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "plan.lead");
+        await MemberSession.SignInAsync(client, "plan.lead");
         var discipline = TestChangeReviewDiscipline.HighLevelSoftware;
         using var added = await client.PostAsJsonAsync(
             $"/api/releases/{fixture.ReleaseId}/test-sets/{discipline}/cases",
@@ -191,7 +188,7 @@ public sealed class BuildTestSetApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "plan.lead");
+        await MemberSession.SignInAsync(client, "plan.lead");
         using var added = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-sets/System/procedures",
             new { procedureRevisionIds = new[] { fixture.ApprovedRevisionId }, reason = "ChangedRequirement", note = "SYSR-000151 changed." });
         Assert.True(added.IsSuccessStatusCode, await added.Content.ReadAsStringAsync());
@@ -212,7 +209,7 @@ public sealed class BuildTestSetApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "plan.engineer");
+        await MemberSession.SignInAsync(client, "plan.engineer");
 
         using var response = await client.PostAsJsonAsync(
             $"/api/releases/{fixture.ReleaseId}/test-sets/System/procedures",

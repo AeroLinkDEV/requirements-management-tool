@@ -8,113 +8,33 @@ const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(here, '..', '..', '..')
 const read = (...parts) => readFileSync(join(repoRoot, ...parts), 'utf8')
 
-test('the software Case contract is neutral at the API seam and keeps old aliases explicit', () => {
-  const verification = read('product', 'src', 'AeroLink.Api', 'VerificationEndpoints.cs')
-  const impact = read('product', 'src', 'AeroLink.Api', 'VerificationImpactEndpoints.cs')
-  const testSets = read('product', 'src', 'AeroLink.Api', 'BuildTestSetEndpoints.cs')
-  const documents = read('product', 'src', 'AeroLink.Api', 'TestProcedureDocumentEndpoints.cs')
-  const authoring = read('product', 'src', 'AeroLink.Api', 'ChangeRequestEndpoints.cs')
-  const requirements = read('product', 'src', 'AeroLink.Api', 'RequirementsEndpoints.cs')
-  const coverageProjection = read('product', 'src', 'AeroLink.Infrastructure', 'Persistence',
-    'VerificationCoverageProjection.cs')
-  const problemReports = read('product', 'src', 'AeroLink.Api', 'ProblemReportEndpoints.cs')
-  const baselines = read('product', 'src', 'AeroLink.Api', 'BaselineEndpoints.cs')
-  const workspace = read('product', 'src', 'AeroLink.Api', 'WorkspaceEndpoints.cs')
-  // #880 §4.2 replaced LifecycleExplorer with the Digital Thread page. The surface changed; the #722
-  // guarantee did not, so the assertions move to the page that inherited it rather than being dropped: the
-  // client still reads a requirement's verification artifacts by their neutral `artifactRevisionId`.
-  const lifecycleClient = read('product', 'client', 'src', 'DigitalThreadPage.tsx')
-
-  assert.match(verification, /artifactId\s*=/)
-  assert.match(verification, /artifactKind\s*=/)
-  assert.match(verification, /artifactRevisionId\s*=\s*c\.ProcedureRevisionId/)
-  assert.match(verification, /artifactState\s*=\s*c\.ProcedureState/)
-  assert.match(verification, /procedureId\s*=.*compatibility alias/)
-  assert.match(verification, /procedureRevisionId\s*=\s*x\.artifactRevisionId.*compatibility alias/)
-  assert.match(impact, /artifactChanges/)
-  assert.match(impact, /procedureChanges\s*=\s*artifactChanges.*compatibility alias/)
-  assert.match(impact, /resolvedArtifactId/)
-  assert.match(impact, /resolvedProcedureId\s*=.*compatibility alias/)
-  assert.match(impact, /artifactLevel\s*=/)
-  assert.match(impact, /artifactChangeAction\s*=/)
-  assert.match(impact, /procedureLevel\s*=.*compatibility alias/)
-  assert.match(impact, /procedureChangeAction\s*=.*compatibility alias/)
-  assert.match(impact, /canProposeProcedureChange[\s\S]{0,180}compatibility alias/)
-  assert.match(impact, /canWithdrawProcedureChange.*compatibility alias/)
-  assert.match(impact, /artifactRevisionId\s*=\s*h\.ProcedureRevisionId/)
-  assert.match(testSets, /artifactRevisionId\s*=\s*entry\.ProcedureRevisionId/)
-  assert.match(testSets, /procedureRevisionId\s*=\s*entry\.ProcedureRevisionId.*compatibility alias/)
-  assert.match(documents, /test-case-documents/)
-  assert.match(documents, /artifactCount/)
-  assert.match(authoring, /coveringArtifacts/)
-  assert.match(authoring, /coveringProcedures\s*=\s*coveringArtifacts.*compatibility alias/)
-  assert.match(requirements, /artifactRevisionId=x\.ArtifactRevisionId/)
-  assert.match(coverageProjection, /Guid ArtifactId/)
-  assert.match(coverageProjection, /ProcedureId => ArtifactId.*compatibility alias/)
-  assert.match(problemReports, /procedureRevisionId = revision\?\.Id, \/\/ compatibility alias/)
-  assert.match(baselines, /artifactCount\s*=/)
-  assert.match(workspace, /testArtifacts\s*=/)
-  assert.match(lifecycleClient, /artifactRevisionId: string/)
-  assert.match(lifecycleClient, /key=\{test\.artifactRevisionId\}/)
-})
-
-test('the client renders the combined software Case/Procedure explorer through shared vocabulary helpers', () => {
+// Most of #722's Case contract is now proved by running it:
+// - the neutral API fields and their pre-Case aliases are asserted in the hosted API tests that call each
+//   route (VerificationProgramIsolation, TestProcedureAuthoring, VerificationImpact, BuildTestSet,
+//   AuthoringTracedImpact, ProcedureManifestEffectivity, the registers, ShowcaseSeed and
+//   ManualTestChangeRequest);
+// - the client vocabulary is asserted in artifact-acronym-presentation.spec.ts;
+// - superseded signatures are asserted in test-procedure-explorer.spec.ts;
+// - Case routes are asserted in routing-contract.spec.ts.
+// Only what no behaviour test can say stays here as source text (#1128).
+test('controlled Case document labels are byte-exact and software surfaces never hard-code the Procedure API', () => {
   const presentation = read('product', 'client', 'src', 'presentation.ts')
-  const explorer = read('product', 'client', 'src', 'TestProcedureExplorer.tsx')
-  const coverage = read('product', 'client', 'src', 'TestingCoverageWorkspace.tsx')
-  const results = read('product', 'client', 'src', 'TestResultsWorkspace.tsx')
-  const testSets = read('product', 'src', 'AeroLink.Api', 'BuildTestSetEndpoints.cs')
-  const impactEndpoints = read('product', 'src', 'AeroLink.Api', 'VerificationImpactEndpoints.cs')
-  const changePage = read('product', 'client', 'src', 'TestChangeRequestPage.tsx')
-  const changeWorkspace = read('product', 'client', 'src', 'TestChangeRequestWorkspace.tsx')
-  const changeEditor = read('product', 'client', 'src', 'TestChangeRequestEditor.tsx')
-  const app = read('product', 'client', 'src', 'App.tsx')
-  const routing = read('product', 'client', 'src', 'routing.ts')
-
-  assert.match(presentation, /HLRTC: 'HLR Test Case \(HLRTC\)'/)
-  assert.match(presentation, /LLRTC: 'LLR Test Case \(LLRTC\)'/)
-  assert.match(presentation, /export const verificationArtifactWord/)
-  assert.match(presentation, /export const verificationArtifactApiRoot/)
-  assert.match(presentation, /export const verificationArtifactDocumentApiRoot/)
-  assert.match(presentation, /'\/api\/test-cases'/)
-  assert.match(presentation, /export const procedureTargetsFor/)
   assert.match(presentation, /HighLevelTestCases: 'HLR Test Case Document \(HLRTD\)'/)
   assert.match(presentation, /LowLevelTestCases: 'LLR Test Case Document \(LLRTD\)'/)
   assert.match(presentation, /HLRTD: documentTypeLabels\.HighLevelTestCases/)
   assert.match(presentation, /LLRTD: documentTypeLabels\.LowLevelTestCases/)
-  assert.match(explorer, /verificationArtifactWord/)
-  assert.match(explorer, /aria-label=\{`\$\{currentArtifactDisplayWord\} state`\}/)
-  assert.match(explorer, /Software Test Case\/Procedure Explorer/)
-  assert.match(explorer, /const currentArtifactShortWord = verificationArtifactNoun/)
-  assert.match(presentation, /level === 'System' \? 'Procedure' : 'Case'/)
-  assert.match(presentation, /`test \$\{verificationArtifactNoun\(level\)\.toLowerCase\(\)\}`/)
-  assert.match(coverage, /The \{currentArtifactWord\} library moved with them/)
-  assert.match(coverage, /resolvedArtifact/)
-  assert.match(coverage, /artifactId: chosen/)
-  assert.doesNotMatch(coverage, /'approved procedure'/)
-  assert.match(app, /Test Case\/Procedure Explorer/)
-  assert.match(app, /prefix=area==="systemTest"\?"procedure":kind === "Procedure" \? "procedure" : "case"/)
-  assert.match(routing, /software-verification\/cases/)
-  assert.match(routing, /path === "software-verification\/procedures"/)
-  for (const source of [explorer, coverage, results, changePage, changeWorkspace, changeEditor]) {
-    assert.doesNotMatch(source, /\/api\/test-procedures/)
+
+  // Software surfaces reach their API root through verificationArtifactApiRoot, so a Case is never sent to
+  // the System Procedure collection.
+  for (const file of ['TestProcedureExplorer.tsx', 'TestingCoverageWorkspace.tsx', 'TestResultsWorkspace.tsx',
+    'TestChangeRequestPage.tsx', 'TestChangeRequestWorkspace.tsx', 'TestChangeRequestEditor.tsx']) {
+    assert.doesNotMatch(read('product', 'client', 'src', file), /\/api\/test-procedures/, file)
   }
-  assert.match(changeEditor, /artifactChanges:/)
-  assert.match(changeWorkspace, /artifactLevel\?:string/)
-  assert.match(changePage, /verificationArtifactChangeSegment/)
-  assert.match(changePage, /\/api\/signatures\?artifactId=\$\{packageId\}/)
-  assert.match(changePage, /Superseded signature/)
-  assert.match(changePage, /supersession\?\.migration/)
-  assert.match(changeWorkspace, /verificationArtifactTargetSegment/)
-  assert.match(explorer, /verificationArtifactApiRoot/)
-  assert.match(impactEndpoints, /regex\(procedure-changes\|case-changes\)/)
-  assert.match(testSets, /ArtifactRevisionIds/)
-  assert.match(testSets, /artifacts,/)
-  assert.match(results, /artifactSetSegment/)
-  assert.match(results, /artifactRevisionIds/)
-  assert.match(results, /artifactRevisionId:\s*procedure\.artifactRevisionId/)
 })
 
+// The migration is merged history and cannot change, so these checks guard against it being rewritten.
+// SoftwareCaseRenamePostgresQualificationTests executes the same migration, but only against its dedicated
+// aerolink_722_qualify database, which no CI lane provides yet (#1122).
 test('the migration contract guards System and leaves review history/body prose governed', () => {
   const migration = read('product', 'src', 'AeroLink.Infrastructure', 'Persistence', 'Migrations',
     '20260822170000_RenameSoftwareVerificationArtifactsToCases.cs')

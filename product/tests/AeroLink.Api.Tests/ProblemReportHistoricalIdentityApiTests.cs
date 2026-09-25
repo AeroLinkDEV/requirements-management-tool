@@ -45,7 +45,7 @@ public sealed class ProblemReportHistoricalIdentityApiTests
         using var client = factory.CreateClient();
         var (projectId, _) = await SeedAsync(factory);
         var reportId = await RaiseReportAsync(factory, projectId);
-        await SignInAsync(client, EngineerHandle);
+        await MemberSession.SignInAsync(client, EngineerHandle);
 
         await TransitionAsync(client, reportId, "ready-for-sccb");
 
@@ -66,7 +66,7 @@ public sealed class ProblemReportHistoricalIdentityApiTests
         using var client = factory.CreateClient();
         var (projectId, _) = await SeedAsync(factory);
         var reportId = await RaiseReportAsync(factory, projectId);
-        await SignInAsync(client, EngineerHandle);
+        await MemberSession.SignInAsync(client, EngineerHandle);
         await TransitionAsync(client, reportId, "ready-for-sccb");
 
         var before = Revisions(await DetailAsync(client, reportId)).First();
@@ -89,7 +89,7 @@ public sealed class ProblemReportHistoricalIdentityApiTests
         using var client = factory.CreateClient();
         var (projectId, _) = await SeedAsync(factory);
         var reportId = await RaiseReportAsync(factory, projectId);
-        await SignInAsync(client, EngineerHandle);
+        await MemberSession.SignInAsync(client, EngineerHandle);
 
         var before = await DetailAsync(client, reportId);
         Assert.Equal(OwnerName, before.GetProperty("responsibleEngineerDisplayName").GetString());
@@ -128,7 +128,7 @@ public sealed class ProblemReportHistoricalIdentityApiTests
             await db.SaveChangesAsync();
         }
 
-        await SignInAsync(client, EngineerHandle);
+        await MemberSession.SignInAsync(client, EngineerHandle);
         var legacy = Revisions(await DetailAsync(client, reportId))
             .Single(x => x.GetProperty("eventType").GetString() == "LegacyImported");
 
@@ -147,7 +147,7 @@ public sealed class ProblemReportHistoricalIdentityApiTests
         var longReport = await RaiseReportAsync(factory, projectId, "PR-77602");
         await AddHistoryAsync(factory, shortReport, 2);
         await AddHistoryAsync(factory, longReport, 60);
-        await SignInAsync(client, EngineerHandle);
+        await MemberSession.SignInAsync(client, EngineerHandle);
 
         commands.Clear();
         var shortDetail = await DetailAsync(client, shortReport);
@@ -179,7 +179,7 @@ public sealed class ProblemReportHistoricalIdentityApiTests
         var (projectId, _) = await SeedAsync(factory);
         for (var index = 0; index < 12; index++)
             await RaiseReportAsync(factory, projectId, $"PR-778{index:D2}");
-        await SignInAsync(client, EngineerHandle);
+        await MemberSession.SignInAsync(client, EngineerHandle);
 
         commands.Clear();
         var oneRow = await client.GetFromJsonAsync<JsonElement>(
@@ -249,7 +249,7 @@ public sealed class ProblemReportHistoricalIdentityApiTests
             await db.SaveChangesAsync();
         }
 
-        await SignInAsync(client, EngineerHandle);
+        await MemberSession.SignInAsync(client, EngineerHandle);
         var invalidation = Revisions(await DetailAsync(client, reportId))
             .Single(x => x.GetProperty("eventType").GetString() == "ClosureVerificationInvalidatedByChange");
 
@@ -305,14 +305,6 @@ public sealed class ProblemReportHistoricalIdentityApiTests
         var account = await db.UserAccounts.SingleAsync(x => x.UserName == userName);
         account.RefreshDirectoryProfile(displayName, account.Email);
         await db.SaveChangesAsync();
-    }
-
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
     private static async Task<Guid> RaiseReportAsync(AeroLinkApiFactory factory, Guid projectId, string number = "PR-77600")

@@ -215,13 +215,6 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
         return new(scr.Id, foreignRevision.Id, revision.Id, memberName);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-    }
-
     private static async Task<JsonElement> ContentAsync(HttpClient client, Guid changeRequestId)
     {
         using var response = await client.GetAsync($"/api/change-requests/{changeRequestId}/proposal-content");
@@ -238,7 +231,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var modify = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.ModifyId);
 
@@ -254,7 +247,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory, proposedRevision: 4);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var modify = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.ModifyId);
 
@@ -271,7 +264,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var introduce = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.IntroduceId);
 
@@ -287,7 +280,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var retire = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.RealRetireId);
 
@@ -310,7 +303,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var retire = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.RetireId);
 
@@ -328,7 +321,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var allocated = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.AllocatingModifyId)
             .GetProperty("allocatedDownstream").EnumerateArray().ToList();
@@ -344,7 +337,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var allocated = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.AllocatingModifyId)
             .GetProperty("allocatedDownstream").EnumerateArray().ToList();
@@ -361,7 +354,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var ids = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.AllocatingModifyId)
             .GetProperty("allocatedDownstream").EnumerateArray()
@@ -375,7 +368,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var stale = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.ModifyId);
 
@@ -391,7 +384,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var body = await ContentAsync(client, fixture.ChangeRequestId);
 
@@ -420,7 +413,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         // SR-91004 is the current revision and does have downstream, so it is Allocated rather than empty; the
         // distinction being proved here is that a resolved, current base is never reported as behind target.
@@ -436,7 +429,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var allocated = Item(await ContentAsync(client, fixture.ChangeRequestId), fixture.AllocatingModifyId)
             .GetProperty("allocatedDownstream").EnumerateArray().ToList();
@@ -459,7 +452,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var body = await ContentAsync(client, fixture.ChangeRequestId);
 
@@ -482,7 +475,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var effect = (await ContentAsync(client, fixture.ChangeRequestId))
             .GetProperty("buildEffect").EnumerateArray().ToList();
@@ -499,7 +492,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedSelectedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var effect = (await ContentAsync(client, world.SelectedChangeRequestId))
             .GetProperty("buildEffect").EnumerateArray().ToList();
@@ -535,7 +528,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Outsider);
+        await MemberSession.SignInForReadsAsync(client, fixture.Outsider);
 
         using var response = await client.GetAsync(
             $"/api/change-requests/{fixture.ChangeRequestId}/proposal-content");
@@ -548,7 +541,7 @@ public sealed class ChangeProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         using var response = await client.GetAsync(
             $"/api/change-requests/{Guid.NewGuid()}/proposal-content");

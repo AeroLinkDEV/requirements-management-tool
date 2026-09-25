@@ -64,20 +64,13 @@ public sealed class RestartReviewApiTests
         return (scr.Id, project.Id, workflow?.Id);
     }
 
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        var login = await client.PostAsJsonAsync("/api/auth/login", new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     [Fact]
     public async Task The_author_cancels_a_misrouted_review_and_restarts_it_with_the_right_approver()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "author.user");
+        await MemberSession.SignInAsync(client, "author.user");
 
         using var response = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/restart-review",
             new { reason = "Routed to the wrong discipline approver.", approvers = new[] { new { userId = "right.user" } } });
@@ -107,7 +100,7 @@ public sealed class RestartReviewApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory, configured: true);
-        await LoginAsync(client, "author.user");
+        await MemberSession.SignInAsync(client, "author.user");
 
         using var response = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/restart-review",
             new { reason = "Routed to the wrong systems approver.", approvers = new[] { new { userId = "right.user" } } });
@@ -162,7 +155,7 @@ public sealed class RestartReviewApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory, configured: true, modernConfigured: true);
-        await LoginAsync(client, "author.user");
+        await MemberSession.SignInAsync(client, "author.user");
 
         // Restart onto the right person so the approval exercises a newly selected, explicit BaseRole
         // obligation rather than the legacy row seeded as the misrouted historical cycle.
@@ -170,7 +163,7 @@ public sealed class RestartReviewApiTests
             new { reason = "Routed to the wrong systems approver.", approvers = new[] { new { userId = "right.user" } } });
         Assert.Equal(HttpStatusCode.OK, restarted.StatusCode);
 
-        await LoginAsync(client, "right.user");
+        await MemberSession.SignInAsync(client, "right.user");
         using var approved = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/approve",
             new
             {
@@ -247,7 +240,7 @@ public sealed class RestartReviewApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "wrong.user");
+        await MemberSession.SignInAsync(client, "wrong.user");
 
         using var response = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/restart-review",
             new { reason = "I would rather someone else reviewed this.", approvers = new[] { new { userId = "right.user" } } });
@@ -260,7 +253,7 @@ public sealed class RestartReviewApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "author.user");
+        await MemberSession.SignInAsync(client, "author.user");
 
         using var noReason = await client.PostAsJsonAsync($"/api/change-requests/{fixture.ChangeRequestId}/restart-review",
             new { reason = "  ", approvers = new[] { new { userId = "right.user" } } });

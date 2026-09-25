@@ -131,7 +131,7 @@ public sealed class ProblemReportVerificationApiTests
         await RejectAsync(client, fixture.ReportId, fixture.ReportVersion, fixture.BlockedExecutionId, "pr_verification_not_pass");
         await RejectAsync(client, fixture.ManualReportId, fixture.ManualReportVersion, fixture.NoRetestExecutionId, "pr_verification_scope_unknown");
         using var quality = factory.CreateClient();
-        await LoginAsync(quality, "closure.quality");
+        await MemberSession.SignInForReadsAsync(quality, "closure.quality");
         using (var closure = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ManualReportId}/closure/approve", new
         {
             expectedVersion = fixture.ManualReportVersion
@@ -323,7 +323,7 @@ public sealed class ProblemReportVerificationApiTests
             revision.GetProperty("eventType").GetString() == "ClosureVerificationInvalidatedByChange");
 
         using var quality = factory.CreateClient();
-        await LoginAsync(quality, "closure.quality");
+        await MemberSession.SignInForReadsAsync(quality, "closure.quality");
         using (var staleClosure = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
             new { expectedVersion = first.ReportVersion }))
         {
@@ -463,7 +463,7 @@ public sealed class ProblemReportVerificationApiTests
         var fixture = await SeedAsync(factory);
         var candidate = await SelectCandidateAsync(engineer, fixture, fixture.TargetBuildId, targetReleaseId: null);
         using var quality = factory.CreateClient();
-        await LoginAsync(quality, "closure.quality");
+        await MemberSession.SignInForReadsAsync(quality, "closure.quality");
 
         using var checkout = await engineer.PostAsJsonAsync("/api/controlled-editing/checkout",
             new { artifactType = "ProblemReport", artifactId = fixture.ReportId, leaseMinutes = 15 });
@@ -511,7 +511,7 @@ public sealed class ProblemReportVerificationApiTests
         var fixture = await SeedAsync(factory);
         var candidate = await SelectCandidateAsync(engineer, fixture, fixture.TargetBuildId, targetReleaseId: null);
         using var quality = factory.CreateClient();
-        await LoginAsync(quality, "closure.quality");
+        await MemberSession.SignInForReadsAsync(quality, "closure.quality");
 
         using var checkout = await engineer.PostAsJsonAsync("/api/controlled-editing/checkout",
             new { artifactType = "ProblemReport", artifactId = fixture.ReportId, leaseMinutes = 15 });
@@ -566,8 +566,8 @@ public sealed class ProblemReportVerificationApiTests
         var candidate = await SelectCandidateAsync(engineer, fixture, fixture.TargetBuildId, targetReleaseId: null);
         using var qualityOne = factory.CreateClient();
         using var qualityTwo = factory.CreateClient();
-        await LoginAsync(qualityOne, "closure.quality");
-        await LoginAsync(qualityTwo, "closure.quality");
+        await MemberSession.SignInForReadsAsync(qualityOne, "closure.quality");
+        await MemberSession.SignInForReadsAsync(qualityTwo, "closure.quality");
 
         var firstTask = qualityOne.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
             new { expectedVersion = candidate.ReportVersion });
@@ -616,7 +616,7 @@ public sealed class ProblemReportVerificationApiTests
         Assert.Equal(HttpStatusCode.OK, checkedIn.StatusCode);
         var candidate = await SelectCandidateAsync(engineer, fixture, fixture.TargetBuildId, targetReleaseId: null);
         using var quality = factory.CreateClient();
-        await LoginAsync(quality, "closure.quality");
+        await MemberSession.SignInForReadsAsync(quality, "closure.quality");
         using var closed = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
             new { expectedVersion = candidate.ReportVersion });
         Assert.Equal(HttpStatusCode.OK, closed.StatusCode);
@@ -682,7 +682,7 @@ public sealed class ProblemReportVerificationApiTests
         Assert.Equal(detail.GetProperty("snapshotHash").GetString(), invalidation.GetProperty("snapshotHash").GetString());
 
         using var quality = factory.CreateClient();
-        await LoginAsync(quality, "closure.quality");
+        await MemberSession.SignInForReadsAsync(quality, "closure.quality");
         using var staleApproval = await quality.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
             new { expectedVersion = candidate.ReportVersion });
         Assert.Equal(HttpStatusCode.Conflict, staleApproval.StatusCode);
@@ -704,7 +704,7 @@ public sealed class ProblemReportVerificationApiTests
         foreach (var userName in new[] { "closure.approver", "closure.cm", "closure.manager", "closure.engineer" })
         {
             using var unauthorized = factory.CreateClient();
-            await LoginAsync(unauthorized, userName);
+            await MemberSession.SignInForReadsAsync(unauthorized, userName);
             var detail = await unauthorized.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
             Assert.False(detail.GetProperty("capabilities").GetProperty("canApproveSqaClosure").GetBoolean());
             using var response = await unauthorized.PostAsJsonAsync($"/api/problem-reports/{fixture.ReportId}/closure/approve",
@@ -718,7 +718,7 @@ public sealed class ProblemReportVerificationApiTests
             Assert.Equal(HttpStatusCode.Forbidden, administratorAttempt.StatusCode);
 
         using var quality = factory.CreateClient();
-        await LoginAsync(quality, "closure.quality");
+        await MemberSession.SignInForReadsAsync(quality, "closure.quality");
         var authorized = await quality.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{fixture.ReportId}");
         Assert.True(authorized.GetProperty("capabilities").GetProperty("canApproveSqaClosure").GetBoolean());
 
@@ -775,7 +775,7 @@ public sealed class ProblemReportVerificationApiTests
         await ProblemReportApiTests.BootstrapAndLoginAsync(administrator);
         var fixture = await SeedAsync(factory, reportedBy, responsibleEngineerId);
         using var quality = factory.CreateClient();
-        await LoginAsync(quality, "closure.quality");
+        await MemberSession.SignInForReadsAsync(quality, "closure.quality");
         var candidate = await SelectCandidateAsync(administrator, fixture, fixture.TargetBuildId,
             targetReleaseId: null, verificationClient: responsibleEngineerId == "closure.quality" ? quality : administrator);
 
@@ -826,13 +826,6 @@ public sealed class ProblemReportVerificationApiTests
             new { expectedVersion = version, testExecutionId = executionId });
         Assert.Equal(HttpStatusCode.OK, verified.StatusCode);
         return (executionId, (await verified.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("version").GetInt64());
-    }
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     private static async Task RejectAsync(HttpClient client, Guid reportId, long version, Guid executionId, string code)

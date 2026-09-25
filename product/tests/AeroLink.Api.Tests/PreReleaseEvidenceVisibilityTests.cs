@@ -82,7 +82,7 @@ public sealed class PreReleaseEvidenceVisibilityTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "evidence.lead");
+        await MemberSession.SignInAsync(client, "evidence.lead");
         await ResolveRequiringEvidenceAsync(client, fixture);
 
         using var scope = factory.Services.CreateScope();
@@ -94,14 +94,6 @@ public sealed class PreReleaseEvidenceVisibilityTests
         var entry = Assert.Single(entries);
         Assert.Equal(fixture.ProcedureRevisionId, entry.ProcedureRevisionId);
         Assert.Equal(TestSelectionReason.ChangedRequirement, entry.Reason);
-    }
-
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 
     private static async Task<JsonElement> ResolveRequiringEvidenceAsync(HttpClient client, Fixture fixture)
@@ -128,7 +120,7 @@ public sealed class PreReleaseEvidenceVisibilityTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "evidence.lead");
+        await MemberSession.SignInAsync(client, "evidence.lead");
         await ResolveRequiringEvidenceAsync(client, fixture);
 
         using var listed = await client.GetAsync($"/api/releases/{fixture.ReleaseId}/verification-impact");
@@ -149,7 +141,7 @@ public sealed class PreReleaseEvidenceVisibilityTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "evidence.lead");
+        await MemberSession.SignInAsync(client, "evidence.lead");
 
         using var assigned = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.ImpactId}/assign",
             new { engineerId = "evidence.engineer" });

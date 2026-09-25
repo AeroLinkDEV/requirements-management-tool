@@ -27,7 +27,7 @@ public sealed class ProblemReportPagingApiTests
         using var factory = new AeroLinkApiFactory(commandInterceptor: commands);
         using var client = factory.CreateClient();
         var scenario = await SeedAsync(factory);
-        await SignInAsync(client, Member);
+        await MemberSession.SignInForReadsAsync(client, Member);
 
         commands.Clear();
         var first = await PageAsync(client, scenario.ProjectId, "&page=1&pageSize=10");
@@ -72,7 +72,7 @@ public sealed class ProblemReportPagingApiTests
         Assert.Equal(expected.Select(item => item.Number), Numbers(composed));
 
         using var outsider = factory.CreateClient();
-        await SignInAsync(outsider, Outsider);
+        await MemberSession.SignInForReadsAsync(outsider, Outsider);
         using var forbidden = await outsider.GetAsync(
             $"/api/problem-reports?projectId={scenario.ProjectId}&page=1&pageSize=10");
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
@@ -124,13 +124,6 @@ public sealed class ProblemReportPagingApiTests
                 "Must never enter the authorized Project total.", "", Outsider, now));
         await db.SaveChangesAsync();
         return new Scenario(project.Id, firstRelease.Id, expected);
-    }
-
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
     }
 
     private static async Task<JsonElement> PageAsync(HttpClient client, Guid projectId, string query)

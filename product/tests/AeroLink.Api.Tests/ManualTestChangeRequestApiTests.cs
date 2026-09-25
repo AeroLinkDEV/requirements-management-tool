@@ -107,14 +107,6 @@ public sealed class ManualTestChangeRequestApiTests
             report.Id, otherReport.Id, autoItemId, highLevel.Id, lowLevel.Id);
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static void AddProcedureDecision(TestChangeReview review, string actor, DateTimeOffset now) =>
         review.AddProcedureChange(actor, new TestProcedureChangeDraft("SYSTP-009999", 0,
             TestProcedureLevel.System, TestProcedureChangeKind.Introduce, "Test fixture procedure",
@@ -137,7 +129,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.GetAsync(
             $"/api/releases/{fixture.ReleaseId}/test-change-request-sources?discipline={discipline}");
@@ -166,7 +158,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "HighLevelSoftware", changeRequestIds = new[] { fixture.LowLevelChangeId },
@@ -190,7 +182,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "HighLevelSoftware", changeRequestIds = Array.Empty<Guid>(),
@@ -227,7 +219,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -273,7 +265,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -308,7 +300,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "HighLevelSoftware", changeRequestIds = Array.Empty<Guid>(),
@@ -330,7 +322,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId },
@@ -355,7 +347,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "HighLevelSoftware", changeRequestIds = new[] { fixture.HighLevelChangeId },
@@ -374,7 +366,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId, fixture.SecondChangeId },
@@ -405,7 +397,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         // A package covering nothing has nothing to decide and would sit in the queue looking like work.
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
@@ -424,7 +416,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using (var scope = factory.Services.CreateScope())
         {
@@ -451,7 +443,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "System", changeRequestIds = new[] { fixture.AutoRaisedChangeId },
@@ -482,7 +474,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using (var scope = factory.Services.CreateScope())
         {
@@ -521,7 +513,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "System", changeRequestIds = new[] { fixture.OtherBuildChangeId }, title = "Verification package" });
@@ -535,7 +527,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId },
@@ -550,7 +542,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var open = await client.PostAsJsonAsync(
             $"/api/test-change-reviews/{fixture.AutoTcrId}/problem-reports",
@@ -583,7 +575,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.outsider");
+        await MemberSession.SignInAsync(client, "manual.outsider");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId }, title = "Verification package" });
@@ -596,7 +588,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.lead");
+        await MemberSession.SignInAsync(client, "manual.lead");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId },
@@ -620,7 +612,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using (var scope = factory.Services.CreateScope())
         {
@@ -672,7 +664,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new { discipline = "System", changeRequestIds = new[] { fixture.FirstChangeId } });
@@ -686,7 +678,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         Guid draftId;
         using (var scope = factory.Services.CreateScope())
@@ -712,7 +704,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -768,7 +760,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -800,7 +792,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -827,7 +819,7 @@ public sealed class ManualTestChangeRequestApiTests
                 await db.Programs.Where(x => x.Name == "Manual Program").Select(x => x.Id).SingleAsync(), ProgramRole.TestEngineer, "test.setup", now));
             await db.SaveChangesAsync();
         }
-        await LoginAsync(client, "manual.other");
+        await MemberSession.SignInAsync(client, "manual.other");
 
         using var response = await client.PostAsJsonAsync($"/api/test-change-reviews/{packageId}/case",
             new { title = "Stolen", problem = "P", analysis = "A", solution = "S" });
@@ -840,7 +832,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         Guid hlrId, llrId, hlrRevisionId;
         using (var scope = factory.Services.CreateScope())
@@ -923,6 +915,15 @@ public sealed class ManualTestChangeRequestApiTests
         Assert.Matches(@"^HLRTC-\d{6}\.00$",
             JsonSerializer.Deserialize<JsonElement>(caseBody).GetProperty("displayNumber").GetString()!);
 
+        // A software package is read through its Case routes as well as written through them (#722).
+        var casePackage = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{hlrPackageId}/case-changes");
+        Assert.Contains(casePackage.GetProperty("artifactChanges").EnumerateArray(),
+            x => x.GetProperty("id").GetGuid() == caseChangeId);
+        using var caseTargets = await client.GetAsync(
+            $"/api/test-change-reviews/{hlrPackageId}/case-targets?page=1&pageSize=50");
+        Assert.Equal(HttpStatusCode.OK, caseTargets.StatusCode);
+
         using var removed = await client.DeleteAsync(
             $"/api/test-change-reviews/{hlrPackageId}/case-changes/{caseChangeId}");
         Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
@@ -941,7 +942,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -975,7 +976,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -1013,7 +1014,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using (var scope = factory.Services.CreateScope())
         {
@@ -1063,8 +1064,8 @@ public sealed class ManualTestChangeRequestApiTests
         using var clientA = factory.CreateClient();
         using var clientB = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(clientA, "manual.engineer");
-        await LoginAsync(clientB, "manual.engineer");
+        await MemberSession.SignInAsync(clientA, "manual.engineer");
+        await MemberSession.SignInAsync(clientB, "manual.engineer");
 
         using var created = await clientA.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -1104,7 +1105,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         var list = await client.GetFromJsonAsync<JsonElement>(
             $"/api/releases/{fixture.ReleaseId}/test-change-reviews");
@@ -1130,7 +1131,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -1158,7 +1159,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
 
         using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -1196,7 +1197,7 @@ public sealed class ManualTestChangeRequestApiTests
     private static async Task<Guid> PrepareSubmittableNoChangePackageAsync(AeroLinkApiFactory factory,
         HttpClient client, Guid autoTcrId, Guid itemId)
     {
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
         using var resolved = await client.PostAsJsonAsync($"/api/verification-impact/{itemId}/resolve",
             new { outcome = "NoTestRequired", rationale = "Existing procedures already cover this wording." });
         Assert.True(resolved.IsSuccessStatusCode, await resolved.Content.ReadAsStringAsync());
@@ -1223,7 +1224,7 @@ public sealed class ManualTestChangeRequestApiTests
         var fixture = await SeedAsync(factory);
         var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, clientA, fixture.AutoTcrId, fixture.AutoItemId);
         Assert.NotEqual(Guid.Empty, reviewId);
-        await LoginAsync(clientB, "manual.engineer");
+        await MemberSession.SignInAsync(clientB, "manual.engineer");
 
         var versionA = await CurrentVersionAsync(clientA, fixture.ReleaseId, reviewId);
         var versionB = await CurrentVersionAsync(clientB, fixture.ReleaseId, reviewId);
@@ -1254,7 +1255,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var clientB = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, clientA, fixture.AutoTcrId, fixture.AutoItemId);
-        await LoginAsync(clientB, "manual.engineer");
+        await MemberSession.SignInAsync(clientB, "manual.engineer");
         var versionBefore = await CurrentVersionAsync(clientA, fixture.ReleaseId, reviewId);
 
         // A reopens the decision while the package is still Open; that is a governed content change and
@@ -1277,7 +1278,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var clientB = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, clientA, fixture.AutoTcrId, fixture.AutoItemId);
-        await LoginAsync(clientB, "manual.engineer");
+        await MemberSession.SignInAsync(clientB, "manual.engineer");
         var version = await CurrentVersionAsync(clientA, fixture.ReleaseId, reviewId);
 
         using var gate = new SaveRaceGate(factory.ConnectionString);
@@ -1332,7 +1333,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var clientB = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, clientA, fixture.AutoTcrId, fixture.AutoItemId);
-        await LoginAsync(clientB, "manual.engineer");
+        await MemberSession.SignInAsync(clientB, "manual.engineer");
         var version = await CurrentVersionAsync(clientA, fixture.ReleaseId, reviewId);
 
         using var gate = new SaveRaceGate(factory.ConnectionString);
@@ -1381,7 +1382,7 @@ public sealed class ManualTestChangeRequestApiTests
         using var clientB = factory.CreateClient();
         var fixture = await SeedAsync(factory);
         var reviewId = await PrepareSubmittableNoChangePackageAsync(factory, clientA, fixture.AutoTcrId, fixture.AutoItemId);
-        await LoginAsync(clientB, "manual.engineer");
+        await MemberSession.SignInAsync(clientB, "manual.engineer");
         var version = await CurrentVersionAsync(clientA, fixture.ReleaseId, reviewId);
 
         using var gate = new SaveRaceGate(factory.ConnectionString);
@@ -1440,11 +1441,11 @@ public sealed class ManualTestChangeRequestApiTests
         Assert.Equal(HttpStatusCode.Conflict, reopenInReview.StatusCode);
         Assert.Contains("only while the test change request is a Draft", await reopenInReview.Content.ReadAsStringAsync());
 
-        await LoginAsync(client, "manual.reviewer");
+        await MemberSession.SignInAsync(client, "manual.reviewer");
         using var approved = await client.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/approve",
             new { rationale = "Approved.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve this exact test change request." });
         Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
         using var reopenApproved = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.AutoItemId}/reopen",
             new { rationale = "Even later." });
         Assert.Equal(HttpStatusCode.Conflict, reopenApproved.StatusCode);
@@ -1469,12 +1470,12 @@ public sealed class ManualTestChangeRequestApiTests
             firstHash = (await db.ReviewCycles.SingleAsync(x => x.TestChangeReviewId == reviewId)).SnapshotHash;
         }
 
-        await LoginAsync(client, "manual.reviewer");
+        await MemberSession.SignInAsync(client, "manual.reviewer");
         using var returned = await client.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/return",
             new { rationale = "Rework the decision." });
         Assert.True(returned.IsSuccessStatusCode, await returned.Content.ReadAsStringAsync());
 
-        await LoginAsync(client, "manual.engineer");
+        await MemberSession.SignInAsync(client, "manual.engineer");
         using var reopened = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.AutoItemId}/reopen",
             new { rationale = "Correct the decision after return." });
         Assert.True(reopened.IsSuccessStatusCode, await reopened.Content.ReadAsStringAsync());
@@ -1510,13 +1511,13 @@ public sealed class ManualTestChangeRequestApiTests
         using var submitted = await clientA.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/submit",
             new { approverId = "manual.reviewer", expectedVersion = version });
         Assert.True(submitted.IsSuccessStatusCode, await submitted.Content.ReadAsStringAsync());
-        await LoginAsync(clientA, "manual.reviewer");
+        await MemberSession.SignInAsync(clientA, "manual.reviewer");
         using var approved = await clientA.PostAsJsonAsync($"/api/test-change-reviews/{reviewId}/approve",
             new { rationale = "Approved.", password = AeroLinkApiFactory.MemberPassword, meaning = "I approve this exact test change request." });
         Assert.True(approved.IsSuccessStatusCode, await approved.Content.ReadAsStringAsync());
 
-        await LoginAsync(clientA, "manual.engineer");
-        await LoginAsync(clientB, "manual.engineer");
+        await MemberSession.SignInAsync(clientA, "manual.engineer");
+        await MemberSession.SignInAsync(clientB, "manual.engineer");
         var first = clientA.PostAsync($"/api/test-change-reviews/{reviewId}/revise", null);
         var second = clientB.PostAsync($"/api/test-change-reviews/{reviewId}/revise", null);
         var results = await Task.WhenAll(first, second);

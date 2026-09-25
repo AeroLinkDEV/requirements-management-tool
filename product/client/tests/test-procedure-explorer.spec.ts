@@ -647,8 +647,14 @@ test('the Case chooser adds an exact eligible Draft and focuses its persisted pr
     route.fulfill({ contentType: 'application/json', body: JSON.stringify(openedCasePackage) }))
   await page.route('**/api/releases/release-16/test-change-reviews', route =>
     route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [openedCasePackage] }) }))
+  // The package carries a signature the Case rename superseded (#722). The page must say so and name the
+  // migration, never present it as a current approval.
   await page.route('**/api/signatures?artifactId=tcr-case-existing', route =>
-    route.fulfill({ contentType: 'application/json', body: '[]' }))
+    route.fulfill({ contentType: 'application/json', body: JSON.stringify([{ id: 'superseded-signature',
+      displayName: 'Admin', action: 'Approved', meaning: 'Approved the package', artifactRevision: 'HLRTCCR-786003.00',
+      contentHash: 'a'.repeat(64), signedAt: '2026-08-20T00:00:00Z', isSuperseded: true,
+      supersession: { migration: 'RenameSoftwareVerificationArtifactsToCases',
+        reason: 'The software Case rename superseded this signature.' } }]) }))
   await page.route('**/api/controlled-editing/status?artifactType=TestChangeRequest&artifactId=tcr-case-existing', route =>
     route.fulfill({ contentType: 'application/json', body: JSON.stringify({ locked: false }) }))
 
@@ -666,6 +672,10 @@ test('the Case chooser adds an exact eligible Draft and focuses its persisted pr
   await page.getByRole('dialog').getByRole('button', { name: 'Add exact revision' }).click()
   await expect(page).toHaveURL(/software-verification\/hlr\/change-requests\/tcr-case-existing\?proposalId=case-proposal/)
   await expect(page.locator('[data-procedure-change-id="case-proposal"]')).toBeFocused()
+  const signatures = page.locator('[data-signature-evidence]')
+  await expect(signatures.getByText('Superseded signature')).toBeVisible()
+  await expect(signatures.getByText('Migration: RenameSoftwareVerificationArtifactsToCases')).toBeVisible()
+  await expect(signatures.getByText('Approved', { exact: true })).toHaveCount(0)
   const exactUrl = page.url()
   await page.reload()
   await expect(page).toHaveURL(exactUrl)

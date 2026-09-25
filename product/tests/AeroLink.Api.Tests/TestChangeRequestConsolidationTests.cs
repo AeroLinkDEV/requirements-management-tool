@@ -81,21 +81,13 @@ public sealed class TestChangeRequestConsolidationTests
             firstItem.Id, secondItem.Id);
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     [Fact]
     public async Task Manual_consolidation_moves_verification_items_to_the_surviving_package()
     {
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "consolidation.engineer");
+        await MemberSession.SignInAsync(client, "consolidation.engineer");
 
         using var response = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -147,7 +139,7 @@ public sealed class TestChangeRequestConsolidationTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "consolidation.engineer");
+        await MemberSession.SignInAsync(client, "consolidation.engineer");
         Guid successorReviewId;
         using (var scope = factory.Services.CreateScope())
         {
@@ -218,17 +210,17 @@ public sealed class TestChangeRequestConsolidationTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "consolidation.lead");
+        await MemberSession.SignInAsync(client, "consolidation.lead");
 
         using var assigned = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.SecondItemId}/assign",
             new { engineerId = "consolidation.engineer" });
         Assert.True(assigned.IsSuccessStatusCode, await assigned.Content.ReadAsStringAsync());
-        await LoginAsync(client, "consolidation.engineer");
+        await MemberSession.SignInAsync(client, "consolidation.engineer");
         using var decided = await client.PostAsJsonAsync($"/api/verification-impact/{fixture.FirstItemId}/resolve",
             new { outcome = "NewProcedureRequired", rationale = "The first change needs a new procedure." });
         Assert.True(decided.IsSuccessStatusCode, await decided.Content.ReadAsStringAsync());
 
-        await LoginAsync(client, "consolidation.engineer");
+        await MemberSession.SignInAsync(client, "consolidation.engineer");
         using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
             {
@@ -264,7 +256,7 @@ public sealed class TestChangeRequestConsolidationTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "consolidation.engineer");
+        await MemberSession.SignInAsync(client, "consolidation.engineer");
 
         using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -345,7 +337,7 @@ public sealed class TestChangeRequestConsolidationTests
             sourceId = source.Id;
         }
 
-        await LoginAsync(client, "consolidation.engineer");
+        await MemberSession.SignInAsync(client, "consolidation.engineer");
         var picker = await client.GetFromJsonAsync<JsonElement>(
             $"/api/releases/{fixture.ReleaseId}/test-change-request-sources?discipline=System");
         Assert.Equal(eligible, picker.EnumerateArray().Any(x =>
@@ -444,7 +436,7 @@ public sealed class TestChangeRequestConsolidationTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "consolidation.engineer");
+        await MemberSession.SignInAsync(client, "consolidation.engineer");
         var picker = await client.GetFromJsonAsync<JsonElement>(
             $"/api/releases/{fixture.ReleaseId}/test-change-request-sources?discipline=System");
         Assert.Contains(picker.EnumerateArray(), x =>
@@ -495,7 +487,7 @@ public sealed class TestChangeRequestConsolidationTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "consolidation.engineer");
+        await MemberSession.SignInAsync(client, "consolidation.engineer");
 
         using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -525,7 +517,7 @@ public sealed class TestChangeRequestConsolidationTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "consolidation.engineer");
+        await MemberSession.SignInAsync(client, "consolidation.engineer");
 
         using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
@@ -609,7 +601,7 @@ public sealed class TestChangeRequestConsolidationTests
                 .Where(x => x.ChangeRequestId == noItemChangeId).ToListAsync());
         }
 
-        await LoginAsync(client, "consolidation.engineer");
+        await MemberSession.SignInAsync(client, "consolidation.engineer");
         using var created = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
             new
             {

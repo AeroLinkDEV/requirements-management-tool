@@ -72,20 +72,12 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
             firstEngineer, secondEngineer, backupEngineer, tester);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     [Fact]
     public async Task Assignment_requires_the_base_role_and_activation_grants_the_leadership_authority()
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         // An ineligible person is refused with the reason, and the refusal grants nothing.
         var position = "SystemEngineeringLead";
@@ -108,7 +100,7 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var position = "SystemEngineeringLead";
         Assert.True((await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/leadership/{position}/primary",
@@ -131,7 +123,7 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var position = "SystemEngineeringLead";
         Assert.True((await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/leadership/{position}/primary",
@@ -167,7 +159,7 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         const string position = "SystemEngineeringLead";
         Assert.True((await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/leadership/{position}/primary",
@@ -202,7 +194,7 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var position = "SystemEngineeringLead";
         Assert.True((await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/leadership/{position}/primary",
@@ -233,7 +225,7 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var granted = await client.PostAsJsonAsync($"/api/projects/{seeded.ProjectId}/personnel",
             new { userId = seeded.FirstId, role = retiredRole.ToString() });
@@ -280,7 +272,7 @@ public sealed class ProjectLeadershipApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         // Only the Project Engineer base role is required for eligibility, and the position is granted to
         // exactly one of the two people who hold it.

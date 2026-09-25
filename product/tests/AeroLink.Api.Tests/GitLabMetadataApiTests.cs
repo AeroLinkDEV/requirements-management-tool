@@ -25,7 +25,7 @@ public sealed class GitLabMetadataApiTests
         }));
         var data = await SeedAsync(configured.Services);
         using var client = configured.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var url = $"/api/projects/{data.ProjectId}/repository/merge-requests";
         var first = await client.GetFromJsonAsync<System.Text.Json.JsonElement>(url);
         using var response = await client.GetAsync(url);
@@ -68,7 +68,7 @@ public sealed class GitLabMetadataApiTests
             await db.SaveChangesAsync();
         }
         using var client = configured.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var url = $"/api/projects/{data.ProjectId}/code/source/{snapshotId}/tree?commit={sha}";
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync(url)).StatusCode);
         Assert.Equal(1, transport.Calls);
@@ -100,7 +100,7 @@ public sealed class GitLabMetadataApiTests
         }));
         var data = await SeedAsync(configured.Services);
         using var client = configured.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         using var response = await client.GetAsync($"/api/projects/{data.ProjectId}/repository/merge-requests");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -144,7 +144,7 @@ public sealed class GitLabMetadataApiTests
         }));
         var data = await SeedAsync(configured.Services);
         using var client = configured.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var routes = new[]
         {
             $"/api/projects/{data.ProjectId}/repository/merge-requests",
@@ -192,7 +192,7 @@ public sealed class GitLabMetadataApiTests
         }));
         var data = await SeedAsync(configured.Services);
         using var client = configured.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var pending = client.GetAsync($"/api/projects/{data.ProjectId}/repository/merge-requests");
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(15));
         try
@@ -229,7 +229,7 @@ public sealed class GitLabMetadataApiTests
             services.AddHttpClient<GitLabMetadataReader>().ConfigurePrimaryHttpMessageHandler(() => transport)));
         var data = await SeedAsync(configured.Services);
         using var client = configured.CreateClient();
-        await SignInAsync(client, data.UserName);
+        await MemberSession.SignInForReadsAsync(client, data.UserName);
         var foreignProject = (await SeedAsync(configured.Services)).ProjectId;
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/projects/{foreignProject}/repository/merge-requests")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/projects/{foreignProject}/repository/merge-requests/1")).StatusCode);
@@ -256,10 +256,6 @@ public sealed class GitLabMetadataApiTests
         await db.SaveChangesAsync();
         return (project.Id, user.Id, user.UserName);
     }
-
-    private static async Task SignInAsync(HttpClient client, string userName) =>
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword })).StatusCode);
 
     private sealed class CaptureGitLab(Func<CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
     {

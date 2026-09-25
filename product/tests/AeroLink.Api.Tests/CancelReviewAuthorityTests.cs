@@ -90,7 +90,7 @@ public sealed class CancelReviewAuthorityTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var scenario = await SeedAsync(factory);
-        await SignInAsync(client, userName);
+        await MemberSession.SignInAsync(client, userName);
 
         using var response = await client.PostAsJsonAsync($"/api/change-requests/{scenario.ChangeRequestId}/cancel-review", new { reason = Reason });
         var body = await response.Content.ReadAsStringAsync();
@@ -104,7 +104,7 @@ public sealed class CancelReviewAuthorityTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var scenario = await SeedAsync(factory);
-        await SignInAsync(client, "cancel.manager.base");
+        await MemberSession.SignInAsync(client, "cancel.manager.base");
 
         using var response = await client.PostAsJsonAsync(
             $"/api/change-requests/{scenario.ChangeRequestId}/cancel-review", new { reason = Reason });
@@ -117,7 +117,7 @@ public sealed class CancelReviewAuthorityTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var scenario = await SeedAsync(factory);
-        await SignInAsync(client, "cancel.bystander");
+        await MemberSession.SignInAsync(client, "cancel.bystander");
 
         using var response = await client.PostAsJsonAsync($"/api/change-requests/{scenario.ChangeRequestId}/cancel-review", new { reason = Reason });
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -129,7 +129,7 @@ public sealed class CancelReviewAuthorityTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var scenario = await SeedAsync(factory);
-        await SignInAsync(client, "cancel.author");
+        await MemberSession.SignInAsync(client, "cancel.author");
 
         using var response = await client.PostAsJsonAsync($"/api/change-requests/{scenario.ChangeRequestId}/cancel-review", new { reason = "  " });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -146,19 +146,11 @@ public sealed class CancelReviewAuthorityTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var scenario = await SeedAsync(factory);
-        await SignInAsync(client, "cancel.author");
+        await MemberSession.SignInAsync(client, "cancel.author");
 
         using var response = await client.PostAsJsonAsync($"/api/change-requests/{scenario.ChangeRequestId}/cancel-review",
             new { reason = Reason, expectedVersion = 9_999L });
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         Assert.Contains("stale_version", await response.Content.ReadAsStringAsync());
-    }
-
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 }

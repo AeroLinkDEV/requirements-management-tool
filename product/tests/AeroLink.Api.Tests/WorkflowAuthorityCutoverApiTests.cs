@@ -72,14 +72,6 @@ public sealed class WorkflowAuthorityCutoverApiTests : IClassFixture<SharedApiHo
             managerName, leadName, backupName, baseOnlyName);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static object BaseRoleStage(string name, string role, string kind = "Review") => new
     {
         name,
@@ -99,7 +91,7 @@ public sealed class WorkflowAuthorityCutoverApiTests : IClassFixture<SharedApiHo
     {
         var seeded = await SeedRosterAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var saved = await client.PutAsJsonAsync(
             $"/api/projects/{seeded.ProjectId}/approval-configuration/{nameof(ReviewSubject.System)}",
@@ -120,7 +112,7 @@ public sealed class WorkflowAuthorityCutoverApiTests : IClassFixture<SharedApiHo
     {
         var seeded = await SeedRosterAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var saved = await client.PutAsJsonAsync(
             $"/api/projects/{seeded.ProjectId}/approval-configuration/{nameof(ReviewSubject.System)}",
@@ -144,7 +136,7 @@ public sealed class WorkflowAuthorityCutoverApiTests : IClassFixture<SharedApiHo
     {
         var seeded = await SeedRosterAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var stage = JsonDocument.Parse(stageJson).RootElement.Clone();
         var response = await client.PutAsJsonAsync(
@@ -168,7 +160,7 @@ public sealed class WorkflowAuthorityCutoverApiTests : IClassFixture<SharedApiHo
     {
         var seeded = await SeedRosterAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var response = await client.PutAsJsonAsync(
             $"/api/projects/{seeded.ProjectId}/approval-configuration/{nameof(ReviewSubject.System)}",
@@ -182,7 +174,7 @@ public sealed class WorkflowAuthorityCutoverApiTests : IClassFixture<SharedApiHo
         var seeded = await SeedAsync(_host.Factory,
             stages: [LeadershipStage("Lead approval", nameof(ProjectLeadershipPosition.SystemEngineeringLead))]);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var body = await client.GetFromJsonAsync<JsonElement>(
             $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
@@ -207,7 +199,7 @@ public sealed class WorkflowAuthorityCutoverApiTests : IClassFixture<SharedApiHo
             LeadershipStage("Accountable engineering", nameof(ProjectLeadershipPosition.ProjectEngineer)),
         ]);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var body = await client.GetFromJsonAsync<JsonElement>(
             $"/api/review-workflows/applicable?projectId={seeded.ProjectId}&type=System");
@@ -270,7 +262,7 @@ public sealed class WorkflowAuthorityCutoverApiTests : IClassFixture<SharedApiHo
     {
         var seeded = await SeedRosterAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         foreach (var role in new[] { "Reviewer", "Approver" })
         {
@@ -286,7 +278,7 @@ public sealed class WorkflowAuthorityCutoverApiTests : IClassFixture<SharedApiHo
     {
         var seeded = await SeedRosterAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         // A crafted request must not recreate standing Reviewer/Approver authority through the
         // role-keyed backup path that membership and delegation grants already refuse.
@@ -338,7 +330,7 @@ public sealed class WorkflowAuthorityCutoverApiTests : IClassFixture<SharedApiHo
         }
 
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         // The historical row stays exactly what it was, and says so: a persisted Reviewer demand is never
         // presented as a modern base role.

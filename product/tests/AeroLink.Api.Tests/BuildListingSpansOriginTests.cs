@@ -44,7 +44,7 @@ public sealed class BuildListingSpansOriginTests(SharedApiHost host) : IClassFix
         }
 
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         foreach (var (release, which) in new[] { (world.FirstRelease, "the build that raised it"), (world.NextRelease, "the build taking it") })
         {
@@ -63,7 +63,7 @@ public sealed class BuildListingSpansOriginTests(SharedApiHost host) : IClassFix
     {
         var world = await SeedAsync(host.Factory);
         using var client = host.CreateClient();
-        await LoginAsync(client, world.Author);
+        await MemberSession.SignInForReadsAsync(client, world.Author);
 
         using var mine = await client.GetAsync(
             $"/api/history/change-requests?projectId={world.ProjectId}&releaseId={world.FirstRelease}&page=1&pageSize=200");
@@ -78,13 +78,6 @@ public sealed class BuildListingSpansOriginTests(SharedApiHost host) : IClassFix
     }
 
     private sealed record World(Guid ProjectId, Guid FirstRelease, Guid NextRelease, Guid ChangeRequestId, string Author);
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        using var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
 
     private static async Task<World> SeedAsync(AeroLinkApiFactory factory)
     {

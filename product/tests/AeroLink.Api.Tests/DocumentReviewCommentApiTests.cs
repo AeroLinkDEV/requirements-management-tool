@@ -24,7 +24,7 @@ public sealed class DocumentReviewCommentApiTests(SharedApiHost host) : IClassFi
     {
         var fixture = await SeedAsync(host.Factory);
         using var reviewer = host.CreateClient();
-        await LoginAsync(reviewer, fixture.FirstReviewer);
+        await MemberSession.SignInAsync(reviewer, fixture.FirstReviewer);
 
         using var created = await reviewer.PostAsJsonAsync(
             $"/api/managed-documents/revisions/{fixture.RevisionId}/review-comments",
@@ -35,12 +35,12 @@ public sealed class DocumentReviewCommentApiTests(SharedApiHost host) : IClassFi
         Assert.Equal("DocumentRevision", comment.GetProperty("anchor").GetString());
 
         using var owner = host.CreateClient();
-        await LoginAsync(owner, fixture.Owner);
+        await MemberSession.SignInAsync(owner, fixture.Owner);
         Assert.Empty(await CommentsFor(owner, fixture.RevisionId));
 
         // The second reviewer has not decided either, so they see nothing of it.
         using var second = host.CreateClient();
-        await LoginAsync(second, fixture.SecondReviewer);
+        await MemberSession.SignInAsync(second, fixture.SecondReviewer);
         Assert.Empty(await CommentsFor(second, fixture.RevisionId));
 
         await ApproveAsync(host.Factory, fixture.RevisionId, fixture.FirstReviewer);
@@ -56,7 +56,7 @@ public sealed class DocumentReviewCommentApiTests(SharedApiHost host) : IClassFi
     {
         var fixture = await SeedAsync(host.Factory);
         using var owner = host.CreateClient();
-        await LoginAsync(owner, fixture.Owner);
+        await MemberSession.SignInAsync(owner, fixture.Owner);
 
         using var refused = await owner.PostAsJsonAsync(
             $"/api/managed-documents/revisions/{fixture.RevisionId}/review-comments",
@@ -69,7 +69,7 @@ public sealed class DocumentReviewCommentApiTests(SharedApiHost host) : IClassFi
     {
         var fixture = await SeedAsync(host.Factory);
         using var first = host.CreateClient();
-        await LoginAsync(first, fixture.FirstReviewer);
+        await MemberSession.SignInAsync(first, fixture.FirstReviewer);
 
         using var created = await first.PostAsJsonAsync(
             $"/api/managed-documents/revisions/{fixture.RevisionId}/review-comments",
@@ -80,7 +80,7 @@ public sealed class DocumentReviewCommentApiTests(SharedApiHost host) : IClassFi
         // The other reviewer is entitled to comment here, so this is not an access check failing early. It is
         // authorship: a draft belongs to the person who wrote it, and nobody else may restate or withdraw it.
         using var second = host.CreateClient();
-        await LoginAsync(second, fixture.SecondReviewer);
+        await MemberSession.SignInAsync(second, fixture.SecondReviewer);
         using var refusedEdit = await second.PutAsJsonAsync(
             $"/api/managed-documents/revisions/{fixture.RevisionId}/review-comments/{commentId}",
             new { body = "Not yours." });
@@ -159,12 +159,5 @@ public sealed class DocumentReviewCommentApiTests(SharedApiHost host) : IClassFi
         db.AddRange(document, revision);
         await db.SaveChangesAsync();
         return new Seeded(revision.Id, owner, first, second);
-    }
-
-    private static async Task LoginAsync(HttpClient client, string userName)
-    {
-        var login = await client.PostAsJsonAsync("/api/auth/login", new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
     }
 }

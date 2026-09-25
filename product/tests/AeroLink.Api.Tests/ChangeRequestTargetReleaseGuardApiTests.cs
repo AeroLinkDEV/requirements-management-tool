@@ -51,14 +51,6 @@ public sealed class ChangeRequestTargetReleaseGuardApiTests
         return (projectA.Id, projectB.Id, new Releases(eligible.Id, second.Id, released.Id, foreign.Id));
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static async Task<JsonElement> ErrorAsync(HttpResponseMessage response)
     {
         var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -81,7 +73,7 @@ public sealed class ChangeRequestTargetReleaseGuardApiTests
         var (projectA, _, releases) = await SeedAsync(factory);
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
 
         using var foreign = await client.PostAsJsonAsync("/api/change-requests",
             new { projectId = projectA, targetReleaseId = releases.Foreign, title = "T", problem = "P", analysis = "A", solution = "S", type = "System" });
@@ -113,7 +105,7 @@ public sealed class ChangeRequestTargetReleaseGuardApiTests
         var (projectA, _, releases) = await SeedAsync(factory);
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
 
         using var foreign = await client.PostAsJsonAsync("/api/change-request-drafts",
             new { projectId = projectA, targetReleaseId = releases.Foreign, title = "T", problem = "P", analysis = "A", solution = "S", type = "System", requirementChanges = Array.Empty<object>() });
@@ -133,7 +125,7 @@ public sealed class ChangeRequestTargetReleaseGuardApiTests
         var (projectA, _, releases) = await SeedAsync(factory);
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         using var created = await client.PostAsJsonAsync("/api/change-requests",
             new { projectId = projectA, targetReleaseId = releases.Eligible, title = "T", problem = "P", analysis = "A", solution = "S", type = "System" });
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
@@ -172,7 +164,7 @@ public sealed class ChangeRequestTargetReleaseGuardApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         using var foreign = await client.PostAsJsonAsync($"/api/enterprise-requirements/import/{jobId}/commit",
             new { targetReleaseId = releases.Foreign, title = "T", problem = "P", analysis = "A", solution = "S", type = "System" });
         using var nonexistent = await client.PostAsJsonAsync($"/api/enterprise-requirements/import/{jobId}/commit",
@@ -216,7 +208,7 @@ public sealed class ChangeRequestTargetReleaseGuardApiTests
             </REQ-IF>
             """;
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         Guid jobId;
         using (var preview = await client.PostAsync("/api/reqif/imports/preview?projectId=" + projectA,
             new MultipartFormDataContent
@@ -267,7 +259,7 @@ public sealed class ChangeRequestTargetReleaseGuardApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         // Program Administrator membership is the product's stewardship capability that may mint service identities.
         using var identity = await client.PostAsJsonAsync("/api/integrations/service-identities",
             new { projectId = projectA, name = "Guard pipeline", scopes = new[] { "requirements:read", "requirements:write" } });
@@ -330,7 +322,7 @@ public sealed class ChangeRequestTargetReleaseGuardApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         // Program Administrator membership is the product's stewardship capability that may mint service identities.
         using var identity = await client.PostAsJsonAsync("/api/integrations/service-identities",
             new { projectId = projectA, name = "Guard OSLC", scopes = new[] { "oslc:write" } });
@@ -393,7 +385,7 @@ public sealed class ChangeRequestTargetReleaseGuardApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         using var released = await client.PostAsJsonAsync($"/api/enterprise-requirements/{artifactId}/propose",
             new { targetReleaseId = releases.Released, kind = "Modify", statement = "S" });
         Assert.Equal(HttpStatusCode.BadRequest, released.StatusCode);

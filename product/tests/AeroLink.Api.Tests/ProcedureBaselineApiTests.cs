@@ -83,14 +83,6 @@ public sealed class ProcedureBaselineApiTests
         return new(project.Id, release.Id, baseline.Id, carrying.Id, noWork.Id);
     }
 
-    private static async Task LoginAsync(HttpClient client, string user)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName = user, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static async Task MaterializeRequirementsAsync(HttpClient client, Guid baselineId)
     {
         using var response = await client.PostAsJsonAsync($"/api/baselines/{baselineId}/materialize-requirements", new { });
@@ -128,7 +120,7 @@ public sealed class ProcedureBaselineApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
 
@@ -170,13 +162,14 @@ public sealed class ProcedureBaselineApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
 
         var listing = await client.GetFromJsonAsync<JsonElement>($"/api/baselines/{fixture.BaselineId}/test-change-requests");
         var available = listing.GetProperty("available").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).ToList();
         Assert.Contains(fixture.TcrId, available);
+        Assert.Equal(listing.GetProperty("procedureCount").GetInt32(), listing.GetProperty("artifactCount").GetInt32());
         // It has no procedures and no controlled number, so carrying it would imply test work that does not exist.
         Assert.DoesNotContain(fixture.NoWorkTcrId, available);
 
@@ -192,7 +185,7 @@ public sealed class ProcedureBaselineApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
 
         using var tooEarly = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
         Assert.Equal(HttpStatusCode.BadRequest, tooEarly.StatusCode);
@@ -205,7 +198,7 @@ public sealed class ProcedureBaselineApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.reader");
+        await MemberSession.SignInAsync(client, "baseline.reader");
 
         using var refused = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/test-change-requests",
             new { testChangeRequestId = fixture.TcrId });
@@ -221,7 +214,7 @@ public sealed class ProcedureBaselineApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
 
@@ -299,7 +292,7 @@ public sealed class ProcedureBaselineApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
         await ReleaseAsync(factory, fixture.BaselineId);
@@ -322,7 +315,7 @@ public sealed class ProcedureBaselineApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
 
@@ -349,7 +342,7 @@ public sealed class ProcedureBaselineApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
 
@@ -377,7 +370,7 @@ public sealed class ProcedureBaselineApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
         await ReleaseAsync(factory, fixture.BaselineId);
@@ -398,7 +391,7 @@ public sealed class ProcedureBaselineApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
 
@@ -480,7 +473,7 @@ public sealed class ProcedureBaselineApiTests
         using var factory = new AeroLinkApiFactory();
         using var client = factory.CreateClient();
         var fixture = await SeedAsync(factory);
-        await LoginAsync(client, "baseline.cm");
+        await MemberSession.SignInAsync(client, "baseline.cm");
         await MaterializeRequirementsAsync(client, fixture.BaselineId);
         await PrepareCarryingPackageAsync(factory, fixture);
         await ReleaseAsync(factory, fixture.BaselineId);

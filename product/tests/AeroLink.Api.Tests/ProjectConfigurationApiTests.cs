@@ -47,20 +47,12 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         return new(project.Id, release.Id, managerName, memberName);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        var response = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     [Fact]
     public async Task Authorized_edit_records_reason_history_and_rejects_stale_or_lifecycle_mutations()
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var read = await client.GetAsync($"/api/projects/{seeded.ProjectId}/configuration");
         Assert.Equal(HttpStatusCode.OK, read.StatusCode);
@@ -119,7 +111,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         using (var edit = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
         {
@@ -218,7 +210,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var response = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
         {
@@ -373,7 +365,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var edit = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
         {
@@ -448,7 +440,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         var edit = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
         {
@@ -483,7 +475,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.ManagerName);
+        await MemberSession.SignInAsync(client, seeded.ManagerName);
 
         using var edit = await client.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
         {
@@ -517,7 +509,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, seeded.MemberName);
+        await MemberSession.SignInAsync(client, seeded.MemberName);
         var read = await client.GetAsync($"/api/projects/{seeded.ProjectId}/configuration");
         Assert.Equal(HttpStatusCode.OK, read.StatusCode);
         using var readJson = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
@@ -532,7 +524,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         var caller = await SeedAsync(_host.Factory);
         var otherProject = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, caller.ManagerName);
+        await MemberSession.SignInAsync(client, caller.ManagerName);
 
         using var response = await client.GetAsync($"/api/projects/{otherProject.ProjectId}/configuration");
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
@@ -559,8 +551,8 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
         var concurrentSeed = await SeedAsync(_host.Factory);
         using var concurrentFirst = _host.CreateClient();
         using var concurrentSecond = _host.CreateClient();
-        await SignInAsync(concurrentFirst, concurrentSeed.ManagerName);
-        await SignInAsync(concurrentSecond, concurrentSeed.ManagerName);
+        await MemberSession.SignInAsync(concurrentFirst, concurrentSeed.ManagerName);
+        await MemberSession.SignInAsync(concurrentSecond, concurrentSeed.ManagerName);
         var firstTask = concurrentFirst.PutAsJsonAsync($"/api/projects/{concurrentSeed.ProjectId}/configuration", firstPayload);
         var secondTask = concurrentSecond.PutAsJsonAsync($"/api/projects/{concurrentSeed.ProjectId}/configuration", secondPayload);
         // The request tasks are created before either is awaited, so the two independent writers race at the
@@ -603,7 +595,7 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
     {
         var seeded = await SeedAsync(_host.Factory);
         using var editor = _host.CreateClient();
-        await SignInAsync(editor, seeded.ManagerName);
+        await MemberSession.SignInAsync(editor, seeded.ManagerName);
 
         var edit = await editor.PutAsJsonAsync($"/api/projects/{seeded.ProjectId}/configuration", new
         {
@@ -620,8 +612,8 @@ public sealed class ProjectConfigurationApiTests : IClassFixture<SharedApiHost>
 
         using var first = _host.CreateClient();
         using var second = _host.CreateClient();
-        await SignInAsync(first, seeded.ManagerName);
-        await SignInAsync(second, seeded.ManagerName);
+        await MemberSession.SignInAsync(first, seeded.ManagerName);
+        await MemberSession.SignInAsync(second, seeded.ManagerName);
         using var gate = new SaveRaceGate(_host.Factory.ConnectionString);
         try
         {

@@ -310,13 +310,6 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
         return new(tcr.Id, memberName);
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-    }
-
     private static async Task<JsonElement> ContentAsync(HttpClient client, Guid reviewId)
     {
         using var response = await client.GetAsync($"/api/test-change-reviews/{reviewId}/proposal-content");
@@ -333,7 +326,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var body = await ContentAsync(client, fixture.SystemTcrId);
 
@@ -358,7 +351,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var introduce = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.IntroduceId);
 
@@ -371,7 +364,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var modify = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.ModifyId);
 
@@ -389,7 +382,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var retire = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.RetireId);
 
@@ -417,7 +410,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var modify = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.ModifyId);
 
@@ -444,7 +437,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var modify = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.ModifyId);
         var removed = Assert.Single(modify.GetProperty("removedCoverage").EnumerateArray().ToList());
@@ -462,7 +455,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var modify = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.ModifyId);
 
@@ -484,7 +477,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var introduce = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.IntroduceId);
 
@@ -519,7 +512,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var body = await ContentAsync(client, fixture.CaseTcrId);
 
@@ -533,7 +526,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var item = Item(await ContentAsync(client, fixture.ProcedureTcrId), fixture.ProcedureIntroduceId);
 
@@ -559,7 +552,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         // The rest of the proposal still reads: one unreadable list must not fail the whole Digital Thread.
         var body = await ContentAsync(client, fixture.SystemTcrId);
@@ -580,7 +573,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var item = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.MalformedCoverageItemId);
 
@@ -596,7 +589,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var item = Item(await ContentAsync(client, fixture.SystemTcrId), fixture.ForeignItemId);
 
@@ -628,7 +621,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         var executions = (await ContentAsync(client, fixture.SystemTcrId))
             .GetProperty("executions").EnumerateArray().ToList();
@@ -645,7 +638,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         // Same rule as the requirement side: a candidate existing for the release is not this package being
         // selected into it.
@@ -657,7 +650,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var world = await SeedSelectedPackageAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, world.Member);
+        await MemberSession.SignInForReadsAsync(client, world.Member);
 
         var effect = (await ContentAsync(client, world.SelectedTcrId))
             .GetProperty("buildEffect").EnumerateArray().ToList();
@@ -678,7 +671,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Outsider);
+        await MemberSession.SignInForReadsAsync(client, fixture.Outsider);
 
         using var response = await client.GetAsync(
             $"/api/test-change-reviews/{fixture.SystemTcrId}/proposal-content");
@@ -691,7 +684,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         using var response = await client.GetAsync(
             $"/api/test-change-reviews/{Guid.NewGuid()}/proposal-content");
@@ -704,7 +697,7 @@ public sealed class TestProposalContentApiTests : IClassFixture<SharedApiHost>
     {
         var fixture = await SeedAsync(_host.Factory);
         using var client = _host.CreateClient();
-        await SignInAsync(client, fixture.Member);
+        await MemberSession.SignInForReadsAsync(client, fixture.Member);
 
         // The resource says which aggregate it reads. Falling back to SystemChangeRequests would make the path
         // ambiguous about what it returned, and would be a route to content through the wrong authorization.

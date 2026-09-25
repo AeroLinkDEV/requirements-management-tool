@@ -106,14 +106,6 @@ public sealed class ControlledAttachmentMutationApiTests
         return baselineId;
     }
 
-    private static async Task SignInAsync(HttpClient client, string userName)
-    {
-        using var login = await client.PostAsJsonAsync("/api/auth/login",
-            new { userName, password = AeroLinkApiFactory.MemberPassword });
-        Assert.Equal(HttpStatusCode.OK, login.StatusCode);
-        await SecurityBoundaryTests.AuthorizeMutationsAsync(client);
-    }
-
     private static MultipartFormDataContent UploadForm(Guid projectId, string artifactType, Guid artifactId,
         string? revisionId = null, Guid? logicalId = null)
     {
@@ -161,7 +153,7 @@ public sealed class ControlledAttachmentMutationApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Reader);
+        await MemberSession.SignInAsync(client, Reader);
         using var denied = await UploadAsync(client, projectId, "Requirement", artifactId, revisionId.ToString());
 
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
@@ -195,7 +187,7 @@ public sealed class ControlledAttachmentMutationApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         using var created = await UploadAsync(client, projectId, "Requirement", artifactId, revisionId.ToString());
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var stored = await created.Content.ReadFromJsonAsync<JsonElement>();
@@ -241,7 +233,7 @@ public sealed class ControlledAttachmentMutationApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         using var rejected = await UploadAsync(client, projectId, "Requirement", artifactId);
 
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
@@ -266,7 +258,7 @@ public sealed class ControlledAttachmentMutationApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         using var rejected = await UploadAsync(client, projectId, "Requirement", firstArtifact, secondRevisionId.ToString());
 
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
@@ -289,7 +281,7 @@ public sealed class ControlledAttachmentMutationApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         using var rejected = await UploadAsync(client, projectId, "Requirement", artifactId, staleRevisionId.ToString());
 
         Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
@@ -327,7 +319,7 @@ public sealed class ControlledAttachmentMutationApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
 
         // Frozen truth is still in work: evidence may be attached to the exact revision.
         using var frozen = await UploadAsync(client, projectId, "Requirement", artifactId, revisionId.ToString());
@@ -381,7 +373,7 @@ public sealed class ControlledAttachmentMutationApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         var chainId = Guid.Empty;
         using (var scope = factory.Services.CreateScope())
         {
@@ -426,7 +418,7 @@ public sealed class ControlledAttachmentMutationApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         using var bound = await UploadAsync(client, projectId, "Requirement", artifactId, revisionId.ToString(), logicalId);
         Assert.Equal(HttpStatusCode.Created, bound.StatusCode);
 
@@ -462,7 +454,7 @@ public sealed class ControlledAttachmentMutationApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         using var refused = await UploadAsync(client, projectId, "Requirement", secondArtifact, secondRevisionId.ToString(), foreignChain);
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
     }
@@ -488,12 +480,12 @@ public sealed class ControlledAttachmentMutationApiTests
         }
 
         using var author = factory.CreateClient();
-        await SignInAsync(author, Engineer);
+        await MemberSession.SignInAsync(author, Engineer);
         using var allowed = await UploadAsync(author, projectId, "ChangeRequest", changeRequestId);
         Assert.Equal(HttpStatusCode.Created, allowed.StatusCode);
 
         using var outsider = factory.CreateClient();
-        await SignInAsync(outsider, Reader);
+        await MemberSession.SignInAsync(outsider, Reader);
         using var denied = await UploadAsync(outsider, projectId, "ChangeRequest", changeRequestId);
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
     }
@@ -514,7 +506,7 @@ public sealed class ControlledAttachmentMutationApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         using var rejected = await UploadAsync(client, projectId, "Widget", artifactId);
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
         Assert.Equal("unsupported_artifact_type", (await ErrorAsync(rejected)).GetString());
@@ -540,7 +532,7 @@ public sealed class ControlledAttachmentMutationApiTests
         }
 
         using var client = factory.CreateClient();
-        await SignInAsync(client, Engineer);
+        await MemberSession.SignInAsync(client, Engineer);
         using var refused = await client.PostAsJsonAsync("/api/reqif/exports", new { projectId, releaseId });
         Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
         Assert.Equal("attachment_revision_binding_required", (await ErrorAsync(refused)).GetString());
