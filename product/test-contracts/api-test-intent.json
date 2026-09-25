@@ -1,17 +1,17 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 997,
-    "cases": 1142,
-    "classes": 156,
-    "hostedTests": 942,
-    "hostedCases": 1065,
+    "tests": 999,
+    "cases": 1144,
+    "classes": 158,
+    "hostedTests": 944,
+    "hostedCases": 1067,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
     "unknownHostTests": 23,
     "unknownHostCases": 31,
-    "hostedCandidateTests": 18,
-    "hostedCandidateCases": 18,
+    "hostedCandidateTests": 19,
+    "hostedCandidateCases": 19,
     "unknownCandidateTests": 11,
     "unknownCandidateCases": 19,
     "unknownCaseTests": 0,
@@ -37,18 +37,18 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 113,
-      "cases": 131,
+      "tests": 114,
+      "cases": 132,
       "unknownCases": 0,
-      "classes": 66
+      "classes": 67
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 43,
-      "cases": 43,
+      "tests": 44,
+      "cases": 44,
       "unknownCases": 0,
-      "classes": 18
+      "classes": 19
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -10601,6 +10601,24 @@
       }
     },
     {
+      "cls": "ProjectFeatureApiTests",
+      "test": "Features_default_on_follow_dependencies_switch_off_only_while_empty_and_gate_new_records",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 16,
+        "end": 113
+      }
+    },
+    {
       "cls": "ProjectLeadershipApiTests",
       "test": "A_replacement_is_atomic_and_the_previous_holder_loses_the_authority",
       "kind": "Fact",
@@ -15606,6 +15624,22 @@
       "sourceLines": {
         "start": 224,
         "end": 263
+      }
+    },
+    {
+      "cls": "TestHostKeyRingTests",
+      "test": "Two_test_hosts_do_not_share_a_data_protection_key_ring",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 13,
+        "end": 26
       }
     },
     {

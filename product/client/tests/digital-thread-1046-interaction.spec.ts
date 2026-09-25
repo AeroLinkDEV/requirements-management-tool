@@ -184,6 +184,31 @@ test('external arrival and browser back forward preserve readable exact selectio
 })
 
 
+// #1136: the drawing frame starts below the toolbar, so its top can move while the viewport keeps its size. On
+// Windows CI an arrival was framed while the frame top sat 12 px lower than it settled, leaving the selected card clipped
+// under the bottom panel. Growing the toolbar after arrival moves the frame top the same way, deterministically.
+test('a toolbar that settles after arrival reframes the selection; a reader-owned camera stays put', async ({ page }, info) => {
+  await open(page, '/tests/fixtures/digital-thread-1046.html?page=1&focal=sys-31')
+  await selectedFits(page)
+  const grow = (px: number) => page.addStyleTag({ content: `.dtCanvasControls{padding-bottom:${4 + px}px !important}` })
+  await grow(60)
+  await waitForCanvasSettled(page)
+  await selectedFits(page)
+  const framed = (await paint(page)).display
+  const c = (await page.locator('.dtCanvas').boundingBox())!
+  await page.mouse.move(c.x + 6, c.y + c.height - 50)
+  await page.mouse.down()
+  await page.mouse.move(c.x + 6, c.y + c.height - 110, { steps: 8 })
+  await page.mouse.up()
+  await waitForCanvasSettled(page)
+  const owned = (await paint(page)).display
+  expect(owned).not.toEqual(framed)
+  await grow(20)
+  await waitForCanvasSettled(page)
+  expect((await paint(page)).display).toEqual(owned)
+  await evidence(page, info)
+})
+
 test('a fixture card parks beneath an unmoved pointer beyond dwell without creating hover', async ({ page }, info) => {
   await open(page, '/tests/fixtures/digital-thread-contract.html?case=parking')
   const source = (await page.locator('[data-node-id="subj"]').boundingBox())!

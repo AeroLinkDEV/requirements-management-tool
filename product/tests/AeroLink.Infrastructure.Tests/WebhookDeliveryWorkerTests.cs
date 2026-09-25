@@ -345,7 +345,7 @@ public sealed class WebhookDeliveryWorkerTests
                 options.UseSqlite($"Data Source={path};Pooling=False");
                 if (interceptor is not null) options.AddInterceptors(interceptor);
             });
-            services.AddDataProtection();
+            services.AddDataProtection().UseEphemeralDataProtectionProvider();
             services.AddScoped<IntegrationSecurityService>();
             services.AddSingleton<IWebhookDnsResolver>(resolver ?? new NoNetworkResolver());
             services.AddSingleton<WebhookDestinationPolicy>();

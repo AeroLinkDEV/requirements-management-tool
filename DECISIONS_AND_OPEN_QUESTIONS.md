@@ -2607,6 +2607,14 @@ choices are created as focused issues only when their trigger and acceptance bou
   - separately reviewed, qualified transitions for kernel changes. This delegation cannot let a kernel authorize itself.
 - **Supersedes:** Nothing. DEC-124 remains authoritative for Codex, and this decision adds Claude as a second delegate on the same terms. It changes operator authorization only, not workflow code, GitHub reviewer identity or environment policy.
 
+### DEC-136 - A Project Chooses Which Major Features It Uses
+
+- **Date:** 2026-09-24
+- **Status:** Accepted owner policy in [issue #1113](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1113), with the owner's twelve answers recorded there.
+- **Decision:** Each project has a feature set over Team Work, Requirements, Verification, Code, Documentation Center, Problem Reports and Release. Command Center and My Work are always present and show what the enabled features contribute. A project with no stored feature set has every feature, so earlier projects keep their behavior.
+- **Rules:** Code and Verification need Requirements (until standalone verification is delivered). A feature can be switched off only while it holds no records; switching one on is always allowed. Configuration Manager, Program Manager or Administrator changes the set with a reason; every change is versioned, attributed and hashed. The save boundary refuses new records for a feature that is off, whatever the entry point, so the server — not the browser — keeps a disabled feature empty. Navigation, quick navigation, deep links and Command Center read the same set.
+- **Consequences:** Switching off never deletes, hides or rewrites controlled history, because a feature holding records cannot be switched off. The Digital Thread follows Requirements or Verification rather than Release. Later #1113 slices add a Problem Reports-only path (empty ladder, attested closure without Verification), release without readiness evidence for projects with Release off, and standalone verification.
+
 ### DEC-140 - Agents Own Non-Functional Decisions; the Owner Owns Functional Ones
 
 - **Date:** 2026-09-25

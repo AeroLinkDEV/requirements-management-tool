@@ -30,7 +30,7 @@ Keep a test hosted when the public boundary is part of what it proves: route/met
 
 EF/provider checks also remain integration-level when the test is specifically proving concurrency or persisted authority across independent contexts. A direct service call is not equivalent evidence for an authenticated HTTP request, and an in-memory substitute is not evidence for relational behavior.
 
-Sign a seeded member in with `MemberSession` (`AeroLink.Api.Tests/TestSupport`). Use `SignInAsync` to also attach the CSRF token for mutations, or `SignInForReadsAsync` without it. Do not add another private copy.
+Sign a seeded member in with `MemberSession` (`AeroLink.Api.Tests/TestSupport`). `SignInAsync` also attaches the CSRF token a browser sends with mutations; `SignInForReadsAsync` does not. The API demands that token only from requests carrying a browser `Origin` or `Sec-Fetch-Site` header, so a test proving CSRF refusal must send one. Do not add another private copy.
 
 For a mutating endpoint family, retain enough hosted coverage to prove the public operation exists, authentication and one unauthorized path are enforced, a valid request persists the expected state, a representative domain error maps to its stable contract, and stale/concurrent intent is rejected where relevant. The route/contract manifest is the automated floor; it is not a quota for test count.
 

@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 156,
-    "tests": 997,
-    "knownCases": 1142,
+    "classes": 158,
+    "tests": 999,
+    "knownCases": 1144,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -20,15 +20,15 @@
       "unknownCaseTests": 0
     },
     "migration-candidate": {
-      "classes": 4,
-      "tests": 9,
-      "knownCases": 14,
+      "classes": 5,
+      "tests": 10,
+      "knownCases": 15,
       "unknownCaseTests": 0
     },
     "reusable-host": {
-      "classes": 57,
-      "tests": 350,
-      "knownCases": 396,
+      "classes": 58,
+      "tests": 351,
+      "knownCases": 397,
       "unknownCaseTests": 0
     }
   },
@@ -1225,6 +1225,17 @@
       ]
     },
     {
+      "cls": "TestHostKeyRingTests",
+      "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
+      "classification": "migration-candidate",
+      "reason": "Every test is in-process logic or a rule matrix; it needs a database or nothing, not a host.",
+      "intents": [
+        "in-process-logic"
+      ]
+    },
+    {
       "cls": "ManualTestChangeRequestApiTests",
       "tests": 40,
       "knownCases": 42,
@@ -1856,6 +1867,17 @@
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "ef-translation"
+      ]
+    },
+    {
+      "cls": "ProjectFeatureApiTests",
+      "tests": 1,
+      "knownCases": 1,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "auth-policy"
       ]
     },
     {

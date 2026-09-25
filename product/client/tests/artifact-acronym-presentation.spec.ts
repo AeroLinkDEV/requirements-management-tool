@@ -1,5 +1,5 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { artifactAcronym, artifactTypeLabel, configuredProcedureTargetsFor, documentTypeLabel, isVerificationProcedureKind, procedureTargetsFor, targetsFor, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactDocumentApiRoot, verificationArtifactLevel, verificationArtifactNoun, verificationArtifactRouteKey, verificationArtifactWord } from '../src/presentation'
+import { artifactAcronym, artifactTypeLabel, configuredProcedureTargetsFor, documentTypeLabel, isVerificationProcedureKind, procedureTargetsFor, targetsFor, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactDocumentApiRoot, verificationArtifactLevel, verificationArtifactNoun, verificationArtifactRouteKey, verificationArtifactTargetSegment, verificationArtifactWord } from '../src/presentation'
 
 test('numbered artifacts keep their canonical uppercase acronym in presentation', () => {
   const examples = [
@@ -85,4 +85,8 @@ test('software verification artifacts are Cases and System stays on Procedures (
   expect(verificationArtifactApiRoot('System')).toBe('/api/test-procedures')
   expect(verificationArtifactDocumentApiRoot('Software')).toBe('test-case-documents')
   expect(verificationArtifactDocumentApiRoot('System')).toBe('test-procedure-documents')
+  // The Modify/Retire picker of a software Case package reads its targets from the Case route.
+  expect(verificationArtifactTargetSegment('Software', 'Case')).toBe('case-targets')
+  expect(verificationArtifactTargetSegment('Software', 'HighLevelProcedure')).toBe('procedure-targets')
+  expect(verificationArtifactTargetSegment('System')).toBe('procedure-targets')
 })

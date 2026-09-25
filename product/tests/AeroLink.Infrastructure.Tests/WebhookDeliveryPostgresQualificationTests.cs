@@ -166,7 +166,7 @@ public sealed class WebhookDeliveryPostgresQualificationTests
     {
         var services = new ServiceCollection();
         services.AddDbContext<AeroLinkDbContext>(options => options.UseNpgsql(connection).AddInterceptors(claimBarrier));
-        services.AddDataProtection();
+        services.AddDataProtection().UseEphemeralDataProtectionProvider();
         services.AddScoped<IntegrationSecurityService>();
         services.AddSingleton<IWebhookDnsResolver, LoopbackResolver>();
         services.AddSingleton<WebhookDestinationPolicy>();

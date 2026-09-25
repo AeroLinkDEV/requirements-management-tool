@@ -117,6 +117,9 @@ Use the repository's test-planning contract instead of guessing what to run.
 - Do not force-merge or bypass required checks.
 - Record exact validation commands/results in the PR when the change is material.
 - For visual changes, add focused browser proof and screenshots where they materially improve review.
+- An implementation task is done when its PR is merged to `main`, with the planner-selected tests and generators
+  passing, the validation recorded in the PR body, and out-of-scope findings filed as issues, or when the PR is
+  closed or handed off with a recorded reason.
 
 ## Windows launchers and operator compatibility
 
@@ -155,6 +158,16 @@ retain historical reports in the archive.
 
 Update `PROJECT_STATE.md` in the same PR when a change materially alters product architecture, supported lifecycle, important user-visible authority, or a major product boundary. Do not update it for every small bug fix.
 
+## Reporting
+
+End every long run (one that changes files, pushes, or spans more than one issue) with exactly three headings:
+
+- **Blocked on me**: decisions or actions only the owner can take, each with the link or exact command needed; write
+  "Nothing" if empty.
+- **Changed**: branches, commits, PRs, issues, and files changed, with the validation run and its result at the
+  recorded SHA.
+- **Found**: defects, risks, or surprises discovered, each with its filed issue link or the reason it was not filed.
+
 ## Things agents must never do for convenience
 
 - Reset the persistent AeroLink database or evidence store to make qualification easier.
@@ -165,6 +178,7 @@ Update `PROJECT_STATE.md` in the same PR when a change materially alters product
 - Weaken tests, branch protection, or required checks merely to get a PR merged.
 - Treat a historical handoff as the live backlog without refreshing GitHub.
 - Move stable Windows launcher paths without an external-dependency audit.
+- Leave a PR disarmed after force-pushing its branch. A force-push removes the PR from auto-merge; re-arm it.
 - Copy a large Case/Procedure or discipline-specific UI when the existing architecture is intended to be parameterized/shared.
 
 When in doubt, preserve controlled truth first, then optimize convenience.

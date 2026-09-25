@@ -10,6 +10,7 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -220,6 +221,10 @@ internal sealed class AeroLinkApiFactory(bool seedDemoAccounts = false, bool all
             // opt back into the one worker they exercise. Keep all other production workers out of API tests.
             services.RemoveAll<IHostedService>();
             if (enableEnterpriseJobWorker) services.AddHostedService<EnterpriseJobWorker>();
+            // Each host keeps its key ring in memory. By default every host in this process shares the runner user's
+            // DataProtection-Keys folder, and parallel classes on a fresh runner raced to create its first key: one
+            // host read the file while another was still writing it, and the CSRF read failed with a 500 (#1130).
+            services.AddDataProtection().UseEphemeralDataProtectionProvider();
             if (storageFaultInjector is not null)
             {
                 services.RemoveAll<IManagedDocumentStorageFaultInjector>();
