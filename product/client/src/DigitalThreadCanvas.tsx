@@ -1432,12 +1432,20 @@ export default function DigitalThreadCanvas({
     const measure = () => {
       const rect = element.getBoundingClientRect()
       if (rect.width < 100) return
-      const signature = `${Math.round(rect.width)}x${Math.round(rect.height)}x${countsKey}`
+      // The drawing frame starts below the toolbar, so its top can move while the viewport keeps its size: a
+      // toolbar that settles after arrival (#1136) left the camera and lanes measured against a stale frame and
+      // the selected card clipped under the bottom panel.
+      const signature = `${Math.round(rect.width)}x${Math.round(rect.height)}x${frame()?.y ?? "-"}x${countsKey}`
       if (signature !== frameSignature.current) {
         frameSignature.current = signature
         // A passive size or count change must not re-land a board the reader has taken control of: a tray
         // closing, a font settling or a re-measure is not a reason to move their camera.
-        if (!cameraOwned.current) land()
+        if (!cameraOwned.current) {
+          land()
+          // Landing discards the selection's framing, so the board still owning its camera frames it again
+          // against the new frame below. A reader-owned camera is left exactly where the reader put it.
+          framedFor.current = null
+        }
       }
 
       // A selection can arrive while the host frame is still unsettled — a freshly mounted panel or a preview
@@ -1454,15 +1462,18 @@ export default function DigitalThreadCanvas({
     }
     measure()
     const timers = [window.setTimeout(measure, 50), window.setTimeout(measure, 350)]
+    // The toolbar bounds the top of the frame; a change in its height is a frame change, not a card repaint.
+    const controls = element.querySelector<HTMLElement>(".dtCanvasControls")
     const observer = typeof ResizeObserver === "function"
       ? new ResizeObserver(entries => {
         // The viewport observer keeps the existing frame and dock behavior. Cards need a deferred paint of
         // their own: web-font substitution can change a selected card's border box without changing the frame.
-        if (entries.some(entry => entry.target !== element)) schedulePaint()
-        if (entries.some(entry => entry.target === element)) measure()
+        if (entries.some(entry => entry.target !== element && entry.target !== controls)) schedulePaint()
+        if (entries.some(entry => entry.target === element || entry.target === controls)) measure()
       })
       : null
     observer?.observe(element)
+    if (controls) observer?.observe(controls, { box: "border-box" })
     cardRefs.current.forEach(card => observer?.observe(card))
     const fonts = document.fonts
     let disposed = false
@@ -1485,7 +1496,7 @@ export default function DigitalThreadCanvas({
       fonts?.removeEventListener("loadingerror", onFontEvent)
       window.removeEventListener("resize", measure)
     }
-  }, [applyFraming, cardIdsKey, countsKey, land, schedulePaint])
+  }, [applyFraming, cardIdsKey, countsKey, frame, land, schedulePaint])
 
   useEffect(() => {
     paint()
