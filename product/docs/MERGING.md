@@ -97,6 +97,24 @@ unfixable afterwards on a protected branch.
 
 Title the pull request as you want it to read in `main`'s history forever. The branch is deleted on merge.
 
+## Who acts: agents, not the owner
+
+Under [DEC-140](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-140---agents-own-non-functional-decisions-the-owner-owns-functional-ones),
+merging is non-functional work that the agents own. The agent that owns a PR takes it to merged without asking
+the owner:
+
+- requesting readiness, arming and re-arming auto-merge, and re-queueing;
+- fixing failures;
+- submitting routine maintenance approvals under DEC-124 and DEC-135.
+
+The owner is asked only for a functional product decision.
+
+One exception remains until [DEC-141](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-141---approval-machinery-changes-are-approved-by-the-non-authoring-agent)
+is installed ([#1145](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1145)). A change to the
+approval machinery itself still needs the owner's manual ruleset bypass, merge and restore, because nothing else
+can merge it. DEC-141's own installation is the last such change. After it, the agent that did not author an
+approval-machinery change approves it.
+
 ## Merge-queue trust boundary
 
 The repository moved to the `AeroLinkDEV` organization, and issue
@@ -133,7 +151,7 @@ green check cannot replace the current composed candidate. Truncated responses a
 collection fail closed. The command does not execute candidate code, read candidate artifacts, approve an
 environment, retrieve the App key or alter repository settings. Existing output files cannot be overwritten.
 
-## Owner-reviewed maintenance binding
+## Maintenance binding
 
 The binding workflow contains an opt-in maintenance path governed by
 [DEC-121](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-121---protected-ci-maintenance-requires-exact-owner-approval-and-a-qualified-initial-installation).
@@ -183,14 +201,16 @@ under the standing delegation after renewed qualification. The existing queue ti
 continues to apply; approval does not extend it.
 
 Any change to the runtime maintenance/merge-authority modules or the protected binding/readiness workflows is
-outside this routine path. Use a separately reviewed trust-root transition; never remove a required check or
-publish a fabricated success to make a refused maintenance PR merge. Rollback also requires reviewed exact
+outside this routine path. Until DEC-141 is installed (#1145), such a change needs a separately reviewed trust-root
+transition, which is the owner's manual bypass, merge and restore. After installation, the non-authoring agent
+approves it under DEC-141. Never remove a required check or publish a fabricated success to make a refused
+maintenance PR merge. Rollback also requires reviewed exact
 revert evidence; an earlier candidate's GitHub approval cannot be reused for a later revert. Standing delegation
 does not waive technical refusals, required checks or the separately reviewed transition for kernel changes.
 
 ## Permanent maintenance evidence reader (#982 preparation)
 
-Routine owner-reviewed maintenance uses a separate repository-scoped evidence App. Its installation is selected
+Routine maintenance uses a separate repository-scoped evidence App. Its installation is selected
 to this repository only and its GitHub permission is **Administration: write** with the implicit Metadata read
 permission; it receives no Checks or Contents permission. GitHub requires that Administration capability for a
 ruleset read that includes the authoritative `bypass_actors` field. The capability is therefore physically
@@ -214,7 +234,7 @@ Authority token. The owner-review job has no token permissions or secret access.
 The binding workflow first uses protected-main code to establish an exact completed queue candidate: the
 ordinary verifier must refuse only the opted-in protected-surface change, the PR must carry the maintenance
 request label, and no kernel path may change. Only that trusted step output can mint the evidence token. Ordinary
-polling and ordinary merge-group candidates never mint it. After the owner review wait, the publisher repeats the
+polling and ordinary merge-group candidates never mint it. After the approval wait, the publisher repeats the
 same current-candidate detector before minting a fresh evidence token. Missing configuration, unverified installation
 identity/scope, an omitted or nonempty ruleset bypass list, or any changed native evidence remains a refusal.
 The privileged response stays in process and is never written to a step summary, output, artifact, or check
