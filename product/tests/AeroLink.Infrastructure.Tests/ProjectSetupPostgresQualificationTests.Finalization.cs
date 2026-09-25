@@ -121,19 +121,11 @@ public sealed partial class ProjectSetupPostgresQualificationTests
 
     private static async Task WithSetupDatabaseAsync(Func<string, Task> test)
     {
-        var raw = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
-        if (string.IsNullOrWhiteSpace(raw)) throw new InvalidOperationException("Required PostgreSQL connection is missing.");
-        var server = ValidateServer(raw);
-        var name = $"aerolink_1037_finalize_{Guid.NewGuid():N}";
-        await CreateDatabaseAsync(server, name);
-        try
-        {
-            var connection = new Npgsql.NpgsqlConnectionStringBuilder(server) { Database = name }.ConnectionString;
-            await using (var migrate = new AeroLinkDbContext(new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options))
-                await migrate.Database.MigrateAsync();
-            await test(connection);
-        }
-        finally { await DropDatabaseAsync(server, name); }
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync("aerolink_1037_finalize");
+        var connection = qualification.ConnectionString;
+        await using (var migrate = new AeroLinkDbContext(new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options))
+            await migrate.Database.MigrateAsync();
+        await test(connection);
     }
 
     private sealed class DraftReadBarrier : DbCommandInterceptor

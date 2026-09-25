@@ -36,9 +36,7 @@ public sealed class ChangeRequestRepositoryLoadBenchmarkTests(ITestOutputHelper 
     [Cq09PostgresBenchmarkFact]
     public async Task PostgreSql_reports_load_costs_and_query_plans()
     {
-        var server = DisposablePostgresDatabase.ValidateServer(
-            Environment.GetEnvironmentVariable(DisposablePostgresFactAttribute.ConnectionVariable));
-        await using var scenario = await LoadScenario.CreatePostgresAsync(server);
+        await using var scenario = await LoadScenario.CreatePostgresAsync();
         await MeasureAsync(scenario, "postgres-baseline-single-full", LegacyFullAsync, includePlans: true);
         await MeasureAsync(scenario, "postgres-after-complete-split", CompleteAsync, includePlans: true);
         await MeasureAsync(scenario, "postgres-after-detail", DetailAsync, includePlans: true);
@@ -50,9 +48,7 @@ public sealed class ChangeRequestRepositoryLoadBenchmarkTests(ITestOutputHelper 
     [Trait("Category", "PostgresQualification")]
     public async Task PostgreSql_reuses_only_snapshot_transactions_for_split_loads()
     {
-        var server = DisposablePostgresDatabase.ValidateServer(
-            Environment.GetEnvironmentVariable(DisposablePostgresFactAttribute.ConnectionVariable));
-        await using var scenario = await LoadScenario.CreatePostgresAsync(server);
+        await using var scenario = await LoadScenario.CreatePostgresAsync();
 
         var readCommittedMeasurement = new QueryReadMeasurement { Enabled = true };
         await using (var readCommitted = scenario.Open(readCommittedMeasurement))
@@ -179,18 +175,15 @@ public sealed class ChangeRequestRepositoryLoadBenchmarkTests(ITestOutputHelper 
     {
         private readonly SqliteConnection? _sqlite;
         private readonly bool _isSqlite;
-        private readonly string? _database;
-        private readonly string? _serverConnection;
+        private readonly DisposablePostgresDatabase? _database;
 
         private LoadScenario(DbContextOptions<AeroLinkDbContext> options, Guid requestId,
-            SqliteConnection? sqlite, string? connectionString, string? serverConnection, string? database,
-            bool isSqlite)
+            SqliteConnection? sqlite, DisposablePostgresDatabase? database, bool isSqlite)
         {
             Options = options;
             RequestId = requestId;
             _sqlite = sqlite;
-            ConnectionString = connectionString;
-            _serverConnection = serverConnection;
+            ConnectionString = database?.ConnectionString;
             _database = database;
             _isSqlite = isSqlite;
         }
@@ -218,33 +211,23 @@ public sealed class ChangeRequestRepositoryLoadBenchmarkTests(ITestOutputHelper 
             await using var db = new AeroLinkDbContext(options);
             await db.Database.EnsureCreatedAsync();
             var id = await SeedAsync(db);
-            return new LoadScenario(options, id, sqlite, null, null, null, isSqlite: true);
+            return new LoadScenario(options, id, sqlite, null, isSqlite: true);
         }
 
-        public static async Task<LoadScenario> CreatePostgresAsync(string serverConnection)
+        public static async Task<LoadScenario> CreatePostgresAsync()
         {
-            var database = $"aerolink_972_{Guid.NewGuid():N}";
-            await using (var admin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(serverConnection)
-            { Database = "postgres" }.ConnectionString))
-            {
-                await admin.OpenAsync();
-                await using var command = admin.CreateCommand();
-                command.CommandText = $"CREATE DATABASE \"{database}\"";
-                await command.ExecuteNonQueryAsync();
-            }
-
-            var connectionString = new NpgsqlConnectionStringBuilder(serverConnection) { Database = database }.ConnectionString;
+            var database = await DisposablePostgresDatabase.CreateAsync("aerolink_972");
             try
             {
-                var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connectionString).Options;
+                var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(database.ConnectionString).Options;
                 await using var db = new AeroLinkDbContext(options);
                 await db.Database.MigrateAsync();
                 var id = await SeedAsync(db);
-                return new LoadScenario(options, id, null, connectionString, serverConnection, database, isSqlite: false);
+                return new LoadScenario(options, id, null, database, isSqlite: false);
             }
             catch
             {
-                await DropDatabaseAsync(serverConnection, database);
+                await database.DisposeAsync();
                 throw;
             }
         }
@@ -311,18 +294,7 @@ public sealed class ChangeRequestRepositoryLoadBenchmarkTests(ITestOutputHelper 
         public async ValueTask DisposeAsync()
         {
             if (_sqlite is not null) await _sqlite.DisposeAsync();
-            if (_serverConnection is not null && _database is not null)
-                await DropDatabaseAsync(_serverConnection, _database);
-        }
-
-        private static async Task DropDatabaseAsync(string serverConnection, string database)
-        {
-            await using var admin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(serverConnection)
-            { Database = "postgres" }.ConnectionString);
-            await admin.OpenAsync();
-            await using var command = admin.CreateCommand();
-            command.CommandText = $"DROP DATABASE IF EXISTS \"{database}\" WITH (FORCE)";
-            await command.ExecuteNonQueryAsync();
+            if (_database is not null) await _database.DisposeAsync();
         }
     }
 }

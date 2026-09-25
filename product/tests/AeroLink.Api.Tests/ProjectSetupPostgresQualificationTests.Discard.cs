@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Tests;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,7 +18,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
     /// Project that the finalization creates is never hidden behind a discarded setup. This is provider-level
     /// evidence — SQLite serializes the same requests and cannot show the interleaving.
     /// </summary>
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Discard_cannot_win_against_a_finalization_that_already_claimed_the_setup()
     {
         await WithDatabaseAsync(async connection =>

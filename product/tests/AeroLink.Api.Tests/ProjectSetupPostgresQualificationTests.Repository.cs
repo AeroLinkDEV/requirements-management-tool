@@ -2,6 +2,7 @@ using System.Data.Common;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
+using AeroLink.Infrastructure.Tests;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Npgsql;
 
@@ -9,7 +10,7 @@ namespace AeroLink.Api.Tests;
 
 public sealed partial class ProjectSetupPostgresQualificationTests
 {
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Repository_edit_waits_for_verified_evidence_commit_and_cannot_rewrite_its_identity()
     {
         await WithDatabaseAsync(async connection =>

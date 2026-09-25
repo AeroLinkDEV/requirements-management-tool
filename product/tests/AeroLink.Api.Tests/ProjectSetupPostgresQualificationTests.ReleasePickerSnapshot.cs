@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Tests;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -153,7 +154,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         return (T)(await command.ExecuteScalarAsync())!;
     }
 
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Picker_upgrade_preserves_legacy_rows_and_freezes_continuations()
     {
         await WithDatabaseAsync(async connection =>
@@ -379,7 +380,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         });
     }
 
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Picker_continuation_on_a_larger_fixture_stays_bounded_and_records_latency()
     {
         var capture = new SqlCaptureInterceptor();
@@ -455,7 +456,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         });
     }
 
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Picker_database_guard_rejects_forbidden_membership_mutations()
     {
         await WithDatabaseAsync(async connection =>
@@ -549,7 +550,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         }
     }
 
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Picker_continuation_generated_sql_and_parameters_are_captured_for_plan_evidence()
     {
         var capture = new SqlCaptureInterceptor();
@@ -620,7 +621,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         });
     }
 
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Stale_snapshot_writers_cannot_enter_frozen_release_continuations()
     {
         foreach (var isolation in new[] { System.Data.IsolationLevel.RepeatableRead, System.Data.IsolationLevel.Serializable })
@@ -736,7 +737,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
             """,
             parameters => parameters.AddWithValue("p", projectId));
 
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Page_one_fence_waits_for_uncommitted_allocator_then_includes_the_committed_build()
     {
         await WithDatabaseAsync(async connection =>
@@ -780,7 +781,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         });
     }
 
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Cancelled_page_one_releases_the_fence_without_stuck_writers()
     {
         await WithDatabaseAsync(async connection =>
@@ -885,7 +886,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         return value is null or DBNull ? null : Convert.ToInt64(value);
     }
 
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Page_one_fence_wait_is_bounded_and_ends_in_a_recoverable_busy_response()
     {
         await WithDatabaseAsync(async connection =>
@@ -925,7 +926,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         });
     }
 
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Searched_release_continuation_freezes_membership_on_both_sides_of_the_cursor()
     {
         await WithDatabaseAsync(async connection =>
@@ -966,7 +967,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         });
     }
 
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Release_ordinal_is_read_back_by_ef_and_never_written_by_lifecycle_saves_on_postgres()
     {
         await WithDatabaseAsync(async connection =>
@@ -1002,7 +1003,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         });
     }
 
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Every_supported_release_writer_receives_a_fenced_membership_ordinal_on_postgres()
     {
         await WithDatabaseAsync(async connection =>
