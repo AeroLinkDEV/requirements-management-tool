@@ -134,7 +134,8 @@ try {
         @{ Name = 'wrong compatibility target'; Setup = { param($path) Set-Content -LiteralPath (Join-Path $path 'FEATURE_CATALOG.md') -Value "# compatibility pointer`r`n`r`nThis is not a second copy or independent authority.`r`n`r`nUse [README.md](README.md).`r`n" -Encoding UTF8 }; Pattern = 'does not link to its declared target' },
         @{ Name = 'outside repository target'; Setup = { param($path) $outside = Join-Path (Split-Path $path -Parent) 'outside-maintained-target.md'; Set-Content -LiteralPath $outside -Value '# outside' -Encoding UTF8; Add-Content -LiteralPath (Join-Path $path 'docs\REMOTE_DEMO_OPERATOR.md') -Value "`r`n[outside](../../outside-maintained-target.md)`r`n" }; Pattern = 'escapes the repository' },
         @{ Name = 'encoded archive target'; Setup = { param($path) Add-Content -LiteralPath (Join-Path $path 'README.md') -Value "`r`n[encoded archive](docs%2Farchive%2FCURRENT_PRODUCT_HANDOFF_2026-07-29.md)`r`n" }; Pattern = 'must not link directly to an archived record' },
-        @{ Name = 'normalized archive target'; Setup = { param($path) Add-Content -LiteralPath (Join-Path $path 'README.md') -Value "`r`n[normalized archive](docs/reference/../archive/CURRENT_PRODUCT_HANDOFF_2026-07-29.md)`r`n" }; Pattern = 'must not link directly to an archived record' }
+        @{ Name = 'normalized archive target'; Setup = { param($path) Add-Content -LiteralPath (Join-Path $path 'README.md') -Value "`r`n[normalized archive](docs/reference/../archive/CURRENT_PRODUCT_HANDOFF_2026-07-29.md)`r`n" }; Pattern = 'must not link directly to an archived record' },
+        @{ Name = 'duplicate decision identifier'; Setup = { param($path) Add-Content -LiteralPath (Join-Path $path 'DECISIONS_AND_OPEN_QUESTIONS.md') -Value "`r`n### DEC-119 - A second decision under an existing number`r`n" }; Pattern = 'decisions headed DEC-119' }
     )
     foreach ($case in $cases) {
         $caseRoot = New-LegitimateFixture ('negative-' + ($case.Name -replace '\s+', '-'))
@@ -153,5 +154,5 @@ if ($failures.Count -gt 0) {
     Write-Host "Repository layout regression contract FAILED ($($failures.Count) failure(s))." -ForegroundColor Red
     exit 1
 }
-Write-Host 'Repository layout regression contract passed (actual tree, legitimate, ignored-source and ignored-local fixtures, and nine negative fixtures).' -ForegroundColor Green
+Write-Host 'Repository layout regression contract passed (actual tree, legitimate, ignored-source and ignored-local fixtures, and ten negative fixtures).' -ForegroundColor Green
 exit 0
