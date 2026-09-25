@@ -291,13 +291,17 @@ public static class ProblemReportEndpoints
         var active = reports.Where(x => ProblemReportLifecycle.IsActiveWork(x.State)).ToList();
         var attentionRows = active.OrderByDescending(x => x.IsReleaseBlocker).ThenByDescending(x => x.Severity)
             .ThenBy(x => x.CreatedAt).Take(12).ToList();
+        var attentionNames = await DirectoryIdentityProjection.DisplayNamesAsync(db,
+            attentionRows.SelectMany(row => new[] { row.ReportedBy, row.ResponsibleEngineerId }), ct);
         return Results.Ok(new
         {
             generatedAt = DateTimeOffset.UtcNow,
             summary = new { total = reports.Count, active = active.Count, closureAwaitingApproval = reports.Count(x => x.State == ProblemReportState.WaitingForSqaToClose), closed = reports.Count(x => x.State == ProblemReportState.Closed), releaseBlockers = reports.Count(x => x.IsReleaseBlocker && !IsWaived(x)), waivedBlockers = reports.Count(x => x.IsReleaseBlocker && IsWaived(x)) },
             bySeverity = reports.GroupBy(x => x.Severity).OrderBy(x => x.Key).Select(x => new { severity = x.Key.ToString(), count = x.Count() }),
+            // Command Center shows what is still open; a closed Critical is history, not load.
+            activeBySeverity = active.GroupBy(x => x.Severity).OrderBy(x => x.Key).Select(x => new { severity = x.Key.ToString(), count = x.Count() }),
             byState = reports.GroupBy(x => x.State).OrderBy(x => x.Key).Select(x => new { state = x.Key.ToString(), count = x.Count() }),
-            attention = attentionRows.Select(x => Summary(x, IsWaived(x)))
+            attention = attentionRows.Select(x => Summary(x, IsWaived(x), attentionNames))
         });
     }
 
@@ -1212,21 +1216,31 @@ public static class ProblemReportEndpoints
         return await HasCurrentSqaClosureAuthorityAsync(report, http.UserAccount(), db, identity, ct);
     }
 
-    private static async Task<bool> HasCurrentSqaClosureAuthorityAsync(ProblemReport report, AuthenticatedUser actor,
+    private static Task<bool> HasCurrentSqaClosureAuthorityAsync(ProblemReport report, AuthenticatedUser actor,
+        AeroLinkDbContext db, IdentityService identity, CancellationToken ct) =>
+        HasSqaClosureAuthorityAsync(report.ProjectId, actor, db, identity, ct);
+
+    private static Task<bool> HasSccbOpeningAuthorityAsync(ProblemReport report, AuthenticatedUser actor,
+        AeroLinkDbContext db, CancellationToken ct) =>
+        HasSccbOpeningAuthorityAsync(report.ProjectId, actor, db, ct);
+
+    /// <summary>The one SQA-closure authority rule, shared with My Work so its queue and the action agree.</summary>
+    internal static async Task<bool> HasSqaClosureAuthorityAsync(Guid projectId, AuthenticatedUser actor,
         AeroLinkDbContext db, IdentityService identity, CancellationToken ct)
     {
         if (actor.IsAdministrator) return false;
-        var programId = await db.Projects.AsNoTracking().Where(item => item.Id == report.ProjectId)
+        var programId = await db.Projects.AsNoTracking().Where(item => item.Id == projectId)
             .Select(item => (Guid?)item.ProgramId).SingleOrDefaultAsync(ct);
         return programId is not null && await identity.HasRoleAsync(actor.Id, programId.Value,
             ProgramRole.SoftwareQualityAnalyst, DateTimeOffset.UtcNow, ct);
     }
 
-    private static async Task<bool> HasSccbOpeningAuthorityAsync(ProblemReport report, AuthenticatedUser actor,
+    /// <summary>The one SCCB-opening authority rule, shared with My Work so its queue and the action agree.</summary>
+    internal static async Task<bool> HasSccbOpeningAuthorityAsync(Guid projectId, AuthenticatedUser actor,
         AeroLinkDbContext db, CancellationToken ct)
     {
         if (actor.IsAdministrator) return false;
-        var programId = await db.Projects.AsNoTracking().Where(item => item.Id == report.ProjectId)
+        var programId = await db.Projects.AsNoTracking().Where(item => item.Id == projectId)
             .Select(item => (Guid?)item.ProgramId).SingleOrDefaultAsync(ct);
         return programId is not null && await HasRoleAsync(programId.Value);
 

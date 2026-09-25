@@ -25,3 +25,17 @@
 .identityModal .cancel{border:1px solid #d6dde6;background:white;color:#667488;border-radius:8px;padding:12px 14px;font-weight:700}
 /* #1091 LOW-18: row actions stay on one line. */
 .userTable article > div:last-child button { white-space: nowrap; }
+/* My Work kind filter and Problem Report rows (#1113 S2). */
+.workQueue .workKinds{display:flex;flex-wrap:wrap;gap:6px;padding:12px 22px;border-bottom:1px solid #edf0f4}
+.workQueue .workKinds button{border:1px solid #d6dee8;border-radius:999px;background:white;color:#43516a;padding:5px 11px;font-size:12px;cursor:pointer}
+.workQueue .workKinds button b{margin-left:4px;color:#23657a}
+.workQueue .workKinds button[aria-pressed="true"]{background:#176c76;border-color:#176c76;color:white}
+.workQueue .workKinds button[aria-pressed="true"] b{color:white}
+.workQueue .workProblemReport{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.workQueue .workProblemReport em{font-style:normal;font-size:12px;font-weight:700;padding:2px 7px;border-radius:6px;background:#eef2f6;color:#43516a}
+.workQueue .workPrSeverity.critical{background:#ffe3e7;color:#9c2238}
+.workQueue .workPrSeverity.high{background:#ffefe0;color:#99511a}
+.workQueue .workPrSeverity.major{background:#fff7d9;color:#7a5d00}
+.workQueue .workPrState{background:#e9f2fb;color:#2f6f9d}
+.identityPage .workQueue .workKinds button:hover{background:#f0f6f8}
+.identityPage .workQueue .workKinds button[aria-pressed="true"],.identityPage .workQueue .workKinds button[aria-pressed="true"]:hover{background:#176c76;border-color:#176c76;color:white}

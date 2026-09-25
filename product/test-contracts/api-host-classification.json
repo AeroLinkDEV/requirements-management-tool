@@ -2,8 +2,8 @@
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
     "classes": 157,
-    "tests": 1000,
-    "knownCases": 1140,
+    "tests": 1001,
+    "knownCases": 1141,
     "unknownCaseTests": 0
   },
   "summary": {
@@ -15,8 +15,8 @@
     },
     "fresh-host": {
       "classes": 62,
-      "tests": 382,
-      "knownCases": 446,
+      "tests": 383,
+      "knownCases": 447,
       "unknownCaseTests": 0
     },
     "migration-candidate": {
@@ -971,6 +971,17 @@
       ]
     },
     {
+      "cls": "ProblemReportActiveMetricApiTests",
+      "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
+      "classification": "fresh-host",
+      "reason": "Reviewed #563 hold: each method bootstraps its own administrator and seeds problem-report state with fixed program codes, so methods cannot share one host without isolation work. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
+      "intents": [
+        "http-boundary"
+      ]
+    },
+    {
       "cls": "ProblemReportWaiverApiTests",
       "tests": 2,
       "knownCases": 2,
@@ -1100,17 +1111,6 @@
       "unknownCaseTests": 0,
       "classification": "fresh-host",
       "reason": "Customizes host state (interceptor-or-fault-injection); sharing could change the subject or leak configuration.",
-      "intents": [
-        "http-boundary"
-      ]
-    },
-    {
-      "cls": "ProblemReportActiveMetricApiTests",
-      "tests": 1,
-      "knownCases": 1,
-      "unknownCaseTests": 0,
-      "classification": "fresh-host",
-      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture.",
       "intents": [
         "http-boundary"
       ]

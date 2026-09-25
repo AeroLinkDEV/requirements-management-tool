@@ -335,3 +335,49 @@ main > header p { margin: 0; color: var(--ink-500); font-size: 15px; max-width: 
 .codeRecords footer {
   font-size: 12px !important;
 }
+
+/* Problem Reports on Command Center (#1113 S2): a full-width row under the change and verification cards. */
+.dashboardAreaCard.problemReports { grid-column: 1 / -1; }
+.dashboardAreaCard.problemReports > header i { background: #fdeee6; color: #a24d1c; }
+.dashboardAreaCard.problemReports .prCardScope { display: flex; gap: 4px; margin-inline-start: auto; margin-inline-end: 12px; }
+.dashboardAreaCard.problemReports .prCardScope button { border: 1px solid #d6dee8; border-radius: 999px; background: white; color: #43516a; padding: 5px 11px; font-size: 12px; }
+.dashboardAreaCard.problemReports .prCardScope button[aria-pressed="true"] { background: #176c76; border-color: #176c76; color: white; }
+.dashboardAreaCard.problemReports .prCardError, .prCardLoading { margin: 0; padding: 18px 21px; color: #5f7890; font-size: 13px; }
+.dashboardAreaCard.problemReports .prCardHeadline { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #e8edf2; }
+.dashboardAreaCard.problemReports .prCardHeadline button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 16px 21px; border: 0; border-inline-end: 1px solid #e8edf2; background: white; text-align: start; }
+.dashboardAreaCard.problemReports .prCardHeadline button:last-child { border-inline-end: 0; }
+.dashboardAreaCard.problemReports .prCardHeadline strong { font: 700 26px/1.1 var(--font-display); color: var(--ink-900); }
+.dashboardAreaCard.problemReports .prCardHeadline span { color: #5f7890; font-size: 12px; }
+.dashboardAreaCard.problemReports .prCardHeadline .blocking strong { color: #a93448; }
+.dashboardAreaCard.problemReports .prCardLifecycle { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; padding: 16px 21px 6px; }
+.dashboardAreaCard.problemReports .prCardLifecycle div { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px 8px; }
+.dashboardAreaCard.problemReports .prCardLifecycle span { grid-column: 1 / -1; color: #5f7890; font-size: 12px; }
+.dashboardAreaCard.problemReports .prCardLifecycle i { display: block; block-size: 8px; min-inline-size: 2px; border-radius: 4px; background: #2f6f9d; }
+.dashboardAreaCard.problemReports .prCardLifecycle b { font-size: 13px; color: var(--ink-900); }
+.dashboardAreaCard.problemReports .prCardSeverity { display: flex; flex-wrap: wrap; gap: 14px; margin: 0; padding: 10px 21px 14px; color: #43516a; font-size: 12px; }
+.dashboardAreaCard.problemReports .prCardSeverity i { display: inline-block; inline-size: 8px; block-size: 8px; margin-inline-end: 5px; border-radius: 50%; background: #9aa8b8; }
+.dashboardAreaCard.problemReports .prCardSeverity .critical i { background: #c0223d; }
+.dashboardAreaCard.problemReports .prCardSeverity .high i { background: #d9772b; }
+.dashboardAreaCard.problemReports .prCardSeverity .major i { background: #d6ae1f; }
+.dashboardAreaCard.problemReports .prCardAttention { padding: 4px 21px 8px; border-top: 1px solid #e8edf2; }
+.dashboardAreaCard.problemReports .prCardAttention h3 { margin: 12px 0 6px; color: #5f7890; font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.dashboardAreaCard.problemReports .prCardAttention p { margin: 0 0 8px; color: #5f7890; font-size: 13px; }
+.dashboardAreaCard.problemReports .prCardAttention button { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 10px; inline-size: 100%; padding: 8px 0; border: 0; border-bottom: 1px solid #f0f3f6; background: none; text-align: start; font-size: 13px; }
+.dashboardAreaCard.problemReports .prCardAttention button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-900); }
+.dashboardAreaCard.problemReports .prCardAttention button small { color: #5f7890; }
+.dashboardAreaCard.problemReports .prCardAttention em { font-style: normal; font-size: 12px; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: #eef2f6; color: #43516a; }
+.dashboardAreaCard.problemReports .prCardAttention em.critical { background: #ffe3e7; color: #9c2238; }
+.dashboardAreaCard.problemReports .prCardAttention em.high { background: #ffefe0; color: #99511a; }
+.dashboardAreaCard.problemReports .prCardAttention em.major { background: #fff7d9; color: #7a5d00; }
+.dashboardAreaCard.problemReports .prCardOpen { margin: 6px 21px 18px; border: 0; background: none; color: #23657a; font-weight: 700; font-size: 13px; padding: 0; }
+@media (max-width: 900px) {
+  .dashboardAreaCard.problemReports .prCardHeadline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboardAreaCard.problemReports .prCardLifecycle { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .dashboardAreaCard.problemReports > header { flex-wrap: wrap; gap: 10px; }
+  .dashboardAreaCard.problemReports .prCardScope { order: 3; margin: 0; flex-basis: 100%; }
+  .dashboardAreaCard.problemReports .prCardAttention button { grid-template-columns: auto auto minmax(0, 1fr); }
+  .dashboardAreaCard.problemReports .prCardAttention button small { grid-column: 1 / -1; }
+}
+.dashboardAreaCard.problemReports .prCardScope button:hover { background: #f0f6f8; }
+.dashboardAreaCard.problemReports .prCardScope button[aria-pressed="true"],
+.dashboardAreaCard.problemReports .prCardScope button[aria-pressed="true"]:hover { background: #176c76; border-color: #176c76; color: white; }
