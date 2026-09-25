@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 116,
-      "cases": 134,
+      "tests": 117,
+      "cases": 135,
       "unknownCases": 0,
-      "classes": 67
+      "classes": 68
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -9004,6 +9004,24 @@
       "sourceLines": {
         "start": 135,
         "end": 161
+      }
+    },
+    {
+      "cls": "ProblemReportImportApiTests",
+      "test": "A_csv_export_is_reconciled_row_by_row_signed_imported_with_source_facts_and_skipped_on_reimport",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 15,
+        "end": 136
       }
     },
     {
