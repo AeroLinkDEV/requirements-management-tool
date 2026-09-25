@@ -22,18 +22,12 @@ namespace AeroLink.Infrastructure.Tests;
 /// the disposable database is created and dropped per run, and the persistent developer database (127.0.0.1:54329)
 /// is never touched.
 /// </summary>
+[Trait("Category", "PostgresQualification")]
 public sealed class ReviewStageAuthorityMigrationQualificationTests
 {
     private const string ConnectionVariable = "AEROLINK_MIGRATIONS_CONNECTION";
     private const string AuthorityMigrationId = "20260829125743_AddReviewStageAuthorityKind";
     private const string MigrationBeforeAuthority = "20260827232621_AddProblemReportRevisionActorDisplayName";
-
-    private static bool ServerConfigured(out string serverConnectionString)
-    {
-        var raw = Environment.GetEnvironmentVariable(ConnectionVariable);
-        serverConnectionString = raw ?? "";
-        return !string.IsNullOrWhiteSpace(raw);
-    }
 
     private static async Task<string> CreateDisposableDatabaseAsync(string serverConnectionString)
     {
@@ -78,7 +72,7 @@ public sealed class ReviewStageAuthorityMigrationQualificationTests
     [DisposablePostgresFact]
     public async Task The_upgrade_adds_authority_additively_and_never_gusses_historical_semantics()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         var database = new NpgsqlConnectionStringBuilder(server).Database;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -188,7 +182,7 @@ public sealed class ReviewStageAuthorityMigrationQualificationTests
     [DisposablePostgresFact]
     public async Task A_clean_install_applies_the_full_chain_and_is_idempotent()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         var connection = await CreateDisposableDatabaseAsync(server);
         try
         {

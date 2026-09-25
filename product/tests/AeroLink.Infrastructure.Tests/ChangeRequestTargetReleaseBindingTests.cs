@@ -68,6 +68,7 @@ public sealed class ChangeRequestTargetReleaseBindingTests
 /// aerolink_849_target_* database; the connection must be loopback and must never name the persistent
 /// developer port 54329.
 /// </summary>
+[Trait("Category", "PostgresQualification")]
 public sealed class ChangeRequestTargetReleasePostgresQualificationTests
 {
     private const string ConnectionVariable = "AEROLINK_MIGRATIONS_CONNECTION";
@@ -125,7 +126,7 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
                 await db.Database.GetService<IMigrator>().MigrateAsync(PredecessorMigration);
                 var seed = await SeedValidHistoryAsync(db);
                 db.SystemChangeRequests.Add(Scr("SRCR-00002", seed.ProjectA, seed.NextRelease));
-                await db.SaveChangesAsync();
+                await PredecessorSchemaRows.InsertTrackedAsync(db);
                 snapshot = await SnapshotHistoryAsync(db);
                 Assert.Equal(2, snapshot.Length);
             }
@@ -179,7 +180,7 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
                 await db.Database.GetService<IMigrator>().MigrateAsync(PredecessorMigration);
                 var seed = await SeedValidHistoryAsync(db);
                 db.SystemChangeRequests.Add(Scr("SRCR-00009", seed.ProjectA, Guid.NewGuid()));
-                await db.SaveChangesAsync();
+                await PredecessorSchemaRows.InsertTrackedAsync(db);
                 historyBefore = await SnapshotHistoryAsync(db);
                 incompatibleRow = historyBefore.Single(x => x.Title == "Incompatible history");
             }
@@ -263,7 +264,8 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
         var carried = new SystemChangeRequest("SRCR-00001", 0, projectA.Id, honest.Id,
             "Carried history", "P", "A", "S", "author", now);
         db.AddRange(program, projectA, projectB, honest, next, foreign, carried);
-        await db.SaveChangesAsync();
+        // Seeded at the predecessor schema, so only its own columns are written.
+        await PredecessorSchemaRows.InsertTrackedAsync(db);
         return new SeedSeed(program.Id, projectA.Id, projectB.Id, honest.Id, next.Id, foreign.Id);
     }
 

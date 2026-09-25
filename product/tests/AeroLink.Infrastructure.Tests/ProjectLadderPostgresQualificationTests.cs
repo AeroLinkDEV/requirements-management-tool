@@ -13,6 +13,7 @@ namespace AeroLink.Infrastructure.Tests;
 [CollectionDefinition("Issue707Postgres", DisableParallelization = true)]
 public sealed class Issue707PostgresCollection : ICollectionFixture<object>;
 
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue707Postgres")]
 public sealed class ProjectLadderPostgresQualificationTests
 {
@@ -24,7 +25,8 @@ public sealed class ProjectLadderPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Clean_install_seals_first_content_atomically_on_postgresql()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_707_qualify");
+        var connection = database.ConnectionString;
         await using var db = await ResetAtLatestAsync(connection);
         var now = DateTimeOffset.UtcNow;
         var program = new ProgramRecord("PG clean program", "PGC");
@@ -57,7 +59,8 @@ public sealed class ProjectLadderPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Issue729_clean_install_has_dormant_profile_and_neutral_identity_schema_without_evidence()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_707_qualify");
+        var connection = database.ConnectionString;
         await using var db = await ResetAtLatestAsync(connection);
         await using var command = db.Database.GetDbConnection().CreateCommand();
         command.CommandText = "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name IN ('project_ladder_steps','project_ladder_configurations','project_ladder_configuration_history','test_procedures')";
@@ -77,7 +80,8 @@ public sealed class ProjectLadderPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Pre_feature_database_backfill_seals_with_truthful_immutable_evidence_on_postgresql()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_707_qualify");
+        var connection = database.ConnectionString;
         await using var db = await MigrateToPreFeatureAsync(connection);
         var now = DateTimeOffset.UtcNow;
         var programId = Guid.NewGuid();
@@ -134,7 +138,8 @@ public sealed class ProjectLadderPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Issue729_pre_feature_migration_leaves_no_verification_step_empty_and_is_idempotent()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_707_qualify");
+        var connection = database.ConnectionString;
         await using var db = await MigrateToPreFeatureAsync(connection);
         var now = DateTimeOffset.UtcNow;
         var programId = Guid.NewGuid(); var projectId = Guid.NewGuid(); var configurationId = Guid.NewGuid(); var stepId = Guid.NewGuid();
@@ -201,7 +206,8 @@ public sealed class ProjectLadderPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Issue729_postgresql_profile_constraint_rejects_customer_interface_and_unknown_shapes()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_707_qualify");
+        var connection = database.ConnectionString;
         await using var db = await ResetAtLatestAsync(connection);
         var now = DateTimeOffset.UtcNow;
         var program = new ProgramRecord("PG invalid profile program", "PGI"); var project = new ProjectRecord(program.Id, "PG invalid profile", "PG invalid profile software");
@@ -216,7 +222,8 @@ public sealed class ProjectLadderPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Concurrent_postgresql_edit_and_first_content_have_one_atomic_winner()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_707_qualify");
+        var connection = database.ConnectionString;
         await using (var setup = await ResetAtLatestAsync(connection))
         {
             var program = new ProgramRecord("PG race program", "PGR");
@@ -230,16 +237,6 @@ public sealed class ProjectLadderPostgresQualificationTests
 
             await RunEditVsContentRaceAsync(project.Id, release.Id, connection);
         }
-    }
-
-    [Theory]
-    [InlineData("Host=example.test;Port=55437;Database=aerolink_707_qualify")]
-    [InlineData("Host=127.0.0.1;Port=55437;Database=unrelated_database")]
-    [InlineData("Host=127.0.0.1;Port=54329;Database=aerolink_707_qualify")]
-    public void Qualification_connection_rejects_non_disposable_targets_before_database_access(string connection)
-    {
-        var error = Assert.Throws<InvalidOperationException>(() => ValidateQualificationConnection(connection));
-        Assert.Contains("Issue #707", error.Message, StringComparison.Ordinal);
     }
 
     private static async Task RunEditVsContentRaceAsync(Guid projectId, Guid releaseId, string connectionString)
@@ -306,39 +303,4 @@ public sealed class ProjectLadderPostgresQualificationTests
 
     private static DbContextOptions<AeroLinkDbContext> Options(string connectionString)
         => new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connectionString).Options;
-
-    private static string QualificationConnectionOrSkip()
-    {
-        var connection = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
-        return ValidateQualificationConnection(connection);
-    }
-
-    private static string ValidateQualificationConnection(string? connection)
-    {
-        if (string.IsNullOrWhiteSpace(connection))
-        {
-            throw new InvalidOperationException(
-                "Issue #707 PostgreSQL qualification requires AEROLINK_MIGRATIONS_CONNECTION; the test should have been skipped during discovery.");
-        }
-
-        var builder = new NpgsqlConnectionStringBuilder(connection);
-        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-        if (!string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                "Issue #707 PostgreSQL qualification requires a loopback host (localhost or 127.0.0.1).");
-        }
-
-        if (builder.Port == 54329)
-            throw new InvalidOperationException("Issue #707 qualification refuses the protected PostgreSQL port 54329.");
-
-        if (!string.Equals(builder.Database, "aerolink_707_qualify", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                "Issue #707 PostgreSQL qualification requires the dedicated database aerolink_707_qualify.");
-        }
-
-        return connection;
-    }
 }

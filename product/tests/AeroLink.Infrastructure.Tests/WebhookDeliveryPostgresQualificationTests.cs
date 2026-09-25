@@ -15,6 +15,7 @@ using Npgsql;
 
 namespace AeroLink.Infrastructure.Tests;
 
+[Trait("Category", "PostgresQualification")]
 public sealed class WebhookDeliveryPostgresQualificationTests
 {
     private const string PredecessorMigration = "20260905222930_AddChangeRequestTargetReleaseProjectBinding";

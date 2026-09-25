@@ -26,6 +26,16 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- One PostgreSQL qualification gate and disposable-database helper for both test projects (#1122). -->
+  <ItemGroup>
+    <Compile Include="..\AeroLink.Infrastructure.Tests\TestSupport\DisposablePostgresFactAttribute.cs"
+             Link="TestSupport\DisposablePostgresFactAttribute.cs" />
+    <Compile Include="..\AeroLink.Infrastructure.Tests\TestSupport\DisposablePostgresDatabase.cs"
+             Link="TestSupport\DisposablePostgresDatabase.cs" />
+    <Compile Include="..\AeroLink.Infrastructure.Tests\TestSupport\PostgresQualificationCategoryTests.cs"
+             Link="TestSupport\PostgresQualificationCategoryTests.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Include="..\AeroLink.Infrastructure.Tests\Fixtures\ProblemReportSnapshots\*.json"
           Link="Fixtures\ProblemReportSnapshots\%(Filename)%(Extension)"

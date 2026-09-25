@@ -15,6 +15,7 @@ using Xunit.Abstractions;
 
 namespace AeroLink.Infrastructure.Tests;
 
+[Trait("Category", "PostgresQualification")]
 public sealed class ChangeRequestTraceScalingTests(ITestOutputHelper output)
 {
     [Theory]
@@ -26,26 +27,10 @@ public sealed class ChangeRequestTraceScalingTests(ITestOutputHelper output)
     [DisposablePostgresFact]
     public async Task PostgreSQL_fixed_graph_scaling_and_query_plans()
     {
-        var settings = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("AEROLINK_973_SERVER_CONNECTION"));
-        Assert.Contains(settings.Host, new[] { "127.0.0.1", "localhost" });
-        Assert.InRange(settings.Port, 55438, 55499);
-        settings.Database = "postgres";
-        await using var server = new NpgsqlConnection(settings.ConnectionString);
-        await server.OpenAsync();
         foreach (var population in new[] { 100, 1000 })
         {
-            var name = "aerolink_973_scaling_" + Guid.NewGuid().ToString("N");
-            await using (var create = new NpgsqlCommand($"CREATE DATABASE \"{name}\"", server)) await create.ExecuteNonQueryAsync();
-            try
-            {
-                settings.Database = name;
-                await MeasureAsync(population, new NpgsqlConnection(settings.ConnectionString));
-            }
-            finally
-            {
-                await using var drop = new NpgsqlCommand($"DROP DATABASE \"{name}\" WITH (FORCE)", server);
-                await drop.ExecuteNonQueryAsync();
-            }
+            await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_973_scaling");
+            await MeasureAsync(population, new NpgsqlConnection(database.ConnectionString));
         }
     }
 
@@ -146,15 +131,6 @@ public sealed class ChangeRequestTraceScalingTests(ITestOutputHelper output)
         }
         if (node.TryGetProperty("Plans", out var children))
             foreach (var child in children.EnumerateArray()) AssertBoundedPlan(child);
-    }
-
-    private sealed class DisposablePostgresFactAttribute : FactAttribute
-    {
-        public DisposablePostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_973_SERVER_CONNECTION")))
-                Skip = "CQ10 PostgreSQL qualification requires an explicitly owned disposable server.";
-        }
     }
 }
 

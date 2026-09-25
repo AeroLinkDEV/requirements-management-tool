@@ -26,31 +26,10 @@ namespace AeroLink.Infrastructure.Tests;
 /// Skipped unless AEROLINK_MIGRATIONS_CONNECTION points at a disposable PostgreSQL server. The disposable
 /// database is created and dropped per test; the persistent developer database on 54329 is never touched.
 /// </summary>
+[Trait("Category", "PostgresQualification")]
 public sealed class AeroLinkMaintenanceQualificationTests
 {
     private const string ConnectionVariable = "AEROLINK_MIGRATIONS_CONNECTION";
-
-    /// <summary>
-    /// Set by the CI lane that exists to run these. Without it, "no connection configured" and "twelve
-    /// qualifications passed" are the same green tick, which is how a suite can be present and prove nothing
-    /// for months. The lane sets this, so a missing connection there is a failure rather than a quiet pass.
-    /// </summary>
-    private const string RequiredVariable = "AEROLINK_REQUIRE_POSTGRES_QUALIFICATION";
-
-    private static bool ServerConfigured(out string serverConnectionString)
-    {
-        var raw = Environment.GetEnvironmentVariable(ConnectionVariable);
-        serverConnectionString = raw ?? "";
-        if (!string.IsNullOrWhiteSpace(serverConnectionString)) return true;
-
-        var required = Environment.GetEnvironmentVariable(RequiredVariable);
-        if (!string.IsNullOrWhiteSpace(required) && !required.Equals("false", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException(
-                $"{RequiredVariable} is set, so this qualification must actually run, but {ConnectionVariable} "
-                + "names no disposable PostgreSQL server. Point it at a throwaway database; never at a "
-                + "persistent AeroLink installation.");
-        return false;
-    }
 
     private static async Task<string> CreateDisposableDatabaseAsync(string serverConnectionString)
     {
@@ -88,10 +67,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// A migrated database with nothing pending reports current, and the analysis is honest that it wrote
     /// nothing.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task A_current_database_reports_current_and_requires_no_upgrade()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -143,10 +122,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// It is reported, and reported as what it is: available and operator-initiated. It must NOT make
     /// UpgradeRequired true, or every HOME start would route demo content through backup and clone validation.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task Showcase_steps_this_build_knows_and_the_database_has_not_recorded_are_reported_as_available()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -205,10 +184,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// A database the schema has moved past reports every pending migration by name, before any web server
     /// starts — which is the whole difference between two seconds and a readiness timeout.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task Pending_schema_migrations_are_reported_by_name_without_starting_anything()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -242,10 +221,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// <summary>
     /// A pending semantic upgrade with nothing ambiguous about it is a deterministic upgrade, not a conflict.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task A_pending_semantic_upgrade_with_no_ambiguity_is_deterministic()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -285,10 +264,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// a legacy SoftwareEngineeringLead standing backup whose holder holds Engineer, not the required
     /// SoftwareEngineer. And it must be visible WITHOUT the analysis having written anything.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task The_816_ineligible_legacy_backup_is_reported_as_a_structured_conflict_and_nothing_is_written()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -361,10 +340,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// Several conflicts in one database are all reported by ONE analysis. Discovering them one restart at a
     /// time is the operator experience #881 exists to end.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task Multiple_conflicts_are_all_reported_in_one_analysis()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -413,10 +392,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// The resolver, on the #816 conflict. Dry run writes nothing; retiring the legacy designation ends it
     /// with attribution rather than deleting it; the analysis is clean afterwards.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task Retiring_the_legacy_backup_preserves_history_and_clears_the_conflict()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -513,10 +492,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// The other decision, which grants authority. It is only ever taken because the operator named it, and
     /// taking it leaves the person genuinely eligible rather than merely unblocking startup.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task Granting_the_required_role_is_an_explicit_choice_that_leaves_the_backup_eligible()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -553,10 +532,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// State moved between the operator reviewing the conflict and acting on it. The write must refuse:
     /// they reviewed a different situation, and applying their decision to this one is a guess.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task A_precondition_that_moved_after_analysis_refuses_and_writes_nothing()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -633,10 +612,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// without renditions to rewrite. The write in step 2 is therefore what exercises the store; the
     /// authority's own path is exercised for the absence of leakage rather than for a rewrite.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task An_evidence_writing_semantic_authority_cannot_touch_the_canonical_evidence_tree()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         var root = Path.Combine(Path.GetTempPath(), $"aerolink-881-evidence-{Guid.NewGuid():N}");
@@ -715,10 +694,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// the database must never end up with the decision applied on top of the competing change. An aborted
     /// resolver writes nothing, which is the same answer it gives every other stale precondition.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task A_concurrent_writer_cannot_land_a_decision_against_state_it_did_not_validate()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -798,10 +777,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// A row that has already been retired, or that belongs to another program, is not the row the operator
     /// reviewed, and no decision may be applied to it.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task A_legacy_row_that_is_no_longer_the_analyzed_row_refuses()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -842,10 +821,10 @@ public sealed class AeroLinkMaintenanceQualificationTests
     /// <summary>
     /// A maintenance decision must be attributable to a person who asked for it, not only to a process.
     /// </summary>
-    [Fact]
+    [DisposablePostgresFact]
     public async Task A_decision_without_an_operator_reference_is_rejected()
     {
-        if (!ServerConfigured(out var server)) return;
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try

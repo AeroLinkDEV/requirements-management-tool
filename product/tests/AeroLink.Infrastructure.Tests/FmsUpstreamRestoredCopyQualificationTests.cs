@@ -5,6 +5,11 @@ using Npgsql;
 
 namespace AeroLink.Infrastructure.Tests;
 
+/// <summary>
+/// A manual qualification (#1122): it runs only against a disposable restored copy of the FMS showcase, which no
+/// CI lane has. Run it before applying the #1006 correction, as OPERATIONS.md describes for
+/// <c>Repair-FmsDemoHistory.ps1</c>.
+/// </summary>
 public sealed class FmsUpstreamRestoredCopyQualificationTests
 {
     [RestoredCopyFact]
@@ -55,7 +60,8 @@ public sealed class FmsUpstreamRestoredCopyQualificationTests
         public RestoredCopyFactAttribute()
         {
             if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_1006_RESTORED_CONNECTION")))
-                Skip = "Explicitly provide the disposable restored FMS copy and evidence root to qualify the one-time correction.";
+                Skip = "Manual qualification: set AEROLINK_1006_RESTORED_CONNECTION (database aerolink_1006_validation) and "
+                    + "AEROLINK_1006_RESTORED_EVIDENCE for a disposable restored FMS copy; see OPERATIONS.md.";
         }
     }
 }

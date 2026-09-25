@@ -209,128 +209,71 @@ public sealed class SaveBoundaryFunctionalTests
 public sealed class Cq07PostgresCollection;
 
 /// <summary>Runs the bounded existing-child query against PostgreSQL in a unique disposable database.</summary>
+[Trait("Category", "PostgresQualification")]
 [Collection("CQ07Postgres")]
 public sealed class SaveBoundaryPostgresQualificationTests
 {
-    private const string ConnectionVariable = "AEROLINK_MIGRATIONS_CONNECTION";
-    private const int QualificationPort = 55465;
-
-    [Cq07PostgresFact]
+    [DisposablePostgresFact]
     public async Task Existing_501_requirement_changes_are_repaired_in_two_postgres_batches()
     {
-        var serverConnection = QualificationServerConnectionOrThrow();
-        var database = $"aerolink_967_{Guid.NewGuid():N}";
-        var connection = await CreateDisposableDatabaseAsync(serverConnection, database);
-        try
+        await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_967");
+        var connection = database.ConnectionString;
+        var probe = new SaveBoundaryPostgresCommandProbe();
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
+            .UseNpgsql(connection).AddInterceptors(probe).Options;
+        var now = DateTimeOffset.UtcNow;
+        Guid requestId;
+        HashSet<Guid> originalIds;
+
+        await using (var setup = new AeroLinkDbContext(options))
         {
-            var probe = new SaveBoundaryPostgresCommandProbe();
-            var options = new DbContextOptionsBuilder<AeroLinkDbContext>()
-                .UseNpgsql(connection).AddInterceptors(probe).Options;
-            var now = DateTimeOffset.UtcNow;
-            Guid requestId;
-            HashSet<Guid> originalIds;
+            await setup.Database.MigrateAsync();
+            var program = new ProgramRecord("CQ07 PostgreSQL bounded program", "CQ7P");
+            var project = new ProjectRecord(program.Id, "CQ07 PostgreSQL project", "Functional qualification");
+            var release = new SoftwareRelease(project.Id, "1.0", false);
+            setup.AddRange(program, project, release);
+            await setup.SaveChangesAsync();
+            setup.Add(LegacyDefaultProjectLadderFactory.Create(project.Id, now));
+            await setup.SaveChangesAsync();
 
-            await using (var setup = new AeroLinkDbContext(options))
+            var request = new SystemChangeRequest("SRCR-96704", 0, project.Id, release.Id,
+                "PostgreSQL bounded requirement edit", "Problem", "Analysis", "Solution", "author", now);
+            for (var i = 1; i <= 501; i++)
             {
-                await setup.Database.MigrateAsync();
-                var program = new ProgramRecord("CQ07 PostgreSQL bounded program", "CQ7P");
-                var project = new ProjectRecord(program.Id, "CQ07 PostgreSQL project", "Functional qualification");
-                var release = new SoftwareRelease(project.Id, "1.0", false);
-                setup.AddRange(program, project, release);
-                await setup.SaveChangesAsync();
-                setup.Add(LegacyDefaultProjectLadderFactory.Create(project.Id, now));
-                await setup.SaveChangesAsync();
-
-                var request = new SystemChangeRequest("SRCR-96704", 0, project.Id, release.Id,
-                    "PostgreSQL bounded requirement edit", "Problem", "Analysis", "Solution", "author", now);
-                for (var i = 1; i <= 501; i++)
-                {
-                    request.AddRequirementChange("author", $"SYSR-{i:D8}", 0, RequirementLevel.System,
-                        RequirementChangeKind.Modify, $"Original statement {i}.", "Original rationale", "Test", now);
-                }
-
-                setup.Add(request);
-                await setup.SaveChangesAsync();
-                requestId = request.Id;
-                originalIds = request.RequirementChanges.Select(x => x.Id).ToHashSet();
+                request.AddRequirementChange("author", $"SYSR-{i:D8}", 0, RequirementLevel.System,
+                    RequirementChangeKind.Modify, $"Original statement {i}.", "Original rationale", "Test", now);
             }
 
-            await using (var db = new AeroLinkDbContext(options))
-            {
-                var request = await db.SystemChangeRequests
-                    .Include(x => x.RequirementChanges)
-                    .Include(x => x.AuditEvents)
-                    .SingleAsync(x => x.Id == requestId);
-                foreach (var child in request.RequirementChanges.ToArray())
-                {
-                    request.RebaseRequirementChange("author", child.Id, 1,
-                        $"Revised statement {child.BaseNumber}.", "Revised rationale", now.AddMinutes(1));
-                }
+            setup.Add(request);
+            await setup.SaveChangesAsync();
+            requestId = request.Id;
+            originalIds = request.RequirementChanges.Select(x => x.Id).ToHashSet();
+        }
 
-                probe.Enabled = true;
-                await db.SaveChangesAsync();
-                probe.Enabled = false;
+        await using (var db = new AeroLinkDbContext(options))
+        {
+            var request = await db.SystemChangeRequests
+                .Include(x => x.RequirementChanges)
+                .Include(x => x.AuditEvents)
+                .SingleAsync(x => x.Id == requestId);
+            foreach (var child in request.RequirementChanges.ToArray())
+            {
+                request.RebaseRequirementChange("author", child.Id, 1,
+                    $"Revised statement {child.BaseNumber}.", "Revised rationale", now.AddMinutes(1));
             }
 
-            Assert.Equal(2, probe.RequirementChangeSelects);
-            await using var verification = new AeroLinkDbContext(options);
-            var saved = await verification.RequirementChanges.AsNoTracking()
-                .Where(x => x.ChangeRequestId == requestId).ToListAsync();
-            Assert.Equal(501, saved.Count);
-            Assert.True(originalIds.SetEquals(saved.Select(x => x.Id)));
-            Assert.All(saved, x => Assert.Equal(2, x.Revision));
+            probe.Enabled = true;
+            await db.SaveChangesAsync();
+            probe.Enabled = false;
         }
-        finally
-        {
-            await DropDisposableDatabaseAsync(serverConnection, database);
-        }
-    }
 
-    private static string QualificationServerConnectionOrThrow()
-    {
-        var raw = Environment.GetEnvironmentVariable(ConnectionVariable);
-        if (string.IsNullOrWhiteSpace(raw))
-            throw new InvalidOperationException(
-                "CQ07 PostgreSQL qualification requires AEROLINK_MIGRATIONS_CONNECTION.");
-        var builder = new NpgsqlConnectionStringBuilder(raw);
-        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-        if (!string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("CQ07 PostgreSQL qualification requires a loopback host.");
-        if (builder.Port is < 55438 or > 55499)
-            throw new InvalidOperationException(
-                "CQ07 PostgreSQL qualification requires a disposable port in 55438-55499 and refuses 54329.");
-        return raw;
-    }
-
-    private static async Task<string> CreateDisposableDatabaseAsync(string serverConnection, string database)
-    {
-        await using var admin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(serverConnection)
-        { Database = "postgres" }.ConnectionString);
-        await admin.OpenAsync();
-        await using var command = admin.CreateCommand();
-        command.CommandText = $"CREATE DATABASE \"{database}\"";
-        await command.ExecuteNonQueryAsync();
-        return new NpgsqlConnectionStringBuilder(serverConnection) { Database = database }.ConnectionString;
-    }
-
-    private static async Task DropDisposableDatabaseAsync(string serverConnection, string database)
-    {
-        await using var admin = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(serverConnection)
-        { Database = "postgres" }.ConnectionString);
-        await admin.OpenAsync();
-        await using var command = admin.CreateCommand();
-        command.CommandText = $"DROP DATABASE IF EXISTS \"{database}\" WITH (FORCE)";
-        await command.ExecuteNonQueryAsync();
-    }
-
-    private sealed class Cq07PostgresFactAttribute : FactAttribute
-    {
-        public Cq07PostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionVariable)))
-                Skip = "CQ07 PostgreSQL qualification skipped: set AEROLINK_MIGRATIONS_CONNECTION to a disposable port in 55438-55499.";
-        }
+        Assert.Equal(2, probe.RequirementChangeSelects);
+        await using var verification = new AeroLinkDbContext(options);
+        var saved = await verification.RequirementChanges.AsNoTracking()
+            .Where(x => x.ChangeRequestId == requestId).ToListAsync();
+        Assert.Equal(501, saved.Count);
+        Assert.True(originalIds.SetEquals(saved.Select(x => x.Id)));
+        Assert.All(saved, x => Assert.Equal(2, x.Revision));
     }
 
     private sealed class SaveBoundaryPostgresCommandProbe : DbCommandInterceptor

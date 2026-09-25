@@ -27,6 +27,7 @@ namespace AeroLink.Infrastructure.Tests;
 [CollectionDefinition("Issue726Postgres", DisableParallelization = true)]
 public sealed class Issue726PostgresCollection : ICollectionFixture<object>;
 
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue726Postgres")]
 public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
 {
@@ -181,7 +182,7 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
         // Case-only state, then completing migrations (a no-op) and running the platform cutover.
         await using (var db = await DatabaseAsync(connection, PreFeatureMigration))
         {
-            var seed = await SeedAsync(db);
+            var seed = await SeedAsync(db, preFeatureSchema: true);
             await db.Database.MigrateAsync();
             var (legacy, typed) = CutoverRegistrations();
             var result = await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed)
@@ -1093,11 +1094,13 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
             foreignConfiguration.Id, foreignProject.Id, foreignSteps[1].Id, foreignSteps[2].Id, now));
         db.ProjectLadderConfigurations.Add(foreignConfiguration);
         await db.SaveChangesAsync();
+        // Content may seal only an effective ladder (#1038), so the draft is activated first.
+        foreignConfiguration.Activate("project.owner", now, LadderConsumerManifestCatalog.VersionV2,
+            new string('0', 64));
+        await db.SaveChangesAsync();
         var foreignSeal = await new ProjectLadderSealAuthority(db).SealAsync(foreignProject.Id,
             LadderBoundContentCatalog.Current.First().Id, "foreign-content", "project.owner", now);
         Assert.Equal(ProjectLadderSealResultKind.Sealed, foreignSeal.Kind);
-        foreignConfiguration.Activate("project.owner", now, LadderConsumerManifestCatalog.VersionV2,
-            new string('0', 64));
         await db.SaveChangesAsync();
         var foreignCase = new TestProcedure(foreignProject.Id, "HLRTC-909101",
             "Foreign case", "test.engineer", now, TestProcedureLevel.HighLevel);
@@ -1520,7 +1523,13 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     private sealed record Seed(AeroLinkDbContext Db, Guid ProjectId, Guid ReleaseId, Guid BaselineId,
         Guid CaseRevisionId, Guid ExecutionId, Guid TestSetEntryId, Guid BaselineSelectionId);
 
-    private static async Task<Seed> SeedAsync(AeroLinkDbContext db)
+    private static Task<Seed> SeedAsync(AeroLinkDbContext db) => SeedAsync(db, preFeatureSchema: false);
+
+    /// <param name="preFeatureSchema">
+    /// The pre-#726 schema lacks release columns that later migrations add, so the program, project, release and
+    /// baseline are written in that schema's own columns. The later seeded tables are unchanged since then.
+    /// </param>
+    private static async Task<Seed> SeedAsync(AeroLinkDbContext db, bool preFeatureSchema)
     {
         var now = DateTimeOffset.UtcNow;
         var tag = Guid.NewGuid().ToString("N")[..8];
@@ -1530,6 +1539,7 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
         var baseline = new CandidateBaseline("SW-01.60", 0, project.Id, release.Id, null,
             "Candidate", "cm.test", now);
         db.AddRange(program, project, release, baseline);
+        if (preFeatureSchema) await PredecessorSchemaRows.InsertTrackedAsync(db);
         var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
         db.ProjectLadderConfigurations.Add(configuration);
         await db.SaveChangesAsync();

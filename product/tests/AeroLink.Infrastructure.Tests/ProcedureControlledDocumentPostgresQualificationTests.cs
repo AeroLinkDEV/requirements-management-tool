@@ -1,4 +1,3 @@
-using System.Net;
 using System.Text;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Identity;
@@ -17,18 +16,19 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class Issue728PostgresCollection : ICollectionFixture<object>;
 
 /// <summary>Exact predecessor and clean-install PostgreSQL qualification for the typed document register.</summary>
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue728Postgres")]
 public sealed class ProcedureControlledDocumentPostgresQualificationTests
 {
     private const string Predecessor = "20260823220128_AddProcedureTestChangeControlPackage";
     private const string Migration = "20260824025544_AddProcedureControlledDocuments";
     private const string DatabaseName = "aerolink_728_qualify";
-    private const int Port = 55474;
 
     [DisposablePostgresFact]
     public async Task Exact_upgrade_preserves_register_identity_and_backfills_historical_kind()
     {
-        var connection = QualificationConnectionOrThrow();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-728-preservation-{Guid.NewGuid():N}");
         try
         {
@@ -55,7 +55,7 @@ public sealed class ProcedureControlledDocumentPostgresQualificationTests
         var baseline = new CandidateBaseline("SW-72.80", 0, projectId, release.Id, null,
             "Historical publication baseline", "qualification", DateTimeOffset.Parse(now));
         db.AddRange(release, baseline);
-        await db.SaveChangesAsync();
+        await PredecessorSchemaRows.InsertTrackedAsync(db);
         var files = new EvidenceFileStore(evidenceRoot);
         var caseBytes = Encoding.UTF8.GetBytes("exact historical HLR Case controlled bytes for issue 728");
         var systemBytes = Encoding.UTF8.GetBytes("exact historical System Procedure controlled bytes for issue 728");
@@ -151,7 +151,8 @@ public sealed class ProcedureControlledDocumentPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Clean_install_has_typed_constraints_and_no_fabricated_registers()
     {
-        var connection = QualificationConnectionOrThrow();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = new AeroLinkDbContext(Options(connection));
         await db.Database.EnsureDeletedAsync();
         await db.Database.GetService<IMigrator>().MigrateAsync();
@@ -164,14 +165,6 @@ public sealed class ProcedureControlledDocumentPostgresQualificationTests
                 "SELECT COUNT(*)::int AS \"Value\" FROM pg_constraint WHERE conname IN ('CK_test_procedure_documents_ArtifactKind','CK_test_procedure_documents_SystemProcedureOnly')")
             .SingleAsync());
     }
-
-    [Theory]
-    [InlineData("Host=127.0.0.1;Port=54329;Database=aerolink_728_qualify")]
-    [InlineData("Host=127.0.0.1;Port=55475;Database=aerolink_728_qualify")]
-    [InlineData("Host=10.0.0.1;Port=55474;Database=aerolink_728_qualify")]
-    [InlineData("Host=127.0.0.1;Port=55474;Database=other_database")]
-    public void Qualification_connection_rejects_protected_non_loopback_or_wrong_database(string connection) =>
-        Assert.Throws<InvalidOperationException>(() => ValidateQualificationConnection(connection));
 
     private static (Guid Id, string Number, VerificationArtifactKind Kind) Project(TestProcedureDocument value) =>
         (value.Id, value.DocumentNumber, value.ArtifactKind);
@@ -205,23 +198,4 @@ public sealed class ProcedureControlledDocumentPostgresQualificationTests
     private static Task Sql(AeroLinkDbContext db, string sql) => db.Database.ExecuteSqlRawAsync(sql);
     private static DbContextOptions<AeroLinkDbContext> Options(string connection) =>
         new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
-
-    private static string QualificationConnectionOrThrow() => ValidateQualificationConnection(
-        Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION"));
-
-    private static string ValidateQualificationConnection(string? connection)
-    {
-        if (string.IsNullOrWhiteSpace(connection))
-            throw new InvalidOperationException("Issue #728 PostgreSQL qualification requires AEROLINK_MIGRATIONS_CONNECTION.");
-        var builder = new NpgsqlConnectionStringBuilder(connection);
-        var host = (builder.Host ?? "").Trim().Trim('[', ']');
-        var loopback = string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-            || IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address);
-        if (!loopback) throw new InvalidOperationException("Issue #728 qualification requires a loopback host.");
-        if (builder.Port != Port)
-            throw new InvalidOperationException($"Issue #728 qualification requires disposable port {Port} and refuses 54329.");
-        if (!string.Equals(builder.Database, DatabaseName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"Issue #728 qualification requires database {DatabaseName}.");
-        return connection;
-    }
 }

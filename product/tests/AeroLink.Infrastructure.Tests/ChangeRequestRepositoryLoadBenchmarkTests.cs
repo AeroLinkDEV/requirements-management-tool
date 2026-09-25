@@ -33,10 +33,11 @@ public sealed class ChangeRequestRepositoryLoadBenchmarkTests(ITestOutputHelper 
         await MeasureAsync(scenario, "sqlite-after-upstream-links", UpstreamLinksAsync);
     }
 
-    [Cq09PostgresFact]
+    [Cq09PostgresBenchmarkFact]
     public async Task PostgreSql_reports_load_costs_and_query_plans()
     {
-        var server = QualificationServerConnectionOrThrow();
+        var server = DisposablePostgresDatabase.ValidateServer(
+            Environment.GetEnvironmentVariable(DisposablePostgresFactAttribute.ConnectionVariable));
         await using var scenario = await LoadScenario.CreatePostgresAsync(server);
         await MeasureAsync(scenario, "postgres-baseline-single-full", LegacyFullAsync, includePlans: true);
         await MeasureAsync(scenario, "postgres-after-complete-split", CompleteAsync, includePlans: true);
@@ -45,10 +46,12 @@ public sealed class ChangeRequestRepositoryLoadBenchmarkTests(ITestOutputHelper 
         await MeasureAsync(scenario, "postgres-after-upstream-links", UpstreamLinksAsync, includePlans: true);
     }
 
-    [Cq09PostgresFact]
+    [DisposablePostgresFact]
+    [Trait("Category", "PostgresQualification")]
     public async Task PostgreSql_reuses_only_snapshot_transactions_for_split_loads()
     {
-        var server = QualificationServerConnectionOrThrow();
+        var server = DisposablePostgresDatabase.ValidateServer(
+            Environment.GetEnvironmentVariable(DisposablePostgresFactAttribute.ConnectionVariable));
         await using var scenario = await LoadScenario.CreatePostgresAsync(server);
 
         var readCommittedMeasurement = new QueryReadMeasurement { Enabled = true };
@@ -148,21 +151,6 @@ public sealed class ChangeRequestRepositoryLoadBenchmarkTests(ITestOutputHelper 
         }
     }
 
-    private static string QualificationServerConnectionOrThrow()
-    {
-        var raw = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
-        if (string.IsNullOrWhiteSpace(raw))
-            throw new InvalidOperationException("CQ09 PostgreSQL qualification requires AEROLINK_MIGRATIONS_CONNECTION.");
-        var builder = new NpgsqlConnectionStringBuilder(raw);
-        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-        if (!string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("CQ09 PostgreSQL qualification requires a loopback host.");
-        if (builder.Port != 55465)
-            throw new InvalidOperationException("CQ09 PostgreSQL qualification requires disposable port 55465 and refuses 54329.");
-        return raw;
-    }
-
     private sealed class Cq09BenchmarkFactAttribute : FactAttribute
     {
         public Cq09BenchmarkFactAttribute()
@@ -172,30 +160,18 @@ public sealed class ChangeRequestRepositoryLoadBenchmarkTests(ITestOutputHelper 
         }
     }
 
-    private sealed class Cq09PostgresFactAttribute : FactAttribute
+    /// <summary>
+    /// The PostgreSQL load report is a measurement like the SQLite one, so it is opt-in too (#1122). It also needs
+    /// the shared disposable server. The snapshot-transaction contract beside it is a qualification and runs
+    /// whenever that server is offered.
+    /// </summary>
+    private sealed class Cq09PostgresBenchmarkFactAttribute : FactAttribute
     {
-        public Cq09PostgresFactAttribute()
+        public Cq09PostgresBenchmarkFactAttribute()
         {
-            var raw = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
-            if (string.IsNullOrWhiteSpace(raw))
-            {
-                Skip = "Set AEROLINK_MIGRATIONS_CONNECTION to the disposable CQ09 PostgreSQL server.";
-                return;
-            }
-
-            try
-            {
-                var builder = new NpgsqlConnectionStringBuilder(raw);
-                var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-                if (builder.Port != 55465
-                    || (!string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
-                        && !string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)))
-                    Skip = "CQ09 PostgreSQL qualification requires disposable loopback port 55465.";
-            }
-            catch (ArgumentException)
-            {
-                Skip = "CQ09 PostgreSQL qualification requires a valid disposable connection string.";
-            }
+            if (Environment.GetEnvironmentVariable("AEROLINK_CQ09_BENCHMARK") != "1"
+                || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(DisposablePostgresFactAttribute.ConnectionVariable)))
+                Skip = "Set AEROLINK_CQ09_BENCHMARK=1 and AEROLINK_MIGRATIONS_CONNECTION to run the CQ09 PostgreSQL load report.";
         }
     }
 

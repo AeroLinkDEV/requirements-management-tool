@@ -23,16 +23,10 @@ namespace AeroLink.Infrastructure.Tests;
 /// the disposable database is created and dropped per run, and the persistent developer database is never
 /// touched.
 /// </summary>
+[Trait("Category", "PostgresQualification")]
 public sealed class ProjectLeadershipMigrationQualificationTests
 {
     private const string ConnectionVariable = "AEROLINK_MIGRATIONS_CONNECTION";
-
-    private static bool ServerConfigured(out string serverConnectionString)
-    {
-        var raw = Environment.GetEnvironmentVariable(ConnectionVariable);
-        serverConnectionString = raw ?? "";
-        return !string.IsNullOrWhiteSpace(serverConnectionString);
-    }
 
     private static async Task<string> CreateDisposableDatabaseAsync(string serverConnectionString)
     {
@@ -67,7 +61,7 @@ public sealed class ProjectLeadershipMigrationQualificationTests
     [DisposablePostgresFact]
     public async Task The_upgrade_backfills_leadership_from_legacy_memberships_and_is_idempotent()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         var serverDatabase = new NpgsqlConnectionStringBuilder(server).Database;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -143,7 +137,7 @@ public sealed class ProjectLeadershipMigrationQualificationTests
     [DisposablePostgresFact]
     public async Task Conflicting_project_engineer_and_project_engineering_lead_holders_fail_closed()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         var serverDatabase = new NpgsqlConnectionStringBuilder(server).Database;
         var connection = await CreateDisposableDatabaseAsync(server);
         try

@@ -13,6 +13,7 @@ namespace AeroLink.Infrastructure.Tests;
 /// first writer is allowed to commit, so PostgreSQL's actual ReleaseId/Discipline unique constraint arbitrates
 /// the race. The test is skipped unless the caller points it at the dedicated disposable server database.
 /// </summary>
+[Trait("Category", "PostgresQualification")]
 public sealed class BuildTestSetSeedingPostgresQualificationTests
 {
     [DisposablePostgresFact]

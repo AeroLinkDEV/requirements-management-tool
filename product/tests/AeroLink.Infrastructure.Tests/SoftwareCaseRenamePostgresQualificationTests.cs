@@ -27,6 +27,7 @@ namespace AeroLink.Infrastructure.Tests;
 [CollectionDefinition("Issue722Postgres", DisableParallelization = true)]
 public sealed class Issue722PostgresCollection : ICollectionFixture<object>;
 
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue722Postgres")]
 public sealed class SoftwareCaseRenamePostgresQualificationTests
 {
@@ -36,7 +37,8 @@ public sealed class SoftwareCaseRenamePostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Exact_pre_rename_upgrade_relabels_software_preserves_system_and_uses_equal_safe_watermarks()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_722_qualify");
+        var connection = database.ConnectionString;
         var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-722-authority-{Guid.NewGuid():N}");
         try
         {
@@ -232,7 +234,8 @@ public sealed class SoftwareCaseRenamePostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Clean_install_latest_migration_allows_case_authority_to_complete_idempotently()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_722_qualify");
+        var connection = database.ConnectionString;
         var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-722-clean-authority-{Guid.NewGuid():N}");
         try
         {
@@ -255,7 +258,4 @@ public sealed class SoftwareCaseRenamePostgresQualificationTests
 
     private static DbContextOptions<AeroLinkDbContext> Options(string connection) =>
         new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
-
-    private static string QualificationConnectionOrSkip() => Issue722QualificationConnection.Validate(
-        Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION"));
 }

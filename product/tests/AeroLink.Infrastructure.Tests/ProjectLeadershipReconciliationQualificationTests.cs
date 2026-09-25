@@ -18,16 +18,10 @@ namespace AeroLink.Infrastructure.Tests;
 /// Skipped unless AEROLINK_MIGRATIONS_CONNECTION points at a disposable PostgreSQL server. The disposable
 /// database is created and dropped per test; the persistent developer database on 54329 is never touched.
 /// </summary>
+[Trait("Category", "PostgresQualification")]
 public sealed class ProjectLeadershipReconciliationQualificationTests
 {
     private const string ConnectionVariable = "AEROLINK_MIGRATIONS_CONNECTION";
-
-    private static bool ServerConfigured(out string serverConnectionString)
-    {
-        var raw = Environment.GetEnvironmentVariable(ConnectionVariable);
-        serverConnectionString = raw ?? "";
-        return !string.IsNullOrWhiteSpace(serverConnectionString);
-    }
 
     private static async Task<string> CreateDisposableDatabaseAsync(string serverConnectionString)
     {
@@ -66,7 +60,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     [DisposablePostgresFact]
     public async Task V2_retires_the_legacy_rows_v1_left_and_preserves_base_eligibility()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -137,7 +131,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     [DisposablePostgresFact]
     public async Task After_v2_a_replaced_leader_no_longer_answers_the_demand()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -193,7 +187,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     [DisposablePostgresFact]
     public async Task A_conflict_in_a_later_program_leaves_no_partial_repair_in_an_earlier_one()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -273,7 +267,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     [DisposablePostgresFact]
     public async Task V2_reports_a_legacy_position_membership_held_by_somebody_other_than_the_assignment_holder()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -311,7 +305,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     [DisposablePostgresFact]
     public async Task V2_migrates_every_legacy_position_backup_family_to_the_same_person()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -374,7 +368,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     [DisposablePostgresFact]
     public async Task V2_reports_a_legacy_and_leadership_backup_that_name_different_people()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -416,7 +410,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     [DisposablePostgresFact]
     public async Task V2_refuses_to_migrate_a_primary_as_their_own_backup_without_partial_changes()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -473,7 +467,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     [DisposablePostgresFact]
     public async Task A_legacy_project_engineering_lead_backup_migrates_and_stops_being_a_second_channel()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
@@ -553,7 +547,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     [DisposablePostgresFact]
     public async Task V2_refuses_a_legacy_backup_whose_holder_lacks_the_required_base_role()
     {
-        Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
+        var server = DisposablePostgresDatabase.ValidateServer(Environment.GetEnvironmentVariable(ConnectionVariable));
         string? database = null;
         var connection = await CreateDisposableDatabaseAsync(server);
         try
