@@ -314,6 +314,7 @@
         "ProblemReportActiveMetricApiTests",
         "ProblemReportApiTests",
         "ProblemReportCheckoutApiTests",
+        "ProblemReportImportApiTests",
         "ProcedureDiscussionApiTests",
         "ProcedureManifestEffectivityApiTests",
         "ProcedureSavedViewApiTests",
@@ -1631,6 +1632,22 @@
     },
     {
       "method": "POST",
+      "path": "/api/problem-reports/import/commit",
+      "file": "ProblemReportImportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportImportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/problem-reports/import/preview",
+      "file": "ProblemReportImportEndpoints.cs",
+      "coveredBy": [
+        "ProblemReportImportApiTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/product-line/change-sets",
       "file": "ProductLineEndpoints.cs",
       "coveredBy": []
@@ -2213,6 +2230,7 @@
         "PersonnelDirectoryApiTests",
         "ProblemReportActiveMetricApiTests",
         "ProblemReportApiTests",
+        "ProblemReportImportApiTests",
         "ProcedureDiscussionApiTests",
         "ProductLineApiTests",
         "ProjectFeatureApiTests",

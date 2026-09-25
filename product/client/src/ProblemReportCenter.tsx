@@ -1036,7 +1036,11 @@ export default function ProblemReportCenter({
           <h1>Problem Reports</h1>
         </div>
         <div className="prHeaderActions">
-          <button type="button" className="secondaryAction" onClick={() => setShowImport((value) => !value)}>
+          <button
+            type="button"
+            className="secondaryAction"
+            onClick={() => setShowImport((value) => !value)}
+          >
             Import…
           </button>
           <button className="primaryAction" onClick={() => setShowCreate(true)}>
@@ -1045,7 +1049,13 @@ export default function ProblemReportCenter({
         </div>
       </header>
       {showImport && (
-        <ProblemReportImportPanel api={api} projectId={projectId} releases={releases} onClose={() => setShowImport(false)} onImported={() => void refresh()} />
+        <ProblemReportImportPanel
+          api={api}
+          projectId={projectId}
+          releases={releases}
+          onClose={() => setShowImport(false)}
+          onImported={() => void refresh()}
+        />
       )}
       {error && (
         <div className="workspaceError" role="alert">
@@ -1299,8 +1309,12 @@ export default function ProblemReportCenter({
                 <p className="prSourceFacts" role="note">
                   {selected.closedInSource && <b>Closed in source · read-only. </b>}
                   Imported from {selected.sourceSystem} {selected.sourceKey}
-                  {selected.sourceReportedBy && <> · reported in source by {selected.sourceReportedBy}</>}
-                  {selected.sourceCreatedAt && <> on {new Date(selected.sourceCreatedAt).toLocaleDateString()}</>}
+                  {selected.sourceReportedBy && (
+                    <> · reported in source by {selected.sourceReportedBy}</>
+                  )}
+                  {selected.sourceCreatedAt && (
+                    <> on {new Date(selected.sourceCreatedAt).toLocaleDateString()}</>
+                  )}
                   {selected.sourceState && <> · source status “{selected.sourceState}”</>}
                 </p>
               )}
