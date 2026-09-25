@@ -14,8 +14,14 @@ export function maintenanceReviewRefusals({ packet, binding, environment, branch
   if (!digestPattern.test(digest ?? '') || evidenceDigest(payload) !== digest ||
       canonicalJson(packet?.assessment ?? null) !== canonicalJson(evaluateMaintenancePreflight(packet?.evidence)) ||
       packet?.assessment?.disposition !== 'REVIEW_REQUIRED') reasons.push('maintenance-preflight-not-reviewable')
-  if (packet?.preparer?.commitSha !== packet?.evidence?.main?.sha ||
-      packet?.preparer?.treeSha !== packet?.evidence?.baseTreeSha) reasons.push('preparer-not-current-protected-main')
+  const preparerIsMain = packet?.preparer?.commitSha === packet?.evidence?.main?.sha &&
+    packet?.preparer?.treeSha === packet?.evidence?.baseTreeSha
+  // #1164: main advances past the checkout while a candidate waits for the entries ahead to merge. Accept that
+  // lag only when no protected path differs between the checkout and current main, so the judging kernel is
+  // byte-identical to main's (DEC-121). Missing drift evidence is never equivalence.
+  const drift = packet?.evidence?.preparerProtectedDrift
+  const preparerEquivalent = Array.isArray(drift) && drift.length === 0
+  if (!preparerIsMain && !preparerEquivalent) reasons.push('preparer-not-current-protected-main')
   if (!packet?.evidence?.pr?.labels?.includes(MAINTENANCE_REQUEST_LABEL)) reasons.push('maintenance-not-requested')
   // Approval history has no attempt identifier. Never carry it across a rerun of the binding workflow.
   if (!positive(binding?.id) || binding?.attempt !== 1 || binding?.repository !== MAINTENANCE_REPOSITORY ||

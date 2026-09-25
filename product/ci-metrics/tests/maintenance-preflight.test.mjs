@@ -179,6 +179,9 @@ function githubFixture({ advanceQueue = false, truncate = false, incomplete = fa
     [`${root}/check-suites/43/check-runs?filter=latest&per_page=100`, { total_count: 1, check_runs: e.checks }],
     [`${root}/git/trees/${sha('d')}?recursive=1`, tree(sha('d'), sha('1'))],
     [`${root}/git/trees/${sha('e')}?recursive=1`, { ...tree(sha('e'), sha('2')), truncated: truncate }],
+    // Preparer checkouts behind main: sha('5') has main's protected content, sha('7') a different ci.yml.
+    [`${root}/git/trees/${sha('5')}?recursive=1`, tree(sha('5'), sha('1'))],
+    [`${root}/git/trees/${sha('7')}?recursive=1`, tree(sha('7'), sha('9'))],
   ])
   return { calls, prNumber, runId, preparer: { commitSha: sha('4'), treeSha: sha('5') },
     read: async path => { calls.push(path); assert.ok(table.has(path), `Unexpected read: ${path}`); return structuredClone(table.get(path)) },
@@ -210,6 +213,15 @@ test('review digest binds the preparer revision and its decision, not just the r
   payload.assessment.reasons.push('additional-refusal')
   assert.notEqual(digest, evidenceDigest(payload))
   await assert.rejects(collectMaintenancePreflight({ ...githubFixture(), preparer: undefined }), /preparer commit/)
+})
+
+test('collector records protected drift between the preparer checkout and current main (#1164)', async () => {
+  const current = await collectMaintenancePreflight({ ...githubFixture(), preparer: { commitSha: sha('a'), treeSha: sha('d') } })
+  assert.deepEqual(current.evidence.preparerProtectedDrift, [])
+  const lagging = await collectMaintenancePreflight(githubFixture())
+  assert.deepEqual(lagging.evidence.preparerProtectedDrift, [], 'main advanced only outside the protected surface')
+  const drifted = await collectMaintenancePreflight({ ...githubFixture(), preparer: { commitSha: sha('6'), treeSha: sha('7') } })
+  assert.deepEqual(drifted.evidence.preparerProtectedDrift, ['.github/workflows/ci.yml'])
 })
 
 for (const [option, error] of [['advanceQueue', /advanced/], ['truncate', /untruncated/], ['incomplete', /pagination/]]) {

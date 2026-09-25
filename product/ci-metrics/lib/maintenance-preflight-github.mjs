@@ -42,6 +42,13 @@ export async function collectMaintenancePreflight({ read, graphql, prNumber, run
   ])
   if (baseTree.sha !== baseCommit.tree.sha || candidateTree.sha !== candidateCommit.tree.sha) throw new Error('Git tree response identity mismatch.')
   const changes = compareProtectedTrees(baseTree, candidateTree)
+  // #1164: after a queue-head wait, main has advanced past the protected-main checkout running this code.
+  // Record every protected path that differs between that checkout and current main; the review accepts the
+  // lag only when none does, so the kernel that judged the candidate is byte-identical to current main's.
+  const preparerTree = preparer.treeSha === baseTree.sha ? baseTree
+    : await read(`${root}/git/trees/${preparer.treeSha}?recursive=1`)
+  if (preparerTree.sha !== preparer.treeSha) throw new Error('Preparer tree response identity mismatch.')
+  const preparerProtectedDrift = compareProtectedTrees(preparerTree, baseTree).map(change => change.path)
   const qpr = queueBody?.data?.repository?.pullRequest
   if (queueBody?.errors || !qpr || qpr.number !== prNumber) throw new Error('Live queue response is missing or ambiguous.')
   const entry = qpr.mergeQueueEntry
@@ -55,7 +62,7 @@ export async function collectMaintenancePreflight({ read, graphql, prNumber, run
     checks: checksBody.check_runs.map(check => ({ name: check.name, app: { id: check.app?.id }, head_sha: check.head_sha,
       status: check.status, conclusion: check.conclusion, check_suite: { id: check.check_suite?.id } })),
     latestProductRunId: runsBody.workflow_runs.map(candidate => candidate.id).sort((a, b) => b - a)[0] ?? null,
-    baseTreeSha: baseTree.sha, candidateTreeSha: candidateTree.sha, changes,
+    baseTreeSha: baseTree.sha, candidateTreeSha: candidateTree.sha, changes, preparerProtectedDrift,
   }
   // Refuse a time-of-check mixture instead of presenting it as one immutable review packet.
   const [currentRun, currentMain, currentPr, currentQueue] = await Promise.all([

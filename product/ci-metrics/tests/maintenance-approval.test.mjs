@@ -57,6 +57,25 @@ function approval(review) {
     environments: [{ id: review.environment.id, name: environmentName }] }]
 }
 
+test('a preparer behind main is reviewable only when no protected path differs from main (#1164)', () => {
+  // The binding job checked out main at trigger time; the entry ahead then merged while the candidate waited.
+  const lagging = drift => {
+    const input = fixture()
+    input.packet.preparer = { commitSha: sha('7'), treeSha: sha('8') }
+    input.binding.headSha = sha('7')
+    if (drift !== undefined) input.packet.evidence.preparerProtectedDrift = drift
+    input.packet.assessment = evaluateMaintenancePreflight(input.packet.evidence)
+    const { digest, ...payload } = input.packet
+    input.packet.digest = evidenceDigest(payload)
+    return input
+  }
+  const review = createMaintenanceReview(lagging([]))
+  assert.deepEqual(evaluateMaintenanceApproval({ review, expectedDigest: review.digest, approvals: approval(review) }), { decision: 'PASS', reasons: [] })
+  assert.throws(() => createMaintenanceReview(lagging(['.github/workflows/merge-queue-binding.yml'])), /preparer-not-current-protected-main/)
+  assert.throws(() => createMaintenanceReview(lagging(undefined)), /preparer-not-current-protected-main/)
+  assert.throws(() => createMaintenanceReview(lagging('none')), /preparer-not-current-protected-main/)
+})
+
 test('exact authenticated owner environment approval permits only the current reviewed evidence', () => {
   const review = createMaintenanceReview(fixture())
   assert.deepEqual(evaluateMaintenanceApproval({ review, expectedDigest: review.digest, approvals: approval(review) }), { decision: 'PASS', reasons: [] })
