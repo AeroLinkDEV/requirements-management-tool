@@ -6,11 +6,12 @@ import type { RouteContext, View, Discipline } from './routing'
 import { artifactPath, projectAreaPath, routePath } from './routing'
 import './CommandPalette.css'
 import { LadderCapability, ladderAllows, ladderHasAny } from './projectLadder'
+import { viewEnabled, type ProjectFeature } from './projectFeatures'
 import type { ProjectLadderProjection } from './projectLadder'
 
 type Result={id:string;kind:string;identifier:string;title:string;state:string;discipline:string;updatedAt?:string;level?:string}
 type PaletteContext=Pick<RouteContext,'programId'|'projectId'>&{releaseId?:string}
-type Props={api:string;context:PaletteContext;open:boolean;ladder:ProjectLadderProjection|null;onClose:()=>void;onSelectBuild:()=>void;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void}
+type Props={api:string;context:PaletteContext;open:boolean;ladder:ProjectLadderProjection|null;features:ProjectFeature[]|null;onClose:()=>void;onSelectBuild:()=>void;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void}
 type PaletteEntry={key:string;category:'page'|'artifact';label:string;detail:string;state?:string;view:View;discipline:Discipline;artifactId?:string;artifactKind?:string;level?:string;icon:string;updatedAt?:string}
 
 const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:string;icon:IconName;artifactKind?:string}[]=[
@@ -35,6 +36,7 @@ const commandDefinitions:{label:string;view:View;discipline:Discipline;detail:st
   {label:'Software LLR Downstream Assessments',view:'testingCoverage',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Approved changes waiting for an LLRTCCR conclusion',icon:'coverage'},
   {label:'Software LLR Test Results',view:'testResults',discipline:'softwareTest',artifactKind:'LowLevel',detail:'Low-level software test set and recorded determinations',icon:'testResults'},
   {label:'Digital Thread',view:'lifecycle',discipline:'system',detail:'Traceability and outputs across the released evidence path',icon:'digitalThread'},
+  {label:'Problem Reports',view:'problemReports',discipline:'system',detail:'Project Problem Reports through SCCB, implementation and SQA closure',icon:'problemReports'},
   {label:'Release Readiness',view:'release',discipline:'system',detail:'Release readiness, change impact, evidence, and authority',icon:'release'},
   {label:'System Operations',view:'enterprise',discipline:'system',detail:'Operational controls and integrity',icon:'operations'},
 ]
@@ -45,19 +47,19 @@ const hiddenViews=new Set<View>(['planning','baselines'])
 const hiddenArtifactKinds=new Set(['baseline','build'])
 const readRecent=():PaletteEntry[]=>{try{return (JSON.parse(localStorage.getItem(recentKey)??'[]') as PaletteEntry[]).filter(item=>!hiddenViews.has(item.view)&&!hiddenArtifactKinds.has(item.artifactKind??'')).slice(0,5)}catch{return[]}}
 
-export default function CommandPalette({api,context,open,ladder,onClose,onSelectBuild,onNavigate}:Props){
+export default function CommandPalette({api,context,open,ladder,features,onClose,onSelectBuild,onNavigate}:Props){
   const [query,setQuery]=useState(''),[results,setResults]=useState<Result[]>([]),[busy,setBusy]=useState(false),[activeIndex,setActiveIndex]=useState(0),[recent,setRecent]=useState<PaletteEntry[]>([])
   const input=useRef<HTMLInputElement>(null)
   useEffect(()=>{if(open){setRecent(readRecent());setTimeout(()=>input.current?.focus(),0)}else{setQuery('');setResults([]);setActiveIndex(0)}},[open])
   useEffect(()=>{if(!open||query.trim().length<2){setResults([]);setBusy(false);return}const controller=new AbortController();const timer=setTimeout(async()=>{setBusy(true);try{const parameters=new URLSearchParams({projectId:context.projectId,query:query.trim(),limit:'30'});if(context.releaseId)parameters.set('releaseId',context.releaseId);const response=await fetch(`${api}/api/search?${parameters}`,{signal:controller.signal});if(response.ok)setResults((await response.json()).items)}catch(error){if((error as Error).name!=='AbortError')setResults([])}finally{if(!controller.signal.aborted)setBusy(false)}},180);return()=>{clearTimeout(timer);controller.abort()}},[api,context.projectId,context.releaseId,open,query])
-  const configuredPages=useMemo(()=>commandEntries.filter(item=>{
+  const configuredPages=useMemo(()=>commandEntries.filter(item=>viewEnabled(features,item.view,item.discipline)).filter(item=>{
     if(item.view==='requirements') return item.discipline==='system' ? ladderAllows(ladder,'System') : ladderHasAny(ladder,['HighLevel','LowLevel'])
     if(item.view==='verification'||item.discipline==='systemTest') return item.discipline==='systemTest' ? ladderAllows(ladder,'System',LadderCapability.Verification) : ladderHasAny(ladder,['HighLevel','LowLevel'],LadderCapability.Verification)
     if(item.artifactKind==='HighLevel') return ladderAllows(ladder,'HighLevel',LadderCapability.Verification)
     if(item.artifactKind==='LowLevel') return ladderAllows(ladder,'LowLevel',LadderCapability.Verification)
     if(item.view==='procedureExplorer') return ladderHasAny(ladder,['System','HighLevel','LowLevel'],LadderCapability.Verification)
     return true
-  }),[ladder])
+  }),[ladder,features])
   const pageEntries=useMemo(()=>configuredPages.filter(item=>item.label.toLowerCase().includes(query.trim().toLowerCase())||item.detail.toLowerCase().includes(query.trim().toLowerCase())),[configuredPages,query])
   const artifactEntries=useMemo<PaletteEntry[]>(()=>results.filter(item=>!hiddenArtifactKinds.has(item.kind)).filter(item=>{
     const levelBound=['change-request','requirement','test-procedure','test-case','test-execution','document'].includes(item.kind)

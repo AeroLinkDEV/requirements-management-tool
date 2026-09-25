@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 998,
-    "cases": 1143,
-    "classes": 157,
-    "hostedTests": 943,
-    "hostedCases": 1066,
+    "tests": 999,
+    "cases": 1144,
+    "classes": 158,
+    "hostedTests": 944,
+    "hostedCases": 1067,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
     "unknownHostTests": 23,
@@ -37,10 +37,10 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 113,
-      "cases": 131,
+      "tests": 114,
+      "cases": 132,
       "unknownCases": 0,
-      "classes": 66
+      "classes": 67
     },
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
@@ -10598,6 +10598,24 @@
       "sourceLines": {
         "start": 521,
         "end": 531
+      }
+    },
+    {
+      "cls": "ProjectFeatureApiTests",
+      "test": "Features_default_on_follow_dependencies_switch_off_only_while_empty_and_gate_new_records",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 16,
+        "end": 113
       }
     },
     {

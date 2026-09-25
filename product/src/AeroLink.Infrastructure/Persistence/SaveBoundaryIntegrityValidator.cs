@@ -18,6 +18,7 @@ internal sealed class SaveBoundaryIntegrityValidator(AeroLinkDbContext db)
 
     internal async Task ValidateAsync(CancellationToken ct)
     {
+        await ProjectFeatureService.RefuseRecordsForDisabledFeaturesAsync(_db, ct);
         await ValidateTestChangeReviewOriginsAsync(ct);
         await ValidateReferencedCaseChangesAsync(ct);
         await ValidateReferencedCaseAssessmentsAsync(ct);
