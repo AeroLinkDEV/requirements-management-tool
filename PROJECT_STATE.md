@@ -320,6 +320,9 @@ AeroLink separates several facts that must not collapse into one:
 
 Released baselines/builds remain immutable. Successor/in-work builds are explicitly assembled under user/configuration authority; AeroLink does not silently create or approve later product baselines.
 
+A project that does not use Release moves between builds by a signed decision recorded as released without
+readiness evidence (DEC-138); it is never presented as a readiness-backed release.
+
 Exact manifests/effectivity are authoritative for what a build carries.
 
 For genuinely pre-manifest builds, the compatibility projection remains explicitly non-exact. If an older

@@ -86,3 +86,23 @@ test('a Verifying report on a project without Verification is sent to SQA on an 
   await send.click()
   await expect(page.getByText('This project uses Verification, so send the report to SQA on a passing test result.')).toBeVisible()
 })
+
+test('without Release the builds page offers a signed release of the in-work build', async ({ page, request }) => {
+  const showcase = await showcaseSeed(request)
+  await page.route(`**/api/projects/${showcase.projectId}/features`, route => route.request().method() === 'GET'
+    ? route.fulfill({ json: { persisted: true, version: 1, canManage: true, enabled: ['TeamWork', 'ProblemReports'], features: [], history: [] } })
+    : route.continue())
+  await login(page, 'admin', { openProject: false })
+  await page.goto(`/projects/${showcase.projectId}/builds`)
+  const panel = page.getByRole('region', { name: 'Move to the next build' })
+  await expect(panel).toBeVisible()
+  const release = panel.getByRole('button', { name: /without readiness evidence/ })
+  await expect(release).toBeDisabled()
+  await panel.getByLabel(/being released/).fill('First field release of this build.')
+  await panel.getByLabel('Confirm with your password').fill('not-used')
+  await expect(release).toBeEnabled()
+  if (process.env.AEROLINK_1113_EVIDENCE) await page.screenshot({ path: `${process.env.AEROLINK_1113_EVIDENCE}/release-without-readiness.png`, fullPage: true, animations: 'disabled' })
+  // The real project uses Release, so the server keeps the release campaign as the only way.
+  await release.click()
+  await expect(panel.getByRole('alert')).toContainText('release campaign')
+})

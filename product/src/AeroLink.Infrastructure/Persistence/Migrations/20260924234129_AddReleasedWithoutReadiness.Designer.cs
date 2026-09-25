@@ -3,6 +3,7 @@ using System;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    partial class AeroLinkDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260924234129_AddReleasedWithoutReadiness")]
+    partial class AddReleasedWithoutReadiness
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -5581,11 +5584,6 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsReleased")
                         .HasColumnType("boolean");
 
-                    b.Property<long?>("PickerInsertionOrdinal")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasAnnotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.None);
-
                     b.Property<Guid?>("PredecessorReleaseId")
                         .HasColumnType("uuid");
 
@@ -5616,14 +5614,7 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProjectId", "Version")
                         .IsUnique();
 
-                    b.ToTable("software_releases", null, t =>
-                        {
-                            t.HasTrigger("aerolink_release_picker_alloc_ins");
-
-                            t.HasTrigger("aerolink_release_picker_immutable_upd");
-
-                            t.HasTrigger("aerolink_release_picker_supplied_ins");
-                        });
+                    b.ToTable("software_releases", (string)null);
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Releases.ChangeImpactDisposition", b =>

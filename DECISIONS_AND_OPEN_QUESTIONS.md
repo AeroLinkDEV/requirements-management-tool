@@ -2623,6 +2623,13 @@ choices are created as focused issues only when their trigger and acceptance bou
 - **Unchanged meaning:** SQA closure stays independent: SQA authority is required, and the reporter and responsible engineer still cannot close. The statement is recorded on the report, frozen into the closure candidate as its verification evidence, carried into the closure package, and withdrawn by later closure-significant changes exactly as a test-result basis is (DEC-133).
 - **Evidence contract:** The statement is written into the schema-6 report snapshot only when present, so every report sent on a test result keeps the bytes and hash it had before. A candidate built on a statement has no verification execution.
 
+### DEC-138 - Without Release, a Build Is Released by a Signed Decision Without Readiness Evidence
+
+- **Date:** 2026-09-24
+- **Status:** Accepted owner decision 8 ("definitely b") in [issue #1113](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1113).
+- **Decision:** In a project whose Release feature is off (DEC-136), a Configuration Manager or Program Manager releases the in-work build by a password-confirmed electronic signature with a reason, so the project can move to a successor build. Where Release is on, the release campaign remains the only way to release a build.
+- **Truthful labelling:** The build is recorded and shown as released without readiness evidence. It is never presented as a readiness-backed release, carries no campaign, baseline or manifest it did not have, and its signature records the actor, reason and content hash.
+
 ### DEC-140 - Agents Own Non-Functional Decisions; the Owner Owns Functional Ones
 
 - **Date:** 2026-09-25

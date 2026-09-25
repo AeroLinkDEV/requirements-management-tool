@@ -2082,9 +2082,18 @@
       "path": "/api/releases",
       "file": "WorkspaceEndpoints.cs",
       "coveredBy": [
+        "ProjectFeatureApiTests",
         "ProjectSetupBoundaryRegressionApiTests",
         "ProjectSetupPostgresQualificationTests",
         "ProjectSetupPostgresQualificationTests.ReleasePickerSnapshot"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/releases/{releaseId:guid}/release-without-readiness",
+      "file": "ProjectFeatureEndpoints.cs",
+      "coveredBy": [
+        "ProjectFeatureApiTests"
       ]
     },
     {

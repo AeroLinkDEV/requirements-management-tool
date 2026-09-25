@@ -269,7 +269,7 @@ public static class WorkspaceEndpoints
                 {
                     project = new { project.Id, project.Name, project.SoftwareProduct },
                     releases = OrderReleasesAscending(releases.Where(x => x.ProjectId == project.Id))
-                        .Select(x => new { x.Id, x.Version, x.IsReleased, x.PredecessorReleaseId })
+                        .Select(x => new { x.Id, x.Version, x.IsReleased, x.PredecessorReleaseId, x.ReleasedWithoutReadiness })
                 })
             }));
         });

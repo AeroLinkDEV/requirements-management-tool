@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace AeroLink.Api.Tests;
 
-/// <summary>#1113 S1: a project's switched-on features.</summary>
+/// <summary>#1113: a project's switched-on features, and what a project without Verification or Release does instead.</summary>
 public sealed class ProjectFeatureApiTests
 {
     [Fact]
@@ -194,6 +194,87 @@ public sealed class ProjectFeatureApiTests
             Assert.Null(candidate.VerificationExecutionId);
             Assert.Contains(statement, candidate.VerificationEvidenceJson);
             Assert.Contains("aerolink.problem-report-resolution-attestation", candidate.ClosurePackageJson);
+        }
+    }
+
+    [Fact]
+    public async Task Without_Release_a_build_is_released_by_a_signed_decision_and_its_successor_can_start()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await BootstrapAsync(client);
+        var manager = $"pf.cm.{Guid.NewGuid():N}";
+        var engineer = $"pf.eng.{Guid.NewGuid():N}";
+        Guid reportsOnlyId, buildId, everythingBuildId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Release program", "PFR");
+            var reportsOnly = new ProjectRecord(program.Id, "Problem Reports only", "Widget");
+            var everything = new ProjectRecord(program.Id, "Every feature", "Widget");
+            var build = new SoftwareRelease(reportsOnly.Id, "1.0", false);
+            var everythingBuild = new SoftwareRelease(everything.Id, "1.0", false);
+            db.AddRange(program, reportsOnly, everything, build, everythingBuild,
+                new ProjectFeatureSet(reportsOnly.Id, ProjectFeature.TeamWork | ProjectFeature.ProblemReports, "test.setup", now));
+            foreach (var (name, role) in new[] { (manager, ProgramRole.ConfigurationManager), (engineer, ProgramRole.SoftwareEngineer) })
+            {
+                var account = new UserAccount(name, name, $"{name}@example.test",
+                    IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+                db.AddRange(account, new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+                // Configuration Manager authority is the Project Leadership position, not the membership alone.
+                if (role == ProgramRole.ConfigurationManager)
+                    db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager, account.Id, "test.setup", now));
+            }
+            await db.SaveChangesAsync();
+            reportsOnlyId = reportsOnly.Id; buildId = build.Id; everythingBuildId = everythingBuild.Id;
+        }
+        async Task<HttpClient> SignInAsync(string userName)
+        {
+            var http = factory.CreateClient();
+            using var login = await http.PostAsJsonAsync("/api/auth/login", new { userName, password = AeroLinkApiFactory.MemberPassword });
+            Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+            await SecurityBoundaryTests.AuthorizeMutationsAsync(http);
+            return http;
+        }
+        const string reason = "Shipped to the customer as the first field release.";
+        Task<HttpResponseMessage> ReleaseAsync(HttpClient http, Guid id, string text, string password) =>
+            http.PostAsJsonAsync($"/api/releases/{id}/release-without-readiness", new { reason = text, password });
+
+        using var engineerClient = await SignInAsync(engineer);
+        using (var forbidden = await ReleaseAsync(engineerClient, buildId, reason, AeroLinkApiFactory.MemberPassword))
+            Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+
+        using var managerClient = await SignInAsync(manager);
+        using (var withRelease = await ReleaseAsync(managerClient, everythingBuildId, reason, AeroLinkApiFactory.MemberPassword))
+        {
+            Assert.Equal(HttpStatusCode.Conflict, withRelease.StatusCode);
+            Assert.Contains("release_feature_enabled", await withRelease.Content.ReadAsStringAsync());
+        }
+        using (var wrongPassword = await ReleaseAsync(managerClient, buildId, reason, "not-the-password"))
+            Assert.Equal(HttpStatusCode.Unauthorized, wrongPassword.StatusCode);
+        using (var noReason = await ReleaseAsync(managerClient, buildId, "ok", AeroLinkApiFactory.MemberPassword))
+            Assert.Equal(HttpStatusCode.BadRequest, noReason.StatusCode);
+        using (var released = await ReleaseAsync(managerClient, buildId, reason, AeroLinkApiFactory.MemberPassword))
+        {
+            Assert.Equal(HttpStatusCode.OK, released.StatusCode);
+            Assert.True((await released.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("releasedWithoutReadiness").GetBoolean());
+        }
+        using (var again = await ReleaseAsync(managerClient, buildId, reason, AeroLinkApiFactory.MemberPassword))
+            Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+
+        // The released build can now have its successor.
+        using (var successor = await managerClient.PostAsJsonAsync("/api/releases", new { projectId = reportsOnlyId, version = "1.1", predecessorReleaseId = buildId }))
+            Assert.Equal(HttpStatusCode.Created, successor.StatusCode);
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var signature = db.ElectronicSignatures.Single(x => x.ArtifactId == buildId);
+            Assert.Equal("ReleaseWithoutReadiness", signature.Action);
+            Assert.Equal(manager, signature.UserName);
+            Assert.Equal(reason, signature.Rationale);
+            Assert.True(db.Releases.Single(x => x.Id == buildId).ReleasedWithoutReadiness);
         }
     }
 
