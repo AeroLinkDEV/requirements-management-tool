@@ -112,10 +112,10 @@ public sealed class ProjectSetupKestrelQualificationTests
                 Content = chunked ? new ChunkedSource(bytes) : new ByteArrayContent(bytes)
             };
             request.Content.Headers.ContentType = new("application/octet-stream");
-            using var response = await client.SendAsync(request);
-            var body = await response.Content.ReadAsStringAsync();
             if (size <= 50 * 1024 * 1024)
             {
+                using var response = await client.SendAsync(request);
+                var body = await response.Content.ReadAsStringAsync();
                 Assert.True(response.IsSuccessStatusCode, $"{size}, chunked={chunked}: {response.StatusCode} {body}");
                 using var receipt = JsonDocument.Parse(body);
                 Assert.Equal(size, receipt.RootElement.GetProperty("sizeBytes").GetInt64());
@@ -124,8 +124,20 @@ public sealed class ProjectSetupKestrelQualificationTests
             }
             else
             {
-                Assert.True(response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.RequestEntityTooLarge,
-                    $"{size}, chunked={chunked}: {response.StatusCode} {body}");
+                // Kestrel rejects an over-limit body and may close the connection while the client is still
+                // writing it (#1117). Whether the client then reads the 400/413 or sees the reset is a timing
+                // race HTTP permits, so either is a refusal; what must hold every time is that nothing was staged.
+                try
+                {
+                    using var response = await client.SendAsync(request);
+                    var body = await response.Content.ReadAsStringAsync();
+                    Assert.True(response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.RequestEntityTooLarge,
+                        $"{size}, chunked={chunked}: {response.StatusCode} {body}");
+                }
+                catch (HttpRequestException reset) when (reset.InnerException is IOException)
+                {
+                    // The server closed the connection on the over-limit body.
+                }
                 using var scope = factory.Services.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
                 Assert.False(await db.ProjectSetupSourcePackages.AnyAsync(x => x.DraftId == draftId));
