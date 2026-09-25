@@ -1293,10 +1293,16 @@ export default function ProblemReportCenter({
                   isReleaseBlocker={releaseOn && selected.isReleaseBlocker}
                   waived={selected.waived}
                   canToggleBlocker={
-                    releaseOn && isOwner && !["Closed", ...terminalDispositions].includes(selected.state)
+                    releaseOn &&
+                    isOwner &&
+                    !["Closed", ...terminalDispositions].includes(selected.state)
                   }
                   showClosureResult={verificationOn && selected.state === "Verifying"}
-                  onAttest={!verificationOn && selected.state === "Verifying" ? (statement) => action("attest-resolution", { statement }) : undefined}
+                  onAttest={
+                    !verificationOn && selected.state === "Verifying"
+                      ? (statement) => action("attest-resolution", { statement })
+                      : undefined
+                  }
                   attestation={selected.resolutionAttestation}
                   closureBasisWithdrawn={selected.capabilities?.closureBasisWithdrawn}
                   dispositionRationale={selected.dispositionRationale}
