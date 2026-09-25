@@ -18,6 +18,8 @@ export const MAINTENANCE_KERNEL_PATHS = [
   '.github/workflows/approval-machinery-notice.yml',
   'product/ci-metrics/lib/machinery-notice.mjs',
   'product/ci-metrics/bin/notify-machinery-merge.mjs',
+  'product/ci-metrics/lib/queue-head-wait.mjs',
+  'product/ci-metrics/bin/await-queue-head.mjs',
 ]
 const sha = value => typeof value === 'string' && /^[0-9a-f]{40}$/.test(value)
 const positive = value => Number.isSafeInteger(value) && value > 0

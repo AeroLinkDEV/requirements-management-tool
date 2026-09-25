@@ -31,7 +31,8 @@ jobs:
     name: Publish trusted merge-queue binding
     if: github.event.workflow_run.event == 'merge_group'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The queue-head wait below is bounded at 60 minutes; the verifier needs the remainder.
+    timeout-minutes: 75
     outputs:
       maintenance-digest: ${{ steps.bind.outputs.maintenance-digest }}
     environment:
@@ -46,9 +47,19 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
+      # #1156: a candidate that carries a protected diff is judged once it heads the queue instead of being
+      # refused behind another entry. Runs before any App token is minted, so no token can expire while waiting.
+      - name: Wait for the entries ahead of a protected-diff candidate to merge
+        id: queue-head
+        if: github.event.action == 'completed' && github.event.workflow_run.event == 'merge_group'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: node product/ci-metrics/bin/await-queue-head.mjs
       - name: Detect exact maintenance candidate
         id: detect-maintenance
-        if: github.event.action == 'completed' && github.event.workflow_run.event == 'merge_group'
+        if: github.event.action == 'completed' && github.event.workflow_run.event == 'merge_group' && steps.queue-head.outputs.superseded != 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_API_URL: ${{ github.api_url }}
@@ -67,6 +78,7 @@ jobs:
           permission-metadata: read
       - name: Mint the repository-scoped Merge Authority token
         id: authority-token
+        if: steps.queue-head.outputs.superseded != 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.MERGE_AUTHORITY_APP_CLIENT_ID }}
@@ -75,6 +87,7 @@ jobs:
           permission-contents: read
       - name: Invalidate prior authority or bind the completed merge-group run
         id: bind
+        if: steps.queue-head.outputs.superseded != 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}

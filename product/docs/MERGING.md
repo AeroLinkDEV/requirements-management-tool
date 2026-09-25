@@ -164,6 +164,11 @@ An unconfigured environment is a refusal. Adding this code alone does not activa
 After that activation, request maintenance with the `authority-maintenance-requested` PR label and ordinary
 Full readiness. The label requests review; it grants no authority. When the PR is first in the queue and its
 complete native Product proof succeeds, the protected-main binder compares the full protected Git trees.
+A candidate that carries a protected diff but is not yet first does not get refused (#1156). The binding job's
+first step waits, for up to 60 minutes, until the entries ahead of it merge, and then judges it at the head of
+the queue. An ordinary candidate composed on a pending maintenance entry waits the same way. Maintenance and
+ordinary PRs can therefore share the queue without agents sequencing them. A re-composed candidate stops
+waiting and is never judged, and an exhausted wait falls back to the verifier.
 Only the ordinary verifier's protected-surface refusal may proceed to review. Missing/failed jobs, a changed
 approval kernel, a different publisher or an obsolete composition still refuse.
 
