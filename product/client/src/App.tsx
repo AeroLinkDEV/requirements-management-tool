@@ -59,7 +59,7 @@ import "./ExperiencePolish.css";
 import "./People.css";
 import "./CohesionPass.css";
 import ProblemReportsCommandCard from "./ProblemReportsCommandCard";
-import { hasFeature, viewEnabled, type ProjectFeature, type ProjectFeatureProjection } from "./projectFeatures";
+import { ALL_FEATURES, hasFeature, viewEnabled, type ProjectFeature, type ProjectFeatureProjection } from "./projectFeatures";
 
 const projectLevelViews: View[] = ["projects", "projectSetup", "builds", "baselineImports", "personnel", "approvalConfiguration", "projectConfiguration"];
 
@@ -457,8 +457,10 @@ function App() {
     if (!projectId) return () => { current = false; };
     fetch(`${API}/api/projects/${projectId}/features`)
       .then(async response => { if (!response.ok) throw new Error(); return await response.json() as ProjectFeatureProjection; })
-      .then(next => { if (current) setFeatures(next.enabled); })
-      .catch(() => { if (current) setFeatures(null); });
+      // An unreadable answer is the default (every feature), exactly as for a project with no stored set; the
+      // server still refuses whatever a disabled feature forbids, so this only decides what the shell offers.
+      .then(next => { if (current) setFeatures(Array.isArray(next?.enabled) ? next.enabled : ALL_FEATURES); })
+      .catch(() => { if (current) setFeatures(ALL_FEATURES); });
     return () => { current = false; };
   }, [projectId, ladderAttempt]);
   useEffect(() => {

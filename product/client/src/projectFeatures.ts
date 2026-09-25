@@ -38,3 +38,6 @@ export function viewEnabled(features: ProjectFeature[] | null | undefined, view:
   if (view === 'lifecycle') return hasFeature(features, 'Requirements') || hasFeature(features, 'Verification')
   return true
 }
+
+/** Every switchable feature: what a project with no stored feature set has. */
+export const ALL_FEATURES: ProjectFeature[] = ['TeamWork', 'Requirements', 'Verification', 'Code', 'DocumentationCenter', 'ProblemReports', 'Release']
