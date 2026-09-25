@@ -280,7 +280,7 @@ test('reviewed #563 holds keep every unsafe reusable class out of reuse headroom
     assert.equal(row?.reason, override.reason, cls)
     assert.match(row?.reason ?? '', /^Reviewed #563 hold:/, cls)
   }
-  assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 57, tests: 350, knownCases: 396, unknownCaseTests: 0 })
+  assert.deepEqual(hostArtifact.summary['reusable-host'], { classes: 58, tests: 351, knownCases: 397, unknownCaseTests: 0 })
   // Includes GitLab metadata and Code relationship tests with isolated provider configuration and access-revocation races.
   assert.deepEqual(hostArtifact.summary['fresh-host'], { classes: 62, tests: 381, knownCases: 450, unknownCaseTests: 0 })
   assert.deepEqual(hostArtifact.summary.converted, { classes: 33, tests: 257, knownCases: 282, unknownCaseTests: 0 })
@@ -329,9 +329,9 @@ test('host classification CLI distinguishes known cases from unknown-case method
       join(temporaryDirectory, 'artifact.json'),
     ], { encoding: 'utf8' })
     assert.match(output, /classification\s+classes\s+methods\s+known cases\s+unknown-case methods\s+share of methods/)
-    assert.match(output, /reusable-host\s+57\s+350\s+396\s+0\s+35.1%/)
+    assert.match(output, /reusable-host\s+58\s+351\s+397\s+0\s+35.2%/)
     assert.match(output, /fresh-host\s+62\s+381\s+450\s+0\s+38.2%/)
-    assert.match(output, /Remaining reuse headroom:\s+57 classes, 350 methods, 396 known cases/)
+    assert.match(output, /Remaining reuse headroom:\s+58 classes, 351 methods, 397 known cases/)
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true })
   }
