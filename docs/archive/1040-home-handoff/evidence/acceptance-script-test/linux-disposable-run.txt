@@ -1,0 +1,32 @@
+#1040 HOME acceptance report  2026-09-25T06:53:21.9540248Z
+Production source: /tmp/claude-0/-home-user-requirements-management-tool/c39e8c1c-fcfc-5a63-a0a1-9acbd8dc604d/scratchpad/prod-sim
+source HEAD: 92ffbb6cefa58a36b9573ea59ceb155704c3538b
+source branch: 
+source status entries: 0
+source origin/main (cached): 92ffbb6cefa58a36b9573ea59ceb155704c3538b
+commits after the #1066 merge: 0
+main-currency.json: not present
+GET /health/ready -> ERROR Connection refused (127.0.0.1:5999)
+GET /health/identity -> ERROR Connection refused (127.0.0.1:5999)
+latest migration: 20260921140636_AddReleasePickerMembership
+software_releases triggers: aerolink_release_picker_alloc_ins:O,aerolink_release_picker_immutable_upd:O
+ordinal sequence last_value,is_called: 3,true
+releases total,legacy(NULL),allocated: 5,2,3
+builds that received an ordinal (created after the upgrade; expected only for genuinely new builds):
+  2.0 | ordinal 1 | project 11111111-1111-1111-1111-111111111111
+  9.0 | ordinal 2 | project 22222222-2222-2222-2222-222222222222
+  2.1 | ordinal 3 | project 11111111-1111-1111-1111-111111111111
+per-project release counts (read-only):
+  
+
+MANUAL (read-only): open an existing FMS document, then + Link artifact -> Build. Existing builds should
+appear in canonical order (e.g. 1.5 before 1.6) with correct Released/In-work labels. Do NOT save a link.
+
+VERDICTS:
+PASS deployed source contains #1066 merge 92ffbb6c :: merge-base --is-ancestor exit 0
+FAIL GET /health/ready :: Connection refused (127.0.0.1:5999)
+FAIL GET /health/identity :: Connection refused (127.0.0.1:5999)
+PASS database session is read-only :: on
+PASS migration 20260921140636_AddReleasePickerMembership applied :: rows=1
+PASS picker triggers installed and enabled :: aerolink_release_picker_alloc_ins:O,aerolink_release_picker_immutable_upd:O
+FAIL existing releases kept as legacy cohort :: expect every pre-upgrade row NULL; allocated > 0 only if builds were created after the upgrade (then report them)

@@ -1,0 +1,45 @@
+Replicas ready under /tmp/claude-0/-home-user-requirements-management-tool/c39e8c1c-fcfc-5a63-a0a1-9acbd8dc604d/scratchpad/rehearsal-20260925T023728Z-13550
+PASS  T1 audit exits 0
+PASS  T1 audit changed nothing (refs, HEAD, local config, status, index bytes)
+PASS  T1 audit recorded exactly the two accidental commits beyond pre-incident main
+PASS  T1 audit found the linked feature worktree
+PASS  T1 audit verified the incident bundle
+PASS  T1 audit refuses to reuse its output directory
+PASS  T1 audit refuses output inside the repository
+PASS  T2 plan exits 0 on the exact incident state
+PASS  T2 plan changed nothing
+PASS  T3a untracked work blocks Recover (refused, nothing changed)
+PASS  T3a no evidence dir created on refusal
+PASS  T3b a subdirectory path is refused (refused, nothing changed)
+PASS  T3c the linked worktree path is refused (refused, nothing changed)
+PASS  T3d HEAD not on main is refused (refused, nothing changed)
+PASS  T3e unexpected local identity refuses the identity step (refused, nothing changed)
+PASS  T3f extra commit beyond the incident is refused (preserve it first) (refused, nothing changed)
+PASS  T3g existing evidence directory is refused (refused, nothing changed)
+PASS  T4 recover (main only) exits 0
+PASS  T4 main restored to 77b96857
+PASS  T4 tree equals pre-incident tree
+PASS  T4 status clean
+PASS  T4 #1105 content present again (ProjectsLanding.tsx matches 77b96857)
+PASS  T4 drill line gone from request-full-ci.yml
+PASS  T4 drillA2 untouched
+PASS  T4 archive refs preserve both accidental tips
+PASS  T4 identity untouched without its switch
+PASS  T4 linked feature worktree untouched
+PASS  T4 preservation bundle is standalone and complete
+PASS  T4 bundle carries the incident main tip
+PASS  T4 config copy preserved rehearsal identity
+PASS  T4 evidence checksums verify
+PASS  T5 rollback exits 0
+PASS  T5 main back at incident commit
+PASS  T5 incident tree restored
+PASS  T6 recover with all opt-ins exits 0
+PASS  T6 main fast-forwarded to the replica's origin/main (0dddb0291420ee3630314bba8b9a5a3e6d367e95)
+PASS  T6 local identity removed
+PASS  T6 effective identity now inherits global (no guess)
+PASS  T6 linked worktree shares the fixed identity
+PASS  T6 drillA2 archived, commits reachable
+PASS  T6 rollback exits 0
+PASS  T6 rollback restored incident main, identity and drillA2
+PASS  T7 source clone refs/HEAD/config unchanged
+SUMMARY: 43 passed, 0 failed. Root: /tmp/claude-0/-home-user-requirements-management-tool/c39e8c1c-fcfc-5a63-a0a1-9acbd8dc604d/scratchpad/rehearsal-20260925T023728Z-13550

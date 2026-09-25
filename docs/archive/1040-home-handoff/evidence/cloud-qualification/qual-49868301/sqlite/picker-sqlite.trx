@@ -1,0 +1,691 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="c4c014f5-0b70-4afe-82a0-56b0388f471b" name="@vm 2026-09-25 04:45:57" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-09-25T04:45:57.3161027+00:00" queuing="2026-09-25T04:45:57.3161028+00:00" start="2026-09-25T04:45:51.6310115+00:00" finish="2026-09-25T04:48:27.5957266+00:00" />
+  <TestSettings name="default" id="9ab9472b-b359-4618-8ac2-473d58ab9b7e">
+    <Deployment runDeploymentRoot="_vm_2026-09-25_04_45_57" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="a9b3fed8-443c-44be-b7dd-872be98240a0" testId="1a80138f-c308-a385-b0f3-036facb9558f" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Relationships_are_canonical_authorized_project_scoped_review_bound_and_hashed" computerName="vm" duration="00:00:09.5701656" startTime="2026-09-25T04:46:30.2953816+00:00" endTime="2026-09-25T04:46:39.8653299+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a9b3fed8-443c-44be-b7dd-872be98240a0" />
+    <UnitTestResult executionId="0e7ebd35-c0ca-4360-84d0-9576a5cc9e8a" testId="29ddf694-1c2b-2a84-700c-3bba76834882" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(phase: &quot;object-promoted-1&quot;)" computerName="vm" duration="00:00:02.6490037" startTime="2026-09-25T04:47:07.6429956+00:00" endTime="2026-09-25T04:47:10.2923149+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0e7ebd35-c0ca-4360-84d0-9576a5cc9e8a" />
+    <UnitTestResult executionId="fb8dc7d3-305c-4d69-a370-911f462a6187" testId="a9c24884-0acd-8c16-3c6f-938c63ca6ad8" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Formal_scope_correction_is_audited_versioned_and_bound_to_review_snapshot" computerName="vm" duration="00:00:03.7311476" startTime="2026-09-25T04:48:06.7596075+00:00" endTime="2026-09-25T04:48:10.4910787+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="fb8dc7d3-305c-4d69-a370-911f462a6187" />
+    <UnitTestResult executionId="c7598b5e-a3b8-4583-ab67-4b9000a3decc" testId="cfced167-65f5-be4d-6109-52afc0516b29" testName="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Oversized_malformed_and_out_of_contract_cursors_fail_bounded" computerName="vm" duration="00:00:03.0925861" startTime="2026-09-25T04:46:12.2205164+00:00" endTime="2026-09-25T04:46:15.3169611+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c7598b5e-a3b8-4583-ab67-4b9000a3decc" />
+    <UnitTestResult executionId="d4645712-7909-4cbd-855c-14c70cb7173c" testId="db0545d1-f0b7-63b8-7853-721aae602f6c" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Controlled_reads_fail_closed_deduplicate_incidents_and_require_exact_hash_recovery" computerName="vm" duration="00:00:05.5591518" startTime="2026-09-25T04:46:06.2054600+00:00" endTime="2026-09-25T04:46:11.7650542+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d4645712-7909-4cbd-855c-14c70cb7173c" />
+    <UnitTestResult executionId="47154583-a966-417a-abda-c587be1e8b8d" testId="6d67e44a-7b32-85f1-a258-775c99c88bfb" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_fault_after_metadata_commit_reconciles_to_available_and_retry_returns_the_same_result" computerName="vm" duration="00:00:03.1937348" startTime="2026-09-25T04:46:16.6436635+00:00" endTime="2026-09-25T04:46:19.8372800+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="47154583-a966-417a-abda-c587be1e8b8d" />
+    <UnitTestResult executionId="ed037e1f-d700-46d2-a65e-c7335017fc06" testId="8c5d9710-3641-9aff-ad69-845c25bca5ba" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Reviewer_independence_uses_the_exact_immutable_contributor_set" computerName="vm" duration="00:00:04.3044181" startTime="2026-09-25T04:47:21.7404682+00:00" endTime="2026-09-25T04:47:26.0450285+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="ed037e1f-d700-46d2-a65e-c7335017fc06" />
+    <UnitTestResult executionId="1fa8ed78-a19e-4070-bed5-af3611eadad3" testId="03aee54a-d046-0140-078f-ea14a6dc2d72" testName="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Searched_release_continuation_freezes_membership_on_both_sides_of_the_cursor" computerName="vm" duration="00:00:02.6363225" startTime="2026-09-25T04:46:09.5847490+00:00" endTime="2026-09-25T04:46:12.2201431+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1fa8ed78-a19e-4070-bed5-af3611eadad3" />
+    <UnitTestResult executionId="3c5c90ee-e5d5-4a76-92a9-ed1580393e2d" testId="a00f25e2-1393-a913-0e62-b4042ad2bead" testName="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Foreign_project_picker_reads_and_relationship_writes_are_refused" computerName="vm" duration="00:00:03.7034116" startTime="2026-09-25T04:46:15.3192520+00:00" endTime="2026-09-25T04:46:19.0199933+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="3c5c90ee-e5d5-4a76-92a9-ed1580393e2d" />
+    <UnitTestResult executionId="0d80bd9f-13fd-40fa-92df-a0b247fe2484" testId="ef4fceac-5db6-9b7d-84d3-c1f0b2d74a31" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Release_link_pages_and_quality_trends_use_canonical_numeric_order" computerName="vm" duration="00:00:03.0420500" startTime="2026-09-25T04:47:55.2971202+00:00" endTime="2026-09-25T04:47:58.3397224+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0d80bd9f-13fd-40fa-92df-a0b247fe2484" />
+    <UnitTestResult executionId="2726d98b-bb01-44d6-bffe-cda069e404e0" testId="10ed92cd-1cfd-dd5a-dbbf-811cdf2764f8" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Successor_is_bound_to_the_verified_released_docx_and_missing_parent_fails_closed" computerName="vm" duration="00:00:03.4181823" startTime="2026-09-25T04:48:12.8579080+00:00" endTime="2026-09-25T04:48:16.2769960+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2726d98b-bb01-44d6-bffe-cda069e404e0" />
+    <UnitTestResult executionId="fbde6757-087d-48a8-b37f-0756c4eb55d1" testId="3d9df52d-324c-dc08-9113-924b47636439" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Release_candidate_rejects_unrelated_docx_bad_pdf_and_misleading_names_without_persisting_any_state" computerName="vm" duration="00:00:04.4857420" startTime="2026-09-25T04:47:58.3403106+00:00" endTime="2026-09-25T04:48:02.8264005+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="fbde6757-087d-48a8-b37f-0756c4eb55d1" />
+    <UnitTestResult executionId="7ffce706-65f7-4919-a49c-f88e6faaf853" testId="fbf5a9c5-f580-7bbf-f272-9032369a8167" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Concurrent_successor_starts_produce_one_project_revision" computerName="vm" duration="00:00:03.1659216" startTime="2026-09-25T04:47:39.1351710+00:00" endTime="2026-09-25T04:47:42.3014559+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="7ffce706-65f7-4919-a49c-f88e6faaf853" />
+    <UnitTestResult executionId="eeca551e-d94d-431c-8115-c4fd27945c9b" testId="02666393-f27f-b1f8-5a61-fdf2fbac36c7" testName="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Revoked_project_access_denies_the_frozen_continuation_and_relationship_write" computerName="vm" duration="00:00:03.1643662" startTime="2026-09-25T04:46:19.0209157+00:00" endTime="2026-09-25T04:46:22.1854010+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="eeca551e-d94d-431c-8115-c4fd27945c9b" />
+    <UnitTestResult executionId="d69eabb4-88ff-4543-beab-8328f6c5967d" testId="832bd96d-20ac-01a5-4ee4-354ca47d0256" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Released_build_context_cannot_make_a_project_document_read_only_or_change_inventory" computerName="vm" duration="00:00:03.0240452" startTime="2026-09-25T04:47:18.7153379+00:00" endTime="2026-09-25T04:47:21.7395967+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d69eabb4-88ff-4543-beab-8328f6c5967d" />
+    <UnitTestResult executionId="feb90d03-318e-4100-b064-819765432359" testId="13a40c0a-9c83-8393-54b7-7ae41c94aa58" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Open_managed_document_resolver_lands_on_the_project_wide_record_without_guessing_a_build" computerName="vm" duration="00:00:05.2618520" startTime="2026-09-25T04:47:33.8723372+00:00" endTime="2026-09-25T04:47:39.1344986+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="feb90d03-318e-4100-b064-819765432359" />
+    <UnitTestResult executionId="71196083-0705-4b68-89e2-ef7cfbbf0ed8" testId="35b3ded2-948d-f17e-8be7-fb79a883f8f0" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Managed_document_control_routes_require_position_authority_and_preserve_primary_backup_delegation_and_admin" computerName="vm" duration="00:00:08.1054984" startTime="2026-09-25T04:48:16.2774981+00:00" endTime="2026-09-25T04:48:24.3835127+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="71196083-0705-4b68-89e2-ef7cfbbf0ed8" />
+    <UnitTestResult executionId="a38882c2-76e9-436c-afc6-c6978f53e4e8" testId="32325332-9615-06b8-44fe-c67c80495b14" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Fresh_setup_project_supports_local_connector_check_in_review_and_exact_controlled_release" computerName="vm" duration="00:00:09.0639521" startTime="2026-09-25T04:46:44.9717611+00:00" endTime="2026-09-25T04:46:54.0355942+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a38882c2-76e9-436c-afc6-c6978f53e4e8" />
+    <UnitTestResult executionId="7094163c-2410-43ba-9701-e18a978db745" testId="d830976c-efde-2f86-4aed-511ca627044f" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Project_without_software_builds_can_use_documentation_center" computerName="vm" duration="00:00:02.3652731" startTime="2026-09-25T04:48:10.4916046+00:00" endTime="2026-09-25T04:48:12.8573901+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="7094163c-2410-43ba-9701-e18a978db745" />
+    <UnitTestResult executionId="a308067e-32bc-4c14-9182-24c2b32ee4b9" testId="580f3545-49b0-2406-2e7c-1f5d539d7c43" testName="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Oversized_whitespace_and_missing_required_fields_fail_the_v2_contract" computerName="vm" duration="00:00:02.5522465" startTime="2026-09-25T04:46:04.4868334+00:00" endTime="2026-09-25T04:46:07.0380094+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a308067e-32bc-4c14-9182-24c2b32ee4b9" />
+    <UnitTestResult executionId="90b5fd92-181e-4883-92a5-f536f84da6df" testId="7a6b7e13-a3c4-284a-c5d6-8dbf9bd8e617" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Technical_and_release_signatures_bind_formal_summary_and_released_file_metadata" computerName="vm" duration="00:00:05.1041917" startTime="2026-09-25T04:46:39.8661514+00:00" endTime="2026-09-25T04:46:44.9708405+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="90b5fd92-181e-4883-92a5-f536f84da6df" />
+    <UnitTestResult executionId="c9b1cb04-685a-49a7-b9ce-dfbdd76c3d35" testId="31f26cdb-d418-c276-b295-646729b6fa06" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.My_work_surfaces_the_active_desktop_checkout_for_its_holder_only" computerName="vm" duration="00:00:03.7097367" startTime="2026-09-25T04:47:42.3021083+00:00" endTime="2026-09-25T04:47:46.0123143+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c9b1cb04-685a-49a7-b9ce-dfbdd76c3d35" />
+    <UnitTestResult executionId="b3760a13-663b-4ed2-8ee3-2167fb0f758c" testId="f56f6338-119e-c524-3e21-761ff44b3396" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Review_decisions_bind_exact_intent_and_retry_idempotently" computerName="vm" duration="00:00:04.1338834" startTime="2026-09-25T04:47:26.0457248+00:00" endTime="2026-09-25T04:47:30.1799575+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b3760a13-663b-4ed2-8ee3-2167fb0f758c" />
+    <UnitTestResult executionId="201c2a2b-8294-44e9-b78d-7d43d52b0b75" testId="61ee833f-2e5c-d11a-7715-2ed65301444c" testName="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests.Failed_install_rolls_back_the_whole_first_installation" computerName="vm" duration="00:00:00.5254491" startTime="2026-09-25T04:45:57.5450590+00:00" endTime="2026-09-25T04:45:58.0670192+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="201c2a2b-8294-44e9-b78d-7d43d52b0b75" />
+    <UnitTestResult executionId="b3c699bc-baf2-405e-a21e-5876d072a6dd" testId="4f7188a3-565e-fee9-99d1-13bc76f6eb5f" testName="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Release_ordinal_is_database_owned_across_ef_lifecycle_saves_on_sqlite" computerName="vm" duration="00:00:02.5440829" startTime="2026-09-25T04:46:07.0384067+00:00" endTime="2026-09-25T04:46:09.5830095+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b3c699bc-baf2-405e-a21e-5876d072a6dd" />
+    <UnitTestResult executionId="23548f51-ee1a-4f05-8de1-977cca55b378" testId="5fd9aa20-5fd3-6970-dbec-85c469366c16" testName="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Release_v2_cursor_round_trips_maximum_historical_labels" computerName="vm" duration="00:00:02.6217651" startTime="2026-09-25T04:46:24.4520563+00:00" endTime="2026-09-25T04:46:27.0741434+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="23548f51-ee1a-4f05-8de1-977cca55b378" />
+    <UnitTestResult executionId="e8377e34-31f2-4c6f-80b2-7faef0da6018" testId="66d365cd-a760-00ea-ae9a-2ac684e8945b" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(phase: &quot;before-promote&quot;)" computerName="vm" duration="00:00:02.9812439" startTime="2026-09-25T04:47:13.1046882+00:00" endTime="2026-09-25T04:47:16.0861900+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e8377e34-31f2-4c6f-80b2-7faef0da6018" />
+    <UnitTestResult executionId="987603bc-67e5-44d2-bac1-8b81b8288cf9" testId="e6c7a967-3b49-5db7-0df2-d5d4606d70a4" testName="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Old_release_v1_cursor_fails_closed_with_a_start_again_path" computerName="vm" duration="00:00:02.2653572" startTime="2026-09-25T04:46:22.1863537+00:00" endTime="2026-09-25T04:46:24.4516116+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="987603bc-67e5-44d2-bac1-8b81b8288cf9" />
+    <UnitTestResult executionId="20c29e3d-ac63-4680-aefc-6d6fe791437c" testId="043b973a-8892-3a77-d521-3f3aa64b0f85" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Delegated_authority_is_frozen_at_assignment_but_disabled_signers_fail_closed" computerName="vm" duration="00:00:03.9315878" startTime="2026-09-25T04:48:02.8269042+00:00" endTime="2026-09-25T04:48:06.7590762+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="20c29e3d-ac63-4680-aefc-6d6fe791437c" />
+    <UnitTestResult executionId="1ed8aa91-928d-4097-8f43-560fd17f19df" testId="ef3f9e5b-8105-68f3-3c85-b505b49299da" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_requires_a_caller_operation_key_and_distinct_keys_do_not_collapse_equal_intent" computerName="vm" duration="00:00:03.0622496" startTime="2026-09-25T04:48:24.3841434+00:00" endTime="2026-09-25T04:48:27.4467404+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1ed8aa91-928d-4097-8f43-560fd17f19df" />
+    <UnitTestResult executionId="4f3e9aa8-b2f0-448d-afe9-977f06cbf747" testId="b014ad8d-a24d-863d-b2d7-424787913acd" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Author_can_submit_and_reroute_an_ordered_named_review_and_approval_chain" computerName="vm" duration="00:00:04.5332315" startTime="2026-09-25T04:47:50.7629742+00:00" endTime="2026-09-25T04:47:55.2966015+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4f3e9aa8-b2f0-448d-afe9-977f06cbf747" />
+    <UnitTestResult executionId="7566849a-596c-460e-a1be-0247eede2460" testId="984d99fe-5e9a-2ad8-fc15-fe1702328004" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Repreparing_a_candidate_supersedes_the_prior_pair_and_releases_only_the_latest" computerName="vm" duration="00:00:13.5525141" startTime="2026-09-25T04:45:52.6511186+00:00" endTime="2026-09-25T04:46:06.2046324+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="7566849a-596c-460e-a1be-0247eede2460" />
+    <UnitTestResult executionId="22637dc9-7172-4b72-83ba-0f6e9ebd0acf" testId="c1cf9e89-e859-77bd-b351-613710e42a10" testName="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests.The_api_host_installs_the_guards_before_serving_and_a_copied_database_restarts_cleanly" computerName="vm" duration="00:00:05.7047901" startTime="2026-09-25T04:45:58.4508672+00:00" endTime="2026-09-25T04:46:04.1565614+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="22637dc9-7172-4b72-83ba-0f6e9ebd0acf" />
+    <UnitTestResult executionId="1d3b220c-a25c-4274-91a0-f0a1c54b0e1a" testId="2e4747b5-e910-3319-01c4-284608831364" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Draft_and_returned_withdrawal_closes_checkouts_but_reviewed_and_released_revisions_fail_closed" computerName="vm" duration="00:00:04.7485264" startTime="2026-09-25T04:47:46.0128856+00:00" endTime="2026-09-25T04:47:50.7622753+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1d3b220c-a25c-4274-91a0-f0a1c54b0e1a" />
+    <UnitTestResult executionId="d29cc483-2e29-41dc-b7d6-dcbe928b7fe6" testId="c2a4e395-8081-ff04-da96-dd1fa8710c92" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Project_inventory_and_histories_are_bounded_filtered_and_cursor_scoped" computerName="vm" duration="00:00:03.6905662" startTime="2026-09-25T04:47:30.1807180+00:00" endTime="2026-09-25T04:47:33.8716119+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d29cc483-2e29-41dc-b7d6-dcbe928b7fe6" />
+    <UnitTestResult executionId="dc66933e-d92c-456d-ad9a-674040a7aeb5" testId="2084bb29-e81e-bfbb-a230-2bad87d8b792" testName="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Release_continuation_freezes_membership_and_a_fresh_traversal_shows_later_builds" computerName="vm" duration="00:00:09.0955502" startTime="2026-09-25T04:45:52.4743028+00:00" endTime="2026-09-25T04:46:01.5825319+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="dc66933e-d92c-456d-ad9a-674040a7aeb5" />
+    <UnitTestResult executionId="bcb5f6c3-b1f2-451d-b1f2-3ac96b716614" testId="afc898bf-e084-7e69-0675-4324cc63d55b" testName="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Search_binding_page_sizes_and_termination_are_preserved" computerName="vm" duration="00:00:02.8955132" startTime="2026-09-25T04:46:01.5921002+00:00" endTime="2026-09-25T04:46:04.4846628+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="bcb5f6c3-b1f2-451d-b1f2-3ac96b716614" />
+    <UnitTestResult executionId="f89c6ed4-91e1-4fdb-9c96-7b9bf5e5b080" testId="6e3b4af8-e894-ff40-1128-e341bedc8690" testName="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests.Installed_guards_reject_the_full_forbidden_membership_matrix" computerName="vm" duration="00:00:04.7934319" startTime="2026-09-25T04:45:52.4724054+00:00" endTime="2026-09-25T04:45:57.2745178+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f89c6ed4-91e1-4fdb-9c96-7b9bf5e5b080" />
+    <UnitTestResult executionId="9e796e28-0ea2-4fa0-bdca-b3b9b2b26a6e" testId="30620cb1-aea3-5b11-7ee0-62bb8e67fda2" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Formal_scope_capability_is_server_derived_and_an_ended_owner_cannot_bypass_project_access" computerName="vm" duration="00:00:03.0160364" startTime="2026-09-25T04:46:58.8046493+00:00" endTime="2026-09-25T04:47:01.8207457+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9e796e28-0ea2-4fa0-bdca-b3b9b2b26a6e" />
+    <UnitTestResult executionId="9829dc10-d823-4dc8-9d41-d9eaa020e638" testId="f72276d6-15f6-db2d-7b7a-f57a2a9fadc9" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Project_document_can_create_checkout_and_check_in_without_build_context" computerName="vm" duration="00:00:04.1639826" startTime="2026-09-25T04:46:19.8376656+00:00" endTime="2026-09-25T04:46:24.0024609+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9829dc10-d823-4dc8-9d41-d9eaa020e638" />
+    <UnitTestResult executionId="0f6dc399-0ed9-4aae-9ec4-f67fcc4ffa13" testId="e20df5ea-53fe-287e-fb3e-260dd4947177" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Search_finds_managed_documents_by_acronym_type_owner_and_state_and_denies_other_projects" computerName="vm" duration="00:00:06.2909189" startTime="2026-09-25T04:46:24.0033372+00:00" endTime="2026-09-25T04:46:30.2942645+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0f6dc399-0ed9-4aae-9ec4-f67fcc4ffa13" />
+    <UnitTestResult executionId="6a3954c1-1dfe-4135-9d22-f5d147ab9775" testId="266efd49-6697-1f2b-625c-71976182563d" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Assignments_are_validated_and_stewardship_and_revision_responsibility_transfer_independently" computerName="vm" duration="00:00:04.7672601" startTime="2026-09-25T04:46:54.0364710+00:00" endTime="2026-09-25T04:46:58.8037877+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="6a3954c1-1dfe-4135-9d22-f5d147ab9775" />
+    <UnitTestResult executionId="98898fe5-a9eb-4328-8dc0-137f54a21e21" testId="0e4bea30-bf92-fd50-48f3-24e04c056ea3" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(phase: &quot;pending-recorded&quot;)" computerName="vm" duration="00:00:02.6269622" startTime="2026-09-25T04:47:16.0867122+00:00" endTime="2026-09-25T04:47:18.7140632+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="98898fe5-a9eb-4328-8dc0-137f54a21e21" />
+    <UnitTestResult executionId="7957cd41-b5c3-4aae-b4c6-bfc52ed6675e" testId="a1b5deed-502f-d970-5fb4-ba65f6af5527" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Targetless_problem_report_link_keeps_project_scope_without_inventing_a_build" computerName="vm" duration="00:00:04.8765871" startTime="2026-09-25T04:46:11.7664952+00:00" endTime="2026-09-25T04:46:16.6428938+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="7957cd41-b5c3-4aae-b4c6-bfc52ed6675e" />
+    <UnitTestResult executionId="b335ad9b-e7b8-4481-97fc-3d758868b9e0" testId="4cfce050-b648-07f7-044f-9b0d4fabf779" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(phase: &quot;metadata-saved&quot;)" computerName="vm" duration="00:00:03.0588512" startTime="2026-09-25T04:47:04.5824826+00:00" endTime="2026-09-25T04:47:07.6421588+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b335ad9b-e7b8-4481-97fc-3d758868b9e0" />
+    <UnitTestResult executionId="e2d046cb-111a-428a-b1a3-9edf1c2d5879" testId="cb5549f5-6aee-f05e-af8f-9ad713156323" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(phase: &quot;object-staged-1&quot;)" computerName="vm" duration="00:00:02.8106237" startTime="2026-09-25T04:47:10.2930825+00:00" endTime="2026-09-25T04:47:13.1039837+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e2d046cb-111a-428a-b1a3-9edf1c2d5879" />
+    <UnitTestResult executionId="67170bce-4090-4781-991d-50ced5982c24" testId="6ad436bb-b594-8e6b-3b48-fb48e39c2d76" testName="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests.First_install_classifies_existing_rows_as_legacy_and_installs_triggers" computerName="vm" duration="00:00:00.2640027" startTime="2026-09-25T04:45:57.2982880+00:00" endTime="2026-09-25T04:45:57.5440789+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="67170bce-4090-4781-991d-50ced5982c24" />
+    <UnitTestResult executionId="12b9d0fd-5b03-4012-9d28-d8c470a83c54" testId="f411d436-6b42-f4aa-62a6-14cbe1531c66" testName="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(phase: &quot;manifest-recorded&quot;)" computerName="vm" duration="00:00:02.7599976" startTime="2026-09-25T04:47:01.8217750+00:00" endTime="2026-09-25T04:47:04.5818123+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="12b9d0fd-5b03-4012-9d28-d8c470a83c54" />
+    <UnitTestResult executionId="4ea6d05c-eff7-4da4-b2f1-fc9bf519ccb3" testId="303c3f22-0f37-a394-c3e7-dc580fad77ed" testName="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests.Restart_install_does_not_reclassify_and_remains_idempotent" computerName="vm" duration="00:00:00.3814748" startTime="2026-09-25T04:45:58.0683561+00:00" endTime="2026-09-25T04:45:58.4504310+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4ea6d05c-eff7-4da4-b2f1-fc9bf519ccb3" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Search_finds_managed_documents_by_acronym_type_owner_and_state_and_denies_other_projects" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="e20df5ea-53fe-287e-fb3e-260dd4947177">
+      <Execution id="0f6dc399-0ed9-4aae-9ec4-f67fcc4ffa13" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Search_finds_managed_documents_by_acronym_type_owner_and_state_and_denies_other_projects" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Project_without_software_builds_can_use_documentation_center" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="d830976c-efde-2f86-4aed-511ca627044f">
+      <Execution id="7094163c-2410-43ba-9701-e18a978db745" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Project_without_software_builds_can_use_documentation_center" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Open_managed_document_resolver_lands_on_the_project_wide_record_without_guessing_a_build" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="13a40c0a-9c83-8393-54b7-7ae41c94aa58">
+      <Execution id="feb90d03-318e-4100-b064-819765432359" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Open_managed_document_resolver_lands_on_the_project_wide_record_without_guessing_a_build" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Revoked_project_access_denies_the_frozen_continuation_and_relationship_write" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="02666393-f27f-b1f8-5a61-fdf2fbac36c7">
+      <Execution id="eeca551e-d94d-431c-8115-c4fd27945c9b" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerMembershipApiTests" name="Revoked_project_access_denies_the_frozen_continuation_and_relationship_write" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Project_document_can_create_checkout_and_check_in_without_build_context" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="f72276d6-15f6-db2d-7b7a-f57a2a9fadc9">
+      <Execution id="9829dc10-d823-4dc8-9d41-d9eaa020e638" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Project_document_can_create_checkout_and_check_in_without_build_context" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests.Restart_install_does_not_reclassify_and_remains_idempotent" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="303c3f22-0f37-a394-c3e7-dc580fad77ed">
+      <Execution id="4ea6d05c-eff7-4da4-b2f1-fc9bf519ccb3" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests" name="Restart_install_does_not_reclassify_and_remains_idempotent" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Release_v2_cursor_round_trips_maximum_historical_labels" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="5fd9aa20-5fd3-6970-dbec-85c469366c16">
+      <Execution id="23548f51-ee1a-4f05-8de1-977cca55b378" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerMembershipApiTests" name="Release_v2_cursor_round_trips_maximum_historical_labels" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Successor_is_bound_to_the_verified_released_docx_and_missing_parent_fails_closed" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="10ed92cd-1cfd-dd5a-dbbf-811cdf2764f8">
+      <Execution id="2726d98b-bb01-44d6-bffe-cda069e404e0" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Successor_is_bound_to_the_verified_released_docx_and_missing_parent_fails_closed" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests.The_api_host_installs_the_guards_before_serving_and_a_copied_database_restarts_cleanly" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="c1cf9e89-e859-77bd-b351-613710e42a10">
+      <Execution id="22637dc9-7172-4b72-83ba-0f6e9ebd0acf" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests" name="The_api_host_installs_the_guards_before_serving_and_a_copied_database_restarts_cleanly" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Controlled_reads_fail_closed_deduplicate_incidents_and_require_exact_hash_recovery" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="db0545d1-f0b7-63b8-7853-721aae602f6c">
+      <Execution id="d4645712-7909-4cbd-855c-14c70cb7173c" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Controlled_reads_fail_closed_deduplicate_incidents_and_require_exact_hash_recovery" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests.Installed_guards_reject_the_full_forbidden_membership_matrix" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="6e3b4af8-e894-ff40-1128-e341bedc8690">
+      <Execution id="f89c6ed4-91e1-4fdb-9c96-7b9bf5e5b080" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests" name="Installed_guards_reject_the_full_forbidden_membership_matrix" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Managed_document_control_routes_require_position_authority_and_preserve_primary_backup_delegation_and_admin" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="35b3ded2-948d-f17e-8be7-fb79a883f8f0">
+      <Execution id="71196083-0705-4b68-89e2-ef7cfbbf0ed8" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Managed_document_control_routes_require_position_authority_and_preserve_primary_backup_delegation_and_admin" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Draft_and_returned_withdrawal_closes_checkouts_but_reviewed_and_released_revisions_fail_closed" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="2e4747b5-e910-3319-01c4-284608831364">
+      <Execution id="1d3b220c-a25c-4274-91a0-f0a1c54b0e1a" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Draft_and_returned_withdrawal_closes_checkouts_but_reviewed_and_released_revisions_fail_closed" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Author_can_submit_and_reroute_an_ordered_named_review_and_approval_chain" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="b014ad8d-a24d-863d-b2d7-424787913acd">
+      <Execution id="4f3e9aa8-b2f0-448d-afe9-977f06cbf747" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Author_can_submit_and_reroute_an_ordered_named_review_and_approval_chain" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Technical_and_release_signatures_bind_formal_summary_and_released_file_metadata" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="7a6b7e13-a3c4-284a-c5d6-8dbf9bd8e617">
+      <Execution id="90b5fd92-181e-4883-92a5-f536f84da6df" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Technical_and_release_signatures_bind_formal_summary_and_released_file_metadata" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(phase: &quot;object-staged-1&quot;)" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="cb5549f5-6aee-f05e-af8f-9ad713156323">
+      <Execution id="e2d046cb-111a-428a-b1a3-9edf1c2d5879" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(phase: &quot;object-promoted-1&quot;)" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="29ddf694-1c2b-2a84-700c-3bba76834882">
+      <Execution id="0e7ebd35-c0ca-4360-84d0-9576a5cc9e8a" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Project_inventory_and_histories_are_bounded_filtered_and_cursor_scoped" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="c2a4e395-8081-ff04-da96-dd1fa8710c92">
+      <Execution id="d29cc483-2e29-41dc-b7d6-dcbe928b7fe6" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Project_inventory_and_histories_are_bounded_filtered_and_cursor_scoped" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Delegated_authority_is_frozen_at_assignment_but_disabled_signers_fail_closed" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="043b973a-8892-3a77-d521-3f3aa64b0f85">
+      <Execution id="20c29e3d-ac63-4680-aefc-6d6fe791437c" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Delegated_authority_is_frozen_at_assignment_but_disabled_signers_fail_closed" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Oversized_malformed_and_out_of_contract_cursors_fail_bounded" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="cfced167-65f5-be4d-6109-52afc0516b29">
+      <Execution id="c7598b5e-a3b8-4583-ab67-4b9000a3decc" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerMembershipApiTests" name="Oversized_malformed_and_out_of_contract_cursors_fail_bounded" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Release_link_pages_and_quality_trends_use_canonical_numeric_order" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="ef4fceac-5db6-9b7d-84d3-c1f0b2d74a31">
+      <Execution id="0d80bd9f-13fd-40fa-92df-a0b247fe2484" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Release_link_pages_and_quality_trends_use_canonical_numeric_order" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Concurrent_successor_starts_produce_one_project_revision" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="fbf5a9c5-f580-7bbf-f272-9032369a8167">
+      <Execution id="7ffce706-65f7-4919-a49c-f88e6faaf853" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Concurrent_successor_starts_produce_one_project_revision" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Targetless_problem_report_link_keeps_project_scope_without_inventing_a_build" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="a1b5deed-502f-d970-5fb4-ba65f6af5527">
+      <Execution id="7957cd41-b5c3-4aae-b4c6-bfc52ed6675e" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Targetless_problem_report_link_keeps_project_scope_without_inventing_a_build" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Foreign_project_picker_reads_and_relationship_writes_are_refused" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="a00f25e2-1393-a913-0e62-b4042ad2bead">
+      <Execution id="3c5c90ee-e5d5-4a76-92a9-ed1580393e2d" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerMembershipApiTests" name="Foreign_project_picker_reads_and_relationship_writes_are_refused" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Relationships_are_canonical_authorized_project_scoped_review_bound_and_hashed" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="1a80138f-c308-a385-b0f3-036facb9558f">
+      <Execution id="a9b3fed8-443c-44be-b7dd-872be98240a0" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Relationships_are_canonical_authorized_project_scoped_review_bound_and_hashed" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_fault_after_metadata_commit_reconciles_to_available_and_retry_returns_the_same_result" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="6d67e44a-7b32-85f1-a258-775c99c88bfb">
+      <Execution id="47154583-a966-417a-abda-c587be1e8b8d" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Create_fault_after_metadata_commit_reconciles_to_available_and_retry_returns_the_same_result" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Searched_release_continuation_freezes_membership_on_both_sides_of_the_cursor" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="03aee54a-d046-0140-078f-ea14a6dc2d72">
+      <Execution id="1fa8ed78-a19e-4070-bed5-af3611eadad3" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerMembershipApiTests" name="Searched_release_continuation_freezes_membership_on_both_sides_of_the_cursor" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests.First_install_classifies_existing_rows_as_legacy_and_installs_triggers" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="6ad436bb-b594-8e6b-3b48-fb48e39c2d76">
+      <Execution id="67170bce-4090-4781-991d-50ced5982c24" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests" name="First_install_classifies_existing_rows_as_legacy_and_installs_triggers" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(phase: &quot;before-promote&quot;)" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="66d365cd-a760-00ea-ae9a-2ac684e8945b">
+      <Execution id="e8377e34-31f2-4c6f-80b2-7faef0da6018" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Review_decisions_bind_exact_intent_and_retry_idempotently" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="f56f6338-119e-c524-3e21-761ff44b3396">
+      <Execution id="b3760a13-663b-4ed2-8ee3-2167fb0f758c" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Review_decisions_bind_exact_intent_and_retry_idempotently" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Release_ordinal_is_database_owned_across_ef_lifecycle_saves_on_sqlite" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="4f7188a3-565e-fee9-99d1-13bc76f6eb5f">
+      <Execution id="b3c699bc-baf2-405e-a21e-5876d072a6dd" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerMembershipApiTests" name="Release_ordinal_is_database_owned_across_ef_lifecycle_saves_on_sqlite" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests.Failed_install_rolls_back_the_whole_first_installation" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="61ee833f-2e5c-d11a-7715-2ed65301444c">
+      <Execution id="201c2a2b-8294-44e9-b78d-7d43d52b0b75" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerSqliteGuardTests" name="Failed_install_rolls_back_the_whole_first_installation" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Release_candidate_rejects_unrelated_docx_bad_pdf_and_misleading_names_without_persisting_any_state" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="3d9df52d-324c-dc08-9113-924b47636439">
+      <Execution id="fbde6757-087d-48a8-b37f-0756c4eb55d1" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Release_candidate_rejects_unrelated_docx_bad_pdf_and_misleading_names_without_persisting_any_state" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Oversized_whitespace_and_missing_required_fields_fail_the_v2_contract" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="580f3545-49b0-2406-2e7c-1f5d539d7c43">
+      <Execution id="a308067e-32bc-4c14-9182-24c2b32ee4b9" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerMembershipApiTests" name="Oversized_whitespace_and_missing_required_fields_fail_the_v2_contract" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Search_binding_page_sizes_and_termination_are_preserved" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="afc898bf-e084-7e69-0675-4324cc63d55b">
+      <Execution id="bcb5f6c3-b1f2-451d-b1f2-3ac96b716614" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerMembershipApiTests" name="Search_binding_page_sizes_and_termination_are_preserved" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.My_work_surfaces_the_active_desktop_checkout_for_its_holder_only" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="31f26cdb-d418-c276-b295-646729b6fa06">
+      <Execution id="c9b1cb04-685a-49a7-b9ce-dfbdd76c3d35" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="My_work_surfaces_the_active_desktop_checkout_for_its_holder_only" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(phase: &quot;pending-recorded&quot;)" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="0e4bea30-bf92-fd50-48f3-24e04c056ea3">
+      <Execution id="98898fe5-a9eb-4328-8dc0-137f54a21e21" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(phase: &quot;manifest-recorded&quot;)" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="f411d436-6b42-f4aa-62a6-14cbe1531c66">
+      <Execution id="12b9d0fd-5b03-4012-9d28-d8c470a83c54" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Repreparing_a_candidate_supersedes_the_prior_pair_and_releases_only_the_latest" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="984d99fe-5e9a-2ad8-fc15-fe1702328004">
+      <Execution id="7566849a-596c-460e-a1be-0247eede2460" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Repreparing_a_candidate_supersedes_the_prior_pair_and_releases_only_the_latest" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Assignments_are_validated_and_stewardship_and_revision_responsibility_transfer_independently" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="266efd49-6697-1f2b-625c-71976182563d">
+      <Execution id="6a3954c1-1dfe-4135-9d22-f5d147ab9775" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Assignments_are_validated_and_stewardship_and_revision_responsibility_transfer_independently" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback(phase: &quot;metadata-saved&quot;)" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="4cfce050-b648-07f7-044f-9b0d4fabf779">
+      <Execution id="b335ad9b-e7b8-4481-97fc-3d758868b9e0" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Create_faults_leave_no_visible_document_and_reconcile_to_reported_rollback" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Old_release_v1_cursor_fails_closed_with_a_start_again_path" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="e6c7a967-3b49-5db7-0df2-d5d4606d70a4">
+      <Execution id="987603bc-67e5-44d2-bac1-8b81b8288cf9" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerMembershipApiTests" name="Old_release_v1_cursor_fails_closed_with_a_start_again_path" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Fresh_setup_project_supports_local_connector_check_in_review_and_exact_controlled_release" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="32325332-9615-06b8-44fe-c67c80495b14">
+      <Execution id="a38882c2-76e9-436c-afc6-c6978f53e4e8" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Fresh_setup_project_supports_local_connector_check_in_review_and_exact_controlled_release" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ReleasePickerMembershipApiTests.Release_continuation_freezes_membership_and_a_fresh_traversal_shows_later_builds" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="2084bb29-e81e-bfbb-a230-2bad87d8b792">
+      <Execution id="dc66933e-d92c-456d-ad9a-674040a7aeb5" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ReleasePickerMembershipApiTests" name="Release_continuation_freezes_membership_and_a_fresh_traversal_shows_later_builds" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Create_requires_a_caller_operation_key_and_distinct_keys_do_not_collapse_equal_intent" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="ef3f9e5b-8105-68f3-3c85-b505b49299da">
+      <Execution id="1ed8aa91-928d-4097-8f43-560fd17f19df" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Create_requires_a_caller_operation_key_and_distinct_keys_do_not_collapse_equal_intent" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Formal_scope_capability_is_server_derived_and_an_ended_owner_cannot_bypass_project_access" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="30620cb1-aea3-5b11-7ee0-62bb8e67fda2">
+      <Execution id="9e796e28-0ea2-4fa0-bdca-b3b9b2b26a6e" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Formal_scope_capability_is_server_derived_and_an_ended_owner_cannot_bypass_project_access" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Formal_scope_correction_is_audited_versioned_and_bound_to_review_snapshot" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="a9c24884-0acd-8c16-3c6f-938c63ca6ad8">
+      <Execution id="fb8dc7d3-305c-4d69-a370-911f462a6187" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Formal_scope_correction_is_audited_versioned_and_bound_to_review_snapshot" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Released_build_context_cannot_make_a_project_document_read_only_or_change_inventory" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="832bd96d-20ac-01a5-4ee4-354ca47d0256">
+      <Execution id="d69eabb4-88ff-4543-beab-8328f6c5967d" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Released_build_context_cannot_make_a_project_document_read_only_or_change_inventory" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Api.Tests.ManagedDocumentApiTests.Reviewer_independence_uses_the_exact_immutable_contributor_set" storage="/home/user/wt-impl/product/tests/aerolink.api.tests/bin/release/net10.0/aerolink.api.tests.dll" id="8c5d9710-3641-9aff-ad69-845c25bca5ba">
+      <Execution id="ed037e1f-d700-46d2-a65e-c7335017fc06" />
+      <TestMethod codeBase="/home/user/wt-impl/product/tests/AeroLink.Api.Tests/bin/Release/net10.0/AeroLink.Api.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Api.Tests.ManagedDocumentApiTests" name="Reviewer_independence_uses_the_exact_immutable_contributor_set" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="1a80138f-c308-a385-b0f3-036facb9558f" executionId="a9b3fed8-443c-44be-b7dd-872be98240a0" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="29ddf694-1c2b-2a84-700c-3bba76834882" executionId="0e7ebd35-c0ca-4360-84d0-9576a5cc9e8a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a9c24884-0acd-8c16-3c6f-938c63ca6ad8" executionId="fb8dc7d3-305c-4d69-a370-911f462a6187" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="cfced167-65f5-be4d-6109-52afc0516b29" executionId="c7598b5e-a3b8-4583-ab67-4b9000a3decc" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="db0545d1-f0b7-63b8-7853-721aae602f6c" executionId="d4645712-7909-4cbd-855c-14c70cb7173c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6d67e44a-7b32-85f1-a258-775c99c88bfb" executionId="47154583-a966-417a-abda-c587be1e8b8d" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="8c5d9710-3641-9aff-ad69-845c25bca5ba" executionId="ed037e1f-d700-46d2-a65e-c7335017fc06" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="03aee54a-d046-0140-078f-ea14a6dc2d72" executionId="1fa8ed78-a19e-4070-bed5-af3611eadad3" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a00f25e2-1393-a913-0e62-b4042ad2bead" executionId="3c5c90ee-e5d5-4a76-92a9-ed1580393e2d" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ef4fceac-5db6-9b7d-84d3-c1f0b2d74a31" executionId="0d80bd9f-13fd-40fa-92df-a0b247fe2484" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="10ed92cd-1cfd-dd5a-dbbf-811cdf2764f8" executionId="2726d98b-bb01-44d6-bffe-cda069e404e0" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="3d9df52d-324c-dc08-9113-924b47636439" executionId="fbde6757-087d-48a8-b37f-0756c4eb55d1" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="fbf5a9c5-f580-7bbf-f272-9032369a8167" executionId="7ffce706-65f7-4919-a49c-f88e6faaf853" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="02666393-f27f-b1f8-5a61-fdf2fbac36c7" executionId="eeca551e-d94d-431c-8115-c4fd27945c9b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="832bd96d-20ac-01a5-4ee4-354ca47d0256" executionId="d69eabb4-88ff-4543-beab-8328f6c5967d" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="13a40c0a-9c83-8393-54b7-7ae41c94aa58" executionId="feb90d03-318e-4100-b064-819765432359" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="35b3ded2-948d-f17e-8be7-fb79a883f8f0" executionId="71196083-0705-4b68-89e2-ef7cfbbf0ed8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="32325332-9615-06b8-44fe-c67c80495b14" executionId="a38882c2-76e9-436c-afc6-c6978f53e4e8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d830976c-efde-2f86-4aed-511ca627044f" executionId="7094163c-2410-43ba-9701-e18a978db745" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="580f3545-49b0-2406-2e7c-1f5d539d7c43" executionId="a308067e-32bc-4c14-9182-24c2b32ee4b9" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7a6b7e13-a3c4-284a-c5d6-8dbf9bd8e617" executionId="90b5fd92-181e-4883-92a5-f536f84da6df" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="31f26cdb-d418-c276-b295-646729b6fa06" executionId="c9b1cb04-685a-49a7-b9ce-dfbdd76c3d35" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f56f6338-119e-c524-3e21-761ff44b3396" executionId="b3760a13-663b-4ed2-8ee3-2167fb0f758c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="61ee833f-2e5c-d11a-7715-2ed65301444c" executionId="201c2a2b-8294-44e9-b78d-7d43d52b0b75" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4f7188a3-565e-fee9-99d1-13bc76f6eb5f" executionId="b3c699bc-baf2-405e-a21e-5876d072a6dd" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="5fd9aa20-5fd3-6970-dbec-85c469366c16" executionId="23548f51-ee1a-4f05-8de1-977cca55b378" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="66d365cd-a760-00ea-ae9a-2ac684e8945b" executionId="e8377e34-31f2-4c6f-80b2-7faef0da6018" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="e6c7a967-3b49-5db7-0df2-d5d4606d70a4" executionId="987603bc-67e5-44d2-bac1-8b81b8288cf9" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="043b973a-8892-3a77-d521-3f3aa64b0f85" executionId="20c29e3d-ac63-4680-aefc-6d6fe791437c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ef3f9e5b-8105-68f3-3c85-b505b49299da" executionId="1ed8aa91-928d-4097-8f43-560fd17f19df" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="b014ad8d-a24d-863d-b2d7-424787913acd" executionId="4f3e9aa8-b2f0-448d-afe9-977f06cbf747" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="984d99fe-5e9a-2ad8-fc15-fe1702328004" executionId="7566849a-596c-460e-a1be-0247eede2460" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c1cf9e89-e859-77bd-b351-613710e42a10" executionId="22637dc9-7172-4b72-83ba-0f6e9ebd0acf" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="2e4747b5-e910-3319-01c4-284608831364" executionId="1d3b220c-a25c-4274-91a0-f0a1c54b0e1a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c2a4e395-8081-ff04-da96-dd1fa8710c92" executionId="d29cc483-2e29-41dc-b7d6-dcbe928b7fe6" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="2084bb29-e81e-bfbb-a230-2bad87d8b792" executionId="dc66933e-d92c-456d-ad9a-674040a7aeb5" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="afc898bf-e084-7e69-0675-4324cc63d55b" executionId="bcb5f6c3-b1f2-451d-b1f2-3ac96b716614" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6e3b4af8-e894-ff40-1128-e341bedc8690" executionId="f89c6ed4-91e1-4fdb-9c96-7b9bf5e5b080" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="30620cb1-aea3-5b11-7ee0-62bb8e67fda2" executionId="9e796e28-0ea2-4fa0-bdca-b3b9b2b26a6e" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f72276d6-15f6-db2d-7b7a-f57a2a9fadc9" executionId="9829dc10-d823-4dc8-9d41-d9eaa020e638" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="e20df5ea-53fe-287e-fb3e-260dd4947177" executionId="0f6dc399-0ed9-4aae-9ec4-f67fcc4ffa13" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="266efd49-6697-1f2b-625c-71976182563d" executionId="6a3954c1-1dfe-4135-9d22-f5d147ab9775" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0e4bea30-bf92-fd50-48f3-24e04c056ea3" executionId="98898fe5-a9eb-4328-8dc0-137f54a21e21" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a1b5deed-502f-d970-5fb4-ba65f6af5527" executionId="7957cd41-b5c3-4aae-b4c6-bfc52ed6675e" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4cfce050-b648-07f7-044f-9b0d4fabf779" executionId="b335ad9b-e7b8-4481-97fc-3d758868b9e0" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="cb5549f5-6aee-f05e-af8f-9ad713156323" executionId="e2d046cb-111a-428a-b1a3-9edf1c2d5879" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6ad436bb-b594-8e6b-3b48-fb48e39c2d76" executionId="67170bce-4090-4781-991d-50ced5982c24" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f411d436-6b42-f4aa-62a6-14cbe1531c66" executionId="12b9d0fd-5b03-4012-9d28-d8c470a83c54" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="303c3f22-0f37-a394-c3e7-dc580fad77ed" executionId="4ea6d05c-eff7-4da4-b2f1-fc9bf519ccb3" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="49" executed="49" passed="49" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 10.0.12)
+[xUnit.net 00:00:00.18]   Discovering: AeroLink.Api.Tests
+[xUnit.net 00:00:00.36]   Discovered:  AeroLink.Api.Tests
+[xUnit.net 00:00:00.39]   Starting:    AeroLink.Api.Tests
+PICKER_WAL_DEBUG files=[picker-guard-template-e6aaf97198ba4633b578fbf5a314544b.db]
+warn: Microsoft.EntityFrameworkCore.Query[20504]
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.
+fail: ConcurrencyExceptionHandler[0]
+      Unhandled API failure for POST /api/managed-documents
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/before-available-recorded.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.CheckpointAsync(ManagedDocumentStorageOperation operation, String phase, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 110
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.CompleteAsync(ManagedDocumentStorageOperation operation, DateTimeOffset now, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 102
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 251
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 251
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1]
+      An unhandled exception has occurred while executing the request.
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/before-available-recorded.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.CheckpointAsync(ManagedDocumentStorageOperation operation, String phase, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 110
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.CompleteAsync(ManagedDocumentStorageOperation operation, DateTimeOffset now, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 102
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 251
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 251
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+warn: Microsoft.EntityFrameworkCore.Query[20504]
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[20504]
+      Compiling a query which loads related collections for more than one collection navigation, either via 'Include' or through projection, but no 'QuerySplittingBehavior' has been configured. By default, Entity Framework will use 'QuerySplittingBehavior.SingleQuery', which can potentially result in slow query performance. See https://go.microsoft.com/fwlink/?linkid=2134277 for more information. To identify the query that's triggering this warning call 'ConfigureWarnings(w =&gt; w.Throw(RelationalEventId.MultipleCollectionIncludeWarning))'.
+fail: ConcurrencyExceptionHandler[0]
+      Unhandled API failure for POST /api/managed-documents
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/manifest-recorded.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.RecordPlanAsync(ManagedDocumentStorageOperation operation, IReadOnlyCollection`1 objects, String resultJson, DateTimeOffset now, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 91
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 243
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1]
+      An unhandled exception has occurred while executing the request.
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/manifest-recorded.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.RecordPlanAsync(ManagedDocumentStorageOperation operation, IReadOnlyCollection`1 objects, String resultJson, DateTimeOffset now, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 91
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 243
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: ConcurrencyExceptionHandler[0]
+      Unhandled API failure for POST /api/managed-documents
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/metadata-saved.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 250
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 251
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1]
+      An unhandled exception has occurred while executing the request.
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/metadata-saved.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 250
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 251
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: ConcurrencyExceptionHandler[0]
+      Unhandled API failure for POST /api/managed-documents
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/object-promoted-1.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.PromoteAsync(ManagedDocumentStorageOperation operation, IEnumerable`1 staged, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 97
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 250
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 251
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1]
+      An unhandled exception has occurred while executing the request.
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/object-promoted-1.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.PromoteAsync(ManagedDocumentStorageOperation operation, IEnumerable`1 staged, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 97
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 250
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 251
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: ConcurrencyExceptionHandler[0]
+      Unhandled API failure for POST /api/managed-documents
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/object-staged-1.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 241
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1]
+      An unhandled exception has occurred while executing the request.
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/object-staged-1.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 241
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: ConcurrencyExceptionHandler[0]
+      Unhandled API failure for POST /api/managed-documents
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/before-promote.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.PromoteAsync(ManagedDocumentStorageOperation operation, IEnumerable`1 staged, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 96
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 250
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 251
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1]
+      An unhandled exception has occurred while executing the request.
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/before-promote.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.PromoteAsync(ManagedDocumentStorageOperation operation, IEnumerable`1 staged, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 96
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 250
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 251
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: ConcurrencyExceptionHandler[0]
+      Unhandled API failure for POST /api/managed-documents
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/pending-recorded.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.BeginAsync(Guid projectId, Guid documentId, Guid revisionId, String operationType, String operationKey, String payloadHash, String actor, DateTimeOffset now, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 74
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.BeginAsync(Guid projectId, Guid documentId, Guid revisionId, String operationType, String operationKey, String payloadHash, String actor, DateTimeOffset now, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 82
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 236
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddleware[1]
+      An unhandled exception has occurred while executing the request.
+      System.IO.IOException: Injected managed-document storage failure at DocumentCreate/pending-recorded.
+         at AeroLink.Api.Tests.OneShotStorageFaultInjector.CheckpointAsync(ManagedDocumentStorageOperation operation, String checkpoint, CancellationToken ct) in /home/user/wt-impl/product/tests/AeroLink.Api.Tests/ManagedDocumentApiTests.cs:line 1424
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.BeginAsync(Guid projectId, Guid documentId, Guid revisionId, String operationType, String operationKey, String payloadHash, String actor, DateTimeOffset now, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 74
+         at AeroLink.Infrastructure.Persistence.ManagedDocumentStorageCoordinator.BeginAsync(Guid projectId, Guid documentId, Guid revisionId, String operationType, String operationKey, String payloadHash, String actor, DateTimeOffset now, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Infrastructure/Persistence/ManagedDocumentStorageCoordinator.cs:line 82
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 236
+         at ManagedDocumentEndpoints.CreateAsync(CreateManagedDocumentRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity, ManagedDocumentFileService files, ManagedDocumentStorageCoordinator storage, CancellationToken ct) in /home/user/wt-impl/product/src/AeroLink.Api/ManagedDocumentEndpoints.cs:line 259
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.ExecuteTaskResult[T](Task`1 task, HttpContext httpContext)
+         at Microsoft.AspNetCore.Http.RequestDelegateFactory.&lt;&gt;c__DisplayClass102_2.&lt;&lt;HandleRequestBodyAndCompileRequestDelegateForJson&gt;b__2&gt;d.MoveNext()
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__5&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 363
+      --- End of stack trace from previous location ---
+         at Program.&lt;&gt;c__DisplayClass0_0.&lt;&lt;&lt;Main&gt;$&gt;b__4&gt;d.MoveNext() in /home/user/wt-impl/product/src/AeroLink.Api/Program.cs:line 207
+      --- End of stack trace from previous location ---
+         at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)
+         at Microsoft.AspNetCore.Diagnostics.ExceptionHandlerMiddlewareImpl.&lt;Invoke&gt;g__Awaited|10_0(ExceptionHandlerMiddlewareImpl middleware, HttpContext context, Task task)
+fail: Microsoft.EntityFrameworkCore.Database.Command[20102]
+      Failed executing DbCommand (0ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (DbType = DateTimeOffset), @p2='?' (Size = 32), @p3='?' (Size = 7), @p4='?' (Size = 64), @p5='?' (Size = 274), @p6='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "managed_document_operations" ("Id", "CompletedAt", "OperationKey", "OperationType", "PayloadHash", "ResultJson", "RevisionId")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6);
+fail: Microsoft.EntityFrameworkCore.Update[10000]
+      An exception occurred in the database while saving changes for context type 'AeroLink.Infrastructure.Persistence.AeroLinkDbContext'.
+      Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.
+       ---&gt; Microsoft.Data.Sqlite.SqliteException (0x80004005): SQLite Error 19: 'UNIQUE constraint failed: managed_document_operations.RevisionId, managed_document_operations.OperationType, managed_document_operations.OperationKey'.
+         at Microsoft.Data.Sqlite.SqliteException.ThrowExceptionForRC(Int32 rc, sqlite3 db)
+         at Microsoft.Data.Sqlite.SqliteDataReader.NextResult()
+         at Microsoft.Data.Sqlite.SqliteCommand.ExecuteReader(CommandBehavior behavior)
+         at Microsoft.Data.Sqlite.SqliteCommand.ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)
+         --- End of inner exception stack trace ---
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Storage.RelationalDatabase.SaveChangesAsync(IList`1 entries, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(IList`1 entriesToSave, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(StateManager stateManager, Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.DbContext.SaveChangesAsync(Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+      Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.
+       ---&gt; Microsoft.Data.Sqlite.SqliteException (0x80004005): SQLite Error 19: 'UNIQUE constraint failed: managed_document_operations.RevisionId, managed_document_operations.OperationType, managed_document_operations.OperationKey'.
+         at Microsoft.Data.Sqlite.SqliteException.ThrowExceptionForRC(Int32 rc, sqlite3 db)
+         at Microsoft.Data.Sqlite.SqliteDataReader.NextResult()
+         at Microsoft.Data.Sqlite.SqliteCommand.ExecuteReader(CommandBehavior behavior)
+         at Microsoft.Data.Sqlite.SqliteCommand.ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)
+         --- End of inner exception stack trace ---
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Storage.RelationalDatabase.SaveChangesAsync(IList`1 entries, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(IList`1 entriesToSave, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(StateManager stateManager, Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.DbContext.SaveChangesAsync(Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+fail: Microsoft.EntityFrameworkCore.Database.Command[20102]
+      Failed executing DbCommand (164ms) [Parameters=[@p0='?' (DbType = Guid), @p1='?' (Size = 5), @p2='?' (DbType = DateTimeOffset), @p3='?' (DbType = DateTimeOffset), @p4='?' (Size = 36), @p5='?' (DbType = Guid), @p6='?' (Size = 2), @p7='?' (Size = 47), @p8='?' (Size = 13), @p9='?' (Size = 64), @p10='?' (DbType = Guid), @p11='?', @p12='?' (DbType = Guid), @p13='?' (Size = 7), @p14='?' (DbType = DateTimeOffset)], CommandType='Text', CommandTimeout='30']
+      INSERT INTO "managed_document_storage_operations" ("Id", "ActorId", "CompletedAt", "CreatedAt", "Detail", "DocumentId", "ObjectManifestJson", "OperationKey", "OperationType", "PayloadHash", "ProjectId", "ResultJson", "RevisionId", "State", "UpdatedAt")
+      VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13, @p14);
+fail: Microsoft.EntityFrameworkCore.Update[10000]
+      An exception occurred in the database while saving changes for context type 'AeroLink.Infrastructure.Persistence.AeroLinkDbContext'.
+      Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.
+       ---&gt; Microsoft.Data.Sqlite.SqliteException (0x80004005): SQLite Error 19: 'UNIQUE constraint failed: managed_document_storage_operations.ProjectId, managed_document_storage_operations.OperationType, managed_document_storage_operations.OperationKey'.
+         at Microsoft.Data.Sqlite.SqliteException.ThrowExceptionForRC(Int32 rc, sqlite3 db)
+         at Microsoft.Data.Sqlite.SqliteDataReader.NextResult()
+         at Microsoft.Data.Sqlite.SqliteCommand.ExecuteReader(CommandBehavior behavior)
+         at Microsoft.Data.Sqlite.SqliteCommand.ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)
+         --- End of inner exception stack trace ---
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Storage.RelationalDatabase.SaveChangesAsync(IList`1 entries, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(IList`1 entriesToSave, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(StateManager stateManager, Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.DbContext.SaveChangesAsync(Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+      Microsoft.EntityFrameworkCore.DbUpdateException: An error occurred while saving the entity changes. See the inner exception for details.
+       ---&gt; Microsoft.Data.Sqlite.SqliteException (0x80004005): SQLite Error 19: 'UNIQUE constraint failed: managed_document_storage_operations.ProjectId, managed_document_storage_operations.OperationType, managed_document_storage_operations.OperationKey'.
+         at Microsoft.Data.Sqlite.SqliteException.ThrowExceptionForRC(Int32 rc, sqlite3 db)
+         at Microsoft.Data.Sqlite.SqliteDataReader.NextResult()
+         at Microsoft.Data.Sqlite.SqliteCommand.ExecuteReader(CommandBehavior behavior)
+         at Microsoft.Data.Sqlite.SqliteCommand.ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Storage.RelationalCommand.ExecuteReaderAsync(RelationalCommandParameterObject parameterObject, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)
+         --- End of inner exception stack trace ---
+         at Microsoft.EntityFrameworkCore.Update.ReaderModificationCommandBatch.ExecuteAsync(IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Update.Internal.BatchExecutor.ExecuteAsync(IEnumerable`1 commandBatches, IRelationalConnection connection, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.Storage.RelationalDatabase.SaveChangesAsync(IList`1 entries, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(IList`1 entriesToSave, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.ChangeTracking.Internal.StateManager.SaveChangesAsync(StateManager stateManager, Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+         at Microsoft.EntityFrameworkCore.DbContext.SaveChangesAsync(Boolean acceptAllChangesOnSuccess, CancellationToken cancellationToken)
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+warn: Microsoft.EntityFrameworkCore.Query[10102]
+      The query uses a row limiting operator ('Skip'/'Take') without an 'OrderBy' operator. This may lead to unpredictable results. If the 'Distinct' operator is used after 'OrderBy', then make sure to use the 'OrderBy' operator after 'Distinct' as the ordering would otherwise get erased.
+[xUnit.net 00:02:35.40]   Finished:    AeroLink.Api.Tests
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

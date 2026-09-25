@@ -1,0 +1,56 @@
+Replicas ready under /tmp/claude-0/-home-user-requirements-management-tool/c39e8c1c-fcfc-5a63-a0a1-9acbd8dc604d/scratchpad/rehearsal-20260925T023645Z-12413
+PASS  T1 audit exits 0
+PASS  T1 audit changed nothing (refs, HEAD, local config, status, index bytes)
+PASS  T1 audit recorded exactly the two accidental commits beyond pre-incident main
+PASS  T1 audit found the linked feature worktree
+PASS  T1 audit verified the incident bundle
+PASS  T1 audit refuses to reuse its output directory
+PASS  T1 audit refuses output inside the repository
+FAIL  T2 plan exits 0 on the exact incident state
+PASS  T2 plan changed nothing
+PASS  T3a untracked work blocks Recover (refused, nothing changed)
+PASS  T3a no evidence dir created on refusal
+PASS  T3b a subdirectory path is refused (refused, nothing changed)
+PASS  T3c the linked worktree path is refused (refused, nothing changed)
+PASS  T3d HEAD not on main is refused (refused, nothing changed)
+PASS  T3e unexpected local identity refuses the identity step (refused, nothing changed)
+PASS  T3f extra commit beyond the incident is refused (preserve it first) (refused, nothing changed)
+PASS  T3g existing evidence directory is refused (refused, nothing changed)
+FAIL  T4 recover (main only) exits 0
+FAIL  T4 main restored to 77b96857
+FAIL  T4 tree equals pre-incident tree
+PASS  T4 status clean
+FAIL  T4 #1105 content present again (ProjectsLanding.tsx matches 77b96857)
+FAIL  T4 drill line gone from request-full-ci.yml
+PASS  T4 drillA2 untouched
+fatal: ambiguous argument 'refs/incident/1040/local-main-b6309fb0': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+fatal: ambiguous argument 'refs/incident/1040/drillA2-bb8a6622': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+FAIL  T4 archive refs preserve both accidental tips
+PASS  T4 identity untouched without its switch
+PASS  T4 linked feature worktree untouched
+FAIL  T4 preservation bundle is standalone and complete
+grep: /tmp/claude-0/-home-user-requirements-management-tool/c39e8c1c-fcfc-5a63-a0a1-9acbd8dc604d/scratchpad/rehearsal-20260925T023645Z-12413/ev-r3/bundle-heads.txt: No such file or directory
+FAIL  T4 bundle carries the incident main tip
+grep: /tmp/claude-0/-home-user-requirements-management-tool/c39e8c1c-fcfc-5a63-a0a1-9acbd8dc604d/scratchpad/rehearsal-20260925T023645Z-12413/ev-r3/config.pre-recovery: No such file or directory
+FAIL  T4 config copy preserved rehearsal identity
+bash: line 1: cd: /tmp/claude-0/-home-user-requirements-management-tool/c39e8c1c-fcfc-5a63-a0a1-9acbd8dc604d/scratchpad/rehearsal-20260925T023645Z-12413/ev-r3: No such file or directory
+FAIL  T4 evidence checksums verify
+FAIL  T5 rollback exits 0
+PASS  T5 main back at incident commit
+PASS  T5 incident tree restored
+FAIL  T6 recover with all opt-ins exits 0
+FAIL  T6 main fast-forwarded to the replica's origin/main (0dddb0291420ee3630314bba8b9a5a3e6d367e95)
+rehearsal
+FAIL  T6 local identity removed
+FAIL  T6 effective identity now inherits global (no guess)
+FAIL  T6 linked worktree shares the fixed identity
+bb8a6622a08742cc75f9879efb53ce8aa331b2fe
+FAIL  T6 drillA2 archived, commits reachable
+FAIL  T6 rollback exits 0
+PASS  T6 rollback restored incident main, identity and drillA2
+PASS  T7 source clone refs/HEAD/config unchanged
+SUMMARY: 24 passed, 19 failed. Root: /tmp/claude-0/-home-user-requirements-management-tool/c39e8c1c-fcfc-5a63-a0a1-9acbd8dc604d/scratchpad/rehearsal-20260925T023645Z-12413

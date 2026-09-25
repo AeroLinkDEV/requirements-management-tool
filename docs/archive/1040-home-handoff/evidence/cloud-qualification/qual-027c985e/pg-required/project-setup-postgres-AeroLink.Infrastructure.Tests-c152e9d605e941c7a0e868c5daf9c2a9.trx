@@ -1,0 +1,99 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="a6210538-4ce8-46a6-973a-fd35b03d0748" name="@vm 2026-09-25 02:40:25" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-09-25T02:40:25.3546164+00:00" queuing="2026-09-25T02:40:25.3546165+00:00" start="2026-09-25T02:40:01.9957801+00:00" finish="2026-09-25T02:41:20.5189904+00:00" />
+  <TestSettings name="default" id="517abcbb-9d09-483d-8288-80c49b5a50a7">
+    <Deployment runDeploymentRoot="_vm_2026-09-25_02_40_25" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="c34f57cd-16a9-41f9-acb8-5a13c89627c1" testId="49cb47b8-eecf-f795-ea07-50b84893c9a8" testName="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Competing_finalizers_and_lost_committed_result_recover_one_project_on_postgresql" computerName="vm" duration="00:00:04.1439546" startTime="2026-09-25T02:40:51.1997906+00:00" endTime="2026-09-25T02:40:55.3414325+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c34f57cd-16a9-41f9-acb8-5a13c89627c1" />
+    <UnitTestResult executionId="0862a56d-8dd0-46ce-96c2-a2d551bfdd02" testId="fb15477e-81c5-1a8c-501d-d76d3bdd94f5" testName="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Inception_baseline_identity_migration_backfills_existing_drafts_before_unique_constraint" computerName="vm" duration="00:00:04.8671228" startTime="2026-09-25T02:41:00.8720309+00:00" endTime="2026-09-25T02:41:05.7335862+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0862a56d-8dd0-46ce-96c2-a2d551bfdd02" />
+    <UnitTestResult executionId="005fefd8-3d34-4c91-87a5-7a880c174d2f" testId="5a0de47e-3ac7-a05f-b472-ab9b9b833aeb" testName="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Inception_uploads_survive_provider_restart_and_replay_for_all_external_formats_on_postgresql" computerName="vm" duration="00:00:05.8741004" startTime="2026-09-25T02:40:45.3306068+00:00" endTime="2026-09-25T02:40:51.1966636+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="005fefd8-3d34-4c91-87a5-7a880c174d2f" />
+    <UnitTestResult executionId="288d9f63-a9c5-4760-bb4f-f69950ccb810" testId="06876892-1332-3940-aa32-320a979ca62f" testName="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Concurrent_native_capture_and_external_upload_leave_one_staged_package_on_postgresql" computerName="vm" duration="00:00:04.5406623" startTime="2026-09-25T02:41:15.8160199+00:00" endTime="2026-09-25T02:41:20.3496490+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="288d9f63-a9c5-4760-bb4f-f69950ccb810" />
+    <UnitTestResult executionId="c5bacbf0-d70b-40b0-9938-492b99a17086" testId="13c22eb6-748c-ce9c-6cfb-da3550210596" testName="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Migration_draft_reload_and_concurrent_edit_are_durable_on_postgresql" computerName="vm" duration="00:00:04.6352329" startTime="2026-09-25T02:40:35.9883342+00:00" endTime="2026-09-25T02:40:40.6081389+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c5bacbf0-d70b-40b0-9938-492b99a17086" />
+    <UnitTestResult executionId="42a910b4-c61b-44c7-9688-fe51e223ad22" testId="e12221cf-5246-d53e-5a46-7541f60ac735" testName="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Concurrent_source_mapping_and_reconcile_return_one_conflict_and_preserve_reconciled_package_on_postgresql" computerName="vm" duration="00:00:04.7132557" startTime="2026-09-25T02:40:40.6130401+00:00" endTime="2026-09-25T02:40:45.3219966+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="42a910b4-c61b-44c7-9688-fe51e223ad22" />
+    <UnitTestResult executionId="6656db9b-b016-46c5-8c6d-edc026c94f9e" testId="49b79990-08a9-531c-f175-a7936c7e9b2b" testName="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Interrupted_finalization_rolls_back_claim_and_structure_before_retry_on_postgresql" computerName="vm" duration="00:00:10.6591170" startTime="2026-09-25T02:40:25.3434947+00:00" endTime="2026-09-25T02:40:35.9720621+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="6656db9b-b016-46c5-8c6d-edc026c94f9e" />
+    <UnitTestResult executionId="9ad364fb-d058-4b0d-afc2-6d1dce820b04" testId="8bb65f82-edbe-274a-0a6e-561c49aa274d" testName="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Native_capture_survives_restart_and_competing_finalization_on_postgresql" computerName="vm" duration="00:00:05.5237321" startTime="2026-09-25T02:40:55.3451436+00:00" endTime="2026-09-25T02:41:00.8656565+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9ad364fb-d058-4b0d-afc2-6d1dce820b04" />
+    <UnitTestResult executionId="0e5c6569-a4a5-48fe-92e1-0c7c368f321e" testId="3f7535a4-0c84-70fb-7606-7d24fc487109" testName="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Canonical_release_keyset_pages_preserve_historical_versions_on_postgresql" computerName="vm" duration="00:00:22.2457822" startTime="2026-09-25T02:40:03.1009302+00:00" endTime="2026-09-25T02:40:25.3095095+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0e5c6569-a4a5-48fe-92e1-0c7c368f321e" />
+    <UnitTestResult executionId="a9c19921-8392-4d7c-9483-e85481b19c89" testId="242380b7-4dc3-93ff-7fa5-ab7dffc58f2c" testName="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Concurrent_identical_external_uploads_are_normalized_to_one_package_and_one_conflict_on_postgresql" computerName="vm" duration="00:00:04.7176416" startTime="2026-09-25T02:41:05.7380025+00:00" endTime="2026-09-25T02:41:10.4523324+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a9c19921-8392-4d7c-9483-e85481b19c89" />
+    <UnitTestResult executionId="9f809b0a-783d-4c01-bcfd-af746ec53688" testId="a10bfc7d-62d1-676c-6593-a9957f706e3b" testName="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Repository_verification_migration_preserves_legacy_null_facts_and_new_identity_snapshots" computerName="vm" duration="00:00:05.3550813" startTime="2026-09-25T02:41:10.4556640+00:00" endTime="2026-09-25T02:41:15.8082335+00:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9f809b0a-783d-4c01-bcfd-af746ec53688" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Concurrent_identical_external_uploads_are_normalized_to_one_package_and_one_conflict_on_postgresql" storage="/home/user/wt-1066/product/tests/aerolink.infrastructure.tests/bin/release/net10.0/aerolink.infrastructure.tests.dll" id="242380b7-4dc3-93ff-7fa5-ab7dffc58f2c">
+      <Execution id="a9c19921-8392-4d7c-9483-e85481b19c89" />
+      <TestMethod codeBase="/home/user/wt-1066/product/tests/AeroLink.Infrastructure.Tests/bin/Release/net10.0/AeroLink.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests" name="Concurrent_identical_external_uploads_are_normalized_to_one_package_and_one_conflict_on_postgresql" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Canonical_release_keyset_pages_preserve_historical_versions_on_postgresql" storage="/home/user/wt-1066/product/tests/aerolink.infrastructure.tests/bin/release/net10.0/aerolink.infrastructure.tests.dll" id="3f7535a4-0c84-70fb-7606-7d24fc487109">
+      <Execution id="0e5c6569-a4a5-48fe-92e1-0c7c368f321e" />
+      <TestMethod codeBase="/home/user/wt-1066/product/tests/AeroLink.Infrastructure.Tests/bin/Release/net10.0/AeroLink.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests" name="Canonical_release_keyset_pages_preserve_historical_versions_on_postgresql" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Concurrent_native_capture_and_external_upload_leave_one_staged_package_on_postgresql" storage="/home/user/wt-1066/product/tests/aerolink.infrastructure.tests/bin/release/net10.0/aerolink.infrastructure.tests.dll" id="06876892-1332-3940-aa32-320a979ca62f">
+      <Execution id="288d9f63-a9c5-4760-bb4f-f69950ccb810" />
+      <TestMethod codeBase="/home/user/wt-1066/product/tests/AeroLink.Infrastructure.Tests/bin/Release/net10.0/AeroLink.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests" name="Concurrent_native_capture_and_external_upload_leave_one_staged_package_on_postgresql" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Migration_draft_reload_and_concurrent_edit_are_durable_on_postgresql" storage="/home/user/wt-1066/product/tests/aerolink.infrastructure.tests/bin/release/net10.0/aerolink.infrastructure.tests.dll" id="13c22eb6-748c-ce9c-6cfb-da3550210596">
+      <Execution id="c5bacbf0-d70b-40b0-9938-492b99a17086" />
+      <TestMethod codeBase="/home/user/wt-1066/product/tests/AeroLink.Infrastructure.Tests/bin/Release/net10.0/AeroLink.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests" name="Migration_draft_reload_and_concurrent_edit_are_durable_on_postgresql" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Competing_finalizers_and_lost_committed_result_recover_one_project_on_postgresql" storage="/home/user/wt-1066/product/tests/aerolink.infrastructure.tests/bin/release/net10.0/aerolink.infrastructure.tests.dll" id="49cb47b8-eecf-f795-ea07-50b84893c9a8">
+      <Execution id="c34f57cd-16a9-41f9-acb8-5a13c89627c1" />
+      <TestMethod codeBase="/home/user/wt-1066/product/tests/AeroLink.Infrastructure.Tests/bin/Release/net10.0/AeroLink.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests" name="Competing_finalizers_and_lost_committed_result_recover_one_project_on_postgresql" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Interrupted_finalization_rolls_back_claim_and_structure_before_retry_on_postgresql" storage="/home/user/wt-1066/product/tests/aerolink.infrastructure.tests/bin/release/net10.0/aerolink.infrastructure.tests.dll" id="49b79990-08a9-531c-f175-a7936c7e9b2b">
+      <Execution id="6656db9b-b016-46c5-8c6d-edc026c94f9e" />
+      <TestMethod codeBase="/home/user/wt-1066/product/tests/AeroLink.Infrastructure.Tests/bin/Release/net10.0/AeroLink.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests" name="Interrupted_finalization_rolls_back_claim_and_structure_before_retry_on_postgresql" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Concurrent_source_mapping_and_reconcile_return_one_conflict_and_preserve_reconciled_package_on_postgresql" storage="/home/user/wt-1066/product/tests/aerolink.infrastructure.tests/bin/release/net10.0/aerolink.infrastructure.tests.dll" id="e12221cf-5246-d53e-5a46-7541f60ac735">
+      <Execution id="42a910b4-c61b-44c7-9688-fe51e223ad22" />
+      <TestMethod codeBase="/home/user/wt-1066/product/tests/AeroLink.Infrastructure.Tests/bin/Release/net10.0/AeroLink.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests" name="Concurrent_source_mapping_and_reconcile_return_one_conflict_and_preserve_reconciled_package_on_postgresql" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Native_capture_survives_restart_and_competing_finalization_on_postgresql" storage="/home/user/wt-1066/product/tests/aerolink.infrastructure.tests/bin/release/net10.0/aerolink.infrastructure.tests.dll" id="8bb65f82-edbe-274a-0a6e-561c49aa274d">
+      <Execution id="9ad364fb-d058-4b0d-afc2-6d1dce820b04" />
+      <TestMethod codeBase="/home/user/wt-1066/product/tests/AeroLink.Infrastructure.Tests/bin/Release/net10.0/AeroLink.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests" name="Native_capture_survives_restart_and_competing_finalization_on_postgresql" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Repository_verification_migration_preserves_legacy_null_facts_and_new_identity_snapshots" storage="/home/user/wt-1066/product/tests/aerolink.infrastructure.tests/bin/release/net10.0/aerolink.infrastructure.tests.dll" id="a10bfc7d-62d1-676c-6593-a9957f706e3b">
+      <Execution id="9f809b0a-783d-4c01-bcfd-af746ec53688" />
+      <TestMethod codeBase="/home/user/wt-1066/product/tests/AeroLink.Infrastructure.Tests/bin/Release/net10.0/AeroLink.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests" name="Repository_verification_migration_preserves_legacy_null_facts_and_new_identity_snapshots" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Inception_baseline_identity_migration_backfills_existing_drafts_before_unique_constraint" storage="/home/user/wt-1066/product/tests/aerolink.infrastructure.tests/bin/release/net10.0/aerolink.infrastructure.tests.dll" id="fb15477e-81c5-1a8c-501d-d76d3bdd94f5">
+      <Execution id="0862a56d-8dd0-46ce-96c2-a2d551bfdd02" />
+      <TestMethod codeBase="/home/user/wt-1066/product/tests/AeroLink.Infrastructure.Tests/bin/Release/net10.0/AeroLink.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests" name="Inception_baseline_identity_migration_backfills_existing_drafts_before_unique_constraint" />
+    </UnitTest>
+    <UnitTest name="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests.Inception_uploads_survive_provider_restart_and_replay_for_all_external_formats_on_postgresql" storage="/home/user/wt-1066/product/tests/aerolink.infrastructure.tests/bin/release/net10.0/aerolink.infrastructure.tests.dll" id="5a0de47e-3ac7-a05f-b472-ab9b9b833aeb">
+      <Execution id="005fefd8-3d34-4c91-87a5-7a880c174d2f" />
+      <TestMethod codeBase="/home/user/wt-1066/product/tests/AeroLink.Infrastructure.Tests/bin/Release/net10.0/AeroLink.Infrastructure.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="AeroLink.Infrastructure.Tests.ProjectSetupPostgresQualificationTests" name="Inception_uploads_survive_provider_restart_and_replay_for_all_external_formats_on_postgresql" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="49cb47b8-eecf-f795-ea07-50b84893c9a8" executionId="c34f57cd-16a9-41f9-acb8-5a13c89627c1" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="fb15477e-81c5-1a8c-501d-d76d3bdd94f5" executionId="0862a56d-8dd0-46ce-96c2-a2d551bfdd02" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="5a0de47e-3ac7-a05f-b472-ab9b9b833aeb" executionId="005fefd8-3d34-4c91-87a5-7a880c174d2f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="06876892-1332-3940-aa32-320a979ca62f" executionId="288d9f63-a9c5-4760-bb4f-f69950ccb810" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="13c22eb6-748c-ce9c-6cfb-da3550210596" executionId="c5bacbf0-d70b-40b0-9938-492b99a17086" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="e12221cf-5246-d53e-5a46-7541f60ac735" executionId="42a910b4-c61b-44c7-9688-fe51e223ad22" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="49b79990-08a9-531c-f175-a7936c7e9b2b" executionId="6656db9b-b016-46c5-8c6d-edc026c94f9e" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="8bb65f82-edbe-274a-0a6e-561c49aa274d" executionId="9ad364fb-d058-4b0d-afc2-6d1dce820b04" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="3f7535a4-0c84-70fb-7606-7d24fc487109" executionId="0e5c6569-a4a5-48fe-92e1-0c7c368f321e" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="242380b7-4dc3-93ff-7fa5-ab7dffc58f2c" executionId="a9c19921-8392-4d7c-9483-e85481b19c89" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a10bfc7d-62d1-676c-6593-a9957f706e3b" executionId="9f809b0a-783d-4c01-bcfd-af746ec53688" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="11" executed="11" passed="11" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.4+50e68bbb8b (64-bit .NET 10.0.12)
+[xUnit.net 00:00:00.15]   Discovering: AeroLink.Infrastructure.Tests
+[xUnit.net 00:00:00.38]   Discovered:  AeroLink.Infrastructure.Tests
+[xUnit.net 00:00:00.40]   Starting:    AeroLink.Infrastructure.Tests
+[xUnit.net 00:01:17.74]   Finished:    AeroLink.Infrastructure.Tests
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="vm" outcome="Warning" timestamp="2026-09-25T02:41:20.4598199+00:00">
+        <Text>Data collector 'Blame' message: All tests finished running, Sequence file will not be generated.</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>

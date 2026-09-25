@@ -1,0 +1,23 @@
+BEFORE HEAD=ed93937619f6e648110d45fdb7c6fe8d775022bd dirty=0 2026-09-25T02:57:38Z
+    24 Warning(s)
+    0 Error(s)
+AFTER-BUILD HEAD=ed93937619f6e648110d45fdb7c6fe8d775022bd dirty=0 2026-09-25T02:58:32Z
+Passed!  - Failed:     0, Passed:    11, Skipped:     0, Total:    11, Duration: 1 m 20 s - AeroLink.Infrastructure.Tests.dll (net10.0)
+Required project-setup PostgreSQL qualification: 11 passed; none skipped. TRX: /tmp/claude-0/-home-user-requirements-management-tool/c39e8c1c-fcfc-5a63-a0a1-9acbd8dc604d/scratchpad/qual-ed939376/pg-required/project-setup-postgres-AeroLink.Infrastructure.Tests-2e826dcc8f88481998d4a197923b3326.trx
+[xUnit.net 00:01:05.37]     AeroLink.Api.Tests.ProjectSetupPostgresQualificationTests.Picker_continuation_generated_sql_and_parameters_are_captured_for_plan_evidence [FAIL]
+  Error Message:
+     at Interop.ThrowExceptionForIoErrno(ErrorInfo errorInfo, String path, Boolean isDirError)
+Failed!  - Failed:     1, Passed:    14, Skipped:     0, Total:    15, Duration: 2 m 30 s - AeroLink.Api.Tests.dll (net10.0)
+[31;1m[0m[36;1m[36;1m  25 | [0m … DE -ne 0) { [36;1mthrow 'Required project-setup PostgreSQL tests failed.'[0m } …[0m
+[31;1m[0m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mRequired project-setup PostgreSQL tests failed.[0m
+pg-exit=1
+AFTER-PG HEAD=ed93937619f6e648110d45fdb7c6fe8d775022bd dirty=0 2026-09-25T03:02:27Z
+Passed!  - Failed:     0, Passed:    14, Skipped:     0, Total:    14, Duration: 1 m 18 s - AeroLink.Infrastructure.Tests.dll (net10.0)
+Passed!  - Failed:     0, Passed:   788, Skipped:     0, Total:   788, Duration: 2 s - AeroLink.Domain.Tests.dll (net10.0)
+  Failed AeroLink.Infrastructure.Tests.NotificationOutboxTests.Smtp_sender_delivers_a_real_message_to_a_loopback_smtp_server [1 m 40 s]
+Failed!  - Failed:     1, Passed:  1148, Skipped:    79, Total:  1228, Duration: 12 m 30 s - AeroLink.Infrastructure.Tests.dll (net10.0)
+  Failed AeroLink.Api.Tests.TestChangeRequestReviewWorkflowTests.A_real_review_submission_outbox_mail_and_authenticated_approval_keep_the_frozen_authority [2 m]
+  Failed AeroLink.Api.Tests.ProjectSetupKestrelQualificationTests.Real_kestrel_accepts_large_and_chunked_sources_and_rejects_over_limit_without_staging [40 s]
+Failed!  - Failed:     2, Passed:  1138, Skipped:    17, Total:  1157, Duration: 1 h 13 m - AeroLink.Api.Tests.dll (net10.0)
+AFTER-SUITES HEAD=ed93937619f6e648110d45fdb7c6fe8d775022bd dirty=0 2026-09-25T04:30:17Z
+DONE

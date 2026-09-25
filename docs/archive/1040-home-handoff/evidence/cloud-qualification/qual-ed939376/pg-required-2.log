@@ -1,0 +1,6 @@
+BEFORE ed93937619f6e648110d45fdb7c6fe8d775022bd dirty=0
+Passed!  - Failed:     0, Passed:    11, Skipped:     0, Total:    11, Duration: 1 m 17 s - AeroLink.Infrastructure.Tests.dll (net10.0)
+Required project-setup PostgreSQL qualification: 11 passed; none skipped. TRX: /tmp/claude-0/-home-user-requirements-management-tool/c39e8c1c-fcfc-5a63-a0a1-9acbd8dc604d/scratchpad/qual-ed939376/pg-required-2/project-setup-postgres-AeroLink.Infrastructure.Tests-762b1f3d6ad2423da28c6bce953b7b23.trx
+Passed!  - Failed:     0, Passed:    15, Skipped:     0, Total:    15, Duration: 2 m 32 s - AeroLink.Api.Tests.dll (net10.0)
+Required project-setup PostgreSQL qualification: 15 passed; none skipped. TRX: /tmp/claude-0/-home-user-requirements-management-tool/c39e8c1c-fcfc-5a63-a0a1-9acbd8dc604d/scratchpad/qual-ed939376/pg-required-2/project-setup-postgres-AeroLink.Api.Tests-e2f0e7cc61c74231b4f42a02b6918e5c.trx
+AFTER ed93937619f6e648110d45fdb7c6fe8d775022bd dirty=0

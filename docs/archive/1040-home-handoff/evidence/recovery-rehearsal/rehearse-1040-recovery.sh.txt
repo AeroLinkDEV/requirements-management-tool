@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# Disposable rehearsal of the proposed #1040 canonical-checkout audit/recovery scripts (cloud, Linux, pwsh 7).
+# Every Git mutation targets a replica path that has been verified to be inside this run's own disposable
+# root. Setup failure aborts before any recovery script runs. The source clone is only ever read (clone
+# --no-local, cat-file) and its refs/config/HEAD are compared before and after.
+set -uo pipefail
+
+SCRATCH=/tmp/claude-0/-home-user-requirements-management-tool/c39e8c1c-fcfc-5a63-a0a1-9acbd8dc604d/scratchpad
+SOURCE="${1:-/home/user/requirements-management-tool}"
+BUNDLE="$SCRATCH/handoff/docs/archive/1040-cloud-handoff/evidence/handoff-1040-1098-2026-09-25T0140Z/critical-evidence/incident-bundle/accidental-commits.bundle"
+DELIV="$SCRATCH/deliverables"
+PWSH=/root/pwsh/pwsh
+ROOT="$SCRATCH/rehearsal-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+PASS=0; FAIL=0
+
+die() { echo "SETUP ABORT: $*" >&2; exit 90; }
+check() { # name, command...
+  local name="$1"; shift
+  if "$@"; then echo "PASS  $name"; PASS=$((PASS+1)); else echo "FAIL  $name"; FAIL=$((FAIL+1)); fi
+}
+
+# ---- Source fingerprint (read-only) ------------------------------------------------------------------
+fingerprint() { # repo -> stdout
+  git -C "$1" for-each-ref --format='%(refname) %(objectname)'
+  git -C "$1" rev-parse HEAD
+  git -C "$1" symbolic-ref -q HEAD || true
+  sha256sum "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)/config" | cut -d' ' -f1
+}
+[ -d "$SOURCE/.git" ] || die "source is not a repository: $SOURCE"
+SRC_BEFORE="$(fingerprint "$SOURCE")" || die "cannot fingerprint source"
+
+# ---- Disposable root, validated ----------------------------------------------------------------------
+case "$ROOT" in "$SCRATCH"/rehearsal-*) ;; *) die "root outside scratch: $ROOT" ;; esac
+[ ! -e "$ROOT" ] || die "root already exists"
+mkdir -p "$ROOT" || die "mkdir failed"
+ROOT="$(cd "$ROOT" && pwd -P)" || die "cannot resolve root"
+export GIT_CONFIG_GLOBAL="$ROOT/global.gitconfig"
+export GIT_CONFIG_NOSYSTEM=1
+printf '[user]\n\tname = Global Test Identity\n\temail = global@example.invalid\n' > "$GIT_CONFIG_GLOBAL" || die "global config"
+
+verify_replica() { # path -> must be a work-tree top strictly inside ROOT
+  local p="$1" top
+  case "$p" in "$ROOT"/*) ;; *) die "replica path escapes root: $p" ;; esac
+  top="$(git -C "$p" rev-parse --show-toplevel 2>/dev/null)" || die "not a repo: $p"
+  [ "$top" = "$p" ] || die "replica top mismatch: $top != $p"
+}
+
+make_replica() { # name -> path (incident state: main=b6309fb0, drillA2=bb8a6622, rehearsal identity, linked worktree)
+  local name="$1" r="$ROOT/$1"
+  git clone --quiet --no-local "$SOURCE" "$r" >/dev/null 2>&1 || die "clone $name"
+  verify_replica "$r"
+  git -C "$r" fetch --quiet "$SOURCE" '+refs/remotes/pr/1066:refs/heads/glm/1040-release-picker-snapshot' || die "fetch feature ($name)"
+  git -C "$r" -c advice.detachedHead=false checkout --quiet -B main 77b96857868f35926cd439371af159f8af2230e2 || die "checkout pre-incident ($name)"
+  git -C "$r" bundle verify "$BUNDLE" >/dev/null 2>&1 || die "bundle verify ($name)"
+  git -C "$r" fetch --quiet "$BUNDLE" 'refs/heads/drillA2:refs/heads/drillA2' 'refs/heads/main:refs/incident-src/main' || die "fetch bundle ($name)"
+  git -C "$r" reset --quiet --keep refs/incident-src/main || die "move to incident main ($name)"
+  git -C "$r" update-ref -d refs/incident-src/main || die "cleanup temp ref ($name)"
+  git -C "$r" config --local user.name rehearsal || die "identity ($name)"
+  git -C "$r" config --local user.email rehearsal@invalid || die "identity ($name)"
+  git -C "$r" worktree add --quiet "$ROOT/$name-feature-wt" glm/1040-release-picker-snapshot >/dev/null 2>&1 || die "worktree ($name)"
+  [ "$(git -C "$r" rev-parse HEAD)" = b6309fb01d46afe17e7aaa3e34fc0bc38be6e726 ] || die "replica HEAD wrong ($name)"
+  [ "$(git -C "$r" rev-parse refs/heads/drillA2)" = bb8a6622a08742cc75f9879efb53ce8aa331b2fe ] || die "replica drillA2 wrong ($name)"
+  echo "$r"
+}
+
+R1="$(make_replica r1)" || exit 90
+R2="$(make_replica r2)" || exit 90
+R3="$(make_replica r3)" || exit 90
+echo "Replicas ready under $ROOT"
+
+state() { git -C "$1" for-each-ref --format='%(refname) %(objectname)'; git -C "$1" rev-parse HEAD; git -C "$1" config --local --list; git -C "$1" status --porcelain=v2 --branch --untracked-files=all; sha256sum "$1/.git/index" | cut -d' ' -f1; }
+
+# ---- T1 audit is read-only ----------------------------------------------------------------------------
+B="$(state "$R1")"
+"$PWSH" -NoProfile -File "$DELIV/Audit-1040-CanonicalCheckout.ps1" -Repo "$R1" -OutDir "$ROOT/audit-r1" -IncidentBundle "$BUNDLE" > "$ROOT/t1.log" 2>&1
+check "T1 audit exits 0" test $? -eq 0
+check "T1 audit changed nothing (refs, HEAD, local config, status, index bytes)" test "$B" = "$(state "$R1")"
+check "T1 audit recorded exactly the two accidental commits beyond pre-incident main" test "$(grep -c . "$ROOT/audit-r1/14-main-beyond-preincident.txt")" -eq 2
+check "T1 audit found the linked feature worktree" grep -q "r1-feature-wt" "$ROOT/audit-r1/40-worktrees.txt"
+check "T1 audit verified the incident bundle" grep -q "is okay" "$ROOT/audit-r1/53-incident-bundle-verify.txt"
+check "T1 audit refuses to reuse its output directory" bash -c "! '$PWSH' -NoProfile -File '$DELIV/Audit-1040-CanonicalCheckout.ps1' -Repo '$R1' -OutDir '$ROOT/audit-r1' >/dev/null 2>&1"
+check "T1 audit refuses output inside the repository" bash -c "! '$PWSH' -NoProfile -File '$DELIV/Audit-1040-CanonicalCheckout.ps1' -Repo '$R1' -OutDir '$R1/audit' >/dev/null 2>&1 && [ ! -e '$R1/audit' ]"
+
+# ---- T2 plan is read-only and passes on the exact incident state ---------------------------------------
+B="$(state "$R1")"
+"$PWSH" -NoProfile -File "$DELIV/Recover-1040-CanonicalCheckout.ps1" -Mode Plan -Repo "$R1" -UnsetRehearsalIdentity -ArchiveDrillA2 -FastForwardToRemoteMain > "$ROOT/t2.log" 2>&1
+check "T2 plan exits 0 on the exact incident state" test $? -eq 0
+check "T2 plan changed nothing" test "$B" = "$(state "$R1")"
+
+# ---- T3 refusals change nothing ------------------------------------------------------------------------
+refuses_unchanged() { # label repo args...
+  local label="$1" repo="$2"; shift 2
+  local before; before="$(state "$repo")"
+  if "$PWSH" -NoProfile -File "$DELIV/Recover-1040-CanonicalCheckout.ps1" "$@" > "$ROOT/refusal.log" 2>&1; then
+    echo "FAIL  $label (did not refuse)"; FAIL=$((FAIL+1)); return
+  fi
+  check "$label (refused, nothing changed)" test "$before" = "$(state "$repo")"
+}
+echo x > "$R2/untracked-work.txt"
+refuses_unchanged "T3a untracked work blocks Recover" "$R2" -Mode Recover -Repo "$R2" -EvidenceDir "$ROOT/ev-t3a"
+check "T3a no evidence dir created on refusal" test ! -e "$ROOT/ev-t3a"
+rm -f "$R2/untracked-work.txt"
+refuses_unchanged "T3b a subdirectory path is refused" "$R2" -Mode Recover -Repo "$R2/product" -EvidenceDir "$ROOT/ev-t3b"
+refuses_unchanged "T3c the linked worktree path is refused" "$R2" -Mode Recover -Repo "$ROOT/r2-feature-wt" -EvidenceDir "$ROOT/ev-t3c"
+git -C "$R2" checkout --quiet drillA2 || die "t3d setup"
+refuses_unchanged "T3d HEAD not on main is refused" "$R2" -Mode Recover -Repo "$R2" -EvidenceDir "$ROOT/ev-t3d"
+git -C "$R2" checkout --quiet main || die "t3d restore"
+git -C "$R2" config --local user.name "someone-else" || die "t3e setup"
+refuses_unchanged "T3e unexpected local identity refuses the identity step" "$R2" -Mode Recover -Repo "$R2" -EvidenceDir "$ROOT/ev-t3e" -UnsetRehearsalIdentity
+git -C "$R2" config --local user.name rehearsal || die "t3e restore"
+git -C "$R2" commit --quiet --allow-empty -m "newer local work" || die "t3f setup"
+refuses_unchanged "T3f extra commit beyond the incident is refused (preserve it first)" "$R2" -Mode Recover -Repo "$R2" -EvidenceDir "$ROOT/ev-t3f"
+mkdir -p "$ROOT/ev-exists"
+git -C "$R2" reset --quiet --keep HEAD~1 || die "t3f restore"
+refuses_unchanged "T3g existing evidence directory is refused" "$R2" -Mode Recover -Repo "$R2" -EvidenceDir "$ROOT/ev-exists"
+
+# ---- T4 recover (main only) ----------------------------------------------------------------------------
+FEAT_BEFORE="$(git -C "$ROOT/r3-feature-wt" rev-parse HEAD) $(git -C "$ROOT/r3-feature-wt" status --porcelain | wc -l)"
+"$PWSH" -NoProfile -File "$DELIV/Recover-1040-CanonicalCheckout.ps1" -Mode Recover -Repo "$R3" -EvidenceDir "$ROOT/ev-r3" > "$ROOT/t4.log" 2>&1
+check "T4 recover (main only) exits 0" test $? -eq 0
+check "T4 main restored to 77b96857" test "$(git -C "$R3" rev-parse refs/heads/main)" = 77b96857868f35926cd439371af159f8af2230e2
+check "T4 tree equals pre-incident tree" test "$(git -C "$R3" rev-parse 'HEAD^{tree}')" = d00fdd25367314188d28fa28863d13c0e8aac5c9
+check "T4 status clean" test -z "$(git -C "$R3" status --porcelain --untracked-files=all)"
+check "T4 #1105 content present again (ProjectsLanding.tsx matches 77b96857)" git -C "$R3" diff --quiet 77b96857868f35926cd439371af159f8af2230e2 -- product/client/src/ProjectsLanding.tsx
+check "T4 drill line gone from request-full-ci.yml" bash -c "! grep -q 'concurrent settings change' '$R3/.github/workflows/request-full-ci.yml'"
+check "T4 drillA2 untouched" test "$(git -C "$R3" rev-parse refs/heads/drillA2)" = bb8a6622a08742cc75f9879efb53ce8aa331b2fe
+check "T4 archive refs preserve both accidental tips" test "$(git -C "$R3" rev-parse refs/incident/1040/local-main-b6309fb0) $(git -C "$R3" rev-parse refs/incident/1040/drillA2-bb8a6622)" = "b6309fb01d46afe17e7aaa3e34fc0bc38be6e726 bb8a6622a08742cc75f9879efb53ce8aa331b2fe"
+check "T4 identity untouched without its switch" test "$(git -C "$R3" config --local user.name)" = rehearsal
+check "T4 linked feature worktree untouched" test "$FEAT_BEFORE" = "$(git -C "$ROOT/r3-feature-wt" rev-parse HEAD) $(git -C "$ROOT/r3-feature-wt" status --porcelain | wc -l)"
+check "T4 preservation bundle is standalone and complete" bash -c "git -C '$R3' bundle verify '$ROOT/ev-r3/canonical-all-refs-pre-recovery.bundle' 2>&1 | grep -q 'is okay' && ! git -C '$R3' bundle verify '$ROOT/ev-r3/canonical-all-refs-pre-recovery.bundle' 2>&1 | grep -q 'requires'"
+check "T4 bundle carries the incident main tip" grep -q "b6309fb01d46afe17e7aaa3e34fc0bc38be6e726 refs/heads/main" "$ROOT/ev-r3/bundle-heads.txt"
+check "T4 config copy preserved rehearsal identity" grep -q "rehearsal@invalid" "$ROOT/ev-r3/config.pre-recovery"
+check "T4 evidence checksums verify" bash -c "cd '$ROOT/ev-r3' && sed 's/\r$//' SHA256SUMS.txt | sha256sum --check --quiet"
+
+# ---- T5 rollback of T4 ---------------------------------------------------------------------------------
+"$PWSH" -NoProfile -File "$DELIV/Recover-1040-CanonicalCheckout.ps1" -Mode Rollback -Repo "$R3" -EvidenceDir "$ROOT/ev-r3" > "$ROOT/t5.log" 2>&1
+check "T5 rollback exits 0" test $? -eq 0
+check "T5 main back at incident commit" test "$(git -C "$R3" rev-parse refs/heads/main)" = b6309fb01d46afe17e7aaa3e34fc0bc38be6e726
+check "T5 incident tree restored" test "$(git -C "$R3" rev-parse 'HEAD^{tree}')" = 6db158346d6e454e84e747b3424e5dce70e86dfe
+
+# ---- T6 full recover with every opt-in, then rollback ---------------------------------------------------
+"$PWSH" -NoProfile -File "$DELIV/Recover-1040-CanonicalCheckout.ps1" -Mode Recover -Repo "$R1" -EvidenceDir "$ROOT/ev-r1" -UnsetRehearsalIdentity -ArchiveDrillA2 -FastForwardToRemoteMain > "$ROOT/t6.log" 2>&1
+check "T6 recover with all opt-ins exits 0" test $? -eq 0
+SRC_MAIN="$(git -C "$SOURCE" rev-parse refs/heads/main 2>/dev/null || git -C "$SOURCE" rev-parse refs/remotes/origin/main)"
+check "T6 main fast-forwarded to the replica's origin/main ($SRC_MAIN)" test "$(git -C "$R1" rev-parse refs/heads/main)" = "$(git -C "$R1" rev-parse refs/remotes/origin/main)"
+check "T6 local identity removed" bash -c "! git -C '$R1' config --local --get user.name"
+check "T6 effective identity now inherits global (no guess)" test "$(git -C "$R1" config user.name)" = "Global Test Identity"
+check "T6 linked worktree shares the fixed identity" test "$(git -C "$ROOT/r1-feature-wt" config user.name)" = "Global Test Identity"
+check "T6 drillA2 archived, commits reachable" bash -c "! git -C '$R1' rev-parse --verify -q refs/heads/drillA2 && [ \"\$(git -C '$R1' rev-parse refs/incident/1040/drillA2-bb8a6622)\" = bb8a6622a08742cc75f9879efb53ce8aa331b2fe ]"
+"$PWSH" -NoProfile -File "$DELIV/Recover-1040-CanonicalCheckout.ps1" -Mode Rollback -Repo "$R1" -EvidenceDir "$ROOT/ev-r1" > "$ROOT/t6b.log" 2>&1
+check "T6 rollback exits 0" test $? -eq 0
+check "T6 rollback restored incident main, identity and drillA2" test "$(git -C "$R1" rev-parse refs/heads/main) $(git -C "$R1" config --local user.name) $(git -C "$R1" rev-parse refs/heads/drillA2)" = "b6309fb01d46afe17e7aaa3e34fc0bc38be6e726 rehearsal bb8a6622a08742cc75f9879efb53ce8aa331b2fe"
+
+# ---- T7 source untouched -------------------------------------------------------------------------------
+check "T7 source clone refs/HEAD/config unchanged" test "$SRC_BEFORE" = "$(fingerprint "$SOURCE")"
+
+echo "SUMMARY: $PASS passed, $FAIL failed. Root: $ROOT"
+[ "$FAIL" -eq 0 ]
