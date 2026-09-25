@@ -37,8 +37,13 @@ test('PR readiness refuses cross-PR current queue aliases through the actual pro
     { name: 'queued entry without a candidate yet', queue: queue([sha('b'), { state: 'QUEUED', headCommit: null }]), pass: true },
     { name: 'queued entry whose candidate is the PR head', queue: queue([{ state: 'QUEUED', headCommit: { oid: sha('a') } }]), pass: false },
     { name: 'queued entry with a malformed candidate', queue: queue([{ state: 'QUEUED', headCommit: { oid: 'abc' } }]), pass: false },
-    { name: 'awaiting-checks entry without a candidate', queue: queue([{ state: 'AWAITING_CHECKS', headCommit: null }]), pass: false },
+    // #1149: an entry refused and left UNMERGEABLE, or awaiting checks, can also lack a candidate commit.
+    { name: 'awaiting-checks entry without a candidate', queue: queue([{ state: 'AWAITING_CHECKS', headCommit: null }]), pass: true },
+    { name: 'unmergeable entry without a candidate', queue: queue([sha('b'), { state: 'UNMERGEABLE', headCommit: null }]), pass: true },
+    { name: 'unmergeable entry whose candidate is the PR head', queue: queue([{ state: 'UNMERGEABLE', headCommit: { oid: sha('a') } }]), pass: false },
+    { name: 'unmergeable entry with a malformed candidate', queue: queue([{ state: 'UNMERGEABLE', headCommit: { oid: 'abc' } }]), pass: false },
     { name: 'entry without a state or candidate', queue: queue([{ headCommit: null }]), pass: false },
+    { name: 'entry with an empty state and no candidate', queue: queue([{ state: '', headCommit: null }]), pass: false },
   ]
   const paged = queue([])
   paged.data.repository.mergeQueue.entries.pageInfo.hasNextPage = true
