@@ -109,11 +109,11 @@ the owner:
 
 The owner is asked only for a functional product decision.
 
-One exception remains until [DEC-142](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-142---agents-merge-approval-machinery-changes-themselves-work-stops-only-where-the-owner-asks)
-is installed ([#1145](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1145)). A change to the
-approval machinery itself still needs the owner's manual ruleset bypass, merge and restore, because nothing else
-can merge it. DEC-142's own installation is the last such change. After it, approval-machinery changes take the
-same delegated maintenance path, and the owner is notified after each merge.
+Approval-machinery changes take the same delegated maintenance path under
+[DEC-142](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-142---agents-merge-approval-machinery-changes-themselves-work-stops-only-where-the-owner-asks).
+The installed kernel on `main` judges each candidate. After each such merge,
+`.github/workflows/approval-machinery-notice.yml` notifies the owner with the exact change and checks that the
+`main` ruleset still has no bypass actors. The owner can reverse it afterwards.
 
 ## Merge-queue trust boundary
 
@@ -200,10 +200,9 @@ through `filter=latest`, but its new attempt still needs a fresh digest and GitH
 under the standing delegation after renewed qualification. The existing queue timeout
 continues to apply; approval does not extend it.
 
-Any change to the runtime maintenance/merge-authority modules or the protected binding/readiness workflows is
-outside this routine path. Until DEC-142 is installed (#1145), such a change needs a separately reviewed trust-root
-transition, which is the owner's manual bypass, merge and restore. After installation, it takes the delegated
-maintenance path under DEC-142. Never remove a required check or publish a fabricated success to make a refused
+A change to the runtime maintenance/merge-authority modules or the protected binding/readiness workflows takes
+this routine path under DEC-142. The installed kernel on `main` evaluates it, never the candidate's own code, and
+its review summary names it as an approval-machinery change. Never remove a required check or publish a fabricated success to make a refused
 maintenance PR merge. Rollback also requires reviewed exact
 revert evidence; an earlier candidate's GitHub approval cannot be reused for a later revert. Standing delegation
 does not waive technical refusals, required checks or the separately reviewed transition for kernel changes.
@@ -242,8 +241,9 @@ message.
 
 Creating/configuring the App, placing its key and immutable IDs in the main-only environment, and any one-time
 trust-root bootstrap are separate operator actions. This implementation does not create an App, read a key,
-change settings, install an App, or authorize its own rollout. The new reader and detector are kernel paths and
-cannot self-authorize through the routine maintenance path.
+change settings, install an App, or authorize its own rollout. The reader and detector are approval machinery:
+under DEC-142 a change to them takes the routine maintenance path and is judged by the installed kernel on `main`,
+never by itself.
 
 ## Related
 

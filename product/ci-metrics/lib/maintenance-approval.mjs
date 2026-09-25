@@ -77,6 +77,9 @@ export function maintenanceReviewSummary(review) {
     `Binding workflow: ${review.binding.id}, attempt ${review.binding.attempt}`, '',
     `[Complete candidate diff](https://github.com/${MAINTENANCE_REPOSITORY}/compare/${evidence.main.sha}...${evidence.run.headSha})`,
     `[Native Product evidence](https://github.com/${MAINTENANCE_REPOSITORY}/actions/runs/${evidence.run.runId})`, '',
+    ...(review.packet.assessment?.kernelChanges?.length
+      ? ['**This candidate changes the approval machinery (DEC-142).** The owner is notified after it merges.', '']
+      : []),
     'Review the code and native proof before approving the maintenance environment. The exact approval comment is:', '',
     `\`APPROVE MAINTENANCE ${review.digest}\``, '',
     'Approval is revalidated against live evidence. A changed candidate, attempt, main, setting or removed request refuses publication.', '',

@@ -15,6 +15,9 @@ export const MAINTENANCE_KERNEL_PATHS = [
   'product/ci-metrics/lib/merge-authority.mjs',
   'product/ci-metrics/lib/merge-authority-github.mjs',
   'product/ci-metrics/bin/verify-merge-authority.mjs',
+  '.github/workflows/approval-machinery-notice.yml',
+  'product/ci-metrics/lib/machinery-notice.mjs',
+  'product/ci-metrics/bin/notify-machinery-merge.mjs',
 ]
 const sha = value => typeof value === 'string' && /^[0-9a-f]{40}$/.test(value)
 const positive = value => Number.isSafeInteger(value) && value > 0
@@ -22,6 +25,9 @@ const protectedPath = path => TRUSTED_SURFACE_PREFIXES.some(prefix => path.start
 const kernelPath = path => MAINTENANCE_KERNEL_PATHS.includes(path) ||
   /^product\/ci-metrics\/(?:lib|bin)\/.*(?:maintenance|merge-authority)/.test(path) ||
   /^\.github\/workflows\/.*maintenance/.test(path)
+
+/** One definition of the approval machinery, shared by the refusal logic and the post-merge owner notice. */
+export const isApprovalMachineryPath = path => typeof path === 'string' && kernelPath(path)
 
 /** Stable encoding binds the complete snapshot, including negative evidence and job identities. */
 export function canonicalJson(value) {
@@ -83,8 +89,9 @@ export function evaluateMaintenancePreflight(evidence) {
   if (String(latestProductRunId) !== String(run?.runId)) reasons.push('newer-or-unverified-product-run')
   if (!Array.isArray(changes) || changes.length === 0 || changes.some(change =>
     typeof change?.path !== 'string' || !protectedPath(change.path))) reasons.push('protected-diff-missing-or-malformed')
+  // DEC-142: approval-machinery (kernel) changes are reviewable like any other protected change. They are
+  // still identified, so the review summary and the post-merge owner notice name them explicitly.
   const kernelChanges = Array.isArray(changes) ? changes.filter(change => typeof change?.path === 'string' && kernelPath(change.path)).map(change => change.path) : []
-  if (kernelChanges.length) reasons.push('separate-trust-root-bootstrap-required')
 
   // Keep the existing verifier's refusal reasons. Only its explicit protected-surface refusal is
   // potentially reviewable; missing jobs, failed jobs and all other refusals still stop preparation.

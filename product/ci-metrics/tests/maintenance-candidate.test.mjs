@@ -42,14 +42,19 @@ test('mint eligibility requires the complete protected candidate and current sol
   }
 })
 
-test('kernel changes never mint the privileged token even when the broad surface changed', () => {
+test('approval-machinery changes take the delegated maintenance path like other protected changes (DEC-142)', () => {
   for (const path of [
     ...MAINTENANCE_KERNEL_PATHS,
     '.github/workflows/merge-queue-binding.yml',
     'product/ci-metrics/lib/maintenance-approval.mjs',
   ]) {
-    assert.equal(shouldMintMaintenanceEvidence(fixture({ changedPaths: [path] })), false, path)
+    assert.equal(shouldMintMaintenanceEvidence(fixture({ changedPaths: [path] })), true, path)
   }
+  // Every other precondition still applies to a machinery change.
+  const machinery = { changedPaths: ['product/ci-metrics/lib/merge-authority.mjs'] }
+  assert.equal(shouldMintMaintenanceEvidence(fixture({ ...machinery, pr: { ...fixture().pr, labels: [] } })), false)
+  assert.equal(shouldMintMaintenanceEvidence(fixture({ ...machinery, queue: { ...fixture().queue, position: 2 } })), false)
+  assert.equal(shouldMintMaintenanceEvidence(fixture({ ...machinery, ordinary: { decision: 'REFUSE', reasons: ['job-failed'] } })), false)
 })
 
 test('candidate requires an explicit opt-in label and protected change', () => {

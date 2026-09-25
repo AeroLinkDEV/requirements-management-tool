@@ -63,10 +63,10 @@ jobs:
               throw new Error('Queue response is incomplete.')
             }
             for (const entry of entries.nodes) {
-              // An entry GitHub has only queued has no candidate commit yet, so there is nothing its identity could
-              // alias. Refusing on it failed every other PR each time one entered the queue (#1106). Any other state
-              // without a resolvable candidate, or a malformed one, is still refused.
-              if (entry?.state === 'QUEUED' && entry.headCommit == null) continue
+              // An entry with no candidate commit has nothing its identity could alias, whatever its state: one only
+              // queued (#1106) or one refused and left UNMERGEABLE (#1149). Refusing on it failed every other PR while
+              // it stayed in the queue. An entry without a state, or with a malformed candidate, is still refused.
+              if (typeof entry?.state === 'string' && entry.state.length > 0 && entry.headCommit === null) continue
               const candidate = entry?.headCommit?.oid
               if (typeof candidate !== 'string' || !/^[0-9a-f]{40}$/.test(candidate)) throw new Error('Queue candidate identity is unresolved.')
               if (candidate === headSha) throw new Error('Readiness SHA is a current queue candidate.')
