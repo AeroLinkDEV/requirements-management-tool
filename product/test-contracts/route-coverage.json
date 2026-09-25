@@ -320,6 +320,7 @@
         "ProcedureTestChangeControlApiTests",
         "ProductLineApiTests",
         "ProductionRoutingTests",
+        "ProjectFeatureApiTests",
         "ProjectRepositoryApiTests",
         "ProjectSetupAuthorizationApiTests",
         "ProjectSetupCodeEvidenceApiTests",
@@ -2196,6 +2197,7 @@
         "ProblemReportApiTests",
         "ProcedureDiscussionApiTests",
         "ProductLineApiTests",
+        "ProjectFeatureApiTests",
         "SecurityBoundaryTests",
         "SecurityHardeningTests",
         "VerificationVocabularyApiTests"
@@ -2655,6 +2657,14 @@
         "ProjectConfigurationApiTests",
         "TeamWorkProjectionApiTests",
         "VerificationVocabularyApiTests"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/projects/{projectId:guid}/features",
+      "file": "ProjectFeatureEndpoints.cs",
+      "coveredBy": [
+        "ProjectFeatureApiTests"
       ]
     },
     {
