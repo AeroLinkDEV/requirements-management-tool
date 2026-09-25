@@ -141,10 +141,30 @@ public sealed class ProjectFeatureService(AeroLinkDbContext db)
         }
         if (added.Count == 0) return;
         var projectIds = added.Select(x => x.ProjectId).Distinct().ToList();
+        // A schema migrated only up to a point before feature sets existed (upgrade qualification writes legacy
+        // rows that way) has no feature sets, so every project in it has every feature. Probed without raising an
+        // error, because a failed statement would abort the caller's PostgreSQL transaction.
+        if (!await FeatureTableExistsAsync(db, ct)) return;
         var sets = await db.ProjectFeatureSets.AsNoTracking().Where(x => projectIds.Contains(x.ProjectId))
             .ToDictionaryAsync(x => x.ProjectId, x => x.Enabled, ct);
         foreach (var (projectId, feature) in added)
             if (sets.TryGetValue(projectId, out var enabled) && !enabled.HasFlag(feature))
                 throw new DomainException($"{ProjectFeatures.Label(feature)} is not enabled for this project.");
+    }
+
+    /// <summary>Databases known to have the feature-set table. A table, once present, stays, so only "yes" is cached.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> FeatureTablePresent = new();
+
+    private static async Task<bool> FeatureTableExistsAsync(AeroLinkDbContext db, CancellationToken ct)
+    {
+        var key = db.Database.GetConnectionString() ?? "";
+        if (FeatureTablePresent.ContainsKey(key)) return true;
+        var present = db.Database.IsNpgsql()
+            ? await db.Database.SqlQueryRaw<bool>("SELECT (to_regclass('project_feature_sets') IS NOT NULL) AS \"Value\"").SingleAsync(ct)
+            : db.Database.IsSqlite()
+                ? await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS \"Value\" FROM sqlite_master WHERE type = 'table' AND name = 'project_feature_sets'").SingleAsync(ct) > 0
+                : true;
+        if (present) FeatureTablePresent[key] = true;
+        return present;
     }
 }
