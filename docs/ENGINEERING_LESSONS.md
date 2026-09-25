@@ -132,6 +132,12 @@ Dated handoffs and audit reports are valuable evidence of what was believed and 
 
 **Practice:** current truth goes in `PROJECT_STATE.md`; live work goes in GitHub Issues; accepted decisions go in the decision log; durable lessons go here; old handoffs/audits belong in the indexed archive.
 
-## 20. Preserve truth first, then optimize convenience
+## 20. A green test is not evidence of the contract it names
+
+A read-only audit in September 2026 found tests that stayed green while proving nothing about the rule in their names. "No access" link tests sent the outsider to a separate test host whose database lacked the record, so the not-found redirect fired and the access check never ran (#1120). Migration qualification tests returned early and reported Passed when no PostgreSQL server was configured (#1121). A characterization test compared an enum against a copy of the list it claimed to police, so a new unclassified role passed (#1125). Production helpers survived only because their own tests still called them. Meanwhile agents, and people, kept adding tests for every small change.
+
+**Practice:** apply the authoring gate in `product/docs/TEST_RISK_LAYERS.md` before adding a test. Make negative controls discriminate the guard they name. Report an unconfigured environment as Skipped, not Passed. Derive expected values independently of the code under test. When removing a test, name the stronger test that still owns the contract.
+
+## 21. Preserve truth first, then optimize convenience
 
 This is the common thread behind most of the lessons above. AeroLink exists to make controlled engineering state explainable later. Convenience improvements are worthwhile only when they do not create a second authority, erase attribution, weaken exact identity, or make the UI say something the controlled record does not actually support.

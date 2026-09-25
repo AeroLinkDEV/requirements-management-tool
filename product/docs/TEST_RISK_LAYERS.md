@@ -51,6 +51,45 @@ Typical examples:
 - File-integrity implementation test + API authorization test for evidence download.
 - Fast release-package calculation test + bounded hosted exact-intent/signature test.
 
+## Authoring gate
+
+Every test costs review time, CI time on every affected pull request, and maintenance on every refactor of the code it touches. Before adding or materially changing a test, answer all four questions. A missing answer means the test is not ready to add.
+
+1. What observable behavior, invariant, or independent contract does it protect?
+2. What credible regression makes it fail?
+3. Why does existing coverage not already catch that failure? Each contract has one primary owner test at the strongest layer that can see the defect (see the layers above). Another layer needs its own written failure mode, as in *Intentional duplication*. Prefer a new row in an existing `[Theory]`, table, or shared fixture over a near-copy of an existing test.
+4. Does it need a production seam (an export, `internal` member, flag, wrapper, reflection hook, or "ForTests" overload) that no production caller needs? If so, test through the real boundary instead.
+
+A regression test for a bug must fail on the pre-fix code for the intended reason and pass after the repair. A regression test that never demonstrably failed proves the fixture, not the fix. One regression at the owning layer covers the bug; do not replay the same scenario at every layer it crosses.
+
+A test that would break under a behavior-preserving refactor is asserting implementation rather than behavior. Rewrite it at the owning boundary before it lands.
+
+## Low-value test patterns
+
+Check a new test against this list, and use the list when auditing existing tests. A match fails the authoring gate unless the retention bar below names the contract the test independently guards.
+
+- No assertion, or only an assertion that cannot fail once the code runs (a non-null result, or a 200 where a stronger test already checks the body).
+- Expected values produced by the helper, formatter, comparator, or hash function under test, or a value compared with itself where repeatability is not the contract.
+- Copied inventories that restate a source list, enum, constant, or manifest, and so change in step with it rather than catching a drift.
+- Exact source, import, or string greps where executing the owning script, dry run, or endpoint is feasible.
+- Tests of a private predicate or call shape that a test at the real boundary already proves.
+- Duplicate invocations of the same contract, including a test that equals one iteration of another test.
+- A mock or fixture that implements the behavior being asserted, or supplies the ordering, receipt, or state the owner should produce.
+- Negative controls that pass for an unrelated reason. Examples: a "no access" request that is refused because the record does not exist in that host's database, a skipped-environment test that returns early and reports Passed, or a rejection the production path never reaches.
+- Names or comments that promise more than the assertions check.
+- Tests whose only purpose is keeping a test-only export, wrapper, or dead production path alive.
+
+## Retention bar
+
+Keep a test when it independently enforces a controlled-history, revision-identity, effectivity, authorization, signature/hash/manifest, migration, storage, route/API, security, launcher-path, or generated-contract rule, even when it looks repetitive. Also keep:
+
+- ordering assertions when the order is observable behavior;
+- regressions with a credible failure mode;
+- source inspection when it is the cheapest independent guard of a user-facing path, key, or byte (for example the root launcher contracts) and survives an identifier-only refactor;
+- a retained test that fails on the baseline. Treat it as a possible product defect: reproduce it and repair the owner rather than deleting the test.
+
+Slowness alone is not a reason to delete coverage; it is a reason to move or share the expensive setup. A test that resembles implementation may still be the only independent proof of a contract; show otherwise before removing it.
+
 ## Placement review checklist
 
 Before moving or deleting a test, answer all of the following:
@@ -64,6 +103,8 @@ Before moving or deleting a test, answer all of the following:
 7. Is any retained duplication intentional and documented by risk?
 
 If the answer to #2 is no, or #3 is yes for the risk being asserted, the test stays at the integration layer.
+
+When a test is deleted rather than moved, also record in the commit or pull request: the test and its location, the failure it could actually detect, the stronger test that still owns the contract (or why no contract exists), and any test-only production seam the deletion lets you remove. A candidate missing any of these is not ready to delete. Deleting an API test changes the generated inventories in `product/test-contracts/`; regenerate them from source as described in `API_TEST_INTENT_INVENTORY.md` and never hand-merge them.
 
 ## Evidence and measurement
 
