@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,7 +17,8 @@ function plan(listing, shard, total) {
   try {
     const path = join(directory, 'listed.txt')
     writeFileSync(path, listing)
-    const output = execFileSync(process.execPath, [planner, path, String(shard), String(total)], { encoding: 'utf8' })
+    const output = execFileSync(process.execPath, [planner, path, String(shard), String(total)],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
     const lines = output.trim().split('\n')
     return { expected: Number(lines[0]), patterns: lines.slice(1) }
   } finally {
@@ -66,5 +67,24 @@ test('the plan still names every discovered file and counts its tests', () => {
   assert.equal(patterns.length, 2)
   for (const [file] of specs) {
     assert.ok(patterns.some((pattern) => new RegExp(pattern).test(`tests/${file}`)), file)
+  }
+})
+
+// CI redirects stdout straight into the plan it executes, so a stale-durations warning must go to stderr. On
+// stdout it would become the expected test count or a spec pattern, and the shard would fail its count check.
+test('stale durations are reported on stderr and never change the plan', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aerolink-journey-shard-'))
+  try {
+    const path = join(directory, 'listed.txt')
+    writeFileSync(path, listingOf([['unrecorded-alpha.spec.ts', 2], ['unrecorded-beta.spec.ts', 1]]))
+    const first = spawnSync(process.execPath, [planner, path, '1', '1'], { encoding: 'utf8' })
+    assert.equal(first.status, 0, first.stderr)
+    assert.match(first.stderr, /^::warning title=Stale journey durations::2 of 2 discovered spec files /)
+    const lines = first.stdout.trim().split('\n')
+    assert.equal(lines[0], '3')
+    assert.equal(lines.length, 3)
+    assert.ok(lines.slice(1).every((pattern) => pattern.startsWith('(^|')), 'stdout carries only the plan')
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
   }
 })
