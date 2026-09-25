@@ -1,0 +1,37 @@
+name: Cancel superseded queue candidates
+
+# GitHub deletes a gh-readonly-queue ref when its entry leaves the queue or the queue recomposes around a
+# failure, but the Product run testing that ref keeps going: 2,649 runner-minutes on discarded green
+# candidates between 2026-09-11 and 2026-09-25, with runs continuing up to 46 minutes after their ref was
+# gone (#1147, #1152 A2). This cancels only those runs.
+#
+# A `delete` run always uses the default branch's definition, so candidate code cannot change what this
+# does. It checks out protected main, never the deleted ref, and its only write is cancelling runs that
+# product/ci-metrics/lib/queue-supersession.mjs selects.
+on:
+  delete:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    name: Cancel runs for a deleted queue candidate
+    if: github.event.ref_type == 'branch' && startsWith(github.event.ref, 'gh-readonly-queue/main/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Cancel superseded Product runs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DELETED_REF: ${{ github.event.ref }}
+        run: node product/ci-metrics/bin/cancel-superseded-queue-runs.mjs
