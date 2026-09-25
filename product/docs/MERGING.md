@@ -109,11 +109,11 @@ the owner:
 
 The owner is asked only for a functional product decision.
 
-One exception remains until [DEC-141](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-141---approval-machinery-changes-are-approved-by-the-non-authoring-agent)
+One exception remains until [DEC-142](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-142---agents-merge-approval-machinery-changes-themselves-work-stops-only-where-the-owner-asks)
 is installed ([#1145](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1145)). A change to the
 approval machinery itself still needs the owner's manual ruleset bypass, merge and restore, because nothing else
-can merge it. DEC-141's own installation is the last such change. After it, the agent that did not author an
-approval-machinery change approves it.
+can merge it. DEC-142's own installation is the last such change. After it, approval-machinery changes take the
+same delegated maintenance path, and the owner is notified after each merge.
 
 ## Merge-queue trust boundary
 
@@ -201,9 +201,9 @@ under the standing delegation after renewed qualification. The existing queue ti
 continues to apply; approval does not extend it.
 
 Any change to the runtime maintenance/merge-authority modules or the protected binding/readiness workflows is
-outside this routine path. Until DEC-141 is installed (#1145), such a change needs a separately reviewed trust-root
-transition, which is the owner's manual bypass, merge and restore. After installation, the non-authoring agent
-approves it under DEC-141. Never remove a required check or publish a fabricated success to make a refused
+outside this routine path. Until DEC-142 is installed (#1145), such a change needs a separately reviewed trust-root
+transition, which is the owner's manual bypass, merge and restore. After installation, it takes the delegated
+maintenance path under DEC-142. Never remove a required check or publish a fabricated success to make a refused
 maintenance PR merge. Rollback also requires reviewed exact
 revert evidence; an earlier candidate's GitHub approval cannot be reused for a later revert. Standing delegation
 does not waive technical refusals, required checks or the separately reviewed transition for kernel changes.

@@ -102,11 +102,12 @@ Use the repository's test-planning contract instead of guessing what to run.
   - fix your own failures and conflicts;
   - watch queue membership until the PR merges.
 
-  If you stop, close the PR or hand it off with a reason. Never leave it idle.
+  If you stop, close the PR or hand it off with a reason. Never leave it idle. Stop at a key point for the owner
+  only when the owner has asked you to for that piece of work (DEC-142).
 - **Decide non-functional matters yourself ([DEC-140](DECISIONS_AND_OPEN_QUESTIONS.md#dec-140---agents-own-non-functional-decisions-the-owner-owns-functional-ones)).**
   Escalate to the owner only for a functional decision, and then ask one specific question with the options.
 - Routine CI-maintenance approvals are delegated (DEC-124, DEC-135). A waiting approval is not the owner's job.
-  Approval-machinery changes are approved by the non-authoring agent once DEC-141's mechanism is installed.
+  Once #1145 installs DEC-142, approval-machinery changes take the same delegated path.
 - Use one focused branch/worktree per implementation task; read-only tasks do not require one.
 - Keep unrelated cleanup out of feature PRs.
 - Rebase/update only when the repository's actual merge state requires it; do not churn a green PR from habit.
