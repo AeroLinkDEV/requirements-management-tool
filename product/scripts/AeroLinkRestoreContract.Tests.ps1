@@ -1,7 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $restore = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Restore-AeroLink.ps1') -Raw
 $download = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Test-AeroLinkRestoredDownloads.ps1') -Raw
-$qualification = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'AeroLinkRestoreQualification.Tests.ps1') -Raw
 $environmentTests = Join-Path $PSScriptRoot 'AeroLinkProcessEnvironment.Tests.ps1'
 $environmentTestsSource = Get-Content -LiteralPath $environmentTests -Raw
 $program = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\src\AeroLink.Api\Program.cs') -Raw
@@ -10,13 +9,6 @@ foreach ($path in @('Backup-AeroLink.ps1','Restore-AeroLink.ps1','Test-AeroLinkR
     [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $path),[ref]$tokens,[ref]$errors)|Out-Null
     if($errors.Count -gt 0){throw "$path has a PowerShell parse error: $($errors[0].Message)"}
 }
-foreach ($required in @('aerolink_restore_stage_','Rename-Database ''aerolink'' $oldDatabase','AfterEvidenceActivation','Test-RestoredApi ''aerolink''','$activationPassed = $true')) {
-    if(-not $restore.Contains($required)){throw "Restore activation contract is missing: $required"}
-}
-foreach ($rollbackRequired in @('$originalDatabaseRenamed = $true','AfterOriginalDatabaseRename','if ($databaseActivated) { Rename-Database ''aerolink'' $failedDatabase }','Rename-Database $oldDatabase ''aerolink''','SELECT COUNT(*) FROM programs;')) {
-    if(-not $restore.Contains($rollbackRequired)){throw "Restore rollback/query contract is missing: $rollbackRequired"}
-}
-if($restore.Contains("if (-not `$DisposableQualification) { & (Join-Path `$PSScriptRoot 'Stop-AeroLink.ps1') }")){throw 'Rollback still stops PostgreSQL before its compensating database renames.'}
 if(-not $restore.Contains('Stop-AeroLinkApplicationProcesses')){throw 'Rollback does not stop the application processes independently of PostgreSQL.'}
 if(-not $restore.Contains('if ($command -notlike "*$productRoot*") { continue }')){throw 'Rollback does not preserve unrelated listeners while recovering the database pair.'}
 if(-not $restore.Contains("Disposable restore qualification is forbidden on the persistent AeroLink PostgreSQL port 54329.")){throw 'Disposable restore qualification is not fenced from the persistent database.'}
@@ -27,9 +19,7 @@ if(-not $download.Contains('if (-not (Get-Module -Name AeroLinkProcessEnvironmen
 if(-not $download.Contains('Get-AeroLinkProcessEnvironmentSnapshot -Name @($settings.Keys)')){throw 'Restore validation does not snapshot exact process-environment presence before overriding settings.'}
 if(-not $download.Contains('Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $previous')){throw 'Restore validation does not restore the exact process-environment snapshot.'}
 if($download.Contains('foreach ($entry in $previous.GetEnumerator()) { [Environment]::SetEnvironmentVariable')){throw 'Restore validation still conflates absent and empty process variables.'}
-if(-not $qualification.Contains('if (-not (Get-Module -Name AeroLinkProcessEnvironment))') -or $qualification.Contains("AeroLinkProcessEnvironment.psm1') -Force") -or -not $qualification.Contains('Get-AeroLinkProcessEnvironmentSnapshot') -or -not $qualification.Contains('Restore-AeroLinkProcessEnvironmentSnapshot')){throw 'Disposable restore qualification does not preserve exact process-environment presence without force-reloading the helper.'}
 if(-not $environmentTestsSource.Contains('if (-not (Get-Module -Name AeroLinkProcessEnvironment))') -or $environmentTestsSource.Contains("AeroLinkProcessEnvironment.psm1') -Force")){throw 'The in-process process-environment regression must reuse the caller-loaded helper rather than force-reloading it.'}
-if($qualification.Contains('foreach($item in $previous.GetEnumerator()){[Environment]::SetEnvironmentVariable')){throw 'Disposable restore qualification still conflates absent and empty process variables.'}
 # The build to validate with is named by the caller and never chosen here. Preferring whichever configuration
 # had output on disk let an established installation validate an upgraded clone with a stale Release binary
 # from its previous production run; a binary predating the read-only boundary would ignore these settings and
@@ -103,5 +93,4 @@ finally {
     Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $callerBefore
     Restore-AeroLinkProcessEnvironmentSnapshot -Snapshot $emptyProbeBefore
 }
-[pscustomobject]@{Passed=$true;ShadowDatabase=$true;ReversibleActivation=$true;ReadOnlyApiDownloads=$true;PersistentPortFence=$true}
 $global:LASTEXITCODE=0

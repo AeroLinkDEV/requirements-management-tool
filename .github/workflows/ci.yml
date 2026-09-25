@@ -522,7 +522,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.backend == 'true'
     runs-on: windows-latest
-    timeout-minutes: 20
+    # The backup and restore qualification runs here too (#1128), about ten minutes after the domain suite.
+    timeout-minutes: 30
     env:
       METRICS_JOB_ID: backend-core-domain
       METRICS_JOB_NAME: Domain test suite
@@ -608,13 +609,23 @@ jobs:
             exit 1
           fi
           echo "All test projects under product/tests are claimed by a job."
-      # Hang-budget arithmetic (#756): the outer job budget is 20 minutes and pre-test work (build,
+      # Hang-budget arithmetic (#756): the outer job budget is 30 minutes and pre-test work (build,
       # contracts, guard) is roughly 5 minutes, so the 6-minute blame budget leaves wide margin for dump
       # finalization and the failure-time upload. The static contract in
       # AeroLinkTestDiagnostics.Tests.ps1 asserts hang < job-timeout minus margin.
       - name: Run the domain test suite
         run: |
           dotnet test product/tests/AeroLink.Domain.Tests/AeroLink.Domain.Tests.csproj --configuration Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=domain.trx" --results-directory TestResults --blame-hang-timeout 6m
+      # #1128: backup, isolated restore and reversible activation run for real instead of being read as text.
+      # The scenario builds a disposable PostgreSQL from the runner's own binaries (PGBIN) on a free loopback
+      # port, never 54329, seeds it through the Release API built above, and injects a fault at each of the ten
+      # activation phases to prove the original database and evidence pair comes back every time.
+      - name: Qualify backup, isolated restore and reversible activation
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:PGBIN)) { throw 'The Windows runner no longer provides PostgreSQL binaries in PGBIN.' }
+          & ./product/scripts/AeroLinkRestoreQualification.Tests.ps1 -PostgresBin $env:PGBIN
       - name: Upload domain test diagnostics
         if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -903,6 +914,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./product/scripts/AeroLinkRemoteDemoRecovery.Tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Remote-demo recovery regression failed.' }
+
+      # Ran nowhere until #1123: every list of suites is hand-written. execution-contract.test.mjs now fails
+      # on a *.Tests.ps1 that CI does not run, directly or through another suite.
+      - name: Validate the resumable source-relationship demo contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./product/scripts/AeroLinkResumableDemo.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Resumable source-relationship demo regression failed.' }
 
       - name: Validate the transition handoff and budget contract
         shell: powershell
@@ -1500,7 +1520,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.postgresql == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Every PostgreSQL qualification runs here (#1122), about ten minutes on top of the smoke itself.
+    timeout-minutes: 30
     env:
       METRICS_JOB_ID: postgresql-smoke
       METRICS_JOB_NAME: PostgreSQL migrations and secure bootstrap
@@ -1608,27 +1629,30 @@ jobs:
           psql -h 127.0.0.1 -U aerolink -d aerolink_ci -qtAc \
             "select count(*) from security_audit_events where \"EventType\" like 'External%' and \"Outcome\" = 'Success';" \
             | { read -r count; test "$count" -ge 3 || { echo "expected identity audit evidence, found $count"; exit 1; }; }
-      # The #881 maintenance and upgrade qualification, on a real provider, in a lane the gate waits on.
+      # Every PostgreSQL qualification, on a real provider, in a lane the gate waits on (#881, #1122).
       #
-      # These tests return early when AEROLINK_MIGRATIONS_CONNECTION is unset. That is right on a developer
-      # machine and worthless as evidence in CI: on every runner so far "no PostgreSQL configured" and
-      # "twelve qualifications passed" produced the same green tick. AEROLINK_REQUIRE_POSTGRES_QUALIFICATION
-      # turns that skip into a failure here, so this lane cannot pass without having actually run them.
+      # Without a server these tests report Skipped. That is right on a developer machine and worthless as
+      # evidence in CI, so AEROLINK_REQUIRE_POSTGRES_QUALIFICATION turns a missing connection into a failure
+      # here. They are selected by category rather than by class name: a guard test fails when a
+      # [DisposablePostgresFact] test lacks Category=PostgresQualification, so a new qualification cannot be
+      # left out of this lane. Project setup has its own no-skip step below.
       #
-      # Each test creates and drops its own aerolink_881_maint_* database on the ephemeral service container.
-      # The connection below names that throwaway service, never a persistent AeroLink installation.
-      - name: Qualify database maintenance and upgrade analysis against PostgreSQL
+      # Each test creates and drops its own database on the ephemeral service container. The connection below
+      # names that throwaway service, never a persistent AeroLink installation.
+      - name: Qualify every PostgreSQL-dependent contract against PostgreSQL
         env:
           AEROLINK_MIGRATIONS_CONNECTION: Host=127.0.0.1;Port=5432;Database=postgres;Username=aerolink;Password=ci-only-password
           AEROLINK_REQUIRE_POSTGRES_QUALIFICATION: "true"
         run: |
           set -euo pipefail
-          dotnet test product/tests/AeroLink.Infrastructure.Tests/AeroLink.Infrastructure.Tests.csproj \
-            --configuration Release --no-build \
-            --filter "FullyQualifiedName~AeroLinkMaintenanceQualificationTests" \
-            --logger "console;verbosity=normal" \
-            --logger "trx;LogFileName=maintenance-qualification.trx" \
-            --results-directory TestResults --blame-hang-timeout 6m
+          for project in AeroLink.Infrastructure.Tests AeroLink.Api.Tests; do
+            dotnet test "product/tests/$project/$project.csproj" \
+              --configuration Release --no-build \
+              --filter "Category=PostgresQualification&FullyQualifiedName!~ProjectSetupPostgresQualificationTests" \
+              --logger "console;verbosity=normal" \
+              --logger "trx;LogFileName=postgres-qualification-$project.trx" \
+              --results-directory TestResults --blame-hang-timeout 6m
+          done
       - name: Qualify project setup against PostgreSQL without skipped evidence
         shell: pwsh
         env:
@@ -1645,7 +1669,7 @@ jobs:
         with:
           name: postgresql-maintenance-qualification-${{ github.run_attempt }}
           path: |
-            TestResults/maintenance-qualification.trx
+            TestResults/postgres-qualification-*.trx
             TestResults/project-setup-postgres-*.trx
           if-no-files-found: ignore
           retention-days: 7
