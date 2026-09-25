@@ -38,7 +38,7 @@ public sealed class ProjectFeatureApiTests
         }
         string Url(Guid id) => $"/api/projects/{id}/features";
         Task<HttpResponseMessage> PutAsync(Guid id, long version, params string[] enabled) =>
-            client.PutAsJsonAsync(Url(id), new { expectedVersion = version, reason = "Problem Reports trial project", enabled });
+            client.PutAsJsonAsync($"/api/projects/{id}/features", new { expectedVersion = version, reason = "Problem Reports trial project", enabled });
 
         // No row: every feature, nothing persisted.
         var initial = await client.GetFromJsonAsync<JsonElement>(Url(projectId));
