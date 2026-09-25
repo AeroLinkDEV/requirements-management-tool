@@ -72,6 +72,13 @@ public sealed record ProblemReportEvidenceSnapshot
     /// other schema-6 snapshot byte-identical to what it was.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ResolutionAttestation { get; init; }
+    /// <summary>Source provenance of an imported report (#1114); absent on every report raised in AeroLink.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? SourceSystem { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? SourceKey { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? SourceReportedBy { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public DateTimeOffset? SourceCreatedAt { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? SourceState { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? ClosedInSource { get; init; }
 }
 
 /// <summary>The immutable supporting-file identity committed into a schema-6 Problem Report snapshot.</summary>
@@ -167,6 +174,12 @@ public static class ProblemReportEvidenceContract
             ? (supportingAttachments ?? []).OrderBy(x => x.LogicalId).ThenBy(x => x.Version).ToArray()
             : null,
         ResolutionAttestation = (schemaVersion ?? SchemaVersion) >= 6 ? report.ResolutionAttestation : null,
+        SourceSystem = (schemaVersion ?? SchemaVersion) >= 6 ? report.SourceSystem : null,
+        SourceKey = (schemaVersion ?? SchemaVersion) >= 6 ? report.SourceKey : null,
+        SourceReportedBy = (schemaVersion ?? SchemaVersion) >= 6 ? report.SourceReportedBy : null,
+        SourceCreatedAt = (schemaVersion ?? SchemaVersion) >= 6 ? report.SourceCreatedAt : null,
+        SourceState = (schemaVersion ?? SchemaVersion) >= 6 ? report.SourceState : null,
+        ClosedInSource = (schemaVersion ?? SchemaVersion) >= 6 ? report.ClosedInSource : null,
     };
 
     public static string Serialize(ProblemReport report, long? versionOverride = null,

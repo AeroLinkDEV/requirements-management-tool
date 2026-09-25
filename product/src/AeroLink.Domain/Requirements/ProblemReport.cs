@@ -306,6 +306,19 @@ public sealed class ProblemReport
     public string WaivedBy { get; private set; } = "";
     public DateTimeOffset? WaivedAt { get; private set; }
     public ProblemReportState State { get; private set; }
+
+    // Source provenance (#1114). All null on a report raised in AeroLink, so native snapshots are unchanged.
+    /// <summary>The tool or export the report was imported from.</summary>
+    public string? SourceSystem { get; private set; }
+    /// <summary>The report's identity in its source, kept permanently and searchable.</summary>
+    public string? SourceKey { get; private set; }
+    /// <summary>Who raised it in the source, as the source recorded them. Never an AeroLink actor.</summary>
+    public string? SourceReportedBy { get; private set; }
+    public DateTimeOffset? SourceCreatedAt { get; private set; }
+    /// <summary>The source's own status text at import.</summary>
+    public string? SourceState { get; private set; }
+    /// <summary>True when the source had already closed it: a read-only historical record with no AeroLink SQA closure.</summary>
+    public bool? ClosedInSource { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
     public long Version { get; private set; }
@@ -547,6 +560,41 @@ public sealed class ProblemReport
         InvalidateClosureVerificationForChange(); Touch(now);
     }
 
+    /// <summary>
+    /// A report brought in from another tool (#1114). It lands in the state the importer mapped the source
+    /// status to, which is a source fact, not an AeroLink lifecycle event; a report the source had closed
+    /// lands Closed-in-source with no disposition and no SQA closure. The source identity, reporter, date
+    /// and status are kept as source facts beside the AeroLink ones.
+    /// </summary>
+    public static ProblemReport Import(Guid projectId, string reportNumber, string title, string problem,
+        string analysis, string raisedBy, string responsibleEngineerId, DateTimeOffset now,
+        ProblemReportSeverity severity, ProblemReportPriority priority, ProblemReportCategory? category,
+        Guid? targetReleaseId, string sourceSystem, string sourceKey, string? sourceReportedBy,
+        DateTimeOffset? sourceCreatedAt, string sourceState, ProblemReportState landingState, bool closedInSource,
+        string rootCause = "", string correctiveAction = "")
+    {
+        var allowed = closedInSource
+            ? landingState == ProblemReportState.Closed
+            : landingState is ProblemReportState.Draft or ProblemReportState.ReadyForSccb or ProblemReportState.Open
+                or ProblemReportState.Implementing or ProblemReportState.Verifying;
+        if (!allowed) throw new DomainException($"An imported report cannot land in {landingState}.");
+        if (landingState != ProblemReportState.Draft && category is null)
+            throw new DomainException("A category is required for an imported report beyond Draft.");
+        var report = new ProblemReport(projectId, reportNumber, title, problem, analysis, raisedBy, now,
+            severity: severity, priority: priority, origin: $"Imported from {sourceSystem.Trim()}",
+            targetReleaseId: targetReleaseId, responsibleEngineerId: responsibleEngineerId, category: category);
+        if (category is not null) report.CategoryProvenance = ProblemReportCategoryProvenance.ImportMapped;
+        report.SourceSystem = Required(sourceSystem, "An imported report requires its source system.");
+        report.SourceKey = Required(sourceKey, "An imported report requires its source key.");
+        report.SourceReportedBy = string.IsNullOrWhiteSpace(sourceReportedBy) ? null : sourceReportedBy.Trim();
+        report.SourceCreatedAt = sourceCreatedAt;
+        report.SourceState = string.IsNullOrWhiteSpace(sourceState) ? null : sourceState.Trim();
+        report.ClosedInSource = closedInSource ? true : null;
+        report.RootCause = rootCause.Trim(); report.CorrectiveAction = correctiveAction.Trim();
+        report.State = landingState;
+        return report;
+    }
+
     public void Reopen(string actor, string rationale, DateTimeOffset now)
     {
         var target = State == ProblemReportState.Closed ? ProblemReportState.Verifying
@@ -566,6 +614,8 @@ public sealed class ProblemReport
     public void TransitionTo(ProblemReportState target, string actor, string? rationale, DateTimeOffset now)
     {
         Required(actor, "A Problem Report transition actor is required.");
+        if (ClosedInSource == true)
+            throw new DomainException("This report was closed in its source tool and is kept as a read-only historical record.");
         var source = ProblemReportTransitionPolicy.Canonical(State);
         target = ProblemReportTransitionPolicy.Canonical(target);
         if (!ProblemReportTransitionPolicy.IsAllowed(source, target))

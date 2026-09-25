@@ -2630,6 +2630,16 @@ choices are created as focused issues only when their trigger and acceptance bou
 - **Decision:** In a project whose Release feature is off (DEC-136), a Configuration Manager or Program Manager releases the in-work build by a password-confirmed electronic signature with a reason, so the project can move to a successor build. Where Release is on, the release campaign remains the only way to release a build.
 - **Truthful labelling:** The build is recorded and shown as released without readiness evidence. It is never presented as a readiness-backed release, carries no campaign, baseline or manifest it did not have, and its signature records the actor, reason and content hash.
 
+### DEC-139 - Problem Reports Are Imported From CSV/XLSX With Source Facts Kept as Source Facts
+
+- **Date:** 2026-09-24
+- **Status:** Accepted owner decisions in [issue #1113](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1113) (CSV/XLSX first; source-closed reports arrive "Closed in source") and on [issue #1114](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1114) (raised-by, re-import, landing state).
+- **Decision:** A Configuration Manager, Program Manager or Administrator imports Problem Reports into a project that uses Problem Reports from a CSV/XLSX export. Every source row is previewed as Create or Skip-with-reason; the import is signed with the importer's password over the hash of the exact file and mapping previewed, and a batch ledger records the file, mapping, counts and importer.
+- **Source facts:** Each report gets a new AeroLink identity and keeps its source system and key (searchable), the source's reporter, created date and status as source facts. The AeroLink "raised by" is the mapped AeroLink account for the source reporter, otherwise the importer. An open report needs its responsible engineer mapped to an AeroLink account. Its landing state is the one the importer mapped the source status to (Draft, Ready for SCCB, Open, Implementing or Verifying), recorded as an import, not as AeroLink lifecycle transitions.
+- **Closed in source:** A report the source had closed arrives Closed with no disposition, no AeroLink SQA closure and no closure candidate, marked Closed in source, and cannot be reopened or transitioned.
+- **Re-import:** A source key already imported into the project is skipped and named, never overwritten.
+- **Evidence contract:** Source facts are written into the schema-6 report snapshot only when present, so every report raised in AeroLink keeps its bytes and hash.
+
 ### DEC-140 - Agents Own Non-Functional Decisions; the Owner Owns Functional Ones
 
 - **Date:** 2026-09-25
