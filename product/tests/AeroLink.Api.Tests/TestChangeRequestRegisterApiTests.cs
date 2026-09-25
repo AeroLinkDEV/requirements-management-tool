@@ -183,6 +183,7 @@ public sealed class TestChangeRequestRegisterApiTests
         Assert.Equal("second.engineer", current.GetProperty("authorId").GetString());
         Assert.Equal(seeded.ReleaseId, current.GetProperty("targetReleaseId").GetGuid());
         Assert.Equal(0, current.GetProperty("procedureCount").GetInt32());
+        Assert.Equal(0, current.GetProperty("artifactCount").GetInt32());
         // Both revisions are counted, which is what the "show superseded revisions" control offers.
         Assert.Equal(2, current.GetProperty("revisionCount").GetInt32());
         Assert.True(body.GetProperty("totalPages").GetInt32() >= 1);

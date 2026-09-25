@@ -1,5 +1,5 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { artifactAcronym, artifactTypeLabel, configuredProcedureTargetsFor, documentTypeLabel, isVerificationProcedureKind, procedureTargetsFor, targetsFor, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactLevel, verificationArtifactNoun, verificationArtifactRouteKey } from '../src/presentation'
+import { artifactAcronym, artifactTypeLabel, configuredProcedureTargetsFor, documentTypeLabel, isVerificationProcedureKind, procedureTargetsFor, targetsFor, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactDocumentApiRoot, verificationArtifactLevel, verificationArtifactNoun, verificationArtifactRouteKey, verificationArtifactWord } from '../src/presentation'
 
 test('numbered artifacts keep their canonical uppercase acronym in presentation', () => {
   const examples = [
@@ -70,4 +70,19 @@ test('configured verification document targets are filtered by each exact level 
   expect(configuredProcedureTargetsFor(ladder, 'Software', undefined, 'Procedure')
     .map(target => target.type)).toEqual(['HighLevelTestProcedures'])
   expect(configuredProcedureTargetsFor(ladder, 'Software', 'LowLevel', 'Procedure')).toEqual([])
+})
+
+test('software verification artifacts are Cases and System stays on Procedures (#722)', () => {
+  expect(artifactTypeLabel('test-case', 'HLRTC-000001.00')).toBe('HLR Test Case (HLRTC)')
+  expect(artifactTypeLabel('test-case', 'LLRTC-000001.00')).toBe('LLR Test Case (LLRTC)')
+  for (const level of ['HighLevel', 'LowLevel']) {
+    expect(verificationArtifactNoun(level)).toBe('Case')
+    expect(verificationArtifactWord(level)).toBe('test case')
+  }
+  expect(verificationArtifactNoun('System')).toBe('Procedure')
+  expect(verificationArtifactWord('System')).toBe('test procedure')
+  expect(verificationArtifactApiRoot('Software')).toBe('/api/test-cases')
+  expect(verificationArtifactApiRoot('System')).toBe('/api/test-procedures')
+  expect(verificationArtifactDocumentApiRoot('Software')).toBe('test-case-documents')
+  expect(verificationArtifactDocumentApiRoot('System')).toBe('test-procedure-documents')
 })

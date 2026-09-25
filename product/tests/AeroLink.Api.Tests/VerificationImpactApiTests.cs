@@ -271,6 +271,7 @@ public sealed class VerificationImpactApiTests
             var body = await deferred.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal("Resolved", body.GetProperty("state").GetString());
             Assert.Equal("ModifyExisting", body.GetProperty("procedureChangeAction").GetString());
+            Assert.Equal("ModifyExisting", body.GetProperty("artifactChangeAction").GetString());
         }
 
         using var verify = factory.Services.CreateScope();
@@ -355,6 +356,13 @@ public sealed class VerificationImpactApiTests
             Assert.Equal("eng.user", body.GetProperty("resolvedBy").GetString());
             Assert.Equal("eng.user", body.GetProperty("assignedEngineerId").GetString());
             Assert.Equal(1, body.GetProperty("decisionHistory").GetArrayLength());
+            // The neutral Case/Procedure fields and their pre-Case aliases name the same decision (#722).
+            Assert.Equal(procedureId, body.GetProperty("resolvedArtifactId").GetGuid());
+            Assert.Equal(procedureId, body.GetProperty("resolvedProcedureId").GetGuid());
+            Assert.Equal(procedureRevisionId, body.GetProperty("resolvedArtifact").GetProperty("revisionId").GetGuid());
+            var decision = body.GetProperty("decisionHistory")[0];
+            Assert.Equal(procedureRevisionId, decision.GetProperty("artifactRevisionId").GetGuid());
+            Assert.Equal(procedureRevisionId, decision.GetProperty("procedureRevisionId").GetGuid());
 
             var reloaded = await engineer.GetFromJsonAsync<JsonElement>(
                 $"/api/releases/{fixture.ReleaseId}/verification-impact");

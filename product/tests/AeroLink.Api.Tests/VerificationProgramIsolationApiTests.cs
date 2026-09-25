@@ -80,6 +80,13 @@ public sealed class VerificationProgramIsolationApiTests
             trace.GetProperty("items")[0].GetProperty("revisionId").GetGuid());
         Assert.Equal(EvidenceFileName, trace.GetProperty("items")[0].GetProperty("tests")[0]
             .GetProperty("executions")[0].GetProperty("evidence")[0].GetProperty("originalFileName").GetString());
+        // The neutral Case/Procedure fields and their pre-Case aliases name the same exact revision (#722).
+        var traced = trace.GetProperty("items")[0].GetProperty("tests")[0];
+        Assert.Equal(scenario.ProcedureAId, traced.GetProperty("artifactId").GetGuid());
+        Assert.Equal(scenario.ProcedureAId, traced.GetProperty("procedureId").GetGuid());
+        Assert.Equal("Procedure", traced.GetProperty("artifactKind").GetString());
+        Assert.Equal(scenario.ProcedureRevisionAId, traced.GetProperty("artifactRevisionId").GetGuid());
+        Assert.Equal("Approved", traced.GetProperty("artifactState").GetString());
 
         using var executions = await client.GetAsync(
             $"/api/test-executions?projectId={scenario.ProjectAId}&releaseId={scenario.ReleaseAId}&buildId={scenario.BuildAId}");
@@ -87,6 +94,8 @@ public sealed class VerificationProgramIsolationApiTests
         var executionRows = await executions.Content.ReadFromJsonAsync<JsonElement>();
         var execution = Assert.Single(executionRows.EnumerateArray());
         Assert.Equal(scenario.ExecutionAId, execution.GetProperty("id").GetGuid());
+        Assert.Equal(scenario.ProcedureRevisionAId, execution.GetProperty("artifactRevisionId").GetGuid());
+        Assert.Equal(scenario.ProcedureRevisionAId, execution.GetProperty("procedureRevisionId").GetGuid());
         Assert.Equal(EvidenceFileName, execution.GetProperty("evidence")[0].GetProperty("originalFileName").GetString());
 
         using var coverage = await client.GetAsync(

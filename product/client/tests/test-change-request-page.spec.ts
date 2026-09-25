@@ -161,6 +161,7 @@ test('a seeded software Procedure package uses the shared shell, exact origin, w
   await expect.poll(() => procedureCreateBody).toBeTruthy()
   expect(procedureCreateBody?.artifactKind).toBe('Procedure')
   expect(procedureCreateBody?.caseChangeIds).toEqual(['72500000-0000-0000-0000-000000000010'])
+  expect(procedureCreateBody).toHaveProperty('artifactChanges', [])
   expect(procedureCreateBody).not.toHaveProperty('changeRequestIds')
   expect(procedureCreateBody).not.toHaveProperty('problemReportIds')
 })

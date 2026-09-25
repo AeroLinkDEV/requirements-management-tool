@@ -212,7 +212,11 @@ public sealed class ProcedureManifestEffectivityApiTests
         var requirementImpact = await client.GetFromJsonAsync<JsonElement>(
             $"/api/enterprise-requirements/{fixture.RequirementArtifactId}/impact?releaseId={fixture.Release15Id}");
         var inspectorTests = requirementImpact.GetProperty("tests").EnumerateArray().ToList();
-        Assert.Equal("SYSTP-002140.00", Assert.Single(inspectorTests).GetProperty("displayNumber").GetString());
+        var inspected = Assert.Single(inspectorTests);
+        Assert.Equal("SYSTP-002140.00", inspected.GetProperty("displayNumber").GetString());
+        // The neutral field and its pre-Case alias name the same manifest revision (#722).
+        Assert.Equal(fixture.Revision00Id, inspected.GetProperty("artifactRevisionId").GetGuid());
+        Assert.Equal(fixture.Revision00Id, inspected.GetProperty("procedureRevisionId").GetGuid());
     }
 
     [Fact]

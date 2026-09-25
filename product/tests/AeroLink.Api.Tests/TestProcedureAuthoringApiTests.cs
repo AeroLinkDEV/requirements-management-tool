@@ -363,6 +363,13 @@ public sealed class TestProcedureAuthoringApiTests
         var change = Assert.Single(package.GetProperty("procedureChanges").EnumerateArray());
         Assert.Equal("Oceanic waypoint sequencing", change.GetProperty("title").GetString());
         Assert.Equal("Introduce", change.GetProperty("kind").GetString());
+        // The neutral Case/Procedure fields and their pre-Case aliases describe the same package (#722).
+        Assert.Equal("System", package.GetProperty("artifactLevel").GetString());
+        Assert.Equal(change.GetRawText(), Assert.Single(package.GetProperty("artifactChanges").EnumerateArray()).GetRawText());
+        var capabilities = package.GetProperty("capabilities");
+        foreach (var capability in new[] { "canProposeArtifactChange", "canProposeProcedureChange",
+                     "canWithdrawArtifactChange", "canWithdrawProcedureChange" })
+            Assert.True(capabilities.GetProperty(capability).GetBoolean(), capability);
 
         using var removed = await client.DeleteAsync(
             $"/api/test-change-reviews/{fixture.TcrId}/procedure-changes/{changeId}");

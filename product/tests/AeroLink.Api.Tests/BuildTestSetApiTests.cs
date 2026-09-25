@@ -106,6 +106,11 @@ public sealed class BuildTestSetApiTests
         Assert.Equal(1, result.GetProperty("added").GetInt32());
         var procedure = result.GetProperty("set").GetProperty("procedures").EnumerateArray().Single();
         Assert.Equal("SYSTP-000901.00", procedure.GetProperty("displayNumber").GetString());
+        // The neutral field and its pre-Case alias name the same exact revision, under both list names (#722).
+        Assert.Equal(fixture.ApprovedRevisionId, procedure.GetProperty("artifactRevisionId").GetGuid());
+        Assert.Equal(fixture.ApprovedRevisionId, procedure.GetProperty("procedureRevisionId").GetGuid());
+        Assert.Equal(result.GetProperty("set").GetProperty("procedures").GetRawText(),
+            result.GetProperty("set").GetProperty("artifacts").GetRawText());
         Assert.Equal("CoverageArea", procedure.GetProperty("reason").GetString());
         Assert.Equal("Integrity and Monitoring", procedure.GetProperty("note").GetString());
         Assert.Equal("plan.lead", procedure.GetProperty("addedBy").GetString());

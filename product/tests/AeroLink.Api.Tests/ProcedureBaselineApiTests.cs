@@ -177,6 +177,7 @@ public sealed class ProcedureBaselineApiTests
         var listing = await client.GetFromJsonAsync<JsonElement>($"/api/baselines/{fixture.BaselineId}/test-change-requests");
         var available = listing.GetProperty("available").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).ToList();
         Assert.Contains(fixture.TcrId, available);
+        Assert.Equal(listing.GetProperty("procedureCount").GetInt32(), listing.GetProperty("artifactCount").GetInt32());
         // It has no procedures and no controlled number, so carrying it would imply test work that does not exist.
         Assert.DoesNotContain(fixture.NoWorkTcrId, available);
 

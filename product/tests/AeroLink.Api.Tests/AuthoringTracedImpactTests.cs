@@ -140,6 +140,9 @@ public sealed class AuthoringTracedImpactTests
         Assert.False(traced.CoveringProcedures[0].IsSuspect);
         Assert.NotEqual(Guid.Empty, traced.CoveringProcedures[0].RevisionId);
         Assert.NotNull(traced.RequirementRevisionId);
+        // The neutral list and its pre-Case alias carry the same covering revisions (#722).
+        var raw = JsonSerializer.Deserialize<JsonElement>(body);
+        Assert.Equal(raw.GetProperty("coveringProcedures").GetRawText(), raw.GetProperty("coveringArtifacts").GetRawText());
     }
 
     [Fact]

@@ -923,6 +923,15 @@ public sealed class ManualTestChangeRequestApiTests
         Assert.Matches(@"^HLRTC-\d{6}\.00$",
             JsonSerializer.Deserialize<JsonElement>(caseBody).GetProperty("displayNumber").GetString()!);
 
+        // A software package is read through its Case routes as well as written through them (#722).
+        var casePackage = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/test-change-reviews/{hlrPackageId}/case-changes");
+        Assert.Contains(casePackage.GetProperty("artifactChanges").EnumerateArray(),
+            x => x.GetProperty("id").GetGuid() == caseChangeId);
+        using var caseTargets = await client.GetAsync(
+            $"/api/test-change-reviews/{hlrPackageId}/case-targets?page=1&pageSize=50");
+        Assert.Equal(HttpStatusCode.OK, caseTargets.StatusCode);
+
         using var removed = await client.DeleteAsync(
             $"/api/test-change-reviews/{hlrPackageId}/case-changes/{caseChangeId}");
         Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
