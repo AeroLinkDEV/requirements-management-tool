@@ -335,3 +335,79 @@ export function decideProvenance({ pushTreeSha, mergedPr = null, manifests = [],
     rejected,
   }
 }
+
+/** The dedicated App that publishes `Trusted merge-queue binding` from protected main (MERGING.md, DEC-119). */
+export const MERGE_AUTHORITY_APP_ID = 4834539
+export const QUEUE_BINDING_CHECK_NAME = 'Trusted merge-queue binding'
+export const PRODUCT_AGGREGATE_JOB_NAME = 'Full Product evidence aggregate'
+export const PRODUCT_WORKFLOW_PATH = '.github/workflows/ci.yml'
+
+/**
+ * Decides whether a main push is a commit the merge queue already proved (#1147, #1152 A1).
+ *
+ * With `max_entries_to_merge: 1`, the queue lands the exact commit its candidate run tested, so the push
+ * SHA equals the candidate SHA. That is stronger than the tree match `decideProvenance` asks for: same
+ * tree and same parents. The evidence here is not a manifest written by the run itself. It is:
+ *
+ * - GitHub's own record of a completed, successful `merge_group` Product run on exactly this commit, whose
+ *   queue ref names the merged pull request, and whose latest-attempt aggregate job succeeded; and
+ * - the `Trusted merge-queue binding` check on exactly this commit from the Merge Authority App, which
+ *   protected main publishes only after verifying every required job of that run. Its newest check must be
+ *   a completed success; an older success does not survive a newer in-progress or failed binding.
+ *
+ * Everything else falls back to the full gate: a direct or bypass push (no binding), a merge that edits the
+ * gate's own definition, unreadable changed paths, evidence from another App or workflow, a binding older
+ * than the evidence-age limit, or any missing or malformed input.
+ */
+export function decideQueueProvenance({ pushSha, mergedPr = null, changedPaths = [], queueRuns = [], aggregateJobs = [], bindingChecks = [], now = null }) {
+  const fallback = (reason, extra = {}) => ({ outcome: 'fallback-needed', canSkip: false, reason, ...extra })
+  if (typeof pushSha !== 'string' || !/^[0-9a-f]{40}$/.test(pushSha)) return fallback('The pushed main commit SHA is missing or malformed.')
+  if (!mergedPr || !Number.isInteger(mergedPr.number)) {
+    return fallback('No merged pull request was found for the pushed commit (direct push or unusual merge method).')
+  }
+  if (touchesGateDefinition(changedPaths)) {
+    const edited = changedPaths.filter((path) => GATE_DEFINING_PATHS.includes(path))
+    return fallback(
+      `This merge changes the gate's own definition (${edited.join(', ')}); its evidence was produced under the definition it introduces, so main runs the full gate once independently.`,
+      { selfModifying: true },
+    )
+  }
+  const reference = typeof now === 'number' ? now : Date.parse(now)
+  if (!Number.isFinite(reference)) return fallback('No decision reference time was supplied, so the queue evidence could not be aged.')
+
+  const queueRef = `gh-readonly-queue/main/pr-${mergedPr.number}-`
+  const runs = (Array.isArray(queueRuns) ? queueRuns : []).filter((run) =>
+    run && run.event === 'merge_group' && run.head_sha === pushSha && run.path === PRODUCT_WORKFLOW_PATH &&
+    typeof run.head_branch === 'string' && run.head_branch.startsWith(queueRef) &&
+    run.status === 'completed' && run.conclusion === 'success' && Number.isInteger(run.id) && Number.isInteger(run.run_attempt))
+  if (runs.length === 0) {
+    return fallback(`No successful merge-queue Product run for PR #${mergedPr.number} exists on the exact pushed commit.`)
+  }
+  const run = runs.sort((a, b) => b.id - a.id)[0]
+
+  const aggregate = (Array.isArray(aggregateJobs) ? aggregateJobs : []).find((job) =>
+    job && job.name === PRODUCT_AGGREGATE_JOB_NAME && job.run_id === run.id && job.run_attempt === run.run_attempt)
+  if (!aggregate || aggregate.status !== 'completed' || aggregate.conclusion !== 'success') {
+    return fallback(`The ${PRODUCT_AGGREGATE_JOB_NAME} job of queue run ${run.id} attempt ${run.run_attempt} did not succeed.`)
+  }
+
+  const bindings = (Array.isArray(bindingChecks) ? bindingChecks : []).filter((check) =>
+    check && check.name === QUEUE_BINDING_CHECK_NAME && check.head_sha === pushSha && check.app?.id === MERGE_AUTHORITY_APP_ID &&
+    Number.isInteger(check.id))
+  if (bindings.length === 0) {
+    return fallback(`No ${QUEUE_BINDING_CHECK_NAME} check from the Merge Authority App exists on the pushed commit.`)
+  }
+  const latest = bindings.sort((a, b) => b.id - a.id)[0]
+  if (latest.status !== 'completed' || latest.conclusion !== 'success') {
+    return fallback(`The newest ${QUEUE_BINDING_CHECK_NAME} check on the pushed commit is ${latest.status}/${latest.conclusion ?? 'none'}, not a completed success.`)
+  }
+  const stale = evidenceAgeRejection({ validatedAt: latest.completed_at }, reference)
+  if (stale !== null) return fallback(`Binding evidence is not usable: ${stale}`)
+
+  return {
+    outcome: 'provenanced-match',
+    canSkip: false,
+    reason: null,
+    source: { kind: 'merge-queue', pr: mergedPr.number, runId: run.id, attempt: run.run_attempt, commitSha: pushSha, bindingCheckId: latest.id },
+  }
+}

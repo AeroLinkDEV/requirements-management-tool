@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import {
   validateManifest, decideProvenance, deriveEligibility, bindManifest,
   evidenceAgeRejection, touchesGateDefinition, collectMergedPaths, normalizeProvenanceTrigger, applyProvenanceMode,
-  MAX_EVIDENCE_AGE_DAYS, MAX_CLOCK_SKEW_MINUTES, GATE_DEFINING_PATHS,
+  MAX_EVIDENCE_AGE_DAYS, MAX_CLOCK_SKEW_MINUTES, GATE_DEFINING_PATHS, decideQueueProvenance, MERGE_AUTHORITY_APP_ID,
 } from '../lib/provenance.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
@@ -70,6 +70,8 @@ test('main quality gate enforcement is fail-safe and leaves cache warming active
   const warmer = workflow.slice(workflow.indexOf('  warm-chromium-cache:'), workflow.indexOf('  backend-api:'))
   assert.match(warmer, /if: github\.event_name == 'push'/)
   assert.doesNotMatch(warmer, /post_merge_skip/)
+  // A skipped push no longer runs the backend jobs that used to save the NuGet entry on main.
+  assert.ok(warmer.includes("key: nuget-${{ runner.os }}-"), "the push-only warmer must keep the main-scoped NuGet cache")
   const gate = workflow.slice(workflow.indexOf('  gate:'), workflow.indexOf('  metrics-tooling:'))
   assert.match(gate, /POST_MERGE_SKIP/)
   assert.match(gate, /Trusted tested-tree provenance matched this exact main tree/)
@@ -484,4 +486,70 @@ test('bindManifest rejects any identity mismatch against trusted API metadata', 
   assert.equal(bindManifest({ ...m, pullRequest: { ...m.pullRequest, baseSha: 'y'.repeat(40) } }, context).ok, false)
   assert.equal(bindManifest({ ...m, checkedOut: { ...m.checkedOut, ref: 'refs/pull/2/merge' } }, context).ok, false)
   assert.equal(bindManifest({ ...m, checkedOut: { ...m.checkedOut, treeSha: 'e'.repeat(40) } }, context).ok, false)
+})
+
+// #1147 / #1152 A1: a main push of the exact commit the merge queue already proved.
+const QUEUE_SHA = 'e'.repeat(40)
+function queueEvidence(overrides = {}) {
+  return {
+    pushSha: QUEUE_SHA,
+    mergedPr: { number: 1148 },
+    changedPaths: [UNRELATED_PATH],
+    queueRuns: [{
+      id: 500, run_attempt: 1, event: 'merge_group', path: '.github/workflows/ci.yml', status: 'completed', conclusion: 'success',
+      head_sha: QUEUE_SHA, head_branch: `gh-readonly-queue/main/pr-1148-${'f'.repeat(40)}`,
+    }],
+    aggregateJobs: [{ run_id: 500, run_attempt: 1, name: 'Full Product evidence aggregate', status: 'completed', conclusion: 'success' }],
+    // Shaped like the real sequence on 4a573d97 (#1148): the binder leaves earlier in-progress invalidations
+    // behind, and the newest check is the completed success.
+    bindingChecks: [
+      { id: 900, name: 'Trusted merge-queue binding', head_sha: QUEUE_SHA, app: { id: MERGE_AUTHORITY_APP_ID }, status: 'in_progress', conclusion: null, completed_at: null },
+      { id: 901, name: 'Trusted merge-queue binding', head_sha: QUEUE_SHA, app: { id: MERGE_AUTHORITY_APP_ID }, status: 'in_progress', conclusion: null, completed_at: null },
+      { id: 902, name: 'Trusted merge-queue binding', head_sha: QUEUE_SHA, app: { id: MERGE_AUTHORITY_APP_ID }, status: 'completed', conclusion: 'success', completed_at: '2026-08-14T05:59:00Z' },
+    ],
+    now: NOW,
+    ...overrides,
+  }
+}
+
+test('a main push of the exact commit the merge queue proved may skip, and only under enforcement', () => {
+  const decision = decideQueueProvenance(queueEvidence())
+  assert.equal(decision.outcome, 'provenanced-match', decision.reason)
+  assert.deepEqual(decision.source, { kind: 'merge-queue', pr: 1148, runId: 500, attempt: 1, commitSha: QUEUE_SHA, bindingCheckId: 902 })
+  assert.equal(applyProvenanceMode(decision, 'enforce').canSkip, true)
+  assert.equal(applyProvenanceMode(decision, 'shadow').canSkip, false)
+})
+
+test('queue provenance falls back to the full gate on every missing or mismatched piece of evidence', () => {
+  const base = queueEvidence()
+  const run = base.queueRuns[0]
+  const aggregate = base.aggregateJobs[0]
+  const success = base.bindingChecks[2]
+  const cases = {
+    'malformed push SHA': { pushSha: 'not-a-sha' },
+    'direct or bypass push with no merged PR': { mergedPr: null },
+    'merge edits the gate definition': { changedPaths: ['.github/workflows/ci.yml'] },
+    'no decision time': { now: null },
+    'queue run on a different commit': { queueRuns: [{ ...run, head_sha: 'a'.repeat(40) }] },
+    'readiness run instead of a queue run': { queueRuns: [{ ...run, event: 'workflow_dispatch' }] },
+    'run of another workflow': { queueRuns: [{ ...run, path: '.github/workflows/other.yml' }] },
+    'queue ref for another pull request': { queueRuns: [{ ...run, head_branch: `gh-readonly-queue/main/pr-999-${'f'.repeat(40)}` }] },
+    'failed queue run': { queueRuns: [{ ...run, conclusion: 'failure' }] },
+    'queue run still running': { queueRuns: [{ ...run, status: 'in_progress', conclusion: null }] },
+    'no aggregate job': { aggregateJobs: [] },
+    'failed aggregate job': { aggregateJobs: [{ ...aggregate, conclusion: 'failure' }] },
+    'aggregate from an earlier attempt': { aggregateJobs: [{ ...aggregate, run_attempt: 2 }] },
+    'no binding check': { bindingChecks: [] },
+    'binding published by another App': { bindingChecks: [{ ...success, app: { id: 15368 } }] },
+    'binding on another commit': { bindingChecks: [{ ...success, head_sha: 'a'.repeat(40) }] },
+    'newer binding invalidation after the success': { bindingChecks: [...base.bindingChecks, { ...success, id: 903, status: 'in_progress', conclusion: null, completed_at: null }] },
+    'failed binding': { bindingChecks: [{ ...success, conclusion: 'failure' }] },
+    'binding older than the evidence-age limit': { bindingChecks: [{ ...success, completed_at: '2026-06-01T00:00:00Z' }] },
+  }
+  for (const [name, override] of Object.entries(cases)) {
+    const decision = decideQueueProvenance(queueEvidence(override))
+    assert.equal(decision.outcome, 'fallback-needed', `${name} must not authorize a skip`)
+    assert.equal(applyProvenanceMode(decision, 'enforce').canSkip, false, name)
+  }
+  assert.equal(decideQueueProvenance(queueEvidence(cases['merge edits the gate definition'])).selfModifying, true)
 })
