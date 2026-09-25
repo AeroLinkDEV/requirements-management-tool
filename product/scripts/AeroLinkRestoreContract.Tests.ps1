@@ -9,6 +9,15 @@ foreach ($path in @('Backup-AeroLink.ps1','Restore-AeroLink.ps1','Test-AeroLinkR
     [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $path),[ref]$tokens,[ref]$errors)|Out-Null
     if($errors.Count -gt 0){throw "$path has a PowerShell parse error: $($errors[0].Message)"}
 }
+# AeroLinkRestoreQualification.Tests.ps1 now executes activation and rollback, but always as a disposable
+# qualification. These source checks stay because they also guard the production-only branches that run skips (#1128).
+foreach ($required in @('aerolink_restore_stage_','Rename-Database ''aerolink'' $oldDatabase','AfterEvidenceActivation','Test-RestoredApi ''aerolink''','$activationPassed = $true')) {
+    if(-not $restore.Contains($required)){throw "Restore activation contract is missing: $required"}
+}
+foreach ($rollbackRequired in @('$originalDatabaseRenamed = $true','AfterOriginalDatabaseRename','if ($databaseActivated) { Rename-Database ''aerolink'' $failedDatabase }','Rename-Database $oldDatabase ''aerolink''','SELECT COUNT(*) FROM programs;')) {
+    if(-not $restore.Contains($rollbackRequired)){throw "Restore rollback/query contract is missing: $rollbackRequired"}
+}
+if($restore.Contains("if (-not `$DisposableQualification) { & (Join-Path `$PSScriptRoot 'Stop-AeroLink.ps1') }")){throw 'Rollback still stops PostgreSQL before its compensating database renames.'}
 if(-not $restore.Contains('Stop-AeroLinkApplicationProcesses')){throw 'Rollback does not stop the application processes independently of PostgreSQL.'}
 if(-not $restore.Contains('if ($command -notlike "*$productRoot*") { continue }')){throw 'Rollback does not preserve unrelated listeners while recovering the database pair.'}
 if(-not $restore.Contains("Disposable restore qualification is forbidden on the persistent AeroLink PostgreSQL port 54329.")){throw 'Disposable restore qualification is not fenced from the persistent database.'}
