@@ -1,17 +1,17 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 997,
-    "cases": 1142,
-    "classes": 156,
-    "hostedTests": 942,
-    "hostedCases": 1065,
+    "tests": 998,
+    "cases": 1143,
+    "classes": 157,
+    "hostedTests": 943,
+    "hostedCases": 1066,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
     "unknownHostTests": 23,
     "unknownHostCases": 31,
-    "hostedCandidateTests": 18,
-    "hostedCandidateCases": 18,
+    "hostedCandidateTests": 19,
+    "hostedCandidateCases": 19,
     "unknownCandidateTests": 11,
     "unknownCandidateCases": 19,
     "unknownCaseTests": 0,
@@ -45,10 +45,10 @@
     "in-process-logic": {
       "label": "In-process logic with no HTTP and no client",
       "level": "Domain or Infrastructure (migration candidate)",
-      "tests": 43,
-      "cases": 43,
+      "tests": 44,
+      "cases": 44,
       "unknownCases": 0,
-      "classes": 18
+      "classes": 19
     },
     "filesystem": {
       "label": "Filesystem / evidence-root behaviour",
@@ -15606,6 +15606,22 @@
       "sourceLines": {
         "start": 224,
         "end": 263
+      }
+    },
+    {
+      "cls": "TestHostKeyRingTests",
+      "test": "Two_test_hosts_do_not_share_a_data_protection_key_ring",
+      "kind": "Fact",
+      "intent": "in-process-logic",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction"
+      ],
+      "sourceLines": {
+        "start": 13,
+        "end": 26
       }
     },
     {
