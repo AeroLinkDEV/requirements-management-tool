@@ -827,10 +827,8 @@ exit 0
     # history-mutating git verb as a literal argument is a contract violation.
     Assert-True ($moduleText -match "'merge', '--ff-only', 'origin/main'") 'E22/E24: the only permitted automatic Git mutation is the strict ff-only merge of origin/main.'
     Assert-True (-not ($moduleText -match "'reset'|'rebase'|'stash'|'pull'|'checkout',\s*'-f'|'checkout',\s*'--force'")) 'E22/E24: the bootstrap must never stash, rebase, hard-reset, force-checkout, or use a fallback pull.'
-    # Re-entry safety: the marker must never skip policy validation, and the parent must pass the verified
-    # source identity into the child.
-    Assert-True ($moduleText -match 'Assert-AeroLinkHomeCanonicalSourcePolicy -Posture \$posture -ExpectedSha \$expectedShaFromParent -Context ''re-entry''') 'E21/E24: re-entry must run the full HOME canonical policy, not just skip the update.'
-    Assert-True ($moduleText -match '-ExpectedSha \$updated\.HeadSha') 'E21/E24: the parent must carry the verified source identity into the re-entry.'
+    # Re-entry safety is proved by running it: C15 shows the parent carries the verified source identity into
+    # the child, and C17 shows re-entry still runs the full HOME canonical policy with the marker present.
     # Self-update identity: every launcher implementation file already loaded into memory before the
     # bootstrap (directly or transitively) must be part of the re-entry identity of BOTH launchers.
     foreach ($launcherName in @('Start-AeroLink.ps1', 'Start-AeroLinkProduction.ps1')) {
