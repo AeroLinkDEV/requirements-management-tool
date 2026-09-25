@@ -1,6 +1,7 @@
 using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 
 namespace AeroLink.Api;
 
@@ -51,6 +52,47 @@ public static class ProjectFeatureEndpoints
         });
     }
 
+    /// <summary>
+    /// Releases the in-work build of a project that has switched Release off (#1113, DEC-138), so it can move
+    /// to a successor build. There is no readiness evidence to release on, so this is a password-confirmed
+    /// signed decision with a reason, recorded as released without readiness evidence and never presented as
+    /// a readiness-backed release. Where Release is on, the release campaign remains the only way.
+    /// </summary>
+    public static void MapReleaseWithoutReadinessEndpoint(this WebApplication app)
+    {
+        app.MapPost("/api/releases/{releaseId:guid}/release-without-readiness", async (Guid releaseId,
+            ReleaseWithoutReadinessRequest request, HttpContext http, AeroLinkDbContext db, IdentityService identity,
+            CancellationToken ct) =>
+        {
+            var release = await db.Releases.SingleOrDefaultAsync(x => x.Id == releaseId, ct);
+            if (release is null) return Results.NotFound(new { error = "That build does not exist." });
+            if (!await http.HasProjectRoleAsync(db, identity, release.ProjectId, ct,
+                    ProgramRole.ConfigurationManager, ProgramRole.ProgramManager)) return Results.Forbid();
+            if ((await ProjectFeatureService.EffectiveAsync(db, release.ProjectId, ct)).HasFlag(ProjectFeature.Release))
+                return Results.Conflict(new { error = "This project uses Release, so a build is released through its release campaign.", code = "release_feature_enabled" });
+            if (release.IsReleased) return Results.Conflict(new { error = $"Build {release.Version} is already released." });
+            var reason = request.Reason?.Trim() ?? "";
+            if (reason.Length < 10) return Results.BadRequest(new { error = "Say why this build is being released (at least 10 characters)." });
+            var actor = http.UserAccount();
+            if (!await identity.ConfirmPasswordAsync(actor.Id, request.Password ?? "", ct))
+                return Results.Json(new { error = "Electronic signature confirmation failed." }, statusCode: 401);
+            var programId = await db.Projects.Where(x => x.Id == release.ProjectId).Select(x => x.ProgramId).SingleAsync(ct);
+            var now = DateTimeOffset.UtcNow;
+            var content = $"project={release.ProjectId:D};release={release.Id:D};version={release.Version};basis=WithoutReadinessEvidence;reason={reason};actor={actor.UserName};at={now.UtcDateTime:O}";
+            var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(content)));
+            release.MarkReleasedWithoutReadiness(now);
+            db.ElectronicSignatures.Add(new ElectronicSignature(actor.Id, actor.UserName, actor.DisplayName, programId,
+                "SoftwareRelease", release.Id, release.Version, "ReleaseWithoutReadiness",
+                "Released without readiness evidence", hash, http.Connection.RemoteIpAddress?.ToString() ?? "local", now,
+                rationale: reason));
+            db.SecurityAuditEvents.Add(new SecurityAuditEvent("ReleasedWithoutReadiness", actor.UserName, $"Release:{release.Id}",
+                "Success", $"Build {release.Version} released without readiness evidence: {reason}",
+                http.Connection.RemoteIpAddress?.ToString() ?? "local", now));
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { release.Id, release.Version, release.IsReleased, release.ReleasedAt, release.ReleasedWithoutReadiness, signatureHash = hash });
+        });
+    }
+
     private static object Projection(ProjectFeatureRead read, bool canManage) => new
     {
         read.Persisted,
@@ -81,4 +123,10 @@ public sealed class ProjectFeatureEditRequest
     public string? Reason { get; set; }
     /// <summary>The complete set of features that should be on, by name.</summary>
     public List<string>? Enabled { get; set; }
+}
+
+public sealed class ReleaseWithoutReadinessRequest
+{
+    public string? Reason { get; set; }
+    public string? Password { get; set; }
 }

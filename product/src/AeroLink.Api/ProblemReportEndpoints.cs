@@ -41,6 +41,7 @@ public static class ProblemReportEndpoints
         group.MapPost("/{id:guid}/investigation", InvestigateAsync);
         group.MapPost("/{id:guid}/resolution", ProposeResolutionAsync);
         group.MapPost("/{id:guid}/verify", VerifyAsync);
+        group.MapPost("/{id:guid}/attest-resolution", AttestResolutionAsync);
         group.MapPost("/{id:guid}/closure/approve", ApproveClosureAsync);
         group.MapPost("/{id:guid}/disposition", DispositionAsync);
         group.MapGet("/{id:guid}/duplicate-candidates", DuplicateCandidatesAsync);
@@ -628,6 +629,24 @@ public static class ProblemReportEndpoints
     private static async Task<IResult> InvestigateAsync(Guid id, InvestigationRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "InvestigationRecorded", (report, actor, now) => report.BeginInvestigation(actor.UserName, request.Analysis, request.RootCause ?? "", request.Effects ?? "", "", now));
     private static async Task<IResult> ProposeResolutionAsync(Guid id, ResolutionRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct) => await ChangeAsync(id, request.ExpectedVersion, http, db, ct, "ResolutionProposed", (report, actor, now) => report.ProposeResolution(actor.UserName, request.CorrectiveAction, now));
 
+    /// <summary>
+    /// Sends a Verifying report to SQA on the person's attested account of how the correction was verified
+    /// (#1113, DEC-137). Only a project that does not use Verification may: where Verification exists, the
+    /// basis is a passing test result through /verify.
+    /// </summary>
+    private static async Task<IResult> AttestResolutionAsync(Guid id, AttestationRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
+    {
+        var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
+        if (!await http.HasProjectAccessAsync(db, report.ProjectId, ct)) return Results.Forbid();
+        if ((await ProjectFeatureService.EffectiveAsync(db, report.ProjectId, ct)).HasFlag(AeroLink.Domain.Programs.ProjectFeature.Verification))
+            return Results.Conflict(new { error = "This project uses Verification, so send the report to SQA on a passing test result.", code = "pr_attestation_verification_enabled" });
+        return await ChangeAsync(report, request.ExpectedVersion, http, db, ct, "ResolutionAttested",
+            (item, actor, now) => item.RecordResolutionAttestation(actor.UserName, request.Statement ?? "", now, request.Rationale),
+            rationale: request.Rationale,
+            afterMutation: async (item, actor, now, _, _, token) =>
+                await new ProblemReportClosureCandidateService(db).CreateForAttestationAsync(item, actor.UserName, now, token));
+    }
+
     private static async Task<IResult> VerifyAsync(Guid id, VerificationRequest request, HttpContext http, AeroLinkDbContext db, CancellationToken ct)
     {
         var report = await db.ProblemReports.SingleOrDefaultAsync(x => x.Id == id, ct); if (report is null) return Results.NotFound();
@@ -1023,7 +1042,7 @@ public static class ProblemReportEndpoints
                 transitionRationale ??= ClosureBasisWithdrawnRationale(eventType);
             var revision = await AddRevisionAsync(db, report, eventType, actor.UserName, now, ct, detail,
                 fromState, toState, transitionRationale, actorDisplayName: actor.DisplayName);
-            if (wasAwaitingClosure && report.ResolutionVerificationExecutionId is null)
+            if (wasAwaitingClosure && report.ResolutionVerificationExecutionId is null && report.ResolutionAttestation is null)
                 await new ProblemReportClosureCandidateService(db).InvalidatePendingAsync(report, actor.UserName,
                     eventType, now, ct, fromState, toState, transitionRationale, actorDisplayName: actor.DisplayName);
             if (afterMutation is not null) await afterMutation(report, actor, now, createdLink, revision, ct);
@@ -1171,7 +1190,7 @@ public static class ProblemReportEndpoints
             && link.ArtifactId == x.ResolutionVerificationExecutionId).Select(LinkResponse).ToList();
         var now = DateTimeOffset.UtcNow; var waiverHistory = (releaseWaivers ?? []).ToList();
         var activeWaiver = waiverHistory.FirstOrDefault(item => item.IsActiveFor(x, now));
-        return new { x.Id, x.ProjectId, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.RootCauseRich, x.Effects, x.EffectsRich, x.Containment, x.ContainmentRich, x.CorrectiveAction, x.CorrectiveActionRich, x.Workaround, x.WorkaroundRich, x.AnalysisRich, category = CategoryResponse(x), x.SystemAircraftImpact, x.SystemAircraftImpactRich, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = currentSnapshot.Hash, snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, duplicateDiagnostic,
+        return new { x.Id, x.ProjectId, x.ResolutionAttestation, x.ReportNumber, x.Revision, x.DisplayNumber, x.Title, x.Problem, x.ProblemRich, x.AdditionalInformation, x.AdditionalInformationRich, x.Analysis, x.ReportedBy, reportedByDisplayName = liveNames.Current(x.ReportedBy), x.ResponsibleEngineerId, responsibleEngineerDisplayName = liveNames.Current(x.ResponsibleEngineerId), x.TargetReleaseId, x.Classification, severity = x.Severity.ToString(), priority = x.Priority.ToString(), x.Origin, x.AffectedConfiguration, x.RootCause, x.RootCauseRich, x.Effects, x.EffectsRich, x.Containment, x.ContainmentRich, x.CorrectiveAction, x.CorrectiveActionRich, x.Workaround, x.WorkaroundRich, x.AnalysisRich, category = CategoryResponse(x), x.SystemAircraftImpact, x.SystemAircraftImpactRich, x.ImpactAssessmentJson, disposition = x.Disposition?.ToString(), x.DispositionRationale, x.ResolutionVerificationExecutionId, x.ClosureApprovedByName, x.ClosureApprovedAt, x.IsReleaseBlocker, x.ReleaseBlockerVersion, waived = activeWaiver is not null, activeReleaseWaiver = activeWaiver is null ? null : WaiverResponse(activeWaiver, x, now), releaseWaivers = waiverHistory.Select(item => WaiverResponse(item, x, now)), legacyWaiver = string.IsNullOrWhiteSpace(x.WaiverRationale) ? null : new { provenance = "LegacyUnverified", rationale = x.WaiverRationale, x.WaivedBy, x.WaivedAt }, state = ProblemReportTransitionPolicy.Canonical(x.State).ToString(), x.CreatedAt, x.UpdatedAt, x.Version, snapshotHash = currentSnapshot.Hash, snapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion, capabilities, duplicateDiagnostic,
             // Each slot arrives complete — identifier, live state and target build. A response carrying only
             // ids would force the browser into a follow-up call per artifact, and the states it showed
             // would then be read at different instants from one another.
@@ -1726,6 +1745,7 @@ public static class ProblemReportEndpoints
     private sealed record InvestigationRequest(long? ExpectedVersion, string Analysis, string? RootCause, string? Effects, string? Containment);
     private sealed record ResolutionRequest(long? ExpectedVersion, string CorrectiveAction);
     private sealed record VerificationRequest(long? ExpectedVersion, Guid TestExecutionId, string? Rationale = null);
+    private sealed record AttestationRequest(long? ExpectedVersion, string? Statement, string? Rationale = null);
     private sealed record ClosureApprovalRequest(long? ExpectedVersion);
     private sealed record DispositionRequest(long? ExpectedVersion, ProblemReportDisposition Disposition, string Rationale, Guid? DuplicateOfId);
     private sealed record ReopenRequest(long? ExpectedVersion, string Rationale);

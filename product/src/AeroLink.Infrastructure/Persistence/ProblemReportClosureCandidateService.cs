@@ -76,6 +76,60 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
         return candidate;
     }
 
+    /// <summary>
+    /// The candidate for a report sent to SQA on an attested statement (#1113, DEC-137). The statement is
+    /// frozen as the verification evidence, and the report snapshot — which carries the same statement — is
+    /// what later approval revalidates, exactly as for a test execution.
+    /// </summary>
+    public async Task<ProblemReportClosureCandidate> CreateForAttestationAsync(ProblemReport report, string actor,
+        DateTimeOffset now, CancellationToken ct)
+    {
+        if (report.State != ProblemReportState.WaitingForSqaToClose || report.ResolutionAttestation is null)
+            throw new InvalidOperationException("The Problem Report must first accept this verification statement.");
+        if (await db.ProblemReportClosureCandidates.AnyAsync(item => item.ProblemReportId == report.Id
+                && item.State == ProblemReportClosureCandidateState.Pending, ct))
+            throw new InvalidOperationException("This Problem Report already has a pending closure candidate.");
+        var sequences = await db.ProblemReportClosureCandidates.AsNoTracking()
+            .Where(item => item.ProblemReportId == report.Id && item.ReportRevision == report.Revision)
+            .Select(item => item.Sequence).ToListAsync(ct);
+        var reportSnapshot = await CurrentReportSnapshotAsync(report, ct);
+        var evidenceJson = AttestationEvidence(report.ResolutionAttestation, actor, now);
+        var linksJson = await LinksManifestAsync(report.Id, additionalLink: null, SchemaVersion, ct);
+        var evidenceHash = Hash(evidenceJson);
+        var linksHash = Hash(linksJson);
+        var manifestHash = Hash(JsonSerializer.Serialize(new
+        {
+            contract = "aerolink.problem-report-closure-candidate-manifest",
+            schemaVersion = SchemaVersion,
+            problemReportId = report.Id,
+            reportRevision = report.Revision,
+            reportVersion = report.Version,
+            reportSnapshotSchemaVersion = ProblemReportEvidenceContract.SchemaVersion,
+            reportHash = reportSnapshot.Hash,
+            verificationExecutionId = (Guid?)null,
+            evidenceHash,
+            linksHash,
+            selectedBy = actor,
+            selectedAt = now,
+        }));
+        var candidate = new ProblemReportClosureCandidate(report.Id, report.Revision,
+            sequences.DefaultIfEmpty(0).Max() + 1, SchemaVersion, report.Version,
+            reportSnapshot.Json, reportSnapshot.Hash, null, evidenceJson, evidenceHash, linksJson, linksHash,
+            manifestHash, actor, now, ProblemReportEvidenceContract.SchemaVersion);
+        db.ProblemReportClosureCandidates.Add(candidate);
+        return candidate;
+    }
+
+    private static string AttestationEvidence(string statement, string actor, DateTimeOffset now) =>
+        JsonSerializer.Serialize(new
+        {
+            contract = "aerolink.problem-report-resolution-attestation",
+            schemaVersion = 1,
+            statement,
+            attestedBy = actor,
+            attestedAt = now,
+        });
+
     public async Task<ProblemReportClosureCandidate?> InvalidatePendingAsync(ProblemReport report,
         string actor, string reason, DateTimeOffset now, CancellationToken ct,
         ProblemReportState? fromState = null, ProblemReportState? toState = null, string? rationale = null,
@@ -141,6 +195,16 @@ public sealed class ProblemReportClosureCandidateService(AeroLinkDbContext db)
             return ProblemReportClosureCandidateDecision.Reject("pr_closure_candidate_stale",
                 "The Problem Report evidence relationships changed after verification. Record new verification before closure.", candidate);
 
+        if (candidate.VerificationExecutionId is null)
+        {
+            // An attested statement: the report snapshot compared above already carries the statement, so
+            // it still matches exactly what SQA was sent. The frozen evidence must be the candidate's own.
+            return report.ResolutionAttestation is not null
+                && string.Equals(candidate.VerificationEvidenceHash, Hash(candidate.VerificationEvidenceJson), StringComparison.Ordinal)
+                ? ProblemReportClosureCandidateDecision.Accept(candidate)
+                : ProblemReportClosureCandidateDecision.Reject("pr_closure_candidate_stale",
+                    "The verification statement no longer matches the SQA closure candidate.", candidate);
+        }
         var execution = await db.TestExecutions.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == candidate.VerificationExecutionId, ct);
         if (execution is null

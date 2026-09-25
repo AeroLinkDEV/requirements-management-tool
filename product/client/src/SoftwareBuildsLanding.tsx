@@ -4,6 +4,8 @@ import { ProjectIcon, projectMark } from "./ProjectsLanding";
 import { buildVersionOrder, officialBuildName } from "./presentation";
 import type { WorkspaceRelease } from "./workspaceContext";
 import "./SoftwareBuildsLanding.css";
+import ReleaseWithoutReadinessPanel from "./ReleaseWithoutReadinessPanel";
+import type { ProjectFeature } from "./projectFeatures";
 
 export type SelectableRelease = WorkspaceRelease;
 
@@ -19,7 +21,7 @@ function MetadataIcon({ kind }: { kind: "builds" | "released" | "work" }) {
 function statusFor(release: SelectableRelease, identity?: string) {
   if (!identity) return { key: "unavailable", label: "Unavailable" };
   return release.isReleased
-    ? { key: "released", label: "Released" }
+    ? { key: "released", label: release.releasedWithoutReadiness ? "Released · no readiness" : "Released" }
     : { key: "in-work", label: "In Work" };
 }
 
@@ -72,6 +74,10 @@ export default function SoftwareBuildsLanding({
   onPersonnel,
   onProjectConfiguration,
   onSignOut,
+  api,
+  projectId,
+  features,
+  onBuildsChanged,
 }: {
   user: AuthUser;
   /** The governed program code; the FMS showcase gets its mark and its mock back story. */
@@ -85,6 +91,11 @@ export default function SoftwareBuildsLanding({
   onPersonnel: () => void;
   onProjectConfiguration: () => void;
   onSignOut: () => void;
+  api?: string;
+  projectId?: string;
+  /** The project's enabled features (#1113); without Release the page offers moving to the next build. */
+  features?: ProjectFeature[] | null;
+  onBuildsChanged?: () => void;
 }) {
   const ordered = sortReleases(releases);
   const releaseById = new Map(ordered.map(release => [release.id, release]));
@@ -183,7 +194,7 @@ export default function SoftwareBuildsLanding({
                       </div>
                       <h3>{identity ? `Build ${release.version}` : "Unsupported build version"}</h3>
                       <p className="buildLifecycleDescription">
-                        {release.isReleased ? "Released build · read-only" : "In-work build · authoring available"}
+                        {release.isReleased ? release.releasedWithoutReadiness ? "Released without readiness evidence · read-only" : "Released build · read-only" : "In-work build · authoring available"}
                       </p>
                       <p className="buildPredecessor" data-lineage-edge>
                         <strong>Predecessor</strong>{predecessorIdentity ? <span>↳ {predecessorIdentity}</span> : <span>{release.predecessorReleaseId ? "Unavailable source build" : "None recorded"}</span>}
@@ -207,6 +218,9 @@ export default function SoftwareBuildsLanding({
             <p className="buildLineageEmpty">This project has no software builds yet. Use <b>Imported baselines</b> above to bring in an existing baseline as its first build.</p>
           )}
         </section>
+        {api && projectId && onBuildsChanged && features && !features.includes("Release") && (
+          <ReleaseWithoutReadinessPanel api={api} projectId={projectId} releases={ordered} onChanged={onBuildsChanged} />
+        )}
       </main>
     </div>
   );

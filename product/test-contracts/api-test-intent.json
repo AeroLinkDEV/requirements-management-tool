@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 999,
-    "cases": 1144,
+    "tests": 1001,
+    "cases": 1146,
     "classes": 158,
-    "hostedTests": 944,
-    "hostedCases": 1067,
+    "hostedTests": 946,
+    "hostedCases": 1069,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
     "unknownHostTests": 23,
@@ -37,8 +37,8 @@
     "auth-policy": {
       "label": "Authentication / authorization wiring",
       "level": "API (must stay hosted)",
-      "tests": 114,
-      "cases": 132,
+      "tests": 116,
+      "cases": 134,
       "unknownCases": 0,
       "classes": 67
     },
@@ -10616,6 +10616,42 @@
       "sourceLines": {
         "start": 16,
         "end": 113
+      }
+    },
+    {
+      "cls": "ProjectFeatureApiTests",
+      "test": "Without_Release_a_build_is_released_by_a_signed_decision_and_its_successor_can_start",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 206,
+        "end": 285
+      }
+    },
+    {
+      "cls": "ProjectFeatureApiTests",
+      "test": "Without_Verification_a_fixed_report_reaches_independent_SQA_closure_on_an_attested_statement",
+      "kind": "Fact",
+      "intent": "auth-policy",
+      "cases": 1,
+      "caseEvidence": "Fact",
+      "hosted": "hosted",
+      "hostEvidence": [
+        "factory-construction",
+        "factory-client",
+        "factory-services"
+      ],
+      "sourceLines": {
+        "start": 115,
+        "end": 204
       }
     },
     {

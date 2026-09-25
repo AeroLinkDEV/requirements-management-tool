@@ -1,7 +1,7 @@
 import { projectSlugOf } from "./routing";
 import type { AppRoute } from "./routing";
 
-export type WorkspaceRelease = { id: string; version: string; isReleased: boolean; predecessorReleaseId?: string | null };
+export type WorkspaceRelease = { id: string; version: string; isReleased: boolean; predecessorReleaseId?: string | null; releasedWithoutReadiness?: boolean };
 export type Workspace = {
   program: { id: string; name: string; code: string };
   projects: {

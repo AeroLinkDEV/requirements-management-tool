@@ -423,6 +423,7 @@ app.MapProjectConfigurationEndpoints();
 app.MapAssurancePolicyEndpoints();
 app.MapVerificationVocabularyEndpoints();
 app.MapProjectFeatureEndpoints();
+app.MapReleaseWithoutReadinessEndpoint();
 app.MapChangeRequestEndpoints();
 app.MapDownstreamAssessmentEndpoints();
 app.MapBaselineImportEndpoints();

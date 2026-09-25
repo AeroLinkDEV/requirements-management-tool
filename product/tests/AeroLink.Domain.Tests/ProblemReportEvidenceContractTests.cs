@@ -27,9 +27,16 @@ public sealed class ProblemReportEvidenceContractTests
         Assert.Equal(ProblemReportEvidenceContract.Contract, json.RootElement.GetProperty("contract").GetString());
         Assert.Equal(ProblemReportEvidenceContract.SchemaVersion,
             json.RootElement.GetProperty("schemaVersion").GetInt32());
-        foreach (var field in evidenceFields)
+        // The attested statement (#1113) is written only when present, so every report sent on a test result
+        // keeps exactly the schema-6 bytes and hash it had before the field existed.
+        var presentWhenSet = new[] { nameof(ProblemReportEvidenceSnapshot.ResolutionAttestation) };
+        foreach (var field in evidenceFields.Except(presentWhenSet))
             Assert.True(json.RootElement.TryGetProperty(JsonNamingPolicy.CamelCase.ConvertName(field), out _),
                 $"Problem Report field {field} is absent from immutable evidence.");
+        Assert.False(json.RootElement.TryGetProperty("resolutionAttestation", out _));
+        var attested = ProblemReportEvidenceContract.Create(NewReport()) with { ResolutionAttestation = "Re-ran the sequence; no recurrence." };
+        Assert.Contains("\"resolutionAttestation\":\"Re-ran the sequence; no recurrence.\"", ProblemReportEvidenceContract.Serialize(attested));
+        Assert.NotEqual(ProblemReportEvidenceContract.Hash(ProblemReportEvidenceContract.Create(NewReport())), ProblemReportEvidenceContract.Hash(attested));
         Assert.False(json.RootElement.TryGetProperty("numberSequence", out _),
             "The derived paging index must not change the controlled evidence contract.");
     }

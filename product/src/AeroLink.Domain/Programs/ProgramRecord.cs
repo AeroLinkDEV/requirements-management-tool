@@ -90,6 +90,12 @@ public sealed class SoftwareRelease
     public long? PickerInsertionOrdinal { get; private set; }
     internal void SetCanonicalIdentity(string canonicalIdentity) => CanonicalIdentity = canonicalIdentity;
     public void MarkReleased(DateTimeOffset now) { if (IsReleased) throw new InvalidOperationException("The software release is already released."); IsReleased = true; ReleasedAt = now; }
+    /// <summary>
+    /// Released by a signed decision with no readiness evidence, which is only possible in a project that has
+    /// switched Release off (#1113, DEC-138). Never presented as a readiness-backed release.
+    /// </summary>
+    public bool ReleasedWithoutReadiness { get; private set; }
+    public void MarkReleasedWithoutReadiness(DateTimeOffset now) { MarkReleased(now); ReleasedWithoutReadiness = true; }
 }
 
 public enum SoftwareBuildState { Recorded, Released }

@@ -68,6 +68,10 @@ public sealed record ProblemReportEvidenceSnapshot
     public required long Version { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<ProblemReportSupportingAttachmentSnapshot>? SupportingAttachments { get; init; }
+    /// <summary>Present only on a report sent to SQA on an attested statement (#1113); absent keeps every
+    /// other schema-6 snapshot byte-identical to what it was.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResolutionAttestation { get; init; }
 }
 
 /// <summary>The immutable supporting-file identity committed into a schema-6 Problem Report snapshot.</summary>
@@ -162,6 +166,7 @@ public static class ProblemReportEvidenceContract
         SupportingAttachments = (schemaVersion ?? SchemaVersion) >= 6
             ? (supportingAttachments ?? []).OrderBy(x => x.LogicalId).ThenBy(x => x.Version).ToArray()
             : null,
+        ResolutionAttestation = (schemaVersion ?? SchemaVersion) >= 6 ? report.ResolutionAttestation : null,
     };
 
     public static string Serialize(ProblemReport report, long? versionOverride = null,

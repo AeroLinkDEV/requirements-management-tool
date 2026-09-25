@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { CANONICAL_STATES, isOnRail, stateIndex, stateLabel } from "./problemReportLifecycle";
 import "./ProblemReportStateHeader.css";
 
@@ -45,6 +45,10 @@ type Props = {
   onReject: () => void;
   onToggleBlocker?: () => void;
   onClosureResult?: () => void;
+  /** Verifying on a project without Verification (#1113): send to SQA on an attested statement instead. */
+  onAttest?: (statement: string) => Promise<boolean>;
+  /** The attested statement this report was sent to SQA on, when that was its basis. */
+  attestation?: string | null;
 };
 
 /**
@@ -86,7 +90,10 @@ export default function ProblemReportStateHeader({
   onReject,
   onToggleBlocker,
   onClosureResult,
+  onAttest,
+  attestation,
 }: Props) {
+  const [statement, setStatement] = useState("");
   const current = stateIndex(state);
   const offered = transitions.filter((transition) => transition.state !== "Rejected");
   const canReject = transitions.some((transition) => transition.state === "Rejected");
@@ -204,6 +211,39 @@ export default function ProblemReportStateHeader({
           <button type="button" className="prStateLink" disabled={busy} onClick={onClosureResult}>
             Choose the closure-supporting result →
           </button>
+        </div>
+      )}
+
+      {onAttest && (
+        <form
+          className="prStatePrereq prAttestation"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void onAttest(statement).then((sent) => { if (sent) setStatement(""); });
+          }}
+        >
+          <label htmlFor="prAttestation">
+            This project does not use Verification. Describe how the correction was verified; SQA closes the
+            report independently on this statement.
+          </label>
+          <textarea
+            id="prAttestation"
+            rows={3}
+            value={statement}
+            onChange={(event) => setStatement(event.target.value)}
+            placeholder="What was checked, on which build, and what was observed"
+          />
+          <button type="submit" className="prStateLink" disabled={busy || statement.trim().length < 20}>
+            Send to SQA on this statement →
+          </button>
+        </form>
+      )}
+
+      {attestation && (
+        <div className="prStatePrereq prAttestation" role="note">
+          <span>
+            <b>Sent to SQA on an attested statement:</b> {attestation}
+          </span>
         </div>
       )}
 

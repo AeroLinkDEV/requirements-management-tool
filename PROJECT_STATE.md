@@ -303,6 +303,8 @@ A Problem Report changes lifecycle state only when a person explicitly transitio
 corrective result offers to send the report to SQA on that result; the engineer confirms it. A later
 closure-significant change withdraws the closure basis and blocks SQA closure, but leaves the report waiting for SQA
 until a person returns it to Verifying. Any rationale given on a transition is kept (DEC-132).
+In a project that does not use Verification, the report is sent to SQA on an attested statement of how the
+correction was verified instead of a test result (DEC-137); SQA still closes it independently.
 
 Upstream change requests and exact Case origins provide inherited Problem Report context for downstream authoring. Authors explicitly select direct links under the existing project/build and review-version rules; source approval does not automatically copy those links into a new verification assessment. Refreshing source context does not change independently accepted links or frozen review history. Software Procedure packages retain their exact Case origin when secondary Problem Reports are explicitly linked.
 
@@ -317,6 +319,9 @@ AeroLink separates several facts that must not collapse into one:
 - the authorized human release decision.
 
 Released baselines/builds remain immutable. Successor/in-work builds are explicitly assembled under user/configuration authority; AeroLink does not silently create or approve later product baselines.
+
+A project that does not use Release moves between builds by a signed decision recorded as released without
+readiness evidence (DEC-138); it is never presented as a readiness-backed release.
 
 Exact manifests/effectivity are authoritative for what a build carries.
 
