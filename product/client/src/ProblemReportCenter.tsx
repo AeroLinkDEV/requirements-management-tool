@@ -17,6 +17,7 @@ import { useCategoryVocabulary, type SelectedCategory } from "./problemReportCat
 import { AutosaveState, DraftRestore } from "./DraftNotice";
 import { useLocalDraft } from "./autosave";
 import "./ProblemReportCenter.css";
+import type { ProjectFeature } from "./projectFeatures";
 
 type Link = {
   artifactType: string;
@@ -125,6 +126,8 @@ type Report = {
   state: string;
   disposition?: string;
   dispositionRationale?: string;
+  /** Present when the report was sent to SQA on an attested statement (#1113). */
+  resolutionAttestation?: string | null;
   duplicateDiagnostic?: DuplicateDiagnostic;
   category?: SelectedCategory | null;
   workaround?: string;
@@ -199,6 +202,8 @@ type Props = {
   }) => void;
   onOpenArtifact: (kind: string, id: string, identifier?: string) => void;
   problemReportHref?: (report: RelatedReport) => string | undefined;
+  /** The project's enabled features (#1113). Null or absent keeps every feature, as before. */
+  features?: ProjectFeature[] | null;
 };
 type ImpactValue = "Unknown" | "No" | "Yes";
 type ImpactMap = Record<string, ImpactValue>;
@@ -346,7 +351,10 @@ export default function ProblemReportCenter({
   onOpenVerification,
   onOpenArtifact,
   problemReportHref,
+  features,
 }: Props) {
+  const verificationOn = !features || features.includes("Verification");
+  const releaseOn = !features || features.includes("Release");
   const [reports, setReports] = useState<Report[]>([]),
     [page, setPage] = useState(1),
     [reportTotal, setReportTotal] = useState(0),
@@ -1282,12 +1290,14 @@ export default function ProblemReportCenter({
                   }
                   transitions={selected.capabilities?.availableTransitions ?? []}
                   busy={busy}
-                  isReleaseBlocker={selected.isReleaseBlocker}
+                  isReleaseBlocker={releaseOn && selected.isReleaseBlocker}
                   waived={selected.waived}
                   canToggleBlocker={
-                    isOwner && !["Closed", ...terminalDispositions].includes(selected.state)
+                    releaseOn && isOwner && !["Closed", ...terminalDispositions].includes(selected.state)
                   }
-                  showClosureResult={selected.state === "Verifying"}
+                  showClosureResult={verificationOn && selected.state === "Verifying"}
+                  onAttest={!verificationOn && selected.state === "Verifying" ? (statement) => action("attest-resolution", { statement }) : undefined}
+                  attestation={selected.resolutionAttestation}
                   closureBasisWithdrawn={selected.capabilities?.closureBasisWithdrawn}
                   dispositionRationale={selected.dispositionRationale}
                   onTransition={requestTransition}

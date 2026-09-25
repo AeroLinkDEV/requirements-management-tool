@@ -304,3 +304,8 @@
   .prStateOffPath { grid-template-columns: minmax(0, 1fr); }
   .prStateOwner { margin-left: 0; }
 }
+
+/* Attested closure basis on a project without Verification (#1113). */
+.prStatePrereq.prAttestation { flex-direction: column; align-items: stretch; gap: 8px; }
+.prStatePrereq.prAttestation textarea { inline-size: 100%; min-block-size: 72px; resize: vertical; font: inherit; padding: 8px 10px; border: 1px solid #d5dce6; border-radius: 8px; }
+.prStatePrereq.prAttestation button { align-self: flex-start; }

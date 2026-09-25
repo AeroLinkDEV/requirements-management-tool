@@ -27,8 +27,8 @@
     },
     "reusable-host": {
       "classes": 58,
-      "tests": 351,
-      "knownCases": 397,
+      "tests": 352,
+      "knownCases": 398,
       "unknownCaseTests": 0
     }
   },
@@ -1770,6 +1770,17 @@
       ]
     },
     {
+      "cls": "ProjectFeatureApiTests",
+      "tests": 2,
+      "knownCases": 2,
+      "unknownCaseTests": 0,
+      "classification": "reusable-host",
+      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
+      "intents": [
+        "auth-policy"
+      ]
+    },
+    {
       "cls": "ProjectSetupAuthorizationApiTests",
       "tests": 2,
       "knownCases": 2,
@@ -1867,17 +1878,6 @@
       "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
       "intents": [
         "ef-translation"
-      ]
-    },
-    {
-      "cls": "ProjectFeatureApiTests",
-      "tests": 1,
-      "knownCases": 1,
-      "unknownCaseTests": 0,
-      "classification": "reusable-host",
-      "reason": "Static reuse candidate, not an implementation-ready safety finding: shared-host conversion requires fresh per-test clients, unique per-test tagged logical data, and assertions scoped to that data.",
-      "intents": [
-        "auth-policy"
       ]
     },
     {

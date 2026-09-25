@@ -2615,6 +2615,14 @@ choices are created as focused issues only when their trigger and acceptance bou
 - **Rules:** Code and Verification need Requirements (until standalone verification is delivered). A feature can be switched off only while it holds no records; switching one on is always allowed. Configuration Manager, Program Manager or Administrator changes the set with a reason; every change is versioned, attributed and hashed. The save boundary refuses new records for a feature that is off, whatever the entry point, so the server — not the browser — keeps a disabled feature empty. Navigation, quick navigation, deep links and Command Center read the same set.
 - **Consequences:** Switching off never deletes, hides or rewrites controlled history, because a feature holding records cannot be switched off. The Digital Thread follows Requirements or Verification rather than Release. Later #1113 slices add a Problem Reports-only path (empty ladder, attested closure without Verification), release without readiness evidence for projects with Release off, and standalone verification.
 
+### DEC-137 - Without Verification, a Fixed Problem Report Reaches SQA on an Attested Statement
+
+- **Date:** 2026-09-24
+- **Status:** Accepted owner decision 1 in [issue #1113](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1113).
+- **Decision:** In a project whose Verification feature is off (DEC-136), the person sending a Verifying Problem Report to SQA does so on an attested statement of how the correction was verified, instead of a passing test execution. Where Verification is on, a passing test result remains the only basis and the attested path is refused.
+- **Unchanged meaning:** SQA closure stays independent: SQA authority is required, and the reporter and responsible engineer still cannot close. The statement is recorded on the report, frozen into the closure candidate as its verification evidence, carried into the closure package, and withdrawn by later closure-significant changes exactly as a test-result basis is (DEC-133).
+- **Evidence contract:** The statement is written into the schema-6 report snapshot only when present, so every report sent on a test result keeps the bytes and hash it had before. A candidate built on a statement has no verification execution.
+
 ### DEC-140 - Agents Own Non-Functional Decisions; the Owner Owns Functional Ones
 
 - **Date:** 2026-09-25

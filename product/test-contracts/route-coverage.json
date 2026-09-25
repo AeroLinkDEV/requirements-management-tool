@@ -1457,6 +1457,14 @@
     },
     {
       "method": "POST",
+      "path": "/api/problem-reports/{id:guid}/attest-resolution",
+      "file": "ProblemReportEndpoints.cs",
+      "coveredBy": [
+        "ProjectFeatureApiTests"
+      ]
+    },
+    {
+      "method": "POST",
       "path": "/api/problem-reports/{id:guid}/blocker",
       "file": "ProblemReportEndpoints.cs",
       "coveredBy": [
@@ -1470,7 +1478,8 @@
       "file": "ProblemReportEndpoints.cs",
       "coveredBy": [
         "ProblemReportApiTests",
-        "ProblemReportVerificationApiTests"
+        "ProblemReportVerificationApiTests",
+        "ProjectFeatureApiTests"
       ]
     },
     {

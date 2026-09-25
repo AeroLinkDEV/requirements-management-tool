@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { login, showcaseSeed } from './auth'
+import { apiBase, login, showcaseSeed } from './auth'
 
 /**
  * #1113 S1 — a project shows only the features it has switched on.
@@ -59,4 +59,30 @@ test('a Problem Reports-only project hides every other feature everywhere', asyn
   await expect(problemReports).toBeDisabled()
   await expect(page.getByText('Holds records, so it stays on.').first()).toBeVisible()
   if (evidenceDir) await page.screenshot({ path: `${evidenceDir}/features-panel.png`, animations: 'disabled' })
+})
+
+test('a Verifying report on a project without Verification is sent to SQA on an attested statement', async ({ page, request }) => {
+  const showcase = await showcaseSeed(request)
+  const root = `/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}`
+  await page.route(`**/api/projects/${showcase.projectId}/features`, route => route.request().method() === 'GET'
+    ? route.fulfill({ json: { persisted: true, version: 1, canManage: true, enabled: ['TeamWork', 'ProblemReports'], features: [], history: [] } })
+    : route.continue())
+  await login(page, 'admin', { openProject: false })
+  const listed = await page.request.get(`${apiBase}/api/problem-reports?projectId=${showcase.projectId}`)
+  const body = await listed.json()
+  const rows: { id: string; state: string }[] = Array.isArray(body) ? body : body.items ?? body.reports ?? []
+  const verifying = rows.find(row => row.state === 'Verifying')
+  test.skip(!verifying, 'The showcase currently holds no Verifying report.')
+
+  await page.goto(`${root}/problem-reports/${verifying!.id}`)
+  const lifecycle = page.getByRole('region', { name: 'Problem Report lifecycle' })
+  await expect(lifecycle.getByText('This project does not use Verification.')).toBeVisible()
+  await expect(lifecycle.getByRole('button', { name: /Choose the closure-supporting result/ })).toHaveCount(0)
+  const send = lifecycle.getByRole('button', { name: 'Send to SQA on this statement →' })
+  await expect(send).toBeDisabled()
+  await lifecycle.getByLabel(/Describe how the correction was verified/).fill('Re-ran the failing sequence on the bench build; no recurrence observed.')
+  await expect(send).toBeEnabled()
+  // The real project does use Verification, so the server keeps the test-result basis: nothing changes.
+  await send.click()
+  await expect(page.getByText('This project uses Verification, so send the report to SQA on a passing test result.')).toBeVisible()
 })

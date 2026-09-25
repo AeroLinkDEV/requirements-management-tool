@@ -1199,6 +1199,7 @@ function App() {
     return inShell(
       <ProblemReportCenter
         api={API}
+        features={features}
         projectId={project.project.id}
         releaseId={release?.id ?? ""}
         releases={project.releases}

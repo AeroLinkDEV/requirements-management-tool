@@ -26,12 +26,14 @@ public sealed class ProblemReportClosureCandidate
     private ProblemReportClosureCandidate() { }
     public ProblemReportClosureCandidate(Guid problemReportId, int reportRevision, int sequence,
         int schemaVersion, long reportVersion, string reportSnapshotJson, string reportSnapshotHash,
-        Guid verificationExecutionId, string verificationEvidenceJson, string verificationEvidenceHash,
+        Guid? verificationExecutionId, string verificationEvidenceJson, string verificationEvidenceHash,
         string linksManifestJson, string linksManifestHash, string manifestHash,
         string selectedBy, DateTimeOffset selectedAt, int reportSnapshotSchemaVersion)
     {
+        // A null execution means the report was sent on an attested statement (#1113); the evidence JSON then
+        // carries that statement, and is still required below.
         if (problemReportId == Guid.Empty || verificationExecutionId == Guid.Empty)
-            throw new DomainException("A closure candidate requires its Problem Report and verification execution.");
+            throw new DomainException("A closure candidate requires its Problem Report and a verification execution or attested statement.");
         if (sequence < 1 || schemaVersion < 1 || reportVersion < 1 || reportSnapshotSchemaVersion < 1)
             throw new DomainException("A closure candidate requires a valid sequence, schema, and Problem Report version.");
         Id = Guid.NewGuid(); ProblemReportId = problemReportId; ReportRevision = reportRevision;
@@ -55,7 +57,7 @@ public sealed class ProblemReportClosureCandidate
     public long ReportVersion { get; private set; }
     public string ReportSnapshotJson { get; private set; } = "";
     public string ReportSnapshotHash { get; private set; } = "";
-    public Guid VerificationExecutionId { get; private set; }
+    public Guid? VerificationExecutionId { get; private set; }
     public string VerificationEvidenceJson { get; private set; } = "";
     public string VerificationEvidenceHash { get; private set; } = "";
     public string LinksManifestJson { get; private set; } = "";
@@ -289,6 +291,12 @@ public sealed class ProblemReport
     public ProblemReportDisposition? Disposition { get; private set; }
     public string DispositionRationale { get; private set; } = "";
     public Guid? ResolutionVerificationExecutionId { get; private set; }
+    /// <summary>
+    /// The engineer's attested account of how the correction was verified, sent to SQA in place of a test
+    /// execution when the project does not use Verification (#1113, DEC-137). Null whenever a test execution
+    /// is the basis, and withdrawn exactly like one.
+    /// </summary>
+    public string? ResolutionAttestation { get; private set; }
     public Guid? ClosureApprovedBy { get; private set; }
     public string ClosureApprovedByName { get; private set; } = "";
     public DateTimeOffset? ClosureApprovedAt { get; private set; }
@@ -476,7 +484,21 @@ public sealed class ProblemReport
     {
         if (State != ProblemReportState.Verifying) throw new DomainException("Only a Verifying problem report can record closure-supporting evidence.");
         if (executionId == Guid.Empty) throw new DomainException("A successor test execution is required for resolution verification.");
-        ResolutionVerificationExecutionId = executionId; TransitionTo(ProblemReportState.WaitingForSqaToClose, actor, rationale, now);
+        ResolutionVerificationExecutionId = executionId; ResolutionAttestation = null; TransitionTo(ProblemReportState.WaitingForSqaToClose, actor, rationale, now);
+    }
+
+    /// <summary>
+    /// The same act for a project that does not use Verification (#1113, DEC-137): the person sends the
+    /// report to SQA on their attested account of how the correction was verified. The caller has already
+    /// established that the project's Verification feature is off; SQA still closes independently.
+    /// </summary>
+    public void RecordResolutionAttestation(string actor, string statement, DateTimeOffset now, string? rationale = null)
+    {
+        if (State != ProblemReportState.Verifying) throw new DomainException("Only a Verifying problem report can record closure-supporting evidence.");
+        var text = statement?.Trim() ?? "";
+        if (text.Length < 20) throw new DomainException("Describe how the correction was verified (at least 20 characters) before sending this report to SQA.");
+        if (text.Length > 8000) throw new DomainException("The verification statement is limited to 8000 characters.");
+        ResolutionVerificationExecutionId = null; ResolutionAttestation = text; TransitionTo(ProblemReportState.WaitingForSqaToClose, actor, rationale, now);
     }
 
     public void ApproveClosure(string actor, Guid actorAccountId, DateTimeOffset now)
@@ -562,34 +584,34 @@ public sealed class ProblemReport
         // (#1088). A report whose closure basis was withdrawn by a later change keeps its state and cannot
         // be closed until a person returns it to Verifying and sends it again on a fresh passing result.
         if (source == ProblemReportState.Verifying && target == ProblemReportState.WaitingForSqaToClose
-            && ResolutionVerificationExecutionId is null)
+            && ResolutionVerificationExecutionId is null && ResolutionAttestation is null)
             throw new DomainException("Choose the passing closure-supporting result before sending this Problem Report to SQA.");
         if (source == ProblemReportState.WaitingForSqaToClose && target == ProblemReportState.Closed
-            && ResolutionVerificationExecutionId is null)
+            && ResolutionVerificationExecutionId is null && ResolutionAttestation is null)
             throw new DomainException("The closure basis for this Problem Report was withdrawn by a later change. Return it to Verifying and send it to SQA on a fresh passing result.");
 
         if (target == ProblemReportState.Rejected)
         {
             Disposition = ProblemReportDisposition.Rejected;
             DispositionRationale = rationale!;
-            ResolutionVerificationExecutionId = null;
+            ResolutionVerificationExecutionId = null; ResolutionAttestation = null;
             ClosureApprovedBy = null; ClosureApprovedByName = ""; ClosureApprovedAt = null;
         }
         else if (source == ProblemReportState.Rejected)
         {
             Revision++; Disposition = null; DispositionRationale = "";
-            ResolutionVerificationExecutionId = null;
+            ResolutionVerificationExecutionId = null; ResolutionAttestation = null;
             ClosureApprovedBy = null; ClosureApprovedByName = ""; ClosureApprovedAt = null;
         }
         else if (source == ProblemReportState.Closed && target == ProblemReportState.Verifying)
         {
             Revision++; Disposition = null; DispositionRationale = "";
-            ResolutionVerificationExecutionId = null;
+            ResolutionVerificationExecutionId = null; ResolutionAttestation = null;
             ClosureApprovedBy = null; ClosureApprovedByName = ""; ClosureApprovedAt = null;
         }
         else if (source == ProblemReportState.WaitingForSqaToClose && target != ProblemReportState.Closed)
         {
-            ResolutionVerificationExecutionId = null;
+            ResolutionVerificationExecutionId = null; ResolutionAttestation = null;
             ClosureApprovedBy = null; ClosureApprovedByName = ""; ClosureApprovedAt = null;
         }
         State = target;
@@ -613,7 +635,7 @@ public sealed class ProblemReport
     /// withdrawn that basis, which leaves the state where it was and the report unclosable (#1088).
     /// </summary>
     public bool HasClosureBasis() =>
-        State == ProblemReportState.WaitingForSqaToClose && ResolutionVerificationExecutionId is not null;
+        State == ProblemReportState.WaitingForSqaToClose && (ResolutionVerificationExecutionId is not null || ResolutionAttestation is not null);
     public bool PrepareControlledRelationshipChange(string actor, DateTimeOffset now)
     {
         Required(actor, "A controlled relationship actor is required."); EnsureNotTerminal();
@@ -628,7 +650,7 @@ public sealed class ProblemReport
     private void InvalidateClosureVerificationForChange()
     {
         if (State != ProblemReportState.WaitingForSqaToClose) return;
-        ResolutionVerificationExecutionId = null;
+        ResolutionVerificationExecutionId = null; ResolutionAttestation = null;
     }
     private void EnsureResponsible(string actor) { if (!string.Equals(actor, ResponsibleEngineerId, StringComparison.OrdinalIgnoreCase)) throw new DomainException("Only the responsible engineer can perform this action."); }
     /// <summary>

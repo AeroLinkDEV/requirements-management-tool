@@ -112,6 +112,91 @@ public sealed class ProjectFeatureApiTests
             Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
     }
 
+    [Fact]
+    public async Task Without_Verification_a_fixed_report_reaches_independent_SQA_closure_on_an_attested_statement()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        await BootstrapAsync(client);
+        var engineer = $"pf.eng.{Guid.NewGuid():N}";
+        var quality = $"pf.sqa.{Guid.NewGuid():N}";
+        Guid attestedId, verifiedProjectReportId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var program = new ProgramRecord("Attestation program", "PFA");
+            var reportsOnly = new ProjectRecord(program.Id, "Problem Reports only", "FMS");
+            var everything = new ProjectRecord(program.Id, "Every feature", "FMS");
+            db.AddRange(program, reportsOnly, everything,
+                new ProjectFeatureSet(reportsOnly.Id, ProjectFeature.TeamWork | ProjectFeature.ProblemReports, "test.setup", now));
+            foreach (var (name, role) in new[] { (engineer, ProgramRole.SoftwareEngineer), (quality, ProgramRole.SoftwareQualityAnalyst) })
+            {
+                var account = new UserAccount(name, name, $"{name}@example.test",
+                    IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
+                db.AddRange(account, new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
+            }
+            var state = typeof(ProblemReport).GetProperty(nameof(ProblemReport.State))!;
+            ProblemReport Verifying(Guid projectId, string number)
+            {
+                var report = new ProblemReport(projectId, number, "Display freezes", "The display freezes.", "", engineer, now);
+                state.SetValue(report, ProblemReportState.Verifying);
+                db.ProblemReports.Add(report);
+                return report;
+            }
+            attestedId = Verifying(reportsOnly.Id, "PR-00001").Id;
+            verifiedProjectReportId = Verifying(everything.Id, "PR-00002").Id;
+            await db.SaveChangesAsync();
+        }
+        const string statement = "Re-ran the waypoint insert sequence 50 times on the bench build; no freeze observed.";
+        Task<HttpResponseMessage> AttestAsync(HttpClient http, Guid id, string text) =>
+            http.PostAsJsonAsync($"/api/problem-reports/{id}/attest-resolution", new { statement = text });
+
+        using var engineerClient = factory.CreateClient();
+        using (var login = await engineerClient.PostAsJsonAsync("/api/auth/login", new { userName = engineer, password = AeroLinkApiFactory.MemberPassword }))
+            Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(engineerClient);
+
+        // Where Verification exists, a test result remains the only basis.
+        using (var refused = await AttestAsync(engineerClient, verifiedProjectReportId, statement))
+        {
+            Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+            Assert.Contains("pr_attestation_verification_enabled", await refused.Content.ReadAsStringAsync());
+        }
+        using (var tooShort = await AttestAsync(engineerClient, attestedId, "Looks fine."))
+            Assert.Equal(HttpStatusCode.BadRequest, tooShort.StatusCode);
+        using (var sent = await AttestAsync(engineerClient, attestedId, statement))
+        {
+            Assert.Equal(HttpStatusCode.OK, sent.StatusCode);
+            Assert.Equal("WaitingForSqaToClose", (await sent.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+        }
+        var detail = await engineerClient.GetFromJsonAsync<JsonElement>($"/api/problem-reports/{attestedId}");
+        Assert.Equal(statement, detail.GetProperty("resolutionAttestation").GetString());
+
+        // The responsible engineer still cannot close it; independent SQA can.
+        using (var selfClose = await engineerClient.PostAsJsonAsync($"/api/problem-reports/{attestedId}/closure/approve", new { }))
+            Assert.Equal(HttpStatusCode.Forbidden, selfClose.StatusCode);
+        using var qualityClient = factory.CreateClient();
+        using (var login = await qualityClient.PostAsJsonAsync("/api/auth/login", new { userName = quality, password = AeroLinkApiFactory.MemberPassword }))
+            Assert.Equal(HttpStatusCode.OK, login.StatusCode);
+        await SecurityBoundaryTests.AuthorizeMutationsAsync(qualityClient);
+        using (var closed = await qualityClient.PostAsJsonAsync($"/api/problem-reports/{attestedId}/closure/approve", new { }))
+        {
+            Assert.Equal(HttpStatusCode.OK, closed.StatusCode);
+            Assert.Equal("Closed", (await closed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var candidate = db.ProblemReportClosureCandidates.Single(x => x.ProblemReportId == attestedId);
+            Assert.Equal(ProblemReportClosureCandidateState.Approved, candidate.State);
+            Assert.Null(candidate.VerificationExecutionId);
+            Assert.Contains(statement, candidate.VerificationEvidenceJson);
+            Assert.Contains("aerolink.problem-report-resolution-attestation", candidate.ClosurePackageJson);
+        }
+    }
+
     private static AeroLink.Domain.Documents.ManagedDocument ManagedDocumentFixture(Guid projectId) =>
         new(projectId, "SYSRD-00001", "SYSRD", "System Requirements", "Gated document", "admin", DateTimeOffset.UtcNow);
 
