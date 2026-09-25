@@ -336,6 +336,20 @@ collector or report job, and no observation lane or executed selector change is 
 any adoption decision require separate work with independently reviewed measurements; the existing count/TRX/
 union guards must remain intact.
 
+## Fast leak rate (#1152 B4)
+
+`bin/report-fast-leak.mjs` is an explicit read-only report. For every failed readiness Full run since a date, it
+asks whether advisory Fast was red (caught earlier), green (leaked) or absent on the same head SHA, and breaks the
+failures down by failing lane. It uses the operator's `gh` credential for GET requests only and writes into a new
+directory.
+
+```text
+node product/ci-metrics/bin/report-fast-leak.mjs <since YYYY-MM-DD> <new-output-directory>
+```
+
+The leak rate is the evidence gate for #1152 option E-a (one Full per pull request): at most 20% over at least two
+weeks. The 2026-09-11..25 baseline was 93.1% (27 leaked of 29 judged). The report authorizes nothing by itself.
+
 ## Security and trust
 
 - Fragments contain no environment values, cookies, headers, passwords, connection strings, request/response
