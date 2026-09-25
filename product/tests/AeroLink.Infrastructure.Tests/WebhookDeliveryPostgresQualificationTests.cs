@@ -15,6 +15,7 @@ using Npgsql;
 
 namespace AeroLink.Infrastructure.Tests;
 
+[Trait("Category", "PostgresQualification")]
 public sealed class WebhookDeliveryPostgresQualificationTests
 {
     private const string PredecessorMigration = "20260905222930_AddChangeRequestTargetReleaseProjectBinding";
@@ -22,67 +23,58 @@ public sealed class WebhookDeliveryPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task PostgreSQL_predecessor_upgrade_recovers_legacy_deliveries_with_explicit_unknown_history()
     {
-        var serverConnection = QualificationConnectionOrThrow();
-        var databaseName = $"aerolink_963_{Guid.NewGuid():N}";
-        var connection = await CreateDatabaseAsync(serverConnection, databaseName);
-        try
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync("aerolink_963");
+        var connection = qualification.ConnectionString;
+        await using (var predecessor = new AeroLinkDbContext(Options(connection)))
+            await predecessor.Database.MigrateAsync(PredecessorMigration);
+
+        var seed = await SeedLegacyDeliveriesAsync(connection);
+        await using (var latest = new AeroLinkDbContext(Options(connection)))
         {
-            await using (var predecessor = new AeroLinkDbContext(Options(connection)))
-                await predecessor.Database.MigrateAsync(PredecessorMigration);
+            await latest.Database.MigrateAsync();
+            var rows = await latest.WebhookDeliveries.AsNoTracking()
+                .Where(x => x.Id == seed.RetryDeliveryId || x.Id == seed.DeadLetterDeliveryId)
+                .ToListAsync();
+            Assert.Equal(2, rows.Count);
 
-            var seed = await SeedLegacyDeliveriesAsync(connection);
-            await using (var latest = new AeroLinkDbContext(Options(connection)))
-            {
-                await latest.Database.MigrateAsync();
-                var rows = await latest.WebhookDeliveries.AsNoTracking()
-                    .Where(x => x.Id == seed.RetryDeliveryId || x.Id == seed.DeadLetterDeliveryId)
-                    .ToListAsync();
-                Assert.Equal(2, rows.Count);
+            var retry = Assert.Single(rows, x => x.Id == seed.RetryDeliveryId);
+            Assert.Equal(WebhookDeliveryState.RetryScheduled, retry.State);
+            Assert.Equal(1, retry.AttemptCount);
+            Assert.Equal(502, retry.ResponseStatusCode);
+            Assert.Contains("legacy receiver diagnostic one", retry.LastError, StringComparison.Ordinal);
+            Assert.Equal(seed.ProjectId, retry.ProjectId);
+            Assert.Equal(seed.EventOneId, retry.IntegrationEventId);
+            Assert.Equal(seed.SubscriptionId, retry.SubscriptionId);
+            var retryHistory = Assert.Single(retry.AttemptHistory());
+            Assert.Equal("LegacyRecovered", retryHistory.Outcome);
+            Assert.Equal(1, retryHistory.Attempt);
+            Assert.Equal(502, retryHistory.ResponseStatusCode);
+            Assert.Equal("legacy receiver diagnostic one", retryHistory.Error);
+            Assert.Null(retryHistory.ClaimToken);
+            Assert.Null(retryHistory.Worker);
+            Assert.Null(retryHistory.StartedAt);
 
-                var retry = Assert.Single(rows, x => x.Id == seed.RetryDeliveryId);
-                Assert.Equal(WebhookDeliveryState.RetryScheduled, retry.State);
-                Assert.Equal(1, retry.AttemptCount);
-                Assert.Equal(502, retry.ResponseStatusCode);
-                Assert.Contains("legacy receiver diagnostic one", retry.LastError, StringComparison.Ordinal);
-                Assert.Equal(seed.ProjectId, retry.ProjectId);
-                Assert.Equal(seed.EventOneId, retry.IntegrationEventId);
-                Assert.Equal(seed.SubscriptionId, retry.SubscriptionId);
-                var retryHistory = Assert.Single(retry.AttemptHistory());
-                Assert.Equal("LegacyRecovered", retryHistory.Outcome);
-                Assert.Equal(1, retryHistory.Attempt);
-                Assert.Equal(502, retryHistory.ResponseStatusCode);
-                Assert.Equal("legacy receiver diagnostic one", retryHistory.Error);
-                Assert.Null(retryHistory.ClaimToken);
-                Assert.Null(retryHistory.Worker);
-                Assert.Null(retryHistory.StartedAt);
-
-                var deadLetter = Assert.Single(rows, x => x.Id == seed.DeadLetterDeliveryId);
-                Assert.Equal(WebhookDeliveryState.DeadLettered, deadLetter.State);
-                Assert.Equal(5, deadLetter.AttemptCount);
-                Assert.Equal(504, deadLetter.ResponseStatusCode);
-                Assert.Contains("legacy receiver diagnostic five", deadLetter.LastError, StringComparison.Ordinal);
-                var deadLetterHistory = Assert.Single(deadLetter.AttemptHistory());
-                Assert.Equal("LegacyRecovered", deadLetterHistory.Outcome);
-                Assert.Equal(5, deadLetterHistory.Attempt);
-                Assert.Equal(504, deadLetterHistory.ResponseStatusCode);
-                Assert.Equal("legacy receiver diagnostic five", deadLetterHistory.Error);
-                Assert.Null(deadLetterHistory.ClaimToken);
-                Assert.Null(deadLetterHistory.Worker);
-                Assert.Null(deadLetterHistory.StartedAt);
-            }
-        }
-        finally
-        {
-            await DropDatabaseAsync(serverConnection, databaseName);
+            var deadLetter = Assert.Single(rows, x => x.Id == seed.DeadLetterDeliveryId);
+            Assert.Equal(WebhookDeliveryState.DeadLettered, deadLetter.State);
+            Assert.Equal(5, deadLetter.AttemptCount);
+            Assert.Equal(504, deadLetter.ResponseStatusCode);
+            Assert.Contains("legacy receiver diagnostic five", deadLetter.LastError, StringComparison.Ordinal);
+            var deadLetterHistory = Assert.Single(deadLetter.AttemptHistory());
+            Assert.Equal("LegacyRecovered", deadLetterHistory.Outcome);
+            Assert.Equal(5, deadLetterHistory.Attempt);
+            Assert.Equal(504, deadLetterHistory.ResponseStatusCode);
+            Assert.Equal("legacy receiver diagnostic five", deadLetterHistory.Error);
+            Assert.Null(deadLetterHistory.ClaimToken);
+            Assert.Null(deadLetterHistory.Worker);
+            Assert.Null(deadLetterHistory.StartedAt);
         }
     }
 
     [DisposablePostgresFact]
     public async Task PostgreSQL_claims_only_enabled_due_rows_and_fences_concurrent_workers()
     {
-        var serverConnection = QualificationConnectionOrThrow();
-        var databaseName = $"aerolink_963_{Guid.NewGuid():N}";
-        var connection = await CreateDatabaseAsync(serverConnection, databaseName);
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync("aerolink_963");
+        var connection = qualification.ConnectionString;
         ServiceProvider? provider = null;
         try
         {
@@ -158,7 +150,6 @@ public sealed class WebhookDeliveryPostgresQualificationTests
         finally
         {
             if (provider is not null) await provider.DisposeAsync();
-            await DropDatabaseAsync(serverConnection, databaseName);
         }
     }
 
@@ -222,42 +213,6 @@ public sealed class WebhookDeliveryPostgresQualificationTests
         command.Parameters.AddWithValue("deadLetterDeliveryId", deadLetterDeliveryId);
         await command.ExecuteNonQueryAsync();
         return new(programId, projectId, subscriptionId, eventOneId, eventFiveId, retryDeliveryId, deadLetterDeliveryId);
-    }
-
-    private static string QualificationConnectionOrThrow()
-    {
-        var connection = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
-        if (string.IsNullOrWhiteSpace(connection))
-            throw new InvalidOperationException("Webhook PostgreSQL qualification requires AEROLINK_MIGRATIONS_CONNECTION.");
-        var builder = new NpgsqlConnectionStringBuilder(connection);
-        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-        if (!(string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-            || IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address)))
-            throw new InvalidOperationException("Webhook PostgreSQL qualification requires a loopback host.");
-        if (builder.Port == 54329)
-            throw new InvalidOperationException("Webhook PostgreSQL qualification refuses persistent port 54329.");
-        return connection;
-    }
-
-    private static async Task<string> CreateDatabaseAsync(string serverConnection, string databaseName)
-    {
-        var builder = new NpgsqlConnectionStringBuilder(serverConnection) { Database = "postgres" };
-        await using var server = new NpgsqlConnection(builder.ConnectionString);
-        await server.OpenAsync();
-        await using var command = server.CreateCommand();
-        command.CommandText = $"CREATE DATABASE \"{databaseName}\"";
-        await command.ExecuteNonQueryAsync();
-        return new NpgsqlConnectionStringBuilder(serverConnection) { Database = databaseName }.ConnectionString;
-    }
-
-    private static async Task DropDatabaseAsync(string serverConnection, string databaseName)
-    {
-        var builder = new NpgsqlConnectionStringBuilder(serverConnection) { Database = "postgres" };
-        await using var server = new NpgsqlConnection(builder.ConnectionString);
-        await server.OpenAsync();
-        await using var command = server.CreateCommand();
-        command.CommandText = $"DROP DATABASE IF EXISTS \"{databaseName}\" WITH (FORCE)";
-        await command.ExecuteNonQueryAsync();
     }
 
     private sealed record LegacySeed(Guid ProgramId, Guid ProjectId, Guid SubscriptionId,

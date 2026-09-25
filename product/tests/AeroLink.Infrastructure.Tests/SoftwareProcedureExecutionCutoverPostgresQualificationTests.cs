@@ -1,4 +1,3 @@
-using System.Net;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
@@ -27,20 +26,18 @@ namespace AeroLink.Infrastructure.Tests;
 [CollectionDefinition("Issue726Postgres", DisableParallelization = true)]
 public sealed class Issue726PostgresCollection : ICollectionFixture<object>;
 
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue726Postgres")]
 public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
 {
     private const string DatabaseName = "aerolink_726_qualify";
-    private const string ServerDatabase = "postgres";
     private const string PreFeatureMigration = "20260824043125_ExtendCaseProcedureSuspectLifecycle";
 
     [DisposablePostgresFact]
     public async Task Clean_install_cutover_is_idempotent_rolls_back_and_serializes_concurrent_writers()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        await EnsureDatabaseAsync(server, DatabaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = DatabaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = qualification.ConnectionString;
 
         await using (var db = await DatabaseAsync(connection))
         {
@@ -91,12 +88,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
 
         // Concurrent writers on a separate, fresh database: no Completed marker exists yet, so the two
         // authorities race; exactly one may generate Procedures.
-        var concurrentName = DatabaseName + "_concurrent";
-        await EnsureDatabaseAsync(server, concurrentName);
-        var concurrentConnection = new NpgsqlConnectionStringBuilder(connection)
-        {
-            Database = concurrentName
-        }.ConnectionString;
+        await using var concurrent = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_concurrent");
+        var concurrentConnection = concurrent.ConnectionString;
         await using (var first = await DatabaseAsync(concurrentConnection))
         await using (var second = await DatabaseAsync(concurrentConnection))
         {
@@ -170,18 +163,15 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Exact_pre_feature_shaped_database_upgrade_runs_the_governed_cutover()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_prefeature";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_prefeature");
+        var connection = qualification.ConnectionString;
 
         // #726 adds no EF migration: the "upgrade" is the governed runtime authority. Qualify the exact
         // pre-feature shape by migrating explicitly to the last pre-#726 migration, seeding the legacy
         // Case-only state, then completing migrations (a no-op) and running the platform cutover.
         await using (var db = await DatabaseAsync(connection, PreFeatureMigration))
         {
-            var seed = await SeedAsync(db);
+            var seed = await SeedAsync(db, preFeatureSchema: true);
             await db.Database.MigrateAsync();
             var (legacy, typed) = CutoverRegistrations();
             var result = await new SoftwareProcedureExecutionCutoverAuthority(db, legacy, typed)
@@ -204,11 +194,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Multiple_case_revisions_migrate_to_one_exact_procedure_artifact_on_postgres()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_multirev";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_multirev");
+        var connection = qualification.ConnectionString;
         await using var db = await DatabaseAsync(connection);
         var seed = await SeedTwoRevisionAsync(db);
         var (legacy, typed) = CutoverRegistrations();
@@ -252,11 +239,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Stored_draft_active_and_retired_configuration_matrix_follows_the_state_contract()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_matrix";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_matrix");
+        var connection = qualification.ConnectionString;
         await using var db = await DatabaseAsync(connection);
         var now = DateTimeOffset.UtcNow;
 
@@ -312,11 +296,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Retired_case_revisions_migrate_on_postgres_without_an_active_claim()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_retiredcases";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_retiredcases");
+        var connection = qualification.ConnectionString;
         await using var db = await DatabaseAsync(connection);
         var now = DateTimeOffset.UtcNow;
         var tag = Guid.NewGuid().ToString("N")[..8];
@@ -387,11 +368,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
         // Exact crash-recovery state from the Codex finding: per-project cutover work is already persisted,
         // the global Completed marker is absent, and two startup instances race. The unique marker row must
         // make the claim atomic so exactly one completion remains and totals stay consistent.
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_recoveryclaim";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_recoveryclaim");
+        var connection = qualification.ConnectionString;
         var (legacy, typed) = CutoverRegistrations();
 
         await using (var seedContext = await DatabaseAsync(connection))
@@ -470,11 +448,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Two_projects_complete_with_scoped_signature_supersession_on_postgres()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_twosig";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_twosig");
+        var connection = qualification.ConnectionString;
         var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-pg-two-{Guid.NewGuid():N}");
         var files = new EvidenceFileStore(evidenceRoot);
         try
@@ -531,11 +506,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Legacy_unmaterialized_document_cutover_preserves_historical_snapshot_on_postgres()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_legacydoc";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_legacydoc");
+        var connection = qualification.ConnectionString;
         var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-pg-legacy-{Guid.NewGuid():N}");
         var files = new EvidenceFileStore(evidenceRoot);
         try
@@ -594,11 +566,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Document_generated_before_later_baseline_materialization_still_uses_legacy_basis_on_postgres()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_temporal";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_temporal");
+        var connection = qualification.ConnectionString;
         var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-pg-temporal-{Guid.NewGuid():N}");
         var files = new EvidenceFileStore(evidenceRoot);
         try
@@ -681,11 +650,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Concurrent_missing_audit_repair_keeps_exactly_one_audit_on_postgres()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_repair";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_repair");
+        var connection = qualification.ConnectionString;
         var (legacy, typed) = CutoverRegistrations();
 
         await using (var seedContext = await DatabaseAsync(connection))
@@ -745,11 +711,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Large_baseline_provenance_is_chunked_complete_deterministic_and_recoverable_on_postgres()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_largeprov";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_largeprov");
+        var connection = qualification.ConnectionString;
         await using var db = await DatabaseAsync(connection);
         var seed = await SeedLargeBaselineAsync(db, caseCount: 60);
         var (legacy, typed) = CutoverRegistrations();
@@ -836,11 +799,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Dormant_historical_revision_is_retired_typed_and_not_selectable_on_postgres()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_dormant";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_dormant");
+        var connection = qualification.ConnectionString;
         await using var db = await DatabaseAsync(connection);
         var now = DateTimeOffset.UtcNow;
         var tag = Guid.NewGuid().ToString("N")[..8];
@@ -891,11 +851,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Rollback_cleanup_failure_evidence_is_isolated_and_bounded_on_postgres()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_cleanupev";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_cleanupev");
+        var connection = qualification.ConnectionString;
         var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-726-pg-cleanup-evidence-{Guid.NewGuid():N}");
         var files = new EvidenceFileStore(evidenceRoot);
         try
@@ -1015,11 +972,8 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Provenance_and_migration_sources_reject_invalid_raw_sql_with_the_intended_guard_on_postgres()
     {
-        var server = ValidateQualificationConnection(
-            Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")!);
-        var databaseName = DatabaseName + "_integrity";
-        await EnsureDatabaseAsync(server, databaseName);
-        var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync(DatabaseName + "_integrity");
+        var connection = qualification.ConnectionString;
         await using var db = await DatabaseAsync(connection);
         var seed = await SeedMaterializedSingleCaseAsync(db);
         var (legacy, typed) = CutoverRegistrations();
@@ -1093,11 +1047,13 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
             foreignConfiguration.Id, foreignProject.Id, foreignSteps[1].Id, foreignSteps[2].Id, now));
         db.ProjectLadderConfigurations.Add(foreignConfiguration);
         await db.SaveChangesAsync();
+        // Content may seal only an effective ladder (#1038), so the draft is activated first.
+        foreignConfiguration.Activate("project.owner", now, LadderConsumerManifestCatalog.VersionV2,
+            new string('0', 64));
+        await db.SaveChangesAsync();
         var foreignSeal = await new ProjectLadderSealAuthority(db).SealAsync(foreignProject.Id,
             LadderBoundContentCatalog.Current.First().Id, "foreign-content", "project.owner", now);
         Assert.Equal(ProjectLadderSealResultKind.Sealed, foreignSeal.Kind);
-        foreignConfiguration.Activate("project.owner", now, LadderConsumerManifestCatalog.VersionV2,
-            new string('0', 64));
         await db.SaveChangesAsync();
         var foreignCase = new TestProcedure(foreignProject.Id, "HLRTC-909101",
             "Foreign case", "test.engineer", now, TestProcedureLevel.HighLevel);
@@ -1493,20 +1449,6 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
             .GetSetMethod(nonPublic: true)!
             .Invoke(target, [value]);
 
-    private static async Task EnsureDatabaseAsync(string connection, string databaseName)
-    {
-        var builder = new NpgsqlConnectionStringBuilder(connection) { Database = ServerDatabase };
-        await using var server = new NpgsqlConnection(builder.ConnectionString);
-        await server.OpenAsync();
-        await using var command = server.CreateCommand();
-        // The qualification database is disposable by definition: start every run from a clean database so
-        // leftover rows from a previous attempt cannot collide with this run's fixture.
-        command.CommandText = $"DROP DATABASE IF EXISTS \"{databaseName}\" WITH (FORCE)";
-        await command.ExecuteNonQueryAsync();
-        command.CommandText = $"CREATE DATABASE \"{databaseName}\"";
-        await command.ExecuteNonQueryAsync();
-    }
-
     private static async Task<AeroLinkDbContext> DatabaseAsync(string connection,
         string? targetMigration = null)
     {
@@ -1520,7 +1462,13 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     private sealed record Seed(AeroLinkDbContext Db, Guid ProjectId, Guid ReleaseId, Guid BaselineId,
         Guid CaseRevisionId, Guid ExecutionId, Guid TestSetEntryId, Guid BaselineSelectionId);
 
-    private static async Task<Seed> SeedAsync(AeroLinkDbContext db)
+    private static Task<Seed> SeedAsync(AeroLinkDbContext db) => SeedAsync(db, preFeatureSchema: false);
+
+    /// <param name="preFeatureSchema">
+    /// The pre-#726 schema lacks release columns that later migrations add, so the program, project, release and
+    /// baseline are written in that schema's own columns. The later seeded tables are unchanged since then.
+    /// </param>
+    private static async Task<Seed> SeedAsync(AeroLinkDbContext db, bool preFeatureSchema)
     {
         var now = DateTimeOffset.UtcNow;
         var tag = Guid.NewGuid().ToString("N")[..8];
@@ -1530,6 +1478,7 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
         var baseline = new CandidateBaseline("SW-01.60", 0, project.Id, release.Id, null,
             "Candidate", "cm.test", now);
         db.AddRange(program, project, release, baseline);
+        if (preFeatureSchema) await PredecessorSchemaRows.InsertTrackedAsync(db);
         var configuration = LegacyDefaultProjectLadderFactory.Create(project.Id, now);
         db.ProjectLadderConfigurations.Add(configuration);
         await db.SaveChangesAsync();
@@ -1676,17 +1625,6 @@ public sealed class SoftwareProcedureExecutionCutoverPostgresQualificationTests
     private static (IReadOnlyList<ILadderConsumerRegistration> Legacy,
         IReadOnlyList<IVerificationArtifactConsumerRegistration> Typed) CutoverRegistrations() =>
         SoftwareProcedureExecutionCutoverTests.FullRegistrations();
-
-    private static string ValidateQualificationConnection(string connection)
-    {
-        var builder = new NpgsqlConnectionStringBuilder(connection);
-        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-        var loopback = string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-            || (IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address));
-        if (!loopback) throw new InvalidOperationException("#726 PostgreSQL qualification requires a loopback host.");
-        if (builder.Port == 54329) throw new InvalidOperationException("#726 qualification refuses port 54329.");
-        return connection;
-    }
 
     private static async Task<SoftwareProcedureCutoverResult> CatchAsync(
         Func<Task<SoftwareProcedureCutoverResult>> operation)

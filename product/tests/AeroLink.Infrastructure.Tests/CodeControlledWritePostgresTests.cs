@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Integrations;
@@ -16,6 +15,7 @@ namespace AeroLink.Infrastructure.Tests;
 /// observe PostgreSQL lock waits instead of relying on timing guesses. The database is always a random database on
 /// the explicitly supplied disposable loopback server; the persistent developer database is rejected.
 /// </summary>
+[Trait("Category", "PostgresQualification")]
 public sealed class CodeControlledWritePostgresTests
 {
     [DisposablePostgresFact]
@@ -306,53 +306,13 @@ public sealed class CodeControlledWritePostgresTests
 
     private static async Task WithDatabaseAsync(Func<DbContextOptions<AeroLinkDbContext>, string, Task> test)
     {
-        var raw = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")
-            ?? throw new InvalidOperationException("Code qualification requires an explicit disposable PostgreSQL connection.");
-        var server = new NpgsqlConnectionStringBuilder(raw);
-        var host = (server.Host ?? string.Empty).Trim('[', ']');
-        if (!(host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-              || IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address))
-            || server.Port != 55423 || string.IsNullOrWhiteSpace(server.Username))
-            throw new InvalidOperationException("Provider qualification requires loopback PostgreSQL on disposable port 55423.");
-
-        var database = $"aerolink_1023_scope_{Guid.NewGuid():N}";
-        server.Database = "postgres";
-        await using var administrator = new NpgsqlConnection(server.ConnectionString);
-        await administrator.OpenAsync();
-        var created = false;
-        try
+        await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_1023_scope");
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(database.ConnectionString).Options;
+        await using (var migrate = new AeroLinkDbContext(options))
         {
-            await using (var create = new NpgsqlCommand($"CREATE DATABASE \"{database}\"", administrator))
-                await create.ExecuteNonQueryAsync();
-            created = true;
-            server.Database = database;
-            var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(server.ConnectionString).Options;
-            await using (var migrate = new AeroLinkDbContext(options))
-            {
-                await migrate.Database.MigrateAsync();
-                await migrate.Database.MigrateAsync();
-            }
-            await test(options, server.ConnectionString);
+            await migrate.Database.MigrateAsync();
+            await migrate.Database.MigrateAsync();
         }
-        finally
-        {
-            if (created)
-            {
-                server.Database = "postgres";
-                await using var drop = new NpgsqlCommand($"DROP DATABASE \"{database}\" WITH (FORCE)", administrator);
-                await drop.ExecuteNonQueryAsync();
-            }
-        }
-    }
-
-    private sealed class DisposablePostgresFactAttribute : FactAttribute
-    {
-        public DisposablePostgresFactAttribute()
-        {
-            var required = Environment.GetEnvironmentVariable("AEROLINK_REQUIRE_POSTGRES_QUALIFICATION");
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION"))
-                && (string.IsNullOrWhiteSpace(required) || required.Equals("false", StringComparison.OrdinalIgnoreCase)))
-                Skip = "Set AEROLINK_MIGRATIONS_CONNECTION to an owned loopback PostgreSQL server on port 55423.";
-        }
+        await test(options, database.ConnectionString);
     }
 }

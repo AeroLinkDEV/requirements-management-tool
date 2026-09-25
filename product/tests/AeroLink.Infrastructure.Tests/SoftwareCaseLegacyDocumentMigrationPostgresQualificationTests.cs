@@ -15,15 +15,17 @@ namespace AeroLink.Infrastructure.Tests;
 [CollectionDefinition("Issue747Postgres", DisableParallelization = true)]
 public sealed class Issue747PostgresCollection : ICollectionFixture<object>;
 
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue747Postgres")]
 public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTests
 {
     private const string DatabaseName = "aerolink_747_qualify";
 
-    [Issue747PostgresFact]
+    [DisposablePostgresFact]
     public async Task Legacy_case_document_without_exact_manifest_uses_generation_time_compatibility_basis_without_fabricating_baseline_manifest()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-747-authority-{Guid.NewGuid():N}");
         try
         {
@@ -113,10 +115,11 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
         }
     }
 
-    [Issue747PostgresFact]
+    [DisposablePostgresFact]
     public async Task Document_generated_before_later_baseline_materialization_still_uses_legacy_generation_time_basis()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-747-temporal-{Guid.NewGuid():N}");
         try
         {
@@ -188,10 +191,11 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
         }
     }
 
-    [Issue747PostgresFact]
+    [DisposablePostgresFact]
     public async Task Legacy_document_without_stored_artifact_supersedes_document_signature_from_content_basis()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-747-no-artifact-{Guid.NewGuid():N}");
         try
         {
@@ -271,10 +275,11 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
         }
     }
 
-    [Issue747PostgresFact]
+    [DisposablePostgresFact]
     public async Task Legacy_case_document_snapshot_count_mismatch_still_fails_closed_and_names_document_and_baseline()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-747-failclosed-{Guid.NewGuid():N}");
         try
         {
@@ -356,63 +361,8 @@ public sealed class SoftwareCaseLegacyDocumentMigrationPostgresQualificationTest
     private static DbContextOptions<AeroLinkDbContext> Options(string connection) =>
         new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
 
-    private static string QualificationConnectionOrSkip() => ValidateQualificationConnection(
-        ResolveQualificationConnection());
-
-    /// <summary>
-    /// The connection this qualification runs against, or null when no PostgreSQL server was offered.
-    ///
-    /// A maintainer who sets only the conventional AEROLINK_MIGRATIONS_CONNECTION must not silently
-    /// skip these four tests, so that variable is accepted here too. It is accepted, never rewritten:
-    /// the connection is passed through exactly as supplied and
-    /// <see cref="ValidateQualificationConnection"/> then refuses it unless it already names the
-    /// dedicated disposable database. That refusal is the same contract every sibling PostgreSQL
-    /// fixture uses, and it matters because these tests call EnsureDeletedAsync — retargeting a
-    /// caller's connection to this fixture's database would drop a database the operator never
-    /// nominated for #747, on a server they pointed at some other qualification. A loud refusal
-    /// naming the required database is the honest outcome; a silent redirect is not.
-    ///
-    /// The dedicated variable wins when both are set, so an explicit #747 target is never overridden.
-    /// </summary>
-    internal static string? ResolveQualificationConnection()
-    {
-        var dedicated = Environment.GetEnvironmentVariable("AEROLINK_747_CONNECTION");
-        if (!string.IsNullOrWhiteSpace(dedicated)) return dedicated;
-        var shared = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
-        return string.IsNullOrWhiteSpace(shared) ? null : shared;
-    }
-
-    private static string ValidateQualificationConnection(string? connection)
-    {
-        if (string.IsNullOrWhiteSpace(connection))
-            throw new InvalidOperationException(
-                "Issue #747 PostgreSQL qualification requires AEROLINK_747_CONNECTION or AEROLINK_MIGRATIONS_CONNECTION.");
-        var builder = new NpgsqlConnectionStringBuilder(connection);
-        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-        if (!string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Issue #747 PostgreSQL qualification requires a loopback host.");
-        if (builder.Port == 54329)
-            throw new InvalidOperationException("Issue #747 qualification refuses the protected PostgreSQL port 54329.");
-        if (!string.Equals(builder.Database, DatabaseName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException(
-                $"Issue #747 PostgreSQL qualification requires the dedicated database {DatabaseName}.");
-        return connection;
-    }
-
     private sealed record SeededLegacyDocument(
         CandidateBaseline Baseline,
         ControlledDocument Document,
         ControlledDocumentArtifact Artifact);
-
-    private sealed class Issue747PostgresFactAttribute : FactAttribute
-    {
-        public Issue747PostgresFactAttribute()
-        {
-            // Skip only when no PostgreSQL server was offered at all. A conventional suite run that
-            // sets AEROLINK_MIGRATIONS_CONNECTION now executes these tests instead of skipping them.
-            if (string.IsNullOrWhiteSpace(ResolveQualificationConnection()))
-                Skip = "Issue #747 PostgreSQL qualification skipped: set AEROLINK_747_CONNECTION or AEROLINK_MIGRATIONS_CONNECTION.";
-        }
-    }
 }

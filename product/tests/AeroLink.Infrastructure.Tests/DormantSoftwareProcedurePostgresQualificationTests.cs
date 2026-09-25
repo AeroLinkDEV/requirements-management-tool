@@ -1,4 +1,3 @@
-using System.Net;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
@@ -21,6 +20,7 @@ namespace AeroLink.Infrastructure.Tests;
 [CollectionDefinition("Issue724Postgres", DisableParallelization = true)]
 public sealed class Issue724PostgresCollection : ICollectionFixture<object>;
 
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue724Postgres")]
 public sealed class DormantSoftwareProcedurePostgresQualificationTests
 {
@@ -30,7 +30,8 @@ public sealed class DormantSoftwareProcedurePostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Exact_predecessor_upgrade_preserves_legacy_rows_and_qualifies_dormant_procedures()
     {
-        var connection = QualificationConnectionOrThrow();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = await MigrateToPredecessorAsync(connection);
         var fixture = await SeedLegacyFixtureAsync(db);
 
@@ -74,9 +75,10 @@ public sealed class DormantSoftwareProcedurePostgresQualificationTests
             "The expected observation is recorded for every ordered step.",
             "Stop the harness and remove the qualification data.",
             "Run with the checked-in harness; capture the command and result.");
+        // A new dormant Procedure names its Case's latest active revision (#1035): revision 1 supersedes 0.
         var (highProcedure, highProcedureRevision) = await service.CreateAsync(
             fixture.ProjectId, TestProcedureLevel.HighLevel, "Dormant HLR Procedure", "qualification", content,
-            VerificationProcedureParentKind.Allocated, [fixture.HighRevisionId], null,
+            VerificationProcedureParentKind.Allocated, [fixture.HighRevision2Id], null,
             DateTimeOffset.UtcNow, CancellationToken.None);
         var (lowProcedure, lowProcedureRevision) = await service.CreateAsync(
             fixture.ProjectId, TestProcedureLevel.LowLevel, "Dormant LLR Procedure", "qualification", content,
@@ -89,9 +91,18 @@ public sealed class DormantSoftwareProcedurePostgresQualificationTests
             .Where(x => x.Id == fixture.HighRevisionId || x.Id == fixture.HighRevision2Id)
             .OrderBy(x => x.Revision).Select(x => x.EffectiveBaselineId!.Value).ToArrayAsync());
         db.ChangeTracker.Clear();
+        // A Procedure revision may verify more than one Case. Each new link names its Case's latest active revision
+        // (#1035), so the second parent is a second HLR Case rather than an older revision of the first.
+        var secondCase = new TestProcedure(fixture.ProjectId, "HLRTC-000042", "Second HLR Case", "qualification",
+            DateTimeOffset.UtcNow, TestProcedureLevel.HighLevel);
+        var secondCaseRevision = new TestProcedureRevision(secondCase.Id, 0, "second objective", "second setup",
+            "second steps", "second expected", TestProcedureState.Approved, "qualification", DateTimeOffset.UtcNow,
+            effectiveBaselineId: fixture.BaselineId, parentKind: VerificationProcedureParentKind.Derived,
+            derivedRationale: "Second Case parent for the cardinality check.");
         await using (var cardinalityDb = new AeroLinkDbContext(Options(connection)))
         {
-            cardinalityDb.TestCaseProcedureLinks.Add(new TestCaseProcedureLink(fixture.HighRevision2Id, highProcedureRevision.Id));
+            cardinalityDb.AddRange(secondCase, secondCaseRevision);
+            cardinalityDb.TestCaseProcedureLinks.Add(new TestCaseProcedureLink(secondCaseRevision.Id, highProcedureRevision.Id));
             await cardinalityDb.SaveChangesAsync();
             Assert.Equal(2, await cardinalityDb.TestCaseProcedureLinks.CountAsync(x => x.ProcedureRevisionId == highProcedureRevision.Id));
             Assert.Single(await cardinalityDb.TestCaseProcedureLinks.Where(x => x.ProcedureRevisionId == lowProcedureRevision.Id).ToListAsync());
@@ -114,10 +125,12 @@ public sealed class DormantSoftwareProcedurePostgresQualificationTests
         await using (var invalidScopeDb = new AeroLinkDbContext(Options(connection)))
         {
             var invalidService = new VerificationProcedureAuthoringService(invalidScopeDb);
-            await Assert.ThrowsAsync<DomainException>(() => invalidService.CreateAsync(
+            // Both parents are their Case's latest active revision, so only the mixed governed baselines refuse.
+            var mixed = await Assert.ThrowsAsync<DomainException>(() => invalidService.CreateAsync(
                 fixture.ProjectId, TestProcedureLevel.HighLevel, "Mixed baseline Procedure", "qualification", content,
-                VerificationProcedureParentKind.Allocated, [fixture.HighRevisionId, crossBaselineCaseRevision.Id], null,
+                VerificationProcedureParentKind.Allocated, [secondCaseRevision.Id, crossBaselineCaseRevision.Id], null,
                 DateTimeOffset.UtcNow, CancellationToken.None));
+            Assert.Contains("must share one exact baseline", mixed.Message, StringComparison.Ordinal);
         }
 
         await using (var invalidLevelDb = new AeroLinkDbContext(Options(connection)))
@@ -149,7 +162,8 @@ public sealed class DormantSoftwareProcedurePostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Clean_current_install_creates_the_additive_schema_without_fabricated_procedures()
     {
-        var connection = QualificationConnectionOrThrow();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = new AeroLinkDbContext(Options(connection));
         await db.Database.EnsureDeletedAsync();
         await db.Database.GetService<IMigrator>().MigrateAsync();
@@ -160,16 +174,6 @@ public sealed class DormantSoftwareProcedurePostgresQualificationTests
         Assert.Equal(1, await db.Database.SqlQueryRaw<int>(
             "SELECT COUNT(*)::int AS \"Value\" FROM \"__EFMigrationsHistory\" WHERE \"MigrationId\" = '20260823061857_AddDormantSoftwareProcedures'")
             .SingleAsync());
-    }
-
-    [Theory]
-    [InlineData("Host=127.0.0.1;Port=54329;Database=aerolink_724_qualify")]
-    [InlineData("Host=127.0.0.1;Port=55429;Database=aerolink_724_qualify")]
-    [InlineData("Host=10.0.0.1;Port=55428;Database=aerolink_724_qualify")]
-    [InlineData("Host=127.0.0.1;Port=55428;Database=other_database")]
-    public void Qualification_connection_rejects_protected_non_loopback_or_wrong_database(string connection)
-    {
-        Assert.Throws<InvalidOperationException>(() => ValidateQualificationConnection(connection));
     }
 
     private static async Task<AeroLinkDbContext> MigrateToPredecessorAsync(string connection)
@@ -232,26 +236,6 @@ public sealed class DormantSoftwareProcedurePostgresQualificationTests
 
     private static DbContextOptions<AeroLinkDbContext> Options(string connection) =>
         new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
-
-    private static string QualificationConnectionOrThrow() => ValidateQualificationConnection(
-        Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION"));
-
-    private static string ValidateQualificationConnection(string? connection)
-    {
-        if (string.IsNullOrWhiteSpace(connection))
-            throw new InvalidOperationException("Issue #724 PostgreSQL qualification requires AEROLINK_MIGRATIONS_CONNECTION.");
-        var builder = new NpgsqlConnectionStringBuilder(connection);
-        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-        var loopback = string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-            || (IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address));
-        if (!loopback)
-            throw new InvalidOperationException("Issue #724 PostgreSQL qualification requires a loopback host.");
-        if (builder.Port != 55428)
-            throw new InvalidOperationException("Issue #724 qualification requires the exact disposable PostgreSQL port 55428 and refuses 54329.");
-        if (!string.Equals(builder.Database, DatabaseName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"Issue #724 qualification requires the dedicated database {DatabaseName}.");
-        return connection;
-    }
 
     private sealed record LegacyFixture(Guid ProjectId, Guid ReleaseId, Guid BaselineId, Guid SystemId,
         Guid HighCaseId, Guid HighRevisionId, Guid HighRevision2Id, Guid LowRevisionId);

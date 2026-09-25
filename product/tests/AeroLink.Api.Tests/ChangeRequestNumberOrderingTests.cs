@@ -6,24 +6,22 @@ using AeroLink.Domain.Identity;
 using AeroLink.Domain.Programs;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Tests;
 using Microsoft.Extensions.DependencyInjection;
-using Npgsql;
 
 namespace AeroLink.Api.Tests;
 
+[Trait("Category", "PostgresQualification")]
 public sealed class ChangeRequestNumberOrderingTests
 {
     [Fact]
     public Task Sqlite_orders_both_registers_numerically_before_paging() => AssertOrderingAsync(null);
 
-    [OrderingPostgresFact]
-    public Task Postgres_orders_both_registers_numerically_before_paging()
+    [DisposablePostgresFact]
+    public async Task Postgres_orders_both_registers_numerically_before_paging()
     {
-        var connection = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("AEROLINK_1006_CONNECTION"));
-        if (connection.Host is not ("127.0.0.1" or "localhost") || connection.Port == 54329
-            || connection.Database != "aerolink_1006_ordering_test")
-            throw new InvalidOperationException("Ordering qualification requires its named disposable loopback database away from port 54329.");
-        return AssertOrderingAsync(connection.ConnectionString);
+        await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_1006_ordering");
+        await AssertOrderingAsync(database.ConnectionString);
     }
 
     private static async Task AssertOrderingAsync(string? connection)
@@ -73,15 +71,6 @@ public sealed class ChangeRequestNumberOrderingTests
                 actual.AddRange(result.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("displayNumber").GetString()!));
             }
             Assert.Equal(expected, actual);
-        }
-    }
-
-    private sealed class OrderingPostgresFactAttribute : FactAttribute
-    {
-        public OrderingPostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_1006_CONNECTION")))
-                Skip = "Set AEROLINK_1006_CONNECTION to the dedicated disposable ordering database.";
         }
     }
 }

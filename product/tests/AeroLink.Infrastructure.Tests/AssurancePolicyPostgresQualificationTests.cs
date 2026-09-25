@@ -22,6 +22,7 @@ public sealed class Issue711PostgresCollection : ICollectionFixture<object>;
 /// existing release campaign carrying no snapshot — because a campaign that predates the feature was run
 /// under the AeroLink recommendations, and inventing a snapshot for it would be a claim about history.
 /// </summary>
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue711Postgres")]
 public sealed class AssurancePolicyPostgresQualificationTests
 {
@@ -30,10 +31,11 @@ public sealed class AssurancePolicyPostgresQualificationTests
 
     private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
-    [Issue711PostgresFact]
+    [DisposablePostgresFact]
     public async Task Clean_install_carries_the_assurance_schema_and_its_database_level_guarantees()
     {
-        await using var db = await ResetAtLatestAsync(QualificationConnectionOrSkip());
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        await using var db = await ResetAtLatestAsync(database.ConnectionString);
         var project = await SeedProjectAsync(db);
 
         var first = ProjectAssurancePolicy.Record(project, 1, AssuranceLevel.LevelB,
@@ -91,10 +93,11 @@ public sealed class AssurancePolicyPostgresQualificationTests
         Assert.Equal("CK_assurance_deviation_distinct_parties", selfApproved.ConstraintName);
     }
 
-    [Issue711PostgresFact]
+    [DisposablePostgresFact]
     public async Task Upgrade_leaves_an_existing_campaign_on_the_AeroLink_recommendations_it_was_run_under()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         Guid campaignId;
         await using (var pre = new AeroLinkDbContext(Options(connection)))
         {
@@ -107,7 +110,8 @@ public sealed class AssurancePolicyPostgresQualificationTests
             var release = new SoftwareRelease(project, "1.0", false);
             var baseline = new CandidateBaseline("BL-00000001", 0, project, release.Id, null, "Pre-upgrade", "cm", Now);
             pre.AddRange(release, baseline);
-            await pre.SaveChangesAsync();
+            // Seeded at the pre-feature schema, so only its own columns are written.
+            await PredecessorSchemaRows.InsertTrackedAsync(pre);
 
             // Written as SQL rather than through the aggregate: the model already knows about the snapshot
             // column, and the whole point of this arrangement is a campaign created before that column existed.
@@ -164,50 +168,4 @@ public sealed class AssurancePolicyPostgresQualificationTests
 
     private static DbContextOptions<AeroLinkDbContext> Options(string connection) =>
         new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
-
-    private static string QualificationConnectionOrSkip() => ValidateQualificationConnection(ResolveQualificationConnection());
-
-    /// <summary>
-    /// The connection this qualification runs against, or null when no PostgreSQL server was offered.
-    ///
-    /// The shared variable is accepted so an ordinary maintainer run does not silently skip these two tests,
-    /// and it is passed through exactly as supplied. <see cref="ValidateQualificationConnection"/> then
-    /// refuses anything that does not already name the dedicated disposable database — these tests call
-    /// EnsureDeletedAsync, and silently retargeting somebody's connection would drop a database they never
-    /// nominated for #711.
-    /// </summary>
-    internal static string? ResolveQualificationConnection()
-    {
-        var dedicated = Environment.GetEnvironmentVariable("AEROLINK_711_CONNECTION");
-        if (!string.IsNullOrWhiteSpace(dedicated)) return dedicated;
-        var shared = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
-        return string.IsNullOrWhiteSpace(shared) ? null : shared;
-    }
-
-    private static string ValidateQualificationConnection(string? connection)
-    {
-        if (string.IsNullOrWhiteSpace(connection))
-            throw new InvalidOperationException(
-                "Issue #711 PostgreSQL qualification requires AEROLINK_711_CONNECTION or AEROLINK_MIGRATIONS_CONNECTION.");
-        var builder = new NpgsqlConnectionStringBuilder(connection);
-        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-        if (!string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Issue #711 PostgreSQL qualification requires a loopback host.");
-        if (builder.Port == 54329)
-            throw new InvalidOperationException("Issue #711 qualification refuses the protected PostgreSQL port 54329.");
-        if (!string.Equals(builder.Database, DatabaseName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException(
-                $"Issue #711 PostgreSQL qualification requires the dedicated database {DatabaseName}.");
-        return connection;
-    }
-
-    private sealed class Issue711PostgresFactAttribute : FactAttribute
-    {
-        public Issue711PostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(ResolveQualificationConnection()))
-                Skip = "Issue #711 PostgreSQL qualification skipped: set AEROLINK_711_CONNECTION or AEROLINK_MIGRATIONS_CONNECTION.";
-        }
-    }
 }

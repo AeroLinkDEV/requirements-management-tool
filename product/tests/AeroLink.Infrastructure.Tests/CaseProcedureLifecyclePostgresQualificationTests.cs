@@ -1,4 +1,3 @@
-using System.Net;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
@@ -24,18 +23,19 @@ public sealed class Issue727PostgresCollection : ICollectionFixture<object>;
 /// execute raw SQL around the save boundary: SQLite cannot prove the trigger contract that keeps attributed
 /// #709 evidence immutable after its transient relation or causal revision has been dematerialized.
 /// </summary>
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue727Postgres")]
 public sealed class CaseProcedureLifecyclePostgresQualificationTests
 {
     private const string Predecessor = "20260824025544_AddProcedureControlledDocuments";
     private const string DatabaseName = "aerolink_727_qualify";
-    private const int Port = 55472;
     private static readonly DateTimeOffset Now = new(2026, 8, 23, 4, 27, 0, TimeSpan.Zero);
 
     [DisposablePostgresFact]
     public async Task Exact_predecessor_upgrade_retains_requirement_lifecycle_evidence_through_actual_reopen()
     {
-        var connection = QualificationConnectionOrThrow();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = await MigrateToPredecessorAsync(connection);
         var program = new ProgramRecord("Issue 727 requirement retention", "I7R");
         var project = new ProjectRecord(program.Id, "Requirement retention", "Issue 727 software");
@@ -59,7 +59,7 @@ public sealed class CaseProcedureLifecyclePostgresQualificationTests
         db.BaselineRequirements.AddRange(
             new BaselineRequirementSelection(baseline.Id, childArtifact.Id, child.Id),
             new BaselineRequirementSelection(baseline.Id, parentArtifact.Id, parent.Id));
-        await db.SaveChangesAsync();
+        await PredecessorSchemaRows.InsertTrackedAsync(db);
 
         var lifecycleId = Guid.NewGuid();
         var eventId = Guid.NewGuid();
@@ -105,7 +105,8 @@ public sealed class CaseProcedureLifecyclePostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Latest_migration_fails_closed_for_raw_causes_attribution_evidence_and_link_association_changes()
     {
-        var connection = QualificationConnectionOrThrow();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = await ResetAtLatestAsync(connection);
         var fixture = await SeedCaseProcedureLifecycleAsync(db);
 
@@ -184,17 +185,6 @@ public sealed class CaseProcedureLifecyclePostgresQualificationTests
         Assert.Equal(fixture.CaseRevisionId, retained.CauseVerificationRevisionId);
         Assert.Equal(2, await db.ExactLinkSuspectEvents.AsNoTracking()
             .CountAsync(x => x.LifecycleId == fixture.LifecycleId));
-    }
-
-    [Theory]
-    [InlineData("Host=example.test;Port=55472;Database=aerolink_727_qualify")]
-    [InlineData("Host=127.0.0.1;Port=54329;Database=aerolink_727_qualify")]
-    [InlineData("Host=127.0.0.1;Port=55428;Database=aerolink_727_qualify")]
-    [InlineData("Host=127.0.0.1;Port=55472;Database=other_database")]
-    public void Qualification_connection_rejects_every_non_disposable_target(string connection)
-    {
-        var error = Assert.Throws<InvalidOperationException>(() => ValidateQualificationConnection(connection));
-        Assert.Contains("Issue #727", error.Message, StringComparison.Ordinal);
     }
 
     private static async Task<CaseLifecycleFixture> SeedCaseProcedureLifecycleAsync(AeroLinkDbContext db)
@@ -310,26 +300,6 @@ public sealed class CaseProcedureLifecyclePostgresQualificationTests
 
     private static DbContextOptions<AeroLinkDbContext> Options(string connection) =>
         new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
-
-    private static string QualificationConnectionOrThrow() => ValidateQualificationConnection(
-        Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION"));
-
-    private static string ValidateQualificationConnection(string? connection)
-    {
-        if (string.IsNullOrWhiteSpace(connection))
-            throw new InvalidOperationException("Issue #727 PostgreSQL qualification requires AEROLINK_MIGRATIONS_CONNECTION.");
-        var builder = new NpgsqlConnectionStringBuilder(connection);
-        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-        var loopback = string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-            || (IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address));
-        if (!loopback)
-            throw new InvalidOperationException("Issue #727 PostgreSQL qualification requires a loopback host.");
-        if (builder.Port != Port)
-            throw new InvalidOperationException($"Issue #727 qualification requires exact disposable port {Port} and refuses 54329.");
-        if (!string.Equals(builder.Database, DatabaseName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"Issue #727 qualification requires dedicated database {DatabaseName}.");
-        return connection;
-    }
 
     private sealed record CaseLifecycleFixture(Guid ProjectId, Guid HistoricalCaseRevisionId,
         Guid CaseRevisionId, Guid AlternateProcedureRevisionId, Guid HistoricalLinkId,

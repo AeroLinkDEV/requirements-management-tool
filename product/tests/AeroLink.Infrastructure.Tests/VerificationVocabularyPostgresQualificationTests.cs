@@ -1,4 +1,3 @@
-using System.Net;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Programs;
@@ -23,6 +22,7 @@ public sealed class Issue701PostgresCollection : ICollectionFixture<object>;
 /// below is invisible to them. It runs here against a disposable PostgreSQL database, never the persistent
 /// demo instance.
 /// </summary>
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue701Postgres")]
 public sealed class VerificationVocabularyPostgresQualificationTests
 {
@@ -35,20 +35,24 @@ public sealed class VerificationVocabularyPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Clean_install_creates_the_vocabulary_schema_with_no_configuration_evidence()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = await ResetAtLatestAsync(connection);
 
         // Pinned by identity: the upgrade path below starts from the migration immediately before this one,
         // and a rebased or regenerated migration must not silently change what that means. On the integrated
         // post-#701/#747 main, later #726 migrations sort after the vocabulary migration, so the vocabulary
         // migration must be APPLIED with its pre-feature predecessor immediately before it, and the #726
-        // execution-cutover schema must sort last.
+        // execution-cutover schema must sort after it. Later features add migrations after both, so the install
+        // is checked as complete rather than pinned to whichever migration was newest when this was written.
         var applied = await db.Database.GetAppliedMigrationsAsync();
         var appliedList = applied.ToList();
         var featureIndex = appliedList.IndexOf(FeatureMigration);
         Assert.True(featureIndex > 0, "The vocabulary migration must be applied.");
         Assert.Equal(PreFeatureMigration, appliedList[featureIndex - 1]);
-        Assert.Equal("20260825114510_AddExecutionCutoverSchema", appliedList.Last());
+        Assert.True(appliedList.IndexOf("20260825114510_AddExecutionCutoverSchema") > featureIndex,
+            "The #726 execution-cutover schema must be applied after the vocabulary migration.");
+        Assert.Equal(db.Database.GetMigrations(), appliedList);
 
         var columns = await ColumnsAsync(db);
         Assert.Contains("project_verification_vocabularies.ProjectId", columns);
@@ -65,7 +69,8 @@ public sealed class VerificationVocabularyPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task A_project_created_on_a_clean_install_carries_a_persisted_vocabulary()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = await ResetAtLatestAsync(connection);
         var program = new ProgramRecord("PG founding program", "PGF");
         var project = new ProjectRecord(program.Id, "PG founding project", "PG founding software");
@@ -83,7 +88,8 @@ public sealed class VerificationVocabularyPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Upgrading_the_exact_pre_feature_schema_founds_every_project_and_rewrites_nothing()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = await MigrateToPreFeatureAsync(connection);
         var seeded = await SeedPreFeatureAsync(db);
 
@@ -122,7 +128,8 @@ public sealed class VerificationVocabularyPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task The_backfill_is_idempotent_and_survives_a_down_and_reapply()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = await MigrateToPreFeatureAsync(connection);
         var seeded = await SeedPreFeatureAsync(db);
         await db.Database.GetService<IMigrator>().MigrateAsync();
@@ -150,7 +157,8 @@ public sealed class VerificationVocabularyPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Uniqueness_foreign_keys_and_the_position_check_are_enforced_by_postgresql()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = await ResetAtLatestAsync(connection);
         var now = DateTimeOffset.UtcNow;
         var program = new ProgramRecord("PG constraint program", "PGK");
@@ -187,7 +195,8 @@ public sealed class VerificationVocabularyPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task An_optimistic_conflict_is_refused_and_the_configuration_is_left_intact()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         var options = Options(connection);
         await using (var setup = await ResetAtLatestAsync(connection))
         {
@@ -219,7 +228,8 @@ public sealed class VerificationVocabularyPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task A_refused_edit_rolls_back_leaving_no_partial_configuration()
     {
-        var connection = QualificationConnectionOrSkip();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = await ResetAtLatestAsync(connection);
         var now = DateTimeOffset.UtcNow;
         var program = new ProgramRecord("PG rollback program", "PGB");
@@ -240,16 +250,6 @@ public sealed class VerificationVocabularyPostgresQualificationTests
         Assert.Equal(1, stored.Version);
         Assert.Empty(await check.SecurityAuditEvents.AsNoTracking()
             .Where(x => x.EventType == "VerificationVocabularyConfigured").ToListAsync());
-    }
-
-    [Theory]
-    [InlineData("Host=example.test;Port=54701;Database=aerolink_701_qualify")]
-    [InlineData("Host=127.0.0.1;Port=54701;Database=aerolink")]
-    [InlineData("Host=127.0.0.1;Port=54329;Database=aerolink_701_qualify")]
-    public void Qualification_connection_rejects_non_disposable_targets_before_database_access(string connection)
-    {
-        var error = Assert.Throws<InvalidOperationException>(() => ValidateQualificationConnection(connection));
-        Assert.Contains("Issue #701", error.Message, StringComparison.Ordinal);
     }
 
     private sealed record PreFeatureSeed(Guid FragmentedProjectId, Guid CleanProjectId);
@@ -353,31 +353,6 @@ public sealed class VerificationVocabularyPostgresQualificationTests
 
     private static DbContextOptions<AeroLinkDbContext> Options(string connectionString) =>
         new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connectionString).Options;
-
-    private static string QualificationConnectionOrSkip() =>
-        ValidateQualificationConnection(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION"));
-
-    /// <summary>
-    /// The guard that keeps this qualification off the persistent demo database. Loopback only, never the
-    /// protected 54329, and only the dedicated disposable database this feature owns.
-    /// </summary>
-    private static string ValidateQualificationConnection(string? connection)
-    {
-        if (string.IsNullOrWhiteSpace(connection))
-            throw new InvalidOperationException(
-                "Issue #701 PostgreSQL qualification requires AEROLINK_MIGRATIONS_CONNECTION; the test should have been skipped during discovery.");
-        var builder = new NpgsqlConnectionStringBuilder(connection);
-        var host = (builder.Host ?? "").Trim().Trim('[', ']');
-        var loopback = string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-            || (IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address));
-        if (!loopback)
-            throw new InvalidOperationException("Issue #701 PostgreSQL qualification requires a loopback host.");
-        if (builder.Port == 54329)
-            throw new InvalidOperationException("Issue #701 qualification refuses the protected PostgreSQL port 54329.");
-        if (!string.Equals(builder.Database, DatabaseName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"Issue #701 qualification requires the dedicated database {DatabaseName}.");
-        return connection;
-    }
 
     private sealed class FixedLadderPolicyResolver(ILadderPolicy policy) : IProjectLadderPolicyResolver
     {

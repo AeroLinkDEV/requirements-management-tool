@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using AeroLink.Domain.Requirements;
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Tests;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -19,15 +20,17 @@ namespace AeroLink.Api.Tests;
 [CollectionDefinition("Issue870Postgres", DisableParallelization = true)]
 public sealed class Issue870PostgresCollection : ICollectionFixture<object>;
 
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue870Postgres")]
 public sealed class ProblemReportPostgresQualificationTests
 {
     private const string DatabaseName = "aerolink_870_qualify";
 
-    [Issue870PostgresFact]
+    [DisposablePostgresFact]
     public async Task Postgres_serializes_check_in_and_attachment_without_500_or_stale_manifest()
     {
-        var connection = QualificationConnection();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         using var factory = new AeroLinkApiFactory(postgresConnection: connection);
         using var client = factory.CreateClient();
         await ProblemReportApiTests.BootstrapAndLoginAsync(client);
@@ -97,33 +100,5 @@ public sealed class ProblemReportPostgresQualificationTests
         }
         else
             Assert.Null(checkedIn);
-    }
-
-    private static string QualificationConnection()
-    {
-        var raw = Environment.GetEnvironmentVariable("AEROLINK_870_CONNECTION");
-        if (string.IsNullOrWhiteSpace(raw))
-            throw new InvalidOperationException(
-                "Issue #870 PostgreSQL qualification requires AEROLINK_870_CONNECTION.");
-        var builder = new NpgsqlConnectionStringBuilder(raw);
-        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-        if (!string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Issue #870 qualification requires a loopback host.");
-        if (builder.Port == 54329)
-            throw new InvalidOperationException("Issue #870 qualification refuses PostgreSQL port 54329.");
-        if (!string.Equals(builder.Database, DatabaseName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException(
-                $"Issue #870 qualification requires the dedicated database {DatabaseName}.");
-        return raw;
-    }
-
-    private sealed class Issue870PostgresFactAttribute : FactAttribute
-    {
-        public Issue870PostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_870_CONNECTION")))
-                Skip = "Issue #870 PostgreSQL qualification skipped: set AEROLINK_870_CONNECTION.";
-        }
     }
 }

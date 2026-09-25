@@ -1,4 +1,3 @@
-using System.Net;
 using AeroLink.Domain.Verification;
 using AeroLink.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -11,11 +10,12 @@ namespace AeroLink.Infrastructure.Tests;
 /// <summary>
 /// Disposable PostgreSQL qualification for #738. This deliberately migrates the exact #724 predecessor,
 /// inserts evidence through the predecessor schema, and then proves that the #738 backfill is evidence-only
-/// and idempotent. It is skipped unless the caller supplies the dedicated disposable connection.
+/// and idempotent. It is skipped unless the caller names a disposable server, and each test creates its own database there.
 /// </summary>
 [CollectionDefinition("Issue738Postgres", DisableParallelization = true)]
 public sealed class Issue738PostgresCollection;
 
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue738Postgres")]
 public sealed class ExactParentOrDerivedPostgresQualificationTests
 {
@@ -26,7 +26,8 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Exact_predecessor_upgrade_backfills_only_honest_parent_evidence_and_is_idempotent()
     {
-        var connection = QualificationConnectionOrThrow();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = await MigrateToPredecessorAsync(connection);
         var fixture = await SeedPredecessorFixtureAsync(db);
         var reviewEvidenceBefore = await db.ReviewCycles.AsNoTracking()
@@ -130,7 +131,8 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Clean_current_install_applies_issue_738_without_fabricated_artifacts()
     {
-        var connection = QualificationConnectionOrThrow();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = new AeroLinkDbContext(Options(connection));
         await db.Database.EnsureDeletedAsync();
         await db.Database.GetService<IMigrator>().MigrateAsync();
@@ -145,7 +147,8 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Issue725_case_origin_is_exact_discriminated_immutable_and_database_guarded()
     {
-        var connection = QualificationConnectionOrThrow();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = await MigrateToPredecessorAsync(connection);
         var fixture = await SeedPredecessorFixtureAsync(db);
         await db.Database.GetService<IMigrator>().MigrateAsync();
@@ -294,15 +297,6 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
             fixture.MaterializedModifyChangeId, "HLRTPCR-QUAL-04", sourceNumber));
     }
 
-    [Theory]
-    [InlineData("Host=127.0.0.1;Port=54329;Database=aerolink_738_qualify")]
-    [InlineData("Host=127.0.0.1;Port=55438;Database=other_database")]
-    [InlineData("Host=10.0.0.1;Port=55438;Database=aerolink_738_qualify")]
-    public void Qualification_connection_rejects_protected_or_wrong_scope(string connection)
-    {
-        Assert.Throws<InvalidOperationException>(() => ValidateQualificationConnection(connection));
-    }
-
     private static async Task<AeroLinkDbContext> MigrateToPredecessorAsync(string connection)
     {
         var db = new AeroLinkDbContext(Options(connection));
@@ -399,29 +393,6 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
 
     private static DbContextOptions<AeroLinkDbContext> Options(string connection) =>
         new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
-
-    private static string QualificationConnectionOrThrow() => ValidateQualificationConnection(
-        Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION"));
-
-    private static string ValidateQualificationConnection(string? connection)
-    {
-        if (string.IsNullOrWhiteSpace(connection))
-            throw new InvalidOperationException("Issue #738 PostgreSQL qualification requires AEROLINK_MIGRATIONS_CONNECTION.");
-        var builder = new NpgsqlConnectionStringBuilder(connection);
-        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-        var loopback = string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-            || (IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address));
-        if (!loopback)
-            throw new InvalidOperationException("Issue #738 PostgreSQL qualification requires a loopback host.");
-        // Qualification runs use an explicitly dedicated high loopback port. Keep the guard fail-closed against
-        // the persistent demo service while allowing each run to choose its own collision-free port in the
-        // disposable qualification range.
-        if (builder.Port is < 55438 or > 55499 || builder.Port == 54329)
-            throw new InvalidOperationException("Issue #725/#738 qualification requires a disposable PostgreSQL port in 55438-55499 and refuses 54329.");
-        if (!string.Equals(builder.Database, DatabaseName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"Issue #738 qualification requires dedicated database {DatabaseName}.");
-        return connection;
-    }
 
     private sealed record Fixture(
         Guid ParentRequirementRevisionId,

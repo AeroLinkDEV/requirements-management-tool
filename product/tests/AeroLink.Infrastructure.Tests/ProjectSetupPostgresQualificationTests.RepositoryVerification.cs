@@ -16,75 +16,63 @@ public sealed partial class ProjectSetupPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Repository_verification_migration_preserves_legacy_null_facts_and_new_identity_snapshots()
     {
-        var rawConnection = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
-        if (string.IsNullOrWhiteSpace(rawConnection))
-            throw new InvalidOperationException("Required project-setup PostgreSQL qualification needs an explicit disposable connection.");
-        var server = ValidateServer(rawConnection);
-        var databaseName = $"aerolink_1039_repository_upgrade_{Guid.NewGuid():N}";
-        await CreateDatabaseAsync(server, databaseName);
-        try
+        await using var qualification = await DisposablePostgresDatabase.CreateAsync("aerolink_1039_repository_upgrade");
+        var connection = qualification.ConnectionString;
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
+        const string predecessor = "20260914012557_AddProjectInceptionSourceStaging";
+        var programId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var releaseId = Guid.NewGuid();
+        var baselineId = Guid.NewGuid();
+        var changeId = Guid.NewGuid();
+        var artifactId = Guid.NewGuid();
+        var revisionId = Guid.NewGuid();
+        var legacyRecordId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+
+        await using (var migrate = new AeroLinkDbContext(options))
         {
-            var connection = new NpgsqlConnectionStringBuilder(server) { Database = databaseName }.ConnectionString;
-            var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
-            const string predecessor = "20260914012557_AddProjectInceptionSourceStaging";
-            var programId = Guid.NewGuid();
-            var projectId = Guid.NewGuid();
-            var releaseId = Guid.NewGuid();
-            var baselineId = Guid.NewGuid();
-            var changeId = Guid.NewGuid();
-            var artifactId = Guid.NewGuid();
-            var revisionId = Guid.NewGuid();
-            var legacyRecordId = Guid.NewGuid();
-            var now = DateTimeOffset.UtcNow;
-
-            await using (var migrate = new AeroLinkDbContext(options))
-            {
-                await migrate.Database.GetService<IMigrator>().MigrateAsync(predecessor);
-                await using var sql = new NpgsqlConnection(connection);
-                await sql.OpenAsync();
-                await InsertLegacyGraphAsync(sql, programId, projectId, releaseId, baselineId, changeId,
-                    artifactId, revisionId, legacyRecordId, now);
-            }
-
-            await using (var upgrade = new AeroLinkDbContext(options))
-            {
-                // This is deliberately an upgrade from a populated pre-RS03 schema, not an empty-database run.
-                await upgrade.Database.MigrateAsync();
-                await upgrade.Database.MigrateAsync();
-
-                var legacy = await upgrade.CodeTraceabilityRecords.AsNoTracking()
-                    .SingleAsync(x => x.Id == legacyRecordId);
-                Assert.Null(legacy.VerifiedRemoteProjectId);
-                Assert.Null(legacy.VerifiedRepositoryEndpoint);
-                Assert.Null(legacy.VerifiedRepositoryPath);
-                Assert.Null(legacy.RepositoryConfigurationVersion);
-                Assert.Null(legacy.RepositoryVerifiedAt);
-                Assert.Null(legacy.RepositoryVerifiedBy);
-
-                var release = new SoftwareRelease(projectId, "1.1", false);
-                var repository = new ProjectRepositoryConfiguration(projectId, ProjectRepositorySetupMode.ConnectNow,
-                    "GitLab", "https://git.example.test/group/project", "admin", now);
-                repository.RecordVerification("admin", now, 123, "group/project");
-                var mapped = new CodeTraceabilityRecord(projectId, release.Id, artifactId, revisionId,
-                    CodeTraceDisposition.GitLabMerge, "group/project", "!1", "Mapped source identity",
-                    "https://git.example.test/group/project/-/merge_requests/1", new string('a', 40), now, "", false,
-                    "admin", now, repository);
-                upgrade.AddRange(release, repository, mapped);
-                await upgrade.SaveChangesAsync();
-
-                var snapshot = await upgrade.CodeTraceabilityRecords.AsNoTracking()
-                    .SingleAsync(x => x.Id == mapped.Id);
-                Assert.Equal(123, snapshot.VerifiedRemoteProjectId);
-                Assert.Equal("https://git.example.test/group/project", snapshot.VerifiedRepositoryEndpoint);
-                Assert.Equal("group/project", snapshot.VerifiedRepositoryPath);
-                Assert.Equal(repository.Version, snapshot.RepositoryConfigurationVersion);
-                Assert.Equal("admin", snapshot.RepositoryVerifiedBy);
-                Assert.NotNull(snapshot.RepositoryVerifiedAt);
-            }
+            await migrate.Database.GetService<IMigrator>().MigrateAsync(predecessor);
+            await using var sql = new NpgsqlConnection(connection);
+            await sql.OpenAsync();
+            await InsertLegacyGraphAsync(sql, programId, projectId, releaseId, baselineId, changeId,
+                artifactId, revisionId, legacyRecordId, now);
         }
-        finally
+
+        await using (var upgrade = new AeroLinkDbContext(options))
         {
-            await DropDatabaseAsync(server, databaseName);
+            // This is deliberately an upgrade from a populated pre-RS03 schema, not an empty-database run.
+            await upgrade.Database.MigrateAsync();
+            await upgrade.Database.MigrateAsync();
+
+            var legacy = await upgrade.CodeTraceabilityRecords.AsNoTracking()
+                .SingleAsync(x => x.Id == legacyRecordId);
+            Assert.Null(legacy.VerifiedRemoteProjectId);
+            Assert.Null(legacy.VerifiedRepositoryEndpoint);
+            Assert.Null(legacy.VerifiedRepositoryPath);
+            Assert.Null(legacy.RepositoryConfigurationVersion);
+            Assert.Null(legacy.RepositoryVerifiedAt);
+            Assert.Null(legacy.RepositoryVerifiedBy);
+
+            var release = new SoftwareRelease(projectId, "1.1", false);
+            var repository = new ProjectRepositoryConfiguration(projectId, ProjectRepositorySetupMode.ConnectNow,
+                "GitLab", "https://git.example.test/group/project", "admin", now);
+            repository.RecordVerification("admin", now, 123, "group/project");
+            var mapped = new CodeTraceabilityRecord(projectId, release.Id, artifactId, revisionId,
+                CodeTraceDisposition.GitLabMerge, "group/project", "!1", "Mapped source identity",
+                "https://git.example.test/group/project/-/merge_requests/1", new string('a', 40), now, "", false,
+                "admin", now, repository);
+            upgrade.AddRange(release, repository, mapped);
+            await upgrade.SaveChangesAsync();
+
+            var snapshot = await upgrade.CodeTraceabilityRecords.AsNoTracking()
+                .SingleAsync(x => x.Id == mapped.Id);
+            Assert.Equal(123, snapshot.VerifiedRemoteProjectId);
+            Assert.Equal("https://git.example.test/group/project", snapshot.VerifiedRepositoryEndpoint);
+            Assert.Equal("group/project", snapshot.VerifiedRepositoryPath);
+            Assert.Equal(repository.Version, snapshot.RepositoryConfigurationVersion);
+            Assert.Equal("admin", snapshot.RepositoryVerifiedBy);
+            Assert.NotNull(snapshot.RepositoryVerifiedAt);
         }
     }
 

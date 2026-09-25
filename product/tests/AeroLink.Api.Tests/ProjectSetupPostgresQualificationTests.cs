@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using AeroLink.Domain.Imports;
 using AeroLink.Domain.Programs;
 using AeroLink.Infrastructure.Persistence;
+using AeroLink.Infrastructure.Tests;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,9 +12,10 @@ using Npgsql;
 
 namespace AeroLink.Api.Tests;
 
+[Trait("Category", "PostgresQualification")]
 public sealed partial class ProjectSetupPostgresQualificationTests
 {
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Fresh_project_services_and_deliberate_staffing_survive_host_restart_and_migration_reapplication()
     {
         await WithDatabaseAsync(async connection =>
@@ -46,7 +48,7 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         });
     }
 
-    [RequiredSetupPostgresFact]
+    [DisposablePostgresFact]
     public async Task Release_creation_and_legacy_import_acceptance_cannot_commit_equivalent_build_identities()
     {
         await WithDatabaseAsync(async connection =>
@@ -108,30 +110,10 @@ public sealed partial class ProjectSetupPostgresQualificationTests
 
     private static async Task WithDatabaseAsync(Func<string, Task> test)
     {
-        var raw = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
-        if (string.IsNullOrWhiteSpace(raw)) throw new InvalidOperationException("Required setup API PostgreSQL qualification needs an explicit disposable connection.");
-        var server = new NpgsqlConnectionStringBuilder(raw);
-        var host = (server.Host ?? "").Trim().Trim('[', ']');
-        if (!(host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-            || IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address)) || server.Port == 54329)
-            throw new InvalidOperationException("Setup API qualification requires loopback PostgreSQL away from persistent port 54329.");
-        var database = "aerolink_1037_api_" + Guid.NewGuid().ToString("N");
-        server.Database = "postgres";
-        await using var admin = new NpgsqlConnection(server.ConnectionString);
-        await admin.OpenAsync();
-        await using (var create = new NpgsqlCommand($"CREATE DATABASE \"{database}\"", admin)) await create.ExecuteNonQueryAsync();
-        try
-        {
-            var connection = new NpgsqlConnectionStringBuilder(server.ConnectionString) { Database = database }.ConnectionString;
-            await using (var db = new AeroLinkDbContext(new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options))
-                await db.Database.MigrateAsync();
-            await test(connection);
-        }
-        finally
-        {
-            await using var drop = new NpgsqlCommand($"DROP DATABASE IF EXISTS \"{database}\" WITH (FORCE)", admin);
-            await drop.ExecuteNonQueryAsync();
-        }
+        await using var database = await DisposablePostgresDatabase.CreateAsync("aerolink_1037_api");
+        await using (var db = new AeroLinkDbContext(new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(database.ConnectionString).Options))
+            await db.Database.MigrateAsync();
+        await test(database.ConnectionString);
     }
 
     private sealed class ReleaseInsertBarrier : DbCommandInterceptor
@@ -149,17 +131,6 @@ public sealed partial class ProjectSetupPostgresQualificationTests
                 await _both.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
             }
             return result;
-        }
-    }
-
-    private sealed class RequiredSetupPostgresFactAttribute : FactAttribute
-    {
-        public RequiredSetupPostgresFactAttribute()
-        {
-            var required = Environment.GetEnvironmentVariable("AEROLINK_REQUIRE_POSTGRES_QUALIFICATION");
-            if ((string.IsNullOrWhiteSpace(required) || required.Equals("false", StringComparison.OrdinalIgnoreCase))
-                && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")))
-                Skip = "Set AEROLINK_MIGRATIONS_CONNECTION for owned disposable PostgreSQL qualification.";
         }
     }
 }

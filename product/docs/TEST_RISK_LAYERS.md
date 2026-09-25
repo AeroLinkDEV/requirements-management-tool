@@ -22,7 +22,7 @@ Use Infrastructure tests when the risk is the persistence or operating-system im
 
 These tests may require a disposable database or disposable filesystem root. They do **not** justify starting the full ASP.NET host unless hosting is itself part of the contract. Persistent developer PostgreSQL under `product/.local` and persistent evidence state are never test inputs.
 
-Mark a PostgreSQL qualification test `[DisposablePostgresFact]` (`AeroLink.Infrastructure.Tests/TestSupport`). With no `AEROLINK_MIGRATIONS_CONNECTION` it reports Skipped; with `AEROLINK_REQUIRE_POSTGRES_QUALIFICATION` set, a missing connection fails. Do not add a private copy of that attribute, and do not return early from the test body.
+Mark a PostgreSQL qualification test `[DisposablePostgresFact]` (`AeroLink.Infrastructure.Tests/TestSupport`, linked into the API tests) and put its class in `[Trait("Category", "PostgresQualification")]`; a guard test fails when the trait is missing. With no `AEROLINK_MIGRATIONS_CONNECTION` the test reports Skipped; with `AEROLINK_REQUIRE_POSTGRES_QUALIFICATION` set, a missing connection fails. Take the database from `DisposablePostgresDatabase.CreateAsync`, which refuses a non-loopback server or port 54329 and drops what it created, rather than requiring a dedicated database name, port or variable that no lane sets. An upgrade qualification seeds its predecessor schema with `PredecessorSchemaRows.InsertTrackedAsync`, not `SaveChangesAsync`, because the current model maps columns later migrations add. Do not add a private copy of any of these, and do not return early from the test body.
 
 ## Hosted API tests
 

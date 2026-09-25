@@ -22,6 +22,7 @@ namespace AeroLink.Infrastructure.Tests;
 [CollectionDefinition("Issue723Postgres", DisableParallelization = true)]
 public sealed class Issue723PostgresCollection : ICollectionFixture<object>;
 
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue723Postgres")]
 public sealed class TestChangeRequestPrefixPostgresQualificationTests
 {
@@ -31,7 +32,8 @@ public sealed class TestChangeRequestPrefixPostgresQualificationTests
     [DisposablePostgresFact]
     public async Task Exact_predecessor_upgrade_preserves_history_rewrites_current_sites_and_completes_idempotently()
     {
-        var connection = QualificationConnectionOrThrow();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         var evidenceRoot = Path.Combine(Path.GetTempPath(), $"aerolink-723-authority-{Guid.NewGuid():N}");
         try
         {
@@ -143,7 +145,8 @@ public sealed class TestChangeRequestPrefixPostgresQualificationTests
                 new BaselineTestProcedureSelection(baseline.Id, low.Id, lowRevision.Id),
                 new BaselineTestProcedureSelection(unaffectedBaseline.Id, unaffectedProcedure.Id, unaffectedRevision.Id),
                 new IdentifierSequence("SYSTCR", 8), new IdentifierSequence("HLRTCR", 12), new IdentifierSequence("LLRTCR", 20));
-            await db.SaveChangesAsync();
+            // Seeded at the predecessor schema, so only its own columns are written.
+            await PredecessorSchemaRows.InsertTrackedAsync(db);
             await db.CandidateBaselines.Where(x => x.Id == baseline.Id).ExecuteUpdateAsync(update => update
                 .SetProperty(x => x.RequirementsMaterializedAt, now)
                 .SetProperty(x => x.TestProceduresMaterializedAt, now)
@@ -300,8 +303,12 @@ public sealed class TestChangeRequestPrefixPostgresQualificationTests
         var review = new TestChangeReview(project.Id, release.Id, source.Id, discipline, source.DisplayNumber, now, oldNumber, authorId: "author");
         review.RecordTestChangeRequired("author", now);
         review.WriteCase("author", "Identity-only rename", "Old identity", "Identity is changing", "Body is preserved", now);
+        // Submission requires every introduced or modified procedure to name its parent kind (#1035). An
+        // identity-only rename keeps the body, so it is declared Derived with that as its rationale.
         review.AddProcedureChange("author", new TestProcedureChangeDraft(procedure.BaseNumber, 0, procedure.Level,
-            TestProcedureChangeKind.Modify, procedure.Title, "objective", "preconditions", "steps", "expected", "identity"), now);
+            TestProcedureChangeKind.Modify, procedure.Title, "objective", "preconditions", "steps", "expected", "identity",
+            ParentKind: VerificationProcedureParentKind.Derived,
+            DerivedRationale: "Identity-only rename; the verified body is unchanged."), now);
         review.SubmitForReview("author", [new ApproverSelection("reviewer", "Reviewer")], true, now);
         review.ApproveActiveStage("reviewer", "Approved", now.AddMinutes(1));
         return review;
@@ -323,16 +330,4 @@ public sealed class TestChangeRequestPrefixPostgresQualificationTests
 
     private static DbContextOptions<AeroLinkDbContext> Options(string connection) =>
         new DbContextOptionsBuilder<AeroLinkDbContext>().UseNpgsql(connection).Options;
-
-    private static string QualificationConnectionOrThrow()
-    {
-        var connection = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
-        if (string.IsNullOrWhiteSpace(connection))
-            throw new InvalidOperationException("Issue #723 PostgreSQL qualification requires AEROLINK_MIGRATIONS_CONNECTION.");
-        var builder = new NpgsqlConnectionStringBuilder(connection);
-        if (!string.Equals(builder.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
-            || builder.Port == 54329 || !string.Equals(builder.Database, DatabaseName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Issue #723 qualification requires loopback, non-54329 PostgreSQL and database aerolink_723_qualify.");
-        return connection;
-    }
 }

@@ -11,15 +11,17 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class Issue786PostgresCollection;
 
 /// <summary>PostgreSQL-only proof for the immutable upstream-answer rows added by #786 Phase 1.</summary>
+[Trait("Category", "PostgresQualification")]
 [Collection("Issue786Postgres")]
 public sealed class ChangeRequestUpstreamPostgresQualificationTests
 {
     private const string DatabaseName = "aerolink_786_qualify";
 
-    [Issue786PostgresFact]
+    [DisposablePostgresFact]
     public async Task Clean_install_guards_active_links_and_history_without_blocking_draft_cascade()
     {
-        var connection = QualificationConnectionOrThrow();
+        await using var database = await DisposablePostgresDatabase.CreateAsync(DatabaseName);
+        var connection = database.ConnectionString;
         await using var db = new AeroLinkDbContext(new DbContextOptionsBuilder<AeroLinkDbContext>()
             .UseNpgsql(connection).Options);
         await db.Database.EnsureDeletedAsync();
@@ -116,41 +118,5 @@ public sealed class ChangeRequestUpstreamPostgresQualificationTests
         Assert.False(await db.SystemChangeRequests.AsNoTracking().AnyAsync(x => x.Id == cascadeId));
         Assert.False(await db.ChangeRequestUpstreamLinks.AsNoTracking().AnyAsync(x => x.ChangeRequestId == cascadeId));
         Assert.False(await db.ChangeRequestUpstreamHistory.AsNoTracking().AnyAsync(x => x.ChangeRequestId == cascadeId));
-    }
-
-    private static string? ResolveQualificationConnection()
-    {
-        var dedicated = Environment.GetEnvironmentVariable("AEROLINK_786_CONNECTION");
-        if (!string.IsNullOrWhiteSpace(dedicated)) return dedicated;
-        var shared = Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION");
-        return string.IsNullOrWhiteSpace(shared) ? null : shared;
-    }
-
-    private static string QualificationConnectionOrThrow()
-    {
-        var connection = ResolveQualificationConnection();
-        if (string.IsNullOrWhiteSpace(connection))
-            throw new InvalidOperationException(
-                "Issue #786 PostgreSQL qualification requires AEROLINK_786_CONNECTION or AEROLINK_MIGRATIONS_CONNECTION.");
-        var builder = new NpgsqlConnectionStringBuilder(connection);
-        var host = (builder.Host ?? string.Empty).Trim().Trim('[', ']');
-        if (!string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Issue #786 PostgreSQL qualification requires a loopback host.");
-        if (builder.Port == 54329)
-            throw new InvalidOperationException("Issue #786 qualification refuses the protected PostgreSQL port 54329.");
-        if (!string.Equals(builder.Database, DatabaseName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException(
-                $"Issue #786 PostgreSQL qualification requires the dedicated database {DatabaseName}.");
-        return connection;
-    }
-
-    private sealed class Issue786PostgresFactAttribute : FactAttribute
-    {
-        public Issue786PostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(ResolveQualificationConnection()))
-                Skip = "Issue #786 PostgreSQL qualification skipped: set its dedicated disposable connection.";
-        }
     }
 }

@@ -469,7 +469,10 @@ explicit showcase upgrade command, which takes a verified backup first, is how t
 The maintenance and upgrade qualification runs against a **disposable PostgreSQL** in the `postgresql-smoke`
 CI lane the merge gate waits on, with `AEROLINK_REQUIRE_POSTGRES_QUALIFICATION` set so a missing connection
 fails the lane rather than skipping into a green tick. Locally, point `AEROLINK_MIGRATIONS_CONNECTION` at a
-throwaway server; never at a persistent installation.
+throwaway server; never at a persistent installation. Every PostgreSQL qualification carries the xUnit trait
+`Category=PostgresQualification`, and each test creates and drops its own database on that server, so
+`dotnet test --filter "Category=PostgresQualification"` runs them all against one server (#1122). Two
+measurements stay opt-in: `AEROLINK_CQ09_BENCHMARK=1` and `AEROLINK_SAVE_BENCHMARK=1`.
 
 ### Declaring which installation this is
 
@@ -980,7 +983,7 @@ Supply the exact installation PostgreSQL binaries, the runtime evidence root and
 & product/scripts/Repair-FmsDemoHistory.ps1 -PostgresBin '<installation PostgreSQL bin>' -EvidenceRoot '<runtime evidence root>' -ReceiptDirectory '<operator recovery directory>'
 ```
 
-First qualify `-Apply` on a disposable restored copy using `-Database` and `-PostgresPort` for that copy and its isolated `-EvidenceRoot`. Verify its complete application upgrade and controlled reads. For the qualified HOME correction, stop the supported HOME host, then run the same command with `-Apply` against the exact installation. It creates and verifies a fresh full backup, refuses a manifest changed since preview, holds database locks during the narrowly scoped trigger exception, and proves all unrelated rows and original trigger modes unchanged before commit. Retain the preview, applied manifest, recovery archive and JSON receipt. Any refusal or proof failure rolls the transaction back. There is no backup bypass.
+First qualify `-Apply` on a disposable restored copy using `-Database` and `-PostgresPort` for that copy and its isolated `-EvidenceRoot`. `FmsUpstreamRestoredCopyQualificationTests` is the automated part of that check. Restore the copy as `aerolink_1006_validation`, then set `AEROLINK_1006_RESTORED_CONNECTION` to it and `AEROLINK_1006_RESTORED_EVIDENCE` to its isolated `restore-validation` evidence tree. No CI lane has a restored copy, so this stays manual. Verify its complete application upgrade and controlled reads. For the qualified HOME correction, stop the supported HOME host, then run the same command with `-Apply` against the exact installation. It creates and verifies a fresh full backup, refuses a manifest changed since preview, holds database locks during the narrowly scoped trigger exception, and proves all unrelated rows and original trigger modes unchanged before commit. Retain the preview, applied manifest, recovery archive and JSON receipt. Any refusal or proof failure rolls the transaction back. There is no backup bypass.
 
 The normal explicit showcase upgrade separately replaces invalid active upstream links in owned scenarios with the approved exact source of the baseline parent. A review interrupted by that correction keeps its prior snapshot and receives a new review cycle. Maintenance removes unapproved links from other active FMS author work without inventing an answer; those Drafts are visibly incomplete until authored. This correction never approves a revision automatically.
 
