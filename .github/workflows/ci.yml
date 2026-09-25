@@ -711,6 +711,19 @@ jobs:
           path: ${{ github.workspace }}/TestResults/
           if-no-files-found: ignore
           retention-days: 30
+      # Per-test timings from green runs as well (#1152 C2). This is the longest single job, and one retained
+      # failure TRX showed four showcase seed/upgrade tests holding 60% of its summed test time while one or two
+      # cores sat idle. Ranking that across runs needs the TRX of passing runs, which were discarded. The API
+      # shards already keep theirs in api-observations; this is the Infrastructure equivalent. It gates nothing.
+      - name: Upload infrastructure test timings
+        if: success()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: infrastructure-test-timings-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/TestResults/infrastructure.trx
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Mark test complete
         if: always()
         continue-on-error: true
