@@ -122,6 +122,7 @@ public static class DependencyInjection
         services.AddScoped<ReleasedSyntheticSourceSupplementService>();
         services.AddScoped<ProjectAssurancePolicyService>();
         services.AddScoped<ProjectVerificationVocabularyService>();
+        services.AddScoped<ProjectFeatureService>();
         services.AddScoped<IdentitySeeder>();
         services.AddScoped<ExternalIdentityAdministrationService>();
         services.AddScoped<EnterpriseRequirementsService>();

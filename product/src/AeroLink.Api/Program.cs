@@ -422,6 +422,7 @@ app.MapTeamWorkEndpoints();
 app.MapProjectConfigurationEndpoints();
 app.MapAssurancePolicyEndpoints();
 app.MapVerificationVocabularyEndpoints();
+app.MapProjectFeatureEndpoints();
 app.MapChangeRequestEndpoints();
 app.MapDownstreamAssessmentEndpoints();
 app.MapBaselineImportEndpoints();

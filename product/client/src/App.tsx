@@ -59,6 +59,7 @@ import "./ExperiencePolish.css";
 import "./People.css";
 import "./CohesionPass.css";
 import ProblemReportsCommandCard from "./ProblemReportsCommandCard";
+import { hasFeature, viewEnabled, type ProjectFeature, type ProjectFeatureProjection } from "./projectFeatures";
 
 const projectLevelViews: View[] = ["projects", "projectSetup", "builds", "baselineImports", "personnel", "approvalConfiguration", "projectConfiguration"];
 
@@ -181,9 +182,9 @@ type Metrics = {
  */
 const API = API_ORIGIN;
 
-function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, artifactKind, coverageReport, context, buildSelectionHref, projectWide, density, ladder, onNavigate, onOpenCoverage, onSearch, onDisplay, onExitBuild, onSignOut }:{
+function AppNavigation({ user, workspaces, activeId, selectedProjectId, selectedReleaseId, view, discipline, artifactKind, coverageReport, context, buildSelectionHref, projectWide, density, ladder, features, onNavigate, onOpenCoverage, onSearch, onDisplay, onExitBuild, onSignOut }:{
   user:AuthUser;workspaces:Workspace[];activeId:string;selectedProjectId:string;selectedReleaseId:string;view:View;discipline:Discipline;context?:RouteContext;
-  artifactKind:string;coverageReport:boolean;buildSelectionHref?:string;projectWide:boolean;density:WorkspaceDensity;ladder:ProjectLadderProjection|null;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void;onOpenCoverage:(discipline:"systemTest"|"softwareTest",level?:"HighLevel"|"LowLevel")=>void;onSearch:()=>void;onDisplay:()=>void;onExitBuild:()=>void;onSignOut:()=>void;
+  artifactKind:string;coverageReport:boolean;buildSelectionHref?:string;projectWide:boolean;density:WorkspaceDensity;ladder:ProjectLadderProjection|null;features:ProjectFeature[]|null;onNavigate:(view:View,discipline?:Discipline,artifactId?:string,artifactKind?:string)=>void;onOpenCoverage:(discipline:"systemTest"|"softwareTest",level?:"HighLevel"|"LowLevel")=>void;onSearch:()=>void;onDisplay:()=>void;onExitBuild:()=>void;onSignOut:()=>void;
 }) {
   const active = workspaces.find(x => x.program.id === activeId) ?? workspaces[0];
   const project = active?.projects.find(x => x.project.id === selectedProjectId) ?? active?.projects[0];
@@ -196,12 +197,13 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
   const hasSystemChange = ladderAllows(ladder, "System", LadderCapability.ChangeControl);
   const hasSoftwareChange = ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.ChangeControl);
   const hasInterfaceChange = ladderAllows(ladder, "Interface", LadderCapability.ChangeControl);
-  const hasSystemVerification = ladderAllows(ladder, "System", LadderCapability.Verification);
-  const hasSoftwareVerification = ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.Verification);
-  const hasRequirements = hasSystem || hasSoftware;
+  const hasSystemVerification = hasFeature(features, "Verification") && ladderAllows(ladder, "System", LadderCapability.Verification);
+  const hasSoftwareVerification = hasFeature(features, "Verification") && ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.Verification);
+  const hasRequirements = hasFeature(features, "Requirements") && (hasSystem || hasSoftware);
+  const hasDigitalThread = hasFeature(features, "Requirements") || hasFeature(features, "Verification");
   const hasSystemRequirementsDocument = ladderAllows(ladder, "System", LadderCapability.RequirementsDocument);
   const hasSoftwareRequirementsDocument = ladderHasAny(ladder, ["HighLevel", "LowLevel"], LadderCapability.RequirementsDocument);
-  const hasCodeTraceability = ladderHasAny(ladder, ["System", "HighLevel", "LowLevel"], LadderCapability.CodeTraceability);
+  const hasCodeTraceability = hasFeature(features, "Code") && ladderHasAny(ladder, ["System", "HighLevel", "LowLevel"], LadderCapability.CodeTraceability);
   const defaultSoftwareChangeLevel = ladderAllows(ladder, "HighLevel", LadderCapability.ChangeControl)
     ? "HighLevel"
     : ladderAllows(ladder, "LowLevel", LadderCapability.ChangeControl) ? "LowLevel" : undefined;
@@ -262,7 +264,7 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
         <button type="button" className="exitBuild" onClick={onExitBuild}>← Back to Software Builds</button>
       </div>
       <nav className="primaryNavigation" aria-label="Primary navigation">
-        <div className="navHome">{item("Command Center","dashboard","home")}{item("My Work","mywork","myWork")}{item("Team Work","teamwork","teamWork")}</div>
+        <div className="navHome">{item("Command Center","dashboard","home")}{item("My Work","mywork","myWork")}{hasFeature(features,"TeamWork")&&item("Team Work","teamwork","teamWork")}</div>
          {hasRequirements && <details className="navGroup" open={engineeringView}><summary>REQUIREMENTS</summary><div className="navScopeSwitch" role="group" aria-label="Requirements scope">{hasSystem && <button type="button" aria-pressed={engineeringScope==="system"} onClick={()=>onNavigate(engineeringTargetView,"system")}>System</button>}{hasSoftware && <button type="button" aria-pressed={engineeringScope==="software"} onClick={()=>onNavigate(engineeringTargetView,"software",undefined,engineeringTargetView==="history"?defaultSoftwareChangeLevel:undefined)}>Software</button>}</div>{(engineeringScope==="system" ? hasSystemChange : hasSoftwareChange) && item("Change Requests","history","changeRequests",engineeringScope,engineeringScope==="software"?"Software Change Requests":"System Change Requests",engineeringScope==="software"?defaultSoftwareChangeLevel:undefined)}{hasInterfaceChange && item("Interface / ICD Change Requests","history","changeRequests","system","Interface / ICD Change Requests","Interface")}{hasInterfaceChange && item("New Interface / ICD Change Request","createInterfaceChange","changeRequests","system","New Interface / ICD Change Request","Interface")}{(engineeringScope==="system" ? hasSystem : hasSoftware) && item("Requirements Explorer","requirements","requirements",engineeringScope,engineeringScope==="software"?"Software Requirements Explorer":"System Requirements Explorer")}{(engineeringScope==="system" ? hasSystemRequirementsDocument : hasSoftwareRequirementsDocument) && item("Generated Documents","documents","documents",engineeringScope,engineeringScope==="software"?"Generated Software Requirements Documents":"Generated System Requirements Documents")}</details>}
          {(hasSystemVerification || hasSoftwareVerification) && <details className="navGroup" open={view==="verification"||view==="testingCoverage"||view==="testChangeRequests"||view==="testChangeRequest"||view==="createTestChangeRequest"||view==="procedureExplorer"||view==="testResults"||(view==="documents"&&(discipline==="systemTest"||discipline==="softwareTest"))}>
           <summary>VERIFICATION</summary>
@@ -291,9 +293,10 @@ function AppNavigation({ user, workspaces, activeId, selectedProjectId, selected
            {item("Merge Requests", "codeMergeRequests", "code", "software", "Code merge requests")}
            {item("Code Explorer", "codeExplorer", "code", "software", "Code explorer")}
          </details>}
-        <div className="navStandalone">{item("Documentation Center","managedDocuments","library","system","Documentation Center",undefined,true)}</div>
-        <div className="navStandalone">{item("Problem Reports","problemReports","problemReports","system","Problem Reports",undefined,true)}</div>
-        <details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Release Readiness","release","release","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","baselines","system","Configuration Baselines / Legacy Verification Bootstrap")}{item("Digital Thread","lifecycle","digitalThread","system","Digital Thread")}</details>
+        {hasFeature(features,"DocumentationCenter")&&<div className="navStandalone">{item("Documentation Center","managedDocuments","library","system","Documentation Center",undefined,true)}</div>}
+        {hasFeature(features,"ProblemReports")&&<div className="navStandalone">{item("Problem Reports","problemReports","problemReports","system","Problem Reports",undefined,true)}</div>}
+        {hasFeature(features,"Release")&&<details className="navGroup" open={releaseView}><summary>RELEASE</summary>{item("Release Readiness","release","release","system","Lifecycle Decision Room / Release Readiness")}{item("Configuration Baselines","baselines","baselines","system","Configuration Baselines / Legacy Verification Bootstrap")}{hasDigitalThread&&item("Digital Thread","lifecycle","digitalThread","system","Digital Thread")}</details>}
+        {!hasFeature(features,"Release")&&hasDigitalThread&&<div className="navStandalone">{item("Digital Thread","lifecycle","digitalThread","system","Digital Thread",undefined,true)}</div>}
         {user.isAdministrator&&<details className="navGroup" open={view==="admin"||view==="enterprise"||view==="integrations"||view==="reviewWorkflows"}><summary>ADMINISTRATION</summary>{item("People & Authority","admin","peopleAuthority")}{item("Review Workflows","reviewWorkflows","workflow","system","Review Workflows / Change Review Procedure")}{item("Integration Center","integrations","integrations","system","Integration Command Center")}{item("System Operations","enterprise","operations","system","System Operations / Enterprise Control")}</details>}
       </nav>
       <footer><PersonAvatar userName={user.userName} displayName={user.displayName} size="large"/><div><b>{user.displayName}</b><small>{user.userName}</small></div><button className="signOut" onClick={onSignOut}>Sign out</button><button className="workspaceDisplay" onClick={onDisplay} aria-label="Open workspace display settings"><span>Aa</span><div><b>Workspace display</b><small>{density} density</small></div><i aria-hidden="true">›</i></button></footer>
@@ -320,6 +323,7 @@ function App() {
      [ladder, setLadder] = useState<ProjectLadderProjection|null>(null),
      [ladderError, setLadderError] = useState(""),
      [ladderAttempt, setLadderAttempt] = useState(0),
+     [features, setFeatures] = useState<ProjectFeature[]|null>(null),
     [dashboardError, setDashboardError] = useState(""),
     [paletteOpen,setPaletteOpen]=useState(false),
     [displayOpen,setDisplayOpen]=useState(false),
@@ -445,6 +449,16 @@ function App() {
       .then(async response => { if (!response.ok) throw new Error("The stored project ladder could not be loaded."); return await response.json() as ProjectLadderProjection; })
       .then(next => { if (current) setLadder(next); })
       .catch(() => { if (current) { setLadder(null); setLadderError("The stored project ladder could not be loaded, so level-specific surfaces are unavailable."); } });
+    return () => { current = false; };
+  }, [projectId, ladderAttempt]);
+  useEffect(() => {
+    let current = true;
+    setFeatures(null);
+    if (!projectId) return () => { current = false; };
+    fetch(`${API}/api/projects/${projectId}/features`)
+      .then(async response => { if (!response.ok) throw new Error(); return await response.json() as ProjectFeatureProjection; })
+      .then(next => { if (current) setFeatures(next.enabled); })
+      .catch(() => { if (current) setFeatures(null); });
     return () => { current = false; };
   }, [projectId, ladderAttempt]);
   useEffect(() => {
@@ -768,8 +782,8 @@ function App() {
   // Reading a procedure against the roster answers whether anybody can sign it, which needs both and so
   // belongs beside them rather than inside a build.
   if(view==="approvalConfiguration"&&project)return <ApprovalConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} onBackToBuilds={()=>{updateRoute("view", "builds");writeHistory("pushState", openProjectBuildsPath)}} onSignOut={signOut}/>;
-   if(view==="projectConfiguration"&&project)return <ProjectConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} initialSection={projectConfigurationSection} onBackToBuilds={()=>{updateRoute("view", "builds");writeHistory("pushState", openProjectBuildsPath)}} onOpenApprovalConfiguration={()=>showProjectConfiguration("approvals")} onActivated={value=>{setLadder({effectiveSteps:value.effectiveSteps,effectiveRelationships:value.effectiveRelationships});setLadderError("");}} onSignOut={signOut}/>;
-   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={active?.program.id??""} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} coverageReport={coverageReport} context={buildContext} buildSelectionHref={!buildContext&&view==="managedDocuments"&&project?projectAreaPath(project.project.id,"builds"):undefined} projectWide={view==="managedDocuments"} density={density} ladder={ladder} onNavigate={navigate} onOpenCoverage={openCoverage} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
+   if(view==="projectConfiguration"&&project)return <ProjectConfigurationCenter user={user} api={API} projectId={project.project.id} projectName={project.project.name} initialSection={projectConfigurationSection} onBackToBuilds={()=>{updateRoute("view", "builds");writeHistory("pushState", openProjectBuildsPath)}} onOpenApprovalConfiguration={()=>showProjectConfiguration("approvals")} onActivated={value=>{setLadder({effectiveSteps:value.effectiveSteps,effectiveRelationships:value.effectiveRelationships});setLadderError("");}} onFeaturesChanged={setFeatures} onSignOut={signOut}/>;
+   const navigation=<AppNavigation user={user} workspaces={workspaces} activeId={active?.program.id??""} selectedProjectId={project?.project.id??selectedProjectId} selectedReleaseId={release?.id??selectedReleaseId} view={view} discipline={discipline} artifactKind={selectedArtifactKind} coverageReport={coverageReport} context={buildContext} buildSelectionHref={!buildContext&&view==="managedDocuments"&&project?projectAreaPath(project.project.id,"builds"):undefined} projectWide={view==="managedDocuments"} density={density} ladder={ladder} features={features} onNavigate={navigate} onOpenCoverage={openCoverage} onSearch={()=>setPaletteOpen(true)} onDisplay={()=>setDisplayOpen(true)} onExitBuild={exitBuild} onSignOut={signOut}/>;
    const labels:Record<View,string>={projects:"Projects",projectSetup:"Create New Project",builds:"Software Builds",baselineImports:"Imported Baselines",personnel:"Personnel",approvalConfiguration:"Approval Configuration",projectConfiguration:"Project Configuration",dashboard:"Command Center",createSystemScr:"New System SRCR",createSoftwareChange:"New Software Change Request",createInterfaceChange:"New Interface / ICD Change Request",scr:"Change Request",baselines:"Baselines",history:"Change Requests",requirements:"Requirements Explorer",verification:"Verification",testingCoverage:"Test Coverage",testChangeRequests:"Change Requests",testChangeRequest:"Test Change Request",createTestChangeRequest:"New Test Change Request",procedureExplorer:"Test Procedure Explorer",testResults:"Test Results",documents:"Generated Documents",managedDocuments:"Documentation Center",code:"Code",codeMergeRequests:"Merge Requests",codeExplorer:"Code Explorer",problemReports:"Problem Reports",lifecycle:"Digital Thread",release:"Release Readiness",releaseImpact:"Change Impact Review",releaseDecision:"Release Evidence & Decision",releaseOperations:"Release Operations",planning:"Product Versions",mywork:"My Work",teamwork:"Team Work",admin:"People & Authority",enterprise:"System Operations",integrations:"Integration Center",reviewWorkflows:"Review Workflows",artifact:"Artifact",notFound:"Not Found"};
   const coverageLabel = discipline === "systemTest" ? "System Coverage" : selectedArtifactKind === "LowLevel" ? "Software LLR Coverage" : selectedArtifactKind === "HighLevel" ? "Software HLR Coverage" : "Software Coverage";
   const scopedLabel=view==="history"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="scr"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="requirements"?`${discipline==="software"?"Software":"System"} ${labels[view]}`:view==="verification"?`${discipline==="softwareTest"?"Software":"System"} Verification`:view==="procedureExplorer"?coverageReport?coverageLabel:`${discipline==="softwareTest"?"Software Test Case/Procedure":"System Test Procedure"} Explorer`:labels[view];
@@ -777,7 +791,7 @@ function App() {
   const internalProjectScope = Boolean(active && project && isInternalProjectWorkspace(active, project));
   const displayedProgramName = active && project ? workspaceDisplayName(active, project) : active?.program.name;
   const contextBar=<div className="contextBar"><nav aria-label="Breadcrumb">{!internalProjectScope&&<><span title={active?.program.name}>{active?.program.name}</span><b aria-hidden="true">›</b></>}<span title={project?.project.name}>{project?.project.name}</span><b aria-hidden="true">›</b>{view!=="managedDocuments"&&<><span>Build {release?.version}</span><b aria-hidden="true">›</b></>}<strong>{scopedLabel}</strong></nav><div className="contextActions"><span className="contextReleaseState">{view==="teamwork"?"Project scope · every build":view==="managedDocuments"?"Project-wide":release?.isReleased?"Released · read-only":"In work"}</span><button aria-label="Copy link to this page" onClick={copyLink}>Copy link</button></div></div>;
-   const palette=paletteContext?<CommandPalette api={API} context={paletteContext} ladder={ladder} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onSelectBuild={exitBuild} onNavigate={navigate}/>:null;
+   const palette=paletteContext?<CommandPalette api={API} context={paletteContext} ladder={ladder} features={features} open={paletteOpen} onClose={()=>setPaletteOpen(false)} onSelectBuild={exitBuild} onNavigate={navigate}/>:null;
   const experience=<ExperienceControls open={displayOpen} density={density} motion={motion} onDensityChange={next=>{setDensity(next);setToast(`${next==='compact'?'Compact':'Comfortable'} density applied`)}} onMotionChange={next=>{setMotion(next);setToast(`${next==='reduced'?'Reduced':'Purposeful'} motion applied`)}} onClose={()=>setDisplayOpen(false)}/>;
   const feedback=toast?<div className="experienceToast" role="status" aria-live="polite"><span>✓</span><b>{toast}</b></div>:null;
   const overlays=<>{palette}{experience}{feedback}</>;
@@ -824,6 +838,8 @@ function App() {
      view === "documents" ? scopedLevelAllowed(discipline, discipline === "systemTest" || discipline === "softwareTest" ? LadderCapability.Verification : LadderCapability.RequirementsDocument) :
      ["code", "codeMergeRequests", "codeExplorer"].includes(view) ? ladderHasAny(ladder, ["System", "HighLevel", "LowLevel"], LadderCapability.CodeTraceability) : true
    );
+   if (features && !viewEnabled(features, view, discipline))
+     return inShell(<main className="artifactState"><div><span>!</span><h1>Not enabled in this project</h1><p>This part of AeroLink is switched off in Project Configuration → Features.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
    if (!viewAllowed)
      return inShell(<main className="artifactState"><div><span>!</span><h1>Workspace unavailable</h1><p>This level or capability is not present in the active project ladder.</p><button onClick={()=>navigate("dashboard")}>Return to Command Center</button></div></main>);
   if(view==="artifact"&&selectedArtifactId&&selectedArtifactKind)return inShell(<ArtifactRecordPage api={API} kind={selectedArtifactKind} id={selectedArtifactId} revisionId={selectedArtifactRevisionId||undefined} releaseId={release?.id??""} onBack={()=>navigate("dashboard")} relatedHref={item=>{
@@ -1385,22 +1401,22 @@ function App() {
             </p>
           </div>
           <div className="buildStateSeal"><b>{release?.isReleased?"✓ Released":"In Work"}</b></div>
-          <button onClick={() => navigate("release")}>Release Readiness →</button>
+          {hasFeature(features,"Release")&&<button onClick={() => navigate("release")}>Release Readiness →</button>}
         </section>
         <section className="dashboardTriptych" aria-busy={dashboardLoading} aria-label="Build work summary">
           {dashboardError?<div role="alert"><p>{dashboardError}</p><button onClick={()=>void loadData()}>Retry build summary</button></div>:dashboardLoading?<>{Array.from({length:3},(_,index)=><div className="dashboardSkeleton dashboardAreaCard" key={index}><span className="skeletonLine medium"/><i className="skeletonMetric"/><span className="skeletonLine"/></div>)}</>:<>
-            {changeCard("System change control","system",metrics.system)}
-            {changeCard("Software change control","software",metrics.software)}
-            <section className="dashboardAreaCard verification">
+            {hasFeature(features,"Requirements")&&changeCard("System change control","system",metrics.system)}
+            {hasFeature(features,"Requirements")&&changeCard("Software change control","software",metrics.software)}
+            {hasFeature(features,"Verification")&&<section className="dashboardAreaCard verification">
               <header><div><span>VERIFICATION</span><h2>Change triage</h2></div><i>V&amp;V</i></header>
               <p className="verificationIntro">Engineering impact decisions for change requests in Build {release?.version}. Verification design remains in the Verification workspace.</p>
               <div className="verificationTriageRows">
                 {verificationRows.filter(([, summary]) => hasVerificationWork(summary)).map(([label, summary]) => verificationRow(label, summary))}
               </div>
               <button className="verificationOpen" onClick={()=>navigate("verification","systemTest")}>Open Verification →</button>
-            </section>
+            </section>}
           </>}
-          {project && <ProblemReportsCommandCard api={API} projectId={project.project.id} releaseId={release?.id ?? ""} releaseVersion={release?.version ?? ""}
+          {project && hasFeature(features,"ProblemReports") && <ProblemReportsCommandCard api={API} projectId={project.project.id} releaseId={release?.id ?? ""} releaseVersion={release?.version ?? ""}
             onOpenList={targetBuild=>openProblemReport(undefined,undefined,targetBuild)} onOpenReport={id=>openProblemReport(id)}/>}
         </section>
       </main></div></div>

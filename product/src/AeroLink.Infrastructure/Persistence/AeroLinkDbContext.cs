@@ -69,6 +69,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ProjectLadderAllowedUpstream> ProjectLadderAllowedUpstreams => Set<ProjectLadderAllowedUpstream>();
     public DbSet<ProjectLadderConfigurationHistory> ProjectLadderConfigurationHistories => Set<ProjectLadderConfigurationHistory>();
     public DbSet<ProjectVerificationVocabulary> ProjectVerificationVocabularies => Set<ProjectVerificationVocabulary>();
+    public DbSet<ProjectFeatureSet> ProjectFeatureSets => Set<ProjectFeatureSet>();
+    public DbSet<ProjectFeatureSetHistory> ProjectFeatureSetHistories => Set<ProjectFeatureSetHistory>();
     public DbSet<ProjectVerificationMethod> ProjectVerificationMethods => Set<ProjectVerificationMethod>();
     public DbSet<SoftwareRelease> Releases => Set<SoftwareRelease>();
     public DbSet<SoftwareBuild> SoftwareBuilds => Set<SoftwareBuild>();
@@ -592,6 +594,25 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
                 .HasPrincipalKey(nameof(ProjectLadderConfiguration.Id), nameof(ProjectLadderConfiguration.ProjectId)).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.AllowedUpstream).WithOne().HasForeignKey(nameof(ProjectLadderAllowedUpstream.ConfigurationId), nameof(ProjectLadderAllowedUpstream.ProjectId))
                 .HasPrincipalKey(nameof(ProjectLadderConfiguration.Id), nameof(ProjectLadderConfiguration.ProjectId)).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ProjectFeatureSet>(b =>
+        {
+            b.ToTable("project_feature_sets");
+            b.HasKey(x => x.Id);
+            b.HasIndex(x => x.ProjectId).IsUnique();
+            b.Property(x => x.Version).IsConcurrencyToken();
+            b.Property(x => x.UpdatedBy).HasMaxLength(200);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<ProjectFeatureSetHistory>(b =>
+        {
+            b.ToTable("project_feature_set_history");
+            b.HasKey(x => x.Id);
+            b.HasIndex(x => new { x.ProjectId, x.Version }).IsUnique();
+            b.Property(x => x.Actor).HasMaxLength(200);
+            b.Property(x => x.Reason).HasMaxLength(2000);
+            b.Property(x => x.SnapshotHash).HasMaxLength(64);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
         });
         modelBuilder.Entity<ProjectVerificationVocabulary>(b =>
         {

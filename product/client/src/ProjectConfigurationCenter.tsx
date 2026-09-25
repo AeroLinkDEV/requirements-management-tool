@@ -1,3 +1,5 @@
+import ProjectFeaturesPanel from "./ProjectFeaturesPanel";
+import type { ProjectFeature } from "./projectFeatures";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AuthUser } from "./IdentityCenter";
 import PortalHeader from "./PortalHeader";
@@ -81,16 +83,16 @@ function normalizeConfiguration(value: ConfigurationResponse): Configuration {
   };
 }
 
-export default function ProjectConfigurationCenter({ user, api, projectId, projectName, initialSection = "ladder", onBackToBuilds, onOpenApprovalConfiguration, onActivated, onSignOut }: {
+export default function ProjectConfigurationCenter({ user, api, projectId, projectName, initialSection = "ladder", onBackToBuilds, onOpenApprovalConfiguration, onActivated, onFeaturesChanged, onSignOut }: {
   user: AuthUser; api: string; projectId: string; projectName: string; onBackToBuilds: () => void;
-  initialSection?: "ladder" | "assurance" | "history" | "readiness" | "approvals" | "verification" | "repository" | "inceptionSource";
-  onOpenApprovalConfiguration: () => void; onActivated: (configuration: Configuration) => void; onSignOut: () => void;
+  initialSection?: "features" | "ladder" | "assurance" | "history" | "readiness" | "approvals" | "verification" | "repository" | "inceptionSource";
+  onOpenApprovalConfiguration: () => void; onActivated: (configuration: Configuration) => void; onFeaturesChanged: (enabled: ProjectFeature[]) => void; onSignOut: () => void;
 }) {
   const [configuration, setConfiguration] = useState<Configuration>();
   const [steps, setSteps] = useState<Step[]>([]);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [reason, setReason] = useState("");
-  const [section, setSection] = useState<"ladder" | "assurance" | "history" | "readiness" | "approvals" | "verification" | "repository" | "inceptionSource">(initialSection);
+  const [section, setSection] = useState<"features" | "ladder" | "assurance" | "history" | "readiness" | "approvals" | "verification" | "repository" | "inceptionSource">(initialSection);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
@@ -232,6 +234,7 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
       {notice && <p className="projectConfigurationNotice" role="status">{notice}</p>}
       {!configuration ? <p>Loading the stored project ladder…</p> : <div className="projectConfigurationLayout">
         <nav className="projectConfigurationRail" aria-label="Configuration sections">
+          <button className={section === "features" ? "selected" : ""} onClick={() => setSection("features")}>Features<small>Modules this project uses</small></button>
           <button className={section === "ladder" ? "selected" : ""} onClick={() => setSection("ladder")}>Requirement ladder<small>{configuration.state}</small></button>
           <button className={section === "assurance" ? "selected" : ""} onClick={() => setSection("assurance")}>Assurance policy<small>Declared posture and deviations</small></button>
           <button className={section === "history" ? "selected" : ""} onClick={() => setSection("history")}>History<small>{configuration.history.length} attributed edits</small></button>
@@ -242,6 +245,7 @@ export default function ProjectConfigurationCenter({ user, api, projectId, proje
           <button className={section === "inceptionSource" ? "selected" : ""} onClick={() => setSection("inceptionSource")}>Source provenance<small>Inherited source facts</small></button>
         </nav>
         <section className="projectConfigurationPanel">
+          {section === "features" && <ProjectFeaturesPanel api={api} projectId={projectId} onChanged={onFeaturesChanged} />}
           {section === "approvals" && <ApprovalConfigurationCenter embedded user={user} api={api} projectId={projectId} projectName={projectName} onBackToBuilds={onBackToBuilds} onSignOut={onSignOut} />}
           {section === "repository" && <RepositoryConfigurationPanel api={api} projectId={projectId} projectName={projectName} />}
           {section === "inceptionSource" && <InceptionSourceProvenancePanel api={api} projectId={projectId} projectName={projectName} />}

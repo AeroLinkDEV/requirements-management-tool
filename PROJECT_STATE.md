@@ -84,6 +84,12 @@ Supported capability subsets remain valid. Setup offers review subjects only for
 and verification capabilities; artifact threads and traceability publications distinguish unavailable verification
 from missing coverage using the effective ladder.
 
+A project also chooses which major features it uses (DEC-136): Team Work, Requirements, Verification, Code,
+Documentation Center, Problem Reports and Release, set in Project Configuration → Features. Command Center and My Work
+are always present. A project without a stored set has every feature. Code and Verification need Requirements; a
+feature can be switched off only while it holds no records, and the save boundary refuses new records for a feature
+that is off. Navigation, quick navigation, deep links and Command Center follow the same set.
+
 Project entry uses stable identity and opens the actual visual build-lineage selector, including for a single
 build. Explicit build links retain their exact authorized target. Repository setup can remain Pending and be
 configured later; a server-observed GitLab connection is separate from controlled implementation evidence.

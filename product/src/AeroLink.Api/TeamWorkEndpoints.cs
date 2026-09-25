@@ -17,6 +17,8 @@ public static class TeamWorkEndpoints
             // allowed to load a project's records for an actor who cannot read that project.
             if (!await http.HasProjectAccessAsync(db, projectId, ct))
                 return Results.Forbid();
+            if (!(await ProjectFeatureService.EffectiveAsync(db, projectId, ct)).HasFlag(AeroLink.Domain.Programs.ProjectFeature.TeamWork))
+                return Results.Conflict(new { error = "Team Work is not enabled for this project.", code = "feature_disabled" });
 
             var result = await projection.ProjectAsync(projectId, ct);
             return result is null
