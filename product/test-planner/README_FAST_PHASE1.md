@@ -14,6 +14,10 @@ This phase measures a bounded Fast pull-request lane without changing merge auth
   `product/client/fast-client-tests.json`.
 - The rendered fixtures use Vite and Chromium without an API or showcase seed. Integrated browser journeys,
   PostgreSQL, complete API/Infrastructure, and operator/recovery evidence remain Full-only during phase 1.
+- The contract tier (`contracts.suites`) runs the Node suites under `product/test-contracts/tests` and
+  `product/test-planner/tests` in a separate parallel job. It needs only a checkout and Node, so a stale
+  generated contract or a planner regression fails in Fast instead of about 25 minutes into Full. Full's
+  Domain job keeps running both suites (#1152 B1).
 - Every selected identity remains in Full. The routing check rejects missing, duplicate or substituted Fast
   identities and records every unselected file as Full-only.
 

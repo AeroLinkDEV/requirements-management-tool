@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "aerolink-fast-ci/v2",
+  "id": "aerolink-fast-ci/v3",
   "authoritative": false,
   "targetMs": 240000,
   "safety": {
@@ -37,6 +37,12 @@
       "npm run test:fast:rendered"
     ]
   },
+  "contracts": {
+    "suites": [
+      "product/test-contracts/tests",
+      "product/test-planner/tests"
+    ]
+  },
   "fullOnlyEvidence": [
     "complete API suite",
     "complete infrastructure suite",
@@ -50,6 +56,7 @@
     "The selected Infrastructure tests use unique temp/in-memory SQLite, except MigrationRegistrationTests which builds the Npgsql model against an invalid host without opening a connection.",
     "SharedHostIsolationTests uses one disposable SharedApiHost/SQLite database with unique logical data and fresh clients to cover hosted startup, authentication/session isolation, persistence, and project authorization.",
     "The explicit client manifest adds API-independent logic and rendered fixtures. Runtime discovery proves their identity parity with Full; every unknown file stays Full-only. Integrated browser smoke and its showcase seed remain in Full.",
-    "Rendered fixtures use Vite and Chromium only, reject API/external requests, and keep one worker with no retry. Individual assertions remain unchanged. Hosted latency and first-pass behavior must be measured before expanding this subset."
+    "Rendered fixtures use Vite and Chromium only, reject API/external requests, and keep one worker with no retry. Individual assertions remain unchanged. Hosted latency and first-pass behavior must be measured before expanding this subset.",
+    "The contract tier runs the Node suites that Full runs in its Domain job (hosted boundary contracts and the changed-area planner). It needs no build, database or browser, so a stale generated contract fails in Fast instead of after a complete Full run. Full keeps running both suites; this tier is additive (#1152 B1)."
   ]
 }
