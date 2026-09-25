@@ -168,6 +168,8 @@ End every long run (one that changes files, pushes, or spans more than one issue
 - Weaken tests, branch protection, or required checks merely to get a PR merged.
 - Treat a historical handoff as the live backlog without refreshing GitHub.
 - Move stable Windows launcher paths without an external-dependency audit.
+- Force-push a branch that has an open PR without asking the owner first. A force-push removes the PR from auto-merge;
+  re-arm it afterwards.
 - Copy a large Case/Procedure or discipline-specific UI when the existing architecture is intended to be parameterized/shared.
 
 When in doubt, preserve controlled truth first, then optimize convenience.
