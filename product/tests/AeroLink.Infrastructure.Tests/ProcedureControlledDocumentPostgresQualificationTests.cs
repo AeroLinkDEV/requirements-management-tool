@@ -224,13 +224,4 @@ public sealed class ProcedureControlledDocumentPostgresQualificationTests
             throw new InvalidOperationException($"Issue #728 qualification requires database {DatabaseName}.");
         return connection;
     }
-
-    private sealed class DisposablePostgresFactAttribute : FactAttribute
-    {
-        public DisposablePostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")))
-                Skip = "Issue #728 PostgreSQL qualification skipped: set the dedicated disposable connection.";
-        }
-    }
 }

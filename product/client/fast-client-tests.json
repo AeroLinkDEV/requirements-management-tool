@@ -5,7 +5,15 @@
     "repository-configuration-contract.spec.ts",
     "artifact-thread-contract.spec.ts",
     "digital-thread-canvas-geometry.spec.ts",
-    "digital-thread-reveal.spec.ts"
+    "digital-thread-reveal.spec.ts",
+    "artifact-thread-presentation.spec.ts",
+    "change-network-presentation.spec.ts",
+    "change-proposal-presentation.spec.ts",
+    "routing-contract.spec.ts",
+    "review-authority-labels.spec.ts",
+    "test-change-request-supersession-presentation.spec.ts",
+    "digital-thread-1046-geometry.spec.ts",
+    "artifact-acronym-presentation.spec.ts"
   ],
   "rendered": [
     "code-source-rendered.spec.ts",

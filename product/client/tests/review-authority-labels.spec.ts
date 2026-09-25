@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, logicTest as test } from './isolated-client-test'
 import { programRoleLabel } from '../src/presentation'
 import { authorityLabel, authorityRoleLabels, baseRoleAuthorities, leadershipAuthorities } from '../src/workflowAuthorities'
 

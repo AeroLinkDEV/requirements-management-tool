@@ -331,15 +331,6 @@ public sealed class CaseProcedureLifecyclePostgresQualificationTests
         return connection;
     }
 
-    private sealed class DisposablePostgresFactAttribute : FactAttribute
-    {
-        public DisposablePostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")))
-                Skip = "Issue #727 PostgreSQL qualification skipped: set AEROLINK_MIGRATIONS_CONNECTION to its dedicated disposable database.";
-        }
-    }
-
     private sealed record CaseLifecycleFixture(Guid ProjectId, Guid HistoricalCaseRevisionId,
         Guid CaseRevisionId, Guid AlternateProcedureRevisionId, Guid HistoricalLinkId,
         Guid CarriedLinkId, Guid LifecycleId);

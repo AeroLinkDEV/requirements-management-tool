@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, logicTest as test } from './isolated-client-test'
 import { artifactPath, coverageExplorerPath, exactTraceArtifactPath, parseRoute, problemReportSnapshotPath, projectConfigurationRepositoryPath, routePath } from '../src/routing'
 
 const context = {

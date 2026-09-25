@@ -341,16 +341,4 @@ public sealed class ProjectLadderPostgresQualificationTests
 
         return connection;
     }
-
-    private sealed class DisposablePostgresFactAttribute : FactAttribute
-    {
-        public DisposablePostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")))
-            {
-                Skip =
-                    "Issue #707 PostgreSQL qualification skipped: set AEROLINK_MIGRATIONS_CONNECTION to the dedicated disposable database.";
-            }
-        }
-    }
 }

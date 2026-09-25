@@ -50,6 +50,16 @@ const durations = existsSync(durationsPath) ? JSON.parse(readFileSync(durationsP
 const known = [...counts.keys()].map((f) => durations[f]).filter((d) => typeof d === 'number' && d > 0).sort((a, b) => a - b)
 const median = known.length ? known[Math.floor(known.length / 2)] : 1
 
+// Nothing fails when the file drifts, so say so where someone will see it. In September 2026, 44 of 189 specs
+// had no entry, including three of the five heaviest, and the slowest shard ran twice as long as the lightest.
+// Shard 1 reports it once, as an Actions warning on stderr; stdout is the plan and must stay exactly that.
+const unknown = counts.size - known.length
+if (shard === 1 && unknown / counts.size > 0.1) {
+  console.error(`::warning title=Stale journey durations::${unknown} of ${counts.size} discovered spec files have no recorded ` +
+    'duration, so the shards are packed with guessed weights. Refresh product/client/journey-durations.json from ' +
+    'the journey-durations-* artifacts (BROWSER_AND_BACKEND_FEEDBACK_TIME.md).')
+}
+
 const files = [...counts.keys()]
   .map((file) => ({ file, tests: counts.get(file), weight: durations[file] ?? median }))
   // Heaviest first, ties broken by name so every runner computes the identical assignment.

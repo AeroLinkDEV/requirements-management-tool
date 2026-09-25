@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, logicTest as test } from './isolated-client-test'
 import { contentPositionsForNodes, geometryFor, MEASURED_CARD_GAP, planReveal, type CanvasNode } from '../src/digitalThreadGeometry'
 
 const geometry = geometryFor(1)

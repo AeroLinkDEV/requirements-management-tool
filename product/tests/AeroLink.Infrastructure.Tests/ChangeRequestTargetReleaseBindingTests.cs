@@ -75,7 +75,7 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
     private const string ThisMigration = "20260905222930_AddChangeRequestTargetReleaseProjectBinding";
     private const string ProtectedPort = "54329";
 
-    [Issue849PostgresFact]
+    [DisposablePostgresFact]
     public async Task A_clean_install_enforces_the_composite_binding()
     {
         var server = ResolveServerConnection();
@@ -107,7 +107,7 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
         }
     }
 
-    [Issue849PostgresFact]
+    [DisposablePostgresFact]
     public async Task An_upgrade_from_the_predecessor_preserves_valid_history_and_then_enforces_the_binding()
     {
         var server = ResolveServerConnection();
@@ -160,7 +160,7 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
         }
     }
 
-    [Issue849PostgresFact]
+    [DisposablePostgresFact]
     public async Task An_upgrade_over_incompatible_history_fails_closed_without_rewriting_it()
     {
         var server = ResolveServerConnection();
@@ -231,19 +231,6 @@ public sealed class ChangeRequestTargetReleasePostgresQualificationTests
                 .Select(x => new HistoryRow(x.Id, x.ProjectId, x.TargetReleaseId, x.BaseNumber, x.Revision,
                     x.Title, x.AuthorId, x.CreatedAt))
                 .SingleAsync());
-
-    /// <summary>
-    /// Skips — visibly, as a skipped result rather than a silent pass — when no disposable PostgreSQL server
-    /// is configured. A skipped run is not provider evidence.
-    /// </summary>
-    private sealed class Issue849PostgresFactAttribute : FactAttribute
-    {
-        public Issue849PostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionVariable)))
-                Skip = "#849 target-release qualification NOT EXECUTED: AEROLINK_MIGRATIONS_CONNECTION names no disposable PostgreSQL server.";
-        }
-    }
 
     private static string ResolveServerConnection()
     {

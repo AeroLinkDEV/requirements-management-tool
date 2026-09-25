@@ -423,15 +423,6 @@ public sealed class ExactParentOrDerivedPostgresQualificationTests
         return connection;
     }
 
-    private sealed class DisposablePostgresFactAttribute : FactAttribute
-    {
-        public DisposablePostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")))
-                Skip = "Issue #738 PostgreSQL qualification skipped: set AEROLINK_MIGRATIONS_CONNECTION to the dedicated disposable database.";
-        }
-    }
-
     private sealed record Fixture(
         Guid ParentRequirementRevisionId,
         Guid AllocatedRequirementRevisionId,

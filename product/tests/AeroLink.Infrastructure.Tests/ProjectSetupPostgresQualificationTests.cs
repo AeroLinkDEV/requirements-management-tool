@@ -120,16 +120,4 @@ public sealed partial class ProjectSetupPostgresQualificationTests
         command.CommandText = $"DROP DATABASE IF EXISTS \"{database}\" WITH (FORCE)";
         await command.ExecuteNonQueryAsync();
     }
-
-    private sealed class DisposablePostgresFactAttribute : FactAttribute
-    {
-        public DisposablePostgresFactAttribute()
-        {
-            var required = Environment.GetEnvironmentVariable("AEROLINK_REQUIRE_POSTGRES_QUALIFICATION");
-            var mustRun = !string.IsNullOrWhiteSpace(required)
-                && !required.Equals("false", StringComparison.OrdinalIgnoreCase);
-            if (!mustRun && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")))
-                Skip = "Issue #1037 PostgreSQL qualification skipped: set AEROLINK_MIGRATIONS_CONNECTION to the dedicated disposable database.";
-        }
-    }
 }

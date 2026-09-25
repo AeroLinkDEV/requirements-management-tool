@@ -22,6 +22,8 @@ Use Infrastructure tests when the risk is the persistence or operating-system im
 
 These tests may require a disposable database or disposable filesystem root. They do **not** justify starting the full ASP.NET host unless hosting is itself part of the contract. Persistent developer PostgreSQL under `product/.local` and persistent evidence state are never test inputs.
 
+Mark a PostgreSQL qualification test `[DisposablePostgresFact]` (`AeroLink.Infrastructure.Tests/TestSupport`). With no `AEROLINK_MIGRATIONS_CONNECTION` it reports Skipped; with `AEROLINK_REQUIRE_POSTGRES_QUALIFICATION` set, a missing connection fails. Do not add a private copy of that attribute, and do not return early from the test body.
+
 ## Hosted API tests
 
 Keep a test hosted when the public boundary is part of what it proves: route/method registration, binding and validation, request/response JSON shape, stable status/error mapping, authentication, authorization/policy wiring, cookie/session behavior, startup/configuration, cross-component transaction boundaries, or an intentionally representative end-to-end lifecycle.
