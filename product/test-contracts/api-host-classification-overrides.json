@@ -68,7 +68,7 @@
     },
     "ProblemReportActiveMetricApiTests": {
       "classification": "fresh-host",
-      "reason": "Reviewed #563 hold: this one-method class provides zero theoretical host-build savings under one host per class and uses bootstrap-dependent problem-report state. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture."
+      "reason": "Reviewed #563 hold: each method bootstraps its own administrator and seeds problem-report state with fixed program codes, so methods cannot share one host without isolation work. Keep fresh-host until it is grouped or a separate measured benefit justifies changing the fixture."
     },
     "ProblemReportDispositionApiTests": {
       "classification": "fresh-host",

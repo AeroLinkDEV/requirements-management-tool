@@ -795,11 +795,35 @@ type WorkTask = {
   artifact: string;
   title: string;
   priority: string;
-  dueAt: string;
+  /** Null for Problem Report work: nothing in its policy sets a due date, so none is shown. */
+  dueAt: string | null;
   ageDays: number;
   route: string;
   discipline: string;
+  /** When the report entered its current state; null when no recorded transition says so. */
+  stateSince?: string | null;
+  problemReport?: { state: string; severity: string; nextAction: string };
 };
+
+/** One chip per kind of work actually present, so the filter never offers an empty answer. */
+const workKinds: { id: string; label: string; routes: string[] }[] = [
+  { id: "changes", label: "Changes", routes: ["scr"] },
+  { id: "verification", label: "Verification", routes: ["testingCoverage"] },
+  { id: "problemReports", label: "Problem Reports", routes: ["problemReports"] },
+  { id: "documents", label: "Documents", routes: ["managedDocuments"] },
+  { id: "release", label: "Release", routes: ["release"] },
+];
+
+const problemReportStateLabels: Record<string, string> = {
+  Draft: "Draft",
+  ReadyForSccb: "Ready for SCCB",
+  Open: "Open",
+  Implementing: "Implementing",
+  Verifying: "Verifying",
+  WaitingForSqaToClose: "Awaiting SQA",
+};
+
+const daysLabel = (days: number) => `${days} day${days === 1 ? "" : "s"}`;
 export function MyWorkCenter({
   api,
   projectId,
@@ -810,6 +834,7 @@ export function MyWorkCenter({
   onOpenRelease,
   onOpenVerification,
   onOpenManagedDocument,
+  onOpenProblemReport,
 }: {
   api: string;
   projectId: string;
@@ -820,6 +845,7 @@ export function MyWorkCenter({
   onOpenRelease: () => void;
   onOpenVerification: (discipline: string) => void;
   onOpenManagedDocument: (id: string) => void;
+  onOpenProblemReport: (id: string) => void;
 }) {
   const [data, setData] = useState<{
     generatedAt: string;
@@ -828,10 +854,19 @@ export function MyWorkCenter({
       approvals: number;
       overdue: number;
       drafts: number;
+      problemReports?: number;
     };
     tasks: WorkTask[];
   }>();
   const [loadError, setLoadError] = useState("");
+  const [kind, setKind] = useState("all");
+  const presentKinds = workKinds.filter((item) =>
+    data?.tasks.some((task) => item.routes.includes(task.route)),
+  );
+  const activeKind = presentKinds.find((item) => item.id === kind);
+  const visibleTasks = (data?.tasks ?? []).filter(
+    (task) => !activeKind || activeKind.routes.includes(task.route),
+  );
   // A failed queue load must degrade to a message on this page, never take the workspace down with it.
   useEffect(() => {
     let live = true;
@@ -865,6 +900,8 @@ export function MyWorkCenter({
         ? onOpenVerification(task.discipline)
         : task.route === "managedDocuments"
           ? onOpenManagedDocument(task.id)
+        : task.route === "problemReports"
+          ? onOpenProblemReport(task.id)
         : onOpenRelease();
   return (
     <main className="identityPage">
@@ -933,8 +970,26 @@ export function MyWorkCenter({
                 LIVE · {new Date(data.generatedAt).toLocaleTimeString()}
               </span>
             </div>
-            {data.tasks.length ? (
-              data.tasks.map((task) => (
+            {presentKinds.length > 1 && (
+              <div className="workKinds" role="group" aria-label="Filter work by kind">
+                <button type="button" aria-pressed={!activeKind} onClick={() => setKind("all")}>
+                  All <b>{data.tasks.length}</b>
+                </button>
+                {presentKinds.map((item) => (
+                  <button
+                    type="button"
+                    key={item.id}
+                    aria-pressed={activeKind?.id === item.id}
+                    onClick={() => setKind(item.id)}
+                  >
+                    {item.label}{" "}
+                    <b>{data.tasks.filter((task) => item.routes.includes(task.route)).length}</b>
+                  </button>
+                ))}
+              </div>
+            )}
+            {visibleTasks.length ? (
+              visibleTasks.map((task) => (
                 <article
                   key={`${task.type}-${task.id}`}
                   onClick={() => openTask(task)}
@@ -945,14 +1000,29 @@ export function MyWorkCenter({
                     <b>
                       {task.artifact} · {task.title}
                     </b>
-                    <small>
-                      Assigned {task.ageDays} day{task.ageDays === 1 ? "" : "s"}{" "}
-                      ago · due {new Date(task.dueAt).toLocaleDateString()}
-                      {/* The overdue count above has to be findable in the list (#1091 LOW-7). */}
-                      {new Date(task.dueAt).getTime() < Date.now() && (
-                        <em className="workOverdue"> · Overdue</em>
-                      )}
-                    </small>
+                    {task.problemReport ? (
+                      <small className="workProblemReport">
+                        <em className={`workPrSeverity ${task.problemReport.severity.toLowerCase()}`}>
+                          {task.problemReport.severity}
+                        </em>
+                        <em className="workPrState">
+                          {problemReportStateLabels[task.problemReport.state] ?? task.problemReport.state}
+                        </em>
+                        {task.problemReport.nextAction} ·{" "}
+                        {task.stateSince
+                          ? `in this state ${daysLabel(task.ageDays)}`
+                          : `last updated ${daysLabel(task.ageDays)} ago`}
+                      </small>
+                    ) : (
+                      <small>
+                        Assigned {daysLabel(task.ageDays)} ago
+                        {task.dueAt && <> · due {new Date(task.dueAt).toLocaleDateString()}</>}
+                        {/* The overdue count above has to be findable in the list (#1091 LOW-7). */}
+                        {task.dueAt && new Date(task.dueAt).getTime() < Date.now() && (
+                          <em className="workOverdue"> · Overdue</em>
+                        )}
+                      </small>
+                    )}
                   </div>
                   <button>Open work item →</button>
                 </article>

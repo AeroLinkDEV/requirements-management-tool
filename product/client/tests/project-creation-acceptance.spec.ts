@@ -321,8 +321,11 @@ test("a Customer-only fresh project displays a concrete empty standard and truth
   await expect(page.getByRole("button", { name: /Open build 1\.05/ })).toBeVisible();
   await page.getByRole("button", { name: /Open build 1\.05/ }).click();
   await expect(page.getByRole("heading", { name: "Command Center", level: 1 })).toBeVisible();
-  await expect(page.locator(".dashboardAreaCard")).toHaveCount(3);
+  await expect(page.locator(".dashboardAreaCard")).toHaveCount(4);
   await expect(page.locator(".dashboardTotal strong")).toHaveText(["0", "0"]);
+  // An empty project has no Problem Reports either (#1113), and says so rather than inventing work.
+  await expect(page.locator(".prCardHeadline strong").first()).toHaveText("0");
+  await expect(page.getByText("No active Problem Reports in this scope.")).toBeVisible();
   await expect(page.locator(".verificationTriageRows article")).toHaveCount(0);
   await page.getByRole("button", { name: "← Back to Software Builds" }).click();
   await page.getByRole("button", { name: "Project configuration" }).click();

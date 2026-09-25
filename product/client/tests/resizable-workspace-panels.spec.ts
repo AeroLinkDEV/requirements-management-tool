@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test'
 import { login } from './auth'
 
-test('Command Center presents a responsive, aligned three-way work summary', async ({ page }) => {
+test('Command Center presents a responsive, aligned work summary with Problem Reports', async ({ page }) => {
   await login(page)
   await expect(page.getByRole('heading', { name: 'Command Center' })).toBeVisible()
   const panels = page.locator('.dashboardTriptych > .dashboardAreaCard')
-  await expect(panels).toHaveCount(3)
+  // System change, Software change, Verification, and the full-width Problem Reports row (#1113).
+  await expect(panels).toHaveCount(4)
   await expect(page.locator('.dashboardTriptych').getByRole('separator')).toHaveCount(0)
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBeTruthy()
 
@@ -13,6 +14,7 @@ test('Command Center presents a responsive, aligned three-way work summary', asy
   const boxes = await panels.evaluateAll(items=>items.map(item=>item.getBoundingClientRect()))
   expect(boxes[1].top).toBeGreaterThan(boxes[0].bottom)
   expect(boxes[2].top).toBeGreaterThan(boxes[1].bottom)
+  expect(boxes[3].top).toBeGreaterThan(boxes[2].bottom)
   const overflow = await page.evaluate(()=>[...document.querySelectorAll<HTMLElement>('body *')].filter(element=>{
     const box=element.getBoundingClientRect()
     return box.width>0&&box.right>innerWidth+1
