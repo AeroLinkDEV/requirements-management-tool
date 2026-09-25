@@ -3,7 +3,7 @@
 import { appendFileSync, readFileSync } from 'node:fs'
 import { collectMaintenanceReview } from '../lib/maintenance-approval-github.mjs'
 import { createMaintenanceRulesetReader } from '../lib/maintenance-evidence-reader.mjs'
-import { maintenanceReviewSummary } from '../lib/maintenance-approval.mjs'
+import { announceMaintenanceReview } from '../lib/maintenance-approval.mjs'
 import { trustedMaintenanceContext } from '../lib/maintenance-runtime.mjs'
 import { evaluateMergeGroupCandidate, TRUSTED_SURFACE_PREFIXES } from '../lib/merge-authority.mjs'
 import {
@@ -156,9 +156,13 @@ async function main() {
       })
       const review = await collectMaintenanceReview({ ...context, read: evidenceRequest, rulesetReader,
         graphql: query => evidenceRequest('/graphql', { method: 'POST', body: { query } }) })
-      appendFileSync(requiredEnv('GITHUB_STEP_SUMMARY'), maintenanceReviewSummary(review))
-      appendFileSync(requiredEnv('GITHUB_OUTPUT'), `maintenance-digest=${review.digest}\n`)
-      console.log('[merge-authority] PENDING: exact owner environment approval is required')
+      const summaryPath = requiredEnv('GITHUB_STEP_SUMMARY')
+      const outputPath = requiredEnv('GITHUB_OUTPUT')
+      announceMaintenanceReview(review, {
+        appendSummary: text => appendFileSync(summaryPath, text),
+        appendOutput: text => appendFileSync(outputPath, text),
+        log: line => console.log(line),
+      })
       return
     } catch {
       // Missing configuration, request, evidence or current identity is a refusal, never an exception.

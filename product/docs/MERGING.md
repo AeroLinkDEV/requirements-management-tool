@@ -173,7 +173,10 @@ Only the ordinary verifier's protected-surface refusal may proceed to review. Mi
 approval kernel, a different publisher or an obsolete composition still refuse.
 
 The binder writes the exact PR head, composed commit/tree, protected diff, main/preparer identity and Product
-run/attempt into its run summary. It leaves the App check pending while the separate
+run/attempt into its run summary. The summary is readable only on github.com. The binding job's log carries the
+same identities (without the diff) and the exact approval line, and the REST job-log endpoint serves it, so an
+agent without web access reads the packet there (#1166). The log holds only SHAs, run numbers and the digest; it
+never holds changed paths or ruleset data. The binder leaves the App check pending while the separate
 `merge-authority-maintenance` environment waits for the owner. This environment must have exactly one required
 reviewer, GitHub account `seanmccarthyns` (ID `295123958`), a branch-only `main` deployment policy and administrator
 bypass disabled. It receives no App secret. Prevention of self-review is explicitly disabled because the owner
