@@ -291,6 +291,8 @@ public static class ProblemReportEndpoints
         var active = reports.Where(x => ProblemReportLifecycle.IsActiveWork(x.State)).ToList();
         var attentionRows = active.OrderByDescending(x => x.IsReleaseBlocker).ThenByDescending(x => x.Severity)
             .ThenBy(x => x.CreatedAt).Take(12).ToList();
+        var attentionNames = await DirectoryIdentityProjection.DisplayNamesAsync(db,
+            attentionRows.SelectMany(row => new[] { row.ReportedBy, row.ResponsibleEngineerId }), ct);
         return Results.Ok(new
         {
             generatedAt = DateTimeOffset.UtcNow,
@@ -299,7 +301,7 @@ public static class ProblemReportEndpoints
             // Command Center shows what is still open; a closed Critical is history, not load.
             activeBySeverity = active.GroupBy(x => x.Severity).OrderBy(x => x.Key).Select(x => new { severity = x.Key.ToString(), count = x.Count() }),
             byState = reports.GroupBy(x => x.State).OrderBy(x => x.Key).Select(x => new { state = x.Key.ToString(), count = x.Count() }),
-            attention = attentionRows.Select(x => Summary(x, IsWaived(x)))
+            attention = attentionRows.Select(x => Summary(x, IsWaived(x), attentionNames))
         });
     }
 

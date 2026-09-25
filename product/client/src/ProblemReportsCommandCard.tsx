@@ -97,7 +97,7 @@ export default function ProblemReportsCommandCard({ api, projectId, releaseId, r
                 <b>{item.displayNumber}</b>
                 <em className={item.severity.toLowerCase()}>{item.severity}</em>
                 <span>{item.title}</span>
-                <small>{stateLabel(item.state)} · {item.responsibleEngineerDisplayName || item.responsibleEngineerId}</small>
+                <small>{stateLabel(item.state)}{item.responsibleEngineerDisplayName ? ` · ${item.responsibleEngineerDisplayName}` : ""}</small>
               </button>
             ))}
         </div>
