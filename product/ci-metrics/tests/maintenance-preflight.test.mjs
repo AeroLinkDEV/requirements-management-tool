@@ -75,10 +75,9 @@ for (const [name, mutate, reason] of [
   ['weak queue policy', e => { e.ruleset.rules[1].parameters.grouping_strategy = 'HEADGREEN' }, 'queue-policy-changed'],
   ['additional credential branch', e => { e.branchPolicies.branch_policies.push({ name: '*', type: 'branch' }) }, 'app-secret-environment-not-main-only'],
   ['tag with main name', e => { e.branchPolicies.branch_policies[0].type = 'tag' }, 'app-secret-environment-not-main-only'],
-  ['kernel removal', e => { e.changes[0].path = '.github/workflows/request-full-ci.yml'; e.changes[0].after = null }, 'separate-trust-root-bootstrap-required'],
-  ['kernel helper substitution', e => { e.changes[0].path = 'product/ci-metrics/lib/maintenance-preflight.mjs' }, 'separate-trust-root-bootstrap-required'],
-  ['privileged reader substitution', e => { e.changes[0].path = 'product/ci-metrics/lib/maintenance-evidence-reader.mjs' }, 'separate-trust-root-bootstrap-required'],
-  ['maintenance detector substitution', e => { e.changes[0].path = 'product/ci-metrics/bin/detect-maintenance-candidate.mjs' }, 'separate-trust-root-bootstrap-required'],
+  // DEC-142: a machinery change is reviewable, but it keeps every other refusal of the candidate it rides in.
+  ['machinery change with a failed job', e => { e.changes[0].path = 'product/ci-metrics/lib/merge-authority.mjs'; e.jobs[0].conclusion = 'failure' }, 'job-not-success:'],
+  ['machinery change with a ruleset bypass', e => { e.changes[0].path = '.github/workflows/request-full-ci.yml'; e.ruleset.bypass_actors.push({ actor_id: 5 }) }, 'required-publishers-or-protection-changed'],
 ]) {
   test(`refuses ${name} without discarding ordinary verifier refusals`, () => {
     const evidence = fixture()
@@ -131,6 +130,24 @@ test('digest is key-order stable but binds revisions, jobs, settings and every d
     assert.notEqual(evidenceDigest(altered), evidenceDigest(original))
   }
   assert.throws(() => canonicalJson({ missing: undefined }))
+})
+
+test('an approval-machinery change is reviewable and named, not refused (DEC-142)', () => {
+  for (const [path, after] of [
+    ['.github/workflows/request-full-ci.yml', null],
+    ['product/ci-metrics/lib/maintenance-preflight.mjs', undefined],
+    ['product/ci-metrics/lib/maintenance-evidence-reader.mjs', undefined],
+    ['product/ci-metrics/bin/detect-maintenance-candidate.mjs', undefined],
+  ]) {
+    const evidence = fixture()
+    evidence.changes[0].path = path
+    if (after !== undefined) evidence.changes[0].after = after
+    const result = evaluateMaintenancePreflight(evidence)
+    assert.equal(result.disposition, 'REVIEW_REQUIRED', path)
+    assert.deepEqual(result.kernelChanges, [path], path)
+    assert.equal(result.canPublishAuthority, false)
+    assert.equal(result.canMerge, false)
+  }
 })
 
 test('an authority test update requires review but does not execute in the approval kernel', () => {

@@ -1,0 +1,80 @@
+name: Approval-machinery owner notice
+
+# DEC-142: after an approval-machinery change merges, notify the owner with the exact change and verify that the
+# main ruleset still has no bypass actors. Runs from protected main after the merge; it never runs candidate code.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: approval-machinery-notice-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: Detect an approval-machinery change
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      machinery-changed: ${{ steps.detect.outputs.machinery-changed }}
+    steps:
+      - name: Check out the pushed main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Compare the pushed commit with its predecessor
+        id: detect
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node product/ci-metrics/bin/notify-machinery-merge.mjs --detect
+
+  notify:
+    name: Notify the owner and verify the ruleset
+    needs: detect
+    if: needs.detect.outputs.machinery-changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The evidence App key lives only in this main-only environment.
+    environment:
+      name: merge-authority
+    steps:
+      - name: Check out the pushed main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Mint the repository-scoped maintenance evidence token
+        id: maintenance-evidence-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.MAINTENANCE_EVIDENCE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.MAINTENANCE_EVIDENCE_APP_PRIVATE_KEY }}
+          owner: AeroLinkDEV
+          repositories: requirements-management-tool
+          permission-administration: write
+          permission-metadata: read
+      - name: Post the owner notice and check the ruleset
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          MAINTENANCE_EVIDENCE_TOKEN: ${{ steps.maintenance-evidence-token.outputs.token }}
+          MAINTENANCE_EVIDENCE_APP_ID: ${{ vars.MAINTENANCE_EVIDENCE_APP_ID }}
+          MAINTENANCE_EVIDENCE_INSTALLATION_ID: ${{ vars.MAINTENANCE_EVIDENCE_INSTALLATION_ID }}
+          MAINTENANCE_EVIDENCE_APP_SLUG: ${{ vars.MAINTENANCE_EVIDENCE_APP_SLUG }}
+          MAINTENANCE_EVIDENCE_ACTION_INSTALLATION_ID: ${{ steps.maintenance-evidence-token.outputs.installation-id }}
+          MAINTENANCE_EVIDENCE_ACTION_APP_SLUG: ${{ steps.maintenance-evidence-token.outputs.app-slug }}
+        run: node product/ci-metrics/bin/notify-machinery-merge.mjs

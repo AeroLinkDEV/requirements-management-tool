@@ -104,13 +104,25 @@ for (const [name, mutate] of [
   ['advanced main', f => { f.packet.evidence.main.sha = sha('9') }],
   ['missing required job', f => { f.packet.evidence.jobs.shift() }],
   ['native publisher changed', f => { f.packet.evidence.checks[0].app.id = 1 }],
-  ['authority kernel replacement', f => { f.packet.evidence.changes[0].path = 'product/ci-metrics/lib/maintenance-runtime.mjs' }],
+  ['machinery change under a stale assessment', f => { f.packet.evidence.changes[0].path = 'product/ci-metrics/lib/maintenance-runtime.mjs' }],
 ]) test(`cannot prepare ${name}`, () => {
   const input = fixture()
   mutate(input)
   const { digest, ...payload } = input.packet
   input.packet.digest = evidenceDigest(payload)
   assert.throws(() => createMaintenanceReview(input))
+})
+
+test('an approval-machinery change is prepared for delegated review and named in the summary (DEC-142)', () => {
+  const input = fixture()
+  const path = 'product/ci-metrics/lib/maintenance-runtime.mjs'
+  input.packet.evidence.changes[0].path = path
+  input.packet.assessment = evaluateMaintenancePreflight(input.packet.evidence)
+  const { digest, ...payload } = input.packet
+  input.packet.digest = evidenceDigest(payload)
+  const review = createMaintenanceReview(input)
+  assert.deepEqual(review.packet.assessment.kernelChanges, [path])
+  assert.match(maintenanceReviewSummary(review), /changes the approval machinery \(DEC-142\)/)
 })
 
 test('recomputed candidate and review digests cannot carry approval to a newer Product attempt', () => {
