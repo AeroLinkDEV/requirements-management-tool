@@ -948,7 +948,6 @@ export function MyWorkCenter({
                 ["Awaiting signature", data.summary.approvals],
                 ["Overdue", data.summary.overdue],
                 ["Drafts I own", data.summary.drafts],
-                ["Problem Reports", data.summary.problemReports ?? 0],
               ].map(([x, n], i) => (
                 <article
                   className={i === 2 && Number(n) > 0 ? "urgent" : ""}

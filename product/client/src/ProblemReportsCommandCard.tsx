@@ -45,7 +45,10 @@ export default function ProblemReportsCommandCard({ api, projectId, releaseId, r
     fetch(`${api}/api/problem-reports/dashboard?${query}`)
       .then(async (response) => {
         if (!response.ok) throw new Error();
-        return (await response.json()) as Dashboard;
+        const body = await response.json();
+        // A malformed summary is unavailable, never a crash: this card must not take Command Center down.
+        if (!body?.summary || !Array.isArray(body.byState) || !Array.isArray(body.attention)) throw new Error();
+        return body as Dashboard;
       })
       .then((body) => { if (live) setData(body); })
       .catch(() => { if (live) setError("Problem Report summary is unavailable. Refresh to try again."); });
@@ -66,7 +69,7 @@ export default function ProblemReportsCommandCard({ api, projectId, releaseId, r
         </div>
         <i>PR</i>
       </header>
-      {error ? <p role="alert" className="prCardError">{error}</p> : !data ? <p className="prCardLoading">Loading Problem Reports…</p> : <>
+      {error ? <p role="status" className="prCardError">{error}</p> : !data ? <p className="prCardLoading">Loading Problem Reports…</p> : <>
         <div className="prCardHeadline">
           <button type="button" onClick={() => onOpenList(targetBuild)}><strong>{data.summary.active}</strong><span>Active</span></button>
           <button type="button" onClick={() => onOpenList(targetBuild)}><strong>{data.summary.closureAwaitingApproval}</strong><span>Awaiting SQA</span></button>

@@ -36,7 +36,7 @@ test('Command Center and My Work carry Problem Report work', async ({ page, requ
 
   await page.goto(`${root}/my-work`)
   await expect(page.getByRole('heading', { name: 'My Work' })).toBeVisible()
-  await expect(page.locator('.workMetricsGrid article').filter({ hasText: 'Problem Reports' }).locator('b')).toHaveText(/^\d+$/)
+  // The count lives on the queue's kind chip; the compact metrics row keeps its four tiles (#925).
   const rows = page.locator('.workQueue article').filter({ has: page.locator('.workProblemReport') })
   const count = await rows.count()
   for (let index = 0; index < count; index++) {
