@@ -20,9 +20,9 @@ test('a CSV export is mapped and previewed row by row before anything is importe
     name: 'jira-export.csv',
     mimeType: 'text/csv',
     buffer: Buffer.from([
-      'Key,Summary,Description,Status,Severity',
-      'JIRA-1,Nav freeze,Display freezes on waypoint insert,Closed,High',
-      'JIRA-2,Odd status,Something happened,Weird,Major',
+      'Key,Summary,Description,Status,Severity,Category',
+      'JIRA-1,Nav freeze,Display freezes on waypoint insert,Closed,High,CodeFunctional',
+      'JIRA-2,Odd status,Something happened,Weird,Major,CodeFunctional',
       '',
     ].join('\n')),
   })

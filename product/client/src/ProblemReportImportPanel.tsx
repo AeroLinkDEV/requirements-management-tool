@@ -156,7 +156,7 @@ export default function ProblemReportImportPanel({ api, projectId, releases, onC
               <label key={`severity-${value}`}>Severity “{value}”{valueSelect("severities", value, severities.map((name) => [name, name]))}</label>)}
             {distinct("priority").filter((value) => !priorities.some((name) => name.toLowerCase() === value.toLowerCase())).map((value) =>
               <label key={`priority-${value}`}>Priority “{value}”{valueSelect("priorities", value, priorities.map((name) => [name, name]))}</label>)}
-            {distinct("category").map((value) => <label key={`category-${value}`}>Category “{value}”{valueSelect("categories", value, categories.map((item) => [item.value, `${item.code} ${item.label}`]))}</label>)}
+            {distinct("category").filter((value) => !categories.some((item) => item.value.toLowerCase() === value.toLowerCase())).map((value) => <label key={`category-${value}`}>Category “{value}”{valueSelect("categories", value, categories.map((item) => [item.value, `${item.code} ${item.label}`]))}</label>)}
             {[...new Set([...distinct("reportedBy"), ...distinct("responsibleEngineer")])].map((value) => (
               <label key={`person-${value}`}>Person “{value}”
                 <input aria-label={`AeroLink user for ${value}`} value={mapping.people[value] ?? ""} placeholder="AeroLink user name (optional)" onChange={(event) => setValue("people", value, event.target.value)} />
