@@ -1,11 +1,11 @@
 {
   "schemaVersion": "aerolink-api-test-intent/v2",
   "totals": {
-    "tests": 998,
-    "cases": 1143,
-    "classes": 157,
-    "hostedTests": 943,
-    "hostedCases": 1066,
+    "tests": 999,
+    "cases": 1144,
+    "classes": 158,
+    "hostedTests": 944,
+    "hostedCases": 1067,
     "nonHostedTests": 32,
     "nonHostedCases": 46,
     "unknownHostTests": 23,

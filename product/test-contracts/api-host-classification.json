@@ -1,9 +1,9 @@
 {
   "schemaVersion": "aerolink-api-host-classification/v3",
   "totals": {
-    "classes": 157,
-    "tests": 998,
-    "knownCases": 1143,
+    "classes": 158,
+    "tests": 999,
+    "knownCases": 1144,
     "unknownCaseTests": 0
   },
   "summary": {
