@@ -258,13 +258,4 @@ public sealed class SoftwareCaseRenamePostgresQualificationTests
 
     private static string QualificationConnectionOrSkip() => Issue722QualificationConnection.Validate(
         Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION"));
-
-    private sealed class DisposablePostgresFactAttribute : FactAttribute
-    {
-        public DisposablePostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")))
-                Skip = "Issue #722 PostgreSQL qualification skipped: set AEROLINK_MIGRATIONS_CONNECTION to the dedicated disposable database.";
-        }
-    }
 }

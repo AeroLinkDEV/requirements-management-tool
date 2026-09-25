@@ -82,15 +82,4 @@ public sealed class CodeRelationshipPagingPostgresQualificationTests
             await drop.ExecuteNonQueryAsync();
         }
     }
-
-    private sealed class DisposablePostgresFactAttribute : FactAttribute
-    {
-        public DisposablePostgresFactAttribute()
-        {
-            var required = Environment.GetEnvironmentVariable("AEROLINK_REQUIRE_POSTGRES_QUALIFICATION");
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION"))
-                && (string.IsNullOrWhiteSpace(required) || required.Equals("false", StringComparison.OrdinalIgnoreCase)))
-                Skip = "Set AEROLINK_MIGRATIONS_CONNECTION to an owned loopback PostgreSQL server away from port 54329.";
-        }
-    }
 }

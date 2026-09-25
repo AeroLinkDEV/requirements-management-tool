@@ -63,7 +63,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     /// legacy position memberships are ended, the migrated role backup is removed, and the base eligibility
     /// memberships that keep the assignments valid are untouched.
     /// </summary>
-    [MigrationsServerFact]
+    [DisposablePostgresFact]
     public async Task V2_retires_the_legacy_rows_v1_left_and_preserves_base_eligibility()
     {
         Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
@@ -134,7 +134,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     /// The defect the repair exists to close: after v2 a replaced leader must lose the authority, where
     /// before it survived in the legacy membership the API could not see.
     /// </summary>
-    [MigrationsServerFact]
+    [DisposablePostgresFact]
     public async Task After_v2_a_replaced_leader_no_longer_answers_the_demand()
     {
         Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
@@ -190,7 +190,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     /// per-program SaveChanges is exactly what made that untrue, and one program in the fixture could never
     /// have exposed it.
     /// </summary>
-    [MigrationsServerFact]
+    [DisposablePostgresFact]
     public async Task A_conflict_in_a_later_program_leaves_no_partial_repair_in_an_earlier_one()
     {
         Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
@@ -270,7 +270,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
         finally { await DropDatabaseAsync(server, database); }
     }
 
-    [MigrationsServerFact]
+    [DisposablePostgresFact]
     public async Task V2_reports_a_legacy_position_membership_held_by_somebody_other_than_the_assignment_holder()
     {
         Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
@@ -308,7 +308,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
         finally { await DropDatabaseAsync(server, database); }
     }
 
-    [MigrationsServerFact]
+    [DisposablePostgresFact]
     public async Task V2_migrates_every_legacy_position_backup_family_to_the_same_person()
     {
         Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
@@ -371,7 +371,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
         finally { await DropDatabaseAsync(server, database); }
     }
 
-    [MigrationsServerFact]
+    [DisposablePostgresFact]
     public async Task V2_reports_a_legacy_and_leadership_backup_that_name_different_people()
     {
         Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
@@ -413,7 +413,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
         finally { await DropDatabaseAsync(server, database); }
     }
 
-    [MigrationsServerFact]
+    [DisposablePostgresFact]
     public async Task V2_refuses_to_migrate_a_primary_as_their_own_backup_without_partial_changes()
     {
         Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
@@ -470,7 +470,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     /// to the Project Engineer position and the legacy row is retired, so removing the new backup actually
     /// removes the authority.
     /// </summary>
-    [MigrationsServerFact]
+    [DisposablePostgresFact]
     public async Task A_legacy_project_engineering_lead_backup_migrates_and_stops_being_a_second_channel()
     {
         Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
@@ -550,7 +550,7 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
     /// Two programs, because the property under test is that the refusal writes nothing anywhere: the
     /// repairable program must come out exactly as it went in.
     /// </summary>
-    [MigrationsServerFact]
+    [DisposablePostgresFact]
     public async Task V2_refuses_a_legacy_backup_whose_holder_lacks_the_required_base_role()
     {
         Assert.True(ServerConfigured(out var server), $"{ConnectionVariable} must name the disposable PostgreSQL server.");
@@ -620,17 +620,5 @@ public sealed class ProjectLeadershipReconciliationQualificationTests
                 x => x.EventType == ProjectLeadershipReconciliationAuthority.MigrationMarker + ".Completed"));
         }
         finally { await DropDatabaseAsync(server, database); }
-    }
-
-    /// <summary>
-    /// Reports Skipped, not Passed, when no disposable PostgreSQL server is configured (#1121).
-    /// </summary>
-    private sealed class MigrationsServerFactAttribute : FactAttribute
-    {
-        public MigrationsServerFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionVariable)))
-                Skip = $"PostgreSQL migration qualification skipped: set {ConnectionVariable} to a disposable server.";
-        }
     }
 }

@@ -335,13 +335,4 @@ public sealed class TestChangeRequestPrefixPostgresQualificationTests
             throw new InvalidOperationException("Issue #723 qualification requires loopback, non-54329 PostgreSQL and database aerolink_723_qualify.");
         return connection;
     }
-
-    private sealed class DisposablePostgresFactAttribute : FactAttribute
-    {
-        public DisposablePostgresFactAttribute()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("AEROLINK_MIGRATIONS_CONNECTION")))
-                Skip = "Issue #723 PostgreSQL qualification skipped: set AEROLINK_MIGRATIONS_CONNECTION to the dedicated disposable database.";
-        }
-    }
 }
