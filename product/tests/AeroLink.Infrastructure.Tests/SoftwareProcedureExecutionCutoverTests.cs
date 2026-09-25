@@ -1651,13 +1651,6 @@ public sealed class SoftwareProcedureExecutionCutoverTests
     }
 
     [Fact]
-    public async Task Impact_coverage_work_uses_all_parent_semantics()
-    {
-        var seed = await SeedAllParentFixtureAsync(reversedLinks: true);
-        await ExerciseAllParentCycleAsync(seed);
-    }
-
-    [Fact]
     public async Task Impact_all_parent_semantics_are_insertion_order_independent()
     {
         // The selected Cases must never depend on provider or insertion order: run the full

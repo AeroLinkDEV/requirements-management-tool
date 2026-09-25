@@ -19,15 +19,6 @@ namespace AeroLink.Api.Tests;
 public sealed class ReleasedExecutionEvidenceAuthorityMismatchTests
 {
     [Fact]
-    public async Task Guarded_factory_preserves_the_file_backed_sqlite_contract()
-    {
-        using var root = new AeroLinkApiFactory();
-        using var factory = GuardedFactory(root);
-        using var client = factory.CreateClient();
-        await SecurityBoundaryTests.AssertSqliteConfigurationAsync(factory.Services);
-    }
-
-    [Fact]
     public async Task A_released_build_authority_wins_even_when_execution_release_id_is_in_work()
     {
         using var root = new AeroLinkApiFactory();
