@@ -265,6 +265,7 @@
       "file": "AdministrationEndpoints.cs",
       "coveredBy": [
         "ProjectLeadershipApiTests",
+        "ReleasePickerMembershipApiTests",
         "SecurityBoundaryTests"
       ]
     },
@@ -370,10 +371,12 @@
         "ProjectSetupInceptionApiTests",
         "ProjectSetupKestrelQualificationTests",
         "ProjectSetupPostgresQualificationTests",
+        "ProjectSetupPostgresQualificationTests.ReleasePickerSnapshot",
         "ProjectSetupServiceQualificationTests",
         "ProjectSetupSourceOptionsApiTests",
         "RebaseRequirementChangeTests",
         "ReleaseCampaignExactIntentApiTests",
+        "ReleasePickerMembershipApiTests",
         "ReleasedExecutionEvidenceApiTests",
         "ReleasedSyntheticSourceSupplementApiTests",
         "RemoveRequirementChangeTests",
@@ -480,7 +483,8 @@
       "file": "BaselineImportEndpoints.cs",
       "coveredBy": [
         "BaselineImportApiTests",
-        "ProjectSetupPostgresQualificationTests"
+        "ProjectSetupPostgresQualificationTests",
+        "ProjectSetupPostgresQualificationTests.ReleasePickerSnapshot"
       ]
     },
     {
@@ -1303,7 +1307,8 @@
         "ManagedDocumentApiTests",
         "ManagedDocumentApiTests.BuildIdentity",
         "ManagedDocumentApiTests.ProjectSetup",
-        "ManagedDocumentRecoveryApiTests"
+        "ManagedDocumentRecoveryApiTests",
+        "ReleasePickerMembershipApiTests"
       ]
     },
     {
@@ -1312,7 +1317,8 @@
       "file": "ManagedDocumentEndpoints.cs",
       "coveredBy": [
         "ManagedDocumentApiTests",
-        "ManagedDocumentApiTests.BuildIdentity"
+        "ManagedDocumentApiTests.BuildIdentity",
+        "ReleasePickerMembershipApiTests"
       ]
     },
     {
@@ -2129,7 +2135,8 @@
       "file": "WorkspaceEndpoints.cs",
       "coveredBy": [
         "ProjectSetupBoundaryRegressionApiTests",
-        "ProjectSetupPostgresQualificationTests"
+        "ProjectSetupPostgresQualificationTests",
+        "ProjectSetupPostgresQualificationTests.ReleasePickerSnapshot"
       ]
     },
     {
@@ -2570,6 +2577,7 @@
         "ProcedureDiscussionApiTests",
         "ProjectSetupApiTests",
         "ProjectSetupBoundaryRegressionApiTests",
+        "ProjectSetupPostgresQualificationTests.ReleasePickerSnapshot",
         "SecurityHardeningTests",
         "TestProcedureDocumentApiTests",
         "VerificationVocabularyApiTests"

@@ -54,6 +54,46 @@ internal static class ManagedDocumentPaging
         error = "The page cursor is invalid or does not belong to these filters. Start again from the first page.",
         code = "invalid_cursor"
     });
+
+    // Release pickers freeze candidate membership with a database-allocated cutoff carried in a
+    // Release-specific v2 cursor. The bound is checked on the raw input before any decoding work.
+    internal const int MaximumEncodedCursorLength = 4096;
+    internal const int MaximumCursorValueLength = 240;
+
+    internal sealed record ReleaseCursorToken(int Version, string Scope, string FilterKey, DateTimeOffset SnapshotAt,
+        string Value, string TieBreaker, long? CutoffOrdinal);
+    internal sealed record ReleaseCursorResult(ReleaseCursorToken? Cursor, IResult? Error);
+
+    internal static string EncodeReleaseCursor(string filterKey, DateTimeOffset snapshotAt, string value, long cutoff)
+    {
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(
+            new ReleaseCursorToken(2, "link-options", filterKey, snapshotAt, value, "0", cutoff));
+        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }
+
+    internal static ReleaseCursorResult DecodeReleaseCursor(string? value, string filterKey)
+    {
+        // The raw bound is checked before any whitespace or decoding handling so an oversized input can
+        // never pass as a fresh page request.
+        if (value is not null && value.Length > MaximumEncodedCursorLength) return new(null, InvalidCursor());
+        if (string.IsNullOrWhiteSpace(value)) return new(null, null);
+        try
+        {
+            var encoded = value.Trim().Replace('-', '+').Replace('_', '/');
+            encoded += new string('=', (4 - encoded.Length % 4) % 4);
+            var cursor = JsonSerializer.Deserialize<ReleaseCursorToken>(Convert.FromBase64String(encoded));
+            if (cursor is null || cursor.Version != 2 || cursor.Scope != "link-options" || cursor.FilterKey != filterKey
+                || cursor.SnapshotAt == default || cursor.SnapshotAt > DateTimeOffset.UtcNow.AddMinutes(1)
+                || cursor.CutoffOrdinal is null or < 0
+                || string.IsNullOrEmpty(cursor.Value) || cursor.Value.Length > MaximumCursorValueLength
+                || cursor.TieBreaker != "0") return new(null, InvalidCursor());
+            return new(cursor, null);
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException)
+        {
+            return new(null, InvalidCursor());
+        }
+    }
 }
 
 internal static class ManagedDocumentHistoryEndpoints

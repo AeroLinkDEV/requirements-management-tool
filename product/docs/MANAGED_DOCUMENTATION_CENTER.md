@@ -95,12 +95,25 @@ operator refreshes from page one; they cannot shift records between pages in an 
 cross-filter, or oversized cursors fail closed with `400`. The browser shows the total register size and loads
 additional records on request, while a direct document URL loads the current record independently of its page.
 
-Release relationship targets are an existing exception to the first-page snapshot guarantee: releases have
-no immutable creation timestamp. Their bounded database pages use canonical numeric build identity, retained
-historical text and a stable ID tie-breaker; a concurrently created build may appear after the current cursor,
-and a build inserted before it requires refreshing page one. [Issue #1040](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1040)
-tracks a genuine snapshot boundary. A Problem Report without a target build retains its Project link; an
-explicit target resolves only that exact authorized Project/build and never falls back to a different build.
+Release relationship targets freeze candidate membership on both supported providers. (The other
+relationship targets filter by their creation time on PostgreSQL only.) Membership is frozen by a
+database-owned, project-fenced insertion ordinal that records operational insertion order only. It is not a
+creation timestamp or a controlled identity, and it never orders or relabels builds. Releases present when
+the feature's schema was installed are the documented legacy cohort (no ordinal). They are always members and
+stay selectable in canonical numeric build identity, with retained historical text and the stable ID
+tie-breaker. Continuations carry the frozen cutoff and exclude builds committed later, whatever their sort
+position; restarting at page one re-establishes the boundary and shows newly committed builds. Old Release
+cursors without the cutoff fail closed with `400` and a start-again path. Release cursors do not expire.
+
+The fence differs by provider. On PostgreSQL, a writer allocates the ordinal inside a per-project advisory
+transaction lock, which it holds until it commits; page one takes the same lock before reading its cutoff.
+Page one therefore waits for a build that is still being recorded in that Project, for at most five seconds.
+If that writer is still open, page one answers `503` with code `picker_busy`, and retrying page one is safe.
+Continuations never wait on the fence. On SQLite, which serves only disposable test and browser hosts, page
+one runs in an immediate write transaction and is serialized with every writer, and the membership guards are
+installed at host startup on a database created by this schema. A Problem Report without a target build
+retains its Project link; an explicit target resolves only that exact authorized Project/build and never
+falls back to a different build.
 
 Production PostgreSQL indexes cover the Project/type/steward/register orders, document/state/revision heads,
 review assignee/state, check-in time, attachment revision/logical version, relationship revision/time, and event
