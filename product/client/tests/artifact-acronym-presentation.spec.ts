@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, logicTest as test } from './isolated-client-test'
 import { artifactAcronym, artifactTypeLabel, configuredProcedureTargetsFor, documentTypeLabel, isVerificationProcedureKind, procedureTargetsFor, targetsFor, testChangeRequestAcronym, testChangeReviewWorkflowSubject, verificationArtifactApiRoot, verificationArtifactLevel, verificationArtifactNoun, verificationArtifactRouteKey } from '../src/presentation'
 
 test('numbered artifacts keep their canonical uppercase acronym in presentation', () => {
