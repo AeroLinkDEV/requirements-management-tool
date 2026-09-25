@@ -109,7 +109,7 @@ public sealed class VerificationProfileTests
         var missingKind = new VerificationArtifactConsumerRegistration("missing-kind", "typed consumer without key",
             [], VerificationArtifactCapability.Identity | VerificationArtifactCapability.Coverage);
 
-        var manifest = LadderConsumerManifestCatalog.BuildForTestsV2([registration, missingKind], [definition]);
+        var manifest = LadderConsumerManifestCatalog.BuildV2([], [registration, missingKind], [definition]);
 
         Assert.False(manifest.IsReady);
         Assert.Contains(manifest.MissingArtifactCoverage,

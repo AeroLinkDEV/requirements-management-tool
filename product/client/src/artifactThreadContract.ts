@@ -396,29 +396,4 @@ export const parseArtifactThread = (raw: unknown): ArtifactThreadParse => {
   }
 }
 
-/** One lane's nodes, in the order the server returned them. */
-export type ArtifactThreadLaneGroup = {
-  lane: ArtifactThreadLane
-  label: (typeof ARTIFACT_THREAD_LANES)[number]
-  nodes: readonly ArtifactThreadNode[]
-}
-
-/**
- * Groups nodes by the lane the server placed them in.
- *
- * Empty lanes are dropped, matching the prototype, which filters unused lanes and re-indexes the rest. The
- * lane index is kept on each group so a caller can still tell which lane it is looking at after the drop.
- */
-export const artifactThreadLaneGroups = (thread: ArtifactThread): ArtifactThreadLaneGroup[] =>
-  ARTIFACT_THREAD_LANES
-    .map((label, lane) => ({
-      lane: lane as ArtifactThreadLane,
-      label,
-      nodes: thread.nodes.filter(node => node.lane === lane),
-    }))
-    .filter(group => group.nodes.length > 0)
-
-/** The focal node, which `parseArtifactThread` has already proven to be present exactly once. */
-export const artifactThreadFocalNode = (thread: ArtifactThread): ArtifactThreadNode =>
-  thread.nodes.find(node => node.isFocal)!
 import { readRecordedCodeRelationship, type RecordedCodeRelationship } from './recordedCodeRelationship'

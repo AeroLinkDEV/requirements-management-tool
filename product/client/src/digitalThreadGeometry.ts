@@ -508,82 +508,6 @@ export const laneAt = (sceneX: number, laneCount: number, geometry: CanvasGeomet
   return sceneX >= left && sceneX <= left + geometry.laneWidth + 28 ? lane : -1
 }
 
-/** The record nearest the middle of a lane. While scrubbing, this is what the other lanes follow. */
-export const anchorInLane = (
-  nodes: readonly CanvasNode[],
-  lane: number,
-  geometry: CanvasGeometry,
-  offsets: readonly number[],
-  bandHeight: number,
-): CanvasNode | null => {
-  const middle = bandHeight / 2
-  let best: CanvasNode | null = null
-  let bestDistance = Number.POSITIVE_INFINITY
-  for (const node of nodes) {
-    if (node.lane !== lane) continue
-    const centre = node.row * geometry.rowPitch + geometry.pad + (offsets[lane] ?? 0) + geometry.anchor
-    const distance = Math.abs(centre - middle)
-    if (distance < bestDistance) {
-      bestDistance = distance
-      best = node
-    }
-  }
-  return best
-}
-
-/**
- * Where every other lane wants to sit so that the records linked to `anchorId` line up with it.
- *
- * A lane with nothing linked to the anchor holds its position rather than drifting proportionally: moving it
- * would assert a relationship the data does not carry, and it also makes the lanes look busier than the
- * change actually is.
- */
-export const syncTargets = (
-  anchorId: string,
-  nodes: readonly CanvasNode[],
-  edges: readonly CanvasEdge[],
-  geometry: CanvasGeometry,
-  offsets: readonly number[],
-  minimums: readonly number[],
-  laneCount: number,
-  exceptLane: number,
-  measuredHeights?: ReadonlyMap<string, number>,
-): number[] => {
-  const anchor = nodes.find(node => node.id === anchorId)
-  const targets = offsets.slice()
-  if (!anchor) return targets
-  const positions = positionsForNodes(nodes, geometry, offsets, measuredHeights)
-  const anchorY = (positions.get(anchor.id)?.y ?? nodePosition(anchor, geometry, offsets).y) - geometry.pad
-  for (let lane = 0; lane < laneCount; lane += 1) {
-    if (lane === exceptLane || lane === anchor.lane) {
-      targets[lane] = offsets[lane] ?? 0
-      continue
-    }
-    const linked = nodes.filter(
-      node =>
-        node.lane === lane &&
-        edges.some(
-          edge =>
-            (edge.from === anchorId && edge.to === node.id) ||
-            (edge.to === anchorId && edge.from === node.id),
-        ),
-    )
-    if (!linked.length) {
-      targets[lane] = offsets[lane] ?? 0
-      continue
-    }
-    const averageRow = linked.reduce((sum, node) => {
-      const position = positions.get(node.id) ?? nodePosition(node, geometry, offsets)
-      return sum + position.y - (offsets[lane] ?? 0) - geometry.pad
-    }, 0) / linked.length
-    targets[lane] = Math.max(
-      minimums[lane] ?? 0,
-      Math.min(0, anchorY - averageRow),
-    )
-  }
-  return targets
-}
-
 /** One eased step toward the sync targets. Returns the new offsets and whether anything is still moving. */
 export const stepTowards = (
   offsets: readonly number[],
@@ -1301,34 +1225,6 @@ export const trace = (
   const down = walk(true)
   const up = walk(false)
   return { nodes: new Set([id, ...down, ...up]), edges: touched, hops, up, down }
-}
-
-/**
- * The lane offset that brings a row into its lane's visible window, or the current offset when it already is.
- *
- * Keyboard focus needs this: a lane rolls independently, so the card arrow-navigation moves to can sit outside
- * the window. Moving focus to a card nobody can see is how a keyboard user ends up lost, and #880 §6.9 requires
- * the lane to roll and keep the focused card visible.
- *
- * Offsets are zero-or-negative — a lane rolls its content upward — so the result is clamped at 0 to stop a
- * short lane being pulled below its own first row.
- */
-export const offsetToReveal = (
-  row: number,
-  geometry: CanvasGeometry,
-  bandHeight: number,
-  currentOffset: number,
-  /** Measured scene Y when an earlier expanded card shifted this row. */
-  measuredY?: number,
-): number => {
-  const y = measuredY ?? (row * geometry.rowPitch + geometry.pad + currentOffset)
-  if (isVisible(y, geometry, bandHeight)) return currentOffset
-  // Above the window: bring the row to the top of the band. Below: bring it to the bottom.
-  const desired =
-    y <= 0
-      ? currentOffset - y + geometry.pad
-      : currentOffset - (y - (bandHeight - geometry.cardHeight - 12))
-  return Math.min(0, desired)
 }
 
 /**
