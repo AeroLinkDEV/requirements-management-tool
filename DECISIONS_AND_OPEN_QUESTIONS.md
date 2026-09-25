@@ -2606,3 +2606,43 @@ choices are created as focused issues only when their trigger and acceptance bou
   - required checks, credential isolation and the no-force-merge boundary;
   - separately reviewed, qualified transitions for kernel changes. This delegation cannot let a kernel authorize itself.
 - **Supersedes:** Nothing. DEC-124 remains authoritative for Codex, and this decision adds Claude as a second delegate on the same terms. It changes operator authorization only, not workflow code, GitHub reviewer identity or environment policy.
+
+### DEC-140 - Agents Own Non-Functional Decisions; the Owner Owns Functional Ones
+
+- **Date:** 2026-09-25
+- **Status:** Accepted
+- **Authority:** The owner stated in the Claude conversation on 2026-09-25: "I, sean, care about functional aspects of AeroLink.....I want to grant you claude and chatgpt far more leeway to make decisions which dont have functional impacts on Aerolink!" He approved this text on 2026-09-25 by replying "approve dec-136 plus B". The proposal numbered this decision DEC-136. It is recorded as DEC-140 because open PRs #1116, #1132 and #1133 had already claimed DEC-136 to DEC-139. Claude transcribes the statements here.
+- **Decision:** Claude and Codex decide non-functional matters themselves. They do not ask the owner and they do not wait for him. They record each such decision where it lives: the PR body, an issue, or a DEC entry when the decision is durable.
+- **Functional (owner decides):** anything that changes what an AeroLink user can see or do, or what AeroLink records or asserts. That includes:
+  - screens, workflows and wording;
+  - lifecycle and authority rules;
+  - controlled identities, traceability, history and evidence semantics;
+  - certification or compliance claims;
+  - data migrations that change the meaning of existing records;
+  - the demonstration datasets.
+- **Non-functional (agents decide):** everything else, including:
+  - CI, the test planner, merge-queue operation and PR lifecycle (labelling, arming, re-running, closing stale work with a reason);
+  - tests, test tooling and CI metrics;
+  - build, dependencies and tooling with no behaviour change;
+  - refactoring;
+  - performance and reliability fixes that do not change behaviour;
+  - repository and agent documentation, including `AGENTS.md` and agent configuration;
+  - issue triage;
+  - operational scripts.
+- **Borderline:** ask "would an AeroLink user notice?" If still unsure, the agent decides, ships, labels the PR `owner-fyi`, and lists it in the weekly digest. The owner can reverse it afterwards. This follows the provenance-instead-of-blocking practice: never block on a question the owner does not care about.
+- **Agent disagreement on a non-functional matter:** the two agents resolve it on the PR. Until they do, the reviewer's objection stands. It is never escalated to the owner unless it turns out to be functional.
+- **Preserved:** these stay in force:
+  - required checks, the merge queue and the no-bypass ruleset;
+  - no force-merge and no fabricated checks;
+  - the persistent database and evidence rules;
+  - the launcher-path audit;
+  - DEC-133 (Problem Report lifecycle moves only by a human), which is functional and unchanged.
+- **Supersedes:** every rule, instruction or habit that requires owner approval for a non-functional change. Where DEC-121 requires owner approval for protected CI maintenance, see DEC-141.
+
+### DEC-141 - Approval-Machinery Changes Are Approved by the Non-Authoring Agent
+
+- **Date:** 2026-09-25
+- **Status:** Accepted. Installation pending ([#1145](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1145)).
+- **Authority:** The owner chose option B of the agent-autonomy proposal on 2026-09-25 by replying "approve dec-136 plus B". The proposal numbered this decision DEC-137. It is recorded as DEC-141 for the numbering reason given in DEC-140. Claude transcribes the reply here.
+- **Decision:** The owner delegates approval of changes to the merge-approval machinery (the trusted requester, binding and maintenance workflows, and merge-authority modules) to the agent that did not author the change. The agent that authored it may never approve it. The existing proof requirements apply unchanged. After each merge, Sean is notified with the exact change, and the watchdog verifies that the ruleset still has no bypass actors. Installing this mechanism is the final change that Sean merges by hand. DEC-121's statement that "the runtime approval kernel cannot authorize its own replacement" still holds: the installed kernel and the non-authoring agent authorize the next kernel, never the candidate itself.
+- **Until installed:** an approval-machinery change still needs the owner's manual ruleset bypass, merge and restore, because nothing else can merge it. The installation of this mechanism is the last such change.

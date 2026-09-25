@@ -97,6 +97,16 @@ Use the repository's test-planning contract instead of guessing what to run.
 
 ## Pull requests and merging
 
+- **You own your PR to merged.** When the work is finished:
+  - request Full CI (`ready-for-full-ci`), arm auto-merge, and re-arm it after every push;
+  - fix your own failures and conflicts;
+  - watch queue membership until the PR merges.
+
+  If you stop, close the PR or hand it off with a reason. Never leave it idle.
+- **Decide non-functional matters yourself ([DEC-140](DECISIONS_AND_OPEN_QUESTIONS.md#dec-140---agents-own-non-functional-decisions-the-owner-owns-functional-ones)).**
+  Escalate to the owner only for a functional decision, and then ask one specific question with the options.
+- Routine CI-maintenance approvals are delegated (DEC-124, DEC-135). A waiting approval is not the owner's job.
+  Approval-machinery changes are approved by the non-authoring agent once DEC-141's mechanism is installed.
 - Use one focused branch/worktree per implementation task; read-only tasks do not require one.
 - Keep unrelated cleanup out of feature PRs.
 - Rebase/update only when the repository's actual merge state requires it; do not churn a green PR from habit.
