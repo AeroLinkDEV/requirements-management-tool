@@ -281,7 +281,7 @@ test('HLR and LLR Change Requests pages offer their own creation actions', async
   await login(page, 'admin', { openProject: false })
   await selectProgram(page, 'Flight Management System Live Program')
   await openNavigationGroup(page, 'ASSURANCE')
-  await page.getByRole('button', { name: 'Software' }).last().click()
+  await page.getByRole('group', { name: 'Verification scope' }).getByRole('button', { name: 'Software', exact: true }).click()
 
   await page.getByRole('link', { name: 'Software Test Change Requests' }).click()
   await expect(page.getByRole('heading', { name: 'Software Test Change Requests' })).toBeVisible({ timeout: 30_000 })
@@ -290,7 +290,7 @@ test('HLR and LLR Change Requests pages offer their own creation actions', async
   await page.getByRole('tab', { name: 'LLR' }).click()
   await expect(page.getByRole('button', { name: '+ New LLR Test Case Change Request' })).toBeVisible()
 
-  await page.getByRole('button', { name: 'System', exact: true }).last().click()
+  await page.getByRole('group', { name: 'Verification scope' }).getByRole('button', { name: 'System', exact: true }).click()
   await page.getByRole('link', { name: 'System Test Change Requests' }).click()
   await expect(page.getByRole('button', { name: '+ New System Test Procedure Change Request' })).toBeVisible()
 })
