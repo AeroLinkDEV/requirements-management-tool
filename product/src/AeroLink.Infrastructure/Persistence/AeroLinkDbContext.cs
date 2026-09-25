@@ -780,6 +780,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.HasKey(x => x.Id);
             b.Property(x => x.Version).HasMaxLength(40).IsRequired();
             b.Property(x => x.CanonicalIdentity).HasMaxLength(40);
+            // Raw-SQL release inserts (picker guards, qualification seeds) predate this column; the store default keeps them valid.
+            b.Property(x => x.ReleasedWithoutReadiness).HasDefaultValue(false);
             // The picker membership ordinal is allocated by the guarded insert trigger inside the shared
             // project fence. Npgsql's convention would turn ValueGeneratedOnAdd into an identity column that
             // allocates before the fence, so the strategy is explicitly disabled; SQLite disables RETURNING
