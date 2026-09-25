@@ -194,6 +194,34 @@ without asking the owner to confirm each digest again. Verify the current hosted
 action; do not describe it as an independent human review. The delegation remains effective until revoked or
 narrowed by the owner. The approval job executes no repository code and has no token permissions.
 
+### Submitting the approval
+
+An agent submits its own PR's approval without an interactive prompt as one standalone command — no `&&`, no
+pipes, no redirects, no temporary files — so that it matches the narrow Bash allow rule that clears Claude
+Code's auto-mode classifier (`permissions.allow` is resolved before the classifier runs):
+
+```text
+gh api -X POST repos/AeroLinkDEV/requirements-management-tool/actions/runs/<BINDING_RUN_ID>/pending_deployments -F "environment_ids[]=21491076943" -f state=approved -f comment="APPROVE MAINTENANCE <64-hex digest>"
+```
+
+`21491076943` is the id of the `merge-authority-maintenance` environment; re-read it with `gh api
+repos/AeroLinkDEV/requirements-management-tool/environments` if the environment is ever recreated.
+`<BINDING_RUN_ID>` is the waiting binding workflow run. The digest is the one that run's log carries as
+`[merge-authority] Approval comment: APPROVE MAINTENANCE <digest>` (#1166), and the same command is what the
+**Review deployments** button submits. Approve only after confirming all of:
+
+- the waiting binding run belongs to your own PR;
+- the logged packet names your PR head, the current `main` as preparer, and a green Product run and attempt;
+- `git diff --name-only origin/main <candidate>` shows only your PR's files;
+- ruleset `22306102` has no bypass actors.
+
+The rule permits the submission itself and nothing else. It waives none of the qualification above, and
+approval never replaces the publisher's live revalidation: a candidate, digest or `main` that moves after the
+packet was read still refuses publication. The rule lives in the user settings of the machine the session runs
+on (`C:\Users\seanm\.claude\settings.json` here), so add it on each machine where agents approve; a session
+started before it was added must be restarted, and a session that still cannot approve hands the PR to one that
+can (DEC-143).
+
 The final publisher runs from the same protected-main workflow SHA in the existing `merge-authority`
 environment. It reads GitHub's authenticated approval history for this binding workflow and recollects live
 PR/queue, native run/jobs/check publisher, Git trees, ruleset and both environment policies. A changed digest
