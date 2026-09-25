@@ -6,11 +6,18 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     /// <inheritdoc />
-    public partial class AddProblemReportResolutionAttestation : Migration
+    public partial class AddProblemReportsOnlyProjectSupport : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AddColumn<bool>(
+                name: "ReleasedWithoutReadiness",
+                table: "software_releases",
+                type: "boolean",
+                nullable: false,
+                defaultValue: false);
+
             migrationBuilder.AddColumn<string>(
                 name: "ResolutionAttestation",
                 table: "problem_reports",
@@ -29,6 +36,10 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropColumn(
+                name: "ReleasedWithoutReadiness",
+                table: "software_releases");
+
             migrationBuilder.DropColumn(
                 name: "ResolutionAttestation",
                 table: "problem_reports");

@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace AeroLink.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AeroLinkDbContext))]
-    [Migration("20260924234129_AddReleasedWithoutReadiness")]
-    partial class AddReleasedWithoutReadiness
+    [Migration("20260925072559_AddProblemReportsOnlyProjectSupport")]
+    partial class AddProblemReportsOnlyProjectSupport
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -5584,6 +5584,11 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsReleased")
                         .HasColumnType("boolean");
 
+                    b.Property<long?>("PickerInsertionOrdinal")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasAnnotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.None);
+
                     b.Property<Guid?>("PredecessorReleaseId")
                         .HasColumnType("uuid");
 
@@ -5614,7 +5619,14 @@ namespace AeroLink.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProjectId", "Version")
                         .IsUnique();
 
-                    b.ToTable("software_releases", (string)null);
+                    b.ToTable("software_releases", null, t =>
+                        {
+                            t.HasTrigger("aerolink_release_picker_alloc_ins");
+
+                            t.HasTrigger("aerolink_release_picker_immutable_upd");
+
+                            t.HasTrigger("aerolink_release_picker_supplied_ins");
+                        });
                 });
 
             modelBuilder.Entity("AeroLink.Domain.Releases.ChangeImpactDisposition", b =>
