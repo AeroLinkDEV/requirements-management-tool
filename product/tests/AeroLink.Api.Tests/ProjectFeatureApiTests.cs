@@ -120,7 +120,7 @@ public sealed class ProjectFeatureApiTests
         await BootstrapAsync(client);
         var engineer = $"pf.eng.{Guid.NewGuid():N}";
         var quality = $"pf.sqa.{Guid.NewGuid():N}";
-        Guid attestedId, verifiedProjectReportId;
+        Guid attestedId, verifiedProjectReportId, reportsOnlyProjectId;
         using (var scope = factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
@@ -145,6 +145,7 @@ public sealed class ProjectFeatureApiTests
                 return report;
             }
             attestedId = Verifying(reportsOnly.Id, "PR-00001").Id;
+            reportsOnlyProjectId = reportsOnly.Id;
             verifiedProjectReportId = Verifying(everything.Id, "PR-00002").Id;
             await db.SaveChangesAsync();
         }
@@ -156,6 +157,11 @@ public sealed class ProjectFeatureApiTests
         using (var login = await engineerClient.PostAsJsonAsync("/api/auth/login", new { userName = engineer, password = AeroLinkApiFactory.MemberPassword }))
             Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         await SecurityBoundaryTests.AuthorizeMutationsAsync(engineerClient);
+
+        // My Work names the statement, not a test result, as the way to SQA here.
+        var work = await engineerClient.GetFromJsonAsync<JsonElement>($"/api/my-work?projectId={reportsOnlyProjectId}");
+        Assert.Contains(work.GetProperty("tasks").EnumerateArray(), task => task.GetProperty("id").GetGuid() == attestedId
+            && task.GetProperty("problemReport").GetProperty("nextAction").GetString() == "Send to SQA on your verification statement");
 
         // Where Verification exists, a test result remains the only basis.
         using (var refused = await AttestAsync(engineerClient, verifiedProjectReportId, statement))

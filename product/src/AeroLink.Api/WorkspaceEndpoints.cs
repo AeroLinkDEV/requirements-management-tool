@@ -40,6 +40,8 @@ public static class WorkspaceEndpoints
     {
         var sccb = projectId is not null && await ProblemReportEndpoints.HasSccbOpeningAuthorityAsync(projectId.Value, actor, db, ct);
         var sqa = projectId is not null && await ProblemReportEndpoints.HasSqaClosureAuthorityAsync(projectId.Value, actor, db, identity, ct);
+        // Without Verification a report reaches SQA on an attested statement, not a test result (DEC-137).
+        var attests = projectId is not null && !(await ProjectFeatureService.EffectiveAsync(db, projectId.Value, ct)).HasFlag(ProjectFeature.Verification);
         var user = actor.UserName;
         var reports = await db.ProblemReports.AsNoTracking().Where(x => (projectId == null || x.ProjectId == projectId)
                 && ((x.ReportedBy == user && x.State == ProblemReportState.Draft)
@@ -65,7 +67,7 @@ public static class WorkspaceEndpoints
                 ProblemReportState.ReadyForSccb => ("SCCB decision", "Review at the SCCB"),
                 ProblemReportState.Open => ("Problem Report", "Investigate or start implementation"),
                 ProblemReportState.Implementing => ("Problem Report", "Record the correction and propose a resolution"),
-                ProblemReportState.Verifying => ("Problem Report", "Send to SQA on a passing result"),
+                ProblemReportState.Verifying => ("Problem Report", attests ? "Send to SQA on your verification statement" : "Send to SQA on a passing result"),
                 _ => ("SQA closure", "Independent SQA closure review"),
             };
             return (object)new
