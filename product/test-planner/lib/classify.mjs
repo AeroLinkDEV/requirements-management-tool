@@ -96,6 +96,23 @@ export function isLauncherPath(path) {
   return LAUNCHER_PATHS.some((pattern) => pattern.test(normalizePath(path)))
 }
 
+/**
+ * Paths the operator and recovery script contracts cannot observe (#1152 C3). Those suites exercise
+ * product/scripts against fixtures, and no script, module or suite reads client source, client tests,
+ * client public assets or the backend test projects. Backend source is not here: the scripts read the API
+ * Program.cs, settings and project file and the migrations folder. A change confined to these paths (plus
+ * documentation) skips the Windows script-contract job at readiness. The merge queue still classifies broad
+ * and runs it, so a missed dependency costs an ejection, never main. The guard in classify.test.mjs fails
+ * when a script starts naming one of these paths.
+ */
+const OPERATOR_INVISIBLE_PATHS = [/^product\/client\/(?:src|tests|public)\//i, /^product\/tests\//i]
+
+/** Whether a changed path can change what the operator and recovery script contracts observe. */
+export function isOperatorPath(path) {
+  const normalized = normalizePath(path)
+  return !isDocumentationPath(normalized) && !OPERATOR_INVISIBLE_PATHS.some((pattern) => pattern.test(normalized))
+}
+
 // The normal Fast lane defers the synthetic showcase seeder/upgrade/scenario maintenance tests to
 // authoritative Full/CI. Direct edits to those tests, their shared fixture, or the seeder they prove must
 // restore the complete Infrastructure suite locally rather than filtering the most relevant coverage.
@@ -171,6 +188,7 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       unclassified: false,
       broad: false,
       launchersOnly: false,
+      operator: false,
       fastFullInfrastructure: false,
     }
   }
@@ -185,6 +203,7 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       unclassified: false,
       broad: true,
       launchersOnly: false,
+      operator: true,
       fastFullInfrastructure: true,
     }
   }
@@ -206,6 +225,7 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       unclassified: false,
       broad: true,
       launchersOnly: false,
+      operator: true,
       fastFullInfrastructure: true,
     }
   }
@@ -224,6 +244,7 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       unclassified: false,
       broad: false,
       launchersOnly: true,
+      operator: true,
       fastFullInfrastructure: false,
     }
   }
@@ -238,6 +259,7 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
     unclassified: false,
     broad: false,
     launchersOnly: false,
+    operator: normalizedPaths.some((path) => isOperatorPath(path)),
     fastFullInfrastructure: needsFullFastInfrastructure(paths),
   }
 
@@ -255,6 +277,7 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
     result.unclassified = true
     result.broad = true
     result.launchersOnly = false
+    result.operator = true
     result.fastFullInfrastructure = true
     result.reason = 'Unclassified product change; running broad backend, client, browser and PostgreSQL validation rather than reporting a skipped pass.'
   }

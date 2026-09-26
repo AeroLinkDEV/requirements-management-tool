@@ -65,7 +65,8 @@ test('main quality gate enforcement is fail-safe and leaves cache warming active
   // domain/infrastructure jobs: backend-api, backend-core-domain, backend-core-infrastructure.
   assert.equal((workflow.match(/if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.docs_only != 'true' && needs\.changes\.outputs\.backend == 'true'/g) ?? []).length, 3)
   assert.match(workflow, /if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.docs_only != 'true' && needs\.changes\.outputs\.client == 'true'/)
-  assert.match(workflow, /script-contracts:[\s\S]*?if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.docs_only != 'true'/)
+  // #1152 C3: the operator contracts follow the classifier's `operator` output, and still honour the post-merge skip.
+  assert.match(workflow, /\n  script-contracts:\n(?: {4}.*\n)*? {4}if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.operator == 'true'\n/)
   assert.match(workflow, /postgresql-smoke:[\s\S]*?if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.postgresql == 'true'/)
   const warmer = workflow.slice(workflow.indexOf('  warm-chromium-cache:'), workflow.indexOf('  backend-api:'))
   assert.match(warmer, /if: github\.event_name == 'push'/)

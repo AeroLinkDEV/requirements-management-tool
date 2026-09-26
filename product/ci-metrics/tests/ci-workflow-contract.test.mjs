@@ -114,7 +114,7 @@ test('the actual aggregate shell requires the native operator owner except docum
     ...Object.fromEntries(envNames.map((name) => [name, ''])),
     BACKEND_API: 'success', BACKEND_CORE_DOMAIN: 'success', BACKEND_CORE_INFRASTRUCTURE: 'success',
     CLIENT: 'success', CONTRACTS: 'success', BROWSER: 'success', PRODUCTION: 'success', BROWSER_FULL: 'success',
-    POSTGRESQL: 'success', METRICS_TOOLING: 'success', DOCS_ONLY: 'false', LAUNCHERS_ONLY: 'false',
+    POSTGRESQL: 'success', METRICS_TOOLING: 'success', DOCS_ONLY: 'false', LAUNCHERS_ONLY: 'false', OPERATOR: 'true',
     POST_MERGE_SKIP: 'false', EVENT_NAME: 'pull_request', FULL_DIAGNOSTICS: 'false',
     GITHUB_STEP_SUMMARY: join(directory, 'summary.md').replaceAll('\\', '/'),
   }
@@ -127,7 +127,14 @@ test('the actual aggregate shell requires the native operator owner except docum
       assert.equal(child.status, 1, `non-documentation operator owner status ${JSON.stringify(status)} must fail: ${child.error ?? child.stderr}\n${child.stdout}`)
     }
     assert.equal(invoke({ CONTRACTS: 'success' }).status, 0, 'a successful operator owner must satisfy the aggregate')
-    assert.equal(invoke({ DOCS_ONLY: 'true', CONTRACTS: 'skipped' }).status, 0, 'documentation-only runs may skip the operator owner')
+    // #1152 C3: documentation, and changes confined to paths no script reads, publish operator=false.
+    assert.equal(invoke({ DOCS_ONLY: 'true', OPERATOR: 'false', CONTRACTS: 'skipped' }).status, 0, 'documentation-only runs may skip the operator owner')
+    assert.equal(invoke({ OPERATOR: 'false', CONTRACTS: 'skipped' }).status, 0, 'a change the operator contracts cannot observe may skip them')
+    // Only an explicit false exempts a run: a missing or unexpected output, even beside docs-only, fails closed.
+    for (const operator of ['', 'true', 'unknown', 'False']) {
+      assert.equal(invoke({ OPERATOR: operator, CONTRACTS: 'skipped' }).status, 1, `operator=${JSON.stringify(operator)} must require the owner`)
+    }
+    assert.equal(invoke({ DOCS_ONLY: 'true', OPERATOR: '', CONTRACTS: 'skipped' }).status, 1, 'docs-only without the operator output must not exempt the owner')
     assert.equal(invoke({ POST_MERGE_SKIP: 'true', CONTRACTS: 'skipped' }).status, 0, 'the modeled post-merge skip may omit the operator owner')
   } finally {
     rmSync(directory, { recursive: true, force: true })

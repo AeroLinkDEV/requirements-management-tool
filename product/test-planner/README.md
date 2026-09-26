@@ -20,6 +20,13 @@ matrix the Domain suite parses) is listed in `TEST_READ_DOCUMENTATION` and class
 documentation. A guard in `classify.test.mjs` scans every test source for documentation references and
 compares them with a reviewed table, so a new read fails until it is listed.
 
+The `operator` output selects the Windows operator and recovery script contracts in CI (#1152 C3). It is false
+only when every changed product path is client source, client tests, client public assets or a backend test
+project: paths no script, module or suite reads. Backend source stays in, because the scripts read the API
+`Program.cs`, settings, project file and migrations. A guard in `classify.test.mjs` fails when an operator
+script starts naming one of the excluded paths. The merge queue classifies broad and always runs the
+contracts. The local `-Mode Full` still runs them for every non-documentation change.
+
 ## Windows entry point
 
 From the repository root, double-click `TEST_AEROLINK_CHANGED.bat` or run the PowerShell entry point:

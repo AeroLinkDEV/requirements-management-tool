@@ -66,6 +66,7 @@ jobs:
       browser: ${{ steps.classify.outputs.browser }}
       postgresql: ${{ steps.classify.outputs.postgresql }}
       launchers_only: ${{ steps.classify.outputs.launchers_only }}
+      operator: ${{ steps.classify.outputs.operator }}
       planner_version: ${{ steps.classify.outputs.planner_version }}
       planner_hash: ${{ steps.classify.outputs.planner_hash }}
       planner_unknown_paths: ${{ steps.classify.outputs.planner_unknown_paths }}
@@ -861,14 +862,16 @@ jobs:
   # The native Windows operator job owns this family once. Node records metrics and
   # fingerprints evidence; the planner job must not repeat the same script executions.
   #
-  # Gated on the change not being documentation-only rather than on `backend`, which preserves exactly when
-  # these ran before: a client-only change still proves the backup, evidence, restore, migration-posture and
-  # remote-demo contracts, because those scripts are not client code and their coverage should not depend on
-  # how a diff happened to be classified.
+  # Gated on `operator` (#1152 C3): true unless every changed product path is one no script, module or suite
+  # can observe. Those are client source, client tests, client public assets and the backend test projects.
+  # So a change to backend source, a script, a launcher, the client's package files or build configuration,
+  # or anything unrecognised, still proves the backup, evidence, restore, migration-posture and remote-demo
+  # contracts. The merge queue classifies broad and always runs this job, so a dependency the planner's
+  # guard missed costs a queue ejection, never main.
   script-contracts:
     name: Operator and recovery script contracts
     needs: changes
-    if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.docs_only != 'true'
+    if: needs.changes.outputs.post_merge_skip != 'true' && needs.changes.outputs.operator == 'true'
     runs-on: windows-latest
     timeout-minutes: 15
     env:
@@ -1784,6 +1787,7 @@ jobs:
           METRICS_TOOLING: ${{ needs.metrics-tooling.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           LAUNCHERS_ONLY: ${{ needs.changes.outputs.launchers_only }}
+          OPERATOR: ${{ needs.changes.outputs.operator }}
           EVENT_NAME: ${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}
           PLANNER_VERSION: ${{ needs.changes.outputs.planner_version }}
           PLANNER_HASH: ${{ needs.changes.outputs.planner_hash }}
@@ -1855,12 +1859,13 @@ jobs:
             exit 1
           fi
 
-          # Operator contracts are mandatory for every non-documentation product run. A conditional owner that
+          # Operator contracts are mandatory for every run whose change they can observe. A conditional owner that
           # silently skipped cannot satisfy the aggregate merely because no other job failed. Trusted post-merge
-          # provenance deliberately skips the redundant product retest, and docs-only runs retain their layout
-          # proof in `changes`; those are the only states where this family is allowed not to run.
-          if [ "$POST_MERGE_SKIP" != "true" ] && [ "$DOCS_ONLY" != "true" ] && [ "$CONTRACTS" != "success" ]; then
-            echo "::error::A non-documentation run must execute the operator and recovery script contracts."
+          # provenance deliberately skips the redundant product retest; docs-only runs retain their layout proof in
+          # `changes`; and a change confined to paths no script can observe has `operator` false (#1152 C3). Those
+          # are the only states where this family is allowed not to run. Only an explicit false permits it.
+          if [ "$POST_MERGE_SKIP" != "true" ] && [ "$OPERATOR" != "false" ] && [ "$CONTRACTS" != "success" ]; then
+            echo "::error::A run whose change the operator and recovery script contracts can observe must execute them."
             exit 1
           fi
 
@@ -1957,7 +1962,7 @@ jobs:
           if [ "${{ needs.changes.outputs.post_merge_skip }}" != "true" ]; then
             if [ "${{ needs.changes.outputs.backend }}" = "true" ]; then needs="$needs,backend-api,backend-core-domain,backend-core-infrastructure"; fi
             if [ "${{ needs.changes.outputs.client }}" = "true" ]; then needs="$needs,client"; fi
-            if [ "${{ needs.changes.outputs.docs_only }}" != "true" ]; then needs="$needs,script-contracts"; fi
+            if [ "${{ needs.changes.outputs.operator }}" = "true" ]; then needs="$needs,script-contracts"; fi
           fi
           effective_event="${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}"
           if [ "${{ needs.changes.outputs.browser }}" = "true" ]; then
