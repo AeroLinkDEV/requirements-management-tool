@@ -160,6 +160,28 @@ test('every surface meets WCAG 2.2 AA contrast in both densities', async ({ page
   expect(pairs, `WCAG 2.2 AA contrast failures, ${pairs.length} distinct colour pair(s):\n  ${pairs.join('\n  ')}`).toEqual([])
 })
 
+// The full-page state view (not found, project ladder loading or unavailable) appears only briefly on a healthy
+// surface, so the audit above caught its #6a778b explanation line only when a slow load held it on screen: 4.19:1
+// on #f3f6f9, twice in queue candidates in one week. The not-found route renders the same view on demand.
+test('the full-page state view meets WCAG body-text contrast in both densities', async ({ page, request }) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(request)
+  await login(page, 'admin', { openProject: false })
+  await selectProgram(page, 'Flight Management System Live Program')
+  const root = new URL(page.url()).pathname.replace(/\/[^/]*$/, '')
+
+  for (const density of ['comfortable', 'compact'] as const) {
+    await page.evaluate(value => localStorage.setItem('aerolink-density', value), density)
+    await page.goto(new URL(`${root}/no-such-workspace-surface`, page.url()).toString(), { waitUntil: 'load' })
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.density), { timeout: 10_000 })
+      .toBe(density)
+    await expect(page.locator('main.artifactState p')).toBeVisible({ timeout: 15_000 })
+    const report = await page.evaluate(auditContrast)
+    expect(report.failures, `${density} state view`).toEqual([])
+  }
+})
+
 test('Change Request author role metadata meets WCAG body-text contrast', async ({ page, request }) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1440, height: 900 })

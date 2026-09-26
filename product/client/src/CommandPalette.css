@@ -40,7 +40,7 @@
 .artifactState > div { max-width: 480px; text-align: center; }
 .artifactState span { width: 64px; height: 64px; display: grid; place-items: center; margin: auto; border-radius: 16px; background: #e7edf5; color: #53657c; font-size: 28px; }
 .artifactState h1 { margin: 18px 0 8px; }
-.artifactState p { color: #6a778b; line-height: 1.6; }
+.artifactState p { color: #53657c; line-height: 1.6; }
 .artifactState button, .artifactActions button { border: 1px solid #cbd5e2; border-radius: 8px; background: #fff; padding: 10px 14px; }
 .artifactRecord { max-width: 1280px !important; margin: auto; padding: 35px 46px; }
 .artifactRecord > header { display: flex; justify-content: space-between; gap: 25px; }

@@ -163,6 +163,10 @@ test('compact density fits materially more on the screen than comfortable', asyn
       // stopped growing, or the two densities are measured at different points in their loading.
       await surfacePainted(page)
       if (path === '/system-verification') await verificationLandingRendered(page)
+      // The requirements surface paints its header before its rows arrive, and a pause in that load passes
+      // layoutSettled: CI measured `comfortable 366px, compact 1140px` twice in one week. Wait for a row, as
+      // the visible-rows test below does.
+      if (path === '/systems/requirements') await page.locator('.reqTable article').first().waitFor()
       await layoutSettled(page)
       const measure = () => page.evaluate(() => {
         const main = document.querySelector('.workspaceView > main') as HTMLElement | null
