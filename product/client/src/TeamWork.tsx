@@ -119,6 +119,7 @@ const holderBasisLabels: Record<TeamWorkHolderBasis, string> = {
 const originLabels: Record<string, string> = {
   changeRequest: "source change request", problemReport: "source problem report",
   caseChange: "source case change", caseAssessment: "source case assessment", caseReview: "source case review",
+  ownCase: "raised on its own case",
 };
 const guidPattern = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const guidExpression = new RegExp(`^${guidPattern}$`, "i");

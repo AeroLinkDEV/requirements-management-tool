@@ -38,23 +38,31 @@ public sealed class StandaloneVerificationApiTests
         db.AddRange(program, project, release, new ProjectFeatureSet(project.Id, features, "test.setup", now));
         await db.SaveChangesAsync();
 
-        var report = new ProblemReport(project.Id, "PR-00001", "Bench rig drops frames",
-            "Frames are lost under load.", "Analysis", "reporter", now, targetReleaseId: release.Id);
+        // A project without Problem Reports cannot hold one: the save boundary refuses it.
+        var report = features.HasFlag(ProjectFeature.ProblemReports)
+            ? new ProblemReport(project.Id, "PR-00001", "Bench rig drops frames",
+                "Frames are lost under load.", "Analysis", "reporter", now, targetReleaseId: release.Id)
+            : null;
         var baseline = new CandidateBaseline("SW-00.01", 0, project.Id, release.Id, null, "Standalone baseline", "cm", now);
-        db.AddRange(report, baseline);
+        if (report is not null) db.Add(report);
+        db.Add(baseline);
         UserAccount? configurationManager = null;
-        foreach (var (user, role) in new[] { ("standalone.cm", ProgramRole.ConfigurationManager) })
+        foreach (var (user, role) in new[]
+                 {
+                     ("standalone.cm", ProgramRole.ConfigurationManager),
+                     ("standalone.engineer", ProgramRole.TestEngineer),
+                 })
         {
             var account = new UserAccount(user, user, $"{user}@example.test",
                 IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             db.Add(account);
             db.Add(new ProgramMembership(account.Id, program.Id, role, "test.setup", now));
-            configurationManager = account;
+            if (role == ProgramRole.ConfigurationManager) configurationManager = account;
         }
         db.Add(new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager,
             configurationManager!.Id, "test.setup", now));
         await db.SaveChangesAsync();
-        return new(project.Id, release.Id, baseline.Id, report.Id);
+        return new(project.Id, release.Id, baseline.Id, report?.Id ?? Guid.Empty);
     }
 
     /// <summary>An approved System package raised from the Problem Report, proposing one procedure.</summary>
@@ -91,7 +99,7 @@ public sealed class StandaloneVerificationApiTests
     {
         using var response = await client.PostAsJsonAsync(path, body);
         var text = await response.Content.ReadAsStringAsync();
-        Assert.True(response.StatusCode == HttpStatusCode.OK, $"{path}: {(int)response.StatusCode} {text}");
+        Assert.True(response.IsSuccessStatusCode, $"{path}: {(int)response.StatusCode} {text}");
         return JsonSerializer.Deserialize<JsonElement>(text);
     }
 
@@ -181,5 +189,128 @@ public sealed class StandaloneVerificationApiTests
         using var freeze = await client.PostAsJsonAsync($"/api/baselines/{fixture.BaselineId}/freeze", new { });
         Assert.Equal(HttpStatusCode.BadRequest, freeze.StatusCode);
         Assert.Contains("At least one approved change request or external package", await freeze.Content.ReadAsStringAsync());
+
+        // A package raised on its own case is refused whatever the entry point.
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        db.Add(TestChangeReview.OnOwnCase(fixture.ProjectId, fixture.ReleaseId, SystemProcedure,
+            DateTimeOffset.UtcNow, "SYSTPCR-000002", authorId: "engineer"));
+        var ownCase = await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
+        Assert.Contains("not on its own case", ownCase.Message);
+    }
+
+    private static readonly VerificationArtifactKey SystemProcedure =
+        new(VerificationDiscipline.System, VerificationArtifactKind.Procedure);
+
+    private static object OwnCaseRequest(string baseNumber) => new
+    {
+        discipline = "System",
+        changeRequestIds = Array.Empty<Guid>(),
+        title = "Bench frame capture",
+        problem = "The rig loses frames under load.",
+        analysis = "Nothing exercises it.",
+        solution = "Add a procedure.",
+        artifactChanges = new[]
+        {
+            new
+            {
+                baseNumber, revision = 0, level = "System", kind = "Introduce", title = "Frame capture under load",
+                objective = "Show the rig keeps every frame at load.", preconditions = "Rig powered.",
+                steps = "1. Apply load. 2. Count frames.", expectedResult = "No frame is lost.",
+                rationale = "The rig loses frames.", parentKind = "Standalone",
+            },
+        },
+    };
+
+    [Fact]
+    public async Task Test_work_is_raised_on_its_own_case_where_there_is_nothing_else_to_raise_it_from()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        // Neither Requirements nor Problem Reports: no change request or report exists to raise work from.
+        var fixture = await SeedAsync(factory, ProjectFeature.Verification | ProjectFeature.Release | ProjectFeature.TeamWork);
+        await MemberSession.SignInAsync(client, "standalone.engineer");
+
+        var created = await PostOkAsync(client, $"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            OwnCaseRequest("SYSTP-000001"));
+        var id = created.GetProperty("id").GetGuid();
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).SingleAsync(x => x.Id == id);
+            Assert.Equal(TestChangeReviewOriginKind.OwnCase, review.OriginKind);
+            Assert.Equal(review.Id, review.OriginReferenceId);
+            Assert.Null(review.ChangeRequestId);
+            Assert.Null(review.OriginatingProblemReportId);
+            Assert.Equal(VerificationProcedureParentKind.Standalone, Assert.Single(review.ProcedureChanges).ParentKind);
+        }
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/test-change-reviews/{id}/procedure-changes");
+        Assert.Equal("Own case", detail.GetProperty("originDisplayLabel").GetString());
+
+        // An authorless package still reaches Team Work, named by its origin.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            db.Add(TestChangeReview.OnOwnCase(fixture.ProjectId, fixture.ReleaseId, SystemProcedure,
+                DateTimeOffset.UtcNow, "SYSTPCR-000099"));
+            await db.SaveChangesAsync();
+        }
+        using (var board = await client.GetAsync($"/api/team-work?projectId={fixture.ProjectId}"))
+        {
+            var text = await board.Content.ReadAsStringAsync();
+            Assert.True(board.StatusCode == HttpStatusCode.OK, text);
+            Assert.Contains("\"raisedByKind\":\"ownCase\"", text);
+        }
+
+        // Its next revision keeps the one origin, even once Requirements is switched on ...
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            var review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).SingleAsync(x => x.Id == id);
+            review.Submit("standalone.engineer", "test.lead", true, now);
+            review.Approve("test.lead", "Reviewed.", now);
+            (await db.ProjectFeatureSets.SingleAsync(x => x.ProjectId == fixture.ProjectId))
+                .Change(ProjectFeatures.All, "test.setup", now);
+            await db.SaveChangesAsync();
+
+            // The approved package's decision carries into the revision it produces ...
+            var procedure = new TestProcedure(fixture.ProjectId, "SYSTP-000001", "Frame capture", "engineer", now,
+                TestProcedureLevel.System);
+            db.TestProcedures.Add(procedure);
+            db.TestProcedureRevisions.Add(new TestProcedureRevision(procedure.Id, 0, "Objective", "", "Steps",
+                "Expected", TestProcedureState.Draft, "engineer", now, sourceTestChangeRequestId: id,
+                parentKind: VerificationProcedureParentKind.Standalone));
+            await db.SaveChangesAsync();
+            // ... but only for the artifact that package decided.
+            var other = new TestProcedure(fixture.ProjectId, "SYSTP-000004", "Other", "engineer", now,
+                TestProcedureLevel.System);
+            db.TestProcedures.Add(other);
+            db.TestProcedureRevisions.Add(new TestProcedureRevision(other.Id, 0, "Objective", "", "Steps",
+                "Expected", TestProcedureState.Draft, "engineer", now, sourceTestChangeRequestId: id,
+                parentKind: VerificationProcedureParentKind.Standalone));
+            Assert.Contains("SYSTP-000004.00 cannot be Standalone",
+                (await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync())).Message);
+            db.ChangeTracker.Clear();
+            review = await db.TestChangeReviews.Include(x => x.ProcedureChanges).SingleAsync(x => x.Id == id);
+
+            var next = review.StartNextRevision("standalone.engineer", now, targetReleaseIsReleased: false);
+            db.Add(next);
+            await db.SaveChangesAsync();
+            Assert.Equal(TestChangeReviewOriginKind.OwnCase, next.OriginKind);
+            Assert.Equal(id, next.OriginReferenceId);
+
+            // ... while a "later revision" that names no real first revision is refused.
+            db.Add(TestChangeReview.OnOwnCase(fixture.ProjectId, fixture.ReleaseId, SystemProcedure,
+                now, "SYSTPCR-000098", 1, "standalone.engineer", Guid.NewGuid()));
+            var forged = await Assert.ThrowsAsync<DomainException>(() => db.SaveChangesAsync());
+            Assert.Contains("must name that package's first revision", forged.Message);
+        }
+
+        // With Requirements on, the endpoint again asks what the package answers for.
+        using var refused = await client.PostAsJsonAsync($"/api/releases/{fixture.ReleaseId}/test-change-requests",
+            OwnCaseRequest("SYSTP-000002"));
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("test_change_request_needs_a_driver", await refused.Content.ReadAsStringAsync());
     }
 }

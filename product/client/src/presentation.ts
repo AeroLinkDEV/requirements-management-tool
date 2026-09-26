@@ -311,6 +311,7 @@ export const verificationOriginLabel = (originKind?: string) => {
     case 'ProblemReport': return 'Problem Report'
     case 'CaseChange': return 'Case change'
     case 'CaseAssessment': return 'Case assessment'
+    case 'OwnCase': return 'Own case'
     default: return 'Origin'
   }
 }

@@ -95,10 +95,14 @@ that is off. Navigation, quick navigation, deep links and Command Center follow 
 Verification without Requirements ("standalone verification", DEC-144) is being delivered in slices on #1188. The
 server accepts the combination. A Case or System Procedure in such a project is Standalone: it names no parents, carries
 no Derived rationale and creates no requirement coverage. The save boundary refuses a new Standalone artifact in a
-project that uses Requirements, except as a revision of one that is already Standalone. A candidate baseline in a
-project without Requirements freezes with no change requests, records an empty requirement manifest, and then
-materializes approved verification work as usual. The browser still refuses the combination until standalone
-authoring lands.
+project that uses Requirements. It still accepts a revision of one that is already Standalone, and continues a
+Standalone decision made before Requirements was switched on: the next revision of the package that proposed it, and
+the revision its approved package materializes. In such a project, a Case or System test change request may be raised
+on its own case (origin `OwnCase`) when there is no change request or Problem Report to raise it from. A new one is
+refused once the project uses Requirements; its later revisions keep the first revision as their one origin. A
+candidate baseline in a project without Requirements freezes with no change requests, records an empty requirement
+manifest, and then materializes approved verification work as usual. The browser still refuses the combination
+until standalone authoring lands.
 
 Project entry uses stable identity and opens the actual visual build-lineage selector, including for a single
 build. Explicit build links retain their exact authorized target. Repository setup can remain Pending and be

@@ -650,6 +650,7 @@ public sealed class TeamWorkProjectionService(AeroLinkDbContext db, IProjectLadd
         TestChangeReviewOriginKind.CaseChange => "caseChange",
         TestChangeReviewOriginKind.CaseAssessment => "caseAssessment",
         TestChangeReviewOriginKind.CaseReview => "caseReview",
+        TestChangeReviewOriginKind.OwnCase => "ownCase",
         _ => throw new DomainException($"The test-change-review origin kind '{originKind}' is not supported by Team Work."),
     };
 
