@@ -358,12 +358,18 @@ try {
     # ---------------------------------------------------------------------------------------------------------
     # T6 (#1043): the deadline terminates the whole attempt and reports DeadlineExceeded, never success.
     # ---------------------------------------------------------------------------------------------------------
+    # The deadline must outlast the delegate's own startup (a fresh Windows PowerShell importing three modules),
+    # so its worker exists before the attempt is cut short. At 8 s a slow runner reached the deadline first: no
+    # worker.pid was written, and Get-Process -Id $null ended the whole suite (run 36203970770). The delegate
+    # hangs for 600 s, so the attempt still ends only by its deadline.
     $clock = [Diagnostics.Stopwatch]::StartNew()
-    $t6 = Invoke-TestChain -Name 't6' -Faults @{ Hang = $true; WorkerSeconds = 300 } -Deadline 8
+    $t6 = Invoke-TestChain -Name 't6' -Faults @{ Hang = $true; WorkerSeconds = 300 } -Deadline 30
     $clock.Stop()
     Check ($t6.Decision -eq 'DeadlineExceeded' -and $t6.ExitCode -eq 23) "T6: an over-budget attempt is DeadlineExceeded/23 (got $($t6.Decision))."
-    Check ($clock.Elapsed.TotalSeconds -lt 60) "T6: the deadline is bounded ($([int]$clock.Elapsed.TotalSeconds)s)."
-    Check ([bool]$t6.Outcome.cleanup.transitionContainmentProven -and (Get-Process -Id $t6.WorkerPid -ErrorAction SilentlyContinue) -eq $null) 'T6: the hung delegate and its worker are collected.'
+    Check ($clock.Elapsed.TotalSeconds -lt 90) "T6: the deadline is bounded ($([int]$clock.Elapsed.TotalSeconds)s)."
+    $t6HasWorker = [bool]$t6.PSObject.Properties['WorkerPid']
+    Check $t6HasWorker 'T6: fixture sanity: the delegate started its worker before the deadline.'
+    Check ([bool]$t6.Outcome.cleanup.transitionContainmentProven -and $t6HasWorker -and (Get-Process -Id $t6.WorkerPid -ErrorAction SilentlyContinue) -eq $null) 'T6: the hung delegate and its worker are collected.'
 
     # ---------------------------------------------------------------------------------------------------------
     # T7 (X6, X7): a role that never becomes ready is RestorationFailed; its staging job is observed empty.
