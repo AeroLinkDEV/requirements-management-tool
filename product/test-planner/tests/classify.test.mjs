@@ -598,5 +598,9 @@ test('no operator script reads a path the classifier says the operator contracts
   for (const line of literalCalls) assert.match(line, /'-DryRun'/, line.trim())
   // The only non-literal call is Invoke-PlanFrom forwarding its own arguments.
   assert.deepEqual(calls.filter((line) => !line.includes('@(')).map((line) => line.trim()), ['try { return Invoke-Plan $Arguments }'])
+  // The stubs that keep real builds out of CI script contracts are load-bearing for OPERATOR_INVISIBLE_PATHS:
+  // the Postgres runner's contract never runs a test project, and the production-transition contract runs
+  // Start-AeroLinkProduction without building client source (#1179 review).
   assert.match(readFileSync(join(repoRoot, 'product/scripts/Test-ProjectSetupPostgres.Tests.ps1'), 'utf8'), /^function dotnet \{/m)
+  assert.match(readFileSync(join(repoRoot, 'product/scripts/AeroLinkProductionTransition.Tests.ps1'), 'utf8'), /^function npm\.cmd \{/m)
 })
