@@ -2,6 +2,7 @@ using AeroLink.Domain.Common;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Traceability;
 using AeroLink.Domain.Requirements;
@@ -1441,7 +1442,8 @@ public static class VerificationEndpoints
             }));
         });
 
-        app.MapGet("/api/verification-coverage", async (Guid projectId, Guid? baselineId, Guid? buildId, HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        app.MapGet("/api/verification-coverage", async (Guid projectId, Guid? baselineId, Guid? buildId, HttpContext http, AeroLinkDbContext db,
+            IProjectLadderPolicyResolver policyResolver, CancellationToken ct) =>
         {
             if (!await http.HasProjectAccessAsync(db, projectId, ct)) return Results.Forbid();
             if (buildId is not null)
@@ -1503,10 +1505,38 @@ public static class VerificationEndpoints
                 var covered = disposition == RequirementCoverageState.Covered;
                 return new { req.Id, req.revisionId, req.displayNumber, req.Statement, disposition, covered, verified = coveredBy.Any(x => x.CoverageState == "Confirmed" && x.latestOutcome == "Pass"), coveredBy };
             }).ToList();
+            // DEC-144: without Requirements there is nothing to cover, so each case's execution status is
+            // reported instead. The requirement fields stay, and are empty.
+            var requirementsInUse = (await ProjectFeatureService.EffectiveAsync(db, projectId, ct))
+                .HasFlag(ProjectFeature.Requirements);
+            object? executionStatus = null;
+            if (!requirementsInUse)
+            {
+                var releaseId = await db.CandidateBaselines.AsNoTracking().Where(x => x.Id == baselineId)
+                    .Select(x => x.ReleaseId).SingleAsync(ct);
+                var cases = await CaseExecutionStatusProjection.ForBaselineAsync(db, baselineId.Value, releaseId,
+                    buildId, await policyResolver.ResolveAsync(projectId, ct), ct);
+                executionStatus = new
+                {
+                    total = cases.Count,
+                    passed = cases.Count(x => x.Status == CaseExecutionStatus.Passed),
+                    failed = cases.Count(x => x.Status == CaseExecutionStatus.Failed),
+                    blocked = cases.Count(x => x.Status == CaseExecutionStatus.Blocked),
+                    notRun = cases.Count(x => x.Status == CaseExecutionStatus.NotRun),
+                    items = cases.Select(x => new
+                    {
+                        x.ArtifactId, x.RevisionId, x.DisplayNumber, x.Title, level = x.Level.ToString(),
+                        artifactKind = x.ArtifactKind.ToString(), status = x.Status.ToString(),
+                        x.LatestExecutionId, x.ExecutedAt,
+                    }),
+                };
+            }
             return Results.Ok(new
             {
                 baselineId,
                 buildId,
+                requirementsInUse,
+                executionStatus,
                 total = items.Count,
                 covered = items.Count(x => x.disposition == RequirementCoverageState.Covered),
                 suspect = items.Count(x => x.disposition == RequirementCoverageState.Suspect),

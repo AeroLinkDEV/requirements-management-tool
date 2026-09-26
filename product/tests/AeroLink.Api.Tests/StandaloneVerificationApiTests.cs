@@ -313,4 +313,92 @@ public sealed class StandaloneVerificationApiTests
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.Contains("test_change_request_needs_a_driver", await refused.Content.ReadAsStringAsync());
     }
+
+    [Fact]
+    public async Task Without_requirements_coverage_and_readiness_show_each_cases_execution_status()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory, WithoutRequirements);
+        var introduce = Package(fixture, "SYSTPCR-000001", "SYSTP-000001", 0,
+            TestProcedureChangeKind.Introduce, VerificationProcedureParentKind.Standalone);
+        await SaveAsync(factory, introduce);
+        await MemberSession.SignInAsync(client, "standalone.cm");
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/freeze", new { });
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/materialize-requirements", new { });
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/test-change-requests",
+            new { testChangeRequestId = introduce.Id });
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
+
+        async Task<JsonElement> CoverageAsync()
+        {
+            var coverage = await client.GetFromJsonAsync<JsonElement>(
+                $"/api/verification-coverage?projectId={fixture.ProjectId}&baselineId={fixture.BaselineId}");
+            Assert.False(coverage.GetProperty("requirementsInUse").GetBoolean());
+            Assert.Equal(0, coverage.GetProperty("total").GetInt32());
+            return coverage.GetProperty("executionStatus");
+        }
+        var notRun = await CoverageAsync();
+        Assert.Equal(1, notRun.GetProperty("total").GetInt32());
+        Assert.Equal(1, notRun.GetProperty("notRun").GetInt32());
+        var item = Assert.Single(notRun.GetProperty("items").EnumerateArray());
+        Assert.Equal("SYSTP-000001.00", item.GetProperty("displayNumber").GetString());
+        Assert.Equal("NotRun", item.GetProperty("status").GetString());
+
+        Guid campaignId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var campaign = new Domain.Releases.ReleaseCampaign(fixture.ProjectId, fixture.ReleaseId, fixture.BaselineId,
+                "Bench 1.0", "standalone.cm", DateTimeOffset.UtcNow);
+            db.Add(campaign);
+            await db.SaveChangesAsync();
+            campaignId = campaign.Id;
+            var readiness = await scope.ServiceProvider.GetRequiredService<ReleaseReadinessService>()
+                .CalculateAsync(campaignId, CancellationToken.None);
+            var gates = readiness.Gates.ToDictionary(x => x.Code);
+            foreach (var code in new[] { "change_control", "impact_disposition", "traceability", "verification_impact", "code_traceability" })
+            {
+                Assert.Equal("NotApplicable", gates[code].EvaluationState);
+                Assert.True(gates[code].Complete);
+                Assert.Contains("does not use Requirements", gates[code].Detail);
+            }
+            Assert.Equal("Baseline frozen and materialized", gates["baseline"].Name);
+            Assert.True(gates["baseline"].Complete);
+            Assert.Contains("no requirement specification is owed", gates["documents"].Detail);
+            Assert.Equal(0, gates["documents"].Completed);
+            Assert.True(gates["documents"].Total > 0);
+            Assert.Equal("Every case has passed", gates["coverage"].Name);
+            Assert.False(gates["coverage"].Complete);
+            Assert.Contains("0 passed, 0 failed, 0 blocked, 1 not run", gates["coverage"].Detail);
+
+            // A passing result for the build moves the case, and the gate, to Passed.
+            var revision = await db.TestProcedureRevisions.SingleAsync();
+            db.Add(new TestExecution(fixture.ProjectId, revision.Id, null, null, TestOutcome.Pass, "standalone.cm",
+                "Bench rig A", "Every frame was kept.", "bench-log-001", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                fixture.ReleaseId));
+            await db.SaveChangesAsync();
+            readiness = await scope.ServiceProvider.GetRequiredService<ReleaseReadinessService>()
+                .CalculateAsync(campaignId, CancellationToken.None);
+            var coverageGate = readiness.Gates.Single(x => x.Code == "coverage");
+            Assert.True(coverageGate.Complete);
+            Assert.Equal(1, coverageGate.Completed);
+        }
+        var passed = await CoverageAsync();
+        Assert.Equal(1, passed.GetProperty("passed").GetInt32());
+        Assert.Equal("Passed", Assert.Single(passed.GetProperty("items").EnumerateArray()).GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task With_requirements_coverage_reports_no_execution_status()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory, ProjectFeatures.All);
+        await MemberSession.SignInAsync(client, "standalone.cm");
+        var coverage = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/verification-coverage?projectId={fixture.ProjectId}&baselineId={fixture.BaselineId}");
+        Assert.True(coverage.GetProperty("requirementsInUse").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, coverage.GetProperty("executionStatus").ValueKind);
+    }
 }
