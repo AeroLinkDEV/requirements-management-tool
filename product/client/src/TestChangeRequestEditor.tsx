@@ -8,6 +8,7 @@ import ControlledProcedureEditor from './ControlledProcedureEditor'
 import { apiRequest, operationError } from './apiClient'
 import type { TestDiscipline } from './TestResultsWorkspace'
 import { isVerificationProcedureKind, testChangeRequestAcronym, verificationArtifactNoun, verificationArtifactWord } from './presentation'
+import { useRequirementsInUse } from './projectFeatures'
 import './ChangeRequestEditor.css'
 
 /**
@@ -116,6 +117,10 @@ export default function TestChangeRequestEditor({
   const acronym = testChangeRequestAcronym(level, procedurePackage ? 'Procedure' : 'Case')
   const artifactWord = verificationArtifactWord(level, procedurePackage ? 'Procedure' : 'Case')
   const artifactNoun = verificationArtifactNoun(level, procedurePackage ? 'Procedure' : 'Case')
+  // DEC-144: without Requirements there is no change request to answer for, so a Case or System package is
+  // raised on its own case and every proposal in it is Standalone. A Procedure package still needs its Case.
+  const requirementsInUse = useRequirementsInUse(api, projectId)
+  const ownCase = requirementsInUse === false && !procedurePackage
 
   const [title, setTitle] = useState('')
   const [problemRich, setProblemRich] = useState(fromPlainText(''))
@@ -193,7 +198,9 @@ export default function TestChangeRequestEditor({
 
   // A package must say what concluded the work was required, and either kind of driver says it: an approved
   // change at this package's own level, or a Problem Report (DEC-113).
-  const hasDriver = procedurePackage ? selected.length === 1 : selected.length > 0 || problemReportIds.length > 0
+  const hasDriver = procedurePackage
+    ? selected.length === 1
+    : ownCase || selected.length > 0 || problemReportIds.length > 0
   const caseComplete = useMemo(() =>
     title.trim().length > 0
     && toPlainText(problemRich).trim().length > 0
@@ -247,6 +254,7 @@ export default function TestChangeRequestEditor({
             baseNumber: draft.baseNumber.trim(), revision: draft.revision, level: levelFor(discipline), kind: draft.kind,
             title: draft.title.trim(), objective: draft.objective.trim(), preconditions: draft.preconditions.trim(),
             steps: draft.steps.trim(), expectedResult: draft.expectedResult.trim(), rationale: draft.rationale.trim(),
+            ...(ownCase && draft.kind !== 'Retire' ? { parentKind: 'Standalone' } : {}),
           })),
         }
       const result = await apiRequest<{ id: string; displayNumber: string }>(
@@ -336,7 +344,13 @@ export default function TestChangeRequestEditor({
               onChange={setSolutionRich} placeholder="What controlled outcome is proposed?" />
           </div>
 
-          <fieldset className="tcrSourceChoices">
+          {ownCase && (
+            <p className="tcrOwnCase" role="note">
+              This project does not use Requirements, so this package is raised on its own case and each {artifactWord} it
+              proposes is Standalone: it verifies its own objective.
+            </p>
+          )}
+          {!ownCase && <fieldset className="tcrSourceChoices">
             <legend>{procedurePackage ? `Eligible ${label} Case origins for this Procedure package` : `Approved ${label} changes this package answers for`}</legend>
             {choices.length === 0
               ? <p className="drawerEmpty">
@@ -351,7 +365,7 @@ export default function TestChangeRequestEditor({
                     {!choice.selectable && choice.reason && <small>{choice.reason}</small>}</span>
                 </label>
               ))}
-          </fieldset>
+          </fieldset>}
 
           <InheritedProblemReports api={api} projectId={projectId} releaseId={releaseId}
             sources={choices.filter(choice => selected.includes(choice.sourceId)).flatMap<ProblemReportSource>(choice =>

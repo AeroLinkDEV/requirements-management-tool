@@ -101,8 +101,9 @@ the revision its approved package materializes. In such a project, a Case or Sys
 on its own case (origin `OwnCase`) when there is no change request or Problem Report to raise it from. A new one is
 refused once the project uses Requirements; its later revisions keep the first revision as their one origin. A
 candidate baseline in a project without Requirements freezes with no change requests, records an empty requirement
-manifest, and then materializes approved verification work as usual. The browser still refuses the combination
-until standalone authoring lands.
+manifest, and then materializes approved verification work as usual. In the browser, setup and Project
+Configuration → Features accept the combination; the test change request editor raises a Case or System package on
+its own case, and each proposal it or the package page writes is Standalone.
 
 Project entry uses stable identity and opens the actual visual build-lineage selector, including for a single
 build. Explicit build links retain their exact authorized target. Repository setup can remain Pending and be

@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react'
+import { apiRequest } from './apiClient'
 import type { Discipline, View } from './routing'
 
 /** The switchable modules of a project (#1113). Command Center and My Work are always present. */
@@ -62,11 +64,30 @@ export const FEATURE_DESCRIPTIONS: Record<ProjectFeature, string> = {
   Release: 'Release readiness, release campaigns and configuration baselines.',
 }
 
-/** Mirrors the server rule (DEC-136) so a page explains a refusal before it is sent; the server still decides. */
+/**
+ * Mirrors the server rule (DEC-136, DEC-144) so a page explains a refusal before it is sent; the server still
+ * decides. Verification may stand without Requirements: its cases are then standalone.
+ */
 export function featureDependencyNote(enabled: ReadonlySet<ProjectFeature>): string | null {
   if (enabled.has('Code') && !enabled.has('Requirements')) return 'Code needs Requirements: code is traced to the requirements it implements.'
-  if (enabled.has('Verification') && !enabled.has('Requirements')) return 'Verification needs Requirements until standalone verification is available.'
   return null
+}
+
+/**
+ * Whether a project uses Requirements, for pages that author verification (DEC-144). Null until known. An
+ * unreadable answer is "yes", the default for a project with no stored set; the server still decides.
+ */
+export function useRequirementsInUse(api: string, projectId: string): boolean | null {
+  const [inUse, setInUse] = useState<boolean | null>(null)
+  useEffect(() => {
+    let current = true
+    setInUse(null)
+    apiRequest<ProjectFeatureProjection>(`${api}/api/projects/${projectId}/features`)
+      .then(next => { if (current) setInUse(!Array.isArray(next?.enabled) || next.enabled.includes('Requirements')) })
+      .catch(() => { if (current) setInUse(true) })
+    return () => { current = false }
+  }, [api, projectId])
+  return inUse
 }
 
 /**
