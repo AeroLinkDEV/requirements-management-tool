@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,20 +14,6 @@ const backupContract = readFileSync(backupContractPath, 'utf8')
 const backupVerifier = readFileSync(join(repoRoot, 'product/scripts/Verify-AeroLinkBackup.ps1'), 'utf8')
 const ownedProcessProject = join(repoRoot, 'product/test-planner/tools/OwnedProcess/OwnedProcess.csproj')
 const ownedProcessSource = readFileSync(join(repoRoot, 'product/test-planner/tools/OwnedProcess/Program.cs'), 'utf8')
-
-test('wrapper exposes bounded non-authoritative timing and CI execution accounting', () => {
-  assert.match(wrapper, /schemaVersion\s*=\s*1/)
-  assert.match(wrapper, /status\s*=\s*\$executionStatus/)
-  assert.match(wrapper, /authoritative\s*=\s*\$false/)
-  assert.match(wrapper, /selectedCiJobs\s*=\s*\$selected/)
-  assert.match(wrapper, /executedCiJobs\s*=\s*\$executed/)
-  assert.match(wrapper, /ciOnlyJobs\s*=\s*\$ciOnly/)
-  assert.match(wrapper, /totalMs\s*=\s*\$totalMs/)
-  assert.match(wrapper, /Get-PersistentEvidenceFingerprint/)
-  assert.match(wrapper, /persistentEvidenceRootTouched\s*=\s*\$persistentEvidenceRootTouched/)
-  assert.match(wrapper, /elapsedMs\s*=\s*\[int64\]\$watch\.ElapsedMilliseconds/)
-  assert.match(wrapper, /StartNew\(\)/)
-})
 
 test('Full mode reaches script contracts and the isolated PostgreSQL boundary only when CI selects them', () => {
   const full = wrapper.slice(wrapper.indexOf('function Invoke-FullPlan'), wrapper.lastIndexOf('if ($DryRun)'))
@@ -54,37 +40,17 @@ test('the always-running Windows changes job executes the repository layout guar
 
 test('disposable PostgreSQL commands are uniquely labeled, loopback-bound, and owner-checked before cleanup', () => {
   const gate = wrapper.slice(wrapper.indexOf('function Invoke-DisposablePostgreSqlGate'))
+  // No executed test can start this gate without Docker on Windows, so these source checks guard what it must
+  // never do: publish beyond loopback, pass the database secret on the command line, or call the API before the
+  // listener is proven ours. How it does the rest is proven by the fake-docker harness below (#1128).
   assert.match(gate, /NewGuid/)
-  assert.match(gate, /volume', 'create', '--label'/)
-  assert.match(gate, /'--name', \$containerName/)
   assert.match(gate, /'--label', "\$labelKey=\$runId"/)
   assert.match(gate, /'--publish', '127\.0\.0\.1::5432'/)
-  assert.match(gate, /NetworkSettings\.Ports/)
   assert.match(gate, /HostIp -ne '127\.0\.0\.1'/)
-  assert.match(gate, /HostPort -notmatch '\^\[1-9\]/)
   assert.doesNotMatch(gate, /'--env'/)
   assert.match(gate, /Get-RestrictedSecretFile/)
   assert.match(wrapper, /SetAccessRuleProtection/)
-  assert.match(gate, /127\.0\.0\.1:0/)
-  assert.match(wrapper, /Get-NetTCPConnection/)
-  assert.match(gate, /Get-BoundedListenerConnections/)
-  assert.match(gate, /Get-CimInstance Win32_Process/)
-  assert.match(gate, /apiOwnershipIntent/)
-  assert.match(gate, /postgres:17/)
-  assert.match(gate, /finally\s*\{/)
-  assert.doesNotMatch(gate, /Get-FreeLoopbackPort|hostApiPort|Start-Process|Stop-Process|containerStarted|volumeCreated/)
-  assert.match(gate, /WaitForExit\(10000\)/)
-  assert.match(gate, /\$helper\.ExitCode -ne 0/)
-  assert.match(gate, /Invoke-SafeApiRequest/)
   assert.ok(gate.indexOf('if (-not $listenerOwned)') < gate.indexOf('Invoke-SafeApiRequest'))
-  assert.ok(gate.indexOf('$containerIntent = $true') < gate.indexOf("'start-container'"))
-  assert.match(gate, /cleanupErrors/)
-  // Ownership still comes from our label on the container's own config; it is now read out of the inspect
-  // JSON rather than through a Go template, so the two halves sit on separate lines.
-  assert.match(wrapper, /\$ownerRecords\[0\]\.Config\.Labels/)
-  assert.match(wrapper, /com\.aerolink\.planner\.run/)
-  assert.match(gate, /Remove-DockerOwnedResource/)
-  assert.match(gate, /secretFileIntent/)
   assert.match(wrapper, /Docker is unavailable.*not-proven/)
 })
 
@@ -208,6 +174,7 @@ function Write-InspectJson {
   if ($Kind -eq 'volume') { Write-Output ('[{"Name":"fixture","Labels":' + $labels + '}]') }
   else { Write-Output ('[{"Id":"fixture","Config":{"Labels":' + $labels + '}}]') }
 }
+Add-Content -LiteralPath (Join-Path $env:FAKE_DOCKER_STATE 'inspect-calls.log') -Value $kind
 if ($mode -eq 'mismatch') { Write-InspectJson -Kind $kind -Owner 'other-run'; exit 0 }
 if ($mode -eq 'torndown') { Write-InspectJson -Kind $kind -Owner $null; exit 0 }
 if (-not (Test-Path -LiteralPath $stateFile) -or (Get-Content -LiteralPath $stateFile -Raw).Trim() -eq 'absent') {
@@ -235,6 +202,18 @@ function Assert-Absent([string]$Kind) {
 }
 $env:FAKE_DOCKER_MODE = 'absent-container'; Assert-Absent 'container'
 $env:FAKE_DOCKER_MODE = 'absent-volume'; Assert-Absent 'volume'
+# docker rm --force returns before inspect stops answering: a record whose Labels are null is absent, not an error.
+$env:FAKE_DOCKER_MODE = 'torndown'; Assert-Absent 'container'; Assert-Absent 'volume'
+# The label is read from the existence probe itself, so one ownership check is one inspect call.
+$calls = Join-Path $env:FAKE_DOCKER_STATE 'inspect-calls.log'
+foreach ($kind in @('container', 'volume')) {
+  Set-Content -LiteralPath (Join-Path $env:FAKE_DOCKER_STATE ($kind + '.state')) -Value 'present'
+  Remove-Item -LiteralPath $calls -ErrorAction SilentlyContinue
+  $env:FAKE_DOCKER_MODE = 'owner'
+  if ($null -eq (Get-DockerOwnedResource -Docker $docker -Kind $kind -Name 'fixture')) { throw "expected owned $kind" }
+  if (@(Get-Content -LiteralPath $calls).Count -ne 1) { throw "ownership of the $kind took more than one inspect call" }
+  Set-Content -LiteralPath (Join-Path $env:FAKE_DOCKER_STATE ($kind + '.state')) -Value 'absent'
+}
 foreach ($kind in @('container', 'volume')) {
   $env:FAKE_DOCKER_MODE = 'daemon'; try { Get-DockerOwnedResource -Docker $docker -Kind $kind -Name 'fixture'; throw 'daemon ambiguity accepted' } catch { if ($_.Exception.Message -notmatch 'ownership could not be verified') { throw } }
   $env:FAKE_DOCKER_MODE = 'arbitrary'; try { Get-DockerOwnedResource -Docker $docker -Kind $kind -Name 'fixture'; throw 'arbitrary error accepted' } catch { if ($_.Exception.Message -notmatch 'ownership could not be verified') { throw } }
@@ -501,7 +480,7 @@ test('the native Windows operator owner retains the complete family and evidence
     'AeroLinkTransitionHandoff.Tests.ps1', 'AeroLinkProcessControl.Tests.ps1', 'AeroLinkProductionTransition.Tests.ps1',
     'AeroLinkLauncherContract.Tests.ps1', 'AeroLinkBootstrap.Tests.ps1', 'AeroLinkInstallation.Tests.ps1',
     'AeroLinkProductionSource.Tests.ps1', 'AeroLinkRuntimeIdentity.Tests.ps1', 'AeroLinkProtectedConfig.Tests.ps1', 'AeroLinkUpgrade.Tests.ps1',
-    'Get-AeroLinkTestPlan.Tests.ps1', 'AeroLinkTestDiagnostics.Tests.ps1',
+    'Get-AeroLinkTestPlan.Tests.ps1', 'AeroLinkTestDiagnostics.Tests.ps1', 'AeroLinkResumableDemo.Tests.ps1',
     'Test-RepositoryLayout.ps1', 'Test-RepositoryLayout.Tests.ps1',
   ]) assert.ok(nativeScripts.includes(name), `${name} must execute in the native Windows owner`)
   assert.match(job, /Configure-AeroLinkBackupSchedule\.ps1/)
@@ -547,15 +526,68 @@ test('the native Windows operator owner retains the complete family and evidence
 })
 
 test('wrapper failure and cleanup contracts are redacted and fail closed', () => {
-  assert.match(wrapper, /function Get-SafeFailureMessage/)
-  assert.match(wrapper, /sensitive details were redacted/)
+  // The reported error always passes through the redactor, and never echoes a docker command line.
   assert.match(wrapper, /\$executionError = Get-SafeFailureMessage/)
-  assert.doesNotMatch(wrapper, /docker \$\(\$Arguments -join/)
   assert.doesNotMatch(wrapper, /\$executionError = \$_.Exception.Message/)
-  assert.match(wrapper, /containerIntent/)
-  assert.match(wrapper, /volumeIntent/)
-  // Still fails closed, and now names which cleanup step failed between the two halves of the sentence.
+  assert.doesNotMatch(wrapper, /docker \$\(\$Arguments -join/)
+  // Still fails closed, and names which cleanup step failed between the two halves of the sentence.
   assert.match(wrapper, /cleanup was not proven \(\$cleanupDetail\); Full mode is non-authoritative/)
+
+  const fixture = mkdtempSync(join(tmpdir(), 'aerolink-redaction-'))
+  const harness = join(fixture, 'harness.ps1')
+  const harnessText = String.raw`$source = '${wrapperPath.replaceAll("'", "''")}'
+$tokens = $null; $parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($source, [ref]$tokens, [ref]$parseErrors)
+$node = $ast.Find({ param($candidate) $candidate -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $candidate.Name -eq 'Get-SafeFailureMessage' }, $true)
+. ([scriptblock]::Create($node.Extent.Text))
+[pscustomobject]@{
+  Empty = Get-SafeFailureMessage ''
+  Connection = Get-SafeFailureMessage 'psql failed: Host=127.0.0.1;Port=5432;Password=hunter2'
+  Token = Get-SafeFailureMessage 'request failed with Authorization: Bearer abc'
+  Plain = Get-SafeFailureMessage 'container did not start'
+  Long = (Get-SafeFailureMessage ('x' * 600)).Length
+} | ConvertTo-Json -Compress
+`
+  try {
+    writeFileSync(harness, harnessText)
+    const result = JSON.parse(execFileSync('pwsh', ['-NoProfile', '-File', harness], { cwd: repoRoot, encoding: 'utf8' }))
+    assert.equal(result.Empty, 'Local validation failed.')
+    assert.equal(result.Connection, 'Local validation failed; sensitive details were redacted.')
+    assert.equal(result.Token, 'Local validation failed; sensitive details were redacted.')
+    assert.equal(result.Plain, 'container did not start')
+    assert.equal(result.Long, 515)
+  } finally {
+    rmSync(fixture, { recursive: true, force: true })
+  }
+})
+
+test('every script suite runs in the native owner, inside a suite that does, or is listed with its reason', () => {
+  // #1123: AeroLinkResumableDemo.Tests.ps1 existed for months without running anywhere, because every list of
+  // suites is written by hand. This derives the executed set from the live workflow and fails on a suite that is
+  // in none of the three places below.
+  const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
+  const executed = new Set([...workflow.matchAll(/\.\/product\/scripts\/([\w.-]+\.Tests\.ps1)/g)].map(match => match[1]))
+  // Each of these is run by the named suite, which CI executes.
+  const invokedBy = {
+    'AeroLinkBackupRetention.Tests.ps1': 'AeroLinkBackupVerification.Tests.ps1',
+    'AeroLinkProcessEnvironment.Tests.ps1': 'AeroLinkRestoreContract.Tests.ps1',
+    'AeroLinkTransitionAuthority.Tests.ps1': 'AeroLinkTransitionHandoff.Tests.ps1',
+    'AeroLinkTransitionImport.Tests.ps1': 'AeroLinkProductionTransition.Tests.ps1',
+  }
+  // Not executed by CI, each for a stated reason.
+  const notInCi = {
+    'AeroLinkSmtp4dev.Tests.ps1': 'a local-Full-only proof; the local runner executes it',
+  }
+  const suites = readdirSync(join(repoRoot, 'product/scripts')).filter(name => name.endsWith('.Tests.ps1')).sort()
+  assert.deepEqual(suites.filter(name => !executed.has(name) && !(name in invokedBy) && !(name in notInCi)), [])
+  for (const [suite, invoker] of Object.entries(invokedBy)) {
+    assert.ok(executed.has(invoker), `${invoker} must execute in CI, because it is what runs ${suite}`)
+    const invokerSource = readFileSync(join(repoRoot, 'product/scripts', invoker), 'utf8')
+    assert.match(invokerSource, new RegExp(`Join-Path \\$PSScriptRoot '${suite.replaceAll('.', '\\.')}'`),
+      `${invoker} must invoke ${suite}`)
+    assert.ok(!executed.has(suite), `${suite} runs in CI directly; remove it from the invoked-by list`)
+  }
+  for (const suite of Object.keys(notInCi)) assert.ok(!executed.has(suite), `${suite} now runs in CI; remove its exception`)
 })
 
 test('JSON dry-run reports execution as not-run without touching a service', () => {
@@ -564,9 +596,16 @@ test('JSON dry-run reports execution as not-run without touching a service', () 
     encoding: 'utf8',
   })
   const result = JSON.parse(output)
-  assert.equal(result.wrapper.execution.status, 'not-run')
-  assert.equal(result.wrapper.execution.authoritative, false)
-  assert.equal(result.wrapper.execution.timing.totalMs, 0)
-  assert.equal(result.wrapper.execution.resources.persistentPostgreSqlTouched, false)
-  assert.equal(result.wrapper.execution.resources.persistentEvidenceRootTouched, false)
+  const execution = result.wrapper.execution
+  assert.equal(execution.schemaVersion, 1)
+  assert.equal(execution.status, 'not-run')
+  assert.equal(execution.authoritative, false)
+  // The accounting a Full run reports: what CI would run, what ran here, and what only CI can run.
+  assert.ok(execution.selectedCiJobs.length > 0)
+  assert.deepEqual(execution.executedCiJobs, [])
+  assert.ok(execution.ciOnlyJobs.every(job => execution.selectedCiJobs.includes(job)))
+  assert.equal(execution.timing.totalMs, 0)
+  assert.deepEqual(execution.timing.steps, [])
+  assert.equal(execution.resources.persistentPostgreSqlTouched, false)
+  assert.equal(execution.resources.persistentEvidenceRootTouched, false)
 })
