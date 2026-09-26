@@ -1,6 +1,12 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
 import { login } from './auth'
 
+// Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
+// context, or the next test inherits "Response has been disposed" from this one (#1001).
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: 'wait' })
+})
+
 /**
  * A test change request is read on a page, the way a change request is.
  *

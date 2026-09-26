@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test'
 import { login, openNavigationGroup, showcaseSeed } from './auth'
 
+// Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
+// context, or the next test inherits "Response has been disposed" from this one (#1001).
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: 'wait' })
+})
+
 test('Verification landing Coverage opens the exact Explorer report and survives reload, Back, and Forward', async ({ page, request }) => {
   test.setTimeout(180_000)
   const showcase = await showcaseSeed(request)

@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test'
 import { apiBase, login } from './auth'
 
+// Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
+// context, or the next test inherits "Response has been disposed" from this one (#1001).
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: 'wait' })
+})
+
 const fixture = {
   generatedAt: '2026-08-30T00:00:00Z',
   totals: { items: 6, returned: 6, unheld: 3 },

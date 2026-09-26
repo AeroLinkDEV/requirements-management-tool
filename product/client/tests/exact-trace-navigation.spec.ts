@@ -1,6 +1,12 @@
 import { expect, test } from "@playwright/test"
 import { apiLogin, login, openNavigationGroup, selectProgram } from "./auth"
 
+// Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
+// context, or the next test inherits "Response has been disposed" from this one (#1001).
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "wait" })
+})
+
 /**
  * #1016 S03. One exact navigation action per destination, in the requirement trace inspector.
  *

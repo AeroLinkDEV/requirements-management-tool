@@ -8,6 +8,12 @@ import {
   savedArtifactsLabel,
 } from "../src/projectSetupVerificationProfile";
 
+// Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
+// context, or the next test inherits "Response has been disposed" from this one (#1001).
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "wait" });
+});
+
 /**
  * Screenshots are captured into the run's own output directory. Promoting one into
  * product/docs/screenshots is a deliberate, separate step, so a routine test run never overwrites the

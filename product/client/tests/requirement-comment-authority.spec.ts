@@ -1,6 +1,12 @@
 import { expect, test, type Route } from "@playwright/test";
 import { apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed } from "./auth";
 
+// Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
+// context, or the next test inherits "Response has been disposed" from this one (#1001).
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: "wait" });
+});
+
 // These races start from the explorer opening its first requirement unasked, which it does only where the
 // inspector is a side panel (1440px and up); below that it is a drawer and waits for a choice (#1091 TPX-1).
 test.use({ viewport: { width: 1600, height: 900 } });

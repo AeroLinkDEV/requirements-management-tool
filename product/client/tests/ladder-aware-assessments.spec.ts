@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test'
 import { login, showcaseSeed } from './auth'
 
+// Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
+// context, or the next test inherits "Response has been disposed" from this one (#1001).
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: 'wait' })
+})
+
 const buildPath = (showcase: { programId: string; projectId: string; activeReleaseId: string }, area: string) =>
   `/programs/${showcase.programId}/projects/${showcase.projectId}/releases/${showcase.activeReleaseId}/${area}`
 

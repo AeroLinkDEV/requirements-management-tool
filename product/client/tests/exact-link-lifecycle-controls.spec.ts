@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test'
 import { login, openNavigationGroup } from './auth'
 
+// Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
+// context, or the next test inherits "Response has been disposed" from this one (#1001).
+test.afterEach(async ({ page }) => {
+  await page.unrouteAll({ behavior: 'wait' })
+})
+
 test('Digital Thread reuses projected lifecycle data and the shared exact-link controls', async ({ page }) => {
   let state = 'Suspect'
   let lifecycleGets = 0
