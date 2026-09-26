@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useProjectFeature } from './projectFeatures'
 import './ProblemReportPicker.css'
 import { stateLabel as problemReportStateLabel } from './problemReportLifecycle'
 
@@ -32,6 +33,8 @@ export default function ProblemReportPicker({ api, projectId, scope, releaseId, 
   const [totalPages,setTotalPages] = useState(0)
   const [busy,setBusy] = useState(false)
   const [error, setError] = useState('')
+  // #1196 (DEC-136): a Problem Report picker belongs to Problem Reports, so a project without them shows none.
+  const problemReportsInUse = useProjectFeature(api, projectId, 'ProblemReports')
   const userSelected = useRef(new Set<string>())
   const priorTarget = useRef(releaseId)
 
@@ -116,6 +119,7 @@ export default function ProblemReportPicker({ api, projectId, scope, releaseId, 
   const loadedCandidates = reports.filter(isCandidate).length
   const hasMore = page < totalPages
 
+  if (problemReportsInUse === false) return null
   return <fieldset className="problemReportPicker">
     <legend>{legend}</legend>
     <label className="problemReportSearch"><span>Find controlled PR</span><input type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search PR number, title, problem, or root cause"/></label>
