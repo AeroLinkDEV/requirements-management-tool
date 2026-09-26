@@ -613,6 +613,8 @@ test('the documentation topology refuses any gate job that is not exactly skippe
     'a shard ran': (jobs) => [...jobs, { name: 'Browser journeys (1/4)', conclusion: 'success', runId: RUN_ID, runAttempt: RUN_ATTEMPT }],
     'the aggregate failed': (jobs) => jobs.map((job) => (job.name === AGGREGATE_JOB_NAME ? { ...job, conclusion: 'failure' } : job)),
     'a job is from a later attempt': (jobs) => jobs.map((job) => (job.name === 'Domain test suite' ? { ...job, runAttempt: RUN_ATTEMPT + 1 } : job)),
+    'a required job appears twice': (jobs) => [...jobs, jobs.find((job) => job.name === 'Domain test suite')],
+    'a skipped group appears twice': (jobs) => [...jobs, jobs.find((job) => job.name === unexpandedShardJobName(SHARDED_JOB_GROUPS[0]))],
   }
   for (const [name, mutate] of Object.entries(variants)) {
     const result = evaluateMergeGroupCandidate({ ...legitimateCandidate(), jobs: mutate(documentationTopologyJobs()), documentationOnlyCandidate: true })
