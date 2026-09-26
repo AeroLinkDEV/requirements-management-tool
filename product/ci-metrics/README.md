@@ -132,6 +132,11 @@ default-branch code and never executes PR content.
   expected/executed/passed/failed/skipped/flaky count, flake-title, and cache trends;
 - detects sustained regressions only with enough comparable evidence (window and minimum-run guards;
   noise never fires);
+- holds the heavy lanes to absolute budgets (`LANE_BUDGETS_MS`: `queue-mixed` 30 min, `dispatch-mixed`
+  31 min, each the lane's measured critical-path p95 plus about 10%). The window-to-window comparison
+  cannot see growth that stays under its 15% ratio at every step, so a lane whose recent critical-path
+  median exceeds its budget is reported as a `criticalPathMedianBudget` regression and opens or updates the
+  tracker below (#1152 C5). A budget moves only with the measurement that justifies it;
 - publishes `rolling-metrics.json` + `rolling-metrics.md` as a 30-day artifact.
 
 Cadence accounting includes pre-queue `pull_request`/`workflow_dispatch` runs, `merge_group` runs whose

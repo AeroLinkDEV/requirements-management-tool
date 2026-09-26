@@ -14,7 +14,7 @@ import { readNamedJsonFromZip, ZipParseError } from '../lib/zip.mjs'
 const RUN_METRICS_FILE = 'run-metrics.json'
 import {
   validateRunRecord, queueAndCancellation, rollingStats, flakeTrend, cacheTrend,
-  detectRegressions, regressionDeterminacy, classifyRun, buildRollingReport, recordFormat, fullGatesPerMerge, MAX_RECORDS, FULL_GATE_WINDOW_DAYS,
+  detectRegressions, detectBudgetBreaches, regressionDeterminacy, classifyRun, buildRollingReport, recordFormat, fullGatesPerMerge, MAX_RECORDS, FULL_GATE_WINDOW_DAYS,
 } from '../lib/rolling.mjs'
 
 const env = (name) => process.env[name] ?? ''
@@ -180,6 +180,11 @@ async function main() {
   for (const [category, list] of byCategory) {
     const options = { window: 8, minRuns: 3, ratio: 1.15, minDeltaMs: 60_000 }
     regressions.push(...detectRegressions(list, options).map((entry) => ({ ...entry, category })))
+    // The same recent window, judged against the lane's absolute budget, so slow compounding growth that no
+    // single window-to-window step reveals still opens the tracker (#1152 C5). A breach needs fewer runs
+    // than a comparison, so it can be reported before the category is determinate; clearing it still waits
+    // for determinate evidence, like any tracked category.
+    regressions.push(...detectBudgetBreaches(list, category, options).map((entry) => ({ ...entry, category })))
     const verdict = regressionDeterminacy(list, options)
     determinacyByCategory[category] = verdict
     if (verdict.determinate) determinateCategories.push(category)

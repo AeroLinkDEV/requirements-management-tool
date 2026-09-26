@@ -296,6 +296,44 @@ export function detectRegressions(records, { window = 10, minRuns = 3, ratio = 1
   return regressions.slice(0, MAX_REGRESSIONS)
 }
 
+/**
+ * Absolute critical-path budgets per lane (#1152 C5, #942 F8).
+ *
+ * `detectRegressions` compares a window with the one before it, so growth that stays under its 15% ratio per
+ * window is never reported and can compound without limit. A budget catches the accumulated result. Each is
+ * the lane's measured critical-path p95 on 2026-09-26 plus about 10%, rounded up to a minute, and applies to
+ * the median of the same recent window. Move a budget only with the measurement that justifies it.
+ *
+ * `push-main` has none: since #1157 most main pushes skip the product jobs, so its median no longer measures
+ * the gate.
+ */
+export const LANE_BUDGETS_MS = Object.freeze({
+  'queue-mixed': 30 * 60_000, // median 1515s, p95 1658s over 25 runs
+  'dispatch-mixed': 31 * 60_000, // median 1528s, p95 1670s over 8 runs
+})
+
+/** A lane whose recent critical-path median exceeds its absolute budget. */
+export function detectBudgetBreaches(records, category, { window = 10, minRuns = 3, budgets = LANE_BUDGETS_MS } = {}) {
+  const budget = Object.hasOwn(budgets, category) ? budgets[category] : null
+  if (!Number.isFinite(budget) || budget <= 0 || !Array.isArray(records)) return []
+  const recent = records.slice(-window)
+  const durations = recent.map(runDurationMs).filter((value) => value !== null)
+  if (durations.length < minRuns) return []
+  const current = median(durations)
+  if (current === null || current <= budget) return []
+  return [{ metric: 'criticalPathMedianBudget', current, budget, threshold: budget, runs: durations.length }]
+}
+
+/** One regression as a report or tracker line; a budget breach names its budget rather than a previous window. */
+function regressionLine(entry) {
+  const label = entry.category ? `${entry.category}: ${entry.metric}` : entry.metric
+  const seconds = (value) => `${Math.round(value / 1000)}s`
+  if (Number.isFinite(entry.budget)) {
+    return `- ${escapeMarkdown(label)}: current ${seconds(entry.current)} over budget ${seconds(entry.budget)} (${entry.runs} runs)`
+  }
+  return `- ${escapeMarkdown(label)}: current ${seconds(entry.current)} vs previous ${seconds(entry.previous)} (threshold ${seconds(entry.threshold)}, ${entry.runs} runs)`
+}
+
 export function validateRunRecord(record) {
   const errors = []
   if (record === null || typeof record !== 'object' || Array.isArray(record)) return ['Run record is not an object.']
@@ -432,10 +470,7 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
   if (regressions.length > 0) {
     lines.push('## Sustained regressions')
     lines.push('')
-    for (const entry of regressions) {
-      const label = entry.category ? `${entry.category}: ${entry.metric}` : entry.metric
-      lines.push(`- ${escapeMarkdown(label)}: current ${Math.round(entry.current / 1000)}s vs previous ${Math.round(entry.previous / 1000)}s (threshold ${Math.round(entry.threshold / 1000)}s, ${entry.runs} runs)`)
-    }
+    for (const entry of regressions) lines.push(regressionLine(entry))
     lines.push('')
   }
   if (flakes.titles.length > 0) {
@@ -674,10 +709,7 @@ export function trackerBody(report, { carryForwardCategories = [] } = {}) {
   } else {
     lines.push(`Detected ${regressions.length} sustained regression(s):`)
     lines.push('')
-    for (const entry of regressions) {
-      const label = entry.category ? `${entry.category}: ${entry.metric}` : entry.metric
-      lines.push(`- ${escapeMarkdown(label)}: current ${Math.round(entry.current / 1000)}s vs previous ${Math.round(entry.previous / 1000)}s (threshold ${Math.round(entry.threshold / 1000)}s, ${entry.runs} runs)`)
-    }
+    for (const entry of regressions) lines.push(regressionLine(entry))
     lines.push('')
     lines.push(`Last updated: ${report?.generatedAt ?? 'unknown'}`)
   }
