@@ -41,3 +41,36 @@ export function viewEnabled(features: ProjectFeature[] | null | undefined, view:
 
 /** Every switchable feature: what a project with no stored feature set has. */
 export const ALL_FEATURES: ProjectFeature[] = ['TeamWork', 'Requirements', 'Verification', 'Code', 'DocumentationCenter', 'ProblemReports', 'Release']
+
+export const FEATURE_LABELS: Record<ProjectFeature, string> = {
+  TeamWork: 'Team Work',
+  Requirements: 'Requirements',
+  Verification: 'Verification',
+  Code: 'Code',
+  DocumentationCenter: 'Documentation Center',
+  ProblemReports: 'Problem Reports',
+  Release: 'Release',
+}
+
+export const FEATURE_DESCRIPTIONS: Record<ProjectFeature, string> = {
+  TeamWork: 'Project-wide lifecycle board of who holds which work.',
+  Requirements: 'System and software requirements, their change requests and generated documents.',
+  Verification: 'Test cases, procedures, coverage, results and test change requests.',
+  Code: 'Merge requests, the code explorer and code-to-requirement evidence.',
+  DocumentationCenter: 'Controlled Word documents authored outside AeroLink.',
+  ProblemReports: 'Problem Reports through SCCB, implementation, verification and SQA closure.',
+  Release: 'Release readiness, release campaigns and configuration baselines.',
+}
+
+/** Mirrors the server rule (DEC-136) so a page explains a refusal before it is sent; the server still decides. */
+export function featureDependencyNote(enabled: ReadonlySet<ProjectFeature>): string | null {
+  if (enabled.has('Code') && !enabled.has('Requirements')) return 'Code needs Requirements: code is traced to the requirements it implements.'
+  if (enabled.has('Verification') && !enabled.has('Requirements')) return 'Verification needs Requirements until standalone verification is available.'
+  return null
+}
+
+/**
+ * The features an inherited setup keeps (#1113): inception brings requirements, verification procedures and an
+ * inception baseline, and the server refuses records for a feature that is off.
+ */
+export const INHERITED_START_FEATURES: ProjectFeature[] = ['Requirements', 'Verification', 'Release']

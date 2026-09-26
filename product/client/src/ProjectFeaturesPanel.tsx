@@ -1,23 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiRequest, operationError } from "./apiClient";
-import type { ProjectFeature, ProjectFeatureProjection } from "./projectFeatures";
-
-const descriptions: Record<ProjectFeature, string> = {
-  TeamWork: "Project-wide lifecycle board of who holds which work.",
-  Requirements: "System and software requirements, their change requests and generated documents.",
-  Verification: "Test cases, procedures, coverage, results and test change requests.",
-  Code: "Merge requests, the code explorer and code-to-requirement evidence.",
-  DocumentationCenter: "Controlled Word documents authored outside AeroLink.",
-  ProblemReports: "Problem Reports through SCCB, implementation, verification and SQA closure.",
-  Release: "Release readiness, release campaigns and configuration baselines.",
-};
-
-/** Mirrors the server rule so the page explains a refusal before it is sent; the server still decides. */
-function dependencyNote(enabled: Set<ProjectFeature>): string | null {
-  if (enabled.has("Code") && !enabled.has("Requirements")) return "Code needs Requirements: code is traced to the requirements it implements.";
-  if (enabled.has("Verification") && !enabled.has("Requirements")) return "Verification needs Requirements until standalone verification is available.";
-  return null;
-}
+import { FEATURE_DESCRIPTIONS as descriptions, featureDependencyNote as dependencyNote, type ProjectFeature, type ProjectFeatureProjection } from "./projectFeatures";
 
 /**
  * Project Configuration → Features (#1113). A feature holding records cannot be switched off; switching

@@ -5,6 +5,14 @@ import { ApiError, apiRequest, operationError } from "./apiClient";
 import { buildVersionOrder, officialBuildName } from "./presentation";
 import { isSetupStep, type SetupStep } from "./projectSetupDrafts";
 import {
+  ALL_FEATURES,
+  FEATURE_DESCRIPTIONS,
+  FEATURE_LABELS,
+  INHERITED_START_FEATURES,
+  featureDependencyNote,
+  type ProjectFeature,
+} from "./projectFeatures";
+import {
   authorityLabel,
   authorityToken,
   baseRoleAuthorities,
@@ -121,6 +129,8 @@ type SetupDraft = {
   project: { name: string; softwareProduct: string };
   start: { kind?: StartKind; sourceBaselineId?: string | null; sourceImportId?: string | null };
   build: { version: string; officialName?: string };
+  /** The features the project starts with (#1113). Absent or unchosen means every feature. */
+  features?: { chosen?: boolean; enabled?: unknown };
   selectedCategories: string[];
   ladder: unknown;
   reviewRules: { accepted: boolean; acceptanceHash?: string | null; definition?: unknown; suggestedDefinition?: unknown };
@@ -148,6 +158,8 @@ type SetupValues = {
   sourceBaselineId: string;
   sourceImportId: string;
   buildVersion: string;
+  /** In ALL_FEATURES order, so saved and local answers compare equal when they hold the same features. */
+  features: ProjectFeature[];
   selectedCategories: string[];
   ladder: LadderDefinition;
   reviewRulesDefinition?: ReviewRulesDefinition;
@@ -167,6 +179,7 @@ const emptySourceState = (): SourceDraftState => ({
 const steps: { id: SetupStep; label: string }[] = [
   { id: "Details", label: "Project details" },
   { id: "StartingPoint", label: "Starting point" },
+  { id: "Features", label: "Features" },
   { id: "FirstBuild", label: "First build" },
   { id: "Ladder", label: "Requirement ladder" },
   { id: "WorkingRules", label: "Review rules" },
@@ -392,6 +405,12 @@ function startKindLabel(kind: StartKind | "") {
   return "Not chosen";
 }
 
+/** A saved feature list in canonical order; anything missing or unreadable means every feature. */
+function normalizeFeatures(value: unknown): ProjectFeature[] {
+  if (!Array.isArray(value)) return [...ALL_FEATURES];
+  return ALL_FEATURES.filter((feature) => value.includes(feature));
+}
+
 function valuesFromDraft(draft: SetupDraft): SetupValues {
   return {
     projectName: draft.project?.name ?? "",
@@ -400,6 +419,7 @@ function valuesFromDraft(draft: SetupDraft): SetupValues {
     sourceBaselineId: draft.start?.sourceBaselineId ?? "",
     sourceImportId: draft.start?.sourceImportId ?? "",
     buildVersion: draft.build?.version ?? "",
+    features: normalizeFeatures(draft.features?.enabled),
     selectedCategories: Array.isArray(draft.selectedCategories)
       ? draft.selectedCategories.filter((item): item is string => typeof item === "string")
       : [],
@@ -491,6 +511,7 @@ function requestBody(values: SetupValues, currentStep: SetupStep, expectedVersio
     // An empty build is a legitimate earlier draft state. Omitting it lets the server preserve that state
     // while Details or Starting Point are saved; sending `{ version: "" }` would invoke the parser too early.
     ...(values.buildVersion.trim() ? { build: { version: values.buildVersion } } : {}),
+    features: values.features,
     // Once a source package exists, its versioned configuration endpoint owns categories. Keeping
     // them out of setup PUTs prevents Save-and-exit/resume from racing or overwriting that source
     // decision; Fresh and not-yet-selected source drafts still retain their local answer here.
@@ -1529,6 +1550,10 @@ export default function ProjectSetupWalkthrough({
                   checked={values.startKind === kind}
                   onChange={() => {
                     update("startKind", kind);
+                    // An inherited start keeps the features its source brings (#1113).
+                    if (kind !== "Fresh")
+                      update("features", ALL_FEATURES.filter((feature) =>
+                        values.features.includes(feature) || INHERITED_START_FEATURES.includes(feature)));
                     update("selectedCategories", kind === "Fresh" ? [] : values.selectedCategories);
                     update("sourceBaselineId", "");
                     update("sourceImportId", "");
@@ -1570,6 +1595,57 @@ export default function ProjectSetupWalkthrough({
           )}
         </section>
       );
+    if (currentStep === "Features") {
+      const enabled = new Set(values.features);
+      const inherited = values.startKind !== "" && values.startKind !== "Fresh";
+      const note = featureDependencyNote(enabled);
+      const toggle = (feature: ProjectFeature) => {
+        const next = new Set(enabled);
+        if (next.has(feature)) next.delete(feature);
+        else next.add(feature);
+        update("features", ALL_FEATURES.filter((candidate) => next.has(candidate)));
+      };
+      return (
+        <section className="setupStepPanel">
+          <h2>Choose the project's features</h2>
+          <p>
+            Switch off the modules this project will not use. Command Center and My Work are always
+            present and show what the enabled features contribute. Later, a feature can be switched on
+            in Project Configuration at any time, and switched off while it holds no records.
+          </p>
+          <fieldset className="setupChoiceList">
+            <legend>Features</legend>
+            {ALL_FEATURES.map((feature) => {
+              // An inherited start cannot switch off what its source brings; a missing one can still be restored.
+              const locked = inherited && INHERITED_START_FEATURES.includes(feature) && enabled.has(feature);
+              return (
+                <label key={feature}>
+                  <input
+                    type="checkbox"
+                    checked={enabled.has(feature)}
+                    disabled={locked}
+                    onChange={() => toggle(feature)}
+                  />
+                  {FEATURE_LABELS[feature]}
+                  <small>{FEATURE_DESCRIPTIONS[feature]}</small>
+                </label>
+              );
+            })}
+          </fieldset>
+          {inherited && (
+            <p className="setupFieldHint">
+              An inherited starting point brings requirements, verification procedures and a baseline,
+              so Requirements, Verification and Release stay on.
+            </p>
+          )}
+          {note && (
+            <p className="setupFieldError" role="alert">
+              {note}
+            </p>
+          )}
+        </section>
+      );
+    }
     if (currentStep === "FirstBuild")
       return (
         <section className="setupStepPanel">
@@ -2216,6 +2292,16 @@ export default function ProjectSetupWalkthrough({
               {values.selectedCategories.length
                 ? ` · ${values.selectedCategories.length} inherited categories`
                 : " · no inherited categories"}
+            </dd>
+          </div>
+          <div>
+            <dt>Features</dt>
+            <dd>
+              {values.features.length === ALL_FEATURES.length
+                ? "Every feature"
+                : values.features.length === 0
+                  ? "Command Center and My Work only"
+                  : values.features.map((feature) => FEATURE_LABELS[feature]).join(", ")}
             </dd>
           </div>
           <div>

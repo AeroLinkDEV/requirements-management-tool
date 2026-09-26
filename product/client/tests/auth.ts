@@ -198,6 +198,16 @@ export async function openNewSoftwareChangeRequest(page:Page,level:'HLR'|'LLR'='
 }
 
 /**
+ * Moves a Create New Project walkthrough past the Features step (#1113), keeping every feature. The
+ * walkthrough reaches it straight after Starting point, so each journey that clicks through setup calls this
+ * where that step now sits; asserting the heading fails loudly if the step order changes again.
+ */
+export async function continuePastFeatures(page: Page) {
+  await expect(page.getByRole('heading', { name: "Choose the project's features", level: 2 })).toBeVisible()
+  await page.getByRole('button', { name: 'Continue' }).click()
+}
+
+/**
  * Waits for a surface to have painted, instead of sleeping for a fixed period.
  *
  * The design and contrast audits visited each surface and then slept one second before measuring. Thirteen
