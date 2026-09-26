@@ -75,7 +75,7 @@ public sealed class TestProcedureChange
             : removedRequirementRevisionIdsJson;
         CoverageChangeRationale = coverageChangeRationale?.Trim() ?? "";
         CoverageChangedBy = coverageChangedBy?.Trim() ?? "";
-        ParentRevisionIdsJson = parentKind != VerificationProcedureParentKind.Derived
+        ParentRevisionIdsJson = !VerificationProcedureParentPolicy.NamesNoParents(parentKind)
             && (string.IsNullOrWhiteSpace(parentRevisionIdsJson) || parentRevisionIdsJson.Trim() == "[]")
             ? DrivingRequirementRevisionIdsJson
             : parentRevisionIdsJson;

@@ -88,10 +88,17 @@ A project also chooses which major features it uses (DEC-136): Team Work, Requir
 Documentation Center, Problem Reports and Release. They are chosen in the Features step of Create New Project, recorded
 as the project's first feature-history entry, and changed later in Project Configuration → Features. An inherited
 starting point keeps Requirements, Verification and Release, which its source brings. Command Center and My Work
-are always present. A project without a stored set has every feature. Code and Verification need Requirements; a
+are always present. A project without a stored set has every feature. Code needs Requirements; a
 feature can be switched off only while it holds no records, and the save boundary refuses new records for a feature
-that is off. Navigation, quick navigation, deep links and Command Center follow the same set. Verification without
-Requirements ("standalone verification") is tracked separately in #1188.
+that is off. Navigation, quick navigation, deep links and Command Center follow the same set.
+
+Verification without Requirements ("standalone verification", DEC-144) is being delivered in slices on #1188. The
+server accepts the combination. A Case or System Procedure in such a project is Standalone: it names no parents, carries
+no Derived rationale and creates no requirement coverage. The save boundary refuses a new Standalone artifact in a
+project that uses Requirements, except as a revision of one that is already Standalone. A candidate baseline in a
+project without Requirements freezes with no change requests, records an empty requirement manifest, and then
+materializes approved verification work as usual. The browser still refuses the combination until standalone
+authoring lands.
 
 Project entry uses stable identity and opens the actual visual build-lineage selector, including for a single
 build. Explicit build links retain their exact authorized target. Repository setup can remain Pending and be

@@ -2704,3 +2704,25 @@ choices are created as focused issues only when their trigger and acceptance bou
 - **Context:** a protected-path PR (`.github/`, `product/test-planner/`, `product/ci-metrics/`) needs the maintenance environment approval. An agent can submit that approval only for its own PR: Claude Code refuses an approval routed through another session. Making the approval automatic (#1165) is refused as a CI bypass. So a protected-path PR whose owning session is absent, or cannot approve, falls to the owner. #1151 timed out at the head of the queue on 2026-09-25 for that reason.
 - **Decision:** only a session that can submit its own maintenance approval opens a protected-path PR. That is a local Claude session whose permission settings allow the DEC-135 approval call. Such a session submits the approval promptly when the binding waits. A cloud session, Codex, or any session that cannot approve hands protected-path work to such a session instead of opening the PR itself. The receiving session then owns the PR and its approval.
 - **Consequence:** the owner is asked for a maintenance approval only if the owning session is lost mid-flight. Functional decisions still go to the owner under DEC-140.
+
+### DEC-144 - A Project May Use Verification Without Requirements
+
+- **Date:** 2026-09-26
+- **Status:** Accepted owner decision on [issue #1188](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1188). The owner replied "Go with the defaults on 1188" in the Claude conversation on 2026-09-26. The six answers are recorded on the issue.
+- **Decision:** A project may switch Verification on while Requirements is off ("standalone verification"). Code still needs Requirements. This replaces the Verification half of DEC-136's dependency rule.
+- **Owner's answers:**
+  - Standalone cases belong to the project's System-test and Software-test verification levels, with no requirement content, and keep today's documents and sections.
+  - A case needs nothing to verify. It stands on its own objective, with an optional free-text external reference such as a requirement ID in another tool.
+  - Without Requirements there are no requirement-coverage metrics. Each case shows its execution status instead: passed, failed or not run.
+  - A Fixed Problem Report may cite a passing execution of a standalone case, as it does today with Verification on.
+  - If Requirements is switched on later, existing standalone cases stay valid, can then be traced to requirements, and are never rewritten.
+  - The Digital Thread shows Cases → Procedures → Executions → Problem Reports, with no requirement layer.
+- **Representation:** A Case or System Procedure in such a project is **Standalone**: a parent kind beside Allocated and Derived that names no exact parents and carries no Derived rationale. A software Procedure is never Standalone, because its parent is a Case. It is Allocated to a standalone Case or Derived as before. A Standalone artifact creates no requirement coverage, and no requirement change can leave it "covering nothing".
+- **Rules the save boundary enforces:** A new Standalone proposal or revision is refused in a project that uses Requirements. The exception is an artifact whose latest revision is already Standalone: it can still be modified as it is after Requirements is switched on, and it is traced by an ordinary Modify when its owners choose to.
+- **Baselines:** A project without Requirements has no change requests to select. Its candidate baseline therefore freezes empty, its requirement step records an empty manifest, and approved verification work is selected and materialized after the freeze as in any build. Baselines remain part of the Release feature (DEC-136).
+- **Delivery:** in slices, each linked on #1188:
+  - the server foundation;
+  - authoring, including the external reference and raising test work where there is neither a change request nor a Problem Report to raise it from;
+  - execution status in place of coverage;
+  - the Digital Thread;
+  - tracing after Requirements is switched on.

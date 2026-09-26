@@ -528,12 +528,13 @@ public sealed class TestChangeReview
         foreach (var introduced in _procedureChanges.Where(x => x.Kind != TestProcedureChangeKind.Retire))
         {
             var ids = ParseParentIds(introduced.ParentRevisionIdsJson, introduced.DisplayNumber);
-            ExactParentSelectionPolicy.Validate(VerificationProcedureParentPolicy.Classification(introduced.ParentKind), ids,
+            VerificationProcedureParentPolicy.Validate(introduced.ParentKind,
+                VerificationProcedureParentPolicy.ParentArtifactKind(ArtifactKey.Discipline, ArtifactKind), ids,
                 introduced.DerivedRationale, ArtifactNoun);
             var driving = DrivingRequirementIds(introduced.DrivingRequirementRevisionIdsJson);
-            if (introduced.ParentKind == VerificationProcedureParentKind.Derived && driving.Count != 0)
+            if (VerificationProcedureParentPolicy.NamesNoParents(introduced.ParentKind) && driving.Count != 0)
                 throw new DomainException(
-                    $"{introduced.DisplayNumber} is Derived but still names driving requirement revisions. A Derived {ArtifactNoun} must have no exact parents.");
+                    $"{introduced.DisplayNumber} is {introduced.ParentKind} but still names driving requirement revisions. A {introduced.ParentKind} {ArtifactNoun} must have no exact parents.");
             if (introduced.ParentKind == VerificationProcedureParentKind.Allocated
                 && !driving.All(ids.Contains))
                 throw new DomainException(

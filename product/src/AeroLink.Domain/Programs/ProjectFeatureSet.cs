@@ -46,18 +46,15 @@ public static class ProjectFeatures
     };
 
     /// <summary>
-    /// The combinations a project may hold. Code evidence and verification coverage both answer to
-    /// requirements, so neither may stand without them until standalone verification exists (#1113 S5).
+    /// The combinations a project may hold. Code evidence answers to requirements, so Code may not stand
+    /// without them. Verification may: without Requirements it is standalone verification (DEC-144).
     /// Returns the refusal, or null when the set is valid.
     /// </summary>
     public static string? Refusal(ProjectFeature enabled)
     {
         if ((enabled & ~All) != 0) return "The feature set contains an unknown feature.";
-        var requirements = enabled.HasFlag(ProjectFeature.Requirements);
-        if (enabled.HasFlag(ProjectFeature.Code) && !requirements)
+        if (enabled.HasFlag(ProjectFeature.Code) && !enabled.HasFlag(ProjectFeature.Requirements))
             return "Code needs Requirements: code is traced to the requirements it implements.";
-        if (enabled.HasFlag(ProjectFeature.Verification) && !requirements)
-            return "Verification needs Requirements until standalone verification is available: verification today covers requirements.";
         return null;
     }
 }

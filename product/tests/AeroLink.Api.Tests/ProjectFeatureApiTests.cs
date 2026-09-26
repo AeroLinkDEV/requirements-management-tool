@@ -48,8 +48,12 @@ public sealed class ProjectFeatureApiTests
         // Dependencies are refused before anything is stored.
         using (var codeAlone = await PutAsync(projectId, 0, "Code", "ProblemReports"))
             Assert.Equal(HttpStatusCode.BadRequest, codeAlone.StatusCode);
-        using (var verificationAlone = await PutAsync(projectId, 0, "Verification", "ProblemReports"))
-            Assert.Equal(HttpStatusCode.BadRequest, verificationAlone.StatusCode);
+        // Verification may stand without Requirements (DEC-144); Code alongside it still may not.
+        using (var codeWithVerification = await PutAsync(projectId, 0, "Verification", "Code", "ProblemReports"))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, codeWithVerification.StatusCode);
+            Assert.Contains("Code needs Requirements", await codeWithVerification.Content.ReadAsStringAsync());
+        }
         using (var unknown = await PutAsync(projectId, 0, "Bogus"))
             Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
         using (var noReason = await client.PutAsJsonAsync(Url(projectId), new { expectedVersion = 0, enabled = new[] { "ProblemReports" } }))

@@ -52,7 +52,6 @@ public sealed class ProjectSetupDraftTests
 
     [Theory]
     [InlineData(ProjectFeature.Code, "Code needs Requirements")]
-    [InlineData(ProjectFeature.Verification | ProjectFeature.ProblemReports, "Verification needs Requirements")]
     [InlineData((ProjectFeature)128, "unknown feature")]
     public void Draft_refuses_a_feature_set_DEC_136_does_not_allow(ProjectFeature enabled, string refusal)
     {
@@ -64,6 +63,19 @@ public sealed class ProjectSetupDraftTests
         Assert.Null(draft.EnabledFeatures);
         Assert.Equal("", draft.ProjectName);
         Assert.Equal(1, draft.Version);
+    }
+
+    [Fact]
+    public void Draft_accepts_verification_without_requirements_DEC_144()
+    {
+        var draft = new ProjectSetupDraft(Creator, "owner@example.test");
+        var standalone = ProjectFeature.Verification | ProjectFeature.Release;
+        draft.UpdateAnswers(1, ProjectSetupStep.Features, null, null, null, null, null, null,
+            null, null, null, null, null, null, Now, standalone);
+        Assert.Equal(standalone, draft.EnabledFeatures);
+        Assert.Null(ProjectFeatures.Refusal(standalone));
+        // Code still answers to requirements.
+        Assert.Contains("Code needs Requirements", ProjectFeatures.Refusal(standalone | ProjectFeature.Code));
     }
 
     [Fact]

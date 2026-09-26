@@ -686,7 +686,14 @@ public static class BaselineEndpoints
                 if (freshActor is null || !await http.HasFreshProjectRoleAsync(db, identity, writeScope, ct, ProgramRole.ConfigurationManager))
                     return Results.Forbid();
                 var baseline = await repository.GetAsync(id, ct); if (baseline is null) return Results.NotFound();
-                baseline.Freeze(freshActor.UserName, DateTimeOffset.UtcNow);
+                // DEC-144: a project without Requirements has no change requests to select, so its baseline
+                // freezes empty and carries only the verification work selected after the freeze.
+                var requirementsInUse = (await ProjectFeatureService.EffectiveAsync(db, projectId.Value, ct))
+                    .HasFlag(ProjectFeature.Requirements);
+                if (requirementsInUse || baseline.Selections.Count != 0 || baseline.ExternalPackageSelections.Count != 0)
+                    baseline.Freeze(freshActor.UserName, DateTimeOffset.UtcNow);
+                else
+                    baseline.FreezeWithoutRequirements(freshActor.UserName, DateTimeOffset.UtcNow);
                 await repository.SaveAsync(ct);
                 await writeScope.CommitAsync(ct);
                 return Results.Ok(ApiMap.Baseline(baseline));

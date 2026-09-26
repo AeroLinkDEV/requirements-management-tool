@@ -19,6 +19,7 @@ internal sealed class SaveBoundaryIntegrityValidator(AeroLinkDbContext db)
     internal async Task ValidateAsync(CancellationToken ct)
     {
         await ProjectFeatureService.RefuseRecordsForDisabledFeaturesAsync(_db, ct);
+        await ProjectFeatureService.RefuseStandaloneVerificationWithRequirementsAsync(_db, ct);
         await ValidateTestChangeReviewOriginsAsync(ct);
         await ValidateReferencedCaseChangesAsync(ct);
         await ValidateReferencedCaseAssessmentsAsync(ct);
@@ -1310,13 +1311,8 @@ internal sealed class SaveBoundaryIntegrityValidator(AeroLinkDbContext db)
                     throw new DomainException(
                         $"Removing an exact parent from an existing approved {noun} revision requires a controlled successor with a signed parent selection.");
             }
-            ExactParentSelectionPolicy.Validate(
-                revision.ParentKind == VerificationProcedureParentKind.Derived
-                    ? ExactParentClassification.Derived
-                    : revision.ParentKind == VerificationProcedureParentKind.Allocated
-                        ? ExactParentClassification.Allocated
-                        : ExactParentClassification.Unspecified,
-                ids, revision.DerivedRationale, noun);
+            VerificationProcedureParentPolicy.Validate(revision.ParentKind,
+                VerificationParentArtifactKind.Requirement, ids, revision.DerivedRationale, noun);
             if (!policies.TryGetValue(owner.ProjectId, out var policy))
                 throw new DomainException($"Project {owner.ProjectId} has no persisted ladder configuration.");
             var expectedLevel = policy.RequirementLevelFor(owner.Level);
