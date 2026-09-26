@@ -42,8 +42,9 @@
 // Anything the wrapper kills, it kills by the PID it started, as a tree, and never by process name.
 
 import { execFileSync, spawn } from 'node:child_process'
-import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { closeSync, existsSync, mkdirSync, openSync, statSync, writeSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { SNAPSHOT_SCRIPT } from './socket-snapshot-reporter.mjs'
 
 /** The command to run, as a JSON argument vector: `["<exe>", "<arg>", ...]`.
  *
@@ -187,18 +188,52 @@ const err = makeStamper('err')
 // spacing, each is time-limited, and a missing tool or a failed capture only adds a line to the transcript.
 // Unset, which is the default for anyone running the suite locally, nothing is attempted.
 
-/** The capture command as a JSON argument vector; `report -p <pid>` is appended. */
-const stackArgvJson = process.env.AEROLINK_E2E_STACK_ARGV
-let stackArgv = null
-if (stackArgvJson) {
+/** An optional capture command from the environment, as a JSON argument vector; null when unset or unusable. */
+const argvFromEnvironment = name => {
+  const json = process.env[name]
+  if (!json) return null
   try {
-    const parsed = JSON.parse(stackArgvJson)
-    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(item => typeof item === 'string')) stackArgv = parsed
-    else writeLog(`==== stack capture disabled: AEROLINK_E2E_STACK_ARGV must be a non-empty array of strings\n`)
+    const parsed = JSON.parse(json)
+    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(item => typeof item === 'string')) return parsed
+    writeLog(`==== ${name} ignored: it must be a non-empty array of strings\n`)
   } catch (error) {
-    writeLog(`==== stack capture disabled: AEROLINK_E2E_STACK_ARGV is not valid JSON (${error.message})\n`)
+    writeLog(`==== ${name} ignored: it is not valid JSON (${error.message})\n`)
   }
+  return null
 }
+
+/** The managed capture command; `report -p <pid>` is appended. */
+const stackArgv = argvFromEnvironment('AEROLINK_E2E_STACK_ARGV')
+
+// What the managed stacks cannot say (#939, #986). The first captured stalls (2026-09-25) showed every stalled
+// request blocked inside a native SQLite call — a COMMIT, a read and two connection opens at once, with nothing
+// else in flight — and the same runners fail Chromium loopback connects with WSAENOBUFS. Lock waits, a stalled
+// disk flush and host memory pressure all look identical from managed frames. So each capture also records the
+// database files' sizes (a WAL that has grown large makes a checkpoint slow), the host's memory, paging, disk and
+// CPU pressure, and, where the Windows debugger is installed, the native stacks. All of it is best-effort in the
+// same way as the managed capture. Outside a CI Windows runner the host and native captures stay off unless the
+// environment names a command.
+const inCiOnWindows = process.env.CI === 'true' && process.platform === 'win32'
+const powershellWithoutParentModules = { ...process.env }
+// Windows PowerShell 5.1 owns the counter and NetTCPIP cmdlets; a PowerShell 7 parent's module path shadows them.
+delete powershellWithoutParentModules.PSModulePath
+const hostSnapshotArgv = process.env.AEROLINK_E2E_HOST_SNAPSHOT_ARGV !== undefined
+  ? argvFromEnvironment('AEROLINK_E2E_HOST_SNAPSHOT_ARGV')
+  : inCiOnWindows ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', SNAPSHOT_SCRIPT] : null
+const debuggerCandidates = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles]
+  .filter(Boolean).map(root => join(root, 'Windows Kits', '10', 'Debuggers', 'x64', 'cdb.exe'))
+/** Non-invasive (`-pv`): the process is suspended for the walk and resumed on `qd`, never altered. */
+const nativeStackArgv = process.env.AEROLINK_E2E_NATIVE_STACK_ARGV !== undefined
+  ? argvFromEnvironment('AEROLINK_E2E_NATIVE_STACK_ARGV')
+  : inCiOnWindows ? (found => found ? [found, '-pv', '-c', '~*kc 40; qd'] : null)(debuggerCandidates.find(existsSync)) : null
+const databasePath = /Data Source=([^;]+)/i.exec(process.env.ConnectionStrings__AeroLink ?? '')?.[1]?.trim() || null
+
+const fileSize = path => {
+  try { return statSync(path).size } catch { return null }
+}
+const databaseFiles = () => ({
+  db: fileSize(databasePath), wal: fileSize(`${databasePath}-wal`), shm: fileSize(`${databasePath}-shm`),
+})
 
 const stallMarker = /AEROLINK-STALL pid=(\d+)/
 const maximumCaptures = Number(process.env.AEROLINK_E2E_STACK_MAX_CAPTURES ?? 5)
@@ -206,8 +241,34 @@ const minimumCaptureSpacingMs = Number(process.env.AEROLINK_E2E_STACK_SPACING_MS
 let captures = 0
 let lastCaptureAt = -Infinity
 let captureRunning = false
-let runningCapture = null
+const runningCaptures = new Set()
 let reportedUnconfigured = false
+
+/** Runs one bounded capture into the transcript under `tag`, and resolves when it has ended either way. */
+const runCapture = (tag, argv, extra, limitMs, options = {}) => new Promise(resolveCapture => {
+  const stamper = makeStamper(tag)
+  let capture
+  try {
+    capture = spawn(argv[0], [...argv.slice(1), ...extra], { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], ...options })
+  } catch (error) {
+    writeLog(`${new Date().toISOString()} ${tag} capture could not start (${error.message})\n`)
+    resolveCapture()
+    return
+  }
+  runningCaptures.add(capture)
+  capture.stdout.setEncoding('utf8')
+  capture.stderr.setEncoding('utf8')
+  capture.stdout.on('data', chunk => stamper.push(chunk))
+  capture.stderr.on('data', chunk => stamper.push(chunk))
+  const limit = setTimeout(() => { try { capture.kill() } catch { /* already gone */ } }, limitMs)
+  capture.on('error', error => writeLog(`${new Date().toISOString()} ${tag} capture failed (${error.message})\n`))
+  capture.on('close', code => {
+    clearTimeout(limit)
+    runningCaptures.delete(capture)
+    writeLog(`${new Date().toISOString()} ${tag} ==== capture ended exit=${code ?? 'null'} ====\n`)
+    resolveCapture()
+  })
+})
 
 const captureStacks = pid => {
   if (!stackArgv) {
@@ -220,30 +281,16 @@ const captureStacks = pid => {
   captures += 1
   lastCaptureAt = now
   captureRunning = true
-  writeLog(`${new Date().toISOString()} stk ==== capturing managed stacks of pid ${pid} (${captures}/${maximumCaptures}) ====\n`)
-  const stk = makeStamper('stk')
-  let capture
-  try {
-    capture = spawn(stackArgv[0], [...stackArgv.slice(1), 'report', '-p', String(pid)],
-      { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
-  } catch (error) {
-    writeLog(`${new Date().toISOString()} stk capture could not start (${error.message})\n`)
-    captureRunning = false
-    return
-  }
-  runningCapture = capture
-  capture.stdout.setEncoding('utf8')
-  capture.stderr.setEncoding('utf8')
-  capture.stdout.on('data', chunk => stk.push(chunk))
-  capture.stderr.on('data', chunk => stk.push(chunk))
-  const limit = setTimeout(() => { try { capture.kill() } catch { /* already gone */ } }, 60_000)
-  capture.on('error', error => writeLog(`${new Date().toISOString()} stk capture failed (${error.message})\n`))
-  capture.on('close', code => {
-    clearTimeout(limit)
-    captureRunning = false
-    runningCapture = null
-    writeLog(`${new Date().toISOString()} stk ==== capture ended exit=${code ?? 'null'} ====\n`)
-  })
+  const at = new Date().toISOString()
+  writeLog(`${at} stk ==== capturing managed stacks of pid ${pid} (${captures}/${maximumCaptures}) ====\n`)
+  // Taken first and synchronously: a size read after the stacks could already describe a finished checkpoint.
+  if (databasePath) writeLog(`${at} dbf ${JSON.stringify(databaseFiles())}\n`)
+  const host = hostSnapshotArgv ? runCapture('hst', hostSnapshotArgv, [], 30_000, { env: powershellWithoutParentModules }) : null
+  // Native after managed: both attach to the same process, and the managed walk is the one already relied upon.
+  runCapture('stk', stackArgv, ['report', '-p', String(pid)], 60_000)
+    .then(() => nativeStackArgv ? runCapture('nat', nativeStackArgv, ['-p', String(pid)], 60_000) : null)
+    .then(() => host)
+    .finally(() => { captureRunning = false })
 }
 
 /** Whole stdout lines, for marker detection only. The transcript itself is written by `out`, unbuffered. */
@@ -314,7 +361,7 @@ for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
 
 const finish = (code, signal) => {
   // A capture outliving the server it was reading has nothing left to report.
-  if (runningCapture) { try { runningCapture.kill() } catch { /* already gone */ } }
+  for (const capture of runningCaptures) { try { capture.kill() } catch { /* already gone */ } }
   const state = captureDegraded === '' ? 'complete' : `degraded (${captureDegraded})`
   // Best-effort, and deliberately not relied upon.
   //

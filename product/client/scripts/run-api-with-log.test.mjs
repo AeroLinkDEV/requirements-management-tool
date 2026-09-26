@@ -92,7 +92,8 @@ const portFree = port => new Promise(resolve => {
  * can observe a running tree. Every started PID is registered for teardown by the caller's `finally`.
  */
 const startWrapper = (argv, { logPath, env = {}, registry } = {}) => {
-  const childEnv = { ...process.env, AEROLINK_E2E_API_ARGV: JSON.stringify(argv), ...env }
+  // The host and native captures default on in CI on Windows; tests opt in explicitly so they stay hermetic.
+  const childEnv = { ...process.env, AEROLINK_E2E_HOST_SNAPSHOT_ARGV: '', AEROLINK_E2E_NATIVE_STACK_ARGV: '', AEROLINK_E2E_API_ARGV: JSON.stringify(argv), ...env }
   // Never inherited by accident: a caller that happens to have this set must not silently give a test a
   // transcript it did not ask for.
   if (logPath) childEnv.AEROLINK_E2E_API_LOG = logPath
@@ -683,6 +684,38 @@ test('captures are spaced, so a burst of stalls takes one capture rather than on
     const log = readFileSync(logPath, 'utf8')
     assert.equal((log.match(/capturing managed stacks/g) ?? []).length, 1)
     assert.match(log, /fake-stack report -p 11$/m)
+    killTree(state.proc.pid)
+    await withDeadline(state.closed, 'the wrapper to exit')
+  } finally {
+    registry.forEach(killTree)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a capture also records the database files, the host snapshot and native stacks, native after managed', async () => {
+  const dir = scratch()
+  const registry = []
+  const logPath = join(dir, 'api.log')
+  const database = join(dir, 'aerolink.db')
+  writeFileSync(database, 'x'.repeat(4096))
+  writeFileSync(`${database}-wal`, 'w'.repeat(1234))
+  // `--` keeps node from reading the appended `-p <pid>` as its own print flag.
+  const fake = label => JSON.stringify([process.execPath, '-e', `console.log(['${label}', ...process.argv.slice(1)].join(' '))`, '--'])
+  try {
+    const state = startWrapper(
+      nodeArgv("console.log('AEROLINK-STALL pid=4343 method=POST path=/api/auth/login'); setTimeout(() => {}, 30000)"),
+      { logPath, registry, env: {
+        AEROLINK_E2E_STACK_ARGV: fakeStackArgv, AEROLINK_E2E_HOST_SNAPSHOT_ARGV: fake('fake-host'),
+        AEROLINK_E2E_NATIVE_STACK_ARGV: fake('fake-native'), ConnectionStrings__AeroLink: `Data Source=${database};Pooling=True`,
+      } },
+    )
+    await waitFor(() => /nat ==== capture ended exit=0/.test(readFileSync(logPath, 'utf8')), 'the native capture to finish')
+    await waitFor(() => /hst ==== capture ended exit=0/.test(readFileSync(logPath, 'utf8')), 'the host snapshot to finish')
+    const log = readFileSync(logPath, 'utf8')
+    assert.match(log, /^\S+ dbf \{"db":4096,"wal":1234,"shm":null\}$/m)
+    assert.match(log, /^\S+ hst fake-host$/m)
+    assert.match(log, /^\S+ nat fake-native -p 4343$/m)
+    assert.ok(log.indexOf('stk ==== capture ended') < log.indexOf('nat fake-native'), 'native stacks are taken after the managed walk')
     killTree(state.proc.pid)
     await withDeadline(state.closed, 'the wrapper to exit')
   } finally {
