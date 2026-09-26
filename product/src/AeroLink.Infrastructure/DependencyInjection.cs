@@ -43,10 +43,12 @@ public static class DependencyInjection
             services.AddHostedService(provider => new StallWatchdog(provider.GetRequiredService<InFlightRequests>(),
                 stallThreshold, provider.GetRequiredService<ILogger<StallWatchdog>>(),
                 isPostgres ? null : () => SqliteStallProbe.Describe(connection, TimeSpan.FromSeconds(3))));
+        var sqliteSynchronous = SqliteSynchronousInterceptor.Configured(configuration, isPostgres);
         services.AddDbContext<AeroLinkDbContext>((serviceProvider, options) =>
         {
             if (isPostgres) options.UseNpgsql(connection);
             else options.UseSqlite(connection);
+            if (sqliteSynchronous is not null) options.AddInterceptors(new SqliteSynchronousInterceptor(sqliteSynchronous));
             options.AddInterceptors(serviceProvider.GetRequiredService<ReleasedExecutionEvidenceInterceptor>());
             if (slowDatabaseAfter is not null)
                 options.AddInterceptors(serviceProvider.GetRequiredService<SlowDatabaseInterceptor>());
