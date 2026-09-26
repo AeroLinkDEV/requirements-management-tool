@@ -34,7 +34,7 @@ export function normalizePath(path) {
  * configuration. Only coding agents read them; no workflow, script, or product suite does, so they are
  * documentation for classification purposes.
  */
-const DOCUMENTATION_ROOTS =/^(?:docs|design|showcase|product\/docs|\.agents|\.claude|\.codex)(?:\/|$)/i
+const DOCUMENTATION_ROOTS = /^(?:docs|design|showcase|product\/docs|\.agents|\.claude|\.codex)(?:\/|$)/i
 const DOCUMENTATION_FILES = /^[^/]+\.md$/i
 
 /**
