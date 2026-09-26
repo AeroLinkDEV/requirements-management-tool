@@ -113,6 +113,9 @@ try {
         }
         catch {
             if ($_.Exception.Message -notlike '*did not become ready*') { throw }
+            # #1183: the failure must carry its own evidence, because CI keeps the job log and not the log files.
+            Assert-True ($_.Exception.Message -match 'exited with code \d+') "The readiness failure did not say how the process ended: $($_.Exception.Message)"
+            Assert-True ($_.Exception.Message -like '*--- stderr tail*--- stdout tail*') "The readiness failure did not carry the log tails: $($_.Exception.Message)"
             $expectedFailure = $true
         }
         Assert-True $expectedFailure 'The immediate-exit API executable did not produce the expected readiness failure.'

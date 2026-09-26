@@ -63,13 +63,29 @@ try {
     # dotnet-run parent whose child could survive cleanup and retain the validation port/database.
     $process = Start-Process -FilePath $apiExecutable -WorkingDirectory (Split-Path $apiExecutable -Parent) `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
+    # Opening the handle now is what lets ExitCode be read after the process has gone; without it a
+    # Start-Process object reports an empty exit code, and the failure below could not say how it ended.
+    $null = $process.Handle
     $ready = $false
     for ($attempt = 0; $attempt -lt 120; $attempt++) {
         if ($process.HasExited) { break }
         try { $response = Invoke-WebRequest -Uri "http://127.0.0.1:$ApiPort/health/ready" -UseBasicParsing -TimeoutSec 2; if ($response.StatusCode -eq 200) { $ready = $true; break } } catch { }
         Start-Sleep -Milliseconds 500
     }
-    if (-not $ready) { throw "The isolated read-only AeroLink validation API did not become ready. See $stderr" }
+    if (-not $ready) {
+        # #1183: the only line that says why the API stopped was written under a directory CI does not upload,
+        # so the failure named a file nobody could read. Put the evidence in the message itself: how the process
+        # ended, every socket on the port in any state (a client connection can own the port without listening
+        # on it), and the tails of both logs.
+        $ended = if ($process.HasExited) { "exited with code $($process.ExitCode)" } else { 'still running after the readiness budget' }
+        $sockets = @(Get-NetTCPConnection -LocalPort $ApiPort -ErrorAction SilentlyContinue | ForEach-Object {
+            "$($_.State) $($_.LocalAddress):$($_.LocalPort) -> $($_.RemoteAddress):$($_.RemotePort) pid=$($_.OwningProcess)"
+        })
+        $tail = { param($path) if (Test-Path -LiteralPath $path) { (@(Get-Content -LiteralPath $path -Tail 40 -ErrorAction SilentlyContinue) -join "`n") } else { '(no file)' } }
+        throw ("The isolated read-only AeroLink validation API did not become ready ($ended). " +
+            "Sockets on port ${ApiPort}: $(if ($sockets.Count -gt 0) { $sockets -join '; ' } else { 'none' })." +
+            "`n--- stderr tail ($stderr) ---`n$(& $tail $stderr)`n--- stdout tail ($stdout) ---`n$(& $tail $stdout)")
+    }
 
     $handler = [Net.Http.HttpClientHandler]::new(); $handler.CookieContainer = [Net.CookieContainer]::new()
     $client = [Net.Http.HttpClient]::new($handler); $client.BaseAddress = [Uri]"http://127.0.0.1:$ApiPort"
