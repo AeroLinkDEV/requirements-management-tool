@@ -348,6 +348,26 @@ public sealed class SecurityBoundaryTests
     }
 
     [Fact]
+    public async Task Administrator_reads_the_security_audit_newest_first_on_the_sqlite_host()
+    {
+        // #1189: SQLite cannot ORDER BY a DateTimeOffset, and this read answered 500 on every SQLite host.
+        using var factory = new AeroLinkApiFactory();
+        using var administrator = factory.CreateClient();
+        await BootstrapAndLoginAdministratorAsync(administrator);
+        using (var again = factory.CreateClient())
+            Assert.Equal(HttpStatusCode.OK, (await again.PostAsJsonAsync("/api/auth/login",
+                new { userName = "admin", password = AeroLinkApiFactory.AdministratorPassword })).StatusCode);
+
+        using var response = await administrator.GetAsync("/api/admin/security-audit");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var occurred = (await response.Content.ReadFromJsonAsync<JsonElement>()).EnumerateArray()
+            .Select(entry => entry.GetProperty("occurredAt").GetDateTimeOffset()).ToList();
+        Assert.True(occurred.Count >= 2, $"expected the bootstrap and sign-in events, found {occurred.Count}");
+        Assert.Equal(occurred.OrderByDescending(at => at), occurred);
+    }
+
+    [Fact]
     public async Task Administrator_can_revoke_membership_and_delegation_with_audit_state_retained()
     {
         using var factory = new AeroLinkApiFactory();

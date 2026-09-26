@@ -168,8 +168,16 @@ public static class AdministrationEndpoints
             await db.SaveChangesAsync(ct); return Results.NoContent();
         });
 
-        app.MapGet("/api/admin/security-audit", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) => http.UserAccount().IsAdministrator
-            ? Results.Ok(await db.SecurityAuditEvents.AsNoTracking().OrderByDescending(x => x.OccurredAt).Take(1000).ToListAsync(ct)) : Results.Forbid());
+        // SQLite cannot order by a DateTimeOffset in SQL (#1189), so on SQLite the rows are ordered after reading,
+        // the same split the managed-document audit uses. PostgreSQL keeps ordering and limiting in the database.
+        app.MapGet("/api/admin/security-audit", async (HttpContext http, AeroLinkDbContext db, CancellationToken ct) =>
+        {
+            if (!http.UserAccount().IsAdministrator) return Results.Forbid();
+            var events = db.SecurityAuditEvents.AsNoTracking();
+            return Results.Ok(db.Database.IsNpgsql()
+                ? await events.OrderByDescending(x => x.OccurredAt).Take(1000).ToListAsync(ct)
+                : (await events.ToListAsync(ct)).OrderByDescending(x => x.OccurredAt).Take(1000).ToList());
+        });
 
         // Enterprise Requirements Workspace: configurable schemas, structured specifications,
         // collaboration, saved views, governed bulk operations, redlines, and onboarding.
