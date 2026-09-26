@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   median, percentile, classifyRun, runDurationMs, jobGroupDurations, queueAndCancellation,
   flakeTrend, cacheTrend, rollingStats, detectRegressions, validateRunRecord, recordFormat, buildRollingReport, trackerBody, trackerCategoriesFromBody, decideTrackerAction, regressionDeterminacy, writeWouldRegressTracker,
-  fullGatesPerMerge, scheduledProofStatus, FULL_GATE_WINDOW_DAYS, MAX_RECORDS,
+  fullGatesPerMerge, scheduledProofStatus, FULL_GATE_WINDOW_DAYS, MAX_RECORDS, detectBudgetBreaches, LANE_BUDGETS_MS,
 } from '../lib/rolling.mjs'
 
 function record(overrides = {}) {
@@ -198,6 +198,49 @@ test('detectRegressions requires sustained evidence and never fires on noise', (
   const outlier = record({ criticalPath: { job: 'gate', durationMs: 240_000, unavailableReason: null }, run: { ...record().run, id: 999 } })
   const p95regressions = detectRegressions([...fast, ...fast, outlier], { window: 6, minRuns: 3, ratio: 1.15, minDeltaMs: 60_000 })
   assert.ok(p95regressions.some((entry) => entry.metric === 'criticalPathP95' && entry.previous === 30_000))
+})
+
+test('a lane budget catches growth that no window-to-window comparison reports (#1152 C5)', () => {
+  // Replayed creep: three 8-run windows at 26, 28.6 and 31.5 minutes, each 10% above the last. The relative
+  // detector compares only the last two, sees +10% under its 15% ratio, and stays silent. The budget does not.
+  const minutes = (value) => Math.round(value * 60_000)
+  const windows = [26, 28.6, 31.46].flatMap((level, w) => Array.from({ length: 8 }, (_, i) =>
+    record({ run: { ...record().run, id: w * 100 + i + 1 }, criticalPath: { job: 'gate', durationMs: minutes(level) + i * 1000, unavailableReason: null } })))
+  const options = { window: 8, minRuns: 3, ratio: 1.15, minDeltaMs: 60_000 }
+  assert.deepEqual(detectRegressions(windows, options), [])
+  const [breach, ...rest] = detectBudgetBreaches(windows, 'queue-mixed', options)
+  assert.deepEqual(rest, [])
+  assert.equal(breach.metric, 'criticalPathMedianBudget')
+  assert.equal(breach.budget, LANE_BUDGETS_MS['queue-mixed'])
+  assert.equal(breach.threshold, breach.budget)
+  assert.equal(breach.runs, 8)
+  assert.ok(breach.current > breach.budget)
+
+  // Under budget, an unbudgeted lane, too few measured runs, and unavailable durations report nothing.
+  assert.deepEqual(detectBudgetBreaches(windows.slice(0, 16), 'queue-mixed', options), [])
+  assert.deepEqual(detectBudgetBreaches(windows, 'push-main', options), [])
+  assert.deepEqual(detectBudgetBreaches(windows, 'constructor', options), [])
+  const unmeasured = windows.map((entry, i) => (i < 22 ? { ...entry, criticalPath: { job: 'gate', durationMs: null, unavailableReason: 'x' } } : entry))
+  assert.deepEqual(detectBudgetBreaches(unmeasured, 'queue-mixed', options), [])
+  assert.deepEqual(detectBudgetBreaches(windows, 'queue-mixed', { ...options, budgets: { 'queue-mixed': Number.NaN } }), [])
+
+  // Every budgeted lane is a category the tracker can record, and the budgets cannot be edited at run time.
+  assert.ok(Object.isFrozen(LANE_BUDGETS_MS))
+  for (const lane of Object.keys(LANE_BUDGETS_MS)) {
+    assert.deepEqual(trackerCategoriesFromBody(trackerBody({ regressions: [{ ...breach, category: lane }], generatedAt: '2026-09-26T00:00:00.000Z' })), [lane])
+  }
+})
+
+test('a budget breach reads as a budget in the report and the tracker, not as a previous window', () => {
+  const breach = { metric: 'criticalPathMedianBudget', category: 'queue-mixed', current: 1_890_000, budget: 1_800_000, threshold: 1_800_000, runs: 8 }
+  const report = buildRollingReport({ records: [record()], regressions: [breach] })
+  assert.match(report.markdown, /- queue-mixed: criticalPathMedianBudget: current 1890s over budget 1800s \(8 runs\)/)
+  const body = trackerBody({ ...report, regressions: [breach] })
+  assert.match(body, /- queue-mixed: criticalPathMedianBudget: current 1890s over budget 1800s \(8 runs\)/)
+  assert.doesNotMatch(body, /previous/)
+  // A relative regression keeps its established line, which the legacy tracker parser reads.
+  const relative = buildRollingReport({ records: [record()], regressions: [{ metric: 'criticalPathMedian', category: 'mixed', current: 900_000, previous: 700_000, threshold: 805_000, runs: 8 }] })
+  assert.match(relative.markdown, /- mixed: criticalPathMedian: current 900s vs previous 700s \(threshold 805s, 8 runs\)/)
 })
 
 test('validateRunRecord rejects untrusted or credential-shaped records', () => {
