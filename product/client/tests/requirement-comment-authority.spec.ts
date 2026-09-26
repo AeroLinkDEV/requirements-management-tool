@@ -4,7 +4,7 @@ import { apiLogin, login, openNavigationGroup, selectProgram, showcaseSeed } fro
 // Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
 // context, or the next test inherits "Response has been disposed" from this one (#1001).
 test.afterEach(async ({ page }) => {
-  await page.unrouteAll({ behavior: "wait" });
+  if (!page.isClosed()) await page.unrouteAll({ behavior: "wait" });
 });
 
 // These races start from the explorer opening its first requirement unasked, which it does only where the

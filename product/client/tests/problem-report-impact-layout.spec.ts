@@ -4,7 +4,7 @@ import { apiBase, apiLogin, login, selectProgram, showcaseSeed } from './auth'
 // Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
 // context, or the next test inherits "Response has been disposed" from this one (#1001).
 test.afterEach(async ({ page }) => {
-  await page.unrouteAll({ behavior: 'wait' })
+  if (!page.isClosed()) await page.unrouteAll({ behavior: 'wait' })
 })
 
 test('Problem Report impact lays out an exact recorded file reference across desktop widths', async ({ page, request }, testInfo) => {
