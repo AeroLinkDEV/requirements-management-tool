@@ -4,6 +4,7 @@ import {
   median, percentile, classifyRun, runDurationMs, jobGroupDurations, queueAndCancellation,
   flakeTrend, cacheTrend, rollingStats, detectRegressions, validateRunRecord, recordFormat, buildRollingReport, trackerBody, trackerCategoriesFromBody, decideTrackerAction, regressionDeterminacy, writeWouldRegressTracker,
   fullGatesPerMerge, ranNoProductJob, scheduledProofStatus, FULL_GATE_WINDOW_DAYS, MAX_RECORDS, detectBudgetBreaches, LANE_BUDGETS_MS,
+  comparableDurationMs,
 } from '../lib/rolling.mjs'
 
 function record(overrides = {}) {
@@ -248,6 +249,53 @@ test('detectRegressions requires sustained evidence and never fires on noise', (
   const outlier = record({ criticalPath: { job: 'gate', durationMs: 240_000, unavailableReason: null }, run: { ...record().run, id: 999 } })
   const p95regressions = detectRegressions([...fast, ...fast, outlier], { window: 6, minRuns: 3, ratio: 1.15, minDeltaMs: 60_000 })
   assert.ok(p95regressions.some((entry) => entry.metric === 'criticalPathP95' && entry.previous === 30_000))
+})
+
+test('cancelled and unmeasured runs are not critical-path samples (#587)', () => {
+  const push = (id, durationMs, conclusion = 'success') => record({
+    run: { ...record().run, id, event: 'push' }, conclusion,
+    criticalPath: durationMs === null
+      ? { job: null, durationMs: null, unavailableReason: 'no product job ran' }
+      : { job: 'gate', durationMs, unavailableReason: null },
+  })
+  // The push-main sequence in rolling report 2026-09-26: A1-skipped pushes (no path), one superseded push
+  // cancelled after 75 s, and full runs of 1468, 1420 and 1367 s. Windows of raw records averaged the 75 s
+  // stub into a 772 s "previous" median and reported a 1393 s "regression".
+  const sequence = [
+    push(1, null), push(2, null, 'cancelled'), push(3, null), push(4, null, 'cancelled'), push(5, 75_000, 'cancelled'),
+    push(6, null), push(7, null), push(8, 1_468_000), push(9, null), push(10, null), push(11, null), push(12, null),
+    push(13, null), push(14, 1_420_000), push(15, null), push(16, 1_367_000),
+  ]
+  const options = { window: 8, minRuns: 3, ratio: 1.15, minDeltaMs: 60_000 }
+  assert.deepEqual(detectRegressions(sequence, options), [])
+  const verdict = regressionDeterminacy(sequence, options)
+  assert.equal(verdict.determinate, false)
+  assert.match(verdict.reason, /Only 3 comparable runs of 16 \(3 cancelled, 10 with the critical path unavailable\)/)
+  assert.equal(comparableDurationMs(push(5, 75_000, 'cancelled')), null)
+  assert.equal(comparableDurationMs(record({ conclusion: 'success', apiTiming: { conclusion: 'cancelled' } })), null)
+  assert.equal(comparableDurationMs(push(8, 1_468_000)), 1_468_000)
+
+  // Windows count comparable runs only: eight full runs per window, with skipped and cancelled pushes
+  // between them, compare like with like, and a steady gate is a determinate "no regression".
+  const steady = []
+  for (let i = 0; i < 16; i += 1) {
+    steady.push(push(100 + i * 3, 1_380_000 + (i % 3) * 20_000), push(101 + i * 3, null), push(102 + i * 3, 60_000, 'cancelled'))
+  }
+  assert.deepEqual(detectRegressions(steady, options), [])
+  assert.equal(regressionDeterminacy(steady, options).determinate, true)
+  // And a real slowdown across comparable runs is still caught through the noise.
+  const slower = [...steady.slice(0, 24), ...steady.slice(24).map((entry) => (comparableDurationMs(entry) === null ? entry
+    : { ...entry, criticalPath: { ...entry.criticalPath, durationMs: entry.criticalPath.durationMs + 400_000 } }))]
+  assert.ok(detectRegressions(slower, options).some((entry) => entry.metric === 'criticalPathMedian'))
+
+  // Budgets and lane statistics use the same samples.
+  const cancelledQueue = Array.from({ length: 8 }, (_, i) => record({
+    run: { ...record().run, id: 300 + i, event: 'merge_group' }, conclusion: 'cancelled',
+    criticalPath: { job: 'gate', durationMs: 40 * 60_000, unavailableReason: null },
+  }))
+  assert.deepEqual(detectBudgetBreaches(cancelledQueue, 'queue-mixed', options), [])
+  const stats = rollingStats([push(8, 1_468_000), push(5, 75_000, 'cancelled')])
+  assert.deepEqual(stats[0].criticalPath, { median: 1_468_000, p95: 1_468_000, samples: 1 })
 })
 
 test('a lane budget catches growth that no window-to-window comparison reports (#1152 C5)', () => {
