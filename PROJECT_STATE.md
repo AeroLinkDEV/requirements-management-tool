@@ -85,10 +85,13 @@ and verification capabilities; artifact threads and traceability publications di
 from missing coverage using the effective ladder.
 
 A project also chooses which major features it uses (DEC-136): Team Work, Requirements, Verification, Code,
-Documentation Center, Problem Reports and Release, set in Project Configuration → Features. Command Center and My Work
+Documentation Center, Problem Reports and Release. They are chosen in the Features step of Create New Project, recorded
+as the project's first feature-history entry, and changed later in Project Configuration → Features. An inherited
+starting point keeps Requirements, Verification and Release, which its source brings. Command Center and My Work
 are always present. A project without a stored set has every feature. Code and Verification need Requirements; a
 feature can be switched off only while it holds no records, and the save boundary refuses new records for a feature
-that is off. Navigation, quick navigation, deep links and Command Center follow the same set.
+that is off. Navigation, quick navigation, deep links and Command Center follow the same set. Verification without
+Requirements ("standalone verification") is tracked separately in #1188.
 
 Project entry uses stable identity and opens the actual visual build-lineage selector, including for a single
 build. Explicit build links retain their exact authorized target. Repository setup can remain Pending and be

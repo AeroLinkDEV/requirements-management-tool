@@ -7,8 +7,11 @@ namespace AeroLink.Domain.Programs;
 /// <summary>The durable state of a project setup attempt. A draft is not a usable Project.</summary>
 public enum ProjectSetupState { Draft, Finalizing, Completed, Abandoned }
 
-/// <summary>The screen-level progress marker retained for resume and discovery.</summary>
-public enum ProjectSetupStep { Details, StartingPoint, FirstBuild, Ladder, WorkingRules, Services, Review, Complete }
+/// <summary>
+/// The screen-level progress marker retained for resume and discovery. Stored by name, so a step can be added
+/// anywhere in the order without renumbering saved drafts.
+/// </summary>
+public enum ProjectSetupStep { Details, StartingPoint, Features, FirstBuild, Ladder, WorkingRules, Services, Review, Complete }
 
 /// <summary>Supported inception sources. Non-Fresh paths are composed by the import/inheritance delivery.</summary>
 public enum ProjectSetupStartKind { Fresh, AeroLinkBaseline, ExternalBaseline }
@@ -79,6 +82,11 @@ public sealed class ProjectSetupDraft
     public string ReviewRulesJson { get; private set; } = "{}";
     public string RepositoryJson { get; private set; } = "{}";
     public string MappingJson { get; private set; } = "{}";
+    /// <summary>
+    /// The features the project will start with (#1113). Null until the creator chooses, which means every
+    /// feature, the same default a project without a stored feature set has.
+    /// </summary>
+    public ProjectFeature? EnabledFeatures { get; private set; }
     public bool ReviewRulesAccepted { get; private set; }
     /// <summary>Hash of the exact ladder and review-rule snapshots the creator accepted together.</summary>
     public string? ReviewRulesAcceptanceHash { get; private set; }
@@ -97,10 +105,13 @@ public sealed class ProjectSetupDraft
     public void UpdateAnswers(long expectedVersion, ProjectSetupStep currentStep, string? projectName,
         string? softwareProduct, ProjectSetupStartKind? startKind, Guid? sourceBaselineId, Guid? sourceImportId,
         string? initialReleaseVersion, string? selectedCategoriesJson, string? ladderJson, string? reviewRulesJson,
-        bool? reviewRulesAccepted, string? repositoryJson, string? mappingJson, DateTimeOffset now)
+        bool? reviewRulesAccepted, string? repositoryJson, string? mappingJson, DateTimeOffset now,
+        ProjectFeature? enabledFeatures = null)
     {
         EnsureEditable();
         EnsureVersion(expectedVersion);
+        if (enabledFeatures is { } chosen && ProjectFeatures.Refusal(chosen) is { } featureRefusal)
+            throw new DomainException(featureRefusal);
         if (!Enum.IsDefined(currentStep)) throw new DomainException("The setup step is not supported.");
         if (projectName is not null && projectName.Trim().Length > 200) throw new DomainException("Project name cannot exceed 200 characters.");
         if (softwareProduct is not null && softwareProduct.Trim().Length > 200) throw new DomainException("Software product cannot exceed 200 characters.");
@@ -144,6 +155,7 @@ public sealed class ProjectSetupDraft
         }
         if (repositoryJson is not null) RepositoryJson = RequiredJson(repositoryJson, "repository settings");
         if (mappingJson is not null) MappingJson = RequiredJson(mappingJson, "mapping");
+        if (enabledFeatures is not null) EnabledFeatures = enabledFeatures;
         CurrentStep = currentStep;
         Touch(now);
     }

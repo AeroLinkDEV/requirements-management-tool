@@ -144,6 +144,12 @@ public static class ProjectSetupEndpoints
         project = new { name = draft.ProjectName, softwareProduct = draft.SoftwareProduct },
         start = new { kind = draft.StartKind?.ToString(), sourceBaselineId = draft.SourceBaselineId, sourceImportId = draft.SourceImportId },
         build = new { version = draft.InitialReleaseVersion, officialName = draft.InitialReleaseCanonicalIdentity },
+        // The features the project will start with (#1113); unchosen means every feature.
+        features = new
+        {
+            chosen = draft.EnabledFeatures is not null,
+            enabled = ProjectFeatures.Each.Where(x => (draft.EnabledFeatures ?? ProjectFeatures.All).HasFlag(x)).Select(x => x.ToString()),
+        },
         selectedCategories = Parse(draft.SelectedCategoriesJson),
         ladder = Parse(draft.LadderJson),
         reviewRules = new
@@ -190,11 +196,26 @@ public sealed class ProjectSetupUpdateRequest
     public bool? ReviewRulesAccepted { get; set; }
     public JsonElement? Repository { get; set; }
     public JsonElement? Mapping { get; set; }
+    /// <summary>The features to start with (#1113), by name. Omitted leaves the saved choice unchanged.</summary>
+    public string[]? Features { get; set; }
 
     public ProjectSetupUpdateCommand ToCommand() => new(ExpectedVersion, CurrentStep,
         Project?.Name, Project?.SoftwareProduct, Start?.Kind, Start?.SourceBaselineId, Start?.SourceImportId,
         Build?.Version, Raw(SelectedCategories), Raw(Ladder), Raw(ReviewRules), ReviewRulesAccepted,
-        Raw(Repository), Raw(Mapping));
+        Raw(Repository), Raw(Mapping), ParseFeatures(Features));
+
+    private static ProjectFeature? ParseFeatures(string[]? names)
+    {
+        if (names is null) return null;
+        var enabled = ProjectFeature.None;
+        foreach (var name in names)
+        {
+            if (!Enum.TryParse<ProjectFeature>(name, ignoreCase: false, out var feature) || !ProjectFeatures.Each.Contains(feature))
+                throw new ProjectSetupInvalidException($"'{name}' is not a project feature.");
+            enabled |= feature;
+        }
+        return enabled;
+    }
 
     private static string? Raw(JsonElement? element) => element is { } value && value.ValueKind != JsonValueKind.Undefined
         ? value.GetRawText() : null;

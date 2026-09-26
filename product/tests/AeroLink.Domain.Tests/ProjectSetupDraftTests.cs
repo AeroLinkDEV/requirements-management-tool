@@ -30,6 +30,43 @@ public sealed class ProjectSetupDraftTests
     }
 
     [Fact]
+    public void Draft_starts_with_every_feature_and_keeps_a_valid_choice_until_changed()
+    {
+        var draft = new ProjectSetupDraft(Creator, "owner@example.test");
+        Assert.Null(draft.EnabledFeatures);
+
+        const ProjectFeature prOnly = ProjectFeature.TeamWork | ProjectFeature.ProblemReports | ProjectFeature.Release;
+        draft.UpdateAnswers(1, ProjectSetupStep.Features, null, null, null, null, null, null,
+            null, null, null, null, null, null, Now, prOnly);
+        Assert.Equal(prOnly, draft.EnabledFeatures);
+        Assert.Equal(2, draft.Version);
+
+        // A later save without features keeps the choice; nothing at all is a valid choice too.
+        draft.UpdateAnswers(2, ProjectSetupStep.Review, "Project", null, null, null, null, null,
+            null, null, null, null, null, null, Now);
+        Assert.Equal(prOnly, draft.EnabledFeatures);
+        draft.UpdateAnswers(3, ProjectSetupStep.Features, null, null, null, null, null, null,
+            null, null, null, null, null, null, Now, ProjectFeature.None);
+        Assert.Equal(ProjectFeature.None, draft.EnabledFeatures);
+    }
+
+    [Theory]
+    [InlineData(ProjectFeature.Code, "Code needs Requirements")]
+    [InlineData(ProjectFeature.Verification | ProjectFeature.ProblemReports, "Verification needs Requirements")]
+    [InlineData((ProjectFeature)128, "unknown feature")]
+    public void Draft_refuses_a_feature_set_DEC_136_does_not_allow(ProjectFeature enabled, string refusal)
+    {
+        var draft = new ProjectSetupDraft(Creator, "owner@example.test");
+        var error = Assert.Throws<DomainException>(() => draft.UpdateAnswers(1, ProjectSetupStep.Features, "Renamed",
+            null, null, null, null, null, null, null, null, null, null, null, Now, enabled));
+        Assert.Contains(refusal, error.Message);
+        // A refused save changes nothing.
+        Assert.Null(draft.EnabledFeatures);
+        Assert.Equal("", draft.ProjectName);
+        Assert.Equal(1, draft.Version);
+    }
+
+    [Fact]
     public void Changing_ladder_or_rules_invalidates_prior_acceptance()
     {
         var draft = new ProjectSetupDraft(Creator, "owner@example.test");

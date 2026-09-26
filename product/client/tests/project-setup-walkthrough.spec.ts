@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login } from "./auth";
+import { continuePastFeatures, login } from "./auth";
 
 test("an administrator can save and resume a project setup draft", async ({ page }) => {
   await login(page, "admin", { openProject: false });
@@ -30,6 +30,7 @@ test("a fresh setup finalizes into one In Work build and returns to its lineage 
 
   await page.getByLabel("Fresh project").check();
   await page.getByRole("button", { name: "Continue" }).click();
+  await continuePastFeatures(page);
   await page.getByLabel("Version").fill("1.02");
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
@@ -66,6 +67,7 @@ test("refreshes review rules after a saved ladder adds Interface and changes sof
 
   await page.getByLabel("Fresh project").check();
   await page.getByRole("button", { name: "Continue" }).click();
+  await continuePastFeatures(page);
   await page.getByLabel("Version").fill("1.03");
   await page.getByRole("button", { name: "Continue" }).click();
 

@@ -453,7 +453,7 @@ test("resume all five drafts after the API process has been restarted", async ({
       await page.getByRole("button", { name: /2\. Starting point/ }).click();
       await expect(page.getByRole("heading", { name: "Choose a starting point", level: 2 })).toBeVisible();
       await expect(page.getByText("Exact source", { exact: true })).toHaveCount(0);
-      await page.getByRole("button", { name: /7\. Review and finish/ }).click();
+      await page.getByRole("button", { name: /8\. Review and finish/ }).click();
       await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
       const freshFinalizationResponse = page.waitForResponse((response) =>
         response.url().includes(`/api/project-setups/${record.draftId}/finalize`)
@@ -546,7 +546,7 @@ test("resume all five drafts after the API process has been restarted", async ({
     // Native baselines can contain hundreds of exact source objects. Capture the visible
     // selection/reconciliation state without asking Chromium to rasterize the entire long panel.
     await page.screenshot({ path: testInfo.outputPath(`restart-recovery-${record.kind}-${record.draftId}.png`) });
-    await page.getByRole("button", { name: /7\. Review and finish/ }).click();
+    await page.getByRole("button", { name: /8\. Review and finish/ }).click();
     await expect(page.getByRole("heading", { name: "Review and finish", level: 2 })).toBeVisible();
     const sourceAcceptance = page.getByRole("checkbox", { name: /I accept this exact source assertion/ });
     await expect(sourceAcceptance).toBeVisible();

@@ -202,7 +202,7 @@ async function beginSetup(page: Page, name: string, startLabel: string) {
 }
 
 async function moveToRepository(page: Page, version: string) {
-  await page.getByRole("button", { name: /3\. First build/ }).click();
+  await page.getByRole("button", { name: /4\. First build/ }).click();
   await expect(page.getByRole("heading", { name: "First working build", level: 2 })).toBeVisible();
   const versionInput = page.getByRole("textbox", { name: "Version", exact: true });
   await expect(versionInput).toBeVisible();

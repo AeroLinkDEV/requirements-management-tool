@@ -3,6 +3,7 @@ import { apiRequest } from "./apiClient";
 export type SetupStep =
   | "Details"
   | "StartingPoint"
+  | "Features"
   | "FirstBuild"
   | "Ladder"
   | "WorkingRules"
@@ -22,6 +23,7 @@ export type ProjectSetupDraftSummary = {
 const setupSteps = new Set<SetupStep>([
   "Details",
   "StartingPoint",
+  "Features",
   "FirstBuild",
   "Ladder",
   "WorkingRules",

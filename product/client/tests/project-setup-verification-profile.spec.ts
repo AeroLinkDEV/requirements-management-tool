@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
-import { apiBase, login } from "./auth";
+import { apiBase, continuePastFeatures, login } from "./auth";
 import {
   compatibleRememberedProfile,
   enabledVerificationProfileInvalid,
@@ -66,6 +66,7 @@ async function startFreshDraftAtLadder(page: Page, projectName: string, version:
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByLabel("Fresh project").check();
   await page.getByRole("button", { name: "Continue" }).click();
+  await continuePastFeatures(page);
   await page.getByLabel("Version").fill(version);
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();

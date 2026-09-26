@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
-import { apiBase, apiLogin, login } from "./auth";
+import { apiBase, apiLogin, continuePastFeatures, login } from "./auth";
 import { routePath } from "../src/routing";
 
 // Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
@@ -55,6 +55,7 @@ async function completeFreshSetup(
 
   await page.getByLabel("Fresh project").check();
   await page.getByRole("button", { name: "Continue" }).click();
+  await continuePastFeatures(page);
   await page.getByLabel("Version").fill(version);
   await page.getByRole("button", { name: "Continue" }).click();
 
@@ -217,6 +218,7 @@ test("a committed fresh finalization survives a lost client response and retry k
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByLabel("Fresh project").check();
   await page.getByRole("button", { name: "Continue" }).click();
+  await continuePastFeatures(page);
   await page.getByLabel("Version").fill("1.04");
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Continue" }).click();

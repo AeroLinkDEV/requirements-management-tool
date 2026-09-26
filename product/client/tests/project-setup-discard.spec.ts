@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { apiBase, login } from "./auth";
+import { apiBase, continuePastFeatures, login } from "./auth";
 
 /**
  * #1045 owner follow-up: Discard setup removes an unfinished saved setup from active discovery. It is
@@ -36,6 +36,7 @@ async function createSavedSetupThroughWalkthrough(page: Page, projectName: strin
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByLabel("Fresh project").check();
   await page.getByRole("button", { name: "Continue" }).click();
+  await continuePastFeatures(page);
   await page.getByLabel("Version").fill("0.01");
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: "Review the requirement ladder", level: 2 })).toBeVisible();

@@ -30,7 +30,8 @@ public sealed record ProjectSetupUpdateCommand(
     string? ReviewRulesJson,
     bool? ReviewRulesAccepted,
     string? RepositoryJson,
-    string? MappingJson);
+    string? MappingJson,
+    ProjectFeature? EnabledFeatures = null);
 
 public sealed record ProjectSetupFinalizationResult(
     Guid ProgramId,
@@ -178,7 +179,7 @@ public sealed class ProjectSetupService(
                 effectiveCommand.SoftwareProduct, effectiveCommand.StartKind, effectiveCommand.SourceBaselineId, effectiveCommand.SourceImportId,
                 effectiveCommand.InitialReleaseVersion, effectiveCommand.SelectedCategoriesJson, effectiveCommand.LadderJson,
                 effectiveCommand.ReviewRulesJson, effectiveCommand.ReviewRulesAccepted, effectiveCommand.RepositoryJson,
-                effectiveCommand.MappingJson, DateTimeOffset.UtcNow);
+                effectiveCommand.MappingJson, DateTimeOffset.UtcNow, effectiveCommand.EnabledFeatures);
             await db.SaveChangesAsync(ct);
             return draft;
         }
@@ -256,6 +257,18 @@ public sealed class ProjectSetupService(
             db.ProjectVerificationVocabularies.Add(ProjectVerificationVocabulary.Founding(project.Id, now));
             db.ProjectRepositoryConfigurations.Add(CreateRepositoryConfiguration(project.Id, draft, actor.UserName, now));
             AddReviewRules(project.Id, ladder, draft.ReviewRulesJson, actor.UserName, now);
+            // The features chosen at setup (#1113), recorded like any later change: versioned, attributed and hashed,
+            // so the project's feature history starts with the creator's choice. Every feature stores no row.
+            if (draft.EnabledFeatures is { } chosenFeatures && chosenFeatures != ProjectFeatures.All)
+            {
+                var features = new ProjectFeatureSet(project.Id, chosenFeatures, actor.UserName, now);
+                db.ProjectFeatureSets.Add(features);
+                db.ProjectFeatureSetHistories.Add(new ProjectFeatureSetHistory(features, ProjectFeatures.All,
+                    "Chosen during project setup.", now));
+                var chosenLabels = string.Join(", ", ProjectFeatures.Each.Where(x => chosenFeatures.HasFlag(x)).Select(ProjectFeatures.Label));
+                db.SecurityAuditEvents.Add(new SecurityAuditEvent("ProjectFeaturesChanged", actor.UserName, $"Project:{project.Id}",
+                    "Success", $"Chosen during project setup: {(chosenLabels.Length > 0 ? chosenLabels : "none")}", "local", now));
+            }
 
             CandidateBaseline? inceptionBaseline = null;
             if (draft.StartKind is ProjectSetupStartKind.AeroLinkBaseline or ProjectSetupStartKind.ExternalBaseline)
@@ -345,6 +358,22 @@ public sealed class ProjectSetupService(
             throw new ProjectSetupInvalidException("Review and approval rules must retain the concrete definition that was accepted.");
         ValidateRepository(draft.RepositoryJson);
         ValidateReviewRules(draft.ReviewRulesJson);
+        ValidateFeatures(draft);
+    }
+
+    /// <summary>
+    /// The features chosen at setup (#1113, DEC-136). An inherited start materializes requirements, verification
+    /// procedures and an inception baseline, and the save boundary refuses records for a feature that is off, so
+    /// those three stay on; its other features can be chosen like a fresh project's.
+    /// </summary>
+    internal static void ValidateFeatures(ProjectSetupDraft draft)
+    {
+        var enabled = draft.EnabledFeatures ?? ProjectFeatures.All;
+        if (ProjectFeatures.Refusal(enabled) is { } refusal) throw new ProjectSetupInvalidException(refusal);
+        const ProjectFeature inherited = ProjectFeature.Requirements | ProjectFeature.Verification | ProjectFeature.Release;
+        if (draft.StartKind is not ProjectSetupStartKind.Fresh && (enabled & inherited) != inherited)
+            throw new ProjectSetupInvalidException(
+                "An inherited starting point brings requirements, verification procedures and a baseline, so Requirements, Verification and Release stay on.");
     }
 
     private async Task<ProjectSetupSourcePackage?> SelectedSourcePackageAsync(ProjectSetupDraft draft,
