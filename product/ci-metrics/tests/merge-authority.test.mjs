@@ -23,6 +23,7 @@ import {
   NON_AUTHORITATIVE_JOB_IDS,
   TRUSTED_SURFACE_PREFIXES,
   SHARDED_JOB_GROUPS,
+  unexpandedShardJobName,
 } from '../lib/merge-authority.mjs'
 
 const REPOSITORY = 'AeroLinkDEV/requirements-management-tool'
@@ -574,4 +575,58 @@ test('the expected job topology matches the current workflow', () => {
       `the '${group.name}' matrix must contain only shard: 1..${group.expectedShards}; include, exclude, or another axis changes the expanded job topology and must update the verifier consciously`,
     )
   }
+})
+
+// #1152 A3: the documentation topology, selectable only by the protected verifier.
+function documentationTopologyJobs(runId = RUN_ID, runAttempt = RUN_ATTEMPT) {
+  return [
+    { name: CLASSIFIER_JOB_NAME, conclusion: 'success', runId, runAttempt },
+    ...REQUIRED_JOBS.map((name) => ({ name, conclusion: 'skipped', runId, runAttempt })),
+    ...SHARDED_JOB_GROUPS.map((group) => ({ name: unexpandedShardJobName(group), conclusion: 'skipped', runId, runAttempt })),
+    { name: 'Full browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})', conclusion: 'skipped', runId, runAttempt },
+    { name: AGGREGATE_JOB_NAME, conclusion: 'success', runId, runAttempt },
+  ]
+}
+
+test('a documentation-only candidate binds on the documentation topology, and only when the verifier derived it', () => {
+  // The shape of the real documentation-only run 36199934217 (#1170).
+  const docs = { ...legitimateCandidate(), jobs: documentationTopologyJobs() }
+  assert.deepEqual(evaluateMergeGroupCandidate({ ...docs, documentationOnlyCandidate: true }), { decision: 'PASS', reasons: [] })
+  // The same run without the verifier's derivation keeps the full requirements, as does anything but exactly true.
+  for (const flag of [undefined, false, 'true', 1]) {
+    const result = evaluateMergeGroupCandidate({ ...docs, documentationOnlyCandidate: flag })
+    assert.equal(result.decision, 'REFUSE', String(flag))
+    assert.ok(result.reasons.some((reason) => reason.startsWith('job-not-success: Domain test suite')), String(flag))
+  }
+  // A full, successful run is not the documentation topology either.
+  assert.equal(evaluateMergeGroupCandidate({ ...legitimateCandidate(), documentationOnlyCandidate: true }).decision, 'REFUSE')
+})
+
+test('the documentation topology refuses any gate job that is not exactly skipped', () => {
+  const variants = {
+    'a required job succeeded': (jobs) => jobs.map((job) => (job.name === 'Domain test suite' ? { ...job, conclusion: 'success' } : job)),
+    'a required job failed': (jobs) => jobs.map((job) => (job.name === 'Infrastructure test suite' ? { ...job, conclusion: 'failure' } : job)),
+    'a required job was cancelled': (jobs) => jobs.map((job) => (job.name === 'Client lint, type-check, and build' ? { ...job, conclusion: 'cancelled' } : job)),
+    'a required job is missing': (jobs) => jobs.filter((job) => job.name !== 'Operator and recovery script contracts'),
+    'a skipped group is missing': (jobs) => jobs.filter((job) => job.name !== unexpandedShardJobName(SHARDED_JOB_GROUPS[1])),
+    'a skipped group timed out': (jobs) => jobs.map((job) => (job.name === unexpandedShardJobName(SHARDED_JOB_GROUPS[0]) ? { ...job, conclusion: 'timed_out' } : job)),
+    'a shard ran': (jobs) => [...jobs, { name: 'Browser journeys (1/4)', conclusion: 'success', runId: RUN_ID, runAttempt: RUN_ATTEMPT }],
+    'the aggregate failed': (jobs) => jobs.map((job) => (job.name === AGGREGATE_JOB_NAME ? { ...job, conclusion: 'failure' } : job)),
+    'a job is from a later attempt': (jobs) => jobs.map((job) => (job.name === 'Domain test suite' ? { ...job, runAttempt: RUN_ATTEMPT + 1 } : job)),
+  }
+  for (const [name, mutate] of Object.entries(variants)) {
+    const result = evaluateMergeGroupCandidate({ ...legitimateCandidate(), jobs: mutate(documentationTopologyJobs()), documentationOnlyCandidate: true })
+    assert.equal(result.decision, 'REFUSE', name)
+  }
+})
+
+test('a documentation candidate queued behind a protected change is judged at the head, not before', () => {
+  // Behind a maintenance entry, the candidate's tree differs from main on the protected path the entry ahead
+  // introduces, so the ordinary evaluator refuses it and the queue-head wait (#1164) holds it. Once the entry
+  // ahead merges, the same documentation-only run binds.
+  const docs = { ...legitimateCandidate(), jobs: documentationTopologyJobs(), documentationOnlyCandidate: true }
+  const behind = evaluateMergeGroupCandidate({ ...docs, changedPaths: ['.github/'] })
+  assert.equal(behind.decision, 'REFUSE')
+  assert.deepEqual(behind.reasons.map((reason) => reason.split(':')[0]), ['trusted-surface-modified'])
+  assert.deepEqual(evaluateMergeGroupCandidate({ ...docs, changedPaths: [] }), { decision: 'PASS', reasons: [] })
 })

@@ -116,13 +116,44 @@ export const AREA_PATTERNS = {
 export const BROAD_EVENTS = new Set(['schedule', 'workflow_dispatch', 'push', 'merge_group'])
 
 /**
+ * True when there is at least one changed path and every one is documentation. Callers pass both sides
+ * of a rename, so moving a product file into a documentation folder is not documentation-only.
+ *
+ * This is the single definition the merge-group classifier and the protected merge-authority verifier
+ * share (#1152 A3): the verifier imports it from its own protected checkout rather than trusting the
+ * candidate's classification.
+ */
+export function isDocumentationOnlyChange(changedPaths) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return false
+  if (changedPaths.some((path) => typeof path !== 'string' || path.length === 0)) return false
+  return changedPaths.every((path) => isDocumentationPath(normalizePath(path)))
+}
+
+/**
  * Classify a list of changed paths.
  *
- * `event` matters: a merge-group event carries no base to diff against — both `pull_request.base.sha`
- * and `event.before` are null — and it is the last gate before the commit reaches main, which is the
- * moment to classify broadly rather than narrowly.
+ * `event` matters. A merge-group candidate is the last gate before the commit reaches main, so it
+ * classifies every area, with one exception: a candidate whose own change (its diff against the queue
+ * base, supplied by the caller) is documentation only takes the documentation topology, exactly as the
+ * same change did at readiness. The protected verifier re-derives that from the candidate's own diff before
+ * it accepts the reduced job set, so this cannot be claimed by the candidate alone (#1152 A3). With no
+ * paths, the merge group stays broad.
  */
 export function classify(changedPaths, { event = 'pull_request' } = {}) {
+  if (event === 'merge_group' && isDocumentationOnlyChange(changedPaths)) {
+    return {
+      docsOnly: true,
+      backend: false,
+      client: false,
+      browser: false,
+      postgresql: false,
+      reason: 'The merge-group candidate changes only documentation; the protected verifier re-derives this from the candidate\'s own diff before accepting the documentation topology.',
+      unclassified: false,
+      broad: false,
+      launchersOnly: false,
+      fastFullInfrastructure: false,
+    }
+  }
   if (BROAD_EVENTS.has(event)) {
     return {
       docsOnly: false,

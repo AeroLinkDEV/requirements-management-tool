@@ -4,22 +4,40 @@ import { readFileSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { classify, explain, localPlan, selectJobs, AREA_PATTERNS, BROAD_EVENTS, normalizePath } from '../lib/classify.mjs'
+import { classify, explain, localPlan, selectJobs, AREA_PATTERNS, BROAD_EVENTS, normalizePath, isDocumentationOnlyChange } from '../lib/classify.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 
 const of = (paths, event = 'pull_request') => classify(paths, { event })
 
 test('broad events classify every area without a diff', () => {
-  // A merge-group event carries no base to diff against, and it is the last gate before main. The same
-  // applies to push, schedule and dispatch, which have no pull-request base either.
+  // Push, schedule and dispatch have no pull-request base, and a merge group is the last gate before main,
+  // so each classifies every area. A merge group is broad for any change that is not documentation only,
+  // and when it has no paths at all.
   for (const event of BROAD_EVENTS) {
-    const result = of(['README.md'], event)
-    assert.equal(result.docsOnly, false, event)
-    for (const area of ['backend', 'client', 'browser', 'postgresql']) {
-      assert.equal(result[area], true, `${event} must select ${area}`)
+    for (const paths of [['product/client/src/App.tsx'], ['README.md', 'product/src/AeroLink.Domain/Rule.cs'], []]) {
+      const result = of(paths, event)
+      assert.equal(result.docsOnly, false, `${event} ${paths.join(',')}`)
+      for (const area of ['backend', 'client', 'browser', 'postgresql']) {
+        assert.equal(result[area], true, `${event} must select ${area} for ${paths.join(',') || 'no paths'}`)
+      }
     }
+    if (event !== 'merge_group') assert.equal(of(['README.md'], event).docsOnly, false, `${event} stays broad for documentation`)
   }
+})
+
+test('a merge-group candidate whose own change is documentation takes the documentation topology', () => {
+  // #1152 A3. The caller supplies the candidate's diff against its queue base, both sides of renames.
+  const docs = of(['README.md', 'product/docs/MERGING.md', '.agents/skills/x/SKILL.md', 'docs/showcase/a.md'], 'merge_group')
+  assert.equal(docs.docsOnly, true)
+  for (const area of ['backend', 'client', 'browser', 'postgresql']) assert.equal(docs[area], false, area)
+  assert.equal(docs.broad, false)
+  // A product file renamed into a documentation folder contributes its old path, so it is not documentation.
+  assert.equal(of(['product/src/AeroLink.Api/Program.cs', 'docs/Program.cs'], 'merge_group').docsOnly, false)
+  // A nested documentation-looking path inside product code is product.
+  assert.equal(of(['product/src/docs/DocumentationLoader.cs'], 'merge_group').docsOnly, false)
+  assert.equal(isDocumentationOnlyChange([]), false)
+  assert.equal(isDocumentationOnlyChange(['README.md', '']), false)
 })
 
 test('documentation-only changes select nothing', () => {

@@ -38,9 +38,13 @@ test('option order does not change the result', () => {
 })
 
 test('a broad event still classifies everything through the CLI', () => {
-  const parsed = JSON.parse(run(['--files', 'README.md', '--event', 'merge_group', '--json']).out)
+  const parsed = JSON.parse(run(['--files', 'README.md', '--event', 'push', '--json']).out)
   assert.equal(parsed.classification.backend, true)
   assert.equal(parsed.classification.browser, true)
+  // #1152 A3: a documentation-only merge-group change takes the documentation topology.
+  const mergeGroup = JSON.parse(run(['--files', 'README.md', '--event', 'merge_group', '--json']).out)
+  assert.equal(mergeGroup.classification.docsOnly, true)
+  assert.equal(mergeGroup.classification.browser, false)
 })
 
 test('multiple files are all collected', () => {

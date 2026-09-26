@@ -9,11 +9,37 @@ import { evaluateMergeGroupCandidate, TRUSTED_SURFACE_PREFIXES } from '../lib/me
 import {
   compareTrustedSurfaces,
   createGitHubRequest,
+  deriveDocumentationOnlyCandidate,
   fetchDefaultBranch,
   fetchLatestRunJobs,
   fetchWorkflowRun,
   publishMergeAuthorityCheck,
 } from '../lib/merge-authority-github.mjs'
+// The protected classifier from this default-branch checkout, never the candidate's (#1152 A3).
+import { isDocumentationOnlyChange } from '../../test-planner/lib/classify.mjs'
+
+const QUEUE_REF = /^gh-readonly-queue\/[^/]+\/pr-([1-9][0-9]*)-[0-9a-f]{40}$/
+
+/**
+ * The candidate's documentation-only status, or false on any doubt. The queue entry's base commit comes
+ * from GitHub's merge-queue record for the pull request named by the queue ref, so the diff is pinned to
+ * what the queue composed.
+ */
+async function documentationOnlyEvidence({ request, repository, trigger, headSha }) {
+  try {
+    const match = QUEUE_REF.exec(trigger?.head_branch ?? '')
+    if (!match) return { documentationOnly: false, reason: 'not a queue ref' }
+    const query = `query { repository(owner: "AeroLinkDEV", name: "requirements-management-tool") { pullRequest(number: ${match[1]}) { mergeQueueEntry { headCommit { oid } baseCommit { oid } } } } }`
+    const response = await request('/graphql', { method: 'POST', body: { query } })
+    const entry = response?.data?.repository?.pullRequest?.mergeQueueEntry
+    if (!entry || entry.headCommit?.oid !== headSha) return { documentationOnly: false, reason: 'the queue entry is gone or holds a different candidate' }
+    return await deriveDocumentationOnlyCandidate({
+      request, repository, candidateSha: headSha, queueBaseSha: entry.baseCommit?.oid, isDocumentationOnlyChange,
+    })
+  } catch (error) {
+    return { documentationOnly: false, reason: `documentation-only derivation failed: ${safeMessage(error)}` }
+  }
+}
 
 const env = (name) => process.env[name] ?? ''
 const SHA_PATTERN = /^[0-9a-f]{40}$/
@@ -100,10 +126,15 @@ async function main() {
       candidateSha: headSha,
       baseSha: defaultBranch.sha,
     })
+    const documentation = await documentationOnlyEvidence({ request: evidenceRequest, repository, trigger, headSha })
+    console.log(documentation.documentationOnly
+      ? `[merge-authority] Documentation-only candidate: ${documentation.paths.length} path(s); the documentation topology applies.`
+      : `[merge-authority] Full gate set required: ${documentation.reason}`)
     decision = evaluateMergeGroupCandidate({
       run,
       jobs,
       changedPaths,
+      documentationOnlyCandidate: documentation.documentationOnly,
       expected: {
         repository,
         headSha,

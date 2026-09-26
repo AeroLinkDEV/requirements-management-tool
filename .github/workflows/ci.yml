@@ -146,7 +146,9 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}
-          BASE_SHA: ${{ inputs.pull_request_base_sha || github.event.pull_request.base.sha || github.event.before }}
+          # merge_group.base_sha is the commit the candidate was composed on, so a merge-group diff is exactly this
+          # entry's own change (#1152 A3). The protected verifier re-derives it before accepting a reduced topology.
+          BASE_SHA: ${{ inputs.pull_request_base_sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD_SHA: ${{ inputs.pull_request_head_sha || github.sha }}
         run: node "${{ github.workspace }}/product/test-planner/tools/classify-ci.mjs"
       - name: Mark test complete

@@ -37,7 +37,14 @@ const headSha = env('HEAD_SHA')
 const outputPath = env('GITHUB_OUTPUT')
 
 let paths = []
-if (!BROAD_EVENTS.has(event)) {
+// A merge-group candidate is diffed against its queue base (the commit it was composed on) so that a
+// documentation-only entry can take the documentation topology (#1152 A3). Without a base it stays broad,
+// which is the fail-safe direction; it never errors, because the queue must not stall on a missing input.
+const mergeGroupDiff = event === 'merge_group' && Boolean(baseSha) && Boolean(headSha)
+if (event === 'merge_group' && !mergeGroupDiff) {
+  console.log(`merge_group supplied no base (${baseSha || 'empty'}) or head (${headSha || 'empty'}); classifying every area.`)
+}
+if (!BROAD_EVENTS.has(event) || mergeGroupDiff) {
   if (!baseSha || !headSha) {
     console.error(`::error::Event ${event} supplied no base (${baseSha || 'empty'}) or head (${headSha || 'empty'}) to diff against.`)
     process.exit(1)
