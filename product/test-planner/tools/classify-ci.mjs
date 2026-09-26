@@ -88,7 +88,7 @@ for (const row of explain(paths).slice(0, 100)) {
   console.log(`  ${row.path} -> ${row.areas.length > 0 ? row.areas.join(', ') : (row.product ? '(no area matched)' : '(not product code)')}`)
 }
 console.log('')
-console.log(`docs_only=${result.docsOnly} backend=${result.backend} client=${result.client} browser=${result.browser} postgresql=${result.postgresql}`)
+console.log(`docs_only=${result.docsOnly} backend=${result.backend} client=${result.client} browser=${result.browser} postgresql=${result.postgresql} operator=${result.operator !== false}`)
 if (result.reason) console.log(result.reason)
 console.log(`planner_version=${PLANNER_VERSION}`)
 console.log(`planner_hash=${plannerHashValue}`)
@@ -108,6 +108,8 @@ appendFileSync(outputPath, [
   outputLine('browser', result.browser),
   outputLine('postgresql', result.postgresql),
   outputLine('launchers_only', result.launchersOnly === true),
+  // Only an explicit false skips the operator contracts; anything else keeps them (#1152 C3).
+  outputLine('operator', result.operator !== false),
   outputLine('planner_version', PLANNER_VERSION),
   outputLine('planner_hash', plannerHashValue),
   outputLine('planner_unknown_paths', unknownPaths.join(', ')),

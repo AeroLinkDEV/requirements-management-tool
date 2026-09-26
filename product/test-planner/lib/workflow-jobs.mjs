@@ -36,7 +36,7 @@ export function parseJobConditions(workflowText) {
   return jobs
 }
 
-const OUTPUT = /^needs\.changes\.outputs\.(docs_only|backend|client|browser|postgresql|post_merge_skip)$/
+const OUTPUT = /^needs\.changes\.outputs\.(docs_only|backend|client|browser|postgresql|operator|post_merge_skip)$/
 const EVENT = /^github\.event_name$/
 const INPUT = /^inputs\.(pull_request_number|full_diagnostics)$/
 
@@ -115,6 +115,8 @@ export function selectJobs(workflowText, classification, { event = 'pull_request
       client: classification.client,
       browser: classification.browser,
       postgresql: classification.postgresql,
+      // Only an explicit false skips the operator contracts, matching classify-ci.mjs (#1152 C3).
+      operator: classification.operator !== false,
       // Changed-area planning must never assume that future trusted provenance will exist. The default is
       // therefore the conservative full-test posture; callers may pass true only when modelling a known
       // provenance decision explicitly.

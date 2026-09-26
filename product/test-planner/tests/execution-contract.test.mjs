@@ -520,9 +520,14 @@ test('the native Windows operator owner retains the complete family and evidence
   assert.ok(gateStart >= 0 && metricsStart > gateStart, 'the aggregate owner must remain identifiable')
   const gate = workflow.slice(gateStart, metricsStart)
   assert.match(gate, /CONTRACTS: \$\{\{ needs\.script-contracts\.result \}\}/)
-  assert.match(gate, /POST_MERGE_SKIP.*!= "true".*DOCS_ONLY.*!= "true".*CONTRACTS.*!= "success"/s,
-    'a non-docs run cannot pass when the mandatory operator owner is skipped')
-  assert.match(gate, /A non-documentation run must execute the operator and recovery script contracts/)
+  assert.match(gate, /OPERATOR: \$\{\{ needs\.changes\.outputs\.operator \}\}/)
+  // #1152 C3: only an explicit operator=false (plus trusted post-merge skip) may leave the owner unrun.
+  assert.ok(gate.includes('if [ "$POST_MERGE_SKIP" != "true" ] && [ "$OPERATOR" != "false" ] && [ "$CONTRACTS" != "success" ]; then'),
+    'a run the operator contracts can observe cannot pass when the mandatory operator owner is skipped')
+  assert.match(gate, /A run whose change the operator and recovery script contracts can observe must execute them/)
+  // The owner is selected on exactly that output, and the classifier publishes it.
+  assert.match(job, /^    if: needs\.changes\.outputs\.post_merge_skip != 'true' && needs\.changes\.outputs\.operator == 'true'$/m)
+  assert.match(workflow, /^      operator: \$\{\{ steps\.classify\.outputs\.operator \}\}$/m)
 })
 
 test('wrapper failure and cleanup contracts are redacted and fail closed', () => {

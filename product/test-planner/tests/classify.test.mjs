@@ -9,6 +9,7 @@ import { classify, explain, localPlan, selectJobs, AREA_PATTERNS, BROAD_EVENTS, 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 
 const of = (paths, event = 'pull_request') => classify(paths, { event })
+const workflow = () => readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
 
 test('broad events classify every area without a diff', () => {
   // Push, schedule and dispatch have no pull-request base, and a merge group is the last gate before main,
@@ -529,4 +530,77 @@ test('a launcher-only change is validated by the launcher contract, not by the p
 
   // A push still classifies every area regardless: it has no base to diff against.
   assert.equal(of(['START_AEROLINK.bat'], 'push').launchersOnly, false)
+})
+
+test('the operator contracts run for every change they can observe, and only skip what no script reads (#1152 C3)', () => {
+  const contracts = (paths, event = 'pull_request') => {
+    const result = of(paths, event)
+    const jobs = selectJobs(workflow(), result, { event })
+    return { operator: result.operator, selected: jobs.selected.some((job) => job.id === 'script-contracts') }
+  }
+  // Client source, client tests, public assets and backend test projects: no script, module or suite reads them.
+  for (const paths of [
+    ['product/client/src/App.tsx'], ['product/client/tests/login.spec.ts', 'README.md'], ['product/client/public/people/a.png'],
+    ['product/tests/AeroLink.Domain.Tests/RuleTests.cs'], ['product\\Client\\Src\\App.tsx'],
+  ]) assert.deepEqual(contracts(paths), { operator: false, selected: false }, paths.join(', '))
+  // Everything else runs them: backend source (the scripts read Program.cs, settings, the API project and the
+  // migrations), the client's package and build files, scripts, launchers, planner and workflow, unknown paths,
+  // and any mix with one of those.
+  for (const paths of [
+    ['product/src/AeroLink.Api/Program.cs'], ['product/src/AeroLink.Infrastructure/Persistence/Migrations/0001_x.cs'],
+    ['product/client/package-lock.json'], ['product/client/vite.config.ts'], ['product/client/playwright.config.ts'],
+    ['product/scripts/AeroLinkUpgrade.psm1'], ['START_AEROLINK.bat'], ['product/test-planner/lib/classify.mjs'],
+    ['.github/workflows/ci.yml'], ['newthing/config.xyz'], ['product/client/src/App.tsx', 'product/scripts/Backup-AeroLink.ps1'],
+    ['product/tests/AeroLink.Api.Tests/X.cs', 'product/src/AeroLink.Api/Program.cs'],
+  ]) assert.deepEqual(contracts(paths), { operator: true, selected: true }, paths.join(', '))
+  // Broad events always run them; documentation never does.
+  for (const event of ['push', 'merge_group', 'schedule', 'workflow_dispatch']) {
+    assert.deepEqual(contracts(['product/client/src/App.tsx'], event), { operator: true, selected: true }, event)
+  }
+  assert.deepEqual(contracts(['README.md']), { operator: false, selected: false })
+  assert.deepEqual(contracts(['README.md'], 'merge_group'), { operator: false, selected: false })
+  // The forecast keeps the job when a classification predates the field: only an explicit false skips it.
+  const legacy = { ...of(['product/client/src/App.tsx']) }
+  delete legacy.operator
+  assert.ok(selectJobs(workflow(), legacy, { event: 'pull_request' }).selected.some((job) => job.id === 'script-contracts'))
+})
+
+// Scripts, modules and launchers that name a path the operator contracts are classified as unable to observe,
+// and why that name is not an observation by a CI script contract. The guard below derives this from the tree
+// and compares it exactly, so a script that starts reading client source or a backend test project fails until
+// the classifier's OPERATOR_INVISIBLE_PATHS is narrowed or the reference is explained (#1152 C3). It sees string
+// paths; a path assembled one segment at a time is caught by the broad merge queue, not here.
+const OPERATOR_INVISIBLE_REFERENCES = {
+  'TEST_AEROLINK_CHANGED.bat': 'a usage example in a comment',
+  'product/scripts/Get-AeroLinkTestPlan.ps1': 'local Full-mode commands; its CI contract runs it only with -DryRun',
+  'product/scripts/Test-ProjectSetupPostgres.ps1': 'its CI contract replaces dotnet with a function and runs no test project',
+  'product/scripts/Test-ProjectSetupWord.ps1': 'no CI script contract runs it',
+}
+
+test('no operator script reads a path the classifier says the operator contracts cannot observe', () => {
+  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    .split('\0').filter(Boolean)
+  const operatorSource = /^(?:product\/scripts\/.+\.(?:ps1|psm1|psd1|cmd|json|mjs)|[^/]+\.(?:bat|cmd))$/i
+  // Client source, tests or public assets, or the backend test projects, spelled from the repository root, the
+  // product root (a quoted relative segment) or product/scripts (`..`).
+  const invisibleReference = /(?:product\/|\.\.\/|['"`])(?:client\/(?:src|tests|public)|tests)(?:\/|['"`\s]|$)/m
+  const actual = tracked
+    .filter((path) => operatorSource.test(path))
+    .filter((path) => invisibleReference.test(readFileSync(join(repoRoot, path), 'utf8').replace(/\\+/g, '/')))
+    .sort()
+  assert.deepEqual(actual, Object.keys(OPERATOR_INVISIBLE_REFERENCES).sort(),
+    'An operator script names client source, client tests, public assets or a backend test project. Explain it in OPERATOR_INVISIBLE_REFERENCES, or narrow OPERATOR_INVISIBLE_PATHS in classify.mjs.')
+  // The planner contract must keep running the planner as a plan only, or the explanation above stops being true.
+  const plannerContract = readFileSync(join(repoRoot, 'product/scripts/Get-AeroLinkTestPlan.Tests.ps1'), 'utf8')
+  const calls = plannerContract.split('\n').filter((line) => /Invoke-Plan(?:From)?\b/.test(line) && !/^\s*function /.test(line))
+  const literalCalls = calls.filter((line) => line.includes('@('))
+  assert.ok(literalCalls.length >= 8, 'the planner contract still exercises the planner')
+  for (const line of literalCalls) assert.match(line, /'-DryRun'/, line.trim())
+  // The only non-literal call is Invoke-PlanFrom forwarding its own arguments.
+  assert.deepEqual(calls.filter((line) => !line.includes('@(')).map((line) => line.trim()), ['try { return Invoke-Plan $Arguments }'])
+  // The stubs that keep real builds out of CI script contracts are load-bearing for OPERATOR_INVISIBLE_PATHS:
+  // the Postgres runner's contract never runs a test project, and the production-transition contract runs
+  // Start-AeroLinkProduction without building client source (#1179 review).
+  assert.match(readFileSync(join(repoRoot, 'product/scripts/Test-ProjectSetupPostgres.Tests.ps1'), 'utf8'), /^function dotnet \{/m)
+  assert.match(readFileSync(join(repoRoot, 'product/scripts/AeroLinkProductionTransition.Tests.ps1'), 'utf8'), /^function npm\.cmd \{/m)
 })
