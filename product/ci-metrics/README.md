@@ -250,6 +250,15 @@ candidate and the current default branch. Tree identity covers every descendant 
 without the changed-files API's pagination limit. A differing, missing, ambiguous, truncated, or
 unreadable trusted subtree refuses the binding.
 
+A documentation-only candidate (#1152 A3) is bound against a different job topology, and only when the
+verifier re-derives that status itself. The queue record for the PR named by the queue ref must hold this run's
+head; the candidate must have exactly one parent, equal to that entry's base commit; the compare must be one
+commit ahead and none behind; and every changed filename, including both sides of a rename, must be
+documentation to the protected `product/test-planner/lib/classify.mjs`. A missing file list or 300+ files
+counts as product. Any doubt keeps the full gate set. Under the documentation topology every required job must
+appear exactly once and conclude `skipped`, with no expanded shard and exactly one unexpanded template per
+sharded group. Run identity, classifier and aggregate success, and the trusted-surface comparison are unchanged.
+
 The App private key is an environment secret, and the environment deployment policy admits only the
 default branch. The active ruleset requires this check **with the AeroLink Merge Authority App's integration
 id**, together with GitHub Actions' `Full Product evidence aggregate`. A workflow-dispatched Product check

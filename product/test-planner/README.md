@@ -10,6 +10,11 @@ content hash, and refuses to guess when a workflow expression is outside its sup
 planner/workflow/shared-contract change selects every area. Renames and copies contribute both paths,
 including the old path, and Windows separators and case are normalized before classification.
 
+`push`, `schedule` and `workflow_dispatch` runs classify broad without a diff. A `merge_group` run is also
+broad unless its candidate changes only documentation against the queue base; that candidate takes the
+documentation topology (#1152 A3). The merge binder never trusts the run's own classification for this: it
+re-derives the candidate's status from the protected default-branch classifier and GitHub's queue record.
+
 ## Windows entry point
 
 From the repository root, double-click `TEST_AEROLINK_CHANGED.bat` or run the PowerShell entry point:
