@@ -85,9 +85,11 @@ public sealed class InFlightRequests
 /// is a starved pool, and a pool-driven timer would be starved with it and report nothing. The line carries
 /// this process id, because the harness starts <c>dotnet run</c> and the server is a grandchild whose id only
 /// the server knows. The harness captures every managed thread's stack when it sees the marker. The line also
-/// carries the pool's own counters, so starvation shows up even where no stack can be taken.
+/// carries the pool's own counters, so starvation shows up even where no stack can be taken. When given a
+/// database probe (the SQLite host, #1163), each report also carries what the database file says at that moment.
 /// </summary>
-public sealed class StallWatchdog(InFlightRequests requests, TimeSpan threshold, ILogger<StallWatchdog> logger)
+public sealed class StallWatchdog(InFlightRequests requests, TimeSpan threshold, ILogger<StallWatchdog> logger,
+    Func<string>? databaseProbe = null)
     : IHostedService, IDisposable
 {
     public const string Marker = "AEROLINK-STALL";
@@ -133,6 +135,8 @@ public sealed class StallWatchdog(InFlightRequests requests, TimeSpan threshold,
                 ThreadPool.PendingWorkItemCount);
         logger.LogWarning("{Marker}-INFLIGHT {Requests}", Marker, string.Join("; ", inFlight.Select(entry =>
             $"{entry.Method} {entry.Path} {(long)entry.Elapsed(now).TotalMilliseconds}ms")));
+        if (databaseProbe is not null)
+            logger.LogWarning("{Marker} {Probe}", SqliteStallProbe.Marker, databaseProbe());
         return stalled.Count;
     }
 

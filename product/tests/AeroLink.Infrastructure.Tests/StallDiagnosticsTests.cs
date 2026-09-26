@@ -98,6 +98,92 @@ public sealed class StallDiagnosticsTests
     }
 
     [Fact]
+    public void A_stall_report_names_the_WAL_frames_a_pinned_reader_keeps_the_checkpoint_from_reaching()
+    {
+        // #1163: the stalled COMMIT had no contender inside any running request. A reader holding an old
+        // snapshot on an otherwise idle connection is one candidate the report must be able to show.
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-stallprobe-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var writer = Open(path);
+            Execute(writer, "PRAGMA journal_mode = WAL; CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1);");
+            using var reader = Open(path);
+            Execute(reader, "BEGIN; SELECT count(*) FROM t;");
+            Execute(writer, "INSERT INTO t SELECT x FROM t; INSERT INTO t SELECT x FROM t; INSERT INTO t VALUES (2);");
+
+            var requests = new InFlightRequests();
+            var logger = new CapturingLogger<StallWatchdog>();
+            using var watchdog = new StallWatchdog(requests, TimeSpan.FromSeconds(10), logger,
+                () => SqliteStallProbe.Describe($"Data Source={path}", TimeSpan.FromSeconds(3)));
+            var now = Stopwatch.GetTimestamp();
+            requests.Begin("POST", "/api/auth/login", now - 15 * Stopwatch.Frequency);
+            watchdog.ReportOnce(now);
+
+            var pinned = Assert.Single(logger.Messages, message => message.StartsWith(SqliteStallProbe.Marker + " "));
+            Assert.Contains("checkpoint busy=0", pinned);
+            Assert.Matches(@"walBytes=\d+", pinned);
+            var (frames, checkpointed) = Frames(pinned);
+            Assert.True(checkpointed < frames, pinned);
+
+            Execute(reader, "COMMIT;");
+            var released = SqliteStallProbe.Describe($"Data Source={path}", TimeSpan.FromSeconds(3));
+            var (framesAfter, checkpointedAfter) = Frames(released);
+            Assert.Equal(framesAfter, checkpointedAfter);
+        }
+        finally { Delete(path); }
+    }
+
+    [Fact]
+    public void The_stall_probe_answers_at_once_when_the_file_is_locked_instead_of_waiting()
+    {
+        // The probe runs on the watchdog's dedicated thread. If it waited out Microsoft.Data.Sqlite's default
+        // 30 s busy retry, the one thread that reports stalls would itself stall.
+        var path = Path.Combine(Path.GetTempPath(), $"aerolink-stallprobe-{Guid.NewGuid():N}.db");
+        try
+        {
+            using var holder = Open(path);
+            Execute(holder, "CREATE TABLE t (x INTEGER); BEGIN EXCLUSIVE; INSERT INTO t VALUES (1);");
+
+            var clock = Stopwatch.StartNew();
+            var report = SqliteStallProbe.Describe($"Data Source={path}", TimeSpan.FromSeconds(10));
+
+            Assert.Contains("checkpoint=error sqliteCode=5", report);
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5), $"{clock.Elapsed}: {report}");
+            Execute(holder, "ROLLBACK;");
+        }
+        finally { Delete(path); }
+    }
+
+    private static SqliteConnection Open(string path)
+    {
+        var connection = new SqliteConnection($"Data Source={path};Pooling=False");
+        connection.Open();
+        return connection;
+    }
+
+    private static void Execute(SqliteConnection connection, string sql)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        using var reader = command.ExecuteReader();
+        while (reader.NextResult()) { }
+    }
+
+    private static (long Frames, long Checkpointed) Frames(string report)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(report, @"walFrames=(\d+) checkpointedFrames=(\d+)");
+        Assert.True(match.Success, report);
+        return (long.Parse(match.Groups[1].Value), long.Parse(match.Groups[2].Value));
+    }
+
+    private static void Delete(string path)
+    {
+        SqliteConnection.ClearAllPools();
+        foreach (var file in new[] { path, path + "-wal", path + "-shm" })
+            try { File.Delete(file); } catch (IOException) { }
+    }
+
+    [Fact]
     public void Work_outside_a_request_is_attributed_to_the_background()
     {
         DiagnosticsWorkContext.Set(null);

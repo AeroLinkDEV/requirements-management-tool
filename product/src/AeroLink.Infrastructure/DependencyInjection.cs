@@ -41,7 +41,8 @@ public static class DependencyInjection
         services.AddSingleton<InFlightRequests>();
         if (StallDiagnosticsSettings.StallReportAfter(configuration) is { } stallThreshold)
             services.AddHostedService(provider => new StallWatchdog(provider.GetRequiredService<InFlightRequests>(),
-                stallThreshold, provider.GetRequiredService<ILogger<StallWatchdog>>()));
+                stallThreshold, provider.GetRequiredService<ILogger<StallWatchdog>>(),
+                isPostgres ? null : () => SqliteStallProbe.Describe(connection, TimeSpan.FromSeconds(3))));
         services.AddDbContext<AeroLinkDbContext>((serviceProvider, options) =>
         {
             if (isPostgres) options.UseNpgsql(connection);
