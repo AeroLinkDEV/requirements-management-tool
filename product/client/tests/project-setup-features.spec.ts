@@ -25,7 +25,8 @@ test("a new project can start as Problem Reports only, and the choice is its fir
   await feature("Requirements").uncheck();
   await expect(page.getByRole("alert")).toHaveText(/Code needs Requirements/);
   await feature("Code").uncheck();
-  await expect(page.getByRole("alert")).toHaveText(/Verification needs Requirements until standalone verification is available/);
+  // Verification may stand without Requirements (DEC-144), so nothing more is refused.
+  await expect(page.getByRole("alert")).toHaveCount(0);
   await feature("Verification").uncheck();
   await feature("Documentation Center").uncheck();
   await expect(page.getByRole("alert")).toHaveCount(0);

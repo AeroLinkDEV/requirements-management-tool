@@ -448,8 +448,11 @@ test('Case to allocated Procedure execution chain drives release readiness', asy
       await editor.getByLabel(field, { exact: true }).fill(`${field} for ${level} ${kind}.`)
     const raise = page.getByRole('button', { name: `Raise ${procedureKind ? level === 'hlr' ? 'HLRTPCR' : 'LLRTPCR' : level === 'hlr' ? 'HLRTCCR' : 'LLRTCCR'}` })
     await expect(raise).toBeEnabled()
+    // Counted before the click: the intercepted POST can land before the click resolves, and an expectation
+    // computed afterwards would then wait for a submission that is already counted.
+    const submitted = editorSubmissions.length
     await raise.click()
-    await expect.poll(() => editorSubmissions.length).toBe(editorSubmissions.length + 1)
+    await expect.poll(() => editorSubmissions.length).toBe(submitted + 1)
   }
   expect(editorSubmissions).toHaveLength(4)
   expect(editorSubmissions.filter(body => body.artifactKind === 'Procedure')).toHaveLength(2)

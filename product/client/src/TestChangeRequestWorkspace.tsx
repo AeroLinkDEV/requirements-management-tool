@@ -6,13 +6,14 @@ import { RichCaseField, RichContentView } from './RichContent'
 import { fromPlainText, toPlainText } from './richContentModel'
 import { testChangeRequestAcronym, verificationArtifactChangeSegment, verificationArtifactNoun, verificationArtifactPrefix, verificationArtifactTargetSegment, verificationArtifactWord, verificationOriginLabel } from './presentation'
 import ExactArtifactLink from './ExactArtifactLink'
+import { useRequirementsInUse } from './projectFeatures'
 // The requirements queue's stylesheet, imported rather than copied. The testing side is meant to be the same
 // surface for the same kind of work, and a second stylesheet that merely looked like it would drift the first
 // time either was touched.
 import './DownstreamAssessmentQueue.css'
 
 type Kind='Introduce'|'Modify'|'Retire'
-type ParentKind='Unspecified'|'Allocated'|'Derived'
+type ParentKind='Unspecified'|'Allocated'|'Derived'|'Standalone'
 type ProcedureChange={id:string;displayNumber:string;baseNumber:string;revision:number;kind:Kind;level:string;title:string;objective:string;preconditions:string;steps:string;expectedResult:string;rationale:string;drivingRequirementRevisionIds:string[];removedRequirementRevisionIds:string[];coverageChangeRationale:string;coverageChangedBy:string;parentKind?:ParentKind;parentRevisionIds?:string[];derivedRationale?:string}
 /** A requirement this package's changes touched, which a procedure here may be written against. */
 type RequirementChoice={id:string;revisionId:string;displayNumber:string;statement:string;level:string}
@@ -69,6 +70,11 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
   const currentArtifactNoun = artifactNoun(currentArtifactLevel,currentArtifactKind)
   const [busy,setBusy]=useState(false),[error,setError]=useState('')
   const [draft,setDraft]=useState(emptyDraft),[proposing,setProposing]=useState(false)
+  // DEC-144: without Requirements a Case or System Procedure has no requirement to trace to, so every proposal
+  // is Standalone. A software Procedure still takes a Case as its parent.
+  const requirementsInUse=useRequirementsInUse(api,projectId)
+  const standaloneOnly=requirementsInUse===false&&!(currentArtifactKind==='Procedure'&&discipline!=='System')
+  const parentKind:ParentKind=standaloneOnly?'Standalone':draft.parentKind
   // Bounded, server-searched pickers with totals: a valid target or governed requirement beyond the old
   // fixed limits is findable, and exact selections are hydrated by ID even when outside the current page.
   const [targetQuery,setTargetQuery]=useState('')
@@ -185,7 +191,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
     finally{setBusy(false)}
   }
   const propose=async()=>{
-    const parentRevisionIds=draft.parentKind==='Derived'
+    const parentRevisionIds=parentKind!=='Allocated'
       ?[]
       :draft.kind==='Modify'
         ?[...currentCoverage.filter(coverage=>!coverage.isSuspect&&!draft.removed.includes(coverage.revisionId)).map(coverage=>coverage.revisionId),
@@ -196,9 +202,9 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
       baseNumber:draft.kind==='Introduce'?undefined:draft.baseNumber.trim(),
       // The requirements this procedure is written against. Without them the procedure revision cannot be
       // bound to what caused it, and the decision that asked for it never settles.
-      drivingRequirementRevisionIds:draft.parentKind==='Derived'?[]:draft.driving,
+      drivingRequirementRevisionIds:parentKind!=='Allocated'?[]:draft.driving,
       parentRevisionIds,
-      parentKind:draft.parentKind,
+      parentKind,
       derivedRationale:draft.derivedRationale,
       removedRequirementRevisionIds:draft.removed,
       coverageChangeRationale:draft.coverageRationale,
@@ -274,7 +280,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
   const currentCoverageIds=new Set(currentCoverage.filter(x=>!x.isSuspect).map(x=>x.revisionId))
   const governedIds=new Set((item?.drivingRequirementChoices??[]).map(x=>x.revisionId))
   const addedCoverage=draft.driving.filter(id=>!currentCoverageIds.has(id))
-  const allocated=draft.parentKind!=='Derived'
+  const allocated=parentKind==='Allocated'
   const coverageDeltaChanged=allocated&&draft.kind==='Modify'&&(addedCoverage.length>0||draft.removed.length>0)
   const finalCoverageCount=allocated
     ?currentCoverage.filter(x=>!x.isSuspect&&!draft.removed.includes(x.revisionId)).length+addedCoverage.length
@@ -462,7 +468,10 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
           <label>Preconditions<textarea value={draft.preconditions} onChange={event=>setDraft(current=>({...current,preconditions:event.target.value}))}/></label>
           <label>Steps<textarea value={draft.steps} onChange={event=>setDraft(current=>({...current,steps:event.target.value}))}/></label>
           <label>Expected result<textarea value={draft.expectedResult} onChange={event=>setDraft(current=>({...current,expectedResult:event.target.value}))}/></label>
-          <fieldset className="drivingRequirements">
+          {standaloneOnly?<fieldset className="drivingRequirements">
+            <legend>Exact parent classification</legend>
+            <p className="drawerEmpty"><b>Standalone</b> — this project does not use Requirements, so this {currentArtifactWord} verifies its own objective and names no parents.</p>
+          </fieldset>:<fieldset className="drivingRequirements">
             <legend>Exact parent classification</legend>
             <label className="drivingChoice">
               <input type="radio" name="parentKind" value="Allocated"
@@ -483,7 +492,7 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
                   onChange={event=>setDraft(current=>({...current,derivedRationale:event.target.value}))}/>
               </label>
             </>}
-          </fieldset>
+          </fieldset>}
         </>}
         {allocated&&draft.kind==='Modify'&&draft.baseNumber&&<fieldset className="drivingRequirements">
           <legend>Current exact coverage</legend>
