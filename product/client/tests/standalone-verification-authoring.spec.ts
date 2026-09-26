@@ -174,5 +174,5 @@ test('a Verification-only build reports each case by execution status and marks 
   const traceHealth = page.locator('.healthStrip article').filter({ hasText: 'Trace coverage' })
   await expect(traceHealth).toContainText('N/A')
   await expect(traceHealth).not.toContainText('Target achieved')
-  await page.screenshot({ path: testInfo.outputPath('standalone-release-readiness.png'), fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('standalone-readiness-gates.png'), fullPage: true })
 })
