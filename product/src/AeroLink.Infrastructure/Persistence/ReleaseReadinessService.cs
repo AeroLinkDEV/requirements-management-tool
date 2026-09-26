@@ -2,6 +2,7 @@ using AeroLink.Domain.Assurance;
 using AeroLink.Domain.Baselines;
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Hierarchy;
+using AeroLink.Domain.Programs;
 using AeroLink.Domain.Releases;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
@@ -327,6 +328,48 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
                 "Generate every controlled document declared by the effective project ladder."),
             new("release_approval","Release approval complete",campaign.Approvals.Count>0 && campaign.Approvals.All(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count(x=>x.State==ReleaseApprovalState.Approved),campaign.Approvals.Count==0?3:campaign.Approvals.Count,"Ordered release approval must be unanimous.","Start release review and collect every approval.")
         };
+        // DEC-144: a project without Requirements has no change requests, no trace network and no requirement
+        // coverage. Those gates say so rather than pass or fail on an empty population, and each case's
+        // execution status stands where coverage stood. Gate codes are unchanged: the decision room finds
+        // its blockers by them.
+        if (!(await ProjectFeatureService.EffectiveAsync(db, campaign.ProjectId, ct)).HasFlag(ProjectFeature.Requirements))
+        {
+            var cases = baselineMaterialized
+                ? await CaseExecutionStatusProjection.ForBaselineAsync(db, baseline.Id, campaign.ReleaseId,
+                    campaign.SoftwareBuildId, ladderPolicy, ct)
+                : [];
+            // The requirement specifications belong to Requirements (DEC-136): only verification documents are owed.
+            var verificationDocumentTypes = configuredDocumentTypes.Except(
+                [ControlledDocumentType.Sysrd, ControlledDocumentType.SwrdHighLevel, ControlledDocumentType.SwrdLowLevel]).ToHashSet();
+            var generatedVerificationDocuments = configuredDocs.Where(x => verificationDocumentTypes.Contains(x.Type))
+                .Select(x => x.Type).Distinct().Count();
+            gates = gates.Select(gate => gate.Code switch
+            {
+                "documents" => gate with
+                {
+                    Complete = generatedVerificationDocuments == verificationDocumentTypes.Count,
+                    Completed = generatedVerificationDocuments,
+                    Total = verificationDocumentTypes.Count,
+                    Detail = $"The release package requires {verificationDocumentTypes.Count} configured verification document type(s). The project does not use Requirements, so no requirement specification is owed.",
+                },
+                "change_control" or "impact_disposition" => WithoutRequirements(gate.Code, gate.Name,
+                    "The project does not use Requirements, so there are no change requests to integrate or disposition."),
+                "traceability" => WithoutRequirements(gate.Code, gate.Name,
+                    "The project does not use Requirements, so there is no requirement trace network."),
+                "verification_impact" => WithoutRequirements(gate.Code, gate.Name,
+                    "The project does not use Requirements, so no requirement change awaits a verification decision."),
+                "code_traceability" => WithoutRequirements(gate.Code, gate.Name,
+                    "The project does not use Requirements, and Code needs them, so no implementation mapping is owed."),
+                "baseline" => gate with
+                {
+                    Name = "Baseline frozen and materialized",
+                    Detail = "The build's baseline must be frozen and its empty requirement step recorded before its verification artifacts are materialized.",
+                    Action = "Freeze the candidate baseline and materialize it.",
+                },
+                "coverage" when baselineMaterialized => CaseExecutionGate(cases, assurance),
+                _ => gate,
+            }).ToList();
+        }
         var percent = (int)Math.Round(gates.Average(x => x.Total == 0 ? (x.Complete ? 100 : 0) : Math.Min(100, x.Completed * 100d / x.Total)));
         return new(percent, gates.All(x => x.Complete), gates);
     }
@@ -348,6 +391,32 @@ public sealed class ReleaseReadinessService(AeroLinkDbContext db, ILadderPolicy?
             "No action is owed at this gate. The approved deviation, its rationale and its approver are recorded under "
             + "Project configuration → Assurance policy.",
             "RelaxedByPolicy");
+    }
+
+    private static ReadinessGate WithoutRequirements(string code, string name, string detail) =>
+        new(code, name, true, 0, 0, detail, "No action is owed at this gate.", "NotApplicable");
+
+    /// <summary>
+    /// DEC-144: without Requirements, each case shows its execution status instead of requirement coverage.
+    /// The gate is the direct counterpart of the coverage gate, where every requirement needs settled coverage by
+    /// a passing test: here every case needs a latest build-scoped Pass. The same assurance lever relaxes it.
+    /// </summary>
+    private static ReadinessGate CaseExecutionGate(IReadOnlyList<CaseExecutionRow> cases, ResolvedAssurancePolicy assurance)
+    {
+        const string name = "Every case has passed";
+        var passed = cases.Count(x => x.Status == CaseExecutionStatus.Passed);
+        var summary = cases.Count == 0
+            ? "The baseline carries no executable verification artifacts, so no execution status is owed."
+            : $"{passed} passed, {cases.Count(x => x.Status == CaseExecutionStatus.Failed)} failed, "
+                + $"{cases.Count(x => x.Status == CaseExecutionStatus.Blocked)} blocked, "
+                + $"{cases.Count(x => x.Status == CaseExecutionStatus.NotRun)} not run.";
+        if (!assurance.Requires(AssurancePolicyLever.RequirementCoverageBeforeRelease))
+            return RelaxedByPolicy("coverage", name, AssurancePolicyLever.RequirementCoverageBeforeRelease, assurance, summary);
+        return new("coverage", name, passed == cases.Count, passed, cases.Count,
+            $"The project does not use Requirements, so each case shows its execution status instead of requirement coverage: {summary}",
+            passed == cases.Count
+                ? "No action is required."
+                : "Record a latest build-scoped Pass for every case in the baseline, or correct what failed or was blocked.");
     }
 
     private static ReadinessGate WaitingForMaterializedBaseline(string code, string name) =>

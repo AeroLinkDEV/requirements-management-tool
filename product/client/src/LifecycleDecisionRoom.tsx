@@ -6,7 +6,7 @@ import { PersonAvatar } from "./People";
 import { decisionPeople, demoPerson } from "./PeopleRegistry";
 import "./LifecycleDecisionRoom.css";
 
-type Gate = { code: string; name: string; complete: boolean; completed: number; total: number; detail: string; action: string; evaluationState: "Evaluated" | "WaitingForPrerequisite"; prerequisiteCode?: string };
+type Gate = { code: string; name: string; complete: boolean; completed: number; total: number; detail: string; action: string; evaluationState: "Evaluated" | "WaitingForPrerequisite" | "RelaxedByPolicy" | "NotApplicable"; prerequisiteCode?: string };
 type Approval = { position: number; approverId: string; approverName: string; state: string; approvedAt?: string };
 type CampaignDetail = {
   id: string; name: string; state: string; releaseId: string; release: string; baselineId: string; baseline: string; baselineState: string;
@@ -163,9 +163,13 @@ function ReleaseHero({ detail, decision = false }: { detail: CampaignDetail; dec
 
 function ReadinessView({ detail, comparison, blockers, gate, onBack, onOpenDecision, onExploreChanges, openGate }: { detail: CampaignDetail; comparison?: Comparison; blockers: Gate[]; gate: (code: string) => Gate | undefined; onBack: () => void; onOpenDecision: () => void; onExploreChanges: () => void; openGate: (gate: Gate) => void }) {
   const trace = gate("traceability"), verification = gate("verification") ?? gate("coverage"), approval = gate("release_approval");
-  const gateStatus = (item?: Gate) => !item ? "Not evaluated" : item.complete ? "Complete" : item.evaluationState === "WaitingForPrerequisite" ? "Waiting for baseline" : item.total > 0 ? `${Math.max(0, item.total - item.completed)} gaps` : "Review required";
+  const gateStatus = (item?: Gate) => !item ? "Not evaluated" : item.evaluationState === "NotApplicable" ? "Not applicable" : item.complete ? "Complete" : item.evaluationState === "WaitingForPrerequisite" ? "Waiting for baseline" : item.total > 0 ? `${Math.max(0, item.total - item.completed)} gaps` : "Review required";
+  // DEC-144: a project without Requirements reports its change-control gate as not applicable.
+  const requirementsInUse = gate("change_control")?.evaluationState !== "NotApplicable";
   const stages = [
-    ["Requirements", comparison?.summary.proposed ?? detail.changes.reduce((sum, item) => sum + item.requirementCount, 0), true],
+    ["Requirements", requirementsInUse
+      ? comparison?.summary.proposed ?? detail.changes.reduce((sum, item) => sum + item.requirementCount, 0)
+      : "Not applicable", true],
     // The same gate the attention list reports, so the rail cannot show a tick beside "123 of 126 remaining" (#1091 RR-1).
     ["Changes", gate("change_control") ? gateStatus(gate("change_control")) : detail.changes.filter((item) => item.included).length,
       gate("change_control") ? gate("change_control")?.complete : detail.changes.some((item) => item.included)],
@@ -210,6 +214,9 @@ function HealthCard({ label, gate, tone }: { label: string; gate?: Gate; tone: s
   const measured = Boolean(gate && gate.total > 0);
   const percent = gate?.complete && !measured ? 100 : measured ? Math.round((gate!.completed / gate!.total) * 100) : 0;
   const waiting = gate?.evaluationState === "WaitingForPrerequisite";
+  // A gate that does not apply to this project (DEC-144) is not a 100% achievement.
+  if (gate?.evaluationState === "NotApplicable")
+    return <article className={`${tone} pendingMetric`}><span>{label}</span><b>N/A</b><small>Not applicable to this project</small><i><em style={{ width: "0%" }} /></i></article>;
   return <article className={`${tone}${!measured && !gate?.complete ? " pendingMetric" : ""}`}><span>{label}</span><b>{measured || gate?.complete ? `${percent}%` : "Pending"}</b><small>{gate?.complete ? "Target achieved" : waiting ? "Waiting for baseline materialization" : measured ? `${Math.max(0, gate!.total - gate!.completed)} checks remaining` : "Evaluation not started"}</small><i><em style={{ width: `${percent}%` }} /></i></article>;
 }
 

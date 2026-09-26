@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import './ReleaseExecutionWorkbench.css'
 
-type Gate={code:string;complete:boolean;completed:number;total:number;evaluationState:"Evaluated"|"WaitingForPrerequisite"}
+type Gate={code:string;complete:boolean;completed:number;total:number;evaluationState:"Evaluated"|"WaitingForPrerequisite"|"RelaxedByPolicy"|"NotApplicable"}
 type Change={id:string;displayNumber:string;title:string;type:string;state:string;authorId:string;requirementCount:number;included:boolean}
 type Build={id:string;buildNumber:string;releaseId:string;baselineId:string;state:string}
 type Detail={id:string;projectId:string;releaseId:string;release:string;baselineId:string;baseline:string;baselineState:string;requirementsHash?:string;softwareBuildId?:string;readiness:{gates:Gate[]};changes:Change[];impacts:{changeRequestId:string;state:string}[];events:{eventType:string}[]}

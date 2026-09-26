@@ -926,7 +926,30 @@ export default function TestProcedureExplorer({ api, projectId, releaseId, disci
         This build has not materialized its requirements, so there is nothing to report coverage against yet.
       </p>}
 
-      {coverageStatus === 'ready' && coverage && <>
+      {coverageStatus === 'ready' && coverage?.requirementsInUse === false && coverage.executionStatus && <>
+      {/* DEC-144: without Requirements there is nothing to cover, so each case shows its execution status. */}
+      <section className="coverageSummary" aria-label="Execution status summary">
+        <article><b>{coverage.executionStatus.total}</b><span>{currentArtifactShortPlural[0].toUpperCase() + currentArtifactShortPlural.slice(1)}</span></article>
+        <article><b>{coverage.executionStatus.passed}</b><span>Passed</span></article>
+        <article className={coverage.executionStatus.failed ? 'attention' : ''}><b>{coverage.executionStatus.failed}</b><span>Failed</span></article>
+        <article className={coverage.executionStatus.blocked ? 'attention' : ''}><b>{coverage.executionStatus.blocked}</b><span>Blocked</span></article>
+        <article className={coverage.executionStatus.notRun ? 'attention' : ''}><b>{coverage.executionStatus.notRun}</b><span>Not run</span></article>
+      </section>
+      <section className="coverageCard">
+        <div className="cardTitle">
+          <h2>Execution status</h2>
+          <p>This project does not use Requirements, so there is no requirement coverage. Each {currentArtifactDisplayWord} in this build shows its latest result instead.</p>
+        </div>
+        {coverage.executionStatus.items.length === 0 && <p className="coverageNone">No {currentArtifactShortPlural} are carried by this build yet.</p>}
+        {coverage.executionStatus.items.map(item => <article
+          className={`coverageRow ${item.status === 'Passed' ? '' : 'attention'}`} key={item.revisionId}>
+          <div><b>{item.displayNumber}</b><i>{item.status === 'NotRun' ? 'Not run' : item.status}</i></div>
+          <p>{item.title}</p>
+        </article>)}
+      </section>
+      </>}
+
+      {coverageStatus === 'ready' && coverage && coverage.requirementsInUse !== false && <>
       <section className="coverageSummary" aria-label="Coverage summary">
         <article><b>{coverage.total}</b><span>Requirements</span></article>
         <article><b>{coverage.covered}</b><span>With a {currentArtifactDisplayWord}</span></article>

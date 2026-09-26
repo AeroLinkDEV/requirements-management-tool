@@ -105,6 +105,12 @@ manifest, and then materializes approved verification work as usual. In the brow
 Configuration → Features accept the combination; the test change request editor raises a Case or System package on
 its own case, and each proposal it or the package page writes is Standalone.
 
+Without Requirements there is no requirement coverage, so each case shows its execution status instead (DEC-144):
+passed, failed, blocked or not run, from its latest build-scoped result. The Test Procedure Explorer coverage report
+lists it, and Release Readiness replaces the coverage gate with "Every case has passed", relaxed by the same assurance
+lever. The change-control, impact, verification-impact, trace and code gates report Not applicable with the reason,
+and the documents gate owes only the verification documents.
+
 Project entry uses stable identity and opens the actual visual build-lineage selector, including for a single
 build. Explicit build links retain their exact authorized target. Repository setup can remain Pending and be
 configured later; a server-observed GitLab connection is separate from controlled implementation evidence.
