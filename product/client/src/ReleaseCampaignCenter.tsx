@@ -13,7 +13,7 @@ type Gate = {
   total: number;
   detail: string;
   action: string;
-  evaluationState: "Evaluated" | "WaitingForPrerequisite";
+  evaluationState: "Evaluated" | "WaitingForPrerequisite" | "RelaxedByPolicy" | "NotApplicable";
   prerequisiteCode?: string;
 };
 type Impact = {
@@ -326,14 +326,16 @@ export default function ReleaseCampaignCenter({
           : undefined;
   const renderGate = (gate: Gate) => {
     const waiting = gate.evaluationState === "WaitingForPrerequisite";
+    // DEC-144: a gate that does not apply to this project says why, rather than "0/0 · Gate complete".
+    const notApplicable = gate.evaluationState === "NotApplicable";
     return (
       <article className={gate.complete ? "complete" : waiting ? "waiting" : "blocked"} key={gate.code}>
         <div>
           <span>{gate.complete ? "✓" : waiting ? "…" : "!"}</span>
           <b>{gate.name}</b>
         </div>
-        <strong>{waiting ? "Waiting" : `${gate.completed}/${gate.total}`}</strong>
-        <p>{gate.complete ? "Gate complete." : gate.detail}</p>
+        <strong>{notApplicable ? "Not applicable" : waiting ? "Waiting" : `${gate.completed}/${gate.total}`}</strong>
+        <p>{notApplicable ? gate.detail : gate.complete ? "Gate complete." : gate.detail}</p>
         <small>
           {gate.complete ? "Configuration evidence is current." : gate.action}
         </small>

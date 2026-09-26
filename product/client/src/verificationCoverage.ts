@@ -26,8 +26,21 @@ export type CoverageItem = {
   }[]
 }
 
+/** DEC-144: one case's latest result for the build, reported where a project has no requirements to cover. */
+export type CaseExecutionItem = {
+  artifactId: string; revisionId: string; displayNumber: string; title: string; level: string; artifactKind: string
+  status: 'Passed' | 'Failed' | 'Blocked' | 'NotRun'; latestExecutionId?: string | null; executedAt?: string | null
+}
+
+export type CaseExecutionStatus = {
+  total: number; passed: number; failed: number; blocked: number; notRun: number; items: CaseExecutionItem[]
+}
+
 export type Coverage = {
   total: number; covered: number; suspect: number; verified: number; uncovered: number; items: CoverageItem[]
+  /** False when the project does not use Requirements (DEC-144); coverage is then empty and executionStatus is set. */
+  requirementsInUse?: boolean
+  executionStatus?: CaseExecutionStatus | null
 }
 
 /** The requirement number a discipline's procedures verify. Coverage is computed for the whole
@@ -57,11 +70,31 @@ export async function coverageConfiguration(api: string, projectId: string, rele
   return { effectiveBaselineId, query }
 }
 
+const executionLevels = (scope: VerificationScope) =>
+  scope === 'Software' ? ['HighLevel', 'LowLevel']
+    : [scope === 'System' ? 'System' : scope === 'HighLevelSoftware' ? 'HighLevel' : 'LowLevel']
+
+/** Narrows each case's execution status to one discipline and recounts it. */
+function summariseExecution(raw: CaseExecutionStatus, scope: VerificationScope): CaseExecutionStatus {
+  const levels = executionLevels(scope)
+  const items = raw.items.filter(x => levels.includes(x.level))
+  return {
+    items,
+    total: items.length,
+    passed: items.filter(x => x.status === 'Passed').length,
+    failed: items.filter(x => x.status === 'Failed').length,
+    blocked: items.filter(x => x.status === 'Blocked').length,
+    notRun: items.filter(x => x.status === 'NotRun').length,
+  }
+}
+
 /** Narrows raw coverage to one discipline and recounts it, so the totals describe what is on screen. */
 export function summarise(raw: Coverage, discipline: VerificationScope): Coverage {
   const prefixes = requirementPrefixes(discipline)
   const items = raw.items.filter(x => prefixes.some(prefix => x.displayNumber.startsWith(prefix)))
   return {
+    requirementsInUse: raw.requirementsInUse,
+    executionStatus: raw.executionStatus ? summariseExecution(raw.executionStatus, discipline) : raw.executionStatus,
     items,
     total: items.length,
     covered: items.filter(x => x.disposition === 'Covered').length,
