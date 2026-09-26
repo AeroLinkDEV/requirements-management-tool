@@ -110,6 +110,9 @@ passed, failed, blocked or not run, from its latest build-scoped result. The Tes
 lists it, and Release Readiness replaces the coverage gate with "Every case has passed", relaxed by the same assurance
 lever. The change-control, impact, verification-impact, trace and code gates report Not applicable with the reason,
 and the documents gate owes only the verification documents.
+The artifact thread places a Problem Report linked to an execution or test change request it already shows (a report
+raised from a failed run, or one a package answers for), so without Requirements it runs Cases → Procedures → Executions
+→ Problem Reports, and lanes with no records stay closed.
 
 Project entry uses stable identity and opens the actual visual build-lineage selector, including for a single
 build. Explicit build links retain their exact authorized target. Repository setup can remain Pending and be

@@ -390,6 +390,65 @@ public sealed class StandaloneVerificationApiTests
     }
 
     [Fact]
+    public async Task Without_requirements_the_thread_runs_from_procedure_to_execution_to_problem_report()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory, WithoutRequirements);
+        var introduce = Package(fixture, "SYSTPCR-000001", "SYSTP-000001", 0,
+            TestProcedureChangeKind.Introduce, VerificationProcedureParentKind.Standalone);
+        await SaveAsync(factory, introduce);
+        await MemberSession.SignInAsync(client, "standalone.cm");
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/freeze", new { });
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/materialize-requirements", new { });
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/test-change-requests",
+            new { testChangeRequestId = introduce.Id });
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
+
+        Guid revisionId, executionId, failureReportId, answeredReportId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            revisionId = (await db.TestProcedureRevisions.SingleAsync()).Id;
+            var build = new SoftwareBuild(fixture.ProjectId, fixture.ReleaseId, fixture.BaselineId, "B-1", "Bench build",
+                "standalone.cm", now);
+            var execution = new TestExecution(fixture.ProjectId, revisionId, build.Id, null, TestOutcome.Fail,
+                "standalone.cm", "Bench rig A", "Frames were lost.", "bench-log-002", now, now, fixture.ReleaseId);
+            var failure = new ProblemReport(fixture.ProjectId, "PR-00002", "Frames lost under load", "Frames lost.",
+                "Analysis", "standalone.cm", now, targetReleaseId: fixture.ReleaseId);
+            db.AddRange(build, execution, failure);
+            db.Add(ProblemReportRelationshipPolicy.CreateControlled(failure.Id, "TestExecution", execution.Id,
+                ProblemReportRelationshipPolicy.OriginatingFailure, ProblemReportRelationshipProducer.FailureCreationWorkflow,
+                "standalone.cm", now));
+            // The package that introduced the procedure answers for the report it was raised from.
+            db.Add(ProblemReportRelationshipPolicy.CreateControlled(fixture.ReportId, "TestChangeRequest", introduce.Id,
+                ProblemReportRelationshipPolicy.VerificationForProblem, ProblemReportRelationshipProducer.TestChangeRequestWorkflow,
+                "standalone.cm", now));
+            await db.SaveChangesAsync();
+            executionId = execution.Id;
+            failureReportId = failure.Id;
+            answeredReportId = fixture.ReportId;
+        }
+
+        var thread = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/artifact-thread?projectId={fixture.ProjectId}&baselineId={fixture.BaselineId}&focalKind=Procedure&focalId={revisionId}");
+        var nodes = thread.GetProperty("nodes").EnumerateArray()
+            .ToDictionary(x => x.GetProperty("id").GetGuid(), x => x.GetProperty("kind").GetString());
+        Assert.Equal("Procedure", nodes[revisionId]);
+        Assert.Equal("Execution", nodes[executionId]);
+        Assert.Equal("ProblemReport", nodes[failureReportId]);
+        Assert.Equal("ProblemReport", nodes[answeredReportId]);
+        Assert.DoesNotContain("Requirement", nodes.Values);
+        var edges = thread.GetProperty("edges").EnumerateArray()
+            .Select(x => (From: x.GetProperty("fromId").GetGuid(), To: x.GetProperty("toId").GetGuid(),
+                Relation: x.GetProperty("relation").GetString()))
+            .ToList();
+        Assert.Contains((failureReportId, executionId, ProblemReportRelationshipPolicy.OriginatingFailure), edges);
+        Assert.Contains((answeredReportId, introduce.Id, ProblemReportRelationshipPolicy.VerificationForProblem), edges);
+    }
+
+    [Fact]
     public async Task With_requirements_coverage_reports_no_execution_status()
     {
         using var factory = new AeroLinkApiFactory();

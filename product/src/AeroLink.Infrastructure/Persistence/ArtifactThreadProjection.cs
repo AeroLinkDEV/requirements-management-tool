@@ -314,6 +314,7 @@ public static class ArtifactThreadProjection
         var verification = await AddVerificationAsync(db, projectId, requirementWalk.All,
             requirementWalk.VerificationSources, anchors, focalKind, focalId, buildIds, builds, acc,
             policies ?? new EffectiveProjectLadderPolicyResolver(db), ct);
+        await AddVerificationProblemReportsAsync(db, projectId, acc, ct);
 
         // Keep this read inside the exact nodes and release context already admitted to the thread. Problem
         // Report relationships target immutable snapshots, while this thread carries live report identities;
@@ -737,6 +738,51 @@ public static class ArtifactThreadProjection
         foreach (var link in links)
             acc.Link(new ArtifactThreadEdge(link.Id, KindProblemReport, link.ArtifactId, KindChangeRequest,
                 link.Relationship, false));
+    }
+
+    /// <summary>
+    /// Problem Reports tied to the verification records already in the thread. That covers a report raised from a
+    /// failed execution, one a resolving execution verifies, and one a test change request answers for.
+    ///
+    /// <para>
+    /// Reports used to join the thread only through a change request. A project without Requirements has none,
+    /// and its thread is Cases → Procedures → Executions → Problem Reports (#1188, DEC-144 answer 6). A report
+    /// raised from a failed run is the same fact in any project, so it is read the same way everywhere. The read
+    /// stays inside the nodes the thread already admitted, so it never widens the thread's scope.
+    /// </para>
+    /// </summary>
+    private static async Task AddVerificationProblemReportsAsync(AeroLinkDbContext db, Guid projectId,
+        Accumulator acc, CancellationToken ct)
+    {
+        var targets = acc.Nodes.Values
+            .Where(node => node.Kind is KindExecution or KindTestChangeRequest)
+            .ToDictionary(node => node.Id, node => node.Kind);
+        if (targets.Count == 0) return;
+        var ids = targets.Keys.ToList();
+        var links = await (from link in db.ProblemReportLinks.AsNoTracking()
+                           join report in db.ProblemReports.AsNoTracking() on link.ProblemReportId equals report.Id
+                           where ids.Contains(link.ArtifactId) && report.ProjectId == projectId
+                               && (link.ArtifactType == "TestExecution" || link.ArtifactType == "TestChangeRequest")
+                           select new
+                           {
+                               link.ArtifactType,
+                               link.ArtifactId,
+                               report.Id,
+                               report.ReportNumber,
+                               report.Revision,
+                               report.Title,
+                               report.State,
+                               link.Relationship,
+                           }).ToListAsync(ct);
+        foreach (var link in links.Where(x => targets[x.ArtifactId]
+                     == (x.ArtifactType == "TestExecution" ? KindExecution : KindTestChangeRequest)))
+        {
+            acc.Place(new ArtifactThreadNode(link.Id, KindProblemReport, ArtifactThreadLane.ProblemReport,
+                $"{link.ReportNumber}.{link.Revision:D2}", link.Title, link.State.ToString(),
+                Level: null, IsFocal: false));
+            acc.Link(new ArtifactThreadEdge(link.Id, KindProblemReport, link.ArtifactId, targets[link.ArtifactId],
+                link.Relationship, false));
+        }
     }
 
     /// <summary>Lanes 3, 4 and 5, plus the applicability statement when the levels have no discipline.</summary>
