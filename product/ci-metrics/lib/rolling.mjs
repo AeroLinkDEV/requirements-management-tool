@@ -68,6 +68,25 @@ export function runDurationMs(record) {
   return path.durationMs
 }
 
+/**
+ * A run's critical path as a comparison sample, or null when it is not one (#587).
+ *
+ * A cancelled run stopped part-way, so its path measures when it was stopped, not the gate: a 75 s superseded
+ * push was averaged with a 1468 s full run into a 772 s "previous" median, and the tracker reported a push-main
+ * regression that was not there. A2 now cancels discarded queue candidates, so queue lanes would inherit the
+ * same distortion. A run with no measured path (a main push that A1 skipped) is not a sample either. Every
+ * statistic below windows over these samples, never over raw records, so a window of eight means eight
+ * measured, completed runs.
+ */
+export function comparableDurationMs(record) {
+  if (record?.conclusion === 'cancelled' || record?.apiTiming?.conclusion === 'cancelled') return null
+  return runDurationMs(record)
+}
+
+function comparableRecords(records) {
+  return (Array.isArray(records) ? records : []).filter((record) => comparableDurationMs(record) !== null)
+}
+
 export function jobGroupDurations(record) {
   const byGroup = new Map()
   for (const job of Array.isArray(record.jobs) ? record.jobs : []) {
@@ -226,7 +245,7 @@ export function rollingStats(records) {
     const category = classifyRun(record)
     const entry = groups.get(category) ?? { category, criticalPath: [], jobGroups: new Map(), counts: { runs: 0, expected: 0, executed: 0, passed: 0, failed: 0, skipped: 0, flaky: 0 } }
     entry.counts.runs += 1
-    const duration = runDurationMs(record)
+    const duration = comparableDurationMs(record)
     if (duration !== null) entry.criticalPath.push(duration)
     for (const [group, values] of jobGroupDurations(record)) {
       const list = entry.jobGroups.get(group) ?? []
@@ -275,31 +294,30 @@ function windowMedian(records, count) {
 export function regressionDeterminacy(records, { window = 10, minRuns = 3 } = {}) {
   const undetermined = (reason) => ({ determinate: false, reason })
   if (!Array.isArray(records)) return undetermined('No records were supplied.')
-  if (records.length < minRuns * 2) return undetermined(`Only ${records.length} comparable runs; ${minRuns * 2} are needed to compare two windows.`)
-  const recent = records.slice(-window)
-  const previous = records.slice(-window * 2, -window)
+  const comparable = comparableRecords(records)
+  if (comparable.length < minRuns * 2) {
+    const cancelled = records.filter((record) => record?.conclusion === 'cancelled' || record?.apiTiming?.conclusion === 'cancelled').length
+    const unmeasured = records.length - comparable.length - cancelled
+    return undetermined(`Only ${comparable.length} comparable runs of ${records.length} (${cancelled} cancelled, ${unmeasured} with the critical path unavailable); ${minRuns * 2} are needed to compare two windows.`)
+  }
+  const recent = comparable.slice(-window)
+  const previous = comparable.slice(-window * 2, -window)
   if (recent.length < minRuns || previous.length < minRuns) {
     return undetermined(`Windows are too small to compare (recent ${recent.length}, previous ${previous.length}, minimum ${minRuns}).`)
-  }
-  const durations = [
-    median(recent.map(runDurationMs)), median(previous.map(runDurationMs)),
-    percentile(recent.map(runDurationMs), 95), percentile(previous.map(runDurationMs), 95),
-  ]
-  if (durations.some((value) => value === null)) {
-    return undetermined('Critical-path durations were unavailable for at least one window, so no comparison was made.')
   }
   return { determinate: true, reason: null }
 }
 
 export function detectRegressions(records, { window = 10, minRuns = 3, ratio = 1.15, minDeltaMs = 60_000 } = {}) {
-  if (records.length < minRuns * 2) return []
-  const recent = records.slice(-window)
-  const previous = records.slice(-window * 2, -window)
+  const comparable = comparableRecords(records)
+  if (comparable.length < minRuns * 2) return []
+  const recent = comparable.slice(-window)
+  const previous = comparable.slice(-window * 2, -window)
   if (recent.length < minRuns || previous.length < minRuns) return []
-  const recentMedian = median(recent.map(runDurationMs))
-  const previousMedian = median(previous.map(runDurationMs))
-  const recentP95 = percentile(recent.map(runDurationMs), 95)
-  const previousP95 = percentile(previous.map(runDurationMs), 95)
+  const recentMedian = median(recent.map(comparableDurationMs))
+  const previousMedian = median(previous.map(comparableDurationMs))
+  const recentP95 = percentile(recent.map(comparableDurationMs), 95)
+  const previousP95 = percentile(previous.map(comparableDurationMs), 95)
   if (recentMedian === null || previousMedian === null || recentP95 === null || previousP95 === null) return []
   const regressions = []
   if (recentMedian > previousMedian * ratio && recentMedian - previousMedian >= minDeltaMs) {
@@ -331,8 +349,7 @@ export const LANE_BUDGETS_MS = Object.freeze({
 export function detectBudgetBreaches(records, category, { window = 10, minRuns = 3, budgets = LANE_BUDGETS_MS } = {}) {
   const budget = Object.hasOwn(budgets, category) ? budgets[category] : null
   if (!Number.isFinite(budget) || budget <= 0 || !Array.isArray(records)) return []
-  const recent = records.slice(-window)
-  const durations = recent.map(runDurationMs).filter((value) => value !== null)
+  const durations = comparableRecords(records).slice(-window).map(comparableDurationMs)
   if (durations.length < minRuns) return []
   const current = median(durations)
   if (current === null || current <= budget) return []

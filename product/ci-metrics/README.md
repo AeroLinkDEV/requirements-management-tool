@@ -131,7 +131,9 @@ default-branch code and never executes PR content.
   median/p95 for the critical path and each job group, plus
   expected/executed/passed/failed/skipped/flaky count, flake-title, and cache trends;
 - detects sustained regressions only with enough comparable evidence (window and minimum-run guards;
-  noise never fires);
+  noise never fires). A comparable run is a completed one with a measured critical path: cancelled runs
+  (superseded pushes, candidates A2 cancels) and main pushes A1 skipped are not samples, and every window
+  counts samples, not records (#587);
 - holds the heavy lanes to absolute budgets (`LANE_BUDGETS_MS`: `queue-mixed` 30 min, `dispatch-mixed`
   31 min, each the lane's measured critical-path p95 plus about 10%). The window-to-window comparison
   cannot see growth that stays under its 15% ratio at every step, so a lane whose recent critical-path
