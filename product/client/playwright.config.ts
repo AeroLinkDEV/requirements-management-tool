@@ -120,6 +120,8 @@ export default defineConfig({
         Diagnostics__StallReportSeconds: '10',
         Diagnostics__SlowDatabaseMilliseconds: '2000',
         Database__Provider: 'Sqlite',
+        // #1163: a disposable database; its durability flushes stalled logins behind a busy runner disk.
+        Database__SqliteSynchronous: 'Off',
         Evidence__Root: storage.evidence,
         DemoData__Enabled: 'false',
         Identity__SeedDemoAccounts: 'true',
