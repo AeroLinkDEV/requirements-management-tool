@@ -32,30 +32,8 @@ test('controlled Case document labels are byte-exact and software surfaces never
   }
 })
 
-// The migration is merged history and cannot change, so these checks guard against it being rewritten.
-// SoftwareCaseRenamePostgresQualificationTests executes the same migration, but only against its dedicated
-// aerolink_722_qualify database, which no CI lane provides yet (#1122).
-test('the migration contract guards System and leaves review history/body prose governed', () => {
-  const migration = read('product', 'src', 'AeroLink.Infrastructure', 'Persistence', 'Migrations',
-    '20260822170000_RenameSoftwareVerificationArtifactsToCases.cs')
-  const authority = read('product', 'src', 'AeroLink.Infrastructure', 'Persistence',
-    'SoftwareVerificationCaseMigrationAuthority.cs')
-
-  assert.match(migration, /SYSTP/)
-  assert.match(migration, /System SYSTP rows are deliberately not touched/)
-  assert.match(migration, /SourceChangeRequestsJson/)
-  assert.match(migration, /test_procedure_revisions/)
-  assert.match(migration, /Unsectioned cases/)
-  assert.match(migration, /artifact_comments/)
-  assert.match(migration, /test_procedure_documents/)
-  assert.match(migration, /artifact_edit_sessions/)
-  assert.match(migration, /regexp_matches/)
-  assert.match(migration, /HLRTP-\(\[0-9\]\+\)/)
-  assert.match(migration, /Controlled high-level software test cases document for this project/)
-  assert.match(migration, /'Test Procedures', 'Test Cases'/)
-  assert.match(migration, /ControlledDocumentArtifact/)
-  assert.match(migration, /ControlledDocument'/)
-  assert.match(authority, /Pending event/)
-  assert.match(authority, /\.Completed/)
-  assert.match(authority, /SignatureSuperseded/)
-})
+// The #722 migration and its authority are proved by executing them:
+// SoftwareCaseRenamePostgresQualificationTests upgrades an exact pre-rename database and asserts that System
+// SYSTP rows are untouched, Cases, documents, comments, notifications and watermarks are relabelled, and every
+// superseded signature leaves pending and completed evidence. Since #1151 it runs in the PostgreSQL job for any
+// persistence or migration change, so the source-text copy of that contract is retired (#1128, #1122).
