@@ -13,9 +13,26 @@ foreach ($name in 'initdb.exe','pg_ctl.exe','createdb.exe','psql.exe') {
     if (-not (Test-Path -LiteralPath (Join-Path $PostgresBin $name) -PathType Leaf)) { throw "Disposable PostgreSQL qualification requires $name under $PostgresBin." }
 }
 
+# #1183: a port-0 bind hands out a port from Windows' dynamic (ephemeral) range, 49152-65535 by default. The
+# port is released at once and bound again only after the restore work, and in that window any outbound
+# connection, including this scenario's own psql and Npgsql sessions, can take it as its source port, so the
+# validation API's bind fails and it exits during startup. Outbound source ports only ever come from the dynamic
+# range, so a free port below it can be lost only to another listener. Ports the OS has excluded (Hyper-V and
+# similar reservations) refuse the probe bind and are skipped.
 function Get-FreePort {
-    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $listener.Start()
-    try { return ([Net.IPEndPoint]$listener.LocalEndpoint).Port } finally { $listener.Stop() }
+    $dynamicStart = 49152
+    $range = netsh int ipv4 show dynamicport tcp 2>$null | Select-String -Pattern 'Start Port\s*:\s*(\d+)'
+    if ($range) { $dynamicStart = [int]$range.Matches[0].Groups[1].Value }
+    $low = 20000; $high = [Math]::Min(40000, $dynamicStart)
+    for ($attempt = 0; $attempt -lt 200; $attempt++) {
+        $candidate = Get-Random -Minimum $low -Maximum $high
+        if ($candidate -eq 54329) { continue }
+        $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $candidate)
+        try { $listener.Start(); return $candidate }
+        catch [Net.Sockets.SocketException] { continue }
+        finally { $listener.Stop() }
+    }
+    throw "No free loopback port was found in $low-$($high - 1), below the dynamic port range that starts at $dynamicStart."
 }
 function Invoke-Checked([string]$File, [string[]]$Arguments) {
     & $File @Arguments
