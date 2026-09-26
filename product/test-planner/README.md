@@ -15,6 +15,11 @@ broad unless its candidate changes only documentation against the queue base; th
 documentation topology (#1152 A3). The merge binder never trusts the run's own classification for this: it
 re-derives the candidate's status from the protected default-branch classifier and GitHub's queue record.
 
+A file under a documentation root that a product suite reads (for example the requirement-hierarchy policy
+matrix the Domain suite parses) is listed in `TEST_READ_DOCUMENTATION` and classifies as backend, never
+documentation. A guard in `classify.test.mjs` scans every test source for documentation references and
+compares them with a reviewed table, so a new read fails until it is listed.
+
 ## Windows entry point
 
 From the repository root, double-click `TEST_AEROLINK_CHANGED.bat` or run the PowerShell entry point:

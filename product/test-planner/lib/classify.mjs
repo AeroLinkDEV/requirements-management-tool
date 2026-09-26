@@ -34,10 +34,25 @@ export function normalizePath(path) {
  * configuration. Only coding agents read them; no workflow, script, or product suite does, so they are
  * documentation for classification purposes.
  */
-const DOCUMENTATION_ROOTS = /^(?:docs|design|showcase|product\/docs|\.agents|\.claude|\.codex)(?:\/|$)/i
+const DOCUMENTATION_ROOTS =/^(?:docs|design|showcase|product\/docs|\.agents|\.claude|\.codex)(?:\/|$)/i
 const DOCUMENTATION_FILES = /^[^/]+\.md$/i
 
+/**
+ * Files under a documentation root that a product suite reads as test input. Editing one can turn that suite
+ * red, so it is backend code for classification, never documentation (#1152 A3). Paths are normalized
+ * (lower case). The guard in classify.test.mjs scans every test source for documentation references and fails
+ * on one it cannot account for, so a new read cannot silently join the documentation topology.
+ */
+export const TEST_READ_DOCUMENTATION = Object.freeze([
+  // ProjectLadderConfigurationTests (Domain) parses the matrix for the activation-manifest source contract.
+  'product/docs/requirement_hierarchy_policy_matrix.md',
+  // AeroLinkOoxmlProfileTests (Infrastructure) validates this real Word round trip against the OOXML profile.
+  'docs/aerolink technical overview.docx',
+])
+const TEST_READ_DOCUMENTATION_SET = new Set(TEST_READ_DOCUMENTATION)
+
 function isDocumentationPath(path) {
+  if (TEST_READ_DOCUMENTATION_SET.has(path)) return false
   return DOCUMENTATION_ROOTS.test(path) || DOCUMENTATION_FILES.test(path)
 }
 
@@ -99,8 +114,13 @@ function matchingBroadPath(paths) {
   return paths.find((path) => isBroadPath(path)) ?? null
 }
 
+const TEST_READ_DOCUMENTATION_PATTERN = TEST_READ_DOCUMENTATION
+  .map((path) => `^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
+  .join('|')
+
 export const AREA_PATTERNS = {
-  backend: new RegExp(`^product/(src|tests)/|^product/.*\\.(cs|csproj|sln|slnx|props|targets)$|${WORKFLOW}`, 'i'),
+  // Documentation read by the Domain and Infrastructure suites selects the backend suites that read it.
+  backend: new RegExp(`^product/(src|tests)/|^product/.*\\.(cs|csproj|sln|slnx|props|targets)$|${WORKFLOW}|${TEST_READ_DOCUMENTATION_PATTERN}`, 'i'),
   client: new RegExp(`^product/client/|${WORKFLOW}`, 'i'),
   browser: new RegExp(`^product/(client|src/AeroLink\\.Api|src/AeroLink\\.Domain|src/AeroLink\\.Infrastructure)/|${WORKFLOW}`, 'i'),
   // Keyed on persistence as well as the migration/identity keywords: a change to an EF query needs the

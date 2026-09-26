@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { classify, explain, localPlan, selectJobs, AREA_PATTERNS, BROAD_EVENTS, normalizePath, isDocumentationOnlyChange } from '../lib/classify.mjs'
+import { classify, explain, localPlan, selectJobs, AREA_PATTERNS, BROAD_EVENTS, normalizePath, isDocumentationOnlyChange, TEST_READ_DOCUMENTATION } from '../lib/classify.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 
@@ -38,6 +38,119 @@ test('a merge-group candidate whose own change is documentation takes the docume
   assert.equal(of(['product/src/docs/DocumentationLoader.cs'], 'merge_group').docsOnly, false)
   assert.equal(isDocumentationOnlyChange([]), false)
   assert.equal(isDocumentationOnlyChange(['README.md', '']), false)
+})
+
+test('documentation a product suite reads is backend input, never documentation-only', () => {
+  // #1152 A3 review: ProjectLadderConfigurationTests reads the policy matrix, so a queue candidate editing only
+  // the matrix must still run the Domain suite that can turn red on it.
+  for (const path of ['product/docs/REQUIREMENT_HIERARCHY_POLICY_MATRIX.md', 'docs\\AeroLink Technical Overview.docx']) {
+    assert.equal(isDocumentationOnlyChange([path]), false, path)
+    for (const event of ['pull_request', 'merge_group']) {
+      const result = of([path, 'README.md'], event)
+      assert.equal(result.docsOnly, false, `${event} ${path}`)
+      assert.equal(result.backend, true, `${event} ${path}`)
+    }
+  }
+  assert.deepEqual(explain(['product/docs/REQUIREMENT_HIERARCHY_POLICY_MATRIX.md'])[0].areas, ['backend'])
+  for (const path of TEST_READ_DOCUMENTATION) assert.equal(path, normalizePath(path), `${path} must be stored normalized`)
+})
+
+// Every test source that names a documentation file, or builds a path from a documentation root, and what it
+// does with it. A read makes the named file test input, so it must be in TEST_READ_DOCUMENTATION; anything
+// else is a fixture string, comment or output path. The guard below derives this map from the tree and
+// compares it exactly, so a new reference fails until someone decides which kind it is (#1152 A3).
+const FIXTURE = 'a fixture path or file name, not a repository read'
+const COMMENT = 'a comment or message naming the document'
+const DOCUMENTATION_REFERENCES = {
+  // Reads by suites the documentation topology skips.
+  'product/tests/AeroLink.Domain.Tests/ProjectLadderConfigurationTests.cs': { reads: true, refs: ['directory', 'product/docs/REQUIREMENT_HIERARCHY_POLICY_MATRIX.md'] },
+  'product/tests/AeroLink.Infrastructure.Tests/AeroLinkOoxmlProfileTests.cs': { reads: true, refs: ['directory', 'docs/AeroLink Technical Overview.docx'] },
+  // Reads every maintained document, but runs in the always-running classifier job (asserted below), so a
+  // documentation-only candidate still runs it.
+  'product/scripts/Test-RepositoryLayout.Tests.ps1': { reads: false, why: 'always runs', refs: ['directory', 'CURRENT_PRODUCT_HANDOFF_2026-07-29.md', 'DECISIONS_AND_OPEN_QUESTIONS.md', 'FEATURE_CATALOG.md', 'PROJECT_STATE.md', 'README.md', 'docs/REMOTE_DEMO_OPERATOR.md'] },
+  // Mentions.
+  'product/ci-metrics/tests/maintenance-approval.test.mjs': { reads: false, why: 'reads product/ci-metrics/README.md, which is product', refs: ['README.md'] },
+  'product/ci-metrics/tests/merge-authority-github.test.mjs': { reads: false, why: `${FIXTURE}; reads product/ci-metrics/README.md`, refs: ['directory', 'README.md', 'product/docs/MERGING.md'] },
+  'product/ci-metrics/tests/merge-authority.test.mjs': { reads: false, why: FIXTURE, refs: ['directory', 'README.md'] },
+  'product/ci-metrics/tests/provenance.test.mjs': { reads: false, why: FIXTURE, refs: ['directory', 'README.md'] },
+  'product/client/tests/capture-overview.spec.ts': { reads: false, why: 'writes captures into docs/overview-video/shots; reads nothing there', refs: ['directory', 'docs/overview-video/slides.js'] },
+  'product/client/tests/code-workspace-rendered.spec.ts': { reads: false, why: FIXTURE, refs: ['README.md'] },
+  'product/client/tests/design-system.spec.ts': { reads: false, why: COMMENT, refs: ['DECISIONS_AND_OPEN_QUESTIONS.md'] },
+  'product/client/tests/product-claims.spec.ts': { reads: false, why: COMMENT, refs: ['docs/product-definition/SCOPE_AND_BOUNDARIES.md'] },
+  'product/client/tests/project-features.spec.ts': { reads: false, why: 'a screenshot output name that ends in command-center.png', refs: ['docs/overview-video/shots/command-center.png'] },
+  'product/scripts/AeroLinkBootstrap.Tests.ps1': { reads: false, why: 'writes files into a disposable fixture repository', refs: ['directory', 'README.md'] },
+  'product/scripts/AeroLinkRemoteDemo.Tests.ps1': { reads: false, why: COMMENT, refs: ['docs/REMOTE_DEMO_OPERATOR.md'] },
+  'product/scripts/AeroLinkTransitionAuthority.Tests.ps1': { reads: false, why: 'writes a stand-in file into a disposable source root', refs: ['README.md'] },
+  'product/scripts/Get-AeroLinkTestPlan.Tests.ps1': { reads: false, why: FIXTURE, refs: ['README.md'] },
+  'product/test-planner/tests/classify-ci.test.mjs': { reads: false, why: FIXTURE, refs: ['README.md'] },
+  'product/test-planner/tests/execution-contract.test.mjs': { reads: false, why: FIXTURE, refs: ['README.md'] },
+  'product/test-planner/tests/overlap.test.mjs': { reads: false, why: FIXTURE, refs: ['directory', 'README.md', 'product/docs/OPERATIONS.md'] },
+  'product/test-planner/tests/parity.test.mjs': { reads: false, why: FIXTURE, refs: ['directory', 'README.md', 'product/docs/OPERATIONS.md'] },
+  'product/test-planner/tests/plan-cli.test.mjs': { reads: false, why: FIXTURE, refs: ['README.md'] },
+  'product/tests/AeroLink.Api.Tests/GitLabMetadataApiTests.cs': { reads: false, why: FIXTURE, refs: ['README.md'] },
+  'product/tests/AeroLink.Infrastructure.Tests/DocumentReviewEmailTests.cs': { reads: false, why: 'DocumentReviewEmailTemplate.Html(...) matches template.html case-insensitively', refs: ['docs/overview-video/template.html'] },
+  'product/tests/AeroLink.Infrastructure.Tests/FmsUpstreamRestoredCopyQualificationTests.cs': { reads: false, why: COMMENT, refs: ['product/docs/OPERATIONS.md'] },
+  'product/tests/AeroLink.Infrastructure.Tests/NotificationOutboxTests.cs': { reads: false, why: 'DocumentReviewEmailTemplate.Html(...) matches template.html case-insensitively', refs: ['docs/overview-video/template.html'] },
+  'product/tests/AeroLink.Infrastructure.Tests/ProductLinePublicationTests.cs': { reads: false, why: 'a comment naming a `showcase` variable', refs: ['directory'] },
+  'product/tests/AeroLink.Infrastructure.Tests/ReleasedSyntheticSourceSupplementServiceTests.cs': { reads: false, why: FIXTURE, refs: ['README.md'] },
+}
+
+const TEST_SOURCE = /^(?:product\/tests\/|product\/client\/tests\/|product\/(?:test-planner|ci-metrics|test-contracts)\/tests\/|product\/scripts\/[^/]+\.Tests\.ps1$|product\/client\/src\/.*\.(?:test|spec)\.[cm]?[jt]sx?$)/
+// A string that starts at a documentation root, relative or joined segment by segment. Case-sensitive: the
+// roots are lower case on disk, and "Design" in a fixture is not a path.
+const DOCUMENTATION_DIRECTORY = /["'`](?:\.\.[/\\])*(?:docs|design|showcase|product[/\\]docs|\.agents|\.claude|\.codex)(?:["'`]|[/\\])/
+
+test('every documentation file a test source references is accounted for', () => {
+  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    .split('\0').filter(Boolean)
+  const documentation = tracked.filter((path) => isDocumentationOnlyChange([path]) || TEST_READ_DOCUMENTATION.includes(normalizePath(path)))
+  const baseName = (path) => path.slice(path.lastIndexOf('/') + 1).toLowerCase()
+  const nameCount = new Map()
+  for (const path of tracked) nameCount.set(baseName(path), (nameCount.get(baseName(path)) ?? 0) + 1)
+
+  const actual = {}
+  // This file names every reference by construction and reads none, so it is the one source not scanned.
+  const self = 'product/test-planner/tests/classify.test.mjs'
+  for (const source of tracked.filter((path) => path !== self && TEST_SOURCE.test(path) && /\.(?:cs|[cm]?[jt]sx?|ps1|psm1|json)$/i.test(path))) {
+    const raw = readFileSync(join(repoRoot, source), 'utf8')
+    // Compare in one spelling: forward slashes (C# and PowerShell escape backslashes) and lower case.
+    const text = raw.replace(/\\+/g, '/').toLowerCase()
+    const refs = documentation.filter((path) => {
+      const normalized = path.toLowerCase()
+      // A full path always counts. A bare file name counts only when no other tracked file shares it, since
+      // `Path.Combine("docs", name)` names the file without its path.
+      return text.includes(normalized) || (nameCount.get(baseName(path)) === 1 && text.includes(baseName(path)))
+    })
+    if (DOCUMENTATION_DIRECTORY.test(raw)) refs.unshift('directory')
+    if (refs.length > 0) actual[source] = refs
+  }
+
+  const expected = Object.fromEntries(Object.entries(DOCUMENTATION_REFERENCES).map(([source, entry]) => [source, entry.refs]))
+  assert.deepEqual(actual, expected,
+    'A test source references documentation. Add it to DOCUMENTATION_REFERENCES: a read also belongs in TEST_READ_DOCUMENTATION.')
+
+  const read = Object.values(DOCUMENTATION_REFERENCES).filter((entry) => entry.reads)
+    .flatMap((entry) => entry.refs.filter((ref) => ref !== 'directory')).map(normalizePath)
+  assert.deepEqual([...new Set(read)].sort(), [...TEST_READ_DOCUMENTATION].sort())
+  for (const [source, entry] of Object.entries(DOCUMENTATION_REFERENCES)) {
+    assert.ok(entry.reads === true || (entry.reads === false && entry.why), `${source} must say why it is not a read`)
+  }
+
+  // The layout contract reads every maintained document, so it must stay in the job a documentation-only
+  // candidate still runs: the classifier job, before the next job begins.
+  const workflow = readFileSync(join(repoRoot, '.github/workflows/ci.yml'), 'utf8').replace(/\r\n/g, '\n')
+  const start = workflow.indexOf('\n  changes:\n')
+  assert.notEqual(start, -1, 'the classifier job exists')
+  const rest = workflow.slice(start + 1)
+  const next = rest.slice(1).search(/\n  [a-z][a-z-]*:\n/)
+  const classifierJob = next === -1 ? rest : rest.slice(0, next + 1)
+  assert.doesNotMatch(classifierJob, /^    if:/m, 'the classifier job runs unconditionally')
+  const stepStart = classifierJob.indexOf('- name: Validate repository layout and documentation links')
+  assert.notEqual(stepStart, -1)
+  const step = classifierJob.slice(stepStart, classifierJob.indexOf('\n      - name:', stepStart))
+  assert.doesNotMatch(step, /^\s+if:/m, 'the layout step runs unconditionally')
+  assert.match(step, /& \.\/product\/scripts\/Test-RepositoryLayout\.ps1/)
+  assert.match(step, /& \.\/product\/scripts\/Test-RepositoryLayout\.Tests\.ps1/)
 })
 
 test('documentation-only changes select nothing', () => {

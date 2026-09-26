@@ -598,8 +598,15 @@ test('a documentation-only candidate binds on the documentation topology, and on
     assert.equal(result.decision, 'REFUSE', String(flag))
     assert.ok(result.reasons.some((reason) => reason.startsWith('job-not-success: Domain test suite')), String(flag))
   }
-  // A full, successful run is not the documentation topology either.
-  assert.equal(evaluateMergeGroupCandidate({ ...legitimateCandidate(), documentationOnlyCandidate: true }).decision, 'REFUSE')
+  // A derived documentation candidate whose run classified broad (composed before #1152 A3, or without a queue
+  // base) and passed the complete gate set still binds: the derivation relaxes, never tightens.
+  assert.deepEqual(evaluateMergeGroupCandidate({ ...legitimateCandidate(), documentationOnlyCandidate: true }), { decision: 'PASS', reasons: [] })
+  // A broad run with one failed shard is neither topology, and says so for both.
+  const failedShard = legitimateCandidate().jobs.map((job) => (job.name === 'Browser journeys (2/4)' ? { ...job, conclusion: 'failure' } : job))
+  const mixed = evaluateMergeGroupCandidate({ ...legitimateCandidate(), jobs: failedShard, documentationOnlyCandidate: true })
+  assert.equal(mixed.decision, 'REFUSE')
+  assert.ok(mixed.reasons.some((reason) => reason.startsWith('docs-topology-')))
+  assert.ok(mixed.reasons.includes('job-not-success: Browser journeys shard 2 concluded \'failure\''))
 })
 
 test('the documentation topology refuses any gate job that is not exactly skipped', () => {

@@ -15,10 +15,9 @@ import {
   fetchWorkflowRun,
   publishMergeAuthorityCheck,
 } from '../lib/merge-authority-github.mjs'
+import { QUEUE_BRANCH_PATTERN } from '../lib/queue-head-wait.mjs'
 // The protected classifier from this default-branch checkout, never the candidate's (#1152 A3).
 import { isDocumentationOnlyChange } from '../../test-planner/lib/classify.mjs'
-
-const QUEUE_REF = /^gh-readonly-queue\/[^/]+\/pr-([1-9][0-9]*)-[0-9a-f]{40}$/
 
 /**
  * The candidate's documentation-only status, or false on any doubt. The queue entry's base commit comes
@@ -27,8 +26,8 @@ const QUEUE_REF = /^gh-readonly-queue\/[^/]+\/pr-([1-9][0-9]*)-[0-9a-f]{40}$/
  */
 async function documentationOnlyEvidence({ request, repository, trigger, headSha }) {
   try {
-    const match = QUEUE_REF.exec(trigger?.head_branch ?? '')
-    if (!match) return { documentationOnly: false, reason: 'not a queue ref' }
+    const match = QUEUE_BRANCH_PATTERN.exec(trigger?.head_branch ?? '')
+    if (!match) return { documentationOnly: false, reason: 'not a main queue ref' }
     const query = `query { repository(owner: "AeroLinkDEV", name: "requirements-management-tool") { pullRequest(number: ${match[1]}) { mergeQueueEntry { headCommit { oid } baseCommit { oid } } } } }`
     const response = await request('/graphql', { method: 'POST', body: { query } })
     const entry = response?.data?.repository?.pullRequest?.mergeQueueEntry

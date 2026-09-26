@@ -177,8 +177,8 @@ function collectShardReasons(jobs, reasons) {
  *   { repository, headSha, baseBranch, runId, runAttempt } — all mandatory; omitting any refuses.
  * @param {boolean} [input.documentationOnlyCandidate] true only when the protected verifier itself derived,
  *   from the candidate's own diff against its queue base, that the change is documentation (#1152 A3).
- *   It then requires the documentation topology instead of the full gate set. Anything but exactly `true`
- *   keeps the full requirements.
+ *   It then accepts the documentation topology as well as the full gate set. Anything but exactly `true`
+ *   keeps the full requirements alone.
  * @returns {{decision: 'PASS'|'REFUSE', reasons: string[]}}
  */
 export function evaluateMergeGroupCandidate(input) {
@@ -287,19 +287,26 @@ export function evaluateMergeGroupCandidate(input) {
     reasons.push(`job-not-success: ${AGGREGATE_JOB_NAME} concluded '${aggregates[0].conclusion ?? 'unknown'}'`)
   }
 
-  if (documentationOnly) {
-    collectDocumentationTopologyReasons(jobs, reasons)
-  } else {
-    for (const name of REQUIRED_JOBS) {
-      const job = jobs.find((candidate) => candidate?.name === name)
-      if (!job) {
-        reasons.push(`missing-job: ${name} did not run`)
-      } else if (job.conclusion !== JOB_CONCLUSION_SUCCESS) {
-        reasons.push(`job-not-success: ${name} concluded '${job.conclusion ?? 'unknown'}'`)
-      }
+  const fullGateReasons = []
+  for (const name of REQUIRED_JOBS) {
+    const job = jobs.find((candidate) => candidate?.name === name)
+    if (!job) {
+      fullGateReasons.push(`missing-job: ${name} did not run`)
+    } else if (job.conclusion !== JOB_CONCLUSION_SUCCESS) {
+      fullGateReasons.push(`job-not-success: ${name} concluded '${job.conclusion ?? 'unknown'}'`)
     }
+  }
+  collectShardReasons(jobs, fullGateReasons)
 
-    collectShardReasons(jobs, reasons)
+  // A derived documentation-only candidate binds on either topology. Its run may have classified broad and
+  // passed the complete gate set: one composed before #1152 A3, or one whose queue base was unavailable. The
+  // derivation relaxes the requirement for such a candidate; it never makes a complete green run insufficient.
+  if (documentationOnly && fullGateReasons.length > 0) {
+    const documentationReasons = []
+    collectDocumentationTopologyReasons(jobs, documentationReasons)
+    if (documentationReasons.length > 0) reasons.push(...documentationReasons, ...fullGateReasons)
+  } else {
+    reasons.push(...fullGateReasons)
   }
 
   if (!Array.isArray(changedPaths)) {
