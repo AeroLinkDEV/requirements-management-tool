@@ -155,7 +155,8 @@ public sealed class ProjectFeatureService(AeroLinkDbContext db)
     /// <summary>
     /// Save-boundary gate for DEC-144: Standalone verification exists only where there is no requirement to
     /// trace to. A new Standalone proposal or revision is refused in a project that uses Requirements, unless
-    /// it continues an artifact whose latest revision is already Standalone. Switching Requirements on later
+    /// it continues an artifact whose latest revision is already Standalone, or a Standalone decision already
+    /// made (see <see cref="ContinuesAStandaloneDecisionAsync"/>). Switching Requirements on later
     /// never invalidates existing standalone work; such an artifact is traced by an ordinary Modify when its
     /// owners choose to, and nothing rewrites it.
     /// </summary>
@@ -171,29 +172,39 @@ public sealed class ProjectFeatureService(AeroLinkDbContext db)
                 && x.Entity.ParentKind == VerificationProcedureParentKind.Standalone
                 && x.Entity.State != TestProcedureState.Retired)
             .Select(x => x.Entity).ToList();
-        if (changes.Count == 0 && revisions.Count == 0) return;
+        // A package raised on its own case (DEC-144) is the same kind of work: new ones only without Requirements.
+        // A later revision names its first revision and continues work that already exists.
+        var ownCasePackages = db.ChangeTracker.Entries<TestChangeReview>()
+            .Where(x => x.State == EntityState.Added && x.Entity.OriginKind == TestChangeReviewOriginKind.OwnCase
+                && x.Entity.OriginReferenceId == x.Entity.Id)
+            .Select(x => x.Entity).ToList();
+        await RequireOwnCaseLineageAsync(db, ct);
+        if (changes.Count == 0 && revisions.Count == 0 && ownCasePackages.Count == 0) return;
 
-        var trackedReviews = db.ChangeTracker.Entries<TestChangeReview>().ToDictionary(x => x.Entity.Id, x => x.Entity.ProjectId);
+        var trackedReviews = db.ChangeTracker.Entries<TestChangeReview>()
+            .ToDictionary(x => x.Entity.Id, x => (x.Entity.ProjectId, x.Entity.BaseNumber, x.Entity.Revision));
         var reviewIds = changes.Select(x => x.TestChangeReviewId).Where(x => !trackedReviews.ContainsKey(x)).Distinct().ToList();
         foreach (var review in await db.TestChangeReviews.AsNoTracking().Where(x => reviewIds.Contains(x.Id))
-                     .Select(x => new { x.Id, x.ProjectId }).ToListAsync(ct))
-            trackedReviews[review.Id] = review.ProjectId;
+                     .Select(x => new { x.Id, x.ProjectId, x.BaseNumber, x.Revision }).ToListAsync(ct))
+            trackedReviews[review.Id] = (review.ProjectId, review.BaseNumber, review.Revision);
         var procedures = db.ChangeTracker.Entries<TestProcedure>().ToDictionary(x => x.Entity.Id, x => x.Entity);
         var procedureIds = revisions.Select(x => x.ProcedureId).Where(x => !procedures.ContainsKey(x)).Distinct().ToList();
         foreach (var procedure in await db.TestProcedures.AsNoTracking().Where(x => procedureIds.Contains(x.Id)).ToListAsync(ct))
             procedures[procedure.Id] = procedure;
 
         var subjects = changes
-            .Select(x => new StandaloneSubject(trackedReviews.GetValueOrDefault(x.TestChangeReviewId), x.BaseNumber,
-                int.MaxValue, x.DisplayNumber))
+            .Select(x => trackedReviews.TryGetValue(x.TestChangeReviewId, out var package)
+                ? new StandaloneSubject(package.ProjectId, x.BaseNumber, int.MaxValue, x.DisplayNumber,
+                    package.BaseNumber, package.Revision, null)
+                : new StandaloneSubject(Guid.Empty, "", int.MaxValue, "", "", 0, null))
             .Concat(revisions.Select(x => procedures.TryGetValue(x.ProcedureId, out var procedure)
                 ? new StandaloneSubject(procedure.ProjectId, procedure.BaseNumber, x.Revision,
-                    ArtifactNumber.Display(procedure.BaseNumber, x.Revision))
-                : new StandaloneSubject(Guid.Empty, "", x.Revision, "")))
+                    ArtifactNumber.Display(procedure.BaseNumber, x.Revision), "", 0, x.SourceTestChangeRequestId)
+                : new StandaloneSubject(Guid.Empty, "", x.Revision, "", "", 0, null)))
             .ToList();
         if (subjects.Any(x => x.ProjectId == Guid.Empty))
             throw new DomainException("A Standalone verification artifact must belong to a known project.");
-        var projectIds = subjects.Select(x => x.ProjectId).Distinct().ToList();
+        var projectIds = subjects.Select(x => x.ProjectId).Concat(ownCasePackages.Select(x => x.ProjectId)).Distinct().ToList();
         var sets = await FeatureTableExistsAsync(db, ct)
             ? await db.ProjectFeatureSets.AsNoTracking().Where(x => projectIds.Contains(x.ProjectId))
                 .ToDictionaryAsync(x => x.ProjectId, x => x.Enabled, ct)
@@ -202,6 +213,10 @@ public sealed class ProjectFeatureService(AeroLinkDbContext db)
                      .Where(x => x.State != EntityState.Deleted && projectIds.Contains(x.Entity.ProjectId)))
             sets[tracked.Entity.ProjectId] = tracked.Entity.Enabled;
 
+        foreach (var package in ownCasePackages)
+            if (!sets.TryGetValue(package.ProjectId, out var enabled) || enabled.HasFlag(ProjectFeature.Requirements))
+                throw new DomainException(
+                    "Test work in a project that uses Requirements is raised from a change request or a Problem Report, not on its own case.");
         foreach (var subject in subjects)
         {
             // A project without a stored set has every feature, Requirements included.
@@ -215,14 +230,68 @@ public sealed class ProjectFeatureService(AeroLinkDbContext db)
                              && revision.Revision < subject.Before
                          orderby revision.Revision descending
                          select (VerificationProcedureParentKind?)revision.ParentKind).FirstOrDefaultAsync(ct);
-            if (latest != VerificationProcedureParentKind.Standalone)
+            if (latest != VerificationProcedureParentKind.Standalone
+                && !await ContinuesAStandaloneDecisionAsync(db, subject, ct))
                 throw new DomainException(
                     $"{(subject.Label.Length == 0 ? "A verification artifact" : subject.Label)} cannot be Standalone: this project uses Requirements, so it is Allocated to requirement revisions or explicitly Derived.");
         }
     }
 
-    /// <summary>A Standalone proposal or revision: its project, artifact, the revision it follows, and its display name.</summary>
-    private sealed record StandaloneSubject(Guid ProjectId, string BaseNumber, int Before, string Label);
+    /// <summary>
+    /// A Standalone decision made while the project did not use Requirements is carried, not remade, once it
+    /// does: the next revision of the package that proposed it, and the revision materialized from the approved
+    /// package, both continue that decision.
+    /// </summary>
+    private static async Task<bool> ContinuesAStandaloneDecisionAsync(AeroLinkDbContext db, StandaloneSubject subject,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subject.BaseNumber)) return false;
+        if (subject.SourcePackageId is Guid source)
+            return await (from review in db.TestChangeReviews.AsNoTracking()
+                          join change in db.Set<TestProcedureChange>().AsNoTracking() on review.Id equals change.TestChangeReviewId
+                          where review.Id == source && review.State == TestChangeReviewState.Approved
+                              && change.BaseNumber == subject.BaseNumber
+                              && change.ParentKind == VerificationProcedureParentKind.Standalone
+                          select change.Id).AnyAsync(ct);
+        if (subject.PackageRevision == 0 || string.IsNullOrWhiteSpace(subject.PackageNumber)) return false;
+        return await (from review in db.TestChangeReviews.AsNoTracking()
+                      join change in db.Set<TestProcedureChange>().AsNoTracking() on review.Id equals change.TestChangeReviewId
+                      where review.ProjectId == subject.ProjectId && review.BaseNumber == subject.PackageNumber
+                          && review.Revision == subject.PackageRevision - 1
+                          && change.BaseNumber == subject.BaseNumber
+                          && change.ParentKind == VerificationProcedureParentKind.Standalone
+                      select change.Id).AnyAsync(ct);
+    }
+
+    /// <summary>
+    /// A later revision of a package raised on its own case must name that package's first revision, in the same
+    /// project, discipline and artifact kind. Otherwise "a later revision" would be a way around the rule above.
+    /// </summary>
+    private static async Task RequireOwnCaseLineageAsync(AeroLinkDbContext db, CancellationToken ct)
+    {
+        var successors = db.ChangeTracker.Entries<TestChangeReview>()
+            .Where(x => x.State == EntityState.Added && x.Entity.OriginKind == TestChangeReviewOriginKind.OwnCase
+                && x.Entity.OriginReferenceId != x.Entity.Id)
+            .Select(x => x.Entity).ToList();
+        foreach (var successor in successors)
+        {
+            var first = db.ChangeTracker.Entries<TestChangeReview>()
+                .FirstOrDefault(x => x.Entity.Id == successor.OriginReferenceId)?.Entity
+                ?? await db.TestChangeReviews.AsNoTracking().SingleOrDefaultAsync(x => x.Id == successor.OriginReferenceId, ct);
+            if (first is null || first.OriginKind != TestChangeReviewOriginKind.OwnCase || first.OriginReferenceId != first.Id
+                || first.ProjectId != successor.ProjectId || first.Discipline != successor.Discipline
+                || first.ArtifactKind != successor.ArtifactKind)
+                throw new DomainException("A later revision of a package raised on its own case must name that package's first revision.");
+        }
+    }
+
+    /// <summary>
+    /// A Standalone proposal or revision: its project, artifact, the revision it follows and its display name, and
+    /// what it may continue. A proposal names its package's number and revision; a revision names the package
+    /// that produced it.
+    /// </summary>
+    private sealed record StandaloneSubject(Guid ProjectId, string BaseNumber, int Before, string Label,
+        string PackageNumber, int PackageRevision, Guid? SourcePackageId);
 
     /// <summary>Databases known to have the feature-set table. A table, once present, stays, so only "yes" is cached.</summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> FeatureTablePresent = new();

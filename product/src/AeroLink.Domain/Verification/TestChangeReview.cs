@@ -18,6 +18,12 @@ public enum TestChangeReviewOriginKind
     CaseChange,
     CaseAssessment,
     CaseReview,
+    /// <summary>
+    /// Raised on its own case in a project that does not use Requirements (DEC-144). Such a project may have no
+    /// change request and no Problem Report to raise test work from, and a standalone case answers to its own
+    /// objective. The reference is the first revision of the package, so every revision keeps one origin.
+    /// </summary>
+    OwnCase,
 }
 /// <summary>
 /// Where a test change request has got to.
@@ -121,6 +127,31 @@ public sealed class TestChangeReview
             OriginatingProblemReportId = problemReportId,
         };
         review.SourceProblemReportNumber = Required(sourceProblemReportNumber, "source Problem Report number");
+        return review;
+    }
+
+    /// <summary>
+    /// A package raised on its own case, in a project that does not use Requirements (DEC-144).
+    ///
+    /// Only a Case or System Procedure package: those are the artifacts that can stand alone. A software
+    /// Procedure package still comes from the Case work it carries out. The save boundary refuses a new one
+    /// in a project that uses Requirements, because there the package answers to a change request or report.
+    /// </summary>
+    public static TestChangeReview OnOwnCase(Guid projectId, Guid releaseId, VerificationArtifactKey artifactKey,
+        DateTimeOffset now, string baseNumber = "", int revision = 0, string authorId = "",
+        Guid? firstRevisionId = null)
+    {
+        if (VerificationProcedureParentPolicy.ParentArtifactKind(artifactKey.Discipline, artifactKey.Kind)
+            != VerificationParentArtifactKind.Requirement)
+            throw new DomainException("A software Procedure package is raised from the Case work it carries out, not on its own case.");
+        if (firstRevisionId == Guid.Empty)
+            throw new DomainException("A later revision of a package raised on its own case must name the first revision.");
+        var review = new TestChangeReview(projectId, releaseId, artifactKey, now, baseNumber, revision,
+            CurrentCaseContractVersion, authorId)
+        {
+            OriginKind = TestChangeReviewOriginKind.OwnCase,
+        };
+        review.OriginReferenceId = firstRevisionId ?? review.Id;
         return review;
     }
 
@@ -997,6 +1028,9 @@ public sealed class TestChangeReview
             TestChangeReviewOriginKind.CaseReview
                 => FromCaseReview(ProjectId, ReleaseId, OriginReferenceId, ArtifactKey,
                     SourceCaseOriginNumber, now, BaseNumber, Revision + 1, actorId),
+            TestChangeReviewOriginKind.OwnCase
+                => OnOwnCase(ProjectId, ReleaseId, ArtifactKey, now, BaseNumber, Revision + 1, actorId,
+                    OriginReferenceId),
             _ => throw new DomainException("A test change review has no valid immutable origin."),
         };
         next.RecordTestChangeRequired(actorId, now);
@@ -1132,6 +1166,12 @@ public sealed class TestChangeReview
                     && Discipline is TestChangeReviewDiscipline.HighLevelSoftware or TestChangeReviewDiscipline.LowLevelSoftware
                     && ChangeRequestId is null
                     && OriginatingProblemReportId is null && !string.IsNullOrWhiteSpace(SourceCaseOriginNumber))
+                    return;
+                break;
+            case TestChangeReviewOriginKind.OwnCase:
+                if (ChangeRequestId is null && OriginatingProblemReportId is null
+                    && VerificationProcedureParentPolicy.ParentArtifactKind(ArtifactKey.Discipline, ArtifactKind)
+                        == VerificationParentArtifactKind.Requirement)
                     return;
                 break;
         }

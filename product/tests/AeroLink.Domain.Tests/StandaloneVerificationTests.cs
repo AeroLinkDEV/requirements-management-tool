@@ -107,6 +107,48 @@ public sealed class StandaloneVerificationTests
     }
 
     [Fact]
+    public void A_package_raised_on_its_own_case_keeps_one_origin_across_revisions()
+    {
+        var key = new VerificationArtifactKey(VerificationDiscipline.HighLevelSoftware, VerificationArtifactKind.Case);
+        var first = TestChangeReview.OnOwnCase(Guid.NewGuid(), Guid.NewGuid(), key, Now, "HLRTCCR-000001",
+            authorId: "engineer");
+        Assert.Equal(TestChangeReviewOriginKind.OwnCase, first.OriginKind);
+        Assert.Equal(first.Id, first.OriginReferenceId);
+        Assert.Null(first.ChangeRequestId);
+        Assert.Null(first.OriginatingProblemReportId);
+        Assert.Equal("", first.SourceDisplayNumber);
+        first.ValidateOriginForPersistence();
+
+        first.RecordTestChangeRequired("engineer", Now);
+        first.WriteCase("engineer", "Bench", "Problem", "Analysis", "Solution", Now);
+        first.AddProcedureChange("engineer", new TestProcedureChangeDraft("HLRTC-000001", 0,
+            TestProcedureLevel.HighLevel, TestProcedureChangeKind.Introduce, "Case", "Objective", "Pre", "Steps",
+            "Expected", "Rationale", ParentKind: VerificationProcedureParentKind.Standalone), Now);
+        first.SubmitForReview("engineer", [new("approver", "Approver")], true, Now);
+        first.Approve("approver", "Approved.", Now);
+        var next = first.StartNextRevision("engineer", Now, targetReleaseIsReleased: false);
+        Assert.Equal(TestChangeReviewOriginKind.OwnCase, next.OriginKind);
+        Assert.Equal(first.Id, next.OriginReferenceId);
+        Assert.Equal(1, next.Revision);
+        next.ValidateOriginForPersistence();
+    }
+
+    [Fact]
+    public void Only_a_case_or_system_procedure_package_is_raised_on_its_own_case()
+    {
+        Assert.Contains("raised from the Case work it carries out", Assert.Throws<DomainException>(() =>
+            TestChangeReview.OnOwnCase(Guid.NewGuid(), Guid.NewGuid(),
+                new VerificationArtifactKey(VerificationDiscipline.LowLevelSoftware, VerificationArtifactKind.Procedure),
+                Now)).Message);
+        Assert.Throws<DomainException>(() => TestChangeReview.OnOwnCase(Guid.NewGuid(), Guid.NewGuid(),
+            new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure), Now,
+            firstRevisionId: Guid.Empty));
+        TestChangeReview.OnOwnCase(Guid.NewGuid(), Guid.NewGuid(),
+            new VerificationArtifactKey(VerificationDiscipline.System, VerificationArtifactKind.Procedure), Now)
+            .ValidateOriginForPersistence();
+    }
+
+    [Fact]
     public void A_baseline_freezes_without_requirements_only_while_nothing_is_selected()
     {
         var baseline = new CandidateBaseline("SW-00.01", 0, Guid.NewGuid(), Guid.NewGuid(), null, "Bench", "cm", Now);

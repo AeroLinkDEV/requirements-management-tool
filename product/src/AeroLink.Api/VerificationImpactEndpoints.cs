@@ -1,6 +1,7 @@
 using AeroLink.Domain.ChangeControl;
 using AeroLink.Domain.Common;
 using AeroLink.Domain.Identity;
+using AeroLink.Domain.Programs;
 using AeroLink.Domain.Hierarchy;
 using AeroLink.Domain.Requirements;
 using AeroLink.Domain.Verification;
@@ -203,6 +204,10 @@ public static class VerificationImpactEndpoints
 {
     private sealed record OriginDisplay(string Label, string Identity, string Title);
 
+    /// <summary>DEC-144: a package raised on its own case has no source record to name.</summary>
+    private static readonly OriginDisplay OwnCaseOrigin =
+        new("Own case", "", "Raised on its own case: the project does not use Requirements");
+
     private static OriginDisplay OriginFor(TestChangeReview review,
         IReadOnlyDictionary<Guid, (string Identity, string Title)> caseChanges,
         IReadOnlyDictionary<Guid, (string Identity, string Title)> assessments,
@@ -224,6 +229,7 @@ public static class VerificationImpactEndpoints
                 => new("Problem Report", report.Identity, report.Title),
             TestChangeReviewOriginKind.ProblemReport
                 => new("Problem Report", review.SourceProblemReportNumber, "Source Problem Report"),
+            TestChangeReviewOriginKind.OwnCase => OwnCaseOrigin,
             _ => new("Origin", review.SourceDisplayNumber, "")
         };
     }
@@ -747,6 +753,10 @@ public static class VerificationImpactEndpoints
                     .Select(x => new { x.Title }).SingleOrDefaultAsync(ct);
                 originDisplay = new("Case TCR", review.SourceCaseOriginNumber,
                     source?.Title ?? "Approved Case change-control package");
+            }
+            else if (review.OriginKind == TestChangeReviewOriginKind.OwnCase)
+            {
+                originDisplay = OwnCaseOrigin;
             }
             else if (review.OriginKind == TestChangeReviewOriginKind.ChangeRequest)
             {
@@ -1931,13 +1941,22 @@ public static class VerificationImpactEndpoints
                     caseOriginKind = TestChangeReviewOriginKind.CaseAssessment;
                 }
             }
-            if (artifactKey.Kind == VerificationArtifactKind.Case
+            // DEC-144: a project without Requirements has no change requests, and a standalone case answers to its
+            // own objective, so there a Case or System package may be raised on its own case. Everywhere else it
+            // still has to say what concluded the work was required.
+            var raisedOnOwnCase = false;
+            if (VerificationProcedureParentPolicy.ParentArtifactKind(artifactKey.Discipline, artifactKey.Kind)
+                    == VerificationParentArtifactKind.Requirement
                 && changeRequestIds.Length == 0 && namedProblemReports.Length == 0)
-                return Results.BadRequest(new
-                {
-                    error = "Name what this package answers for: an approved change request at its own level, or a Problem Report.",
-                    code = "test_change_request_needs_a_driver"
-                });
+            {
+                if ((await ProjectFeatureService.EffectiveAsync(db, release.ProjectId, ct)).HasFlag(ProjectFeature.Requirements))
+                    return Results.BadRequest(new
+                    {
+                        error = "Name what this package answers for: an approved change request at its own level, or a Problem Report.",
+                        code = "test_change_request_needs_a_driver"
+                    });
+                raisedOnOwnCase = true;
+            }
             if (string.IsNullOrWhiteSpace(request.Title))
                 return Results.BadRequest(new { error = "A manually raised test change request needs a title that says what it is for." });
 
@@ -2021,6 +2040,11 @@ public static class VerificationImpactEndpoints
                                 artifactKey, caseOriginDisplay, now, authorId: actor)
                             : TestChangeReview.FromCaseChange(release.ProjectId, releaseId, caseOriginId,
                                 artifactKey, caseOriginDisplay, now, authorId: actor);
+                    }
+                    else if (raisedOnOwnCase)
+                    {
+                        review = TestChangeReview.OnOwnCase(release.ProjectId, releaseId, artifactKey, now,
+                            authorId: actor);
                     }
                     else
                     {
