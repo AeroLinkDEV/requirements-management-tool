@@ -1,6 +1,12 @@
 import { expect, test, type Route } from '@playwright/test'
 import { apiBase, apiLogin, login, openNavigationGroup, showcaseSeed } from './auth'
 
+// Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
+// context, or the next test inherits "Response has been disposed" from this one (#1001).
+test.afterEach(async ({ page }) => {
+  if (!page.isClosed()) await page.unrouteAll({ behavior: 'wait' })
+})
+
 type Workspace = {
   program: { id: string }
   projects: {

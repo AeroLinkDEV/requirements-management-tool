@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test'
 import { login } from './auth'
 
+// Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
+// context, or the next test inherits "Response has been disposed" from this one (#1001).
+test.afterEach(async ({ page }) => {
+  if (!page.isClosed()) await page.unrouteAll({ behavior: 'wait' })
+})
+
 /**
  * The Test Procedure Explorer reads like the Requirements Explorer.
  *

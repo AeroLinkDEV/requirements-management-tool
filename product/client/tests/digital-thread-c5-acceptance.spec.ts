@@ -2,6 +2,12 @@ import { expect, test, type Page } from "@playwright/test"
 import { V5_FIXTURE_IDS as ids } from "./fixtures/digital-thread-v5"
 import { waitForCanvasSettled } from "./digital-thread-rendered-helpers"
 
+// Route handlers in this file fetch and parse real responses. Let them settle before Playwright closes the
+// context, or the next test inherits "Response has been disposed" from this one (#1001).
+test.afterEach(async ({ page }) => {
+  if (!page.isClosed()) await page.unrouteAll({ behavior: "wait" })
+})
+
 const open = async (page: Page, view: string, width = 1440, density = "comfortable") => {
   await page.setViewportSize({ width, height: 900 })
   await page.emulateMedia({ reducedMotion: "reduce" })
