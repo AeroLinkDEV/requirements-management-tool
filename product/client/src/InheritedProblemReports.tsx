@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useProjectFeature } from './projectFeatures'
 import type { ProblemReportOption } from './ProblemReportPicker'
 
 export type ProblemReportSource = { id: string; kind: 'ChangeRequest' | 'TestChangeRequest'; displayNumber: string }
@@ -16,6 +17,8 @@ export default function InheritedProblemReports({ api, projectId, releaseId, sou
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [refresh, setRefresh] = useState(0)
+  // #1196 (DEC-136): upstream Problem Report context belongs to Problem Reports.
+  const problemReportsInUse = useProjectFeature(api, projectId, 'ProblemReports')
   useEffect(() => {
     const controller = new AbortController()
     const currentSources = JSON.parse(sourceKey) as ProblemReportSource[]
@@ -38,7 +41,7 @@ export default function InheritedProblemReports({ api, projectId, releaseId, sou
       .finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
   }, [api, projectId, sourceKey, contextKey, refresh])
-  if (!sources.length) return null
+  if (!sources.length || problemReportsInUse === false) return null
   const candidates = snapshot?.key === contextKey ? snapshot.candidates : []
   return <fieldset className="problemReportPicker" aria-label="Inherited Problem Report context">
     <legend>Problem Reports from upstream context</legend>

@@ -78,15 +78,24 @@ export function featureDependencyNote(enabled: ReadonlySet<ProjectFeature>): str
  * unreadable answer is "yes", the default for a project with no stored set; the server still decides.
  */
 export function useRequirementsInUse(api: string, projectId: string): boolean | null {
+  return useProjectFeature(api, projectId, 'Requirements')
+}
+
+/**
+ * Whether a project has one feature switched on, for a component that belongs to that feature wherever it is
+ * placed (#1196). Null until known. An unreadable answer is "yes", the default for a project with no stored
+ * set; the server still refuses a disabled feature's records.
+ */
+export function useProjectFeature(api: string, projectId: string, feature: ProjectFeature): boolean | null {
   const [inUse, setInUse] = useState<boolean | null>(null)
   useEffect(() => {
     let current = true
     setInUse(null)
     apiRequest<ProjectFeatureProjection>(`${api}/api/projects/${projectId}/features`)
-      .then(next => { if (current) setInUse(!Array.isArray(next?.enabled) || next.enabled.includes('Requirements')) })
+      .then(next => { if (current) setInUse(!Array.isArray(next?.enabled) || next.enabled.includes(feature)) })
       .catch(() => { if (current) setInUse(true) })
     return () => { current = false }
-  }, [api, projectId])
+  }, [api, projectId, feature])
   return inUse
 }
 
