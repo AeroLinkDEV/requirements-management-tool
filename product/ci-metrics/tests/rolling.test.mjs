@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   median, percentile, classifyRun, runDurationMs, jobGroupDurations, queueAndCancellation,
   flakeTrend, cacheTrend, rollingStats, detectRegressions, validateRunRecord, recordFormat, buildRollingReport, trackerBody, trackerCategoriesFromBody, decideTrackerAction, regressionDeterminacy, writeWouldRegressTracker,
-  fullGatesPerMerge, scheduledProofStatus, FULL_GATE_WINDOW_DAYS, MAX_RECORDS, detectBudgetBreaches, LANE_BUDGETS_MS,
+  fullGatesPerMerge, ranNoProductJob, scheduledProofStatus, FULL_GATE_WINDOW_DAYS, MAX_RECORDS, detectBudgetBreaches, LANE_BUDGETS_MS,
 } from '../lib/rolling.mjs'
 
 function record(overrides = {}) {
@@ -117,7 +117,57 @@ test('queue-era cadence includes dispatch, queue attempts and the exact post-mer
     { ...run, event: 'push', head_sha: 'c'.repeat(40) },
   ]
   assert.deepEqual(fullGatesPerMerge([pr], rows), [{ pr: 932, mergedAt: pr.merged_at,
-    runs: 3, attempts: 4, prRuns: 1, queueRuns: 1, postMergeRuns: 1 }])
+    runs: 3, attempts: 4, prRuns: 1, queueRuns: 1, postMergeRuns: 1, postMergeSkipped: 0 }])
+})
+
+// Job lists as GitHub returned them for #1162's post-merge push (A1 skipped the retest) and for a push
+// before A1 that retested the product (runs 36204140420 and 36191627734).
+const skippedPushJobs = [
+  ['success', 'CI metrics tooling tests'], ['success', 'Warm the Chromium and NuGet caches'],
+  ['success', 'Classify changed product areas'], ['success', 'Full Product evidence aggregate'],
+  ['skipped', 'Full browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})'],
+  ['skipped', 'Browser journeys on the production build'], ['skipped', 'Infrastructure test suite'],
+  ['skipped', 'Client lint, type-check, and build'], ['skipped', 'API test suite (${{ matrix.shard }}/${{ strategy.job-total }})'],
+  ['skipped', 'PostgreSQL migrations and secure bootstrap'], ['skipped', 'Domain test suite'],
+  ['skipped', 'Operator and recovery script contracts'], ['success', 'Aggregate CI metrics'],
+].map(([conclusion, name]) => ({ conclusion, name }))
+const retestedPushJobs = [
+  ['success', 'Warm the Chromium cache'], ['success', 'CI metrics tooling tests'], ['success', 'Classify changed product areas'],
+  ['success', 'Client lint, type-check, and build'], ['success', 'Operator and recovery script contracts'],
+  ['success', 'Infrastructure test suite'], ['success', 'Domain test suite'], ['success', 'API test suite (1/3)'],
+  ['success', 'API test suite (2/3)'], ['success', 'PostgreSQL migrations and secure bootstrap'], ['success', 'API test suite (3/3)'],
+  ['skipped', 'Browser journeys on the production build'], ['success', 'Full Product evidence aggregate'],
+  ['success', 'Aggregate CI metrics'],
+].map(([conclusion, name]) => ({ conclusion, name }))
+
+test('a post-merge push that ran no product job is told apart from one that retested the product', () => {
+  assert.equal(ranNoProductJob(skippedPushJobs), true)
+  assert.equal(ranNoProductJob(retestedPushJobs), false)
+  // One product job that actually ran, or failed, is a retest.
+  assert.equal(ranNoProductJob(skippedPushJobs.map((job) => job.name === 'Domain test suite' ? { ...job, conclusion: 'failure' } : job)), false)
+  // No job list is no evidence of a skip.
+  assert.equal(ranNoProductJob([]), false)
+  assert.equal(ranNoProductJob(undefined), false)
+})
+
+test('a skipped post-merge push is reported, not counted as a full gate (#1147)', () => {
+  const pr = { number: 1162, head: { ref: 'ci/1152-b4-fast-leak-report' }, created_at: '2026-09-25T16:00:00Z',
+    merged_at: '2026-09-26T00:15:12Z', merge_commit_sha: 'd'.repeat(40) }
+  const rows = [
+    { id: 1, event: 'workflow_dispatch', head_branch: pr.head.ref, created_at: '2026-09-25T17:00:00Z', run_attempt: 1, pull_requests: [] },
+    { id: 2, event: 'merge_group', head_branch: `gh-readonly-queue/main/pr-1162-${'e'.repeat(40)}`, created_at: '2026-09-25T23:40:00Z', run_attempt: 1 },
+    { id: 36204140420, event: 'push', head_sha: pr.merge_commit_sha, created_at: '2026-09-26T00:15:30Z', run_attempt: 1 },
+  ]
+  const [entry] = fullGatesPerMerge([pr], rows, { productSkippedRunIds: new Set([36204140420]) })
+  assert.deepEqual(entry, { pr: 1162, mergedAt: pr.merged_at, runs: 2, attempts: 2, prRuns: 1, queueRuns: 1,
+    postMergeRuns: 0, postMergeSkipped: 1 })
+
+  const report = buildRollingReport({ records: [record()], fullGates: [entry] })
+  assert.match(report.markdown, /median 2, p95 2, max 2 \(2 runs \/ 2 attempts in total; 1 post-merge push\(es\) skipped the product retest and are not counted\)/)
+  assert.match(report.markdown, /PR #1162 .*1 post-merge push skipped the product retest \(queue-proved\)/)
+
+  // Without the skip evidence the same push still counts, exactly as before.
+  assert.equal(fullGatesPerMerge([pr], rows)[0].runs, 3)
 })
 
 test('runDurationMs and jobGroupDurations respect unavailable data', () => {

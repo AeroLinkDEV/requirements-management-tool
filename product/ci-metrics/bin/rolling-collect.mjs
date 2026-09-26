@@ -14,7 +14,7 @@ import { readNamedJsonFromZip, ZipParseError } from '../lib/zip.mjs'
 const RUN_METRICS_FILE = 'run-metrics.json'
 import {
   validateRunRecord, queueAndCancellation, rollingStats, flakeTrend, cacheTrend,
-  detectRegressions, detectBudgetBreaches, regressionDeterminacy, classifyRun, buildRollingReport, recordFormat, fullGatesPerMerge, MAX_RECORDS, FULL_GATE_WINDOW_DAYS,
+  detectRegressions, detectBudgetBreaches, regressionDeterminacy, classifyRun, buildRollingReport, recordFormat, fullGatesPerMerge, ranNoProductJob, MAX_RECORDS, FULL_GATE_WINDOW_DAYS,
 } from '../lib/rolling.mjs'
 
 const env = (name) => process.env[name] ?? ''
@@ -204,14 +204,21 @@ async function main() {
         : null,
   }
 
-  const fullGates = fullGatesPerMerge(
-    mergedPrs.filter((pr) => {
-      if (!pr.merged_at) return false
-      const mergedAt = Date.parse(pr.merged_at)
-      return Number.isFinite(mergedAt) && Date.now() - mergedAt <= FULL_GATE_WINDOW_DAYS * 24 * 60 * 60 * 1000
-    }),
-    workflowRuns,
-  )
+  const gateWindowPrs = mergedPrs.filter((pr) => {
+    if (!pr.merged_at) return false
+    const mergedAt = Date.parse(pr.merged_at)
+    return Number.isFinite(mergedAt) && Date.now() - mergedAt <= FULL_GATE_WINDOW_DAYS * 24 * 60 * 60 * 1000
+  })
+  // A post-merge push of a queue-proved commit skips every product job (#1157). Only GitHub's own job list
+  // says whether it did, so ask for the pushes this report attributes, not every run.
+  const mergeCommits = new Set(gateWindowPrs.map((pr) => pr.merge_commit_sha).filter(Boolean))
+  const productSkippedRunIds = new Set()
+  for (const run of workflowRuns) {
+    if (run.event !== 'push' || run.status !== 'completed' || !mergeCommits.has(run.head_sha)) continue
+    const jobs = await listAll(`/repos/${repository}/actions/runs/${run.id}/jobs?filter=all`, { token, apiUrl })
+    if (ranNoProductJob(jobs)) productSkippedRunIds.add(run.id)
+  }
+  const fullGates = fullGatesPerMerge(gateWindowPrs, workflowRuns, { productSkippedRunIds })
   const report = buildRollingReport({
     records,
     regressions,
