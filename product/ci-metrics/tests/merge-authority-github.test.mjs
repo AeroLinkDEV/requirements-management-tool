@@ -7,11 +7,14 @@ import {
   compareTrustedSurfaces,
   compareTrustedSurfacePaths,
   createGitHubRequest,
+  deriveDocumentationOnlyCandidate,
+  COMPARE_FILE_LIMIT,
   fetchDefaultBranch,
   fetchLatestRunJobs,
   fetchWorkflowRun,
   publishMergeAuthorityCheck,
 } from '../lib/merge-authority-github.mjs'
+import { isDocumentationOnlyChange } from '../../test-planner/lib/classify.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const REPOSITORY = 'AeroLinkDEV/requirements-management-tool'
@@ -400,4 +403,45 @@ test('default-branch workflow keeps authority credentials behind the queue-only 
     assert.match(productWorkflow, new RegExp(testPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     assert.match(readme, new RegExp(testPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   }
+})
+
+// #1152 A3: the candidate's own change, pinned to the queue base, read with the protected classifier.
+function documentationCandidateApi({ parents = [sha('b')], status = 'ahead', aheadBy = 1, behindBy = 0, files = [{ filename: 'product/docs/MERGING.md' }] } = {}) {
+  return async (path) => {
+    if (path === `/repos/${REPOSITORY}/commits/${sha('c')}`) return { sha: sha('c'), parents: parents.map((parent) => ({ sha: parent })) }
+    if (path === `/repos/${REPOSITORY}/compare/${sha('b')}...${sha('c')}`) return { status, ahead_by: aheadBy, behind_by: behindBy, files }
+    throw new Error(`unexpected request ${path}`)
+  }
+}
+const derive = (api, overrides = {}) => deriveDocumentationOnlyCandidate({
+  request: api, repository: REPOSITORY, candidateSha: sha('c'), queueBaseSha: sha('b'), isDocumentationOnlyChange, ...overrides,
+})
+
+test('a documentation-only candidate is derived from its own diff against the queue base', async () => {
+  const result = await derive(documentationCandidateApi({ files: [{ filename: 'README.md' }, { filename: 'docs/a.md', previous_filename: 'docs/old.md' }] }))
+  assert.equal(result.documentationOnly, true)
+  assert.deepEqual(result.paths, ['README.md', 'docs/a.md', 'docs/old.md'])
+})
+
+test('any doubt about the candidate keeps the full gate set', async () => {
+  const files = (count) => Array.from({ length: count }, (_, index) => ({ filename: `docs/f${index}.md` }))
+  const cases = {
+    'a product file': documentationCandidateApi({ files: [{ filename: 'README.md' }, { filename: 'product/client/src/App.tsx' }] }),
+    'a product file renamed into docs': documentationCandidateApi({ files: [{ filename: 'docs/App.tsx', previous_filename: 'product/client/src/App.tsx' }] }),
+    'a removed product file': documentationCandidateApi({ files: [{ filename: 'product/src/AeroLink.Api/Old.cs', status: 'removed' }] }),
+    'a protected path': documentationCandidateApi({ files: [{ filename: '.github/workflows/ci.yml' }] }),
+    'two parents': documentationCandidateApi({ parents: [sha('b'), sha('d')] }),
+    'a parent other than the queue base': documentationCandidateApi({ parents: [sha('d')] }),
+    'more than one commit ahead': documentationCandidateApi({ aheadBy: 2 }),
+    'diverged from the base': documentationCandidateApi({ status: 'diverged', behindBy: 1 }),
+    'a possibly truncated file list': documentationCandidateApi({ files: files(COMPARE_FILE_LIMIT) }),
+    'no file list': documentationCandidateApi({ files: null }),
+    'an empty file list': documentationCandidateApi({ files: [] }),
+    'a nameless file': documentationCandidateApi({ files: [{ filename: '' }] }),
+  }
+  for (const [name, api] of Object.entries(cases)) {
+    assert.equal((await derive(api)).documentationOnly, false, name)
+  }
+  assert.equal((await derive(documentationCandidateApi(), { queueBaseSha: undefined })).documentationOnly, false, 'no queue base')
+  assert.equal((await derive(documentationCandidateApi(), { isDocumentationOnlyChange: undefined })).documentationOnly, false, 'no classifier')
 })

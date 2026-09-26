@@ -117,7 +117,8 @@ const jobs = selectJobs(workflowText, result, { event })
 const hash = plannerHash(repoRoot)
 // Broad Actions events intentionally classify without a pull-request diff. Match the CI entry point's
 // empty path stream rather than reporting unknown paths from a local branch diff that CI never consumed.
-const unknownPaths = BROAD_EVENTS.has(event)
+// A merge group is the exception: CI diffs it against its queue base (#1152 A3), so its paths count.
+const unknownPaths = BROAD_EVENTS.has(event) && event !== 'merge_group'
   ? []
   : explain(paths).filter((row) => row.product && row.areas.length === 0 && !row.broad).map((row) => row.path)
 const compact = {

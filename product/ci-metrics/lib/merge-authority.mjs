@@ -76,8 +76,47 @@ export const SHARDED_JOB_GROUPS = [
 ]
 
 const JOB_CONCLUSION_SUCCESS = 'success'
+const JOB_CONCLUSION_SKIPPED = 'skipped'
 const RUN_STATUS_COMPLETED = 'completed'
 const MERGE_GROUP_EVENT = 'merge_group'
+
+/**
+ * The name GitHub gives a matrix job that was skipped by its job-level condition: the matrix never
+ * expands, so the template text is kept. A documentation-only run shows exactly one such job per group.
+ */
+export function unexpandedShardJobName(group) {
+  return `${group.name} (\${{ matrix.shard }}/\${{ strategy.job-total }})`
+}
+
+/**
+ * Documentation-only topology (#1152 A3). Only the verifier can select it, and only after it has derived
+ * from the candidate's own diff, with the protected classifier, that the change is documentation. Every
+ * other gate job must be present and exactly `skipped`: a missing, failed, cancelled, timed-out or even
+ * successful product job means the run was not the documentation topology the evidence describes.
+ */
+function collectDocumentationTopologyReasons(jobs, reasons) {
+  for (const name of REQUIRED_JOBS) {
+    const matched = jobs.filter((job) => job?.name === name)
+    if (matched.length !== 1) {
+      reasons.push(`docs-topology-job-count: expected exactly one '${name}' job, found ${matched.length}`)
+    } else if (matched[0].conclusion !== JOB_CONCLUSION_SKIPPED) {
+      reasons.push(`docs-topology-not-skipped: '${name}' concluded '${matched[0].conclusion ?? 'unknown'}', but a documentation-only candidate skips it`)
+    }
+  }
+  for (const group of SHARDED_JOB_GROUPS) {
+    const template = unexpandedShardJobName(group)
+    const expanded = jobs.filter((job) => typeof job?.name === 'string' && group.pattern.test(job.name))
+    const skipped = jobs.filter((job) => job?.name === template)
+    if (expanded.length > 0) {
+      reasons.push(`docs-topology-shards-ran: ${expanded.length} ${group.name} shard(s) ran, but a documentation-only candidate skips the group`)
+    }
+    if (skipped.length !== 1) {
+      reasons.push(`docs-topology-job-count: expected exactly one skipped '${template}' job, found ${skipped.length}`)
+    } else if (skipped[0].conclusion !== JOB_CONCLUSION_SKIPPED) {
+      reasons.push(`docs-topology-not-skipped: '${template}' concluded '${skipped[0].conclusion ?? 'unknown'}'`)
+    }
+  }
+}
 
 function duplicateNames(jobs, names) {
   const duplicates = []
@@ -136,11 +175,16 @@ function collectShardReasons(jobs, reasons) {
  *   surface is not a trusted one.
  * @param {object} input.expected trusted configuration from the verifier's own context:
  *   { repository, headSha, baseBranch, runId, runAttempt } — all mandatory; omitting any refuses.
+ * @param {boolean} [input.documentationOnlyCandidate] true only when the protected verifier itself derived,
+ *   from the candidate's own diff against its queue base, that the change is documentation (#1152 A3).
+ *   It then accepts the documentation topology as well as the full gate set. Anything but exactly `true`
+ *   keeps the full requirements alone.
  * @returns {{decision: 'PASS'|'REFUSE', reasons: string[]}}
  */
 export function evaluateMergeGroupCandidate(input) {
   const reasons = []
   const { run, jobs, changedPaths, expected } = input ?? {}
+  const documentationOnly = input?.documentationOnlyCandidate === true
 
   if (!run || typeof run !== 'object') {
     return { decision: 'REFUSE', reasons: ['run-metadata-missing: no triggering-run metadata was supplied'] }
@@ -243,16 +287,27 @@ export function evaluateMergeGroupCandidate(input) {
     reasons.push(`job-not-success: ${AGGREGATE_JOB_NAME} concluded '${aggregates[0].conclusion ?? 'unknown'}'`)
   }
 
+  const fullGateReasons = []
   for (const name of REQUIRED_JOBS) {
     const job = jobs.find((candidate) => candidate?.name === name)
     if (!job) {
-      reasons.push(`missing-job: ${name} did not run`)
+      fullGateReasons.push(`missing-job: ${name} did not run`)
     } else if (job.conclusion !== JOB_CONCLUSION_SUCCESS) {
-      reasons.push(`job-not-success: ${name} concluded '${job.conclusion ?? 'unknown'}'`)
+      fullGateReasons.push(`job-not-success: ${name} concluded '${job.conclusion ?? 'unknown'}'`)
     }
   }
+  collectShardReasons(jobs, fullGateReasons)
 
-  collectShardReasons(jobs, reasons)
+  // A derived documentation-only candidate binds on either topology. Its run may have classified broad and
+  // passed the complete gate set: one composed before #1152 A3, or one whose queue base was unavailable. The
+  // derivation relaxes the requirement for such a candidate; it never makes a complete green run insufficient.
+  if (documentationOnly && fullGateReasons.length > 0) {
+    const documentationReasons = []
+    collectDocumentationTopologyReasons(jobs, documentationReasons)
+    if (documentationReasons.length > 0) reasons.push(...documentationReasons, ...fullGateReasons)
+  } else {
+    reasons.push(...fullGateReasons)
+  }
 
   if (!Array.isArray(changedPaths)) {
     reasons.push('surface-comparison-missing: no candidate-vs-default-branch path list was supplied; an unverified surface is not a trusted one')

@@ -217,3 +217,41 @@ export async function publishMergeAuthorityCheck({ request, repository, headSha,
     },
   })
 }
+
+/** GitHub's compare API returns at most this many files; a list that reaches it may be truncated. */
+export const COMPARE_FILE_LIMIT = 300
+
+/**
+ * Whether a queue candidate's own change is documentation only (#1152 A3), derived from GitHub's records and
+ * the protected classifier in this checkout, never from the candidate's own classification.
+ *
+ * The base is pinned to what the queue actually composed: the candidate must have exactly one parent (every
+ * candidate this queue has built is a single-parent squash), and that parent must equal the queue entry's
+ * `baseCommit`. The diff is then read with the compare API; both sides of renames count, a truncated or
+ * missing file list is product, and so is anything the classifier does not call documentation. Every
+ * uncertain answer is `false`, which keeps the full gate set.
+ */
+export async function deriveDocumentationOnlyCandidate({ request, repository, candidateSha, queueBaseSha, isDocumentationOnlyChange }) {
+  const no = (reason) => ({ documentationOnly: false, reason })
+  if (typeof isDocumentationOnlyChange !== 'function') return no('no protected classifier was supplied')
+  if (typeof candidateSha !== 'string' || !SHA_PATTERN.test(candidateSha)) return no('candidate SHA is malformed')
+  if (typeof queueBaseSha !== 'string' || !SHA_PATTERN.test(queueBaseSha)) return no('the queue entry base commit is unknown')
+  const commit = await request(`/repos/${repository}/commits/${candidateSha}`)
+  const parents = Array.isArray(commit?.parents) ? commit.parents.map((parent) => parent?.sha) : null
+  if (!parents || parents.length !== 1) return no(`candidate has ${parents ? parents.length : 'unknown'} parents; only a single-parent queue candidate is judged`)
+  if (parents[0] !== queueBaseSha) return no('candidate parent is not the queue entry base commit')
+  const compare = await request(`/repos/${repository}/compare/${queueBaseSha}...${candidateSha}`)
+  if (compare?.status !== 'ahead' || compare?.ahead_by !== 1 || compare?.behind_by !== 0) return no('candidate is not exactly one commit ahead of its queue base')
+  const files = compare?.files
+  if (!Array.isArray(files) || files.length === 0) return no('the compare response carried no file list')
+  if (files.length >= COMPARE_FILE_LIMIT) return no(`the compare response lists ${files.length} files, which may be truncated`)
+  const paths = []
+  for (const file of files) {
+    if (typeof file?.filename !== 'string' || file.filename.length === 0) return no('a changed file had no usable name')
+    paths.push(file.filename)
+    if (typeof file.previous_filename === 'string' && file.previous_filename.length > 0) paths.push(file.previous_filename)
+  }
+  return isDocumentationOnlyChange(paths)
+    ? { documentationOnly: true, reason: null, paths }
+    : no('the candidate changes more than documentation')
+}
