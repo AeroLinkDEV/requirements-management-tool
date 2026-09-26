@@ -19,7 +19,7 @@ type ProcedureChange={id:string;displayNumber:string;baseNumber:string;revision:
 type RequirementChoice={id:string;revisionId:string;displayNumber:string;statement:string;level:string}
 /** A controlled procedure a Modify or Retire may target, with the revision it actually sits at. */
 type CurrentCoverage={id:string;revisionId:string;displayNumber:string;statement:string;level:string;isSuspect:boolean}
-type ProcedureTarget={procedureId?:string;baseNumber:string;title:string;currentRevision:number;state?:string;currentCoverage:CurrentCoverage[]}
+type ProcedureTarget={procedureId?:string;baseNumber:string;title:string;currentRevision:number;state?:string;parentKind?:string;currentCoverage:CurrentCoverage[]}
 type ProcedureTargetPage={page:number;pageSize:number;totalCount:number;totalPages:number;items:ProcedureTarget[]}
 type RequirementChoicePage={page:number;pageSize:number;totalCount:number;totalPages:number;items:RequirementChoice[]}
 type Capabilities={canProposeArtifactChange?:boolean;canWithdrawArtifactChange?:boolean;canProposeProcedureChange?:boolean;canWithdrawProcedureChange?:boolean;canRevise:boolean}
@@ -414,7 +414,8 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
         <label>What is being done
           <select value={draft.kind} onChange={event=>{
             setDraft(current=>({...current,
-              kind:event.target.value as Kind,baseNumber:'',revision:0,driving:[],removed:[],coverageRationale:''}))
+              kind:event.target.value as Kind,baseNumber:'',revision:0,driving:[],removed:[],coverageRationale:'',
+              parentKind:current.parentKind==='Standalone'?'Allocated':current.parentKind}))
             setDrivingDetails({});setSelectedTargetDetails(undefined)
           }}>
             <option value="Introduce">Introduce a new {currentArtifactWord}</option>
@@ -441,7 +442,9 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
               setSelectedTargetDetails(target)
               setDrivingDetails({})
               setDraft(current=>({...current,baseNumber:event.target.value,revision:(target?.currentRevision??-1)+1,
-                driving:[],removed:[],coverageRationale:''}))
+                driving:[],removed:[],coverageRationale:'',
+                // DEC-144: a Standalone case stays valid once Requirements is on, and is traced only when chosen.
+                parentKind:target?.parentKind==='Standalone'?'Standalone':current.parentKind==='Standalone'?'Allocated':current.parentKind}))
             }}>
                   <option value="">Choose the {currentArtifactWord} this acts on...</option>
                   {targetOptions.map(target=>
@@ -473,6 +476,12 @@ export default function TestChangeRequestWorkspace({api,projectId,reviewId,disci
             <p className="drawerEmpty"><b>Standalone</b> — this project does not use Requirements, so this {currentArtifactWord} verifies its own objective and names no parents.</p>
           </fieldset>:<fieldset className="drivingRequirements">
             <legend>Exact parent classification</legend>
+            {draft.kind==='Modify'&&selectedTarget?.parentKind==='Standalone'&&<label className="drivingChoice">
+              <input type="radio" name="parentKind" value="Standalone"
+                checked={draft.parentKind==='Standalone'}
+                onChange={()=>{setDraft(current=>({...current,parentKind:'Standalone',driving:[],removed:[],coverageRationale:'',derivedRationale:''}));setDrivingDetails({})}}/>
+              <span><b>Keep Standalone</b> — written before this project used Requirements; it stays Standalone until it is traced.</span>
+            </label>}
             <label className="drivingChoice">
               <input type="radio" name="parentKind" value="Allocated"
                 checked={draft.parentKind==='Allocated'}

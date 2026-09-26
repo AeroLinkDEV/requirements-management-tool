@@ -103,13 +103,18 @@ refused once the project uses Requirements; its later revisions keep the first r
 candidate baseline in a project without Requirements freezes with no change requests, records an empty requirement
 manifest, and then materializes approved verification work as usual. In the browser, setup and Project
 Configuration → Features accept the combination; the test change request editor raises a Case or System package on
-its own case, and each proposal it or the package page writes is Standalone.
+its own case, and each proposal it or the package page writes is Standalone. Once Requirements is switched on, the
+package page modifies a Standalone case as Standalone by default (Keep Standalone) and traces it when Allocated is
+chosen; the traced revision is new and the Standalone one is never rewritten.
 
 Without Requirements there is no requirement coverage, so each case shows its execution status instead (DEC-144):
 passed, failed, blocked or not run, from its latest build-scoped result. The Test Procedure Explorer coverage report
 lists it, and Release Readiness replaces the coverage gate with "Every case has passed", relaxed by the same assurance
 lever. The change-control, impact, verification-impact, trace and code gates report Not applicable with the reason,
 and the documents gate owes only the verification documents.
+The artifact thread places a Problem Report linked to an execution or test change request it already shows (a report
+raised from a failed run, or one a package answers for), so without Requirements it runs Cases → Procedures → Executions
+→ Problem Reports, and lanes with no records stay closed.
 
 Project entry uses stable identity and opens the actual visual build-lineage selector, including for a single
 build. Explicit build links retain their exact authorized target. Repository setup can remain Pending and be

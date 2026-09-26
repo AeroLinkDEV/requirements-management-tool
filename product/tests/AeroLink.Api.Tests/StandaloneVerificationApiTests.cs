@@ -390,6 +390,158 @@ public sealed class StandaloneVerificationApiTests
     }
 
     [Fact]
+    public async Task Without_requirements_the_thread_runs_from_procedure_to_execution_to_problem_report()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory, WithoutRequirements);
+        var introduce = Package(fixture, "SYSTPCR-000001", "SYSTP-000001", 0,
+            TestProcedureChangeKind.Introduce, VerificationProcedureParentKind.Standalone);
+        await SaveAsync(factory, introduce);
+        await MemberSession.SignInAsync(client, "standalone.cm");
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/freeze", new { });
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/materialize-requirements", new { });
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/test-change-requests",
+            new { testChangeRequestId = introduce.Id });
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
+
+        Guid revisionId, executionId, failureReportId, answeredReportId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            revisionId = (await db.TestProcedureRevisions.SingleAsync()).Id;
+            var build = new SoftwareBuild(fixture.ProjectId, fixture.ReleaseId, fixture.BaselineId, "B-1", "Bench build",
+                "standalone.cm", now);
+            var execution = new TestExecution(fixture.ProjectId, revisionId, build.Id, null, TestOutcome.Fail,
+                "standalone.cm", "Bench rig A", "Frames were lost.", "bench-log-002", now, now, fixture.ReleaseId);
+            var failure = new ProblemReport(fixture.ProjectId, "PR-00002", "Frames lost under load", "Frames lost.",
+                "Analysis", "standalone.cm", now, targetReleaseId: fixture.ReleaseId);
+            db.AddRange(build, execution, failure);
+            db.Add(ProblemReportRelationshipPolicy.CreateControlled(failure.Id, "TestExecution", execution.Id,
+                ProblemReportRelationshipPolicy.OriginatingFailure, ProblemReportRelationshipProducer.FailureCreationWorkflow,
+                "standalone.cm", now));
+            // The package that introduced the procedure answers for the report it was raised from.
+            db.Add(ProblemReportRelationshipPolicy.CreateControlled(fixture.ReportId, "TestChangeRequest", introduce.Id,
+                ProblemReportRelationshipPolicy.VerificationForProblem, ProblemReportRelationshipProducer.TestChangeRequestWorkflow,
+                "standalone.cm", now));
+            await db.SaveChangesAsync();
+            executionId = execution.Id;
+            failureReportId = failure.Id;
+            answeredReportId = fixture.ReportId;
+        }
+
+        var thread = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/artifact-thread?projectId={fixture.ProjectId}&baselineId={fixture.BaselineId}&focalKind=Procedure&focalId={revisionId}");
+        var nodes = thread.GetProperty("nodes").EnumerateArray()
+            .ToDictionary(x => x.GetProperty("id").GetGuid(), x => x.GetProperty("kind").GetString());
+        Assert.Equal("Procedure", nodes[revisionId]);
+        Assert.Equal("Execution", nodes[executionId]);
+        Assert.Equal("ProblemReport", nodes[failureReportId]);
+        Assert.Equal("ProblemReport", nodes[answeredReportId]);
+        Assert.DoesNotContain("Requirement", nodes.Values);
+        var edges = thread.GetProperty("edges").EnumerateArray()
+            .Select(x => (From: x.GetProperty("fromId").GetGuid(), To: x.GetProperty("toId").GetGuid(),
+                Relation: x.GetProperty("relation").GetString()))
+            .ToList();
+        Assert.Contains((failureReportId, executionId, ProblemReportRelationshipPolicy.OriginatingFailure), edges);
+        Assert.Contains((answeredReportId, introduce.Id, ProblemReportRelationshipPolicy.VerificationForProblem), edges);
+    }
+
+    [Fact]
+    public async Task Once_requirements_are_on_a_standalone_procedure_is_traced_by_modify_and_its_history_is_kept()
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var fixture = await SeedAsync(factory, WithoutRequirements);
+        var introduce = Package(fixture, "SYSTPCR-000001", "SYSTP-000001", 0,
+            TestProcedureChangeKind.Introduce, VerificationProcedureParentKind.Standalone);
+        await SaveAsync(factory, introduce);
+        await MemberSession.SignInAsync(client, "standalone.cm");
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/freeze", new { });
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/materialize-requirements", new { });
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/test-change-requests",
+            new { testChangeRequestId = introduce.Id });
+        await PostOkAsync(client, $"/api/baselines/{fixture.BaselineId}/materialize-test-procedures", new { });
+
+        // Requirements is switched on; a change request introduces the requirement the procedure verifies, and
+        // a successor baseline carries it.
+        Guid successorId, scrId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            (await db.ProjectFeatureSets.SingleAsync(x => x.ProjectId == fixture.ProjectId))
+                .Change(WithoutRequirements | ProjectFeature.Requirements, "test.setup", now);
+            await db.SaveChangesAsync();
+            var scr = new Domain.ChangeControl.SystemChangeRequest("SRCR-00001", 0, fixture.ProjectId, fixture.ReleaseId,
+                "Frame capture requirement", "P", "A", "S", "author", now);
+            scr.AddRequirementChange("author", "SYSR-00000001", 0, Domain.ChangeControl.RequirementLevel.System,
+                Domain.ChangeControl.RequirementChangeKind.Introduce, "The rig shall keep every frame at load.",
+                "Bench qualification", "Test", now);
+            scr.SubmitForReview("author", [new Domain.ChangeControl.ApproverSelection("reviewer", "Reviewer")], now);
+            scr.ApproveActiveStage("reviewer", now);
+            var successor = new CandidateBaseline("SW-00.02", 0, fixture.ProjectId, fixture.ReleaseId,
+                fixture.BaselineId, "Traced baseline", "cm", now);
+            successor.Select(scr, "cm", now);
+            db.AddRange(scr, successor);
+            await db.SaveChangesAsync();
+            successorId = successor.Id;
+            scrId = scr.Id;
+        }
+        await PostOkAsync(client, $"/api/baselines/{successorId}/freeze", new { });
+        await PostOkAsync(client, $"/api/baselines/{successorId}/materialize-requirements", new { });
+
+        // An ordinary Modify traces it: Allocated to the new requirement, with the coverage change explained.
+        Guid traceId, requirementRevisionId;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var now = DateTimeOffset.UtcNow;
+            requirementRevisionId = (await db.RequirementRevisions.SingleAsync(x => x.SourceChangeRequestId == scrId)).Id;
+            var trace = new TestChangeReview(fixture.ProjectId, fixture.ReleaseId, scrId,
+                TestChangeReviewDiscipline.System, "SRCR-00001.00", now, "SYSTPCR-000002");
+            trace.RecordTestChangeRequired("verification.engineer", now);
+            var ids = JsonSerializer.Serialize(new[] { requirementRevisionId });
+            trace.AddProcedureChange("verification.engineer", new TestProcedureChangeDraft("SYSTP-000001", 1,
+                TestProcedureLevel.System, TestProcedureChangeKind.Modify, "Frame capture under load",
+                "Show the rig keeps every frame at load.", "Rig powered.", "1. Apply load. 2. Count frames.",
+                "No frame is lost.", "Requirements now exist; trace to the one this verifies.", ids,
+                CoverageChangeRationale: "Traced to SYSR-00000001 after Requirements was switched on.",
+                ParentKind: VerificationProcedureParentKind.Allocated, ParentRevisionIdsJson: ids), now);
+            trace.WriteCase("verification.engineer", "Trace the bench procedure", "Problem", "Analysis", "Solution", now);
+            trace.Submit("verification.engineer", "test.lead", true, now);
+            trace.Approve("test.lead", "Reviewed.", now);
+            // The impact item that change-request approval raises is what puts the requirement in the package's
+            // governed scope; seeded directly here, as ProcedureBaselineApiTests does.
+            var request = await db.SystemChangeRequests.Include(x => x.RequirementChanges).SingleAsync(x => x.Id == scrId);
+            var item = VerificationImpactItem.ForIntroducedRequirement(fixture.ProjectId, fixture.ReleaseId, scrId,
+                trace.Id, request.RequirementChanges.Single().Id, request.RequirementChanges.Single().DisplayNumber,
+                "Test", now);
+            item.LinkRequirementRevision(requirementRevisionId, now);
+            db.AddRange(trace, item);
+            await db.SaveChangesAsync();
+            traceId = trace.Id;
+        }
+        await PostOkAsync(client, $"/api/baselines/{successorId}/test-change-requests", new { testChangeRequestId = traceId });
+        await PostOkAsync(client, $"/api/baselines/{successorId}/materialize-test-procedures", new { });
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+            var revisions = await db.TestProcedureRevisions.AsNoTracking().OrderBy(x => x.Revision).ToListAsync();
+            Assert.Equal(2, revisions.Count);
+            // Never rewritten: the standalone revision is exactly what it was.
+            Assert.Equal(VerificationProcedureParentKind.Standalone, revisions[0].ParentKind);
+            Assert.Empty(await db.TestCoverage.Where(x => x.ProcedureRevisionId == revisions[0].Id).ToListAsync());
+            Assert.Equal(VerificationProcedureParentKind.Allocated, revisions[1].ParentKind);
+            Assert.Equal(requirementRevisionId,
+                Assert.Single(await db.TestCoverage.Where(x => x.ProcedureRevisionId == revisions[1].Id).ToListAsync())
+                    .RequirementRevisionId);
+        }
+    }
+
+    [Fact]
     public async Task With_requirements_coverage_reports_no_execution_status()
     {
         using var factory = new AeroLinkApiFactory();

@@ -176,3 +176,98 @@ test('a Verification-only build reports each case by execution status and marks 
   await expect(traceHealth).not.toContainText('Target achieved')
   await page.screenshot({ path: testInfo.outputPath('standalone-readiness-gates.png'), fullPage: true })
 })
+
+/**
+ * #1188 / DEC-144 answer 6: without Requirements the Digital Thread runs Procedures → Executions → Problem
+ * Reports, with no requirement layer.
+ */
+test('a Verification-only thread runs from procedure to execution to the Problem Report it raised', async ({ page, request, playwright }, testInfo) => {
+  test.setTimeout(240_000)
+  await apiLogin(request)
+  const suffix = `${Date.now()}`.slice(-7)
+  const created = await request.post(`${apiBase}/api/workspaces`, { data: {
+    programName: `Standalone thread ${suffix}`, programCode: `ST${suffix}`, projectName: 'Standalone Thread Project',
+    softwareProduct: 'Standalone Thread Product', initialRelease: '1.0', initialReleaseIsReleased: false,
+  } })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  const workspace = await created.json() as { program: { id: string }; project: { id: string }; release: { id: string } }
+  const features = await request.put(`${apiBase}/api/projects/${workspace.project.id}/features`, { data: {
+    expectedVersion: 0, reason: 'Verification-only bench project', enabled: ['TeamWork', 'Verification', 'ProblemReports', 'Release'],
+  } })
+  expect(features.ok(), await features.text()).toBeTruthy()
+
+  const number = `SYSTP-${suffix.padStart(6, '0').slice(-6)}`
+  const raised = await request.post(`${apiBase}/api/releases/${workspace.release.id}/test-change-requests`, { data: {
+    discipline: 'System', changeRequestIds: [], title: 'Bench frame capture', problem: 'Frames are lost under load.',
+    analysis: 'Nothing exercises it.', solution: 'Introduce a procedure.',
+    artifactChanges: [{ baseNumber: number, revision: 0, level: 'System', kind: 'Introduce', title: 'Frame capture under load',
+      objective: 'Show the rig keeps every frame at load.', preconditions: 'Rig powered.', steps: '1. Apply load. 2. Count frames.',
+      expectedResult: 'No frame is lost.', rationale: 'The rig loses frames.', parentKind: 'Standalone' }],
+  } })
+  expect(raised.ok(), await raised.text()).toBeTruthy()
+  const review = await raised.json() as { id: string }
+  const users = await request.get(`${apiBase}/api/admin/users`)
+  const reviewerAccount = (await users.json() as { id: string; userName: string }[]).find(user => user.userName === 'systems.reviewer')!
+  const grant = await request.post(`${apiBase}/api/admin/users/${reviewerAccount.id}/memberships`, {
+    data: { programId: workspace.program.id, role: 'SystemEngineer' },
+  })
+  expect(grant.ok() || grant.status() === 409, await grant.text()).toBeTruthy()
+  expect((await request.post(`${apiBase}/api/projects/${workspace.project.id}/leadership/SystemEngineeringLead/primary`, {
+    data: { holderUserId: reviewerAccount.id },
+  })).ok()).toBeTruthy()
+  expect((await request.post(`${apiBase}/api/test-change-reviews/${review.id}/submit`, { data: { approverId: 'systems.reviewer' } })).ok()).toBeTruthy()
+  const reviewer = await playwright.request.newContext()
+  expect((await reviewer.post(`${apiBase}/api/auth/login`, { data: { userName: 'systems.reviewer', password: 'AeroLink!2026' } })).ok()).toBeTruthy()
+  const approved = await reviewer.post(`${apiBase}/api/test-change-reviews/${review.id}/approve`, { data: {
+    rationale: 'The standalone procedure is complete.', password: 'AeroLink!2026', meaning: 'I approve this exact System test change request package.',
+  } })
+  expect(approved.ok(), await approved.text()).toBeTruthy()
+  await reviewer.dispose()
+
+  const baselineResponse = await request.post(`${apiBase}/api/baselines`, { data: {
+    baseNumber: `SW-96.${suffix.slice(-2)}`, revision: 0, projectId: workspace.project.id, releaseId: workspace.release.id,
+    name: 'Standalone thread baseline',
+  } })
+  expect(baselineResponse.ok(), await baselineResponse.text()).toBeTruthy()
+  const baseline = await baselineResponse.json() as { id: string }
+  for (const [path, data] of [
+    ['freeze', {}], ['materialize-requirements', {}], ['test-change-requests', { testChangeRequestId: review.id }],
+    ['materialize-test-procedures', {}],
+  ] as const) {
+    const response = await request.post(`${apiBase}/api/baselines/${baseline.id}/${path}`, { data })
+    expect(response.ok(), `${path}: ${await response.text()}`).toBeTruthy()
+  }
+  const buildResponse = await request.post(`${apiBase}/api/builds`, { data: {
+    projectId: workspace.project.id, releaseId: workspace.release.id, baselineId: baseline.id,
+    buildNumber: `B-${suffix}`, description: 'Bench build',
+  } })
+  expect(buildResponse.ok(), await buildResponse.text()).toBeTruthy()
+  const build = await buildResponse.json() as { id: string }
+  const procedures = await (await request.get(
+    `${apiBase}/api/test-procedures?projectId=${workspace.project.id}&scope=System&page=1&pageSize=5`)).json() as
+    { items: { revisionId?: string; currentRevisionId?: string }[] }
+  const revisionId = procedures.items[0].revisionId ?? procedures.items[0].currentRevisionId
+  const execution = await request.post(`${apiBase}/api/test-executions`, { data: {
+    projectId: workspace.project.id, procedureRevisionId: revisionId, softwareBuildId: build.id, retestOfExecutionId: null,
+    outcome: 'Fail', configuration: 'Bench rig A', determination: 'Frames were lost.', evidenceReference: 'bench-log-001',
+    executedAt: new Date().toISOString(),
+  } })
+  expect(execution.ok(), await execution.text()).toBeTruthy()
+  const executionId = (await execution.json() as { id: string }).id
+  const reportResponse = await request.post(`${apiBase}/api/problem-reports/from-test-execution/${executionId}`, {
+    data: { title: 'Frames lost under load', problem: 'The rig lost frames.', releaseId: workspace.release.id },
+  })
+  expect(reportResponse.ok(), await reportResponse.text()).toBeTruthy()
+  const report = await reportResponse.json() as { displayNumber: string }
+
+  await login(page, 'admin', { openProject: false })
+  const root = `/programs/${workspace.program.id}/projects/${workspace.project.id}/releases/${workspace.release.id}`
+  await page.goto(`${root}/traceability/procedures/${revisionId}`)
+  const board = page.locator('main')
+  await expect(board.getByText(report.displayNumber).first()).toBeVisible()
+  await expect(board.getByText(`${number}.00`).first()).toBeVisible()
+  await expect(board.getByText('PROBLEM REPORT', { exact: true }).first()).toBeVisible()
+  // No requirement layer: that lane is closed because it holds no records.
+  await expect(board.getByText('REQUIREMENT', { exact: true })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('standalone-artifact-thread.png'), fullPage: true })
+})

@@ -309,6 +309,90 @@ test('a procedure modification shows retained coverage and records an explicit r
   await expect(recordedDecision).toContainText('Approved final coverage: SYSR-000402.00 · Unchanged requirement., SYSR-000403.00 · New governed requirement.')
   await expect(recordedDecision).toContainText('Coverage rationale: Replace obsolete coverage. · test.engineer')
 })
+
+// #1188 / DEC-144 answer 5: once Requirements is on, a Standalone procedure stays valid, is modified as it is by
+// default, and is traced only when the engineer chooses Allocated.
+test('a Standalone procedure is kept Standalone by default and traced only when Allocated is chosen', async ({ page }) => {
+  test.setTimeout(120_000)
+  await login(page, 'test.engineer')
+  await openNavigationGroup(page, 'ASSURANCE')
+  await page.getByRole('link', { name: 'System Test Change Requests' }).click()
+  const packageRow = page.locator('.downstreamAssessment').filter({ hasText: /SYSTPCR-/ }).first()
+  await expect(packageRow).toBeVisible({ timeout: 30_000 })
+
+  const requirementId = '10000000-0000-0000-0000-000000000011'
+  const submitted: Record<string, unknown>[] = []
+  await page.route('**/api/test-change-reviews/*/procedure-changes', async route => {
+    if (route.request().method() === 'POST') {
+      submitted.push(route.request().postDataJSON())
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        id: `20000000-0000-0000-0000-00000000001${submitted.length}`, displayNumber: 'SYSTP-000910.01',
+        baseNumber: 'SYSTP-000910', revision: 1, kind: 'Modify', level: 'System', title: 'Bench procedure',
+      }) })
+    }
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      id: '30000000-0000-0000-0000-000000000011', displayNumber: 'SYSTPCR-000411.00',
+      baseNumber: 'SYSTPCR-000411', revision: 0, discipline: 'System', state: 'Draft',
+      outcome: 'ChangeRequired', procedureLevel: 'System', sourceChangeRequestNumber: 'SRCR-000411.00',
+      assignedEngineerId: 'test.engineer', version: 1 + submitted.length,
+      title: 'Trace the bench procedure', problem: 'Requirements now exist.', analysis: 'Trace or keep.',
+      solution: 'Decide per procedure.', problemRich: '', analysisRich: '', solutionRich: '',
+      capabilities: { canProposeProcedureChange: true, canWithdrawProcedureChange: true, canRevise: false },
+      drivingRequirementChoices: [
+        { id: '50000000-0000-0000-0000-000000000011', revisionId: requirementId, displayNumber: 'SYSR-000411.00', statement: 'The rig shall keep every frame.', level: 'System' },
+      ],
+      procedureTargets: [{ baseNumber: 'SYSTP-000910', title: 'Bench procedure', currentRevision: 0, parentKind: 'Standalone', currentCoverage: [] }],
+      procedureChanges: [],
+    }) })
+  })
+  await page.route('**/api/test-change-reviews/*/procedure-targets*', async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      page: 1, pageSize: 50, totalCount: 1, totalPages: 1,
+      items: [{ procedureId: '60000000-0000-0000-0000-000000000011', baseNumber: 'SYSTP-000910',
+        title: 'Bench procedure', currentRevision: 0, parentKind: 'Standalone', currentCoverage: [] }],
+    }) })
+  })
+  await page.route('**/api/test-change-reviews/*/requirement-candidates*', async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+      page: 1, pageSize: 50, totalCount: 1, totalPages: 1,
+      items: [{ id: '50000000-0000-0000-0000-000000000011', revisionId: requirementId, displayNumber: 'SYSR-000411.00', statement: 'The rig shall keep every frame.', level: 'System' }],
+    }) })
+  })
+
+  await packageRow.getByRole('button', { name: /^SYSTPCR-\d{6}\.\d{2}/ }).click()
+  const drawer = page.getByRole('dialog', { name: /test procedure decisions/ })
+  const propose = async () => {
+    await drawer.getByRole('button', { name: 'Propose a test procedure change' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Propose a test procedure change' })
+    await dialog.getByLabel('What is being done').selectOption('Modify')
+    await dialog.getByRole('combobox', { name: /^Procedure/ }).selectOption('SYSTP-000910')
+    await dialog.getByLabel('Title').fill('Bench procedure')
+    await dialog.getByLabel('Objective').fill('Show the rig keeps every frame.')
+    await dialog.getByLabel('Steps').fill('Apply load and count frames.')
+    await dialog.getByLabel('Expected result').fill('No frame is lost.')
+    await dialog.getByLabel('Why this test procedure work is required').fill('Requirements now exist.')
+    return dialog
+  }
+
+  // By default the Standalone target is modified as it is: no requirement is asked for.
+  let dialog = await propose()
+  const keep = dialog.getByRole('radio', { name: /Keep Standalone/ })
+  await expect(keep).toBeChecked()
+  await expect(dialog.getByRole('group', { name: 'Requirements this test procedure verifies' })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Propose decision' }).click()
+  await expect.poll(() => submitted.length).toBe(1)
+  expect(submitted[0]).toMatchObject({ parentKind: 'Standalone', parentRevisionIds: [], drivingRequirementRevisionIds: [] })
+
+  // Choosing Allocated traces it to the requirement it verifies, with the coverage change explained.
+  dialog = await propose()
+  await dialog.getByRole('radio', { name: /^Allocated/ }).check()
+  await dialog.getByRole('group', { name: 'Requirements this test procedure verifies' }).getByLabel(/SYSR-000411\.00/).check()
+  await dialog.getByLabel('Why coverage is being added or removed').fill('Traced after Requirements was switched on.')
+  await dialog.getByRole('button', { name: 'Propose decision' }).click()
+  await expect.poll(() => submitted.length).toBe(2)
+  expect(submitted[1]).toMatchObject({ parentKind: 'Allocated', parentRevisionIds: [requirementId], drivingRequirementRevisionIds: [requirementId] })
+})
+
 test('a stale Modify target reloads controlled state and requires an explicit re-selection', async ({ page }) => {
   test.setTimeout(120_000)
   await login(page, 'test.engineer')
