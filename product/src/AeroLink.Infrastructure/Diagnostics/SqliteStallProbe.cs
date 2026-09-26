@@ -35,9 +35,21 @@ public static class SqliteStallProbe
         var path = builder.DataSource;
         if (string.IsNullOrWhiteSpace(path) || path == ":memory:") return "file=none (in-memory database)";
 
-        var files = $"dbBytes={Size(path)} walBytes={Size(path + "-wal")}";
+        // Everything that touches the file runs inside the budget. The first recurrence (#1163, run 36214468229)
+        // showed why: a plain File.Exists on the database waited ~28 s while the stalled commit ran, and it held
+        // the watchdog thread with it. The stage that did not return is now the finding, and statMs says how long
+        // the operating system took to answer a metadata question about the file.
+        var stage = "stat";
+        string? files = null;
         string? outcome = null;
-        var probe = new Thread(() => outcome = Checkpoint(builder.ToString()))
+        var probe = new Thread(() =>
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var sizes = $"dbBytes={Size(path)} walBytes={Size(path + "-wal")}";
+            files = $"{sizes} statMs={clock.ElapsedMilliseconds}";
+            stage = "checkpoint";
+            outcome = Checkpoint(builder.ToString());
+        })
         {
             IsBackground = true,
             Name = "AeroLink SQLite stall probe",
@@ -45,7 +57,7 @@ public static class SqliteStallProbe
         probe.Start();
         return probe.Join(budget)
             ? $"{files} {outcome}"
-            : $"{files} checkpoint=did-not-return-within-{(long)budget.TotalMilliseconds}ms";
+            : $"{files ?? "dbBytes=? walBytes=?"} {stage}=did-not-return-within-{(long)budget.TotalMilliseconds}ms";
     }
 
     private static string Checkpoint(string connectionString)

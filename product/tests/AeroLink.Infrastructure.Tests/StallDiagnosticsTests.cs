@@ -121,7 +121,8 @@ public sealed class StallDiagnosticsTests
 
             var pinned = Assert.Single(logger.Messages, message => message.StartsWith(SqliteStallProbe.Marker + " "));
             Assert.Contains("checkpoint busy=0", pinned);
-            Assert.Matches(@"walBytes=\d+", pinned);
+            // The file read is timed inside the probe's budget (#1163: File.Exists itself once waited ~28 s).
+            Assert.Matches(@"walBytes=\d+ statMs=\d+", pinned);
             var (frames, checkpointed) = Frames(pinned);
             Assert.True(checkpointed < frames, pinned);
 
