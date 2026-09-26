@@ -352,6 +352,25 @@ public sealed class CandidateBaseline
     }
 
     /// <summary>
+    /// Freezes a baseline in a project that does not use Requirements (DEC-144). Such a project has no change
+    /// requests to select, so the baseline is frozen empty. Its requirement step then records an empty manifest,
+    /// and its verification artifacts are selected after freezing, as in any build. Only the caller knows the
+    /// project's features, so the caller chooses this path. It is refused once anything has been selected.
+    /// </summary>
+    public void FreezeWithoutRequirements(string actorId, DateTimeOffset now)
+    {
+        EnsureDraft();
+        if (_selections.Count != 0 || _externalPackageSelections.Count != 0)
+            throw new DomainException("A baseline with selected change requests or external packages is frozen with them.");
+        var manifest = string.Join("|", "without-requirements", DisplayNumber, ProjectId, ReleaseId);
+        ContentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
+        State = CandidateBaselineState.Frozen;
+        FrozenAt = now;
+        UpdatedAt = now;
+        Event("CandidateBaselineFrozen", actorId, $"Frozen {DisplayNumber} without change requests, because the project does not use Requirements, with hash {ContentHash}.", now);
+    }
+
+    /// <summary>
     /// Unseals a frozen baseline so its contents can change again.
     ///
     /// Freezing is a commitment: it fixes exactly which change request revisions the build contains, and

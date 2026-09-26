@@ -60,13 +60,12 @@ public static class TestChangeReviewRequirementScope
             var parentIds = ParseIds(change.ParentRevisionIdsJson, change.DisplayNumber, "exact parent");
             var drivingIds = ParseIds(change.DrivingRequirementRevisionIdsJson, change.DisplayNumber, "driving");
             var removedIds = ParseIds(change.RemovedRequirementRevisionIdsJson, change.DisplayNumber, "removed");
-            ExactParentSelectionPolicy.Validate(
-                VerificationProcedureParentPolicy.Classification(change.ParentKind), parentIds,
-                change.DerivedRationale, artifactNoun);
+            VerificationProcedureParentPolicy.Validate(change.ParentKind,
+                VerificationParentArtifactKind.Requirement, parentIds, change.DerivedRationale, artifactNoun);
 
-            if (change.ParentKind == VerificationProcedureParentKind.Derived && drivingIds.Count != 0)
+            if (VerificationProcedureParentPolicy.NamesNoParents(change.ParentKind) && drivingIds.Count != 0)
                 throw new DomainException(
-                    $"{change.DisplayNumber} is Derived but still names driving requirement revisions.");
+                    $"{change.DisplayNumber} is {change.ParentKind} but still names driving requirement revisions.");
             if (change.ParentKind == VerificationProcedureParentKind.Allocated
                 && !drivingIds.All(parentIds.Contains))
                 throw new DomainException(
@@ -171,9 +170,8 @@ public static class TestChangeReviewRequirementScope
         foreach (var change in review.ProcedureChanges.Where(x => x.Kind != TestProcedureChangeKind.Retire))
         {
             var parentIds = ParseIds(change.ParentRevisionIdsJson, change.DisplayNumber, "exact Case parent");
-            ExactParentSelectionPolicy.Validate(
-                VerificationProcedureParentPolicy.Classification(change.ParentKind), parentIds,
-                change.DerivedRationale, "software Procedure");
+            VerificationProcedureParentPolicy.Validate(change.ParentKind,
+                VerificationParentArtifactKind.Case, parentIds, change.DerivedRationale, "software Procedure");
             if (change.DrivingRequirementRevisionIdsJson is not ("" or "[]"))
             {
                 var driving = ParseIds(change.DrivingRequirementRevisionIdsJson, change.DisplayNumber, "driving");

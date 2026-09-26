@@ -1030,17 +1030,17 @@ public static class VerificationImpactEndpoints
                         return Results.BadRequest(new { error = $"Case revision {missingCase} is not an exact Case parent selected by this Project and build.", code = "case_parent_out_of_scope" });
                 }
                 if (isSoftwareProcedure)
-                    ExactParentSelectionPolicy.Validate(
-                        VerificationProcedureParentPolicy.Classification(selected.ParentKind), parentIds,
-                        selected.DerivedRationale, "software Procedure");
+                    VerificationProcedureParentPolicy.Validate(selected.ParentKind,
+                        VerificationParentArtifactKind.Case, parentIds, selected.DerivedRationale, "software Procedure");
+                // A Derived or Standalone revision is modified as what it is: neither has coverage to retain.
                 var parentKind = isSoftwareProcedure
                     ? selected.ParentKind
-                    : selected.ParentKind == VerificationProcedureParentKind.Derived
-                        ? VerificationProcedureParentKind.Derived
+                    : VerificationProcedureParentPolicy.NamesNoParents(selected.ParentKind)
+                        ? selected.ParentKind
                         : parentIds.Length > 0
                             ? VerificationProcedureParentKind.Allocated
                             : VerificationProcedureParentKind.Unspecified;
-                if (!isSoftwareProcedure && parentKind != VerificationProcedureParentKind.Derived && parentIds.Length == 0)
+                if (!isSoftwareProcedure && !VerificationProcedureParentPolicy.NamesNoParents(parentKind) && parentIds.Length == 0)
                     return Results.BadRequest(new
                     {
                         error = "A modified Procedure must retain or add at least one exact requirement revision. Retire the Procedure instead if it verifies nothing in this build.",
@@ -1301,12 +1301,13 @@ public static class VerificationImpactEndpoints
                 // make alternate clients disagree about the review contract. Empty
                 // arrays are harmless; any supplied identity is an explicit XOR
                 // violation and is refused before persistence.
-                if (parentKind == VerificationProcedureParentKind.Derived
+                if (VerificationProcedureParentPolicy.NamesNoParents(parentKind)
                     && (request.ParentRevisionIds?.Length > 0 || driving.Length > 0))
                     return Results.BadRequest(new
                     {
-                        error = $"A derived {artifactNoun} cannot carry exact parent revisions.",
-                        code = "derived_parent_conflict"
+                        error = $"A {parentKind.ToString().ToLowerInvariant()} {artifactNoun} cannot carry exact parent revisions.",
+                        code = parentKind == VerificationProcedureParentKind.Derived
+                            ? "derived_parent_conflict" : "standalone_parent_conflict"
                     });
                 var removed = request.RemovedRequirementRevisionIds ?? [];
                 if (request.Kind != TestProcedureChangeKind.Modify && removed.Length != 0)
@@ -1437,14 +1438,14 @@ public static class VerificationImpactEndpoints
                             code = "coverage_removal_not_current"
                         });
                     if (request.ParentRevisionIds is null
-                        && parentKind != VerificationProcedureParentKind.Derived)
+                        && !VerificationProcedureParentPolicy.NamesNoParents(parentKind))
                         parentIds = currentCoverageIds.Except(removed).Concat(driving).Distinct().ToArray();
                     if (request.ParentKind == VerificationProcedureParentKind.Unspecified)
                         parentKind = parentIds.Length > 0
                             ? VerificationProcedureParentKind.Allocated
                             : VerificationProcedureParentKind.Unspecified;
                     var addsOrRemovesCoverage = !currentCoverageIds.SetEquals(parentIds.ToHashSet());
-                    if (parentKind != VerificationProcedureParentKind.Derived
+                    if (!VerificationProcedureParentPolicy.NamesNoParents(parentKind)
                         && addsOrRemovesCoverage
                         && string.IsNullOrWhiteSpace(request.CoverageChangeRationale))
                         return Results.BadRequest(new
@@ -1485,7 +1486,7 @@ public static class VerificationImpactEndpoints
                             });
                     }
                     var finalCoverage = parentIds.Distinct().Count();
-                    if (finalCoverage == 0 && parentKind != VerificationProcedureParentKind.Derived)
+                    if (finalCoverage == 0 && !VerificationProcedureParentPolicy.NamesNoParents(parentKind))
                         return Results.BadRequest(new
                         {
                             error = $"A modified {artifactNoun} must retain or add at least one exact requirement revision. Retire the {artifactNoun} instead if it verifies nothing in this build.",
@@ -1495,9 +1496,8 @@ public static class VerificationImpactEndpoints
 
                 if (isProcedurePackage && request.Kind != TestProcedureChangeKind.Retire)
                 {
-                    ExactParentSelectionPolicy.Validate(
-                        VerificationProcedureParentPolicy.Classification(parentKind), parentIds,
-                        request.DerivedRationale, "software Procedure");
+                    VerificationProcedureParentPolicy.Validate(parentKind, VerificationParentArtifactKind.Case,
+                        parentIds, request.DerivedRationale, "software Procedure");
                     if (parentKind == VerificationProcedureParentKind.Allocated)
                     {
                         var effectivity = await TestProcedureEffectivity.ForReleaseAsync(db, review.ProjectId, review.ReleaseId, ct);
@@ -2067,11 +2067,11 @@ public static class VerificationImpactEndpoints
                     var suppliedParentIds = (change.ParentRevisionIds ?? [])
                         .Concat(change.DrivingRequirementRevisionIds ?? [])
                         .Distinct().ToArray();
-                    if (change.ParentKind == VerificationProcedureParentKind.Derived
+                    if (VerificationProcedureParentPolicy.NamesNoParents(change.ParentKind)
                         && suppliedParentIds.Length != 0)
                         throw new DomainException(
-                            $"A derived {TestChangeRequestSourceEligibility.ArtifactNoun(request.Discipline)} cannot carry exact parent revisions.");
-                    var parentRevisionIds = change.ParentKind == VerificationProcedureParentKind.Derived
+                            $"A {change.ParentKind.ToString().ToLowerInvariant()} {TestChangeRequestSourceEligibility.ArtifactNoun(request.Discipline)} cannot carry exact parent revisions.");
+                    var parentRevisionIds = VerificationProcedureParentPolicy.NamesNoParents(change.ParentKind)
                         ? Array.Empty<Guid>()
                         : change.ParentRevisionIds ?? change.DrivingRequirementRevisionIds ?? [];
                     review.AddProcedureChange(actor, new TestProcedureChangeDraft(change.BaseNumber, change.Revision,

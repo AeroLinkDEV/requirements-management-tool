@@ -37,7 +37,6 @@ public sealed class ProjectSetupFeaturesApiTests : IClassFixture<SharedApiHost>
                  {
                      (new[] { "TeamWork", "Nope" }, "'Nope' is not a project feature."),
                      (new[] { "Code" }, "Code needs Requirements"),
-                     (new[] { "Verification", "ProblemReports" }, "Verification needs Requirements until standalone verification is available"),
                  })
         {
             using var refused = await client.PutAsJsonAsync($"/api/project-setups/{draftId}",

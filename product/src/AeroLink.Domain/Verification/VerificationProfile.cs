@@ -134,12 +134,18 @@ public sealed record VerificationProcedureRevisionContent(
     public string Tooling => ToolingAutomation;
 }
 
-/// <summary>How a non-root software Procedure is related to exact Case revisions.</summary>
+/// <summary>How a verification artifact is related to its exact parent revisions.</summary>
 public enum VerificationProcedureParentKind
 {
     Unspecified,
     Allocated,
     Derived,
+    /// <summary>
+    /// A Case or System Procedure in a project that does not use Requirements (DEC-144). It names no parents
+    /// and carries no Derived rationale: there is no requirement it could have been traced to, so it verifies
+    /// its own objective. Never a software Procedure, whose parent is a Case that always exists.
+    /// </summary>
+    Standalone,
 }
 
 /// <summary>
@@ -171,6 +177,11 @@ public static class VerificationProcedureParentPolicy
             ? VerificationParentArtifactKind.Case
             : VerificationParentArtifactKind.Requirement;
 
+    /// <summary>
+    /// The shared classification. Standalone has none: the requirement side has no such kind, so passing it to
+    /// <see cref="ExactParentSelectionPolicy"/> directly refuses it as unclassified. Validate through
+    /// <see cref="Validate(VerificationProcedureParentKind, VerificationParentArtifactKind, IEnumerable{Guid}?, string?, string)"/>.
+    /// </summary>
     public static ExactParentClassification Classification(VerificationProcedureParentKind kind) => kind switch
     {
         VerificationProcedureParentKind.Allocated => ExactParentClassification.Allocated,
@@ -178,10 +189,35 @@ public static class VerificationProcedureParentPolicy
         _ => ExactParentClassification.Unspecified,
     };
 
+    /// <summary>
+    /// True when the kind names no exact parents, so no coverage or Case link comes from it: Derived (a
+    /// deliberate choice with a rationale) and Standalone (no requirements to trace to).
+    /// </summary>
+    public static bool NamesNoParents(VerificationProcedureParentKind kind) =>
+        kind is VerificationProcedureParentKind.Derived or VerificationProcedureParentKind.Standalone;
+
     public static void Validate(VerificationProcedureParentKind kind,
         IEnumerable<Guid>? caseRevisionIds, string? derivedRationale)
-        => ExactParentSelectionPolicy.Validate(Classification(kind), caseRevisionIds,
-            derivedRationale, "software Procedure revision");
+        => Validate(kind, VerificationParentArtifactKind.Case, caseRevisionIds, derivedRationale,
+            "software Procedure revision");
+
+    public static void Validate(VerificationProcedureParentKind kind,
+        VerificationParentArtifactKind parentArtifactKind, IEnumerable<Guid>? parentRevisionIds,
+        string? derivedRationale, string artifactNoun)
+    {
+        if (kind != VerificationProcedureParentKind.Standalone)
+        {
+            ExactParentSelectionPolicy.Validate(Classification(kind), parentRevisionIds, derivedRationale, artifactNoun);
+            return;
+        }
+        if (parentArtifactKind != VerificationParentArtifactKind.Requirement)
+            throw new DomainException(
+                $"A {artifactNoun} cannot be Standalone: its exact parent is a Case, so it is Allocated to a Case revision or explicitly Derived.");
+        if (ExactParentSelectionPolicy.NormalizeIds(parentRevisionIds, artifactNoun).Count > 0)
+            throw new DomainException($"A Standalone {artifactNoun} names no exact parents.");
+        if (!string.IsNullOrWhiteSpace(derivedRationale))
+            throw new DomainException($"A Standalone {artifactNoun} carries no Derived rationale.");
+    }
 }
 
 /// <summary>Capabilities a routed consumer must explicitly declare for a v2 artifact registration.</summary>

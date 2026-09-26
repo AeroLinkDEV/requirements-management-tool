@@ -152,6 +152,78 @@ public sealed class ProjectFeatureService(AeroLinkDbContext db)
                 throw new DomainException($"{ProjectFeatures.Label(feature)} is not enabled for this project.");
     }
 
+    /// <summary>
+    /// Save-boundary gate for DEC-144: Standalone verification exists only where there is no requirement to
+    /// trace to. A new Standalone proposal or revision is refused in a project that uses Requirements, unless
+    /// it continues an artifact whose latest revision is already Standalone. Switching Requirements on later
+    /// never invalidates existing standalone work; such an artifact is traced by an ordinary Modify when its
+    /// owners choose to, and nothing rewrites it.
+    /// </summary>
+    internal static async Task RefuseStandaloneVerificationWithRequirementsAsync(AeroLinkDbContext db, CancellationToken ct)
+    {
+        var changes = db.ChangeTracker.Entries<TestProcedureChange>()
+            .Where(x => x.State is EntityState.Added or EntityState.Modified
+                && x.Entity.ParentKind == VerificationProcedureParentKind.Standalone
+                && x.Entity.Kind != TestProcedureChangeKind.Retire)
+            .Select(x => x.Entity).ToList();
+        var revisions = db.ChangeTracker.Entries<TestProcedureRevision>()
+            .Where(x => x.State == EntityState.Added
+                && x.Entity.ParentKind == VerificationProcedureParentKind.Standalone
+                && x.Entity.State != TestProcedureState.Retired)
+            .Select(x => x.Entity).ToList();
+        if (changes.Count == 0 && revisions.Count == 0) return;
+
+        var trackedReviews = db.ChangeTracker.Entries<TestChangeReview>().ToDictionary(x => x.Entity.Id, x => x.Entity.ProjectId);
+        var reviewIds = changes.Select(x => x.TestChangeReviewId).Where(x => !trackedReviews.ContainsKey(x)).Distinct().ToList();
+        foreach (var review in await db.TestChangeReviews.AsNoTracking().Where(x => reviewIds.Contains(x.Id))
+                     .Select(x => new { x.Id, x.ProjectId }).ToListAsync(ct))
+            trackedReviews[review.Id] = review.ProjectId;
+        var procedures = db.ChangeTracker.Entries<TestProcedure>().ToDictionary(x => x.Entity.Id, x => x.Entity);
+        var procedureIds = revisions.Select(x => x.ProcedureId).Where(x => !procedures.ContainsKey(x)).Distinct().ToList();
+        foreach (var procedure in await db.TestProcedures.AsNoTracking().Where(x => procedureIds.Contains(x.Id)).ToListAsync(ct))
+            procedures[procedure.Id] = procedure;
+
+        var subjects = changes
+            .Select(x => new StandaloneSubject(trackedReviews.GetValueOrDefault(x.TestChangeReviewId), x.BaseNumber,
+                int.MaxValue, x.DisplayNumber))
+            .Concat(revisions.Select(x => procedures.TryGetValue(x.ProcedureId, out var procedure)
+                ? new StandaloneSubject(procedure.ProjectId, procedure.BaseNumber, x.Revision,
+                    ArtifactNumber.Display(procedure.BaseNumber, x.Revision))
+                : new StandaloneSubject(Guid.Empty, "", x.Revision, "")))
+            .ToList();
+        if (subjects.Any(x => x.ProjectId == Guid.Empty))
+            throw new DomainException("A Standalone verification artifact must belong to a known project.");
+        var projectIds = subjects.Select(x => x.ProjectId).Distinct().ToList();
+        var sets = await FeatureTableExistsAsync(db, ct)
+            ? await db.ProjectFeatureSets.AsNoTracking().Where(x => projectIds.Contains(x.ProjectId))
+                .ToDictionaryAsync(x => x.ProjectId, x => x.Enabled, ct)
+            : new Dictionary<Guid, ProjectFeature>();
+        foreach (var tracked in db.ChangeTracker.Entries<ProjectFeatureSet>()
+                     .Where(x => x.State != EntityState.Deleted && projectIds.Contains(x.Entity.ProjectId)))
+            sets[tracked.Entity.ProjectId] = tracked.Entity.Enabled;
+
+        foreach (var subject in subjects)
+        {
+            // A project without a stored set has every feature, Requirements included.
+            if (sets.TryGetValue(subject.ProjectId, out var enabled) && !enabled.HasFlag(ProjectFeature.Requirements))
+                continue;
+            var latest = string.IsNullOrWhiteSpace(subject.BaseNumber)
+                ? null
+                : await (from revision in db.TestProcedureRevisions.AsNoTracking()
+                         join procedure in db.TestProcedures.AsNoTracking() on revision.ProcedureId equals procedure.Id
+                         where procedure.ProjectId == subject.ProjectId && procedure.BaseNumber == subject.BaseNumber
+                             && revision.Revision < subject.Before
+                         orderby revision.Revision descending
+                         select (VerificationProcedureParentKind?)revision.ParentKind).FirstOrDefaultAsync(ct);
+            if (latest != VerificationProcedureParentKind.Standalone)
+                throw new DomainException(
+                    $"{(subject.Label.Length == 0 ? "A verification artifact" : subject.Label)} cannot be Standalone: this project uses Requirements, so it is Allocated to requirement revisions or explicitly Derived.");
+        }
+    }
+
+    /// <summary>A Standalone proposal or revision: its project, artifact, the revision it follows, and its display name.</summary>
+    private sealed record StandaloneSubject(Guid ProjectId, string BaseNumber, int Before, string Label);
+
     /// <summary>Databases known to have the feature-set table. A table, once present, stays, so only "yes" is cached.</summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> FeatureTablePresent = new();
 

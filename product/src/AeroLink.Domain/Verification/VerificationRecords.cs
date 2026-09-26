@@ -36,7 +36,7 @@ public sealed class TestProcedure : IVerificationArtifactHeader
             throw new DomainException($"{level} verification artifacts must use {expectedKind}.");
         EnsurePrefixMatchesIdentity(BaseNumber, level, ArtifactKind, policy);
         if (level != TestProcedureLevel.System && ArtifactKind == VerificationArtifactKind.Procedure
-            && parentKind == VerificationProcedureParentKind.Unspecified)
+            && parentKind is VerificationProcedureParentKind.Unspecified or VerificationProcedureParentKind.Standalone)
             throw new DomainException("A software Procedure requires an explicit Allocated or Derived parent classification.");
         _ = VerificationArtifactVocabulary.Definition(ArtifactKey);
     }

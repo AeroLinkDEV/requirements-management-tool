@@ -213,9 +213,11 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
                      && !(x.Tcr.ArtifactKind == VerificationArtifactKind.Procedure
                          && x.Tcr.Discipline != TestChangeReviewDiscipline.System)))
         {
-            // Derived Case/Procedure revisions are deliberately standalone. They
+            // Derived and Standalone Case/Procedure revisions name no parents. They
             // remain in the baseline, but do not create requirement coverage that
             // could satisfy an upstream obligation.
+            if (VerificationProcedureParentPolicy.NamesNoParents(entry.Change.ParentKind))
+                continue;
             var driving = DrivingRequirements(entry.Change).Distinct().ToHashSet();
             var removed = RemovedRequirements(entry.Change).Distinct().ToHashSet();
             var prior = entry.PriorRevisionId is null
@@ -225,10 +227,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
                         && carriedRequirementIds.Contains(x.RequirementRevisionId)
                         // #709 suspect carry-forward is lifecycle evidence, not an approved parent to copy
                         // into the new revision. A fresh explicit selection below creates a non-suspect link.
-                        && !x.IsSuspect
-                        && entry.Change.ParentKind != VerificationProcedureParentKind.Derived).ToListAsync(ct);
-            if (entry.Change.ParentKind == VerificationProcedureParentKind.Derived)
-                continue;
+                        && !x.IsSuspect).ToListAsync(ct);
 
             // ParentRevisionIdsJson is the immutable full selection for a new
             // package. Older authoring callers only supplied the driving delta,
@@ -363,12 +362,13 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
                 var driving = ParentRequirements(change).Distinct().ToHashSet();
                 var removed = RemovedRequirements(change).Distinct().ToHashSet();
                 var parentIds = ParseParentIds(change.ParentRevisionIdsJson, change.DisplayNumber);
-                ExactParentSelectionPolicy.Validate(
-                    VerificationProcedureParentPolicy.Classification(change.ParentKind), parentIds,
+                var parentArtifactKind = VerificationProcedureParentPolicy.ParentArtifactKind(
+                    tcr.ArtifactKey.Discipline, tcr.ArtifactKind);
+                VerificationProcedureParentPolicy.Validate(change.ParentKind, parentArtifactKind, parentIds,
                     change.DerivedRationale, tcr.Discipline == TestChangeReviewDiscipline.System
                         ? "System Procedure"
-                        : "software Case");
-                if (change.ParentKind == VerificationProcedureParentKind.Derived)
+                        : parentArtifactKind == VerificationParentArtifactKind.Case ? "software Procedure" : "software Case");
+                if (VerificationProcedureParentPolicy.NamesNoParents(change.ParentKind))
                     continue;
                 // #726: a software Procedure change's exact parents are Case revisions, never requirement
                 // revisions. They must exist, belong to this Project/level, and be carried by this baseline's
@@ -458,7 +458,7 @@ public sealed class TestProcedureBaselineMaterializer(AeroLinkDbContext db,
     {
         var byRequirement = materialized
             .Where(x => x.Change.Kind != TestProcedureChangeKind.Retire
-                && x.Change.ParentKind != VerificationProcedureParentKind.Derived)
+                && !VerificationProcedureParentPolicy.NamesNoParents(x.Change.ParentKind))
             // Settlement is attributable to the driving/addition delta, not every retained parent in a
             // successor's immutable final selection. A retained parent may be present merely because the
             // successor carries an existing link forward; it must not settle an unrelated NewProcedureRequired
@@ -548,7 +548,7 @@ private static string SourceSnapshotJson(TestChangeReview tcr)
 
     private static IReadOnlyList<Guid> ParentRequirements(TestProcedureChange change)
     {
-        if (change.ParentKind == VerificationProcedureParentKind.Derived)
+        if (VerificationProcedureParentPolicy.NamesNoParents(change.ParentKind))
             return [];
         var json = string.IsNullOrWhiteSpace(change.ParentRevisionIdsJson)
             || change.ParentRevisionIdsJson.Trim() == "[]"
