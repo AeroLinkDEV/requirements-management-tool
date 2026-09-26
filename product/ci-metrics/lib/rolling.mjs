@@ -140,7 +140,19 @@ export function cacheTrend(records) {
   return totals
 }
 
-export function fullGatesPerMerge(mergedPrs, runs) {
+// Jobs a post-merge push runs whether or not it retests the product. Since #1157 (A1), a push of the exact
+// commit the merge queue already proved skips every product job, so counting that run as a full gate
+// overstated the cadence (#1147). The list is the conservative side: a renamed bookkeeping job makes a
+// skipped run count as a gate again, as it did before, rather than hiding a real one.
+const NON_PRODUCT_JOB = /^(Classify changed product areas|CI metrics tooling tests|Warm the Chromium|Full Product evidence aggregate|Aggregate CI metrics)\b/
+
+/** True when a run's jobs (GitHub's jobs API, `filter=all`) show that no product job ran. */
+export function ranNoProductJob(jobs) {
+  if (!Array.isArray(jobs) || jobs.length === 0) return false
+  return jobs.every((job) => job?.conclusion === 'skipped' || NON_PRODUCT_JOB.test(String(job?.name ?? '')))
+}
+
+export function fullGatesPerMerge(mergedPrs, runs, { productSkippedRunIds = new Set() } = {}) {
   const result = []
   for (const pr of Array.isArray(mergedPrs) ? mergedPrs : []) {
     if (!pr.merged_at || typeof pr.merge_commit_sha !== 'string' || pr.merge_commit_sha.length !== 40) continue
@@ -155,6 +167,7 @@ export function fullGatesPerMerge(mergedPrs, runs) {
     const prRuns = []
     const queueRuns = []
     const postMergeRuns = []
+    const postMergeSkipped = []
     for (const run of Array.isArray(runs) ? runs : []) {
       if (typeof run.created_at !== 'string') continue
       const at = Date.parse(run.created_at)
@@ -168,7 +181,8 @@ export function fullGatesPerMerge(mergedPrs, runs) {
       } else if (run.event === 'merge_group' && queuePrimary && Number(queuePrimary[1]) === pr.number && inLifetime) {
         queueRuns.push(run)
       } else if (run.event === 'push' && run.head_sha === pr.merge_commit_sha) {
-        postMergeRuns.push(run)
+        if (productSkippedRunIds.has(run.id)) postMergeSkipped.push(run)
+        else postMergeRuns.push(run)
       }
     }
     const attemptCount = (runs) => runs.reduce((sum, run) => sum + (Number.isInteger(run.run_attempt) && run.run_attempt > 0 ? run.run_attempt : 1), 0)
@@ -180,6 +194,7 @@ export function fullGatesPerMerge(mergedPrs, runs) {
       prRuns: prRuns.length,
       queueRuns: queueRuns.length,
       postMergeRuns: postMergeRuns.length,
+      postMergeSkipped: postMergeSkipped.length,
     })
   }
   return result.sort((a, b) => String(b.mergedAt).localeCompare(String(a.mergedAt))).slice(0, MAX_RECORDS)
@@ -452,9 +467,11 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
     // The distribution leads because the totals do not answer the question anyone asks. A median of 2 with a
     // maximum of 34 says a typical merge costs two full gates and a long tail costs far more, which is the
     // rebase treadmill with a number attached rather than an anecdote.
+    const skippedPushes = fullGates.reduce((sum, entry) => sum + (Number.isInteger(entry.postMergeSkipped) ? entry.postMergeSkipped : 0), 0)
     lines.push(
       `- Full gates per merged PR (${scope}): median ${middle}, p95 ${upper}, max ${worst} ` +
-        `(${totalRuns} runs / ${totalAttempts} attempts in total)`,
+        `(${totalRuns} runs / ${totalAttempts} attempts in total` +
+        `${skippedPushes > 0 ? `; ${skippedPushes} post-merge push(es) skipped the product retest and are not counted` : ''})`,
     )
     lines.push('- Cadence counts are observed Product workflow runs (including failures and selected scopes), not proof of a completed Full gate. Pre-queue attribution uses branch/lifetime; queue attribution uses the primary PR in its ref, not every composed member. Counts cover only the fetched run window; a missing historical stage is not zero lifetime cost.')
   }
@@ -492,7 +509,7 @@ export function buildRollingReport({ records, regressions = [], missing = [], fu
     lines.push('## Full gates per merged PR')
     lines.push('')
     for (const entry of fullGates.slice(0, 20)) {
-      lines.push(`- PR #${escapeMarkdown(String(entry.pr))} (merged ${escapeMarkdown(String(entry.mergedAt).slice(0, 10))}): ${entry.runs} full gate run(s) / ${entry.attempts} attempt(s) (${entry.prRuns} pre-queue, ${entry.queueRuns ?? 0} queue, ${entry.postMergeRuns} post-merge)`)
+      lines.push(`- PR #${escapeMarkdown(String(entry.pr))} (merged ${escapeMarkdown(String(entry.mergedAt).slice(0, 10))}): ${entry.runs} full gate run(s) / ${entry.attempts} attempt(s) (${entry.prRuns} pre-queue, ${entry.queueRuns ?? 0} queue, ${entry.postMergeRuns} post-merge)${entry.postMergeSkipped ? `; ${entry.postMergeSkipped} post-merge push skipped the product retest (queue-proved)` : ''}`)
     }
     lines.push('')
   }
