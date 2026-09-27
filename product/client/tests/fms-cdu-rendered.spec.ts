@@ -100,9 +100,12 @@ test('every physical key on the rendered panel can be clicked and reaches the si
 test('conditions from the bench light the panel annunciators, and FMS failure blanks the display', async ({ page }) => {
   await open(page)
   const lamp = (code: string) => page.locator(`.fmsCduLamp[data-lamp="${code}"]`)
-  await page.getByLabel('GPS lost (dead reckoning)').check()
-  await expect(lamp('POS')).toHaveClass(/\blit\b/)
+  // With GPS lost the FMS updates from radio; only with the DMEs lost as well does it dead reckon and light POS.
+  await page.getByRole('checkbox', { name: /^GPS lost sensor/ }).check()
   await expectLine(page, 13, /^GPS NAV LOST/)
+  await expect(lamp('POS')).not.toHaveClass(/\blit\b/)
+  await page.getByRole('checkbox', { name: /^DME outage/ }).check()
+  await expect(lamp('POS')).toHaveClass(/\blit\b/)
   await page.getByLabel('Subsystem request').check()
   await expect(lamp('MENU_LIGHT')).toHaveClass(/\blit\b/)
 
