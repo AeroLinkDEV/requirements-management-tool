@@ -381,6 +381,14 @@ export default function ProblemReportCenter({
     () => new URLSearchParams(location.search).get("targetBuild") ?? "",
   );
   const refreshSequence = useRef(0);
+  // The queue scope and the shell callback as they are now, not as a long-running open or refresh captured
+  // them (#1203). A late open that reported the target it started under wrote the previous build back into the
+  // address after the reader had changed it; and the shell drops a navigation made through a callback from an
+  // older route, so a late refresh calling its own captured `onSelected` could lose a legitimate clear.
+  const targetFilterRef = useRef(targetFilter);
+  targetFilterRef.current = targetFilter;
+  const onSelectedRef = useRef(onSelected);
+  onSelectedRef.current = onSelected;
   // The reader's latest selection intent, as opposed to the render-scoped `selected` a long-running refresh
   // captured when it started. Opening a record claims it before its request goes out, and saving a new one
   // claims the created record; a refresh claims nothing — it serves the intent it observed when it began,
@@ -570,7 +578,7 @@ export default function ProblemReportCenter({
           // the same filter and the fallback record. Explicit opens and create/action refreshes still push,
           // even when an action causes the changed record to fall out of the current filter and another row
           // becomes the fallback.
-          onSelected(
+          onSelectedRef.current(
             id,
             targetFilter,
             undefined,
@@ -583,7 +591,12 @@ export default function ProblemReportCenter({
         appliedIdRef.current = undefined;
         appliedSnapshotRef.current = undefined;
         if ((requested && !historicalRequested) || hadRecord)
-          onSelected(undefined, targetFilter, undefined, replaceRoute || selectId === undefined);
+          onSelectedRef.current(
+            undefined,
+            targetFilter,
+            undefined,
+            replaceRoute || selectId === undefined,
+          );
       }
     } catch (reason) {
       // A failure is the reader's problem only while the record it was loading is still the reader's
@@ -658,7 +671,9 @@ export default function ProblemReportCenter({
   useEffect(() => {
     const restore = () => {
       setPage(1);
-      setTargetFilter(new URLSearchParams(location.search).get("targetBuild") ?? "");
+      const restored = new URLSearchParams(location.search).get("targetBuild") ?? "";
+      targetFilterRef.current = restored;
+      setTargetFilter(restored);
     };
     addEventListener("popstate", restore);
     return () => removeEventListener("popstate", restore);
@@ -668,6 +683,7 @@ export default function ProblemReportCenter({
     if (value) url.searchParams.set("targetBuild", value);
     else url.searchParams.delete("targetBuild");
     history.pushState({}, "", `${url.pathname}${url.search}`);
+    targetFilterRef.current = value;
     setPage(1);
     setTargetFilter(value);
   };
@@ -685,6 +701,7 @@ export default function ProblemReportCenter({
   const visible = useMemo(() => reports, [reports]);
   const open = async (id: string, snapshotId?: string) => {
     const sequence = ++openSequence.current;
+    const targetAtStart = targetFilterRef.current;
     selectedIdRef.current = id;
     try {
       const detail = await call(
@@ -697,13 +714,16 @@ export default function ProblemReportCenter({
       // that committed while the request was in flight supersedes it. Re-committing a record another path
       // already committed is harmless — and it re-syncs the address, which that other path may have missed.
       if (sequence !== openSequence.current || selectedIdRef.current !== id) return;
+      // Opened under another target build: the queue has moved on, and the refresh the change started decides
+      // whether this record still belongs to it. Committing here would write the old target back.
+      if (targetFilterRef.current !== targetAtStart) return;
       setSelected(detail);
       selectedIdRef.current = detail.id;
       appliedIdRef.current = detail.id;
       appliedSnapshotRef.current = detail.snapshotId;
       setOwner({ userId: detail.responsibleEngineerId, name: detail.responsibleEngineerId });
       setTab("record");
-      onSelected(id, targetFilter, snapshotId);
+      onSelectedRef.current(id, targetFilterRef.current, snapshotId);
     } catch (reason) {
       // An open the reader has already superseded owns nothing: it must not revert the newer selection, and
       // its failure is not the current request's error. A current failure hands the intent back to the
