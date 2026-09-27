@@ -60,7 +60,7 @@
   font-family: "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif;
   font-stretch: condensed;
   font-weight: 600;
-  font-size: 2.05cqw;
+  font-size: max(12px, 2.05cqw);
   letter-spacing: 0.01em;
   /* Screen-printed paint on a slightly glossy key. */
   text-shadow: 0 0.08cqw 0 rgba(0, 0, 0, 0.6);
@@ -76,25 +76,26 @@
 
 .fmsCduKey.role-numeric[data-fn="PLUSMINUS"] .legend,
 .fmsCduKey.role-numeric[data-fn="SP"] .legend {
-  font-size: 2.15cqw;
+  font-size: max(12px, 2.15cqw);
 }
 
 .fmsCduKey.role-alpha[data-fn="CLR"] .legend {
-  font-size: 2.05cqw;
+  font-size: max(12px, 2.05cqw);
 }
 
+/* The product's 12px readability floor holds on the panel too; the keys have room for it at full size. */
 .fmsCduKey .legend.long {
-  font-size: 1.9cqw;
+  font-size: max(12px, 1.9cqw);
 }
 
 .fmsCduKey .legend.two {
   align-items: flex-start;
-  font-size: 1.75cqw;
+  font-size: max(12px, 1.75cqw);
 }
 
 .fmsCduKey .legend.two .second {
   margin-left: 1.3cqw;
-  font-size: 1.55cqw;
+  font-size: max(12px, 1.55cqw);
 }
 
 .fmsCduKey .legend.compass span:first-child {
@@ -138,7 +139,7 @@
   font-family: "Arial Narrow", "Roboto Condensed", Arial, sans-serif;
   font-stretch: condensed;
   font-weight: 700;
-  font-size: 2cqw;
+  font-size: max(12px, 2cqw);
   letter-spacing: 0.02em;
   /* An unlit legend is just visible through the dark filter glass. */
   color: rgba(120, 120, 118, 0.42);
@@ -197,8 +198,8 @@
   transform: scaleX(1.38);
 }
 
-.cduCell.cdu-medium { font-size: 2.55cqw; }
-.cduCell.cdu-small { font-size: 2.15cqw; }
+.cduCell.cdu-medium { font-size: max(12px, 2.55cqw); }
+.cduCell.cdu-small { font-size: max(12px, 2.15cqw); }
 
 .cdu-white { color: #f4f4f0; }
 .cdu-cyan { color: #34e7ff; }

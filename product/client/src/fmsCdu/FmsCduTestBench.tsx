@@ -41,7 +41,8 @@ export default function FmsCduTestBench() {
   const reset = () => { setSession(value => value + 1); setLog([]); };
 
   return (
-    <section className="fmsBench">
+    // A <main>, as every workspace page is: the shell frames and densifies pages by that element.
+    <main className="fmsBench" aria-label="FMS Test Bench">
       <header className="fmsBenchHeader">
         <div>
           <span className="fmsBenchEyebrow">TEST BENCH</span>
@@ -108,6 +109,6 @@ export default function FmsCduTestBench() {
           </section>
         </aside>
       </div>
-    </section>
+    </main>
   );
 }

@@ -29,7 +29,7 @@
 }
 
 .fmsBenchEyebrow {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--teal-700, #176c63);
@@ -98,6 +98,7 @@
 
 .fmsBenchSide h2 small {
   margin-left: 6px;
+  font-size: 12px;
   color: var(--ink-500, #6b7686);
   font-weight: 500;
 }

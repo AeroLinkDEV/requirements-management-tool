@@ -35,7 +35,7 @@ test('primary navigation separates generated data, managed documents, code and p
   await expect(reports).toBeVisible()
   await expect(nav.locator('.navStandalone details')).toHaveCount(0)
   const standaloneNames=await nav.locator('.navStandalone a').evaluateAll(items=>items.map(item=>item.getAttribute('aria-label')))
-  expect(standaloneNames).toEqual(['Documentation Center','Problem Reports'])
+  expect(standaloneNames).toEqual(['Documentation Center','Problem Reports','FMS Test Bench / CMA-9000 CDU'])
 
   await expect(verification.getByRole('link',{name:'System Test Change Requests'})).toBeVisible()
   await expect(verification.getByRole('link',{name:'System Downstream Assessments'})).toHaveCount(0)
