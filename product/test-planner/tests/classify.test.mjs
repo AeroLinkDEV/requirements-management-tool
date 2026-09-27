@@ -78,7 +78,6 @@ const DOCUMENTATION_REFERENCES = {
   'product/client/tests/code-workspace-rendered.spec.ts': { reads: false, why: FIXTURE, refs: ['README.md'] },
   'product/client/tests/design-system.spec.ts': { reads: false, why: COMMENT, refs: ['DECISIONS_AND_OPEN_QUESTIONS.md'] },
   'product/client/tests/product-claims.spec.ts': { reads: false, why: COMMENT, refs: ['docs/product-definition/SCOPE_AND_BOUNDARIES.md'] },
-  'product/client/tests/project-features.spec.ts': { reads: false, why: 'a screenshot output name that ends in command-center.png', refs: ['docs/overview-video/shots/command-center.png'] },
   'product/scripts/AeroLinkBootstrap.Tests.ps1': { reads: false, why: 'writes files into a disposable fixture repository', refs: ['directory', 'README.md'] },
   'product/scripts/AeroLinkRemoteDemo.Tests.ps1': { reads: false, why: COMMENT, refs: ['docs/REMOTE_DEMO_OPERATOR.md'] },
   'product/scripts/AeroLinkTransitionAuthority.Tests.ps1': { reads: false, why: 'writes a stand-in file into a disposable source root', refs: ['README.md'] },
@@ -89,9 +88,7 @@ const DOCUMENTATION_REFERENCES = {
   'product/test-planner/tests/parity.test.mjs': { reads: false, why: FIXTURE, refs: ['directory', 'README.md', 'product/docs/OPERATIONS.md'] },
   'product/test-planner/tests/plan-cli.test.mjs': { reads: false, why: FIXTURE, refs: ['README.md'] },
   'product/tests/AeroLink.Api.Tests/GitLabMetadataApiTests.cs': { reads: false, why: FIXTURE, refs: ['README.md'] },
-  'product/tests/AeroLink.Infrastructure.Tests/DocumentReviewEmailTests.cs': { reads: false, why: 'DocumentReviewEmailTemplate.Html(...) matches template.html case-insensitively', refs: ['docs/overview-video/template.html'] },
   'product/tests/AeroLink.Infrastructure.Tests/FmsUpstreamRestoredCopyQualificationTests.cs': { reads: false, why: COMMENT, refs: ['product/docs/OPERATIONS.md'] },
-  'product/tests/AeroLink.Infrastructure.Tests/NotificationOutboxTests.cs': { reads: false, why: 'DocumentReviewEmailTemplate.Html(...) matches template.html case-insensitively', refs: ['docs/overview-video/template.html'] },
   'product/tests/AeroLink.Infrastructure.Tests/ProductLinePublicationTests.cs': { reads: false, why: 'a comment naming a `showcase` variable', refs: ['directory'] },
   'product/tests/AeroLink.Infrastructure.Tests/ReleasedSyntheticSourceSupplementServiceTests.cs': { reads: false, why: FIXTURE, refs: ['README.md'] },
 }
@@ -100,6 +97,27 @@ const TEST_SOURCE = /^(?:product\/tests\/|product\/client\/tests\/|product\/(?:t
 // A string that starts at a documentation root, relative or joined segment by segment. Case-sensitive: the
 // roots are lower case on disk, and "Design" in a fixture is not a path.
 const DOCUMENTATION_DIRECTORY = /["'`](?:\.\.[/\\])*(?:docs|design|showcase|product[/\\]docs|\.agents|\.claude|\.codex)(?:["'`]|[/\\])/
+
+// A documentation path or name counts only as a whole one: `standalone-release-readiness.png` is not a reference to
+// `release-readiness.png`, and `mydocs/readme.md` is not `docs/readme.md` (#1204). A relative `../docs/x.md` still
+// is, because a path separator may precede the match. Text is compared lower case.
+export function mentionsWhole(text, name) {
+  for (let at = text.indexOf(name); at >= 0; at = text.indexOf(name, at + 1)) {
+    const before = at === 0 ? '' : text[at - 1]
+    const after = text[at + name.length] ?? ''
+    if (!/[a-z0-9_.-]/.test(before) && !/[a-z0-9_-]/.test(after)) return true
+  }
+  return false
+}
+
+test('a documentation name counts only as a whole name', () => {
+  assert.equal(mentionsWhole("outputpath('standalone-release-readiness.png')", 'release-readiness.png'), false)
+  assert.equal(mentionsWhole('mydocs/readme.md', 'docs/readme.md'), false)
+  assert.equal(mentionsWhole("path.combine(root, \"docs\", \"release-readiness.png\")", 'release-readiness.png'), true)
+  assert.equal(mentionsWhole('shots/release-readiness.png', 'release-readiness.png'), true)
+  assert.equal(mentionsWhole("'../../docs/readme.md'", 'docs/readme.md'), true)
+  assert.equal(mentionsWhole('see readme.md.', 'readme.md'), true)
+})
 
 test('every documentation file a test source references is accounted for', () => {
   const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
@@ -120,7 +138,8 @@ test('every documentation file a test source references is accounted for', () =>
       const normalized = path.toLowerCase()
       // A full path always counts. A bare file name counts only when no other tracked file shares it, since
       // `Path.Combine("docs", name)` names the file without its path.
-      return text.includes(normalized) || (nameCount.get(baseName(path)) === 1 && text.includes(baseName(path)))
+      return mentionsWhole(text, normalized)
+        || (nameCount.get(baseName(path)) === 1 && mentionsWhole(text, baseName(path)))
     })
     if (DOCUMENTATION_DIRECTORY.test(raw)) refs.unshift('directory')
     if (refs.length > 0) actual[source] = refs
