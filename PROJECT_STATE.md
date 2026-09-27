@@ -391,8 +391,18 @@ display unit for engineers.
   (including CLR held for one second) and the physical keyboard.
 - Today a **scripted simulation** drives the display (`product/client/src/fmsCdu/scriptedFms.ts`). It implements
   the manual's rules for scratchpad entry, CLR/DELETE, line select entry and copy, MOD/ACT with EXEC and ERASE,
-  paging, BRT and the MSG and EXEC annunciators. Its pages show a fixed demonstration flight plan, it computes no
-  navigation, and it is labelled as a simulation.
+  paging, BRT and the MSG and EXEC annunciators. It also models DIRECT-TO (with route discontinuity), holds with
+  their standard entry and status, the VNAV approach path with the glidepath-angle alerts, the SQUARE, LADDER and
+  SECTOR search patterns, the tactical approach, HOVER and TIMER. Courses and distances come from a small
+  demonstration navigation database, and the aircraft moves only when the bench sequences it to the next
+  waypoint. It is labelled as a simulation and is not a navigation computer. The ATC, FMC COMM and GSM/SMS pages
+  are representative only (no datalink) and say so on screen.
+- The bench injects conditions that light the variation's annunciators and change the pages (FMS failure, GPS
+  loss and dead reckoning, RNP, NPA, offset, independent operation, GSM, SMS, ATC uplink, radio transmit,
+  subsystem request) and raises any alert from the manual's alert message list.
+- The bench has Day, Night and NVG cockpit lighting: backlit key legends (NVIS green for NVG), NVIS-compatible
+  annunciators, and display luminance from the light sensor (an ambient-light control) combined with BRT; NVG
+  holds the display between 0.1 and 3 fL.
 - The panel talks only to the `CduBackend` interface, so the real CMA-9000 operational program can replace the
   simulation later. The bench's key event log is where test-procedure integration will attach; it is not
   integrated with test procedures or evidence today.
