@@ -417,3 +417,84 @@ test('an implicit zero-row target clear replaces its history entry', async ({ pa
   await expect(targetBuild()).toHaveValue(releasedOption!)
   await expect(page.locator('.prList').getByText(title)).toHaveCount(0)
 })
+
+// #1203: an open still in flight when the reader changes the target build belongs to the previous queue scope.
+// It used to commit late and report the target it started under, writing the old build back into the address;
+// under load that left the report selected under a target it does not belong to.
+test('an open still in flight when the target changes never writes the previous target back', async ({ page, request }) => {
+  test.setTimeout(240_000)
+  await page.addInitScript(() => {
+    const writes: string[] = []
+    ;(window as unknown as { __writes: string[] }).__writes = writes
+    for (const method of ['pushState', 'replaceState'] as const) {
+      const original = history[method].bind(history)
+      history[method] = (data: unknown, unused: string, url?: string | URL | null) => {
+        writes.push(String(url ?? ''))
+        return original(data, unused, url)
+      }
+    }
+  })
+  await apiLogin(request)
+  const showcase = await showcaseSeed(request)
+  const stamp = Date.now()
+  const title = `In-flight open report ${stamp}`
+  const created = await request.post(`${apiBase}/api/problem-reports`, {
+    data: {
+      category: 'CodeFunctional', projectId: showcase.projectId,
+      releaseId: showcase.activeReleaseId,
+      title,
+      problem: 'This report is being opened when the queue moves to another target.',
+    },
+  })
+  expect(created.ok(), await created.text()).toBeTruthy()
+  const reportId = (await created.json()).id as string
+
+  await login(page)
+  await page.getByRole('link', { name: 'Problem Reports' }).click()
+  await expect(page.getByRole('heading', { name: 'Problem Report queue' })).toBeVisible({ timeout: 30_000 })
+  await page.getByPlaceholder('Number, title, description, root cause').fill(String(stamp))
+  await page.waitForResponse(response =>
+    response.url().includes('/api/problem-reports?') &&
+    new URL(response.url()).searchParams.get('search') === String(stamp))
+  const targetBuild = () => page.locator('.prFilters').getByLabel('Target build')
+  const activeOption = showcase.activeReleaseId
+  const releasedOption = await targetBuild().locator('option').filter({ hasText: 'released' }).getAttribute('value')
+  expect(releasedOption).toBeTruthy()
+  await Promise.all([
+    page.waitForResponse(response => response.url().includes('/api/problem-reports?') &&
+      new URL(response.url()).searchParams.get('targetReleaseId') === activeOption),
+    targetBuild().selectOption(activeOption),
+  ])
+  await expect(page.locator('.prList').getByText(title)).toBeVisible()
+
+  // The open's detail request is held until after the target change, and the new scope's list longer still, so
+  // the open lands after the change but before the refresh that decides the new scope. The new scope is empty.
+  let changed = false
+  await page.route(url => url.pathname === `/api/problem-reports/${reportId}`, async route => {
+    if (!changed) await new Promise(resolve => setTimeout(resolve, 2500))
+    await route.continue()
+  })
+  await page.route(url => url.pathname === '/api/problem-reports' && url.searchParams.get('targetReleaseId') === releasedOption,
+    async route => {
+      await new Promise(resolve => setTimeout(resolve, 5000))
+      await route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ items: [], page: 1, pageSize: 10, totalCount: 0, totalPages: 0 }) })
+    })
+  await page.route(url => url.pathname === '/api/problem-reports/dashboard' && url.searchParams.get('targetReleaseId') === releasedOption,
+    route => route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ summary: { total: 0, active: 0, closureAwaitingApproval: 0, closed: 0, releaseBlockers: 0, waivedBlockers: 0 } }) }))
+
+  await page.locator('.prList').getByText(title).click()
+  const writesBeforeChange = await page.evaluate(() => (window as unknown as { __writes: string[] }).__writes.length)
+  changed = true
+  await targetBuild().selectOption(releasedOption!)
+  await expect(page).toHaveURL(new RegExp(`targetBuild=${releasedOption}`))
+  // Long enough for the held open and then the refresh to land.
+  await page.waitForTimeout(7000)
+  const writesAfterChange = (await page.evaluate(() => (window as unknown as { __writes: string[] }).__writes))
+    .slice(writesBeforeChange)
+  expect(writesAfterChange.filter(url => url.includes(`targetBuild=${activeOption}`)), writesAfterChange.join('\n')).toEqual([])
+  await expect(page).toHaveURL(new RegExp(`targetBuild=${releasedOption}`))
+  await expect(page).not.toHaveURL(new RegExp(reportId))
+  await expect(targetBuild()).toHaveValue(releasedOption!)
+})
