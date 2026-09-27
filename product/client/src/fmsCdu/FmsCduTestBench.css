@@ -46,6 +46,7 @@
 
 .fmsBenchVariant select {
   min-width: 300px;
+  max-width: 100%;
   padding: 8px 10px;
   border: 1px solid #d5dce6;
   border-radius: 8px;
@@ -64,12 +65,29 @@
   .fmsBenchBody { grid-template-columns: 1fr; }
 }
 
+.fmsBenchMain {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
 .fmsBenchPanel {
   display: flex;
   justify-content: center;
   padding: 18px;
   border-radius: 14px;
   background: radial-gradient(ellipse at 50% 30%, #3a4250 0%, #20252e 70%);
+  transition: background 200ms ease;
+}
+
+/* The stage darkens with the cockpit, so the panel's own lighting carries the scene. */
+.fmsBenchPanel.mode-night {
+  background: radial-gradient(ellipse at 50% 30%, #1a1e25 0%, #0c0e12 70%);
+}
+
+.fmsBenchPanel.mode-nvg {
+  background: radial-gradient(ellipse at 50% 30%, #0e1110 0%, #050606 70%);
 }
 
 .fmsBenchLoading {
@@ -81,26 +99,137 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
 }
 
-.fmsBenchSide section {
+.fmsBenchCard {
   padding: 14px 16px;
   border: 1px solid #dfe4eb;
   border-radius: 12px;
   background: white;
 }
 
-.fmsBenchSide h2 {
+.fmsBenchCard h2 {
   margin: 0 0 10px;
   font-size: 13px;
   color: var(--ink-900, #14212e);
 }
 
-.fmsBenchSide h2 small {
+.fmsBenchCard h2 small {
   margin-left: 6px;
   font-size: 12px;
   color: var(--ink-500, #6b7686);
   font-weight: 500;
+}
+
+.fmsBenchReadout {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--ink-600, #4b5868);
+}
+
+.fmsBenchReadout strong {
+  color: var(--ink-900, #14212e);
+  font-variant-numeric: tabular-nums;
+}
+
+.fmsBenchHint {
+  display: block;
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--ink-500, #6b7686);
+}
+
+.fmsBenchActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fmsBenchModes {
+  display: inline-flex;
+  margin-bottom: 12px;
+  border: 1px solid #c9d3de;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.fmsBenchModes label {
+  padding: 6px 16px;
+  font: 600 12px var(--font-body);
+  color: var(--ink-600, #4b5868);
+  background: #f5f8fb;
+  cursor: pointer;
+}
+
+.fmsBenchModes label + label {
+  border-left: 1px solid #c9d3de;
+}
+
+.fmsBenchModes label.selected {
+  color: white;
+  background: var(--teal-700, #176c63);
+}
+
+.fmsBenchModes label:focus-within {
+  outline: 2px solid var(--teal-500, #1b8a7d);
+  outline-offset: -2px;
+}
+
+.fmsBenchModes input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fmsBenchAmbient {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-600, #4b5868);
+}
+
+.fmsBenchAmbient input {
+  width: 100%;
+  accent-color: var(--teal-700, #176c63);
+}
+
+.fmsBenchConditions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fmsBenchConditions label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
+  font-size: 12px;
+  color: var(--ink-900, #14212e);
+  cursor: pointer;
+}
+
+.fmsBenchConditions input {
+  margin: 2px 0 0;
+  accent-color: var(--teal-700, #176c63);
+}
+
+.fmsBenchConditions small {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--teal-700, #176c63);
+}
+
+.fmsBenchConditions small.absent {
+  color: var(--ink-500, #6b7686);
+  font-style: italic;
 }
 
 .fmsBenchAlert {
@@ -109,18 +238,23 @@
   margin-bottom: 10px;
 }
 
-.fmsBenchAlert input {
+.fmsBenchAlert input,
+.fmsBenchAlert select {
   flex: 1;
   min-width: 0;
   padding: 7px 9px;
   border: 1px solid #d5dce6;
   border-radius: 8px;
+  background: white;
   font: 13px var(--font-body);
+}
+
+.fmsBenchAlert input {
   text-transform: uppercase;
 }
 
 .fmsBenchAlert button,
-.fmsBenchReset {
+.fmsBenchActions button {
   padding: 7px 12px;
   border: 1px solid #c9d3de;
   border-radius: 8px;
@@ -130,7 +264,8 @@
   cursor: pointer;
 }
 
-.fmsBenchAlert button:disabled {
+.fmsBenchAlert button:disabled,
+.fmsBenchActions button:disabled {
   opacity: 0.5;
   cursor: default;
 }
