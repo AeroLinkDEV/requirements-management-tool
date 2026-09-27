@@ -89,7 +89,7 @@ The FAA advisory circulars AC 20-138D and AC 90-105A would not download, so I us
 
 ## Revised plan for the remaining work
 
-The order is revised by what airlines and certification treat as core. The gap tables above are the 27 September baseline; steps 2 to 6 were built and shipped together, and `PROJECT_STATE.md` describes what the bench does now. Steps 7 and 8 remain.
+The order is revised by what airlines and certification treat as core. The gap tables above are the 27 September baseline; steps 2 to 7 are built, and `PROJECT_STATE.md` describes what the bench does now. Step 8 remains.
 
 | PR | Scope |
 |---|---|
@@ -99,7 +99,7 @@ The order is revised by what airlines and certification treat as core. The gap t
 | 4 (done) | **Lateral guidance fidelity:**<br>• path terminators (CF, DF, CA, VA and FA conditional legs; VI and VM vector legs; FM; RF arcs; HA, HF and HM holds);<br>• INTC CRS and ABEAM PTS;<br>• a parallel offset that is flown, with start and end;<br>• leg bypass;<br>• selected heading versus managed LNAV, with arm and capture;<br>• a flight mode annunciator strip. |
 | 5 (done) | **Navigation sensors, RNP and approaches:**<br>• GPS/DME/VOR/inertial blending with priority and reversion;<br>• NAV STATUS and NAV OPTIONS pages, including navaid inhibit;<br>• DME autotune;<br>• computed ANP;<br>• default RNP by phase, time to alert and UNABLE RNP;<br>• on-approach logic;<br>• POS SHIFT;<br>• RAIM and SBAS;<br>• approach types (LNAV, LNAV/VNAV, LPV) and go-around. |
 | 6 (done) | **VNAV and performance:**<br>• speed and altitude restrictions;<br>• VNAV PTH and VNAV SPD;<br>• top and end of descent;<br>• DES NOW;<br>• UNABLE NEXT ALTITUDE;<br>• winds;<br>• ETA and fuel predictions at each waypoint;<br>• fuel alerts;<br>• RTA;<br>• cold-temperature correction;<br>• altitude formats and transition altitude. |
-| 7 | **Tactical, maintenance and dual FMS:**<br>• rendezvous and moving waypoints;<br>• tactical descent;<br>• AIRAC active and inactive cycles, DATABASE OUT OF DATE, temporary and supplemental databases;<br>• built-in test and maintenance pages;<br>• cross-side synchronisation and independent mode. |
+| 7 (done) | **Tactical, maintenance and dual FMS:**<br>• rendezvous and moving waypoints;<br>• tactical descent;<br>• AIRAC active and inactive cycles, DATABASE OUT OF DATE, temporary and supplemental databases;<br>• built-in test and maintenance pages;<br>• cross-side synchronisation and independent mode. |
 | 8 | **Scenarios and AeroLink integration:**<br>• scripted scenarios (for example, GPS lost 2 NM before the final approach fix);<br>• record and playback;<br>• screen assertions;<br>• links to test procedures and evidence. |
 
 Honesty rule, unchanged: the simulator stays labelled as a simulation. The demonstration navigation data is invented. Where the CMA-9000 manual differs from this generic airline practice, the manual wins; where the manual is silent, the behaviour above is the default.

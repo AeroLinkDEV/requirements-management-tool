@@ -223,7 +223,10 @@ export class FlightSimulator {
     // The final approach path first, then the VNAV descent path, then climbing or holding the target altitude. A hold
     // or an altitude-terminated leg keeps its own altitude.
     const ownAltitude = this.holdPlan || fms.activeRoute.legs[0]?.kind === "cond";
-    const onPath = this.pathVerticalSpeed(groundSpeed) ?? (ownAltitude ? null : this.descentVerticalSpeed(groundSpeed));
+    // A tactical descent flies its own angle down to its altitude.
+    const tdnAngle = fms.tdn.active ? fms.tdnAngle() : null;
+    const tdn = tdnAngle === null ? null : -groundSpeed * 101.27 * Math.tan(rad(tdnAngle));
+    const onPath = tdn ?? this.pathVerticalSpeed(groundSpeed) ?? (ownAltitude ? null : this.descentVerticalSpeed(groundSpeed));
     const verticalSpeed = onPath ?? vs;
     const altitude = fms.altitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
@@ -275,6 +278,7 @@ export class FlightSimulator {
     const hold = this.fms.activeRoute.hold;
     if (this.holdPlan && hold) return constraintAltitude(hold.altitude) ?? this.fms.altitude;
     if (leg?.kind === "cond" && leg.altitude !== undefined) return Math.max(leg.altitude, this.fms.altitude);
+    if (this.fms.tdn.active || this.fms.tdn.level) return this.fms.tdn.targetAltitude;
     // VNAV: in the climb, the cruise altitude or the lowest restriction ahead; in the descent, the planned altitude at
     // the active waypoint.
     const profile = this.fms.profile();

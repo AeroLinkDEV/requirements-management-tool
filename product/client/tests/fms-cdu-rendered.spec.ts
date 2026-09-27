@@ -166,3 +166,20 @@ test('Fly moves the aircraft along the route on the map at the chosen rate, and 
   await page.getByLabel('Map range').selectOption('80')
   await expect(map).toHaveAttribute('aria-label', /80 NM range/)
 })
+
+test('IDENT shows both database cycles, and the maintenance page follows a self test and independent operation', async ({ page }) => {
+  await open(page)
+  await expectLine(page, 4, /^DEMO-2609\s+03SEP-30SEP$/)
+  await expectLine(page, 6, /^DEMO-2610\s+01OCT-28OCT$/)
+  await key(page, 'INIT_REF').click()
+  await key(page, 'LSK6L').click()
+  await expectLine(page, 0, /^MAINTENANCE/)
+  await key(page, 'LSK2L').click()
+  await expectLine(page, 4, /(IN PROG|PASS)$/)
+  // The self test runs for five seconds of simulation time.
+  await expect.poll(async () => (await screenLines(page))[4] ?? "", { timeout: 15_000 }).toMatch(/PASS$/)
+  await expectLine(page, 6, /^DUAL SYNC\s+RTE MATCH$/)
+  await page.getByLabel('Independent operation').check()
+  await expectLine(page, 6, /^INDEPENDENT\s+RTE MATCH$/)
+  await expectLine(page, 8, /^\d{4}Z X-SIDE SYNC LOST/)
+})

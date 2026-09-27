@@ -275,15 +275,29 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
           lines[10] = { left: medium(entry.runways.map(r => r.ident.slice(2)).join(" ").slice(0, 24)) };
         }
       }
-      lines[11] = { left: small(` NAV DATA ${fms.navdb.cycle.id} ${fms.navdb.cycle.from}-${fms.navdb.cycle.to}`.slice(0, 24), "green") };
+      // An ident not in the database can be defined here, in the temporary database, by its position.
+      if (!entry && fms.navDataQuery) {
+        lines[2] = { left: { text: fms.navDataQuery }, right: small("NOT IN DATA BASE", "amber") };
+        lines[3] = caption(" DEFINE POSITION");
+        lines[4] = { left: boxes(15) };
+      }
+      lines[11] = { left: small(` NAV DATA ${fms.activeCycle.id}`, "green") };
       lines[12] = { left: back("INDEX") };
       return lines;
     },
     lsk: (fms, side, row, scratch) => {
       if (side === "L" && row === 6) { fms.open("INIT_REF"); return; }
+      if (side === "L" && row === 2 && scratch && fms.navDataQuery && !fms.navdb.find(fms.navDataQuery).length) {
+        const resolved = /^[NS]\d{2}/.test(scratch) ? fms.resolveWaypoint(scratch) : "invalid";
+        if (typeof resolved === "string" || "select" in resolved) return "invalid";
+        const at = fms.coordinates(resolved.ident)!;
+        fms.forgetPilot(resolved.ident);
+        fms.defineTemporary(fms.navDataQuery, at);
+        fms.setScratch("");
+        return;
+      }
       if (side !== "L" || row !== 1 || !scratch) return;
       if (!WAYPOINT.test(scratch)) return "invalid";
-      if (!fms.navdb.find(scratch).length) return "not-in-database";
       fms.navDataQuery = scratch;
       fms.setScratch("");
     },

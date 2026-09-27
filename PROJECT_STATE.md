@@ -430,10 +430,21 @@ display unit for engineers.
     windows, flight levels); a vertical profile with top and end of descent, climbs that level at constraints,
     UNABLE NEXT ALT, DES NOW and the VNAV descent path; winds; ETA and fuel predictions with FUEL RESERVE and
     NOT ENOUGH FUEL; cold temperature correction.
+  - **Tactical functions**: RENDEZVOUS (arrive at a waypoint at a time, flying the required speed within crew
+    limits, with RENDEZVOUS UNACHIEVABLE), moving waypoints that advance on a track and speed, and the tactical
+    descent (TDN) at a computed angle to a target altitude before a reference point, which levels there until
+    cancelled and is refused as TDN NOT POSSIBLE above the maximum angle.
+  - **Database cycles, maintenance and dual operation**: IDENT shows the active and inactive navigation database
+    cycles with their effective dates and swaps them; past the active cycle's end the FMS raises DATABASE OUT OF
+    DATE; REF NAV DATA defines idents in a temporary database; a loaded ARINC 424 file becomes the active cycle.
+    The MAINT page runs a self test that fails while a fault is present and keeps a fault log. In dual operation
+    the executed route is cross-loaded to the other FMS; in independent operation the sides can differ, and they
+    resynchronise when it ends.
   - The earlier pages: HOLD, the SQUARE, LADDER and SECTOR search patterns, the tactical approach, HOVER and
     TIMER. The ATC, FMC COMM and GSM/SMS pages are representative only (no datalink) and say so on screen.
 - A **flight simulation** (`flight.ts`) flies the active route as an FMS-coupled autopilot would, in real or
-  accelerated time. It is a point-mass model with a bank-limited turn, not a flight dynamics model. A north-up
+  accelerated time. It is a point-mass model with a bank-limited turn, not a flight dynamics model. Pause is a
+  position freeze: the clock keeps running, so timers and the self test still complete. A north-up
   **navigation map** (route, holds, patterns, offset track, navaids and airports, and the true position when the
   FMS has drifted), a flight mode annunciator and a guidance readout sit beside the CDU.
 - The bench injects conditions that light the variation's annunciators and change the pages (FMS failure, GPS

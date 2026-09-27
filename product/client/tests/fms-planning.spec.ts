@@ -175,7 +175,7 @@ test('a duplicate ident asks SELECT DESIRED WPT, and the chosen one is inserted'
   expect(unit.coordinates('BOBTU')!.lat).toBeCloseTo(45.21, 2)
 })
 
-test('REF NAV DATA shows a navaid frequency, an airport and its runways, and refuses an unknown ident', () => {
+test('REF NAV DATA shows a navaid frequency, an airport and its runways, and defines an unknown ident in the temporary database', () => {
   const unit = fms()
   press(unit, 'INIT_REF', 'LSK1R')
   expect(lines(unit)[0]).toMatch(/^REF NAV DATA/)
@@ -186,7 +186,15 @@ test('REF NAV DATA shows a navaid frequency, an airport and its runways, and ref
   expect(lines(unit)[2]).toMatch(/AIRPORT$/)
   expect(lines(unit)[10]).toMatch(/^06L 24R 06R 24L 10 28/)
   enter(unit, 'ZZZZ', 'LSK1L')
-  expect(scratch(unit)).toBe('NOT IN DATA BASE')
+  expect(lines(unit)[2]).toMatch(/^ZZZZ\s+NOT IN DATA BASE$/)
+  expect(lines(unit)[3]).toMatch(/DEFINE POSITION/)
+  enter(unit, 'N4530.0W07500.0', 'LSK2L')
+  expect(unit.coordinates('ZZZZ')).toEqual({ lat: 45.5, lon: -75 })
+  expect(unit.pilotWaypoints.map(p => [p.ident, p.definition])).toEqual([['ZZZZ', 'TEMP DB']])
+  // Defined, it can be flown to like any waypoint.
+  unit.press('LEGS')
+  enter(unit, 'ZZZZ', 'LSK2L')
+  expect(idents(unit)[1]).toBe('ZZZZ')
 })
 
 test('the secondary flight plan takes a company route and becomes a modification on ACTIVATE', () => {

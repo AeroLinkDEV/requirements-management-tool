@@ -53,11 +53,12 @@ export default function FmsCduTestBench() {
   const [headingInput, setHeadingInput] = useState("090");
   const variant = variantById(variantId);
 
-  // A quarter-second loop flies the aircraft while playing; paused, time stands still but timers are checked.
+  // A quarter-second loop flies the aircraft while playing. Paused is a position freeze: the aircraft stands still but
+  // the clock runs in real time, as a cockpit clock does, so timers and a self test still complete.
   useEffect(() => {
     const interval = 250;
     const timer = window.setInterval(() => {
-      if (!playing) { backend.tick(); return; }
+      if (!playing) { simTime.current += interval; backend.tick(); return; }
       const dt = (interval / 1000) * rate;
       simTime.current += dt * 1000;
       sim.step(dt);
