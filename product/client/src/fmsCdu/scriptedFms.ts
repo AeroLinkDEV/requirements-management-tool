@@ -8,6 +8,8 @@ import {
   type SarPattern, type Uplink,
 } from "./fmsModel";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
+import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
+import { NAV_PAGES } from "./navPages";
 import { PLANNING_PAGES } from "./planningPages";
 import { composeRoute, enrouteLegs, findProcedure } from "./procedures";
 import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line } from "./screen";
@@ -25,7 +27,7 @@ import type { CduFunction } from "./variants";
  * labelled as a simulation on its IDENT page and is not a navigation computer.
  */
 
-const PAGES: Record<PageId, Page> = { ...CORE_PAGES, ...PLANNING_PAGES, ...TACTICAL_PAGES, ...DATALINK_PAGES };
+const PAGES: Record<PageId, Page> = { ...CORE_PAGES, ...PLANNING_PAGES, ...NAV_PAGES, ...TACTICAL_PAGES, ...DATALINK_PAGES };
 
 export type WaypointResolution = { ident: string } | { select: string } | "invalid" | "not-in-database";
 
@@ -62,6 +64,17 @@ export class ScriptedFms implements CduBackend {
   private lastBrt = -Infinity;
   private squawkIdentUntil = 0;
   private here: LatLon = { ...START_POSITION };
+  /** Where the aircraft really is; here is where the FMS believes it is. */
+  private truth: LatLon = { ...START_POSITION };
+  /** The FMS position error, NM east and north of the true position. */
+  private error = { x: 0, y: 0 };
+  private nav = {
+    mode: "GPS" as NavMode, anp: 0.05, dmes: [] as string[], vor: null as string | null, rnpManual: null as number | null,
+    unableSince: null as number | null, unableAlerted: false, integrityAlerted: false, approachIntegrityAlerted: false, armAlerted: false,
+  };
+  private armedApproach = false;
+  private inhibited: string[] = [];
+  private gpsSelected = true;
   private injected = new Set<ConditionId>();
   private call: { state: "none" | "ringing" | "active"; from: string; since: number } = { state: "none", from: "", since: 0 };
   private messages: { from: string; text: string; at: Date; read: boolean }[] = [];
@@ -114,7 +127,10 @@ export class ScriptedFms implements CduBackend {
 
   private readonly clock: () => Date;
 
-  constructor(clock: () => Date = () => new Date()) { this.clock = clock; }
+  constructor(clock: () => Date = () => new Date()) {
+    this.clock = clock;
+    this.updateNavigation(0);
+  }
 
   // ------------------------------------------------------------------ CduBackend
 
@@ -134,11 +150,16 @@ export class ScriptedFms implements CduBackend {
     if (this.unacknowledged) lamps.add("MSG");
     if (this.modified) lamps.add("EXEC");
     const lampFor: Partial<Record<ConditionId, Lamp>> = {
-      gpsLost: "POS", rnpExceeded: "RNP", npa: "NPA", offset: "OFST", independent: "IND", gsmCall: "GSM", sms: "SMS",
+      offset: "OFST", independent: "IND", gsmCall: "GSM", sms: "SMS",
       atcUplink: "ATC", tx1: "TX1", tx2: "TX2", vuhf: "V/UHF", hf: "HF", menuRequest: "MENU",
     };
     for (const [condition, lamp] of Object.entries(lampFor) as [ConditionId, Lamp][])
       if (this.hasCondition(condition)) lamps.add(lamp);
+    // Navigation annunciators follow the navigation state: POS in dead reckoning, RNP when ANP exceeds RNP, NPA on a
+    // non-precision approach. The bench can still force RNP and NPA on.
+    if (this.nav.mode === "DR") lamps.add("POS");
+    if (this.rnpExceeded) lamps.add("RNP");
+    if (this.hasCondition("npa") || this.nonPrecisionApproach) lamps.add("NPA");
     return lamps;
   }
 
@@ -195,8 +216,8 @@ export class ScriptedFms implements CduBackend {
         break;
       default:
         if (on) this.injected.add(id); else this.injected.delete(id);
-        if (on && id === "gpsLost") this.alert(alert("GPS NAV LOST"));
         if (on && id === "rnpExceeded") this.alert(alert("CHECK ANP"));
+        if (id === "gpsLost" || id === "gpsIntegrity" || id === "dmeOutage") this.updateNavigation(0);
         if (on && id === "independent") this.alert(alert("INDEPENDENT OP"));
         // The FMS restarts on its IDENT page when it comes back.
         if (!on && id === "fmsFail") { this.open("IDENT"); this.message = null; }
@@ -213,7 +234,7 @@ export class ScriptedFms implements CduBackend {
     if (this.active.legs[0]?.kind === "disco") this.active.legs.shift();
     const leg = this.active.legs[0];
     const at = leg?.kind === "wpt" ? this.coordinates(leg.ident) : undefined;
-    if (at) this.here = { ...at };
+    if (at) { this.truth = { ...at }; this.here = this.withError(this.truth); }
     this.arrive();
     this.emit();
   }
@@ -275,11 +296,7 @@ export class ScriptedFms implements CduBackend {
       return;
     }
     // Passing the runway starts the missed approach; its hold is armed so the aircraft holds at the end of it.
-    const missedHold = findProcedure(this.db, route, "APPROACH")?.missedHold;
-    if (passed?.kind === "wpt" && passed.source === "APPR" && /^RW\d{2}/.test(ident) && missedHold && !route.hold) {
-      route.hold = { fix: missedHold.fix, turn: missedHold.turn, inbound: missedHold.inbound, legTime: 1, legDistance: null, exit: "MANUAL", speed: 180, altitude: missedHold.altitude, status: "ARMED" };
-      for (const leg of route.legs) if (leg.kind === "wpt" && leg.ident === missedHold.fix) leg.qualifier = "/H";
-    }
+    if (passed?.kind === "wpt" && passed.source === "APPR" && /^RW\d{2}/.test(ident)) this.armMissedHold(route);
     const pending = this.modified?.legs[0];
     if (pending?.kind === "wpt" && pending.ident === ident) this.modified?.legs.shift();
     if (!route.legs.some(next => next.kind === "wpt")) this.alert(alert("END OF ROUTE"));
@@ -287,10 +304,150 @@ export class ScriptedFms implements CduBackend {
 
   /** The flight simulation reports the aircraft's state after each step. */
   setAircraft(state: Partial<{ position: LatLon; track: number; groundSpeed: number; altitude: number; verticalSpeed: number; crossTrack: number; trackError: number }>) {
-    if (state.position) this.here = state.position;
+    // The simulation reports where the aircraft really is; the FMS position is that plus its navigation error.
+    if (state.position) { this.truth = state.position; this.here = this.withError(this.truth); }
     const { position: _position, ...rest } = state;
     Object.assign(this.aircraft, rest);
   }
+
+  // ------------------------------------------------------------------ navigation sensors (navigation.ts)
+
+  private withError(at: LatLon) {
+    const nm = Math.hypot(this.error.x, this.error.y);
+    if (nm < 1e-6) return { ...at };
+    return offset(at, (Math.atan2(this.error.x, this.error.y) * 180) / Math.PI, nm);
+  }
+
+  /**
+   * Chooses the navigation source and updates the FMS position error and ANP, then checks ANP against RNP. In
+   * dead reckoning the error grows with inertial drift; when a better source returns the position jumps back,
+   * which the FMS reports as a POSITION SHIFT.
+   */
+  updateNavigation(dt: number) {
+    const inputs = {
+      gpsAvailable: !this.injected.has("gpsLost") && this.gpsSelected,
+      gpsIntegrity: !this.injected.has("gpsIntegrity"),
+      dmeAvailable: !this.injected.has("dmeOutage"),
+      inhibited: this.inhibited,
+    };
+    const previous = this.nav.mode;
+    const selection = selectSources(this.db.nearby(this.truth, 160), this.truth, this.altitude, inputs);
+    if (selection.mode === "DR") {
+      const drift = sourceError("DR");
+      const grow = (IRS_DRIFT_NM_PER_HOUR * dt) / 3600;
+      this.error = { x: this.error.x + grow * Math.sin((drift.bearing * Math.PI) / 180), y: this.error.y + grow * Math.cos((drift.bearing * Math.PI) / 180) };
+    } else {
+      const target = sourceError(selection.mode);
+      const next = { x: target.nm * Math.sin((target.bearing * Math.PI) / 180), y: target.nm * Math.cos((target.bearing * Math.PI) / 180) };
+      if (Math.hypot(next.x - this.error.x, next.y - this.error.y) > 0.5) this.alert(alert("POSITION SHIFT"));
+      this.error = next;
+    }
+    this.here = this.withError(this.truth);
+    const errorNm = Math.hypot(this.error.x, this.error.y);
+    this.nav = {
+      ...this.nav, mode: selection.mode, dmes: selection.dmes.map(d => d.ident), vor: selection.vor?.ident ?? null,
+      anp: selection.mode === "DR" ? Math.max(0.1, errorNm * 1.3 + 0.05) : selection.baseAnp,
+    };
+    if (previous === "GPS" && selection.mode !== "GPS") this.alert(alert("GPS NAV LOST"));
+    if (selection.mode === "GPS" && !inputs.gpsIntegrity && !this.nav.integrityAlerted) { this.nav.integrityAlerted = true; this.alert(alert("GPS POS UNCERTAIN")); }
+    if (inputs.gpsIntegrity) this.nav.integrityAlerted = false;
+
+    // ANP above RNP for longer than the time to alert of the phase: CHECK ANP, once per episode.
+    const now = this.now.getTime();
+    const { alertSeconds } = RNP_DEFAULTS[this.flightPhase];
+    if (this.nav.anp > this.requiredRnp) {
+      this.nav.unableSince ??= now;
+      if (!this.nav.unableAlerted && now - this.nav.unableSince >= alertSeconds * 1000) { this.nav.unableAlerted = true; this.alert(alert("CHECK ANP")); }
+    } else { this.nav.unableSince = null; this.nav.unableAlerted = false; }
+
+    const faf = findProcedure(this.db, this.active, "APPROACH")?.faf;
+    const first = this.active.legs[0];
+    const fafPosition = faf ? this.coordinates(faf) : undefined;
+    const nearFaf = first?.kind === "wpt" && first.ident === faf && fafPosition !== undefined && distanceNm(this.here, fafPosition) <= 2;
+    if (nearFaf && !this.armedApproach) {
+      if (!this.nav.armAlerted) { this.nav.armAlerted = true; this.alert(alert("ARM APPROACH")); }
+    } else if (!nearFaf) this.nav.armAlerted = false;
+
+    // On an RNAV approach, a position without GPS integrity is not good enough to continue.
+    const approach = findProcedure(this.db, this.active, "APPROACH");
+    const rnavApproach = approach?.approachType === "RNAV" && this.flightPhase === "APPROACH";
+    if (rnavApproach && (selection.mode !== "GPS" || !inputs.gpsIntegrity)) {
+      if (!this.nav.approachIntegrityAlerted) { this.nav.approachIntegrityAlerted = true; this.alert(alert("NO APPR INTEGRITY")); }
+    } else this.nav.approachIntegrityAlerted = false;
+  }
+
+  /** The phase that sets the default RNP: approach on an approach leg, terminal within 30 NM of either airport. */
+  get flightPhase(): FlightPhase {
+    const leg = this.active.legs[0];
+    if (leg && leg.kind !== "disco" && leg.source === "APPR") return "APPROACH";
+    const near = (icao: string) => { const airport = this.db.airport(icao); return airport !== undefined && distanceNm(this.here, airport.position) <= 30; };
+    return near(this.active.origin) || near(this.active.dest) ? "TERMINAL" : "EN ROUTE";
+  }
+
+  /** On an approach that is not an ILS: the NPA annunciator. */
+  get nonPrecisionApproach() {
+    return this.flightPhase === "APPROACH" && findProcedure(this.db, this.active, "APPROACH")?.approachType !== "ILS";
+  }
+
+  /**
+   * The approach the crew is flying, as the FMA and VNAV page name it: an ILS; an RNAV approach to LPV minima on
+   * GPS with integrity (SBAS is assumed available); and no approach guidance without GPS integrity.
+   */
+  get approachType(): "ILS" | "LPV" | "NO APPR" | null {
+    const approach = findProcedure(this.db, this.active, "APPROACH") ?? findProcedure(this.db, this.route, "APPROACH");
+    if (!approach) return null;
+    if (approach.approachType === "ILS") return "ILS";
+    return this.nav.mode !== "GPS" || this.injected.has("gpsIntegrity") ? "NO APPR" : "LPV";
+  }
+
+  get approachArmed() { return this.armedApproach; }
+
+  /** APPR: arms the approach; it becomes active on the final approach. */
+  armApproach(on = true) { this.armedApproach = on; this.emit(); }
+
+  /**
+   * TOGA: a go-around before the runway. The rest of the approach is dropped and the missed approach becomes the
+   * active route from present position, its hold armed.
+   */
+  goAround() {
+    const route = this.active;
+    const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
+    // Only from the approach: once the missed approach is being flown there is nothing left to go around from.
+    if (missed <= 0) return false;
+    route.legs.splice(0, missed);
+    this.legStart = { ...this.here };
+    this.armedApproach = false;
+    this.armMissedHold(route);
+    this.emit();
+    return true;
+  }
+
+  private armMissedHold(route: Route) {
+    const missedHold = findProcedure(this.db, route, "APPROACH")?.missedHold;
+    if (!missedHold || route.hold) return;
+    route.hold = { fix: missedHold.fix, turn: missedHold.turn, inbound: missedHold.inbound, legTime: 1, legDistance: null, exit: "MANUAL", speed: 180, altitude: missedHold.altitude, status: "ARMED" };
+    for (const leg of route.legs) if (leg.kind === "wpt" && leg.ident === missedHold.fix) leg.qualifier = "/H";
+  }
+
+  /** RNP in force: the entry the crew made, or the default for the phase of flight. */
+  get requiredRnp() { return this.nav.rnpManual ?? RNP_DEFAULTS[this.flightPhase].rnp; }
+  get navState() { return this.nav; }
+  get truePosition() { return this.truth; }
+  get inhibitedNavaids() { return this.inhibited; }
+  get gpsNavSelected() { return this.gpsSelected; }
+  /** Whether ANP has exceeded RNP (the RNP annunciator), computed or injected. */
+  get rnpExceeded() { return this.injected.has("rnpExceeded") || this.nav.anp > this.requiredRnp; }
+
+  /** A manual RNP (PROGRESS), or null to return to the default for the phase. */
+  setRnp(rnp: number | null) {
+    this.nav.rnpManual = rnp;
+    if (rnp !== null && rnp > RNP_DEFAULTS[this.flightPhase].rnp) this.alert(alert("VERIFY RNP VALUE"));
+    this.updateNavigation(0);
+  }
+
+  /** NAV OPTIONS: navaids excluded from position updating, and GPS selected in or out. */
+  setInhibited(idents: string[]) { this.inhibited = idents.slice(0, 3); this.updateNavigation(0); }
+  selectGps(on: boolean) { this.gpsSelected = on; this.updateNavigation(0); }
 
   /** Advances time-driven state: the timer alarms, the call duration and the clocks on the display. */
   tick() {

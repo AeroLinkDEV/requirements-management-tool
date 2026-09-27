@@ -81,12 +81,12 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         undefined,
         { left: prompt("<FIX INFO"), right: prompt("GSM/SMS>") },
         undefined,
-        { left: prompt("<SEC FPLN") },
+        { left: prompt("<SEC FPLN"), right: prompt("NAV STATUS>") },
       ],
     lsk: (fms, side, row, _scratch, index) => {
       const target: Record<string, PageId> = index === 0
         ? { L1: "IDENT", L2: "POS", L3: "FUEL", L4: "RTE", L5: "HOLD", R1: "NAV_DATA", R2: "PREDEF", R3: "MSG_RECALL", R4: "RADIO", R5: "TIMER" }
-        : { L1: "TACT", L2: "TACT_APPR", L3: "HOVER", L4: "FIX", L5: "SEC_FPLN", R1: "VNAV", R2: "ATC", R3: "FMC_COMM", R4: "ANS" };
+        : { L1: "TACT", L2: "TACT_APPR", L3: "HOVER", L4: "FIX", L5: "SEC_FPLN", R1: "VNAV", R2: "ATC", R3: "FMC_COMM", R4: "ANS", R5: "NAV_STATUS" };
       const page = target[`${side}${row}`];
       if (page === "HOLD" && !fms.route.hold) { fms.open("LEGS"); fms.setScratch("/H"); return; }
       if (page) fms.open(page);
@@ -120,7 +120,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       caption(" FMS POS"),
       { left: medium(formatPosition(fms.position)) },
       caption(" GPS POS"),
-      { left: fms.hasCondition("gpsLost") ? dashes(15) : medium(formatPosition(fms.position)) },
+      { left: fms.navState.mode !== "GPS" ? dashes(15) : medium(formatPosition(fms.position)) },
       caption(" UTC", "SET POS "),
       { left: medium(hhmm(fms.now)), right: boxes(15) },
       undefined, undefined, undefined, undefined,
@@ -131,7 +131,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       if (row === 6) { fms.open(side === "L" ? "INIT_REF" : "RTE"); return; }
       if (side === "R" && row === 3) return /^[NS]\d{4}\.\d[EW]\d{5}\.\d$/.test(scratch) ? void fms.setScratch("") : "invalid";
       if (side === "L" && row === 1 && !scratch) fms.setScratch(formatPosition(fms.position));
-      if (side === "L" && row === 2 && !scratch && !fms.hasCondition("gpsLost")) fms.setScratch(formatPosition(fms.position));
+      if (side === "L" && row === 2 && !scratch && fms.navState.mode === "GPS") fms.setScratch(formatPosition(fms.position));
     },
   },
 
@@ -273,10 +273,12 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const now = fms.now.getTime();
       const eta = (miles: number) => hhmm(new Date(now + (miles / fms.groundSpeed) * 3_600_000));
       const ident = (leg: Leg | undefined) => (leg?.kind === "wpt" ? leg.ident : leg?.kind === "cond" ? conditionalLabel(leg) : "-----");
-      const gpsLost = fms.hasCondition("gpsLost");
+      const nav = fms.navState;
+      const gpsLost = nav.mode !== "GPS";
       if (index === 0) {
-        const rnp = fms.hasCondition("npa") ? 0.3 : 1.0;
-        const anp = fms.hasCondition("rnpExceeded") ? Math.max(1.35, rnp + 0.35) : gpsLost ? 0.62 : 0.05;
+        // RNP: the crew's entry or the default for the phase; ANP from the navigation sources (navigation.ts).
+        const rnp = fms.hasCondition("npa") ? 0.3 : fms.requiredRnp;
+        const anp = fms.hasCondition("rnpExceeded") ? Math.max(1.35, rnp + 0.35) : nav.anp;
         const toDistance = toLeg?.distance ?? 0;
         return [
           title("PROGRESS", "1/4", "ACT"),
@@ -288,10 +290,10 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           { left: medium(` ${three(fms.wind.direction)}°/ ${fms.wind.speed}KT`), right: medium(`${three(fms.track)}°/${Math.round(fms.groundSpeed)}KT`) },
           caption(undefined, "TKE/XTK "),
           { right: medium(`${fms.trackError < 0 ? "L" : "R"}${three(Math.abs(fms.trackError))}°/${fms.crossTrack < 0 ? "L" : "R"}${fixed(Math.abs(fms.crossTrack), 2)}NM`) },
-          caption("RNP/ANP"),
+          caption(`RNP/ANP ${nav.rnpManual === null ? fms.flightPhase : "MANUAL"}`),
           { left: medium(`${fixed(rnp, 2)}/${fixed(anp, 2)}NM`, anp > rnp ? "amber" : "white") },
           caption("NAV MODE"),
-          { left: gpsLost ? { text: "DR", color: "amber" } : { text: "GPS", color: "cyan" } },
+          { left: { text: nav.mode, color: nav.mode === "DR" ? "amber" : "cyan" }, right: prompt("NAV STATUS>") },
         ];
       }
       if (index === 1)
@@ -306,9 +308,9 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         return [
           title("PROGRESS", "3/4", "ACT"),
           caption(" GPS", "HIL "),
-          gpsLost ? { left: medium("NO SIGNAL", "amber"), right: dashes(6) } : { left: medium("NAV 9 SAT"), right: medium("0.03NM") },
+          gpsLost ? { left: medium("NO SIGNAL", "amber"), right: dashes(6) } : { left: medium("NAV 9 SAT"), right: medium(fms.hasCondition("gpsIntegrity") ? "-----" : "0.03NM") },
           caption(" SBAS", "INTEGRITY "),
-          { left: medium(gpsLost ? "----" : "WAAS"), right: gpsLost ? medium("LOST", "amber") : medium("OK", "green") },
+          { left: medium(gpsLost ? "----" : "WAAS"), right: gpsLost || fms.hasCondition("gpsIntegrity") ? medium("LOST", "amber") : medium("OK", "green") },
         ];
       const offset = fms.lateralOffset;
       return [
@@ -322,6 +324,17 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       ];
     },
     lsk: (fms, side, row, scratch, index) => {
+      if (index === 0) {
+        if (side === "R" && row === 6) { fms.open("NAV_STATUS"); return; }
+        if (side !== "L" || row !== 5 || !scratch) return;
+        // RNP: a manual value (0.01 to 30 NM) replaces the phase default until it is deleted.
+        if (scratch === "DELETE") { fms.setRnp(null); fms.setScratch(""); return; }
+        const rnp = numberIn(scratch, 0.01, 30, /^\d{0,2}\.?\d{1,2}$/);
+        if (rnp === null) return "invalid";
+        fms.setScratch("");
+        fms.setRnp(rnp);
+        return;
+      }
       if (index !== 3 || !scratch) return;
       if (side === "L" && row === 1) {
         if (scratch === "DELETE") { fms.setOffset(null); fms.setScratch(""); return; }
@@ -564,7 +577,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const targetVs = Math.round((fms.groundSpeed * 101.27 * tan) / 10) * 10;
       const outside = path.vpa < GLIDEPATH_LIMITS.low || path.vpa > GLIDEPATH_LIMITS.high;
       return [
-        title(`VNAV ${path.runway}`, "1/1", "ACT"),
+        title(`VNAV ${path.runway} ${fms.approachType ?? ""}`.trim(), "1/1", "ACT"),
         caption(" MDA-DA", "FAF ALT "),
         { left: { text: `${fms.vnav.mda}FT` }, right: { text: `${path.faf} ${fms.vnav.fafAltitude}A` } },
         caption(" ACT WPT", "CRS/DIST "),

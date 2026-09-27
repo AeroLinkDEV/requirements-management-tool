@@ -64,6 +64,9 @@ export default function FmsMap({ fms, sim, range }: Props) {
   // Navaids and airports within the range, as a navigation display shows them.
   const nearby = fms.navdb.nearby(centre, range * 1.6).filter(e => e.kind !== "fix").slice(0, 60);
 
+  const drift = distanceNm(fms.truePosition, centre);
+  const trueOffset = drift > 0.05 ? project(fms.truePosition) : null;
+
   const g = sim.guidance;
   const [firstLeg, ...laterFirst] = first ?? [];
   // In a hold or search pattern the guidance leg is the active one; the route resumes from the fix.
@@ -115,6 +118,14 @@ export default function FmsMap({ fms, sim, range }: Props) {
           );
         })}
       </g>
+
+      {/* Where the aircraft really is, when the FMS position has drifted from it (a simulator view, not a display). */}
+      {trueOffset ? (
+        <g transform={`translate(${trueOffset.x.toFixed(1)},${trueOffset.y.toFixed(1)})`} className="truePosition">
+          <path d="M-4,-4 L4,4 M-4,4 L4,-4" />
+          <text x={6} y={4}>TRUE</text>
+        </g>
+      ) : null}
 
       {/* The aircraft, at the centre, pointing along its track, with a short track line ahead. */}
       <g transform={`rotate(${fms.track})`}>

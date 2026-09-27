@@ -127,7 +127,10 @@ test('a latitude/longitude entry creates WPTnn, listed on PREDEF WPT 1/2', () =>
   expect(unit.coordinates('WPT01')).toEqual({ lat: 45.5, lon: -75 })
   press(unit, 'INIT_REF', 'LSK2R')
   expect(lines(unit)[2]).toMatch(/^WPT01\s+N4530\.0W07500\.0$/)
-  enter(unit, 'N9530W07500', 'LSK1L')
+  // A latitude beyond 90 degrees is not a position.
+  unit.press('LEGS')
+  enter(unit, 'N9530W07500', 'LSK2L')
+  expect(scratch(unit)).toBe('INVALID ENTRY')
 })
 
 test('place/bearing/distance and place-bearing/place-bearing entries create waypoints named after the place', () => {

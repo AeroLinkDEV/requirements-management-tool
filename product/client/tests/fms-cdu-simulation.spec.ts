@@ -224,6 +224,7 @@ test('FMS failure lights only FAIL, blanks the display and ignores keys; recover
   const { unit } = fms()
   unit.press('RTE')
   unit.setCondition('gpsLost', true)
+  unit.setCondition('dmeOutage', true)
   unit.setCondition('fmsFail', true)
   expect([...unit.lamps()]).toEqual(['FAIL'])
   expect(lines(unit).every(line => line.trim() === '')).toBe(true)
@@ -235,15 +236,19 @@ test('FMS failure lights only FAIL, blanks the display and ignores keys; recover
   expect(unit.lamps().has('POS')).toBe(true)
 })
 
-test('GPS loss lights POS, raises GPS NAV LOST and puts PROGRESS in dead reckoning', () => {
+test('GPS loss raises GPS NAV LOST and falls back to radio updating; with no DME either, the FMS dead reckons and POS lights', () => {
   const { unit } = fms()
   unit.setCondition('gpsLost', true)
-  expect(unit.lamps().has('POS')).toBe(true)
   expect(scratch(unit)).toBe('GPS NAV LOST')
+  // Near Ottawa at 3000 ft only the YOW VOR/DME is in range, so the FMS updates from it: no dead reckoning yet.
+  expect(unit.lamps().has('POS')).toBe(false)
   press(unit, 'CLR', 'PROG')
+  expect(lines(unit)[12]).toMatch(/^VOR\/DME/)
+  expect(lines(unit)[10]).toMatch(/^1\.00\/0\.5\dNM/)
+  unit.setCondition('dmeOutage', true)
+  expect(unit.lamps().has('POS')).toBe(true)
   expect(lines(unit)[12]).toMatch(/^DR/)
-  expect(lines(unit)[10]).toMatch(/^1\.00\/0\.62NM/)
-  unit.press('NEXT', )
+  unit.press('NEXT')
   unit.press('NEXT')
   expect(lines(unit)[2]).toMatch(/^NO SIGNAL/)
 })

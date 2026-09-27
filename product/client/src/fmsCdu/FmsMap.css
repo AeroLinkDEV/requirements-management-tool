@@ -89,3 +89,13 @@
   font-size: 12px;
   opacity: 0.85;
 }
+
+.fmsMap .truePosition path {
+  stroke: #ffb21e;
+  stroke-width: 1.5;
+}
+
+.fmsMap .truePosition text {
+  fill: #ffb21e;
+  font-size: 12px;
+}

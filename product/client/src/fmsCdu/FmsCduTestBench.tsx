@@ -84,9 +84,11 @@ export default function FmsCduTestBench() {
   const signed = (value: number, digits = 0) => `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
 
   const next = backend.activeRoute.legs[0];
+  // On the final approach: armed approach and the aircraft past the FAF (the runway is the active waypoint).
+  const onFinal = backend.approachArmed && next?.kind === "wpt" && /^RW\d{2}/.test(next.ident);
   const failedFms = backend.hasCondition("fmsFail");
-  const lampNote = (lamp: string) =>
-    lamp === "MENU" ? "MENU light" : variant.annunciators.some(code => code === lamp) ? `${lamp} lamp` : "no lamp on this variation";
+  const lampNote = (lamp: string | undefined) =>
+    lamp === undefined ? "sensor" : lamp === "MENU" ? "MENU light" : variant.annunciators.some(code => code === lamp) ? `${lamp} lamp` : "no lamp on this variation";
   const meaning = ALERTS.find(entry => entry.text === libraryAlert)?.meaning;
 
   return (
@@ -180,8 +182,9 @@ export default function FmsCduTestBench() {
             </div>
             {/* The flight mode annunciator: engaged modes in green, armed ones in white, as on the PFD. */}
             <div className="fmsBenchFma" role="status" aria-label="Flight modes">
-              <span className="engaged">{sim.lateralMode === "LNAV" ? (guidance.mode === "HDG" ? "LNAV" : guidance.mode) : "HDG SEL"}</span>
+              <span className="engaged">{sim.lateralMode === "LNAV" ? (onFinal && backend.approachType ? backend.approachType : guidance.mode === "HDG" ? "LNAV" : guidance.mode) : "HDG SEL"}</span>
               {sim.lnavIsArmed ? <span className="armed">LNAV</span> : null}
+              {backend.approachArmed && !onFinal ? <span className="armed">APPR</span> : null}
               <span className="engaged">{Math.abs(backend.verticalSpeed) > 100 ? "VNAV PTH" : "VNAV ALT"}</span>
             </div>
             <form className="fmsBenchAutopilot" onSubmit={event => { event.preventDefault(); sim.selectHeading(Number(headingInput) || 0); }}>
@@ -192,6 +195,8 @@ export default function FmsCduTestBench() {
               </label>
               <button type="submit" disabled={failedFms} aria-pressed={sim.lateralMode === "HDG"}>HDG SEL</button>
               <button type="button" disabled={failedFms || sim.lateralMode === "LNAV"} aria-pressed={sim.lnavIsArmed} onClick={() => sim.armLnav()}>LNAV</button>
+              <button type="button" disabled={failedFms || !backend.approachType} aria-pressed={backend.approachArmed} onClick={() => backend.armApproach(!backend.approachArmed)}>APPR</button>
+              <button type="button" disabled={failedFms} onClick={() => backend.goAround()}>TOGA</button>
             </form>
             <dl className="fmsBenchGuidance" aria-label="Guidance">
               <dt>Mode</dt><dd>{guidance.mode}</dd>

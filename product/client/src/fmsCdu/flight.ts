@@ -217,13 +217,15 @@ export class FlightSimulator {
     const track = norm360(fms.track + (G_TURN * Math.tan(rad(this.bank)) / this.tas) * dt);
     const headwind = fms.wind.speed * Math.cos(rad(fms.wind.direction - track));
     const groundSpeed = Math.max(30, this.tas - headwind);
-    const position = offset(fms.position, track, (groundSpeed * dt) / 3600);
+    // The aircraft moves from where it really is; guidance above steered it from where the FMS believes it is.
+    const position = offset(fms.truePosition, track, (groundSpeed * dt) / 3600);
     const vs = clamp((guidance.targetAltitude - fms.altitude) * 2, -MAX_VS, MAX_VS);
     const onPath = this.pathVerticalSpeed(groundSpeed);
     const verticalSpeed = onPath ?? vs;
     const altitude = fms.altitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
     fms.setAircraft({ position, track, groundSpeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError });
+    fms.updateNavigation(dt);
   }
 
   /** On final (FAF sequenced, runway active) the aircraft follows the VNAV path angle down. */

@@ -82,6 +82,9 @@ export const DEMO_NAV_DATA: NavData = {
       runways: runwayPair({ lat: 45.4603, lon: -75.6461 }, "09", "27", 90, 3300, 188) },
     { kind: "navaid", ident: "YOW", type: "VORDME", position: { lat: 45.4398, lon: -75.8967 }, frequency: "114.60", name: "OTTAWA DEMO" },
     { kind: "navaid", ident: "YUL", type: "VORDME", position: { lat: 45.6334, lon: -73.8740 }, frequency: "116.30", name: "MONTREAL DEMO" },
+    // South of the airway, so DME/DME has a usable crossing angle with YOW along the route (YOW and YUL alone
+    // lie nearly in line with it).
+    { kind: "navaid", ident: "HWK", type: "VORDME", position: { lat: 45.0000, lon: -74.7000 }, frequency: "115.20", name: "HAWKESBURY DEMO" },
     { kind: "navaid", ident: "RIG", type: "VOR", position: { lat: 45.5600, lon: -74.7000 }, frequency: "112.10", name: "RIGAUD DEMO" },
     { kind: "navaid", ident: "OW", type: "NDB", position: { lat: 45.3000, lon: -75.5500 }, frequency: "236", name: "OTTAWA NDB DEMO" },
     { kind: "navaid", ident: "UL", type: "NDB", position: { lat: 45.5050, lon: -73.6500 }, frequency: "371", name: "DORVAL NDB DEMO" },
