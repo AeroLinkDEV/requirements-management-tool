@@ -5,9 +5,11 @@ import { CONDITIONS } from "./conditions";
 import { FlightSimulator, MAP_RANGES } from "./flight";
 import FmsCduPanel from "./FmsCduPanel";
 import FmsMap from "./FmsMap";
+import FmsScenarioCard from "./FmsScenarioCard";
 import { conditionalLabel } from "./fmsModel";
 import { useCduLayout, type CduKeyEvent } from "./layout";
 import { LIGHTING_MODES, displayLuminance, type Lighting, type LightingMode } from "./lighting";
+import { ScenarioRecorder, ScenarioRunner, type Scenario } from "./scenario";
 import { ScriptedFms } from "./scriptedFms";
 import { screenText } from "./screen";
 import { CDU_VARIANTS, DEFAULT_VARIANT_ID, variantById } from "./variants";
@@ -26,8 +28,8 @@ const formatLuminance = (fl: number) => (fl < 10 ? fl.toFixed(1) : String(Math.r
 /**
  * An interactive CMA-9000 control display unit for engineers to exercise before, and later with, the real
  * operational program. Today it runs the scripted simulation. The bench injects conditions and alerts, moves the
- * aircraft along its route, and sets the cockpit lighting; the key event log is the seam a future test procedure
- * integration records from.
+ * aircraft along its route, and sets the cockpit lighting. Scenarios run scripted steps against a restarted
+ * simulation and check the screen, can be recorded from the bench, and are written out as test procedure text.
  */
 export default function FmsCduTestBench() {
   const { layout, failed } = useCduLayout();
@@ -35,11 +37,21 @@ export default function FmsCduTestBench() {
   const [session, setSession] = useState(0);
   // Simulated time: it starts at the wall clock and runs at the chosen rate while the flight is playing.
   const simTime = useRef(Date.now());
-  const { backend, sim } = useMemo(() => {
+  // A scenario run or a recording starts on the next session, so it always begins from a restarted simulation.
+  const pendingScenario = useRef<Scenario | null>(null);
+  const pendingRecording = useRef(false);
+  const { backend, sim, runner, recorder } = useMemo(() => {
     simTime.current = Date.now();
     const fms = new ScriptedFms(() => new Date(simTime.current));
-    return { backend: fms, sim: new FlightSimulator(fms) };
+    const runner = pendingScenario.current ? new ScenarioRunner(pendingScenario.current, fms) : null;
+    const recorder = pendingRecording.current ? new ScenarioRecorder(() => new Date(simTime.current)) : null;
+    pendingScenario.current = null;
+    pendingRecording.current = false;
+    return { backend: fms, sim: new FlightSimulator(fms), runner, recorder };
   }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [recording, setRecording] = useState(false);
+  const recordTo = recording ? recorder : null;
+  const pausedFor = useRef<ScenarioRunner | null>(null);
   const subscribe = useCallback((listener: () => void) => backend.subscribe(listener), [backend]);
   useSyncExternalStore(subscribe, () => backend.revision());
   const [log, setLog] = useState<LogEntry[]>([]);
@@ -58,13 +70,20 @@ export default function FmsCduTestBench() {
   useEffect(() => {
     const interval = 250;
     const timer = window.setInterval(() => {
-      if (!playing) { simTime.current += interval; backend.tick(); return; }
-      const dt = (interval / 1000) * rate;
-      simTime.current += dt * 1000;
-      sim.step(dt);
+      if (playing) {
+        const dt = (interval / 1000) * rate;
+        simTime.current += dt * 1000;
+        sim.step(dt);
+      } else {
+        simTime.current += interval;
+        backend.tick();
+      }
+      runner?.poll();
+      // A finished scenario pauses the flight once; flying on afterwards is the engineer's choice.
+      if (runner?.finished && pausedFor.current !== runner) { pausedFor.current = runner; setPlaying(false); }
     }, interval);
     return () => window.clearInterval(timer);
-  }, [backend, sim, playing, rate]);
+  }, [backend, sim, runner, playing, rate]);
 
   const chooseVariant = (id: string) => {
     setVariantId(id);
@@ -78,9 +97,28 @@ export default function FmsCduTestBench() {
   const onKey = useCallback((event: CduKeyEvent) => {
     const title = screenText(backend.screen())[0].trim();
     setLog(entries => [{ ...event, title }, ...entries].slice(0, 200));
-  }, [backend]);
+    recordTo?.key(event.fn);
+  }, [backend, recordTo]);
 
-  const reset = () => { setSession(value => value + 1); setLog([]); setPlaying(false); };
+  const reset = () => { setSession(value => value + 1); setLog([]); setPlaying(false); setRecording(false); };
+  const runScenario = (scenario: Scenario) => {
+    pendingScenario.current = scenario;
+    setSession(value => value + 1);
+    setLog([]);
+    setRecording(false);
+    setPlaying(true);
+  };
+  const startRecording = () => {
+    pendingRecording.current = true;
+    setSession(value => value + 1);
+    setLog([]);
+    setPlaying(false);
+    setRecording(true);
+  };
+  const finishRecording = (title: string) => {
+    setRecording(false);
+    return recorder ? recorder.toScenario(title) : null;
+  };
   const guidance = sim.guidance;
   const signed = (value: number, digits = 0) => `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
 
@@ -196,8 +234,9 @@ export default function FmsCduTestBench() {
               </label>
               <button type="submit" disabled={failedFms} aria-pressed={sim.lateralMode === "HDG"}>HDG SEL</button>
               <button type="button" disabled={failedFms || sim.lateralMode === "LNAV"} aria-pressed={sim.lnavIsArmed} onClick={() => sim.armLnav()}>LNAV</button>
-              <button type="button" disabled={failedFms || !backend.approachType} aria-pressed={backend.approachArmed} onClick={() => backend.armApproach(!backend.approachArmed)}>APPR</button>
-              <button type="button" disabled={failedFms} onClick={() => backend.goAround()}>TOGA</button>
+              <button type="button" disabled={failedFms || !backend.approachType} aria-pressed={backend.approachArmed}
+                onClick={() => { if (!backend.approachArmed) recordTo?.armApproach(); backend.armApproach(!backend.approachArmed); }}>APPR</button>
+              <button type="button" disabled={failedFms} onClick={() => { recordTo?.goAround(); backend.goAround(); }}>TOGA</button>
             </form>
             <dl className="fmsBenchGuidance" aria-label="Guidance">
               <dt>Mode</dt><dd>{guidance.mode}</dd>
@@ -211,6 +250,18 @@ export default function FmsCduTestBench() {
             </dl>
           </section>
 
+          <FmsScenarioCard
+            runner={runner}
+            recording={recording}
+            screenLines={screenText(backend.screen())}
+            context={{ startedAt: runner?.startedAt ?? backend.now, cycle: backend.activeCycle.id, variant: `${variant.id} (${variant.label})` }}
+            onRun={runScenario}
+            onStop={() => runner?.abandon()}
+            onRecord={startRecording}
+            onFinishRecording={finishRecording}
+            onCheckLine={line => recorder?.checkLine(line, screenText(backend.screen())[line])}
+          />
+
           <section className="fmsBenchCard">
             <h2>Conditions</h2>
             <ul className="fmsBenchConditions">
@@ -219,7 +270,7 @@ export default function FmsCduTestBench() {
                   <label>
                     <input type="checkbox" checked={backend.hasCondition(condition.id)}
                       disabled={failedFms && condition.id !== "fmsFail"}
-                      onChange={event => backend.setCondition(condition.id, event.target.checked)} />
+                      onChange={event => { recordTo?.condition(condition.id, event.target.checked); backend.setCondition(condition.id, event.target.checked); }} />
                     <span>
                       <b>{condition.label}</b> <small className={lampNote(condition.lamp).startsWith("no ") ? "absent" : undefined}>{lampNote(condition.lamp)}</small>
                       <span className="fmsBenchHint">{condition.description}</span>
@@ -254,14 +305,14 @@ export default function FmsCduTestBench() {
 
           <section className="fmsBenchCard">
             <h2>Alerts</h2>
-            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); backend.raiseAlert(libraryAlert); }}>
+            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); recordTo?.alert(libraryAlert); backend.raiseAlert(libraryAlert); }}>
               <select value={libraryAlert} aria-label="Alert from the manual" onChange={event => setLibraryAlert(event.target.value)}>
                 {ALERTS.map(entry => <option key={entry.text} value={entry.text}>{entry.text}</option>)}
               </select>
               <button type="submit" disabled={failedFms}>Raise</button>
             </form>
             {meaning ? <p className="fmsBenchHint">{meaning}</p> : null}
-            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (alert.trim()) { backend.raiseAlert(alert.trim()); setAlert(""); } }}>
+            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (alert.trim()) { recordTo?.alert(alert.trim()); backend.raiseAlert(alert.trim()); setAlert(""); } }}>
               <input value={alert} maxLength={24} placeholder="Other text, e.g. UNABLE RNP" aria-label="Alert message to raise"
                 onChange={event => setAlert(event.target.value)} />
               <button type="submit" disabled={!alert.trim() || failedFms}>Raise alert</button>

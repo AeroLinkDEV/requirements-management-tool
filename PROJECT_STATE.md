@@ -455,8 +455,16 @@ display unit for engineers.
   annunciators, and display luminance from the light sensor (an ambient-light control) combined with BRT; NVG
   holds the display between 0.1 and 3 fL.
 - The panel talks only to the `CduBackend` interface, so the real CMA-9000 operational program can replace the
-  simulation later. The bench's key event log is where test-procedure integration will attach; it is not
-  integrated with test procedures or evidence today.
+  simulation later.
+- **Scenarios** (`scenario.ts`) script a test on the bench: ordered steps triggered at the start, at a time, within
+  a distance of a waypoint or when a waypoint becomes active, which press keys, inject conditions, raise alerts,
+  select procedures, arm the approach or go around, and check screen lines, the scratchpad, alerts, annunciators and
+  the active waypoint (optionally waiting a number of seconds). Built-in scenarios cover GPS lost before the final
+  approach fix, GPS integrity lost on the approach, dead reckoning, and a crew RNP the navigation cannot meet. A run
+  restarts the simulation and shows each step's result live. The bench records a scenario from keys, conditions,
+  alerts, APPR, TOGA and screen-line checks, and saves or loads scenarios as JSON. A scenario is written out as the
+  fields of an AeroLink test procedure proposal to copy into a procedure change, and a run as a Markdown report
+  marked as simulation evidence; the bench does not change controlled procedures or record evidence itself.
 
 ## Documents and publications
 
