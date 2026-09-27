@@ -178,8 +178,8 @@ export function racetrackOutline(fix: LatLon, hold: Hold, groundSpeed: number, t
 
 export class FlightSimulator {
   private readonly fms: ScriptedFms;
-  /** True airspeed in knots. */
-  tas = 120;
+  /** True airspeed in knots: the speed VNAV flies (cruise speed, or a speed constraint). */
+  get tas() { return this.fms.targetSpeed; }
   private bank = 0;
   private lateral: "LNAV" | "HDG" = "LNAV";
   private lnavArmed = false;
@@ -220,12 +220,35 @@ export class FlightSimulator {
     // The aircraft moves from where it really is; guidance above steered it from where the FMS believes it is.
     const position = offset(fms.truePosition, track, (groundSpeed * dt) / 3600);
     const vs = clamp((guidance.targetAltitude - fms.altitude) * 2, -MAX_VS, MAX_VS);
-    const onPath = this.pathVerticalSpeed(groundSpeed);
+    // The final approach path first, then the VNAV descent path, then climbing or holding the target altitude. A hold
+    // or an altitude-terminated leg keeps its own altitude.
+    const ownAltitude = this.holdPlan || fms.activeRoute.legs[0]?.kind === "cond";
+    const onPath = this.pathVerticalSpeed(groundSpeed) ?? (ownAltitude ? null : this.descentVerticalSpeed(groundSpeed));
     const verticalSpeed = onPath ?? vs;
     const altitude = fms.altitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
     fms.setAircraft({ position, track, groundSpeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError });
     fms.updateNavigation(dt);
+    fms.updatePerformance(dt);
+    // DES NOW ends once the aircraft is on the descent path.
+    if (fms.vnav.desNow && fms.profile().descending) fms.vnav.desNow = false;
+  }
+
+  /**
+   * VNAV PTH descent: past the top of descent (or after DES NOW) the aircraft follows the planned path. Below the path
+   * it holds its altitude until the path comes down to it; after DES NOW it descends at 1000 fpm to capture it.
+   */
+  private descentVerticalSpeed(groundSpeed: number) {
+    const fms = this.fms;
+    const profile = fms.profile();
+    const first = profile.points[0];
+    if (!first || !profile.endOfDescent || (!profile.descending && !fms.vnav.desNow)) return null;
+    const tan = Math.tan(rad(fms.vnav.pathAngle));
+    const pathAltitude = profile.descending ? Math.min(fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * tan) : -Infinity;
+    const above = fms.altitude - pathAltitude;
+    if (fms.vnav.desNow && above > 300) return -MAX_VS;
+    if (above < -50) return 0;
+    return -groundSpeed * 101.27 * tan + clamp(-above * 2, -300, 300);
   }
 
   /** On final (FAF sequenced, runway active) the aircraft follows the VNAV path angle down. */
@@ -235,7 +258,7 @@ export class FlightSimulator {
     if (leg?.kind !== "wpt" || !/^RW\d{2}/.test(leg.ident) || !fms.lastSequenced) return null;
     const fafPos = fms.coordinates(fms.lastSequenced), rwyPos = fms.coordinates(leg.ident);
     if (!fafPos || !rwyPos) return null;
-    const vpa = Math.atan((fms.vnav.fafAltitude - fms.vnav.runwayElevation) / (distanceNm(fafPos, rwyPos) * 6076.12));
+    const vpa = Math.atan((fms.fafAltitudeCorrected - fms.vnav.runwayElevation) / (distanceNm(fafPos, rwyPos) * 6076.12));
     const pathAltitude = fms.vnav.runwayElevation + distanceNm(fms.position, rwyPos) * 6076.12 * Math.tan(vpa);
     // The path's descent rate, corrected toward the path.
     return -groundSpeed * 101.27 * Math.tan(vpa) + clamp((pathAltitude - fms.altitude) * 2, -300, 300);
@@ -252,7 +275,11 @@ export class FlightSimulator {
     const hold = this.fms.activeRoute.hold;
     if (this.holdPlan && hold) return constraintAltitude(hold.altitude) ?? this.fms.altitude;
     if (leg?.kind === "cond" && leg.altitude !== undefined) return Math.max(leg.altitude, this.fms.altitude);
-    return (leg?.kind === "wpt" ? constraintAltitude(leg.altitude) : null) ?? this.fms.altitude;
+    // VNAV: in the climb, the cruise altitude or the lowest restriction ahead; in the descent, the planned altitude at
+    // the active waypoint.
+    const profile = this.fms.profile();
+    if (profile.descending) return profile.points[0]?.altitude ?? this.fms.altitude;
+    return Math.max(profile.climbCap, Math.min(this.fms.altitude, this.fms.vnav.cruiseAltitude));
   }
 
   // ------------------------------------------------------------------ selected and managed lateral guidance

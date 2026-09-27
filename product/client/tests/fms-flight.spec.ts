@@ -65,18 +65,47 @@ test('the aircraft climbs to each leg constraint and descends on the VNAV path f
   const { unit, fly } = setup()
   fly(3600, () => activeIdent(unit) === 'TOLGU')
   expect(unit.altitude).toBeGreaterThan(4400)
-  let threshold = 0
-  const vs: number[] = []
+  // The demonstration route turns 148 degrees at the FAF, so the fly-by turn rolls out on final short of it and the
+  // aircraft catches the path from above. What matters is that it is on the path well before the threshold.
+  const runway = unit.coordinates('RW24R')!, faf = unit.coordinates('FERDI')!
+  const vpa = Math.atan((1500 - 118) / (distanceNm(faf, runway) * 6076.12))
+  let threshold = 0, worstLate = 0
+  const lateVs: number[] = []
   fly(3600, () => {
-    if (activeIdent(unit) === 'RW24R') vs.push(unit.verticalSpeed)
+    const toGo = distanceNm(unit.position, runway)
+    if (activeIdent(unit) === 'RW24R' && toGo < 1.5 && toGo > 0.3) {
+      worstLate = Math.max(worstLate, Math.abs(unit.altitude - (118 + toGo * 6076.12 * Math.tan(vpa))))
+      lateVs.push(unit.verticalSpeed)
+    }
     if (activeIdent(unit) === 'CYUL' && !threshold) { threshold = unit.altitude; return true }
   })
-  // About 630 fpm down a three-degree path at 120 kt (less into a headwind), and near threshold height at the end.
-  const steady = vs.slice(Math.floor(vs.length / 3), Math.floor((2 * vs.length) / 3))
-  expect(Math.min(...steady)).toBeGreaterThan(-800)
-  expect(Math.max(...steady)).toBeLessThan(-450)
+  // On the three-degree path over the last mile and a half, descending at about 630 fpm, near threshold height.
+  expect(worstLate).toBeLessThan(150)
+  expect(Math.min(...lateVs)).toBeGreaterThan(-900)
+  expect(Math.max(...lateVs)).toBeLessThan(-450)
   expect(threshold).toBeGreaterThan(80)
   expect(threshold).toBeLessThan(400)
+})
+
+test('VNAV holds cruise until the top of descent, then descends on the planned path to the FAF', () => {
+  const { unit, fly } = setup()
+  const profile = unit.profile()
+  expect(profile.endOfDescent).toBe('RW24R')
+  // Descending 3000 ft at three degrees takes about 9.4 NM: the T/D is that far before the FAF.
+  const ferdi = profile.points.find(p => p.ident === 'FERDI')!
+  expect(ferdi.altitude).toBe(1500)
+  expect(ferdi.distance - profile.topOfDescent!).toBeCloseTo(9.4, 0)
+  let leftCruiseAt = -1
+  const alongAtLeaving = { toFerdi: 0 }
+  fly(3 * 3600, () => {
+    if (activeIdent(unit) === 'FERDI' && unit.altitude < 4480 && leftCruiseAt < 0) {
+      leftCruiseAt = 1
+      alongAtLeaving.toFerdi = distanceNm(unit.position, unit.coordinates('FERDI')!)
+    }
+    return activeIdent(unit) === 'RW24R'
+  })
+  expect(alongAtLeaving.toFerdi).toBeGreaterThan(8.5)
+  expect(alongAtLeaving.toFerdi).toBeLessThan(10.5)
 })
 
 /** Signed distance from the inbound course line through the fix, positive right of the inbound course. */

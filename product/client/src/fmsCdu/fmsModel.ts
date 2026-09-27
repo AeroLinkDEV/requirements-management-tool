@@ -100,6 +100,8 @@ export type Leg =
   | {
     kind: "wpt"; ident: string; altitude?: string; qualifier?: "/H" | "/S" | "/O"; via?: string; source?: LegSource;
     path?: FixPath; course?: number; arc?: { centre: LatLon; turn: "L" | "R" };
+    /** A speed constraint at the fix, knots. */
+    speed?: number;
   }
   | { kind: "cond"; path: ConditionalPath; course: number; altitude?: number; via?: string; source?: LegSource }
   | { kind: "disco" };

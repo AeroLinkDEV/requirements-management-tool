@@ -19,7 +19,8 @@
     "fms-flight.spec.ts",
     "fms-planning.spec.ts",
     "fms-guidance.spec.ts",
-    "fms-navigation.spec.ts"
+    "fms-navigation.spec.ts",
+    "fms-vnav.spec.ts"
   ],
   "rendered": [
     "code-source-rendered.spec.ts",

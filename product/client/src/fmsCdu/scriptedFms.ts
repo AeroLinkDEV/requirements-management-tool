@@ -8,6 +8,7 @@ import {
   type SarPattern, type Uplink,
 } from "./fmsModel";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
+import { coldTemperatureCorrection, computeProfile, parseConstraint, type Profile } from "./vnav";
 import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
 import { NAV_PAGES } from "./navPages";
 import { PLANNING_PAGES } from "./planningPages";
@@ -73,6 +74,7 @@ export class ScriptedFms implements CduBackend {
     unableSince: null as number | null, unableAlerted: false, integrityAlerted: false, approachIntegrityAlerted: false, armAlerted: false,
   };
   private armedApproach = false;
+  private perf = { notEnoughAlerted: false, unableAlertedFor: null as string | null };
   private inhibited: string[] = [];
   private gpsSelected = true;
   private injected = new Set<ConditionId>();
@@ -112,7 +114,11 @@ export class ScriptedFms implements CduBackend {
 
   readonly wind = { direction: 270, speed: 12 };
   /** Entries on the VNAV approach page. The FAF altitude sets the vertical path angle to the threshold. */
-  readonly vnav = { mda: 560, fafAltitude: 1500, runwayElevation: 118, destTemp: null as number | null, qnh: null as string | null };
+  readonly vnav = {
+    mda: 560, fafAltitude: 1500, runwayElevation: 118, destTemp: null as number | null, qnh: null as string | null,
+    /** The planned cruise, the descent path angle, and DES NOW (an early descent to capture the path). */
+    cruiseAltitude: 4500, cruiseSpeed: 120, pathAngle: 3.0, desNow: false,
+  };
   readonly timer = { alarmAt: null as number | null, countdownEnd: null as number | null };
   readonly sar: Sar = {
     id: { SQUARE: "SQR01", LADDER: "LAD01", SECTOR: "SEC01" }, refId: null, relativeBearing: null, distance: null,
@@ -382,6 +388,70 @@ export class ScriptedFms implements CduBackend {
     if (leg && leg.kind !== "disco" && leg.source === "APPR") return "APPROACH";
     const near = (icao: string) => { const airport = this.db.airport(icao); return airport !== undefined && distanceNm(this.here, airport.position) <= 30; };
     return near(this.active.origin) || near(this.active.dest) ? "TERMINAL" : "EN ROUTE";
+  }
+
+  // ------------------------------------------------------------------ vertical profile and predictions (vnav.ts)
+
+  /** Ground speed on a course, from the true airspeed and the wind. */
+  groundSpeedOn(course: number, tas = this.targetSpeed) {
+    return Math.max(30, tas - this.wind.speed * Math.cos(((this.wind.direction - course) * Math.PI) / 180));
+  }
+
+  /** The cold temperature correction to the FAF altitude, from the destination temperature on VNAV (0 at or above ISA). */
+  get coldCorrection() {
+    const { destTemp, fafAltitude, runwayElevation } = this.vnav;
+    return destTemp === null ? 0 : coldTemperatureCorrection(fafAltitude - runwayElevation, destTemp, runwayElevation);
+  }
+
+  get fafAltitudeCorrected() { return this.vnav.fafAltitude + this.coldCorrection; }
+
+  /** The true airspeed flown: the cruise speed, reduced by a speed constraint at the active fix or the hold. */
+  get targetSpeed() {
+    const leg = this.active.legs[0];
+    const constraint = leg?.kind === "wpt" ? leg.speed : undefined;
+    const hold = this.active.hold?.status === "IN PROGRESS" ? this.active.hold.speed : undefined;
+    return Math.min(this.vnav.cruiseSpeed, constraint ?? Infinity, hold ?? Infinity);
+  }
+
+  /**
+   * The planned vertical profile and predictions along the active route: altitude, ETA and fuel at each waypoint,
+   * the top and end of descent, and the first climb constraint that cannot be met. The E/D is the runway.
+   */
+  profile(route: Route = this.active): Profile {
+    const geometry = this.legGeometry(route);
+    // The descent meets the approach: the final approach fix is crossed at its (temperature-corrected) altitude.
+    const runwayAt = route.legs.findIndex(leg => leg.kind === "wpt" && /^RW\d{2}/.test(leg.ident));
+    const waypoints = route.legs.flatMap((leg, i) => {
+      if (leg.kind !== "wpt") return [];
+      const g = geometry[i];
+      const constraint = i === runwayAt - 1 ? { kind: "AT" as const, altitude: this.fafAltitudeCorrected } : parseConstraint(leg.altitude);
+      return [{
+        ident: leg.ident, legDistance: g?.distance ?? 0, groundSpeed: this.groundSpeedOn(g?.course ?? this.track),
+        constraint, endOfDescent: i === runwayAt,
+      }];
+    });
+    return computeProfile({
+      waypoints, altitude: this.altitude, cruiseAltitude: this.vnav.cruiseAltitude, climbRate: 1000, pathAngle: this.vnav.pathAngle,
+      fuel: this.fuel.quantity, fuelFlow: this.fuel.flow, now: this.now.getTime(),
+    });
+  }
+
+  /**
+   * Burns fuel for dt seconds and checks the plan: FUEL RESERVE when fuel on board reaches the reserve, NOT ENOUGH
+   * FUEL when the prediction at the destination is below it, UNABLE NEXT ALTITUDE (the manual’s wording is not in
+   * the alert list, so the advisory is used) when a climb constraint cannot be made.
+   */
+  updatePerformance(dt: number) {
+    const before = this.fuel.quantity;
+    this.fuel.quantity = Math.max(0, before - (this.fuel.flow * dt) / 3600);
+    if (before > this.fuel.reserve && this.fuel.quantity <= this.fuel.reserve) this.alert(alert("FUEL RESERVE"));
+    const profile = this.profile();
+    const atDestination = profile.points.at(-1)?.fuel;
+    if (atDestination !== undefined && atDestination < this.fuel.reserve) {
+      if (!this.perf.notEnoughAlerted) { this.perf.notEnoughAlerted = true; this.alert(alert("NOT ENOUGH FUEL")); }
+    } else this.perf.notEnoughAlerted = false;
+    if (profile.unableNext && profile.unableNext !== this.perf.unableAlertedFor) { this.perf.unableAlertedFor = profile.unableNext; this.advisory("UNABLE NEXT ALT"); }
+    if (!profile.unableNext) this.perf.unableAlertedFor = null;
   }
 
   /** On an approach that is not an ILS: the NPA annunciator. */

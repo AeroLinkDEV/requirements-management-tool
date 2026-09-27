@@ -1,0 +1,183 @@
+/**
+ * Vertical navigation and predictions: altitude constraints, the planned vertical profile along the route with its
+ * top of descent (T/D) and end of descent (E/D), and time and fuel predictions at each waypoint. This follows how
+ * airline FMSs build the profile (Boeing 737 FCOM 11.31, VNAV): the descent path is built backward from the E/D at the
+ * path angle, respecting each constraint; the climb forward from the aircraft at the climb rate, levelling at
+ * "at or below" constraints and the cruise altitude. The rates and angles are representative.
+ */
+
+export type AltitudeConstraint =
+  | { kind: "AT"; altitude: number }
+  | { kind: "A"; altitude: number }
+  | { kind: "B"; altitude: number }
+  | { kind: "WINDOW"; lower: number; upper: number };
+
+export const TRANSITION_ALTITUDE = 18000;
+
+/**
+ * An altitude: FL080 or FL80 as a flight level; otherwise feet. As a crew entry (entry = true) three digits are
+ * hundreds of feet, as the FMS reads them (050 is 5000); stored values, such as a runway elevation of 168, are feet.
+ */
+export function parseAltitude(text: string, entry = false): number | null {
+  const fl = /^FL(\d{2,3})$/.exec(text);
+  if (fl) return Number(fl[1]) * 100;
+  if (entry && /^\d{3}$/.test(text)) return Number(text) * 100;
+  if (/^\d{1,5}$/.test(text)) return Number(text);
+  return null;
+}
+
+/**
+ * A constraint: 5000 (at), 5000A (at or above), 5000B (at or below), 7000B5000A or 5000A7000B (a window). With
+ * entry = true the altitudes follow the crew entry rules of parseAltitude.
+ */
+export function parseConstraint(text: string | undefined, entry = false): AltitudeConstraint | null {
+  if (!text) return null;
+  const window = /^(FL\d{2,3}|\d{1,5})([AB])(FL\d{2,3}|\d{1,5})([AB])$/.exec(text);
+  if (window && window[2] !== window[4]) {
+    const a = parseAltitude(window[1], entry), b = parseAltitude(window[3], entry);
+    if (a === null || b === null) return null;
+    const lower = window[2] === "A" ? a : b, upper = window[2] === "B" ? a : b;
+    return lower <= upper ? { kind: "WINDOW", lower, upper } : null;
+  }
+  const single = /^(FL\d{2,3}|\d{1,5})([AB]?)$/.exec(text);
+  if (!single) return null;
+  const altitude = parseAltitude(single[1], entry);
+  if (altitude === null) return null;
+  return single[2] === "A" ? { kind: "A", altitude } : single[2] === "B" ? { kind: "B", altitude } : { kind: "AT", altitude };
+}
+
+/** How a constraint is written back on LEGS: altitudes above the transition altitude as flight levels. */
+export function formatConstraint(c: AltitudeConstraint) {
+  const alt = (value: number) => (value >= TRANSITION_ALTITUDE ? `FL${String(Math.round(value / 100)).padStart(3, "0")}` : String(value));
+  switch (c.kind) {
+    case "AT": return alt(c.altitude);
+    case "A": return `${alt(c.altitude)}A`;
+    case "B": return `${alt(c.altitude)}B`;
+    case "WINDOW": return `${alt(c.upper)}B${alt(c.lower)}A`;
+  }
+}
+
+/** Clamp an altitude into what a constraint allows. */
+export function applyConstraint(altitude: number, c: AltitudeConstraint | null) {
+  if (!c) return altitude;
+  switch (c.kind) {
+    case "AT": return c.altitude;
+    case "A": return Math.max(altitude, c.altitude);
+    case "B": return Math.min(altitude, c.altitude);
+    case "WINDOW": return Math.min(Math.max(altitude, c.lower), c.upper);
+  }
+}
+
+export type ProfileInput = {
+  /** One entry per waypoint ahead, in order: the distance of the leg into it and its constraint. */
+  waypoints: { ident: string; legDistance: number; groundSpeed: number; constraint: AltitudeConstraint | null; endOfDescent: boolean }[];
+  altitude: number;
+  cruiseAltitude: number;
+  climbRate: number;
+  pathAngle: number;
+  fuel: number;
+  fuelFlow: number;
+  now: number;
+};
+
+export type ProfilePoint = { ident: string; distance: number; altitude: number; eta: number; fuel: number; constraintMet: boolean };
+export type Profile = {
+  points: ProfilePoint[];
+  /** Distance ahead of the aircraft to the top of descent, null if the descent has begun or there is none. */
+  topOfDescent: number | null;
+  endOfDescent: string | null;
+  /** The first climb constraint the aircraft cannot make at its climb rate. */
+  unableNext: string | null;
+  /** The altitude the climb may go to now: cruise, or the lowest "at" or "at or below" constraint ahead in the climb. */
+  climbCap: number;
+  /** Past the top of descent: the active waypoint is on the descent path. */
+  descending: boolean;
+};
+
+const FT_PER_NM = 6076.12;
+
+export function computeProfile(input: ProfileInput): Profile {
+  const { waypoints, cruiseAltitude, pathAngle } = input;
+  const tan = Math.tan((pathAngle * Math.PI) / 180);
+  const cumulative: number[] = [];
+  let total = 0;
+  for (const w of waypoints) { total += w.legDistance; cumulative.push(total); }
+
+  // The capping constraints of the climb: cruise, or an "at" or "at or below" constraint.
+  const capOf = (c: AltitudeConstraint | null) =>
+    c?.kind === "AT" || c?.kind === "B" ? c.altitude : c?.kind === "WINDOW" ? c.upper : Infinity;
+
+  // Top of climb: the first waypoint by which the climb (at the climb rate, levelling at its constraints) reaches
+  // cruise. Constraints before it are climb constraints; constraints after it below cruise are descent constraints.
+  let topOfClimb = -1;
+  {
+    let altitude = input.altitude;
+    if (altitude < cruiseAltitude - 1) {
+      topOfClimb = waypoints.length;
+      for (let i = 0; i < waypoints.length; i += 1) {
+        const cap = Math.min(cruiseAltitude, capOf(waypoints[i].constraint));
+        altitude = Math.min(Math.max(cap, altitude), altitude + input.climbRate * (waypoints[i].legDistance / Math.max(30, waypoints[i].groundSpeed)) * 60);
+        if (altitude >= cruiseAltitude - 1) { topOfClimb = i; break; }
+      }
+    }
+  }
+
+  // Descent: backward from the E/D at the path angle, capped at cruise and shaped by the descent constraints.
+  const edIndex = waypoints.findIndex(w => w.endOfDescent);
+  const descent: number[] = waypoints.map(() => Infinity);
+  if (edIndex >= 0) {
+    const ed = waypoints[edIndex].constraint;
+    descent[edIndex] = ed?.kind === "AT" ? ed.altitude : ed?.kind === "B" ? ed.altitude : ed?.kind === "WINDOW" ? ed.lower : ed?.altitude ?? 0;
+    for (let i = edIndex - 1; i >= 0; i -= 1) {
+      const up = descent[i + 1] + waypoints[i + 1].legDistance * FT_PER_NM * tan;
+      // In the climb the path stops at cruise: those constraints belong to the climb.
+      if (i <= topOfClimb && up >= cruiseAltitude) break;
+      descent[i] = applyConstraint(Math.min(up, cruiseAltitude), waypoints[i].constraint);
+    }
+  }
+
+  // Top of descent: where the backward path, rising at the path angle, reaches the cruise altitude.
+  let topOfDescent: number | null = null;
+  if (edIndex >= 0) {
+    const firstBelow = descent.findIndex((alt, i) => i <= edIndex && alt < cruiseAltitude - 1);
+    if (firstBelow >= 0) {
+      const back = (cruiseAltitude - descent[firstBelow]) / (FT_PER_NM * tan);
+      const at = cumulative[firstBelow] - back;
+      topOfDescent = at > 0 ? at : null;
+    }
+  }
+
+  // The climb levels at the lowest "at" or "at or below" constraint ahead in the climb, until passing it.
+  let climbCap = cruiseAltitude;
+  for (let i = 0; i < waypoints.length && descent[i] === Infinity; i += 1) climbCap = Math.min(climbCap, capOf(waypoints[i].constraint));
+
+  // Climb: forward from the aircraft at the climb rate, levelling at B constraints and cruise.
+  const points: ProfilePoint[] = [];
+  let altitude = input.altitude, time = input.now, fuel = input.fuel, unableNext: string | null = null;
+  waypoints.forEach((w, i) => {
+    const hours = w.legDistance / Math.max(30, w.groundSpeed);
+    time += hours * 3_600_000;
+    fuel -= hours * input.fuelFlow;
+    const cap = Math.min(cruiseAltitude, capOf(w.constraint));
+    const climbed = altitude < cap ? Math.min(cap, altitude + input.climbRate * hours * 60) : altitude;
+    const predicted = Math.min(climbed, descent[i]);
+    const needed = w.constraint?.kind === "A" || w.constraint?.kind === "AT" ? w.constraint.altitude : w.constraint?.kind === "WINDOW" ? w.constraint.lower : -Infinity;
+    const met = predicted >= needed - 50 || descent[i] < needed;
+    if (!met && unableNext === null && predicted < needed) unableNext = w.ident;
+    altitude = predicted;
+    points.push({ ident: w.ident, distance: cumulative[i], altitude: predicted, eta: time, fuel, constraintMet: met });
+  });
+  return { points, topOfDescent, endOfDescent: edIndex >= 0 ? waypoints[edIndex].ident : null, unableNext, climbCap, descending: edIndex >= 0 && topOfDescent === null && descent[0] !== Infinity };
+}
+
+/**
+ * Cold temperature correction for an altitude above the aerodrome: the true altitude is lower than indicated when it
+ * is colder than standard, so constraint altitudes are raised. A simplified form of the ICAO PANS-OPS correction,
+ * rounded up to 10 ft; zero at or above ISA.
+ */
+export function coldTemperatureCorrection(heightAboveAerodrome: number, aerodromeTemp: number, aerodromeElevation: number) {
+  const isaAtAerodrome = 15 - (aerodromeElevation / 1000) * 2;
+  if (aerodromeTemp >= isaAtAerodrome || heightAboveAerodrome <= 0) return 0;
+  const correction = (heightAboveAerodrome * (isaAtAerodrome - aerodromeTemp)) / (273 + aerodromeTemp);
+  return Math.ceil(correction / 10) * 10;
+}
