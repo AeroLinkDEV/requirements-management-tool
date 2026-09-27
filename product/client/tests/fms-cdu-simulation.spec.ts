@@ -263,8 +263,13 @@ test('RNP exceeded and NPA change RNP/ANP; the offset lamp follows an offset ent
   press(unit, 'CLR', 'CLR', 'CLR', 'CLR')
   enter(unit, 'R1.5', 'LSK1L')
   expect(lines(unit)[2]).toMatch(/^R1\.5NM/)
+  // The offset is a modification: OFST lights once it is executed, and goes out once its deletion is.
+  expect(unit.lamps().has('OFST')).toBe(false)
+  unit.press('EXEC')
   expect(unit.lamps().has('OFST')).toBe(true)
   press(unit, 'CLR', 'LSK1L')
+  expect(unit.lamps().has('OFST')).toBe(true)
+  unit.press('EXEC')
   expect(unit.lamps().has('OFST')).toBe(false)
   expect(unit.hasCondition('offset')).toBe(false)
 })

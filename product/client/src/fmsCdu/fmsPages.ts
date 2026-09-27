@@ -1,6 +1,6 @@
 import { alert } from "./alerts";
 import {
-  WAYPOINT, boxes, caption, courseDeg, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, offset, pad, prompt, simulated,
+  WAYPOINT, boxes, caption, conditionalLabel, courseDeg, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, offset, pad, prompt, simulated,
   small, three, title, type CorePageId, type Leg, type LskResult, type Page, type PageId,
 } from "./fmsModel";
 import type { Line } from "./screen";
@@ -162,6 +162,12 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           return;
         }
         const active = at === 0;
+        if (leg.kind === "cond") {
+          // A conditional leg: its course or heading, and the event that ends it.
+          lines[1 + i * 2] = { left: small(` ${three(leg.course)}° ${leg.path[0] === "V" ? "HDG" : "CRS"}`) };
+          lines[2 + i * 2] = { left: { text: conditionalLabel(leg), color: active ? "magenta" : "green", inverse: active } };
+          return;
+        }
         const leg3 = geometry[at];
         const marker = leg.qualifier === "/H" ? `HOLD ${route.hold?.turn === "LEFT" ? "L" : "R"}` : leg.qualifier === "/S" ? "SAR" : undefined;
         lines[1 + i * 2] = {
@@ -176,9 +182,27 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       });
       lines[11] = { left: dashes(24) };
       lines[12] = fms.routeStatus === "MOD" ? { left: back("ERASE"), right: prompt("RTE DATA>") } : { right: prompt("RTE DATA>") };
+      // A direct-to offers INTC CRS (fly a course into the fix instead) and ABEAM PTS (keep the bypassed points).
+      if (fms.directModification && index === 0) {
+        const first = route.legs[0];
+        const course = first?.kind === "wpt" && first.path === "CF" && first.course !== undefined ? first.course : geometry[0]?.course;
+        lines[11] = { left: dashes(13), right: small("INTC CRS ", "green") };
+        lines[12] = { left: back("ERASE"), right: { text: course === undefined ? "---" : three(course), color: first?.kind === "wpt" && first.path === "CF" ? "white" : "cyan" } };
+        if (fms.bypassedByDirect.length) lines[10] = { ...lines[10], right: prompt("ABEAM PTS>") };
+      }
       return lines;
     },
     lsk: (fms, side, row, scratch, index): LskResult => {
+      if (fms.directModification && index === 0 && side === "R") {
+        if (row === 5 && fms.bypassedByDirect.length) { fms.abeamPoints(); return; }
+        if (row === 6) {
+          const course = scratch ? numberIn(scratch, 0, 360, /^\d{1,3}$/) : fms.legGeometry()[0]?.course ?? null;
+          if (course === null) return "invalid";
+          fms.interceptCourse(course === 0 ? 360 : course);
+          fms.setScratch("");
+          return;
+        }
+      }
       if (row === 6) {
         if (side === "L" && fms.routeStatus === "MOD") fms.eraseModification();
         if (side === "R") fms.open("RTE", 1);
@@ -248,7 +272,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const toLeg = geometry[0], nextLeg = geometry[1];
       const now = fms.now.getTime();
       const eta = (miles: number) => hhmm(new Date(now + (miles / fms.groundSpeed) * 3_600_000));
-      const ident = (leg: Leg | undefined) => (leg?.kind === "wpt" ? leg.ident : "-----");
+      const ident = (leg: Leg | undefined) => (leg?.kind === "wpt" ? leg.ident : leg?.kind === "cond" ? conditionalLabel(leg) : "-----");
       const gpsLost = fms.hasCondition("gpsLost");
       if (index === 0) {
         const rnp = fms.hasCondition("npa") ? 0.3 : 1.0;
@@ -263,7 +287,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           caption("TRUE WIND", "TK/GS "),
           { left: medium(` ${three(fms.wind.direction)}°/ ${fms.wind.speed}KT`), right: medium(`${three(fms.track)}°/${Math.round(fms.groundSpeed)}KT`) },
           caption(undefined, "TKE/XTK "),
-          { right: medium(fms.lateralOffset === null ? "L002°/R0.02NM" : `L000°/${fms.lateralOffset < 0 ? "L" : "R"}${fixed(Math.abs(fms.lateralOffset), 2)}NM`) },
+          { right: medium(`${fms.trackError < 0 ? "L" : "R"}${three(Math.abs(fms.trackError))}°/${fms.crossTrack < 0 ? "L" : "R"}${fixed(Math.abs(fms.crossTrack), 2)}NM`) },
           caption("RNP/ANP"),
           { left: medium(`${fixed(rnp, 2)}/${fixed(anp, 2)}NM`, anp > rnp ? "amber" : "white") },
           caption("NAV MODE"),
@@ -286,24 +310,38 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           caption(" SBAS", "INTEGRITY "),
           { left: medium(gpsLost ? "----" : "WAAS"), right: gpsLost ? medium("LOST", "amber") : medium("OK", "green") },
         ];
+      const offset = fms.lateralOffset;
       return [
-        title("PROGRESS", "4/4", "ACT"),
+        title("PROGRESS", "4/4", fms.routeStatus),
         caption(" OFFSET"),
-        { left: fms.lateralOffset === null ? dashes(5) : { text: `${fms.lateralOffset < 0 ? "L" : "R"}${fixed(Math.abs(fms.lateralOffset), 1)}NM` } },
+        { left: offset ? { text: `${offset.nm < 0 ? "L" : "R"}${fixed(Math.abs(offset.nm), 1)}NM` } : dashes(5) },
+        caption(" START WPT", "END WPT "),
+        offset ? { left: offset.start ? { text: offset.start } : dashes(5), right: offset.end ? { text: offset.end } : dashes(5) } : undefined,
         caption(" ALT", "VS "),
         { left: medium(`${Math.round(fms.altitude)}FT`), right: medium(`${fms.verticalSpeed >= 0 ? "+" : ""}${Math.round(fms.verticalSpeed / 10) * 10}FPM`) },
       ];
     },
     lsk: (fms, side, row, scratch, index) => {
-      if (index !== 3 || side !== "L" || row !== 1) return;
-      if (!scratch) return;
-      if (scratch === "DELETE") { fms.setOffset(null); fms.setScratch(""); return; }
-      // An offset is L or R and 0.1 to 20.0 NM (item: lateral offset, PROGRESS 4/4).
-      const shape = /^([LR])(\d{1,2}(\.\d)?)$/.exec(scratch);
-      const nm = shape ? numberIn(shape[2], 0.1, 20) : null;
-      if (!shape || nm === null) return "invalid";
-      fms.setOffset(shape[1] === "L" ? -nm : nm);
-      fms.setScratch("");
+      if (index !== 3 || !scratch) return;
+      if (side === "L" && row === 1) {
+        if (scratch === "DELETE") { fms.setOffset(null); fms.setScratch(""); return; }
+        // An offset is L or R, before or after the distance, and 0.1 to 20.0 NM: L2.0, 2L, R10.
+        const before = /^([LR])(\d{1,2}(?:\.\d)?)$/.exec(scratch), after = /^(\d{1,2}(?:\.\d)?)([LR])$/.exec(scratch);
+        const direction = before?.[1] ?? after?.[2];
+        const nm = numberIn(before?.[2] ?? after?.[1] ?? "", 0.1, 20);
+        if (!direction || nm === null) return "invalid";
+        fms.setOffset({ nm: direction === "L" ? -nm : nm });
+        fms.setScratch("");
+        return;
+      }
+      // START and END WPT: route waypoints the offset begins after and ends at.
+      if (row === 2 && fms.lateralOffset) {
+        const key = side === "L" ? "start" : "end";
+        if (scratch === "DELETE") { fms.setOffset({ [key]: undefined }); fms.setScratch(""); return; }
+        if (!fms.route.legs.some(leg => leg.kind === "wpt" && leg.ident === scratch)) return "invalid";
+        fms.setOffset({ [key]: scratch });
+        fms.setScratch("");
+      }
     },
   },
 
@@ -515,7 +553,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           undefined, undefined, undefined, undefined, undefined, { left: back("INDEX") }];
       const geometry = fms.legGeometry();
       const legs = fms.route.legs;
-      const ident = (i: number) => { const leg = legs[i]; return leg?.kind === "wpt" ? leg.ident : "-----"; };
+      const ident = (i: number) => { const leg = legs[i]; return leg?.kind === "wpt" ? leg.ident : leg?.kind === "cond" ? conditionalLabel(leg) : "-----"; };
       const crsDist = (i: number) => { const leg = geometry[i]; return leg ? `${three(leg.course)}°/${fixed(leg.distance, 1).padStart(5)}NM` : "---°/--.-NM"; };
       const tan = Math.tan((path.vpa * Math.PI) / 180);
       // Vertical deviation is shown once the aircraft is on the final approach: FAF or runway active.

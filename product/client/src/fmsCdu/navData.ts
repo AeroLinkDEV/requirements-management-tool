@@ -1,4 +1,4 @@
-import { distanceNm, offset, type LatLon } from "./fmsModel";
+import { distanceNm, offset, type ConditionalPath, type FixPath, type LatLon } from "./fmsModel";
 
 /**
  * The navigation database: airports with runways, navaids, fixes, airways and terminal procedures (SIDs, STARs and
@@ -18,7 +18,10 @@ export type NavEntry = Fix | Navaid | Airport;
 
 export type Airway = { ident: string; fixes: string[] };
 
-export type ProcedureLeg = { ident: string; altitude?: string; overfly?: boolean };
+/** A procedure leg: a fix with its path terminator, or a conditional leg (course or heading to an event). */
+export type ProcedureLeg =
+  | { ident: string; altitude?: string; overfly?: boolean; path?: FixPath; course?: number; arc?: { centre: LatLon; turn: "L" | "R" } }
+  | { path: ConditionalPath; course: number; altitude?: number };
 export type ProcedureKind = "SID" | "STAR" | "APPROACH";
 export type ApproachType = "RNAV" | "ILS" | "VOR" | "NDB";
 export type Procedure = {
@@ -54,6 +57,12 @@ function runwayPair(ref: LatLon, a: string, b: string, courseA: number, length: 
 }
 
 const CYOW_REF = { lat: 45.3225, lon: -75.6692 };
+
+// The RNAV 06L approach turns onto final on a 3 NM radius-to-fix arc: it ends at the FAF (UL601) on the final
+// approach course, 057, having begun 120 degrees earlier at UL603.
+const UL601 = { lat: 45.4300, lon: -73.8200 };
+const R06L_ARC = { centre: offset(UL601, 147, 3), turn: "R" as const };
+const UL603 = offset(R06L_ARC.centre, 207, 3);
 const CYUL_REF = { lat: 45.4706, lon: -73.7408 };
 
 // CYUL runway 06L/24R is placed so its 24R threshold matches the demonstration route's RW24R.
@@ -85,7 +94,7 @@ export const DEMO_NAV_DATA: NavData = {
     fix("OW501", 45.2800, -75.8200), fix("OW511", 45.3700, -75.4900), fix("OW512", 45.4100, -75.2500),
     fix("UL301", 45.5700, -74.2500), fix("UL302", 45.5500, -73.9000), fix("UL401", 45.6800, -74.0500),
     fix("UL402", 45.6000, -73.8200), fix("UL501", 45.4200, -73.8800), fix("UL502", 45.3500, -73.9500),
-    fix("UL601", 45.4300, -73.8200), fix("UL602", 45.4000, -73.8700),
+    fix("UL601", UL601.lat, UL601.lon), fix("UL602", 45.4000, -73.8700), fix("UL603", UL603.lat, UL603.lon),
   ],
   airways: [
     { ident: "V300", fixes: ["YOW", "MUN", "RDG", "TOLGU", "YUL"] },
@@ -95,10 +104,12 @@ export const DEMO_NAV_DATA: NavData = {
   procedures: [
     { kind: "SID", airport: "CYOW", ident: "RIDEA3", runways: ["RW25", "RW32"],
       transitions: { MUN: [{ ident: "MUN", altitude: "3000" }], ELIBA: [{ ident: "ELIBA", altitude: "5000" }] },
-      legs: [{ ident: "OW501", altitude: "2500A" }] },
+      // The runway course to 1200 ft, then direct to the first fix.
+      legs: [{ path: "CA", course: 251, altitude: 1200 }, { ident: "OW501", altitude: "2500A", path: "DF" }] },
     { kind: "SID", airport: "CYOW", ident: "GATIN2", runways: ["RW07", "RW14"],
       transitions: { RDG: [{ ident: "OW512", altitude: "4000" }, { ident: "RDG", altitude: "4500" }] },
-      legs: [{ ident: "OW511", altitude: "2500A" }] },
+      // A heading to 1000 ft, a heading to intercept, then the published course into the first fix.
+      legs: [{ path: "VA", course: 71, altitude: 1000 }, { path: "VI", course: 40 }, { ident: "OW511", altitude: "2500A", path: "CF", course: 90 }] },
     { kind: "STAR", airport: "CYUL", ident: "LACHN3", runways: ["RW24R", "RW24L", "RW28"],
       transitions: { TOLGU: [{ ident: "TOLGU", altitude: "6000" }], RDG: [{ ident: "RDG", altitude: "7000" }, { ident: "TOLGU", altitude: "6000" }] },
       legs: [{ ident: "UL301", altitude: "5000" }, { ident: "UL302", altitude: "4000" }] },
@@ -108,7 +119,7 @@ export const DEMO_NAV_DATA: NavData = {
     { kind: "APPROACH", airport: "CYUL", ident: "R24R", approachType: "RNAV", runways: ["RW24R"],
       transitions: { UL302: [{ ident: "UL302", altitude: "4000" }], AGBEK: [{ ident: "AGBEK", altitude: "3000" }] },
       legs: [{ ident: "FERDI", altitude: "1500A" }, { ident: "RW24R", altitude: "168", overfly: true }], faf: "FERDI",
-      missed: [{ ident: "UL501", altitude: "3000" }, { ident: "UL502", altitude: "3000" }],
+      missed: [{ path: "CA", course: 237, altitude: 1000 }, { ident: "UL501", altitude: "3000", path: "DF" }, { ident: "UL502", altitude: "3000" }],
       missedHold: { fix: "UL502", inbound: 57, turn: "RIGHT", altitude: "3000" } },
     { kind: "APPROACH", airport: "CYUL", ident: "I24R", approachType: "ILS", runways: ["RW24R"],
       transitions: { UL302: [{ ident: "UL302", altitude: "4000" }] },
@@ -116,7 +127,7 @@ export const DEMO_NAV_DATA: NavData = {
       missed: [{ ident: "UL501", altitude: "3000" }], missedHold: { fix: "UL501", inbound: 57, turn: "RIGHT", altitude: "3000" } },
     { kind: "APPROACH", airport: "CYUL", ident: "R06L", approachType: "RNAV", runways: ["RW06L"],
       transitions: { UL402: [{ ident: "UL402", altitude: "4000" }] },
-      legs: [{ ident: "UL601", altitude: "2000A" }, { ident: "RW06L", altitude: "168", overfly: true }], faf: "UL601",
+      legs: [{ ident: "UL603", altitude: "3000" }, { ident: "UL601", altitude: "2000A", path: "RF", arc: R06L_ARC }, { ident: "RW06L", altitude: "168", overfly: true }], faf: "UL601",
       missed: [{ ident: "UL602", altitude: "3000" }], missedHold: { fix: "UL602", inbound: 237, turn: "RIGHT", altitude: "3000" } },
   ],
 };

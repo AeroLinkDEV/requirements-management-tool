@@ -15,7 +15,8 @@ const typeText = (unit: ScriptedFms, text: string) => {
 const enter = (unit: ScriptedFms, text: string, lsk: CduFunction) => { typeText(unit, text); unit.press(lsk) }
 const lines = (unit: ScriptedFms) => screenText(unit.screen())
 const scratch = (unit: ScriptedFms) => lines(unit)[SCRATCHPAD_LINE].trimEnd()
-const idents = (unit: ScriptedFms) => unit.route.legs.map(leg => (leg.kind === 'wpt' ? leg.ident : '(disco)'))
+// A conditional leg shows as its path terminator, e.g. (CA); a gap as (disco).
+const idents = (unit: ScriptedFms) => unit.route.legs.map(leg => (leg.kind === 'wpt' ? leg.ident : leg.kind === 'cond' ? `(${leg.path})` : '(disco)'))
 
 test('a SID and transition start the route at the runway end and join the enroute legs where they meet', () => {
   const unit = fms()
@@ -30,7 +31,7 @@ test('a SID and transition start the route at the runway end and join the enrout
   expect(lines(unit)[3]).toMatch(/^ TRANS/)
   expect(lines(unit)[4]).toMatch(/^MUN/)
   unit.press('LSK2L')
-  expect(idents(unit)).toEqual(['OW501', 'MUN', 'RDG', 'TOLGU', 'FERDI', 'RW24R', 'CYUL'])
+  expect(idents(unit)).toEqual(['(CA)', 'OW501', 'MUN', 'RDG', 'TOLGU', 'FERDI', 'RW24R', 'CYUL'])
   expect(unit.route.sid).toEqual({ ident: 'RIDEA3', transition: 'MUN' })
   expect(unit.routeStatus).toBe('MOD')
 })
@@ -38,7 +39,7 @@ test('a SID and transition start the route at the runway end and join the enrout
 test('a SID transition that does not meet the route is followed by a route discontinuity', () => {
   const unit = fms()
   unit.selectProcedure('SID', 'RIDEA3', 'ELIBA')
-  expect(idents(unit).slice(0, 4)).toEqual(['OW501', 'ELIBA', '(disco)', 'MUN'])
+  expect(idents(unit).slice(0, 5)).toEqual(['(CA)', 'OW501', 'ELIBA', '(disco)', 'MUN'])
 })
 
 test('a STAR and approach replace the end of the route, and the approach is followed by its missed approach', () => {
@@ -50,10 +51,10 @@ test('a STAR and approach replace the end of the route, and the approach is foll
   expect(idents(unit)).toEqual(['MUN', 'RDG', 'TOLGU', 'UL301', 'UL302', 'CYUL'])
   unit.press('LSK1R')
   // The approach's first fix is not the STAR's last: a discontinuity until the UL302 transition joins them.
-  expect(idents(unit)).toEqual(['MUN', 'RDG', 'TOLGU', 'UL301', 'UL302', '(disco)', 'FERDI', 'RW24R', 'UL501', 'UL502'])
+  expect(idents(unit)).toEqual(['MUN', 'RDG', 'TOLGU', 'UL301', 'UL302', '(disco)', 'FERDI', 'RW24R', '(CA)', 'UL501', 'UL502'])
   expect(lines(unit)[4]).toMatch(/UL302$/)
   unit.press('LSK2R')
-  expect(idents(unit)).toEqual(['MUN', 'RDG', 'TOLGU', 'UL301', 'UL302', 'FERDI', 'RW24R', 'UL501', 'UL502'])
+  expect(idents(unit)).toEqual(['MUN', 'RDG', 'TOLGU', 'UL301', 'UL302', 'FERDI', 'RW24R', '(CA)', 'UL501', 'UL502'])
   // Selecting the STAR again removes it; the approach stays.
   unit.press('LSK1L')
   expect(unit.route.star).toBeUndefined()
@@ -65,6 +66,9 @@ test('passing the runway on the approach starts the missed approach and arms its
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
   for (let i = 0; i < 5; i += 1) unit.sequence()
+  // The missed approach climbs straight ahead to 1000 ft (a CA leg) before turning for UL501.
+  expect(idents(unit)[0]).toBe('(CA)')
+  unit.sequence()
   expect(idents(unit)[0]).toBe('UL501')
   expect(unit.activeRoute.hold).toMatchObject({ fix: 'UL502', status: 'ARMED' })
 })

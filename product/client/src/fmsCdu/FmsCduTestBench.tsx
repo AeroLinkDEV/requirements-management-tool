@@ -5,6 +5,7 @@ import { CONDITIONS } from "./conditions";
 import { FlightSimulator, MAP_RANGES } from "./flight";
 import FmsCduPanel from "./FmsCduPanel";
 import FmsMap from "./FmsMap";
+import { conditionalLabel } from "./fmsModel";
 import { useCduLayout, type CduKeyEvent } from "./layout";
 import { LIGHTING_MODES, displayLuminance, type Lighting, type LightingMode } from "./lighting";
 import { ScriptedFms } from "./scriptedFms";
@@ -49,6 +50,7 @@ export default function FmsCduTestBench() {
   const [rate, setRate] = useState(1);
   const [range, setRange] = useState(20);
   const [navLoad, setNavLoad] = useState<string | null>(null);
+  const [headingInput, setHeadingInput] = useState("090");
   const variant = variantById(variantId);
 
   // A quarter-second loop flies the aircraft while playing; paused, time stands still but timers are checked.
@@ -161,7 +163,7 @@ export default function FmsCduTestBench() {
             <p className="fmsBenchReadout">
               {next?.kind === "wpt"
                 ? <>Active waypoint <strong>{next.ident}</strong>{guidance.distanceToGo !== null && guidance.mode === "LNAV" ? `, ${guidance.distanceToGo.toFixed(1)} NM` : ""}</>
-                : next ? "Route discontinuity ahead" : "End of route"}
+                : next?.kind === "cond" ? <>Active leg <strong>{conditionalLabel(next)}</strong></> : next ? "Route discontinuity ahead" : "End of route"}
             </p>
             <div className="fmsBenchActions">
               <button type="button" onClick={() => setPlaying(value => !value)} disabled={failedFms} aria-pressed={playing}>
@@ -176,6 +178,21 @@ export default function FmsCduTestBench() {
               <button type="button" onClick={() => backend.sequence()} disabled={failedFms}>Jump to next waypoint</button>
               <button type="button" onClick={reset}>Restart the simulation</button>
             </div>
+            {/* The flight mode annunciator: engaged modes in green, armed ones in white, as on the PFD. */}
+            <div className="fmsBenchFma" role="status" aria-label="Flight modes">
+              <span className="engaged">{sim.lateralMode === "LNAV" ? (guidance.mode === "HDG" ? "LNAV" : guidance.mode) : "HDG SEL"}</span>
+              {sim.lnavIsArmed ? <span className="armed">LNAV</span> : null}
+              <span className="engaged">{Math.abs(backend.verticalSpeed) > 100 ? "VNAV PTH" : "VNAV ALT"}</span>
+            </div>
+            <form className="fmsBenchAutopilot" onSubmit={event => { event.preventDefault(); sim.selectHeading(Number(headingInput) || 0); }}>
+              <label>
+                <span>Heading</span>
+                <input inputMode="numeric" value={headingInput} maxLength={3} aria-label="Selected heading"
+                  onChange={event => setHeadingInput(event.target.value.replace(/\D/g, ""))} />
+              </label>
+              <button type="submit" disabled={failedFms} aria-pressed={sim.lateralMode === "HDG"}>HDG SEL</button>
+              <button type="button" disabled={failedFms || sim.lateralMode === "LNAV"} aria-pressed={sim.lnavIsArmed} onClick={() => sim.armLnav()}>LNAV</button>
+            </form>
             <dl className="fmsBenchGuidance" aria-label="Guidance">
               <dt>Mode</dt><dd>{guidance.mode}</dd>
               <dt>DTK</dt><dd>{guidance.desiredTrack === null ? "---" : `${String(Math.round(guidance.desiredTrack) || 360).padStart(3, "0")}°`}</dd>

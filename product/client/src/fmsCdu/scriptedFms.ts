@@ -3,8 +3,8 @@ import type { ConditionId } from "./conditions";
 import { DATALINK_PAGES, DEMO_SMS, DEMO_UPLINKS } from "./datalinkPages";
 import { CORE_PAGES } from "./fmsPages";
 import {
-  START_POSITION, WAYPOINT, bearingIntersection, courseDeg, distanceNm, holdEntry, maxSarGroundSpeed, offset,
-  type Hold, type HoldEntry, type LatLon, type Leg, type LskResult, type Message, type Page, type PageId, type Route, type Sar,
+  START_POSITION, WAYPOINT, arcLength, bearingIntersection, courseDeg, distanceNm, fromLocal, toLocal, holdEntry, maxSarGroundSpeed, offset,
+  type Hold, type HoldEntry, type LatLon, type Leg, type LskResult, type Message, type Offset, type Page, type PageId, type Route, type Sar,
   type SarPattern, type Uplink,
 } from "./fmsModel";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
@@ -63,7 +63,6 @@ export class ScriptedFms implements CduBackend {
   private squawkIdentUntil = 0;
   private here: LatLon = { ...START_POSITION };
   private injected = new Set<ConditionId>();
-  private offsetNm: number | null = null;
   private call: { state: "none" | "ringing" | "active"; from: string; since: number } = { state: "none", from: "", since: 0 };
   private messages: { from: string; text: string; at: Date; read: boolean }[] = [];
   private uplinkList: Uplink[] = [];
@@ -81,15 +80,19 @@ export class ScriptedFms implements CduBackend {
   /** The ident shown on REF NAV DATA, and an airway chosen on RTE 2 waiting for its TO fix. */
   navDataQuery: string | null = null;
   pendingVia: string | null = null;
-  private aircraft = { track: courseDeg(START_POSITION, { lat: 45.2150, lon: -75.3900 }), groundSpeed: 120, altitude: 3000, verticalSpeed: 0 };
+  private aircraft = { track: courseDeg(START_POSITION, { lat: 45.2150, lon: -75.3900 }), groundSpeed: 120, altitude: 3000, verticalSpeed: 0, crossTrack: 0, trackError: 0 };
   /** Where the active leg starts: the last waypoint passed, or present position when a direct-to was executed. */
   private legStart: LatLon = { ...START_POSITION };
   private directPending = false;
+  private directBypassed: string[] = [];
 
   get groundSpeed() { return this.aircraft.groundSpeed; }
   get altitude() { return this.aircraft.altitude; }
   get track() { return this.aircraft.track; }
   get verticalSpeed() { return this.aircraft.verticalSpeed; }
+  /** Guidance deviations the flight simulation reports: cross-track NM (positive right) and track error degrees. */
+  get crossTrack() { return this.aircraft.crossTrack; }
+  get trackError() { return this.aircraft.trackError; }
   get activeLegStart() { return this.legStart; }
   /** The active route, whatever a pending modification shows on the pages. Guidance flies this one. */
   get activeRoute(): Route { return this.active; }
@@ -165,7 +168,7 @@ export class ScriptedFms implements CduBackend {
 
   hasCondition(id: ConditionId): boolean {
     switch (id) {
-      case "offset": return this.offsetNm !== null;
+      case "offset": return this.active.offset !== undefined;
       case "gsmCall": return this.call.state !== "none";
       case "sms": return this.messages.some(message => !message.read);
       case "atcUplink": return this.uplinkList.some(uplink => uplink.response === "OPEN");
@@ -176,7 +179,8 @@ export class ScriptedFms implements CduBackend {
   setCondition(id: ConditionId, on: boolean) {
     if (on === this.hasCondition(id)) return;
     switch (id) {
-      case "offset": this.offsetNm = on ? -2.0 : null; break;
+      // Injected as an executed offset, as though the crew had entered and executed it.
+      case "offset": if (on) this.active.offset = { nm: -2.0 }; else this.active.offset = undefined; break;
       case "gsmCall": this.call = on ? { state: "ringing", from: "+1 613 555 0142", since: this.now.getTime() } : { state: "none", from: "", since: 0 }; break;
       case "sms":
         if (on) this.messages.unshift({ ...DEMO_SMS[this.messages.length % DEMO_SMS.length], at: this.now, read: false });
@@ -222,8 +226,12 @@ export class ScriptedFms implements CduBackend {
   arrive(): "route" | "hold" | "sar" | "end" {
     const route = this.active;
     const leg = route.legs[0];
-    if (!leg || leg.kind !== "wpt") { this.alert(alert("END OF ROUTE")); return "end"; }
+    if (!leg || leg.kind === "disco") { this.alert(alert("END OF ROUTE")); return "end"; }
+    // A conditional leg ends where its event happened: the next leg starts from here.
+    if (leg.kind === "cond") { this.passLeg(null); return "route"; }
     const hold = route.hold;
+    // A hold with a one-turn exit (HF) leaves at the first fix crossing after its entry.
+    if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && hold.exit === "1 TURN") hold.status = "EXIT ARMED";
     if (hold && hold.fix === leg.ident && hold.status !== "EXIT ARMED") {
       if (hold.status === "ARMED") {
         this.enteredHold = this.holdEntryFor(route);
@@ -237,8 +245,8 @@ export class ScriptedFms implements CduBackend {
       this.sar.status = "IN PROGRESS";
       return "sar";
     }
-    this.pass(leg.ident);
-    return route.legs.some(next => next.kind === "wpt") ? "route" : "end";
+    this.passLeg(leg.ident);
+    return route.legs.some(next => next.kind !== "disco") ? "route" : "end";
   }
 
   /** The search pattern has been flown to its end: the route continues after the search pattern waypoint. */
@@ -246,14 +254,26 @@ export class ScriptedFms implements CduBackend {
     const leg = this.active.legs[0];
     this.sar.active = null;
     this.sar.status = null;
-    if (leg?.kind === "wpt" && leg.qualifier === "/S") this.pass(leg.ident);
+    if (leg?.kind === "wpt" && leg.qualifier === "/S") this.passLeg(leg.ident);
   }
 
-  private pass(ident: string) {
+  /** Sequences the active leg: a waypoint (by ident) or, with null, a conditional leg that has ended. */
+  private passLeg(ident: string | null) {
     const route = this.active;
-    this.legStart = this.coordinates(ident) ?? { ...this.here };
-    this.sequenced = ident;
+    this.legStart = (ident && this.coordinates(ident)) || { ...this.here };
+    if (ident) this.sequenced = ident;
     const passed = route.legs.shift();
+    // A direct-to-fix leg is flown from wherever the aircraft is when it becomes active.
+    const next = route.legs[0];
+    if (next?.kind === "wpt" && next.path === "DF") this.legStart = { ...this.here };
+    // The offset ends at its end waypoint, where the aircraft returns to the route.
+    if (ident && route.offset?.end === ident) route.offset = undefined;
+    if (!ident) {
+      const pendingCond = this.modified?.legs[0];
+      if (pendingCond?.kind === "cond") this.modified?.legs.shift();
+      if (!route.legs.some(l => l.kind !== "disco")) this.alert(alert("END OF ROUTE"));
+      return;
+    }
     // Passing the runway starts the missed approach; its hold is armed so the aircraft holds at the end of it.
     const missedHold = findProcedure(this.db, route, "APPROACH")?.missedHold;
     if (passed?.kind === "wpt" && passed.source === "APPR" && /^RW\d{2}/.test(ident) && missedHold && !route.hold) {
@@ -266,7 +286,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** The flight simulation reports the aircraft's state after each step. */
-  setAircraft(state: Partial<{ position: LatLon; track: number; groundSpeed: number; altitude: number; verticalSpeed: number }>) {
+  setAircraft(state: Partial<{ position: LatLon; track: number; groundSpeed: number; altitude: number; verticalSpeed: number; crossTrack: number; trackError: number }>) {
     if (state.position) this.here = state.position;
     const { position: _position, ...rest } = state;
     Object.assign(this.aircraft, rest);
@@ -291,7 +311,8 @@ export class ScriptedFms implements CduBackend {
   get markList() { return this.marks; }
   get recallList() { return this.recall; }
   get squawkIdent() { return this.clock().getTime() < this.squawkIdentUntil; }
-  get lateralOffset() { return this.offsetNm; }
+  /** The lateral offset the pages show: the modification's if there is one, otherwise the active route's. */
+  get lateralOffset() { return this.route.offset; }
   get callState() { return this.call; }
   get smsList() { return this.messages; }
   get uplinks() { return this.uplinkList; }
@@ -461,7 +482,7 @@ export class ScriptedFms implements CduBackend {
   /** Where new enroute legs go: before the arrival, the approach and missed approach, or the destination. */
   enrouteEnd(route: Route = this.route) {
     const legs = route.legs;
-    const arrival = legs.findIndex(leg => leg.kind === "wpt" && (leg.source === "STAR" || leg.source === "APPR" || leg.source === "MISSED"));
+    const arrival = legs.findIndex(leg => leg.kind !== "disco" && (leg.source === "STAR" || leg.source === "APPR" || leg.source === "MISSED"));
     if (arrival >= 0) return arrival;
     const last = legs.at(-1);
     return last?.kind === "wpt" && last.ident === route.dest ? legs.length - 1 : legs.length;
@@ -471,9 +492,12 @@ export class ScriptedFms implements CduBackend {
   legGeometry(route: Route = this.route): LegGeometry[] {
     let from: LatLon | null = this.here;
     return route.legs.map(leg => {
-      if (leg.kind === "disco") { from = null; return null; }
+      // After a gap or a conditional leg the start of the next leg is not known in advance.
+      if (leg.kind !== "wpt") { from = null; return null; }
       const to = this.coordinates(leg.ident) ?? null;
-      const result = from && to ? { course: courseDeg(from, to), distance: distanceNm(from, to) } : null;
+      let result = from && to ? { course: courseDeg(from, to), distance: distanceNm(from, to) } : null;
+      if (result && from && to && leg.path === "RF" && leg.arc) result = { course: result.course, distance: arcLength(from, to, leg.arc) };
+      if (result && leg.path === "CF" && leg.course !== undefined) result = { ...result, course: leg.course };
       from = to;
       return result;
     });
@@ -505,12 +529,19 @@ export class ScriptedFms implements CduBackend {
     this.modified = null;
     this.sar.pending = null;
     this.directPending = false;
+    this.directBypassed = [];
   }
 
   setScratch(text: string) { this.scratch = text.slice(0, COLUMNS); }
   setRadio(key: keyof ScriptedFms["radios"], value: string) { this.radios[key] = value; }
   setFuel(key: keyof ScriptedFms["fuel"], value: number) { this.fuel[key] = value; }
-  setOffset(nm: number | null) { this.offsetNm = nm; }
+  /** Enters, changes or (with null) deletes the lateral offset, as a modification to execute. */
+  setOffset(change: Partial<Offset> | null) {
+    this.modify(route => {
+      if (change === null) route.offset = undefined;
+      else if (change.nm !== undefined || route.offset) route.offset = { ...(route.offset ?? { nm: 0 }), ...change };
+    });
+  }
 
   /** The FAF altitude constraint, on the VNAV page and on the FAF leg of both the active and modified routes. */
   setFafAltitude(altitude: number) {
@@ -545,10 +576,51 @@ export class ScriptedFms implements CduBackend {
    */
   directTo(ident: string): LskResult {
     const at = this.route.legs.findIndex(leg => leg.kind === "wpt" && leg.ident === ident);
+    if (at < 0 && !this.coordinates(ident)) return "not-in-database";
     this.directPending = true;
-    if (at >= 0) { this.modify(route => { route.legs.splice(0, at); }); return; }
-    if (!this.coordinates(ident)) return "not-in-database";
+    // A direct-to must not silently lose the points it bypasses (the Cali lesson): they are kept for ABEAM PTS.
+    this.directBypassed = at > 0 ? this.route.legs.slice(0, at).flatMap(leg => (leg.kind === "wpt" ? [leg.ident] : [])) : [];
+    if (at >= 0) {
+      this.modify(route => {
+        route.legs.splice(0, at);
+        const first = route.legs[0];
+        // Direct from present position: whatever path the leg had (a published course, an arc) no longer applies.
+        if (first?.kind === "wpt") route.legs[0] = { ...first, path: undefined, course: undefined, arc: undefined };
+      });
+      return;
+    }
     this.modify(route => { route.legs.unshift({ kind: "wpt", ident }, { kind: "disco" }); });
+  }
+
+  /** Whether the pending modification is a direct-to, for the INTC CRS and ABEAM PTS prompts. */
+  get directModification() { return this.directPending && this.modified !== null; }
+  get bypassedByDirect() { return this.directBypassed; }
+
+  /** INTC CRS: fly the entered course into the active waypoint instead of direct from present position. */
+  interceptCourse(course: number) {
+    this.modify(route => {
+      const leg = route.legs[0];
+      if (leg?.kind === "wpt") route.legs[0] = { ...leg, path: "CF", course };
+    });
+  }
+
+  /** ABEAM PTS: each waypoint the direct-to bypassed becomes a point abeam it on the new direct track. */
+  abeamPoints() {
+    const target = this.route.legs[0];
+    const to = target?.kind === "wpt" ? this.coordinates(target.ident) : undefined;
+    if (!to || !this.directBypassed.length) return;
+    const direct = toLocal(this.here, to);
+    const points = this.directBypassed.flatMap(ident => {
+      const at = this.coordinates(ident);
+      if (!at) return [];
+      const p = toLocal(this.here, at);
+      const along = (p.x * direct.x + p.y * direct.y) / (direct.x ** 2 + direct.y ** 2);
+      if (along <= 0 || along >= 1) return [];
+      const position = fromLocal(this.here, { x: direct.x * along, y: direct.y * along });
+      return [{ kind: "wpt" as const, ident: this.createPilot(ident.slice(0, 3), position, `ABEAM ${ident}`) }];
+    });
+    this.modify(route => { route.legs.splice(0, 0, ...points); });
+    this.directBypassed = [];
   }
 
   /** Defines a hold at a fix as a modification. A fix that is not in the route becomes the next waypoint. */
@@ -627,6 +699,7 @@ export class ScriptedFms implements CduBackend {
     const first = (legs: Leg[]) => { const leg = legs[0]; return leg?.kind === "wpt" ? leg.ident : null; };
     if (this.directPending || first(route.legs) !== first(this.active.legs)) this.legStart = { ...this.here };
     this.directPending = false;
+    this.directBypassed = [];
     this.active = route;
     this.modified = null;
   }

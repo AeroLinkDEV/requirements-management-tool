@@ -1,5 +1,5 @@
 import {
-  ICAO, WAYPOINT, boxes, caption, dashes, formatPosition, medium, prompt, small, title,
+  ICAO, WAYPOINT, boxes, caption, conditionalLabel, dashes, formatPosition, medium, prompt, small, title,
   type Leg, type LskResult, type Page, type PlanningPageId, type Route,
 } from "./fmsModel";
 import type { Line } from "./screen";
@@ -19,15 +19,16 @@ const selected = (label: string, on: boolean, side: "L" | "R") =>
 type RouteSegment = { via: string; to: string; from: number; to_: number; disco: boolean };
 
 export function routeSegments(route: Route): RouteSegment[] {
-  const label = (leg: Extract<Leg, { kind: "wpt" }>) =>
+  const label = (leg: Exclude<Leg, { kind: "disco" }>) =>
     leg.via ?? (leg.source === "SID" ? route.sid?.ident : leg.source === "STAR" ? route.star?.ident : leg.source === "APPR" ? route.approach?.ident : leg.source === "MISSED" ? "MISSED" : undefined) ?? "DIRECT";
   const segments: RouteSegment[] = [];
   route.legs.forEach((leg, i) => {
     if (leg.kind === "disco") { segments.push({ via: "", to: "DISCONTINUITY", from: i, to_: i, disco: true }); return; }
     const via = label(leg);
+    const to = leg.kind === "cond" ? conditionalLabel(leg) : leg.ident;
     const last = segments.at(-1);
-    if (last && !last.disco && last.via === via && via !== "DIRECT") { last.to = leg.ident; last.to_ = i; return; }
-    segments.push({ via, to: leg.ident, from: i, to_: i, disco: false });
+    if (last && !last.disco && last.via === via && via !== "DIRECT") { last.to = to; last.to_ = i; return; }
+    segments.push({ via, to, from: i, to_: i, disco: false });
   });
   return segments;
 }

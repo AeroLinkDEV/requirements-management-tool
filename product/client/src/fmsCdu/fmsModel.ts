@@ -29,6 +29,24 @@ export function courseDeg(a: LatLon, b: LatLon) {
   return course === 0 ? 360 : course;
 }
 
+/** Initial true bearing in degrees, 0..360, unrounded; for guidance geometry. */
+export function bearingDeg(a: LatLon, b: LatLon) {
+  const y = Math.sin(toRad(b.lon - a.lon)) * Math.cos(toRad(b.lat));
+  const x = Math.cos(toRad(a.lat)) * Math.sin(toRad(b.lat)) - Math.sin(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.cos(toRad(b.lon - a.lon));
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+/** The angle an RF arc sweeps from one point to another about its centre, in its turn direction, 0..360. */
+export function arcSweep(from: LatLon, to: LatLon, arc: { centre: LatLon; turn: "L" | "R" }) {
+  const a = bearingDeg(arc.centre, from), b = bearingDeg(arc.centre, to);
+  return arc.turn === "R" ? (b - a + 360) % 360 : (a - b + 360) % 360;
+}
+
+/** Length in NM of an RF arc between two points on it. */
+export function arcLength(from: LatLon, to: LatLon, arc: { centre: LatLon; turn: "L" | "R" }) {
+  return distanceNm(arc.centre, to) * toRad(arcSweep(from, to, arc));
+}
+
 /** A point at a true bearing and distance from another, for relative-position entries such as SAR REF ID. */
 export function offset(from: LatLon, bearing: number, nm: number): LatLon {
   const d = nm / 3440.065, b = toRad(bearing), lat1 = toRad(from.lat), lon1 = toRad(from.lon);
@@ -69,9 +87,29 @@ export function formatPosition(p: LatLon) {
 
 /** A route entry: a waypoint (optionally a holding or search fix), or the discontinuity a direct-to leaves. */
 export type LegSource = "SID" | "STAR" | "APPR" | "MISSED";
+/**
+ * ARINC 424 path terminators. A waypoint leg ends at a fix: TF (track between fixes, the default), CF (a published
+ * course to the fix), DF (direct from wherever the leg begins) or RF (a constant-radius arc about a centre). A
+ * conditional leg ends at an event instead of a place: CA, FA and VA climb on a course, track or heading to an
+ * altitude; VI flies a heading until the next leg is intercepted; VM and FM fly a heading or track until the crew
+ * takes over (manual termination).
+ */
+export type FixPath = "TF" | "CF" | "DF" | "RF";
+export type ConditionalPath = "CA" | "FA" | "VA" | "VI" | "VM" | "FM";
 export type Leg =
-  | { kind: "wpt"; ident: string; altitude?: string; qualifier?: "/H" | "/S" | "/O"; via?: string; source?: LegSource }
+  | {
+    kind: "wpt"; ident: string; altitude?: string; qualifier?: "/H" | "/S" | "/O"; via?: string; source?: LegSource;
+    path?: FixPath; course?: number; arc?: { centre: LatLon; turn: "L" | "R" };
+  }
+  | { kind: "cond"; path: ConditionalPath; course: number; altitude?: number; via?: string; source?: LegSource }
   | { kind: "disco" };
+
+/** How a conditional leg shows on LEGS: (3000) for an altitude, (INTC) for an intercept, (VECTOR) for manual. */
+export const conditionalLabel = (leg: Extract<Leg, { kind: "cond" }>) =>
+  leg.path === "VI" ? "(INTC)" : leg.path === "VM" || leg.path === "FM" ? "(VECTOR)" : `(${leg.altitude ?? "----"})`;
+
+/** A lateral offset: nm positive right of the route, starting after `start` and ending at `end` when given. */
+export type Offset = { nm: number; start?: string; end?: string };
 
 export type ProcedureChoice = { ident: string; transition?: string };
 export type Route = {
@@ -79,6 +117,7 @@ export type Route = {
   sid?: ProcedureChoice; star?: ProcedureChoice; approach?: ProcedureChoice;
   /** Where the enroute legs were joined to the departure and the arrival, so rebuilding the route keeps the join. */
   departureJoin?: string; arrivalJoin?: string;
+  offset?: Offset;
 };
 
 /** A hold is INACTIVE while only in a modification, ARMED once executed, IN PROGRESS from the first fix crossing. */

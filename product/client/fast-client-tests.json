@@ -17,7 +17,8 @@
     "fms-cdu-engine.spec.ts",
     "fms-cdu-simulation.spec.ts",
     "fms-flight.spec.ts",
-    "fms-planning.spec.ts"
+    "fms-planning.spec.ts",
+    "fms-guidance.spec.ts"
   ],
   "rendered": [
     "code-source-rendered.spec.ts",

@@ -10,19 +10,22 @@ import type { NavDatabase, Procedure, ProcedureLeg } from "./navData";
  */
 
 const toLegs = (legs: ProcedureLeg[], source: LegSource, via: string): Leg[] =>
-  legs.map(leg => ({ kind: "wpt", ident: leg.ident, altitude: leg.altitude, source, via }));
+  legs.map(leg => ("ident" in leg
+    // An overfly fix (a runway threshold, a missed approach point) is flown over, never turned short of.
+    ? { kind: "wpt", ident: leg.ident, altitude: leg.altitude, source, via, path: leg.path, course: leg.course, arc: leg.arc, qualifier: leg.overfly ? "/O" : undefined }
+    : { kind: "cond", path: leg.path, course: leg.course, altitude: leg.altitude, source, via }));
 
 const isWpt = (leg: Leg | undefined, ident: string) => leg?.kind === "wpt" && leg.ident === ident;
 
 /** The legs of a route that are not part of a procedure and are not the destination. */
 export function enrouteLegs(route: Route): Leg[] {
   const legs = route.legs;
-  const sourced = (leg: Leg, sources: LegSource[]) => leg.kind === "wpt" && leg.source !== undefined && sources.includes(leg.source);
+  const sourced = (leg: Leg, sources: LegSource[]) => leg.kind !== "disco" && leg.source !== undefined && sources.includes(leg.source);
   let start = 0;
   legs.forEach((leg, i) => { if (sourced(leg, ["SID"])) start = i + 1; });
   const arrival = legs.findIndex(leg => sourced(leg, ["STAR", "APPR", "MISSED"]));
   const end = arrival < 0 ? legs.length : arrival;
-  let enroute = legs.slice(start, end).filter(leg => !(leg.kind === "wpt" && leg.source));
+  let enroute = legs.slice(start, end).filter(leg => !(leg.kind !== "disco" && leg.source));
   const last = enroute.at(-1);
   if (last?.kind === "wpt" && last.ident === route.dest) enroute = enroute.slice(0, -1);
   // The discontinuities that joined procedures to the enroute legs are rebuilt with them, not kept.
@@ -47,6 +50,8 @@ export function composeRoute(route: Route, db: NavDatabase, enroute: Leg[] = enr
   const result: Leg[] = [...sidLegs];
   let en = [...enroute];
   const sidEnd = sidLegs.at(-1);
+  // A SID that ends in vectors (VM/FM) hands over to ATC: the route resumes after a discontinuity.
+  if (sidEnd?.kind === "cond" && en.length && en[0].kind !== "disco") result.push({ kind: "disco" });
   if (sidEnd?.kind === "wpt") {
     const joins = en.findIndex(leg => isWpt(leg, sidEnd.ident));
     if (joins >= 0) { en = en.slice(joins + 1); route.departureJoin = sidEnd.ident; }

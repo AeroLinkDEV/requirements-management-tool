@@ -1,5 +1,5 @@
 import { racetrackOutline, sarTrack, type FlightSimulator } from "./flight";
-import type { LatLon, Leg } from "./fmsModel";
+import { arcSweep, bearingDeg, distanceNm, offset, type LatLon, type Leg } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
 import "./FmsMap.css";
 
@@ -27,9 +27,17 @@ export default function FmsMap({ fms, sim, range }: Props) {
     const lines: LatLon[][] = [];
     let current: LatLon[] = [start];
     for (const leg of legs) {
-      if (leg.kind === "disco") { if (current.length > 1) lines.push(current); current = []; continue; }
+      // A gap, or a conditional leg with no fixed end, breaks the drawn line.
+      if (leg.kind !== "wpt") { if (current.length > 1) lines.push(current); current = []; continue; }
       const at = fms.coordinates(leg.ident);
-      if (at) current.push(at);
+      if (!at) continue;
+      // An RF leg is drawn as its arc, not as the chord.
+      const previous = current.at(-1);
+      if (leg.path === "RF" && leg.arc && previous) {
+        const sweep = arcSweep(previous, at, leg.arc), radius = distanceNm(leg.arc.centre, at), start = bearingDeg(leg.arc.centre, previous);
+        for (let i = 1; i < 12; i += 1) current.push(offset(leg.arc.centre, start + (leg.arc.turn === "R" ? 1 : -1) * (sweep * i) / 12, radius));
+      }
+      current.push(at);
     }
     if (current.length > 1) lines.push(current);
     return lines;
@@ -60,6 +68,11 @@ export default function FmsMap({ fms, sim, range }: Props) {
   const [firstLeg, ...laterFirst] = first ?? [];
   // In a hold or search pattern the guidance leg is the active one; the route resumes from the fix.
   const onRoute = g.mode === "LNAV";
+  // The offset track actually flown, parallel to the active leg.
+  const shift = active.offset?.nm ?? 0;
+  const offsetLeg = shift && g.legFrom && g.legTo && g.desiredTrack !== null && g.mode === "LNAV"
+    ? [offset(g.legFrom, g.desiredTrack + (shift > 0 ? 90 : -90), Math.abs(shift)), offset(g.legTo, g.desiredTrack + (shift > 0 ? 90 : -90), Math.abs(shift))]
+    : null;
   const activeLeg = onRoute && firstLeg && activeTo ? [firstLeg, laterFirst[0]] : null;
 
   return (
@@ -90,6 +103,7 @@ export default function FmsMap({ fms, sim, range }: Props) {
         {first && first.length > 2 ? <path className="later" d={path(first.slice(1))} /> : null}
         {later.map((line, i) => <path key={`l${i}`} className="later" d={path(line)} />)}
         {activeLeg ? <path className="active" d={path(activeLeg)} /> : null}
+        {offsetLeg ? <path className="offset" d={path(offsetLeg)} /> : null}
         {g.legFrom && g.legTo && g.mode !== "LNAV" ? <path className="active" d={path([g.legFrom, g.legTo])} /> : null}
         {waypoints.map(({ ident, at, active: isActive }) => {
           const q = project(at);

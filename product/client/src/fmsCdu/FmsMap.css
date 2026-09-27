@@ -47,6 +47,7 @@
 .fmsMap path.modified { stroke: #f4f4f0; stroke-dasharray: 5 4; opacity: 0.8; }
 .fmsMap path.hold { stroke: #34e7ff; }
 .fmsMap path.sar { stroke: #34e7ff; stroke-width: 1.1; }
+.fmsMap path.offset { fill: none; stroke: #ff5cf0; stroke-width: 1.4; stroke-dasharray: 6 4; }
 
 .fmsMap .wpt path {
   fill: #f4f4f0;
