@@ -5,7 +5,7 @@ import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import { coldTemperatureCorrection, computeProfile, formatConstraint, parseAltitude, parseConstraint } from '../src/fmsCdu/vnav'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
-// VNAV and performance, per airline FMS practice (product/docs/FMS_TEST_BENCH.md): speed and altitude constraints,
+// VNAV and performance, per airline FMS practice (the FMS test bench research roadmap): speed and altitude constraints,
 // the planned profile with its top and end of descent, climbs that respect "at or below" constraints, DES NOW,
 // winds, ETA and fuel predictions with the fuel alerts, and cold temperature correction.
 const setup = () => {

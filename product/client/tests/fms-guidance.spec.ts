@@ -5,7 +5,7 @@ import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
-// Lateral guidance fidelity, per the PBN functional requirements and airline practice (product/docs/FMS_TEST_BENCH.md):
+// Lateral guidance fidelity, per the PBN functional requirements and airline practice (the FMS test bench research roadmap):
 // ARINC 424 path terminators, INTC CRS and ABEAM PTS on a direct-to, a flown lateral offset, and selected heading
 // versus LNAV with arm and capture.
 const setup = () => {

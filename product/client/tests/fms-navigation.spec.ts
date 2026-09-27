@@ -6,7 +6,7 @@ import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
-// Navigation sensors and RNP, per ICAO Doc 9613 and airline FMS practice (product/docs/FMS_TEST_BENCH.md): the
+// Navigation sensors and RNP, per ICAO Doc 9613 and airline FMS practice (the FMS test bench research roadmap): the
 // GPS > DME/DME > VOR/DME > inertial priority with automatic reversion, ANP from the sources, RNP by phase with its
 // time to alert, dead-reckoning drift and the position shift when a sensor returns, NAV OPTIONS, and the approach.
 const setup = () => {
