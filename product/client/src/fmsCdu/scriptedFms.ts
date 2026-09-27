@@ -3,10 +3,13 @@ import type { ConditionId } from "./conditions";
 import { DATALINK_PAGES, DEMO_SMS, DEMO_UPLINKS } from "./datalinkPages";
 import { CORE_PAGES } from "./fmsPages";
 import {
-  NAV_DATABASE, START_POSITION, courseDeg, distanceNm, holdEntry, maxSarGroundSpeed, offset,
+  START_POSITION, WAYPOINT, bearingIntersection, courseDeg, distanceNm, holdEntry, maxSarGroundSpeed, offset,
   type Hold, type HoldEntry, type LatLon, type Leg, type LskResult, type Message, type Page, type PageId, type Route, type Sar,
   type SarPattern, type Uplink,
 } from "./fmsModel";
+import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
+import { PLANNING_PAGES } from "./planningPages";
+import { composeRoute, enrouteLegs, findProcedure } from "./procedures";
 import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line } from "./screen";
 import { TACTICAL_PAGES } from "./tacticalPages";
 import type { CduFunction } from "./variants";
@@ -22,7 +25,9 @@ import type { CduFunction } from "./variants";
  * labelled as a simulation on its IDENT page and is not a navigation computer.
  */
 
-const PAGES: Record<PageId, Page> = { ...CORE_PAGES, ...TACTICAL_PAGES, ...DATALINK_PAGES };
+const PAGES: Record<PageId, Page> = { ...CORE_PAGES, ...PLANNING_PAGES, ...TACTICAL_PAGES, ...DATALINK_PAGES };
+
+export type WaypointResolution = { ident: string } | { select: string } | "invalid" | "not-in-database";
 
 const wpt = (ident: string, altitude?: string): Leg => ({ kind: "wpt", ident, altitude });
 
@@ -66,7 +71,17 @@ export class ScriptedFms implements CduBackend {
   private enteredHold: HoldEntry | null = null;
   private sequenced: string | null = null;
 
-  private aircraft = { track: courseDeg(START_POSITION, NAV_DATABASE.MUN), groundSpeed: 120, altitude: 3000, verticalSpeed: 0 };
+  private db = new NavDatabase(DEMO_NAV_DATA);
+  /** Which of several same-ident entries the crew chose on SELECT DESIRED WPT. */
+  private chosen: Record<string, number> = {};
+  private selectPending: { ident: string; apply: (ident: string) => LskResult; back: { page: PageId; index: number } } | null = null;
+  private pilot: { ident: string; position: LatLon; definition: string }[] = [];
+  private companyRoutes: StoredRoute[] = structuredClone(DEMO_COMPANY_ROUTES);
+  private secondaryRoute: Route | null = null;
+  /** The ident shown on REF NAV DATA, and an airway chosen on RTE 2 waiting for its TO fix. */
+  navDataQuery: string | null = null;
+  pendingVia: string | null = null;
+  private aircraft = { track: courseDeg(START_POSITION, { lat: 45.2150, lon: -75.3900 }), groundSpeed: 120, altitude: 3000, verticalSpeed: 0 };
   /** Where the active leg starts: the last waypoint passed, or present position when a direct-to was executed. */
   private legStart: LatLon = { ...START_POSITION };
   private directPending = false;
@@ -238,7 +253,13 @@ export class ScriptedFms implements CduBackend {
     const route = this.active;
     this.legStart = this.coordinates(ident) ?? { ...this.here };
     this.sequenced = ident;
-    route.legs.shift();
+    const passed = route.legs.shift();
+    // Passing the runway starts the missed approach; its hold is armed so the aircraft holds at the end of it.
+    const missedHold = findProcedure(this.db, route, "APPROACH")?.missedHold;
+    if (passed?.kind === "wpt" && passed.source === "APPR" && /^RW\d{2}/.test(ident) && missedHold && !route.hold) {
+      route.hold = { fix: missedHold.fix, turn: missedHold.turn, inbound: missedHold.inbound, legTime: 1, legDistance: null, exit: "MANUAL", speed: 180, altitude: missedHold.altitude, status: "ARMED" };
+      for (const leg of route.legs) if (leg.kind === "wpt" && leg.ident === missedHold.fix) leg.qualifier = "/H";
+    }
     const pending = this.modified?.legs[0];
     if (pending?.kind === "wpt" && pending.ident === ident) this.modified?.legs.shift();
     if (!route.legs.some(next => next.kind === "wpt")) this.alert(alert("END OF ROUTE"));
@@ -280,7 +301,170 @@ export class ScriptedFms implements CduBackend {
 
   /** A waypoint's position: a search or tactical point, a Mark On Top, or the navigation database. */
   coordinates(ident: string): LatLon | undefined {
-    return this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position ?? NAV_DATABASE[ident];
+    const own = this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position;
+    if (own) return own;
+    if (/^RW\d{2}[LRC]?$/.test(ident)) {
+      const route = this.route;
+      return (this.db.runway(ident, route.dest) ?? this.db.runway(ident, route.origin) ?? this.db.runway(ident))?.threshold;
+    }
+    return this.entryFor(ident)?.position;
+  }
+
+  /** The database entry an ident means: the only one, the one chosen on SELECT DESIRED WPT, or the nearest. */
+  entryFor(ident: string): NavEntry | undefined {
+    const entries = this.db.find(ident);
+    if (entries.length <= 1) return entries[0];
+    const chosen = this.chosen[ident];
+    if (chosen !== undefined && entries[chosen]) return entries[chosen];
+    return [...entries].sort((a, b) => distanceNm(this.here, a.position) - distanceNm(this.here, b.position))[0];
+  }
+
+  get navdb() { return this.db; }
+  get pilotWaypoints() { return this.pilot; }
+  get storedRoutes() { return this.companyRoutes; }
+  get secondary() { return this.secondaryRoute; }
+  get selection() { return this.selectPending; }
+
+  /** Merges loaded navigation data (ARINC 424) over the database. */
+  loadNavData(data: NavData) {
+    this.db = this.db.merge(data);
+    this.emit();
+  }
+
+  /**
+   * Resolves a waypoint entry. A known ident is itself (a duplicate ident needs SELECT DESIRED WPT first). A latitude
+   * and longitude (N4530.0W07530.0), a place/bearing/distance (RDG045/10) or a place-bearing/place-bearing
+   * (RDG045/MUN090) entry creates a pilot waypoint, named WPTnn or after the place.
+   */
+  resolveWaypoint(text: string): WaypointResolution {
+    if (WAYPOINT.test(text)) {
+      if (!this.coordinates(text)) return "not-in-database";
+      const own = this.points[text] !== undefined || this.marks.some(mark => mark.ident === text);
+      if (!own && this.db.find(text).length > 1 && this.chosen[text] === undefined) return { select: text };
+      return { ident: text };
+    }
+    const latLon = /^([NS])(\d{2})(\d{2}(?:\.\d)?)?([EW])(\d{3})(\d{2}(?:\.\d)?)?$/.exec(text);
+    if (latLon) {
+      const lat = Number(latLon[2]) + Number(latLon[3] ?? 0) / 60, lon = Number(latLon[5]) + Number(latLon[6] ?? 0) / 60;
+      if (lat > 90 || lon > 180 || Number(latLon[3] ?? 0) >= 60 || Number(latLon[6] ?? 0) >= 60) return "invalid";
+      return { ident: this.createPilot("WPT", { lat: latLon[1] === "S" ? -lat : lat, lon: latLon[4] === "W" ? -lon : lon }, text) };
+    }
+    const pbd = /^([A-Z0-9]{2,5})(\d{3})\/(\d{1,3}(?:\.\d)?)$/.exec(text);
+    if (pbd) {
+      const place = this.coordinates(pbd[1]);
+      const bearing = Number(pbd[2]), distance = Number(pbd[3]);
+      if (!place) return "not-in-database";
+      if (bearing < 1 || bearing > 360 || distance <= 0) return "invalid";
+      return { ident: this.createPilot(pbd[1].slice(0, 3), offset(place, bearing, distance), text) };
+    }
+    const pbpb = /^([A-Z0-9]{2,5})(\d{3})\/([A-Z0-9]{2,5})(\d{3})$/.exec(text);
+    if (pbpb) {
+      const p1 = this.coordinates(pbpb[1]), p2 = this.coordinates(pbpb[3]);
+      if (!p1 || !p2) return "not-in-database";
+      const crossing = bearingIntersection(p1, Number(pbpb[2]), p2, Number(pbpb[4]));
+      if (!crossing) return "invalid";
+      return { ident: this.createPilot(pbpb[1].slice(0, 3), crossing, text) };
+    }
+    return "invalid";
+  }
+
+  /** Stores a pilot waypoint under the next free name for its prefix (WPT01, RDG01...). */
+  createPilot(prefix: string, position: LatLon, definition: string) {
+    let n = 1;
+    let ident = `${prefix}${String(n).padStart(2, "0")}`;
+    while (this.coordinates(ident)) { n += 1; ident = `${prefix}${String(n).padStart(2, "0")}`; }
+    this.points[ident] = position;
+    this.pilot.push({ ident, position, definition });
+    return ident;
+  }
+
+  /** Resolves a waypoint entry and uses it, going through SELECT DESIRED WPT first for a duplicate ident. */
+  enterWaypoint(text: string, apply: (ident: string) => LskResult): LskResult {
+    const resolved = this.resolveWaypoint(text);
+    if (typeof resolved === "string") return resolved;
+    if ("select" in resolved) {
+      this.selectPending = { ident: resolved.select, apply, back: { page: this.page, index: this.index } };
+      this.open("SELECT_WPT");
+      return;
+    }
+    return apply(resolved.ident);
+  }
+
+  /** SELECT DESIRED WPT: the crew picks one of the same-ident entries, and the entry that asked continues. */
+  chooseEntry(index: number): LskResult {
+    const pending = this.selectPending;
+    if (!pending || !this.db.find(pending.ident)[index]) return;
+    this.chosen[pending.ident] = index;
+    this.selectPending = null;
+    this.open(pending.back.page, pending.back.index);
+    return pending.apply(pending.ident);
+  }
+
+  /** Selects (or with null, removes) a SID, STAR or approach and its transition, rebuilding the route as a MOD. */
+  selectProcedure(kind: "SID" | "STAR" | "APPROACH", ident: string | null, transition?: string) {
+    this.modify(route => {
+      const enroute = enrouteLegs(route);
+      const choice = ident ? { ident, transition } : undefined;
+      if (kind === "SID") route.sid = choice;
+      else if (kind === "STAR") route.star = choice;
+      else route.approach = choice;
+      route.legs = composeRoute(route, this.db, enroute);
+    });
+  }
+
+  selectRunway(ident: string) {
+    this.modify(route => {
+      route.runway = route.runway === ident ? undefined : ident;
+      const sid = findProcedure(this.db, route, "SID");
+      if (sid && route.runway && !sid.runways.includes(route.runway)) {
+        const enroute = enrouteLegs(route);
+        route.sid = undefined;
+        route.legs = composeRoute(route, this.db, enroute);
+      }
+    });
+  }
+
+  /** Loads a company route into the active route (as a MOD) or into the secondary flight plan. */
+  loadCompanyRoute(name: string, target: "active" | "secondary" = "active"): boolean {
+    const stored = this.companyRoutes.find(route => route.name === name);
+    if (!stored) return false;
+    const build = (route: Route) => {
+      route.origin = stored.origin;
+      route.dest = stored.dest;
+      route.coRoute = stored.name;
+      route.sid = route.star = route.approach = undefined;
+      route.hold = undefined;
+      route.legs = [...stored.legs.map(leg => ({ kind: "wpt" as const, ...leg })), { kind: "wpt", ident: stored.dest }];
+    };
+    if (target === "active") this.modify(build);
+    else { const route = structuredClone(this.secondaryRoute ?? this.active); build(route); this.secondaryRoute = route; }
+    return true;
+  }
+
+  /** SAVE: stores the route's enroute legs under its CO ROUTE name, replacing a stored route of that name. */
+  saveCompanyRoute() {
+    const route = this.route;
+    const legs = enrouteLegs(route).flatMap(leg => (leg.kind === "wpt" ? [{ ident: leg.ident, via: leg.via, altitude: leg.altitude }] : []));
+    this.companyRoutes = [...this.companyRoutes.filter(stored => stored.name !== route.coRoute), { name: route.coRoute, origin: route.origin, dest: route.dest, legs }];
+  }
+
+  copyActiveToSecondary() { this.secondaryRoute = structuredClone({ ...this.active, hold: undefined }); }
+
+  /** ACTIVATE on SEC FPLN: the secondary flight plan becomes a modification of the active route. */
+  activateSecondary() {
+    const secondary = this.secondaryRoute;
+    if (!secondary) return false;
+    this.modify(route => { Object.assign(route, structuredClone(secondary), { hold: undefined }); });
+    return true;
+  }
+
+  /** Where new enroute legs go: before the arrival, the approach and missed approach, or the destination. */
+  enrouteEnd(route: Route = this.route) {
+    const legs = route.legs;
+    const arrival = legs.findIndex(leg => leg.kind === "wpt" && (leg.source === "STAR" || leg.source === "APPR" || leg.source === "MISSED"));
+    if (arrival >= 0) return arrival;
+    const last = legs.at(-1);
+    return last?.kind === "wpt" && last.ident === route.dest ? legs.length - 1 : legs.length;
   }
 
   /** Course and distance into each leg, from present position. There is no computed leg after a discontinuity. */

@@ -74,3 +74,17 @@
   stroke-dasharray: 2 4;
   opacity: 0.6;
 }
+
+.fmsMap .navaid path,
+.fmsMap .airport circle {
+  fill: none;
+  stroke: #34e7ff;
+  stroke-width: 1;
+}
+
+.fmsMap .navaid text,
+.fmsMap .airport text {
+  fill: #34e7ff;
+  font-size: 12px;
+  opacity: 0.85;
+}

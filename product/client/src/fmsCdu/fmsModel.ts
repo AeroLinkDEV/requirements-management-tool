@@ -2,31 +2,11 @@ import { COLUMNS, type CduColor, type Line, type Segment } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
 
 /**
- * Shared state shapes, the demonstration navigation database, and screen helpers for the scripted CMA-9000.
- *
- * The navigation database is a small demonstration set around the demonstration flight plan: the two airports
- * are real, the fixes are fictitious. Courses and distances are computed from these positions, so what the
- * pages show is consistent, but nothing here is navigation data to fly by.
+ * Shared state shapes, geometry and screen helpers for the scripted CMA-9000. The navigation database is in
+ * navData.ts. Bearings are true: the simulation applies no magnetic variation.
  */
 
 export type LatLon = { lat: number; lon: number };
-
-export const NAV_DATABASE: Record<string, LatLon> = {
-  CYOW: { lat: 45.3225, lon: -75.6692 },
-  CYUL: { lat: 45.4706, lon: -73.7408 },
-  CYRO: { lat: 45.4603, lon: -75.6461 },
-  MUN: { lat: 45.2150, lon: -75.3900 },
-  RDG: { lat: 45.4300, lon: -74.9800 },
-  TOLGU: { lat: 45.5020, lon: -74.5100 },
-  // The final approach fix sits 4.4 NM out on the runway 24R approach course, so the path is a three-degree one.
-  FERDI: { lat: 45.5200, lon: -73.6313 },
-  RW24R: { lat: 45.4790, lon: -73.7180 },
-  ELIBA: { lat: 45.6500, lon: -75.1000 },
-  BOBTU: { lat: 45.2100, lon: -74.6500 },
-  KILLA: { lat: 45.3900, lon: -74.3300 },
-  AGBEK: { lat: 45.4400, lon: -73.9100 },
-  YUL01: { lat: 45.5200, lon: -73.9800 },
-};
 
 /** Present position of the simulated aircraft at the start of a session, just east of CYOW. */
 export const START_POSITION: LatLon = { lat: 45.3100, lon: -75.6817 };
@@ -57,6 +37,26 @@ export function offset(from: LatLon, bearing: number, nm: number): LatLon {
   return { lat: toDeg(lat2), lon: toDeg(lon2) };
 }
 
+/** East/north nautical miles from an origin; accurate enough over the tens of miles the simulation works in. */
+export function toLocal(origin: LatLon, p: LatLon) {
+  return { x: (p.lon - origin.lon) * 60 * Math.cos(toRad(origin.lat)), y: (p.lat - origin.lat) * 60 };
+}
+
+export function fromLocal(origin: LatLon, { x, y }: { x: number; y: number }): LatLon {
+  return { lat: origin.lat + y / 60, lon: origin.lon + x / (60 * Math.cos(toRad(origin.lat))) };
+}
+
+/** Where two true bearings from two places cross, ahead of both; null if they are parallel or cross behind. */
+export function bearingIntersection(p1: LatLon, b1: number, p2: LatLon, b2: number): LatLon | null {
+  const q = toLocal(p1, p2);
+  const d1 = { x: Math.sin(toRad(b1)), y: Math.cos(toRad(b1)) }, d2 = { x: Math.sin(toRad(b2)), y: Math.cos(toRad(b2)) };
+  const cross = d1.x * d2.y - d1.y * d2.x;
+  if (Math.abs(cross) < 1e-6) return null;
+  const t1 = (q.x * d2.y - q.y * d2.x) / cross, t2 = (q.x * d1.y - q.y * d1.x) / cross;
+  if (t1 <= 0 || t2 <= 0) return null;
+  return fromLocal(p1, { x: d1.x * t1, y: d1.y * t1 });
+}
+
 export function formatPosition(p: LatLon) {
   const part = (value: number, positive: string, negative: string, width: number) => {
     const abs = Math.abs(value), deg = Math.floor(abs), min = (abs - deg) * 60;
@@ -68,11 +68,18 @@ export function formatPosition(p: LatLon) {
 // ---------------------------------------------------------------------------------------------- state shapes
 
 /** A route entry: a waypoint (optionally a holding or search fix), or the discontinuity a direct-to leaves. */
+export type LegSource = "SID" | "STAR" | "APPR" | "MISSED";
 export type Leg =
-  | { kind: "wpt"; ident: string; altitude?: string; qualifier?: "/H" | "/S" | "/O" }
+  | { kind: "wpt"; ident: string; altitude?: string; qualifier?: "/H" | "/S" | "/O"; via?: string; source?: LegSource }
   | { kind: "disco" };
 
-export type Route = { origin: string; dest: string; coRoute: string; flightNo: string; runway?: string; legs: Leg[]; hold?: Hold };
+export type ProcedureChoice = { ident: string; transition?: string };
+export type Route = {
+  origin: string; dest: string; coRoute: string; flightNo: string; runway?: string; legs: Leg[]; hold?: Hold;
+  sid?: ProcedureChoice; star?: ProcedureChoice; approach?: ProcedureChoice;
+  /** Where the enroute legs were joined to the departure and the arrival, so rebuilding the route keeps the join. */
+  departureJoin?: string; arrivalJoin?: string;
+};
 
 /** A hold is INACTIVE while only in a modification, ARMED once executed, IN PROGRESS from the first fix crossing. */
 export type HoldStatus = "INACTIVE" | "ARMED" | "IN PROGRESS" | "EXIT ARMED";
@@ -116,11 +123,12 @@ export type Uplink = { id: number; at: Date; text: string; response: "OPEN" | "W
 // ---------------------------------------------------------------------------------------------- pages
 
 export type CorePageId =
-  | "MENU" | "INIT_REF" | "IDENT" | "POS" | "MSG_RECALL" | "RTE" | "DEP_ARR" | "DEPARTURES" | "ARRIVALS" | "LEGS"
-  | "PROG" | "RADIO" | "FUEL" | "HOLD" | "FIX" | "PREDEF" | "VNAV" | "TIMER";
+  | "MENU" | "INIT_REF" | "IDENT" | "POS" | "MSG_RECALL" | "LEGS" | "PROG" | "RADIO" | "FUEL" | "HOLD" | "FIX" | "PREDEF"
+  | "VNAV" | "TIMER";
+export type PlanningPageId = "RTE" | "DEP_ARR" | "DEPARTURES" | "ARRIVALS" | "NAV_DATA" | "SELECT_WPT" | "SEC_FPLN";
 export type TacticalPageId = "TACT" | "SAR" | "TACT_APPR" | "HOVER";
 export type DatalinkPageId = "ATC" | "FMC_COMM" | "ANS";
-export type PageId = CorePageId | TacticalPageId | DatalinkPageId;
+export type PageId = CorePageId | PlanningPageId | TacticalPageId | DatalinkPageId;
 
 export type Page = {
   pages: (fms: ScriptedFms) => number;

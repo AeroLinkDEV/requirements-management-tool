@@ -53,6 +53,9 @@ export default function FmsMap({ fms, sim, range }: Props) {
   const sarPath = sim.sarPath
     ?? (fms.sar.active && sarStart?.kind === "wpt" && fms.coordinates(sarStart.ident) ? sarTrack(fms.coordinates(sarStart.ident)!, fms.sar, fms.sar.active) : null);
 
+  // Navaids and airports within the range, as a navigation display shows them.
+  const nearby = fms.navdb.nearby(centre, range * 1.6).filter(e => e.kind !== "fix").slice(0, 60);
+
   const g = sim.guidance;
   const [firstLeg, ...laterFirst] = first ?? [];
   // In a hold or search pattern the guidance leg is the active one; the route resumes from the fix.
@@ -72,6 +75,15 @@ export default function FmsMap({ fms, sim, range }: Props) {
       <text className="north" x={0} y={-R - 6}>N</text>
 
       <g clipPath="url(#fmsMapClip)">
+        {nearby.map(entry => {
+          const q = project(entry.position);
+          return (
+            <g key={`${entry.kind}:${entry.ident}:${entry.position.lat}`} transform={`translate(${q.x.toFixed(1)},${q.y.toFixed(1)})`} className={entry.kind === "airport" ? "airport" : "navaid"}>
+              {entry.kind === "airport" ? <circle r={4} /> : <path d="M-4,0 L-2,-3.5 L2,-3.5 L4,0 L2,3.5 L-2,3.5 Z" />}
+              <text x={6} y={-4}>{entry.ident}</text>
+            </g>
+          );
+        })}
         {racetrack ? <path className="hold" d={path(racetrack)} /> : null}
         {sarPath ? <path className="sar" d={path(sarPath)} /> : null}
         {modified.map((line, i) => <path key={`m${i}`} className="modified" d={path(line)} />)}

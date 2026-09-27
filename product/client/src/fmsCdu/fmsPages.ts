@@ -1,6 +1,6 @@
 import { alert } from "./alerts";
 import {
-  ICAO, WAYPOINT, boxes, caption, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, pad, prompt, simulated,
+  WAYPOINT, boxes, caption, courseDeg, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, offset, pad, prompt, simulated,
   small, three, title, type CorePageId, type Leg, type LskResult, type Page, type PageId,
 } from "./fmsModel";
 import type { Line } from "./screen";
@@ -80,11 +80,13 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         { left: prompt("<HOVER"), right: prompt("FMC COMM>") },
         undefined,
         { left: prompt("<FIX INFO"), right: prompt("GSM/SMS>") },
+        undefined,
+        { left: prompt("<SEC FPLN") },
       ],
     lsk: (fms, side, row, _scratch, index) => {
       const target: Record<string, PageId> = index === 0
-        ? { L1: "IDENT", L2: "POS", L3: "FUEL", L4: "RTE", L5: "HOLD", R1: "IDENT", R2: "PREDEF", R3: "MSG_RECALL", R4: "RADIO", R5: "TIMER" }
-        : { L1: "TACT", L2: "TACT_APPR", L3: "HOVER", L4: "FIX", R1: "VNAV", R2: "ATC", R3: "FMC_COMM", R4: "ANS" };
+        ? { L1: "IDENT", L2: "POS", L3: "FUEL", L4: "RTE", L5: "HOLD", R1: "NAV_DATA", R2: "PREDEF", R3: "MSG_RECALL", R4: "RADIO", R5: "TIMER" }
+        : { L1: "TACT", L2: "TACT_APPR", L3: "HOVER", L4: "FIX", L5: "SEC_FPLN", R1: "VNAV", R2: "ATC", R3: "FMC_COMM", R4: "ANS" };
       const page = target[`${side}${row}`];
       if (page === "HOLD" && !fms.route.hold) { fms.open("LEGS"); fms.setScratch("/H"); return; }
       if (page) fms.open(page);
@@ -93,12 +95,12 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
 
   IDENT: {
     pages: () => 1,
-    render: () => [
+    render: fms => [
       title("IDENT", "1/1"),
       caption(" MODEL", "OP PROGRAM "),
       { left: medium("CMA-9000"), right: medium("AEROLINK SIM") },
       caption(" NAV DATA", "ACTIVE "),
-      { left: medium("NA-2610"), right: medium("01OCT-28OCT") },
+      { left: medium(fms.navdb.cycle.id), right: medium(fms.navdb.cycle.from ? `${fms.navdb.cycle.from}-${fms.navdb.cycle.to}` : "LOADED") },
       undefined,
       { center: small("SIMULATION - NOT FOR", "amber") },
       { center: small("NAVIGATION", "amber") },
@@ -143,99 +145,6 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       page.forEach((message, i) => { lines[2 + i * 2] = { left: { text: message.text, color: message.alert ? "amber" : "white" } }; });
       return lines;
     },
-  },
-
-  RTE: {
-    pages: () => 2,
-    render: (fms, index) => {
-      const route = fms.route;
-      if (index === 0)
-        return [
-          title("RTE 1", "1/2", fms.routeStatus),
-          caption(" ORIGIN", "DEST "),
-          { left: { text: route.origin }, right: { text: route.dest } },
-          caption(" CO ROUTE", "FLT NO "),
-          { left: { text: route.coRoute }, right: { text: route.flightNo } },
-          caption(" RUNWAY"),
-          { left: route.runway ? { text: route.runway } : dashes(5) },
-          undefined, undefined, undefined, undefined,
-          { left: dashes(24) },
-          fms.routeStatus === "MOD" ? { left: back("ERASE"), right: prompt("LEGS>") } : { right: prompt("LEGS>") },
-        ];
-      const lines: (Line | undefined)[] = [title("RTE 1", "2/2", fms.routeStatus), caption(" VIA", "TO ")];
-      route.legs.slice(0, 5).forEach((leg, i) => {
-        lines[2 + i * 2] = leg.kind === "disco"
-          ? { center: small("DISCONTINUITY") }
-          : { left: medium("DIRECT"), right: { text: leg.ident } };
-      });
-      lines[12] = { right: prompt("LEGS>") };
-      return lines;
-    },
-    lsk: (fms, side, row, scratch, index) => {
-      if (row === 6) {
-        if (side === "R") fms.open("LEGS");
-        else if (fms.routeStatus === "MOD") fms.eraseModification();
-        return;
-      }
-      if (index !== 0) return;
-      const field = side === "L" ? (row === 1 ? "origin" : row === 2 ? "coRoute" : row === 3 ? "runway" : null)
-        : row === 1 ? "dest" : row === 2 ? "flightNo" : null;
-      if (!field) return;
-      if (!scratch) { fms.setScratch(fms.route[field] ?? ""); return; }
-      if (scratch === "DELETE") return "not-allowed";
-      if ((field === "origin" || field === "dest") && !ICAO.test(scratch)) return "invalid";
-      if (field === "runway" && !/^RW\d{2}[LRC]?$/.test(scratch)) return "invalid";
-      if (scratch.length > 10) return "invalid";
-      fms.modify(route => { route[field] = scratch; });
-      fms.setScratch("");
-    },
-  },
-
-  DEP_ARR: {
-    pages: () => 1,
-    render: fms => [
-      title("DEP/ARR INDEX", "1/1"),
-      undefined,
-      { left: prompt("<DEP"), center: { text: fms.route.origin }, right: small("ARR>") },
-      undefined,
-      { center: { text: fms.route.dest }, right: prompt("ARR>") },
-    ],
-    lsk: (fms, side, row) => {
-      if (side === "L" && row === 1) fms.open("DEPARTURES");
-      if (side === "R" && (row === 1 || row === 2)) fms.open("ARRIVALS");
-    },
-  },
-
-  DEPARTURES: {
-    pages: () => 1,
-    render: fms => [
-      title(`${fms.route.origin} DEPARTURES`, "1/1"),
-      caption(" SIDS", "RUNWAYS "),
-      ...["07", "14", "25", "32"].flatMap(runway => {
-        const selected = fms.route.runway === `RW${runway}`;
-        return [{ right: { text: `${selected ? "<SEL> " : ""}RW${runway}`, color: selected ? "green" as const : "white" as const } }, undefined];
-      }),
-      undefined, undefined, undefined,
-      { left: back("INDEX") },
-    ],
-    lsk: (fms, side, row) => {
-      if (side === "L" && row === 6) { fms.open("DEP_ARR"); return; }
-      const runway = ["07", "14", "25", "32"][row - 1];
-      if (side === "R" && runway) fms.modify(route => { route.runway = `RW${runway}`; });
-    },
-  },
-
-  ARRIVALS: {
-    pages: () => 1,
-    render: () => [
-      title("ARRIVALS", "1/1"),
-      undefined,
-      { left: medium("STARS AND APPROACHES") },
-      { left: medium("ARE NOT MODELLED IN") },
-      { left: medium("THIS SIMULATION") },
-      undefined,
-      simulated(),
-    ],
   },
 
   LEGS: {
@@ -295,23 +204,38 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         fms.open("HOLD");
         return;
       }
-      if (!WAYPOINT.test(scratch)) return "invalid";
-      // Line 1 of the first page is the active waypoint: an entry there is a DIRECT-TO from present position.
-      if (at === 0) {
-        const result = fms.directTo(scratch);
-        if (!result) fms.setScratch("");
-        return result;
-      }
-      // A waypoint further down the route closes the gap: the legs in between are deleted.
-      const later = legs.findIndex((next, i) => i >= at && next.kind === "wpt" && next.ident === scratch);
-      if (later >= 0) {
-        fms.modify(route => { route.legs.splice(at, later - at); });
+      // Along-track: RDG/-5 is five miles before RDG on the route, RDG/5 five miles after it.
+      const alongTrack = /^([A-Z0-9]{2,5})\/([+-]?\d{1,3}(?:\.\d)?)$/.exec(scratch);
+      if (alongTrack) {
+        const place = legs.findIndex(next => next.kind === "wpt" && next.ident === alongTrack[1]);
+        const distance = Number(alongTrack[2]);
+        const neighbour = legs[distance < 0 ? place - 1 : place + 1];
+        const from = fms.coordinates(alongTrack[1]);
+        const toward = neighbour?.kind === "wpt" ? fms.coordinates(neighbour.ident) : place === 0 && distance < 0 ? fms.position : undefined;
+        if (place < 0 || !from) return "not-in-database";
+        if (!toward || distance === 0 || Math.abs(distance) >= distanceNm(from, toward)) return "invalid";
+        const ident = fms.createPilot(alongTrack[1].slice(0, 3), offset(from, courseDeg(from, toward), Math.abs(distance)), scratch);
+        fms.modify(route => { route.legs.splice(distance < 0 ? place : place + 1, 0, { kind: "wpt", ident }); });
         fms.setScratch("");
         return;
       }
-      if (!fms.coordinates(scratch)) return "not-in-database";
-      fms.modify(route => { route.legs.splice(at, leg?.kind === "disco" ? 1 : 0, { kind: "wpt", ident: scratch }); });
-      fms.setScratch("");
+      return fms.enterWaypoint(scratch, ident => {
+        // Line 1 of the first page is the active waypoint: an entry there is a DIRECT-TO from present position.
+        if (at === 0) {
+          const result = fms.directTo(ident);
+          if (!result) fms.setScratch("");
+          return result;
+        }
+        // A waypoint further down the route closes the gap: the legs in between are deleted.
+        const later = legs.findIndex((next, i) => i >= at && next.kind === "wpt" && next.ident === ident);
+        if (later >= 0) {
+          fms.modify(route => { route.legs.splice(at, later - at); });
+          fms.setScratch("");
+          return;
+        }
+        fms.modify(route => { route.legs.splice(at, leg?.kind === "disco" ? 1 : 0, { kind: "wpt", ident }); });
+        fms.setScratch("");
+      });
     },
   },
 
@@ -562,8 +486,11 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     render: (fms, index) => {
       const lines: (Line | undefined)[] = [title("PREDEF WPT", `${index + 1}/2`)];
       if (index === 0) {
-        lines[2] = { left: medium("NO PREDEFINED") };
-        lines[3] = { left: medium("WAYPOINTS") };
+        lines[1] = caption(" PILOT WPT", "DEFINED AS ");
+        fms.pilotWaypoints.slice(-5).forEach((wpt, i) => {
+          lines[2 + i * 2] = { left: { text: wpt.ident, color: "green" }, right: medium(wpt.definition.slice(0, 18)) };
+        });
+        if (!fms.pilotWaypoints.length) lines[2] = { left: medium("NO PILOT WAYPOINTS") };
         return lines;
       }
       lines[1] = caption(" MARK ON TOP");
@@ -574,8 +501,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       return lines;
     },
     lsk: (fms, side, row, scratch, index) => {
-      const mark = index === 1 ? fms.markList.slice(-5)[row - 1] : undefined;
-      if (side === "L" && mark && !scratch) fms.setScratch(mark.ident);
+      const wpt = index === 1 ? fms.markList.slice(-5)[row - 1] : fms.pilotWaypoints.slice(-5)[row - 1];
+      if (side === "L" && wpt && !scratch) fms.setScratch(wpt.ident);
     },
   },
 

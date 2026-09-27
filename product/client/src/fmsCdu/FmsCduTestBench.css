@@ -396,3 +396,17 @@
 /* The display dims with the cockpit, as the CDU does. */
 .fmsBenchMapScreen.mode-night .fmsMap { filter: brightness(0.7); }
 .fmsBenchMapScreen.mode-nvg .fmsMap { filter: brightness(0.4); }
+
+.fmsBenchFile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-600, #4b5868);
+}
+
+.fmsBenchFile input {
+  max-width: 100%;
+  font: 12px var(--font-body);
+}
