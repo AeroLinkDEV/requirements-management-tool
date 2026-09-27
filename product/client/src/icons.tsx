@@ -48,6 +48,7 @@ export type IconName =
   | "coverage"
   | "search"
   | "brandMark"
+  | "fmsCdu"
 
 const shapes: Record<IconName, ReactElement> = {
   home: <path d="M2.5 8 8 2.8 13.5 8M4.2 6.8v6.7h7.6V6.8" />,
@@ -135,6 +136,13 @@ const shapes: Record<IconName, ReactElement> = {
     <>
       <path d="M6.6 9.4 9.4 6.6" />
       <path d="M7.2 4.6 8.6 3.2a2.4 2.4 0 0 1 3.4 3.4L10.6 8M8.8 11.4 7.4 12.8A2.4 2.4 0 0 1 4 9.4L5.4 8" />
+    </>
+  ),
+  fmsCdu: (
+    <>
+      <rect x="3" y="1.8" width="10" height="12.4" rx="1.2" />
+      <rect x="4.9" y="3.6" width="6.2" height="4.2" rx=".4" />
+      <path d="M5 10h.01M8 10h.01M11 10h.01M5 12.2h.01M8 12.2h.01M11 12.2h.01" strokeWidth="1.6" strokeLinecap="round" />
     </>
   ),
   operations: (

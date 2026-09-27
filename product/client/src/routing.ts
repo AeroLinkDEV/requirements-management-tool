@@ -1,6 +1,6 @@
 export type View =
   | "projects" | "projectSetup" | "builds" | "baselineImports" | "personnel" | "approvalConfiguration" | "projectConfiguration" | "dashboard" | "createSystemScr" | "createSoftwareChange" | "createInterfaceChange" | "scr" | "baselines" | "history" | "requirements"
-  | "verification" | "testingCoverage" | "testChangeRequests" | "testChangeRequest" | "createTestChangeRequest" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "codeMergeRequests" | "codeExplorer" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "teamwork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "artifact" | "notFound";
+  | "verification" | "testingCoverage" | "testChangeRequests" | "testChangeRequest" | "createTestChangeRequest" | "procedureExplorer" | "testResults" | "documents" | "managedDocuments" | "code" | "codeMergeRequests" | "codeExplorer" | "problemReports" | "lifecycle" | "release" | "releaseImpact" | "releaseDecision" | "releaseOperations" | "planning" | "mywork" | "teamwork" | "admin" | "enterprise" | "integrations" | "reviewWorkflows" | "fmsCdu" | "artifact" | "notFound";
 
 export type Discipline = "system" | "software" | "systemTest" | "softwareTest";
 
@@ -277,6 +277,7 @@ export function parseRoute(pathname: string, search = ""): AppRoute {
   if (path === "release-readiness/operations") return { ...base, view: "releaseOperations", discipline: "system" };
   if (path === "enterprise-control") return { ...base, view: "enterprise", discipline: "system" };
   if (path === "integration-command-center") return { ...base, view: "integrations", discipline: "system" };
+  if (path === "fms-test-bench") return { ...base, view: "fmsCdu", discipline: "system" };
   if (path === "administration") return { ...base, view: "admin", discipline: "system" };
   if (path === "review-workflows") return { ...base, view: "reviewWorkflows", discipline: "system" };
   if (tail[0] === "artifacts" && tail[1] && tail[2]) {
@@ -412,6 +413,7 @@ export function routePath(context: RouteContext, view: View, discipline: Discipl
     case "releaseOperations": return `${root}/release-readiness/operations`;
     case "enterprise": return `${root}/enterprise-control`;
     case "integrations": return `${root}/integration-command-center`;
+    case "fmsCdu": return `${root}/fms-test-bench`;
     case "admin": return `${root}/administration`;
     case "reviewWorkflows": return `${root}/review-workflows`;
     case "artifact": {

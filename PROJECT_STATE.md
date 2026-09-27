@@ -378,6 +378,25 @@ The showcase is synthetic demonstration data. It must not be confused with live 
 
 See [FMS Live Showcase Dataset](docs/showcase/FMS_LIVE_SHOWCASE_DATASET.md) and [FMS 1.6 Release Campaign](docs/showcase/FMS_1_6_RELEASE_CAMPAIGN.md).
 
+## FMS Test Bench (CMA-9000 CDU)
+
+Every project has an **FMS Test Bench** (`…/fms-test-bench`): a photorealistic, touchable CMA-9000 FMS control
+display unit for engineers.
+
+- The faceplate is rendered in Blender from `product/tools/AeroLink.FmsCduModel`, which uses the public CMC
+  datasheet dimensions and the Operator's Manual front-panel figures. No manufacturer logo is shown.
+- The user selects one of nine hardware variations. Each variation relabels the seven annunciators and the second
+  function row; the faceplate itself is shared.
+- The display is a live 14 × 24 AMLCD grid with the manual's colour conventions. The keys work by mouse, touch
+  (including CLR held for one second) and the physical keyboard.
+- Today a **scripted simulation** drives the display (`product/client/src/fmsCdu/scriptedFms.ts`). It implements
+  the manual's rules for scratchpad entry, CLR/DELETE, line select entry and copy, MOD/ACT with EXEC and ERASE,
+  paging, BRT and the MSG and EXEC annunciators. Its pages show a fixed demonstration flight plan, it computes no
+  navigation, and it is labelled as a simulation.
+- The panel talks only to the `CduBackend` interface, so the real CMA-9000 operational program can replace the
+  simulation later. The bench's key event log is where test-procedure integration will attach; it is not
+  integrated with test procedures or evidence today.
+
 ## Documents and publications
 
 AeroLink supports controlled generated publications over structured artifacts and a Managed Documentation Center for externally authored Word documents.
