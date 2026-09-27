@@ -60,6 +60,12 @@ test('Team Work route generation and parsing preserve project and shell build co
   })
 })
 
+test('the FMS test bench is a shareable project route that keeps the shell build context', () => {
+  const address = routePath(context, 'fmsCdu')
+  expect(address).toBe('/programs/program-a/projects/project-a/releases/release-a/fms-test-bench')
+  expect(parseRoute(address)).toMatchObject({ view: 'fmsCdu', projectId: 'project-a', releaseId: 'release-a' })
+})
+
 test('software authoring routes preserve the selected HLR or LLR level', () => {
   const hlr = routePath(context, 'createSoftwareChange', 'software', undefined, 'HighLevel')
   const llr = routePath(context, 'createSoftwareChange', 'software', undefined, 'LowLevel')

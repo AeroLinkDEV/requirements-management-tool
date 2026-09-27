@@ -13,13 +13,15 @@
     "review-authority-labels.spec.ts",
     "test-change-request-supersession-presentation.spec.ts",
     "digital-thread-1046-geometry.spec.ts",
-    "artifact-acronym-presentation.spec.ts"
+    "artifact-acronym-presentation.spec.ts",
+    "fms-cdu-engine.spec.ts"
   ],
   "rendered": [
     "code-source-rendered.spec.ts",
     "code-evidence-rendered.spec.ts",
     "code-workspace-rendered.spec.ts",
     "artifact-thread-rendered.spec.ts",
-    "recorded-code-reference-surfaces.spec.ts"
+    "recorded-code-reference-surfaces.spec.ts",
+    "fms-cdu-rendered.spec.ts"
   ]
 }

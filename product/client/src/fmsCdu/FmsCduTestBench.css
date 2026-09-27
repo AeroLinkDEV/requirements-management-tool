@@ -1,0 +1,188 @@
+.fmsBench {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 1180px;
+}
+
+.fmsBenchHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.fmsBenchHeader h1 {
+  margin: 4px 0 6px;
+  font-family: var(--font-display);
+  font-size: var(--text-title, 24px);
+  color: var(--ink-900, #14212e);
+}
+
+.fmsBenchHeader p {
+  max-width: 680px;
+  margin: 0;
+  color: var(--ink-600, #4b5868);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.fmsBenchEyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--teal-700, #176c63);
+}
+
+.fmsBenchVariant {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-600, #4b5868);
+}
+
+.fmsBenchVariant select {
+  min-width: 300px;
+  padding: 8px 10px;
+  border: 1px solid #d5dce6;
+  border-radius: 8px;
+  background: white;
+  font: 500 13px var(--font-body);
+}
+
+.fmsBenchBody {
+  display: grid;
+  grid-template-columns: minmax(300px, 620px) minmax(260px, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .fmsBenchBody { grid-template-columns: 1fr; }
+}
+
+.fmsBenchPanel {
+  display: flex;
+  justify-content: center;
+  padding: 18px;
+  border-radius: 14px;
+  background: radial-gradient(ellipse at 50% 30%, #3a4250 0%, #20252e 70%);
+}
+
+.fmsBenchLoading {
+  color: #d7dce4;
+  font-size: 13px;
+}
+
+.fmsBenchSide {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.fmsBenchSide section {
+  padding: 14px 16px;
+  border: 1px solid #dfe4eb;
+  border-radius: 12px;
+  background: white;
+}
+
+.fmsBenchSide h2 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--ink-900, #14212e);
+}
+
+.fmsBenchSide h2 small {
+  margin-left: 6px;
+  color: var(--ink-500, #6b7686);
+  font-weight: 500;
+}
+
+.fmsBenchAlert {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.fmsBenchAlert input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid #d5dce6;
+  border-radius: 8px;
+  font: 13px var(--font-body);
+  text-transform: uppercase;
+}
+
+.fmsBenchAlert button,
+.fmsBenchReset {
+  padding: 7px 12px;
+  border: 1px solid #c9d3de;
+  border-radius: 8px;
+  background: #f5f8fb;
+  font: 600 12px var(--font-body);
+  color: var(--ink-900, #14212e);
+  cursor: pointer;
+}
+
+.fmsBenchAlert button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.fmsBenchKeys {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 5px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.fmsBenchKeys dt {
+  font-weight: 700;
+  color: var(--ink-900, #14212e);
+}
+
+.fmsBenchKeys dd {
+  margin: 0;
+  color: var(--ink-600, #4b5868);
+}
+
+.fmsBenchLog ol {
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.fmsBenchLog li {
+  display: grid;
+  grid-template-columns: 64px 90px 1fr;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid #eef1f5;
+  font-size: 12px;
+}
+
+.fmsBenchLog time {
+  color: var(--ink-500, #6b7686);
+  font-variant-numeric: tabular-nums;
+}
+
+.fmsBenchLog span {
+  overflow: hidden;
+  color: var(--ink-600, #4b5868);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fmsBenchEmpty {
+  margin: 0;
+  color: var(--ink-500, #6b7686);
+  font-size: 12px;
+}
