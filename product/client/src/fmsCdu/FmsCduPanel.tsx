@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent } from "react";
 import { CDU_ASSETS as ASSETS, type CduKeyEvent, type CduLayout } from "./layout";
-
-const HOLD_MS = 1000;
+import { displayLuminance, screenBrightness, type Lighting } from "./lighting";
 import { COLUMNS, type CduBackend, type CduCell, type Lamp } from "./screen";
 import { COMPASS_LETTERS, functionFor, legendFor, type CduFunction, type CduVariant } from "./variants";
 import "./FmsCduPanel.css";
+
+const HOLD_MS = 1000;
+const DAYLIGHT: Lighting = { mode: "day", ambient: 0.8 };
 
 /** Physical keyboard shortcuts, for engineers driving the panel from a desk. */
 function functionForKeyboard(event: KeyboardEvent): CduFunction | null {
@@ -36,14 +38,16 @@ type Props = {
   variant: CduVariant;
   layout: CduLayout;
   onKey?: (event: CduKeyEvent) => void;
+  lighting?: Lighting;
 };
 
-export default function FmsCduPanel({ backend, variant, layout, onKey }: Props) {
+export default function FmsCduPanel({ backend, variant, layout, onKey, lighting = DAYLIGHT }: Props) {
   const subscribe = useCallback((listener: () => void) => backend.subscribe(listener), [backend]);
   const version = useSyncExternalStore(subscribe, () => backend.revision());
   const screen = useMemo(() => backend.screen(), [backend, version]); // eslint-disable-line react-hooks/exhaustive-deps
   const lamps = useMemo(() => backend.lamps(), [backend, version]); // eslint-disable-line react-hooks/exhaustive-deps
-  const brightness = backend.brightness();
+  // The display follows the light sensor and BRT together; see lighting.ts.
+  const luminance = displayLuminance(backend.brightness(), lighting);
   const [pressed, setPressed] = useState<ReadonlySet<string>>(new Set());
   const holdTimer = useRef<number | null>(null);
   const heldFired = useRef(false);
@@ -106,8 +110,9 @@ export default function FmsCduPanel({ backend, variant, layout, onKey }: Props) 
   const s = layout.screen;
   return (
     <div
-      className="fmsCdu"
-      style={{ aspectRatio: `${W} / ${H}`, "--cdu-brightness": 0.45 + brightness * 0.55 } as CSSProperties}
+      className={`fmsCdu mode-${lighting.mode}`}
+      data-luminance={luminance.toFixed(2)}
+      style={{ aspectRatio: `${W} / ${H}`, "--cdu-brightness": screenBrightness(luminance) } as CSSProperties}
       tabIndex={0}
       role="group"
       aria-label={`CMA-9000 control display unit, hardware variation ${variant.id}`}

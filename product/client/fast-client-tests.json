@@ -14,7 +14,8 @@
     "test-change-request-supersession-presentation.spec.ts",
     "digital-thread-1046-geometry.spec.ts",
     "artifact-acronym-presentation.spec.ts",
-    "fms-cdu-engine.spec.ts"
+    "fms-cdu-engine.spec.ts",
+    "fms-cdu-simulation.spec.ts"
   ],
   "rendered": [
     "code-source-rendered.spec.ts",

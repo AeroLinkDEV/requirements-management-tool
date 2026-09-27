@@ -1,6 +1,9 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { ALERTS } from "./alerts";
+import { CONDITIONS } from "./conditions";
 import FmsCduPanel from "./FmsCduPanel";
 import { useCduLayout, type CduKeyEvent } from "./layout";
+import { LIGHTING_MODES, displayLuminance, type Lighting, type LightingMode } from "./lighting";
 import { ScriptedFms } from "./scriptedFms";
 import { screenText } from "./screen";
 import { CDU_VARIANTS, DEFAULT_VARIANT_ID, variantById } from "./variants";
@@ -14,23 +17,40 @@ const storedVariant = () => {
 
 type LogEntry = CduKeyEvent & { title: string };
 
+const formatLuminance = (fl: number) => (fl < 10 ? fl.toFixed(1) : String(Math.round(fl)));
+
 /**
  * An interactive CMA-9000 control display unit for engineers to exercise before, and later with, the real
- * operational program. Today it runs the scripted simulation; the key event log is the seam a future test
- * procedure integration records from.
+ * operational program. Today it runs the scripted simulation. The bench injects conditions and alerts, moves the
+ * aircraft along its route, and sets the cockpit lighting; the key event log is the seam a future test procedure
+ * integration records from.
  */
 export default function FmsCduTestBench() {
   const { layout, failed } = useCduLayout();
   const [variantId, setVariantId] = useState(storedVariant);
   const [session, setSession] = useState(0);
   const backend = useMemo(() => new ScriptedFms(), [session]); // eslint-disable-line react-hooks/exhaustive-deps
+  const subscribe = useCallback((listener: () => void) => backend.subscribe(listener), [backend]);
+  useSyncExternalStore(subscribe, () => backend.revision());
   const [log, setLog] = useState<LogEntry[]>([]);
   const [alert, setAlert] = useState("");
+  const [libraryAlert, setLibraryAlert] = useState(ALERTS[0].text);
+  const [lighting, setLighting] = useState<Lighting>({ mode: "day", ambient: LIGHTING_MODES[0].ambient });
   const variant = variantById(variantId);
+
+  // Time drives the timer alarms, the call duration and the clocks on the display.
+  useEffect(() => {
+    const timer = window.setInterval(() => backend.tick(), 1000);
+    return () => window.clearInterval(timer);
+  }, [backend]);
 
   const chooseVariant = (id: string) => {
     setVariantId(id);
     try { window.localStorage.setItem(VARIANT_KEY, id); } catch { /* a remembered choice is a convenience only */ }
+  };
+
+  const chooseLighting = (mode: LightingMode) => {
+    setLighting({ mode, ambient: LIGHTING_MODES.find(option => option.id === mode)!.ambient });
   };
 
   const onKey = useCallback((event: CduKeyEvent) => {
@@ -39,6 +59,13 @@ export default function FmsCduTestBench() {
   }, [backend]);
 
   const reset = () => { setSession(value => value + 1); setLog([]); };
+
+  const next = backend.route.legs[0];
+  const nextLeg = backend.legGeometry()[0];
+  const failedFms = backend.hasCondition("fmsFail");
+  const lampNote = (lamp: string) =>
+    lamp === "MENU" ? "MENU light" : variant.annunciators.some(code => code === lamp) ? `${lamp} lamp` : "no lamp on this variation";
+  const meaning = ALERTS.find(entry => entry.text === libraryAlert)?.meaning;
 
   return (
     // A <main>, as every workspace page is: the shell frames and densifies pages by that element.
@@ -49,8 +76,9 @@ export default function FmsCduTestBench() {
           <h1>CMA-9000 FMS control display unit</h1>
           <p>
             A photorealistic, touchable CDU running a <strong>scripted simulation</strong>: key behaviour follows the
-            CMA-9000 Operator's Manual, and page values come from a fixed demonstration flight plan. It is not a
-            navigation computer, and it is built so the real operational program can drive it later.
+            CMA-9000 Operator's Manual, and courses and distances come from a small demonstration navigation
+            database. It is not a navigation computer, and it is built so the real operational program can drive it
+            later.
           </p>
         </div>
         <label className="fmsBenchVariant">
@@ -62,24 +90,86 @@ export default function FmsCduTestBench() {
       </header>
 
       <div className="fmsBenchBody">
-        <div className="fmsBenchPanel">
-          {layout
-            ? <FmsCduPanel backend={backend} variant={variant} layout={layout} onKey={onKey} />
-            : <p className="fmsBenchLoading" role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU model…"}</p>}
+        <div className="fmsBenchMain">
+          <div className={`fmsBenchPanel mode-${lighting.mode}`}>
+            {layout
+              ? <FmsCduPanel backend={backend} variant={variant} layout={layout} onKey={onKey} lighting={lighting} />
+              : <p className="fmsBenchLoading" role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU model…"}</p>}
+          </div>
+
+          <section className="fmsBenchCard">
+            <h2>Cockpit lighting</h2>
+            <div className="fmsBenchModes" role="radiogroup" aria-label="Cockpit lighting">
+              {LIGHTING_MODES.map(option => (
+                <label key={option.id} className={lighting.mode === option.id ? "selected" : undefined}>
+                  <input type="radio" name="fmsBenchLighting" value={option.id} checked={lighting.mode === option.id}
+                    onChange={() => chooseLighting(option.id)} />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+            <label className="fmsBenchAmbient">
+              <span>Ambient light at the light sensor</span>
+              <input type="range" min={0} max={100} value={Math.round(lighting.ambient * 100)} aria-label="Ambient light"
+                onChange={event => setLighting(current => ({ ...current, ambient: Number(event.target.value) / 100 }))} />
+            </label>
+            <p className="fmsBenchReadout">
+              Display <strong data-testid="fms-luminance">{formatLuminance(displayLuminance(backend.brightness(), lighting))} fL</strong>
+              {lighting.mode === "nvg" ? " (NVG range 0.1–3 fL)" : ""}. BRT on the panel adjusts it within the range.
+            </p>
+          </section>
         </div>
 
         <aside className="fmsBenchSide">
-          <section>
-            <h2>Session</h2>
-            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (alert.trim()) { backend.raiseAlert(alert.trim()); setAlert(""); } }}>
-              <input value={alert} maxLength={24} placeholder="Alert message, e.g. UNABLE RNP" aria-label="Alert message to raise"
-                onChange={event => setAlert(event.target.value)} />
-              <button type="submit" disabled={!alert.trim()}>Raise alert</button>
-            </form>
-            <button type="button" className="fmsBenchReset" onClick={reset}>Restart the simulation</button>
+          <section className="fmsBenchCard">
+            <h2>Flight</h2>
+            <p className="fmsBenchReadout">
+              {next?.kind === "wpt"
+                ? <>Active waypoint <strong>{next.ident}</strong>{nextLeg ? `, ${nextLeg.distance.toFixed(1)} NM` : ""}</>
+                : next ? "Route discontinuity ahead" : "End of route"}
+            </p>
+            <div className="fmsBenchActions">
+              <button type="button" onClick={() => backend.sequence()} disabled={failedFms}>Sequence to next waypoint</button>
+              <button type="button" onClick={reset}>Restart the simulation</button>
+            </div>
           </section>
 
-          <section>
+          <section className="fmsBenchCard">
+            <h2>Conditions</h2>
+            <ul className="fmsBenchConditions">
+              {CONDITIONS.map(condition => (
+                <li key={condition.id}>
+                  <label>
+                    <input type="checkbox" checked={backend.hasCondition(condition.id)}
+                      disabled={failedFms && condition.id !== "fmsFail"}
+                      onChange={event => backend.setCondition(condition.id, event.target.checked)} />
+                    <span>
+                      <b>{condition.label}</b> <small className={lampNote(condition.lamp).startsWith("no ") ? "absent" : undefined}>{lampNote(condition.lamp)}</small>
+                      <span className="fmsBenchHint">{condition.description}</span>
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="fmsBenchCard">
+            <h2>Alerts</h2>
+            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); backend.raiseAlert(libraryAlert); }}>
+              <select value={libraryAlert} aria-label="Alert from the manual" onChange={event => setLibraryAlert(event.target.value)}>
+                {ALERTS.map(entry => <option key={entry.text} value={entry.text}>{entry.text}</option>)}
+              </select>
+              <button type="submit" disabled={failedFms}>Raise</button>
+            </form>
+            {meaning ? <p className="fmsBenchHint">{meaning}</p> : null}
+            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (alert.trim()) { backend.raiseAlert(alert.trim()); setAlert(""); } }}>
+              <input value={alert} maxLength={24} placeholder="Other text, e.g. UNABLE RNP" aria-label="Alert message to raise"
+                onChange={event => setAlert(event.target.value)} />
+              <button type="submit" disabled={!alert.trim() || failedFms}>Raise alert</button>
+            </form>
+          </section>
+
+          <section className="fmsBenchCard">
             <h2>Keyboard</h2>
             <dl className="fmsBenchKeys">
               <dt>A–Z, 0–9</dt><dd>Type into the scratchpad</dd>
@@ -91,7 +181,7 @@ export default function FmsCduTestBench() {
             </dl>
           </section>
 
-          <section className="fmsBenchLog">
+          <section className="fmsBenchCard fmsBenchLog">
             <h2>Key events <small>{log.length}</small></h2>
             {log.length === 0
               ? <p className="fmsBenchEmpty">Press a key on the panel.</p>
