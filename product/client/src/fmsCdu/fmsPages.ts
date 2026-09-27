@@ -337,7 +337,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           { left: small(` ${nextLeg ? three(nextLeg.course) : "---"}°`) },
           { left: { text: pad(ident(next), 5), color: "green" }, right: medium(nextLeg ? `${fixed(toDistance + nextLeg.distance, 1)}NM ${eta(toDistance + nextLeg.distance)}` : "") },
           caption("TRUE WIND", "TK/GS "),
-          { left: medium(` ${three(fms.wind.direction)}°/ ${fms.wind.speed}KT`), right: medium(`${toLeg ? three(toLeg.course) : "---"}°/${fms.groundSpeed}KT`) },
+          { left: medium(` ${three(fms.wind.direction)}°/ ${fms.wind.speed}KT`), right: medium(`${three(fms.track)}°/${Math.round(fms.groundSpeed)}KT`) },
           caption(undefined, "TKE/XTK "),
           { right: medium(fms.lateralOffset === null ? "L002°/R0.02NM" : `L000°/${fms.lateralOffset < 0 ? "L" : "R"}${fixed(Math.abs(fms.lateralOffset), 2)}NM`) },
           caption("RNP/ANP"),
@@ -367,7 +367,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         caption(" OFFSET"),
         { left: fms.lateralOffset === null ? dashes(5) : { text: `${fms.lateralOffset < 0 ? "L" : "R"}${fixed(Math.abs(fms.lateralOffset), 1)}NM` } },
         caption(" ALT", "VS "),
-        { left: medium(`${fms.altitude}FT`), right: medium("+0FPM") },
+        { left: medium(`${Math.round(fms.altitude)}FT`), right: medium(`${fms.verticalSpeed >= 0 ? "+" : ""}${Math.round(fms.verticalSpeed / 10) * 10}FPM`) },
       ];
     },
     lsk: (fms, side, row, scratch, index) => {
@@ -612,7 +612,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           right: fms.vnav.qnh === null ? boxes(4) : { text: fms.vnav.qnh },
         },
         caption(" WIND/GS", "VPA "),
-        { left: medium(`${three(fms.wind.direction)}°/${fms.wind.speed}KT ${fms.groundSpeed}KT`), right: medium(`-${fixed(path.vpa, 2)}°`, outside ? "amber" : "white") },
+        { left: medium(`${three(fms.wind.direction)}°/${fms.wind.speed}KT ${Math.round(fms.groundSpeed)}KT`), right: medium(`-${fixed(path.vpa, 2)}°`, outside ? "amber" : "white") },
         caption(" VDEV", "TGT VS "),
         { left: medium(onFinal ? `${vdev >= 0 ? "+" : ""}${vdev}FT` : "-----"), right: medium(`-${targetVs}FPM`) },
       ];

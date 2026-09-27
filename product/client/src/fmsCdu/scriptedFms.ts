@@ -17,9 +17,9 @@ import type { CduFunction } from "./variants";
  * It follows the Operator's Manual rules for the keys (scratchpad entry, CLR, DELETE, +/-, line select entry and
  * copy, MOD/ACT with EXEC and ERASE, PREV/NEXT, BRT, the MSG annunciator) and for the pages it models: direct-to,
  * holds with their standard entry, the VNAV approach path, the search patterns, the tactical approach and the
- * timer. Courses and distances come from a small demonstration navigation database, and the aircraft only moves
- * when the bench sequences it to the next waypoint. It is labelled as a simulation on its IDENT page and is not a
- * navigation computer.
+ * timer. Courses and distances come from a small demonstration navigation database. The aircraft is flown by the
+ * flight simulation (flight.ts), which reports its state here and calls arrive() at each waypoint passage. It is
+ * labelled as a simulation on its IDENT page and is not a navigation computer.
  */
 
 const PAGES: Record<PageId, Page> = { ...CORE_PAGES, ...TACTICAL_PAGES, ...DATALINK_PAGES };
@@ -66,8 +66,19 @@ export class ScriptedFms implements CduBackend {
   private enteredHold: HoldEntry | null = null;
   private sequenced: string | null = null;
 
-  readonly groundSpeed = 120;
-  readonly altitude = 3000;
+  private aircraft = { track: courseDeg(START_POSITION, NAV_DATABASE.MUN), groundSpeed: 120, altitude: 3000, verticalSpeed: 0 };
+  /** Where the active leg starts: the last waypoint passed, or present position when a direct-to was executed. */
+  private legStart: LatLon = { ...START_POSITION };
+  private directPending = false;
+
+  get groundSpeed() { return this.aircraft.groundSpeed; }
+  get altitude() { return this.aircraft.altitude; }
+  get track() { return this.aircraft.track; }
+  get verticalSpeed() { return this.aircraft.verticalSpeed; }
+  get activeLegStart() { return this.legStart; }
+  /** The active route, whatever a pending modification shows on the pages. Guidance flies this one. */
+  get activeRoute(): Route { return this.active; }
+
   readonly wind = { direction: 270, speed: 12 };
   /** Entries on the VNAV approach page. The FAF altitude sets the vertical path angle to the threshold. */
   readonly vnav = { mda: 560, fafAltitude: 1500, runwayElevation: 118, destTemp: null as number | null, qnh: null as string | null };
@@ -180,11 +191,23 @@ export class ScriptedFms implements CduBackend {
    */
   sequence() {
     if (this.injected.has("fmsFail")) return;
+    if (this.active.legs[0]?.kind === "disco") this.active.legs.shift();
+    const leg = this.active.legs[0];
+    const at = leg?.kind === "wpt" ? this.coordinates(leg.ident) : undefined;
+    if (at) this.here = { ...at };
+    this.arrive();
+    this.emit();
+  }
+
+  /**
+   * The aircraft has reached the active waypoint. It is sequenced, unless it is the fix of a hold that is not armed
+   * to exit (the hold is entered, or another circuit begins) or the start of the active search pattern. Returns what
+   * the aircraft flies next; the flight simulation calls this at each waypoint passage.
+   */
+  arrive(): "route" | "hold" | "sar" | "end" {
     const route = this.active;
-    if (route.legs[0]?.kind === "disco") route.legs.shift();
     const leg = route.legs[0];
-    if (!leg || leg.kind !== "wpt") { this.alert(alert("END OF ROUTE")); this.emit(); return; }
-    const at = this.coordinates(leg.ident);
+    if (!leg || leg.kind !== "wpt") { this.alert(alert("END OF ROUTE")); return "end"; }
     const hold = route.hold;
     if (hold && hold.fix === leg.ident && hold.status !== "EXIT ARMED") {
       if (hold.status === "ARMED") {
@@ -192,24 +215,40 @@ export class ScriptedFms implements CduBackend {
         hold.status = "IN PROGRESS";
         if (hold.speed > MAX_HOLDING_SPEED) this.alert(alert("HIGH HOLDING SPEED"));
       }
-      if (at) this.here = at;
-      this.emit();
-      return;
+      return "hold";
     }
     if (hold && hold.fix === leg.ident) { route.hold = undefined; this.enteredHold = null; }
     if (leg.qualifier === "/S" && this.sar.active) {
       this.sar.status = "IN PROGRESS";
-      if (at) this.here = at;
-      this.emit();
-      return;
+      return "sar";
     }
-    if (at) this.here = at;
-    this.sequenced = leg.ident;
+    this.pass(leg.ident);
+    return route.legs.some(next => next.kind === "wpt") ? "route" : "end";
+  }
+
+  /** The search pattern has been flown to its end: the route continues after the search pattern waypoint. */
+  completeSar() {
+    const leg = this.active.legs[0];
+    this.sar.active = null;
+    this.sar.status = null;
+    if (leg?.kind === "wpt" && leg.qualifier === "/S") this.pass(leg.ident);
+  }
+
+  private pass(ident: string) {
+    const route = this.active;
+    this.legStart = this.coordinates(ident) ?? { ...this.here };
+    this.sequenced = ident;
     route.legs.shift();
     const pending = this.modified?.legs[0];
-    if (pending?.kind === "wpt" && pending.ident === leg.ident) this.modified?.legs.shift();
+    if (pending?.kind === "wpt" && pending.ident === ident) this.modified?.legs.shift();
     if (!route.legs.some(next => next.kind === "wpt")) this.alert(alert("END OF ROUTE"));
-    this.emit();
+  }
+
+  /** The flight simulation reports the aircraft's state after each step. */
+  setAircraft(state: Partial<{ position: LatLon; track: number; groundSpeed: number; altitude: number; verticalSpeed: number }>) {
+    if (state.position) this.here = state.position;
+    const { position: _position, ...rest } = state;
+    Object.assign(this.aircraft, rest);
   }
 
   /** Advances time-driven state: the timer alarms, the call duration and the clocks on the display. */
@@ -281,6 +320,7 @@ export class ScriptedFms implements CduBackend {
   eraseModification() {
     this.modified = null;
     this.sar.pending = null;
+    this.directPending = false;
   }
 
   setScratch(text: string) { this.scratch = text.slice(0, COLUMNS); }
@@ -321,6 +361,7 @@ export class ScriptedFms implements CduBackend {
    */
   directTo(ident: string): LskResult {
     const at = this.route.legs.findIndex(leg => leg.kind === "wpt" && leg.ident === ident);
+    this.directPending = true;
     if (at >= 0) { this.modify(route => { route.legs.splice(0, at); }); return; }
     if (!this.coordinates(ident)) return "not-in-database";
     this.modify(route => { route.legs.unshift({ kind: "wpt", ident }, { kind: "disco" }); });
@@ -398,6 +439,10 @@ export class ScriptedFms implements CduBackend {
     if (!route) return;
     if (route.hold?.status === "INACTIVE") route.hold.status = "ARMED";
     if (this.sar.pending) { this.sar.active = this.sar.pending; this.sar.status = "ARMED"; this.sar.pending = null; }
+    // A new active waypoint, or a direct-to, starts the active leg at present position.
+    const first = (legs: Leg[]) => { const leg = legs[0]; return leg?.kind === "wpt" ? leg.ident : null; };
+    if (this.directPending || first(route.legs) !== first(this.active.legs)) this.legStart = { ...this.here };
+    this.directPending = false;
     this.active = route;
     this.modified = null;
   }
