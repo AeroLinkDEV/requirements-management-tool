@@ -152,7 +152,7 @@ test('a scenario becomes test procedure text, and its run a Markdown report mark
   expect(text.steps.split('\n')).toHaveLength(scenario.steps.length)
   expect(text.steps.split('\n')[0]).toBe('1. At the start, press PROG.')
   // After the first step, a step with no trigger of its own follows on: "then".
-  expect(text.steps).toMatch(/^2\. Then type \.03 into the scratchpad\.$/m)
+  expect(text.steps).toMatch(/^2\. Then type \.01 into the scratchpad\.$/m)
   expect(text.steps).toMatch(/^7\. At 30 s, check that screen line 14 matches/m)
   expect(text.steps).toMatch(/^8\. Then check that the alert CHECK ANP has been raised within 120 s\.$/m)
   expect(text.expectedResult).toMatch(/^- the RNP annunciator is lit\.$/m)

@@ -62,10 +62,11 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
     maxSeconds: 300,
     steps: [
       { when: { kind: "start" }, action: { kind: "keys", keys: ["PROG"] } },
-      { when: { kind: "start" }, action: { kind: "type", text: ".03" } },
+      // 0.01 NM: below the 0.02 NM floor on ANP, so below ANP in every satellite geometry.
+      { when: { kind: "start" }, action: { kind: "type", text: ".01" } },
       { when: { kind: "start" }, action: { kind: "keys", keys: ["LSK5L"] } },
       { when: { kind: "start" }, action: { kind: "expectLine", line: 9, pattern: "MANUAL" } },
-      { when: { kind: "start" }, action: { kind: "expectLine", line: 10, pattern: "^0\\.03/" } },
+      { when: { kind: "start" }, action: { kind: "expectLine", line: 10, pattern: "^0\\.01/" } },
       { when: { kind: "start" }, action: { kind: "expectLamp", lamp: "RNP", lit: true } },
       { when: { kind: "time", seconds: 30 }, action: { kind: "expectLine", line: 13, pattern: "^\\s*$" } },
       { when: { kind: "start" }, action: { kind: "expectAlert", text: "CHECK ANP" }, within: 120 },

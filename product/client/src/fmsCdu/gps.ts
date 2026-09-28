@@ -479,6 +479,17 @@ function leastSquares(rows: { h: number[]; e: number }[]): Fit {
   return { x, q, statistic: Math.sqrt(sse), dof: n - 4, hslope, vslope };
 }
 
+/**
+ * Each satellite's share of the residual space, the diagonal of I - H(HᵀH)⁻¹Hᵀ for the lines of sight: a range bias b on
+ * satellite k shows in the RAIM residual as b·√share. The shares sum to the degrees of freedom, so with one the most
+ * observable satellite has at least 1/n (the bench's GPS integrity condition faults that one: gpsSensors in scriptedFms).
+ */
+export function residualShares(los: readonly (readonly [number, number, number])[]): number[] {
+  const rows = los.map(l => [-l[0], -l[1], -l[2], 1]);
+  const q = invert4([0, 1, 2, 3].map(i => [0, 1, 2, 3].map(j => rows.reduce((sum, h) => sum + h[i] * h[j], 0))));
+  return rows.map(h => 1 - h.reduce((sum, hi, i) => sum + hi * q[i].reduce((inner, qij, j) => inner + qij * h[j], 0), 0));
+}
+
 function invert4(m: number[][]): number[][] {
   const a = m.map((row, i) => [...row, ...[0, 1, 2, 3].map(j => (i === j ? 1 : 0))]);
   for (let c = 0; c < 4; c += 1) {

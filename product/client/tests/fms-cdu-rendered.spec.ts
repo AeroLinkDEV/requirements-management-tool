@@ -232,7 +232,7 @@ test('a built-in scenario runs on the bench with its steps checked live, and giv
   const [report] = await Promise.all([page.waitForEvent('download'), card.getByRole('button', { name: 'Download run report' }).click()])
   expect(report.suggestedFilename()).toBe('crew-rnp-the-navigation-cannot-meet-run.md')
   await card.getByRole('button', { name: 'Test procedure text' }).click()
-  await expect(card.getByLabel('Test procedure text')).toHaveValue(/Steps:\n1\. At the start, press PROG\.\n2\. Then type \.03 into the scratchpad\./)
+  await expect(card.getByLabel('Test procedure text')).toHaveValue(/Steps:\n1\. At the start, press PROG\.\n2\. Then type \.01 into the scratchpad\./)
 })
 
 test('a recording of panel keys and a screen check plays back as a scenario and passes', async ({ page }) => {
