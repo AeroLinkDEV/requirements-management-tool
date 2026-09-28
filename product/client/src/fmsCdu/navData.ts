@@ -100,6 +100,10 @@ export const DEMO_NAV_DATA: NavData = {
     fix("UL301", 45.5700, -74.2500), fix("UL302", 45.5500, -73.9000), fix("UL401", 45.6800, -74.0500),
     fix("UL402", 45.6000, -73.8200), fix("UL501", 45.4200, -73.8800), fix("UL502", 45.3500, -73.9500),
     fix("UL601", UL601.lat, UL601.lon), fix("UL602", 45.4000, -73.8700), fix("UL603", UL603.lat, UL603.lon),
+    // Arriving from the west, the runway 24R approaches fly a downwind, base and final north of the airport, so no turn
+    // is sharper than about 90 degrees and the final is straight: DEMEL joins downwind 4 NM from the RW24R threshold on
+    // 327, ALNIT ends it 9 NM along 057, and ULIDA is the intermediate fix on the extended centreline, 9 NM out on 057.
+    fix("DEMEL", 45.5349, -73.7698), fix("ALNIT", 45.6166, -73.5902), fix("ULIDA", 45.5607, -73.5386),
   ],
   airways: [
     { ident: "V300", fixes: ["YOW", "MUN", "RDG", "TOLGU", "YUL"] },
@@ -123,12 +127,14 @@ export const DEMO_NAV_DATA: NavData = {
       legs: [{ ident: "UL401", altitude: "5000" }, { ident: "UL402", altitude: "4000" }] },
     { kind: "APPROACH", airport: "CYUL", ident: "R24R", approachType: "RNAV", runways: ["RW24R"],
       transitions: { UL302: [{ ident: "UL302", altitude: "4000" }], AGBEK: [{ ident: "AGBEK", altitude: "3000" }] },
-      legs: [{ ident: "FERDI", altitude: "1500A" }, { ident: "RW24R", altitude: "168", overfly: true }], faf: "FERDI",
+      legs: [{ ident: "DEMEL", altitude: "3000" }, { ident: "ALNIT", altitude: "3000" }, { ident: "ULIDA", altitude: "2500" },
+        { ident: "FERDI", altitude: "1500A" }, { ident: "RW24R", altitude: "168", overfly: true }], faf: "FERDI",
       missed: [{ path: "CA", course: 237, altitude: 1000 }, { ident: "UL501", altitude: "3000", path: "DF" }, { ident: "UL502", altitude: "3000" }],
       missedHold: { fix: "UL502", inbound: 57, turn: "RIGHT", altitude: "3000" } },
     { kind: "APPROACH", airport: "CYUL", ident: "I24R", approachType: "ILS", runways: ["RW24R"],
       transitions: { UL302: [{ ident: "UL302", altitude: "4000" }] },
-      legs: [{ ident: "FERDI", altitude: "1500A" }, { ident: "RW24R", altitude: "168", overfly: true }], faf: "FERDI",
+      legs: [{ ident: "DEMEL", altitude: "3000" }, { ident: "ALNIT", altitude: "3000" }, { ident: "ULIDA", altitude: "2500" },
+        { ident: "FERDI", altitude: "1500A" }, { ident: "RW24R", altitude: "168", overfly: true }], faf: "FERDI",
       missed: [{ ident: "UL501", altitude: "3000" }], missedHold: { fix: "UL501", inbound: 57, turn: "RIGHT", altitude: "3000" } },
     { kind: "APPROACH", airport: "CYUL", ident: "R06L", approachType: "RNAV", runways: ["RW06L"],
       transitions: { UL402: [{ ident: "UL402", altitude: "4000" }] },

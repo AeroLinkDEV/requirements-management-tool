@@ -31,7 +31,7 @@ test('a SID and transition start the route at the runway end and join the enrout
   expect(lines(unit)[3]).toMatch(/^ TRANS/)
   expect(lines(unit)[4]).toMatch(/^MUN/)
   unit.press('LSK2L')
-  expect(idents(unit)).toEqual(['(CA)', 'OW501', 'MUN', 'RDG', 'TOLGU', 'FERDI', 'RW24R', 'CYUL'])
+  expect(idents(unit)).toEqual(['(CA)', 'OW501', 'MUN', 'RDG', 'TOLGU', 'DEMEL', 'ALNIT', 'ULIDA', 'FERDI', 'RW24R', 'CYUL'])
   expect(unit.route.sid).toEqual({ ident: 'RIDEA3', transition: 'MUN' })
   expect(unit.routeStatus).toBe('MOD')
 })
@@ -51,10 +51,10 @@ test('a STAR and approach replace the end of the route, and the approach is foll
   expect(idents(unit)).toEqual(['MUN', 'RDG', 'TOLGU', 'UL301', 'UL302', 'CYUL'])
   unit.press('LSK1R')
   // The approach's first fix is not the STAR's last: a discontinuity until the UL302 transition joins them.
-  expect(idents(unit)).toEqual(['MUN', 'RDG', 'TOLGU', 'UL301', 'UL302', '(disco)', 'FERDI', 'RW24R', '(CA)', 'UL501', 'UL502'])
+  expect(idents(unit)).toEqual(['MUN', 'RDG', 'TOLGU', 'UL301', 'UL302', '(disco)', 'DEMEL', 'ALNIT', 'ULIDA', 'FERDI', 'RW24R', '(CA)', 'UL501', 'UL502'])
   expect(lines(unit)[4]).toMatch(/UL302$/)
   unit.press('LSK2R')
-  expect(idents(unit)).toEqual(['MUN', 'RDG', 'TOLGU', 'UL301', 'UL302', 'FERDI', 'RW24R', '(CA)', 'UL501', 'UL502'])
+  expect(idents(unit)).toEqual(['MUN', 'RDG', 'TOLGU', 'UL301', 'UL302', 'DEMEL', 'ALNIT', 'ULIDA', 'FERDI', 'RW24R', '(CA)', 'UL501', 'UL502'])
   // Selecting the STAR again removes it; the approach stays.
   unit.press('LSK1L')
   expect(unit.route.star).toBeUndefined()
@@ -65,7 +65,8 @@ test('passing the runway on the approach starts the missed approach and arms its
   const unit = fms()
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
-  for (let i = 0; i < 5; i += 1) unit.sequence()
+  // Jump through MUN, RDG, TOLGU, the approach's DEMEL, ALNIT, ULIDA and FERDI, and the runway.
+  for (let i = 0; i < 8; i += 1) unit.sequence()
   // The missed approach climbs straight ahead to 1000 ft (a CA leg) before turning for UL501.
   expect(idents(unit)[0]).toBe('(CA)')
   unit.sequence()

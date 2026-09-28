@@ -25,40 +25,37 @@ const typeText = (unit: ScriptedFms, text: string) => { for (const ch of text) u
 const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : null }
 // A 3-degree path falls 6076.12 × tan 3° = 318.4 ft per NM.
 const FT_PER_NM_3DEG = 6076.12 * Math.tan((3 * Math.PI) / 180)
-const TOLGU = { lat: 45.5020, lon: -74.5100 }
-
-// The demonstration route with TOLGU made AT 3000: cruise at 4500 to RDG, descend to 3000 at TOLGU, then a 62 NM level
-// segment at 3000 before the descent to the FAF (FERDI, 1500). The same shape as a downwind at a constraint altitude.
-const levelSegmentRoute = () => {
-  const run = setup()
-  press(run.unit, 'LEGS')
-  typeText(run.unit, '3000')
-  press(run.unit, 'LSK3R', 'EXEC')
-  expect(run.unit.activeRoute.legs[2]).toMatchObject({ ident: 'TOLGU', altitude: '3000' })
-  return run
+// The demonstration approach's fixes (navData.ts): downwind DEMEL-ALNIT at 3000, base to ULIDA at 2500, final from
+// FERDI (the FAF, 1500).
+const FIXES = {
+  DEMEL: { lat: 45.5349, lon: -73.7698 }, ALNIT: { lat: 45.6166, lon: -73.5902 },
+  ULIDA: { lat: 45.5607, lon: -73.5386 }, FERDI: { lat: 45.5200, lon: -73.6313 },
 }
 
-test('past the top of descent the aircraft descends to a constraint followed by a level segment, and never climbs back', () => {
-  const { unit, sim, fly } = levelSegmentRoute()
-  const crossed: Record<string, number> = {}
+test('the demonstration route descends to the downwind, flies it level, and meets each approach constraint without climbing', () => {
+  const { unit, sim, fly } = setup()
+  // Where each fix is crossed: the altitude where the aircraft passes closest to it (a fly-by fix is not overflown).
+  const closest: Record<string, { nm: number; altitude: number }> = {}
   let descentAt: number | null = null, worstVs = -Infinity, climbMode = false
   fly(4 * 3600, () => {
-    const events = sim.modeEvents.filter(e => e.event === 'VNAV DESCENT')
-    if (descentAt === null && events.length) descentAt = distanceNm(unit.truePosition, TOLGU)
-    if (descentAt !== null && crossed.FERDI === undefined) {
+    if (descentAt === null && sim.modeEvents.some(e => e.event === 'VNAV DESCENT')) descentAt = distanceNm(unit.truePosition, FIXES.DEMEL)
+    const now = active(unit)
+    if (descentAt !== null && now !== 'RW24R') {
       worstVs = Math.max(worstVs, unit.verticalSpeed)
       if (sim.verticalMode === 'VNAV CLB') climbMode = true
     }
-    const now = active(unit)
-    if (now === 'FERDI' && crossed.TOLGU === undefined) crossed.TOLGU = unit.altitude
-    if (now === 'RW24R' && crossed.FERDI === undefined) crossed.FERDI = unit.altitude
-    return crossed.FERDI !== undefined
+    for (const [ident, at] of Object.entries(FIXES)) {
+      const nm = distanceNm(unit.truePosition, at)
+      if (!closest[ident] || nm < closest[ident].nm) closest[ident] = { nm, altitude: unit.altitude }
+    }
+    return now === 'RW24R'
   })
-  expect(crossed.TOLGU).toBeGreaterThanOrEqual(2950)
-  expect(crossed.TOLGU).toBeLessThanOrEqual(3050)
-  // FERDI's crossing altitude is not checked on this route: its 150-degree turn onto final sequences FERDI about 1.5 NM
-  // early (fly-by anticipation). The demonstration approach (A23) removes that turn and checks it.
-  // The descent phase begins at the top of descent: 1500 ft above TOLGU's 3000 at 318.4 ft/NM is 4.71 NM before it.
+  const crossed = (ident: keyof typeof FIXES) => { expect(closest[ident].nm).toBeLessThan(0.3); return closest[ident].altitude }
+  expect(Math.abs(crossed('DEMEL') - 3000)).toBeLessThanOrEqual(50)
+  expect(Math.abs(crossed('ALNIT') - 3000)).toBeLessThanOrEqual(50)
+  expect(Math.abs(crossed('ULIDA') - 2500)).toBeLessThanOrEqual(50)
+  expect(Math.abs(crossed('FERDI') - 1500)).toBeLessThanOrEqual(50)
+  // The descent phase begins at the top of descent: 1500 ft above DEMEL's 3000 at 318.4 ft/NM is 4.71 NM before it.
   expect(descentAt).not.toBeNull()
   expect(descentAt!).toBeCloseTo(1500 / FT_PER_NM_3DEG, 0)
   expect(climbMode).toBe(false)
@@ -85,9 +82,11 @@ test('in the descent phase the profile traces the path through a level segment b
 })
 
 test('entering a cruise altitude above the aircraft leaves the descent; one below it, or being below the path, does not', () => {
-  const { unit, sim, fly } = levelSegmentRoute()
-  fly(4 * 3600, () => unit.verticalPhase === 'DESCENT')
-  fly(20)
+  const { unit, sim, fly } = setup()
+  // An early descent: DES NOW at cruise at the start of the 31 NM leg into DEMEL (AT 3000), far before the T/D.
+  fly(4 * 3600, () => active(unit) === 'DEMEL')
+  unit.vnav.desNow = true
+  fly(30)
   expect(unit.verticalPhase).toBe('DESCENT')
   // Below the path is not a reason to leave the descent.
   unit.setAircraft({ altitude: unit.altitude - 800 })
@@ -107,19 +106,23 @@ test('entering a cruise altitude above the aircraft leaves the descent; one belo
   fly(1)
   expect(unit.verticalPhase).toBe('CLIMB')
   expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'VNAV CLIMB', detail: expect.stringContaining('cruise altitude 6000') })
-  // Out of the descent, the climb rules apply again (unchanged): TOLGU's AT 3000 ahead caps the climb, so VNAV no
-  // longer plans a descent and does not climb through the constraint either.
+  // The early descent is cancelled: the climb rules apply again (unchanged), the T/D for 6000 is ahead (3000 ft above
+  // DEMEL's 3000 at 318.4 ft/NM is 9.4 NM before it, and DEMEL is still more than 20 NM away), and it climbs.
+  expect(unit.vnav.desNow).toBe(false)
   expect(unit.profile().descending).toBe(false)
+  expect(unit.profile().topOfDescent).not.toBeNull()
   fly(30)
-  expect(unit.verticalSpeed).toBeLessThan(100)
+  expect(unit.verticalPhase).toBe('CLIMB')
+  expect(sim.verticalMode).toBe('VNAV CLB')
+  expect(unit.verticalSpeed).toBeGreaterThan(500)
 })
 
 test('in the descent, below a constraint ahead, VNAV holds the altitude rather than climbing to it', () => {
-  const { unit, sim, fly } = levelSegmentRoute()
+  const { unit, sim, fly } = setup()
   fly(4 * 3600, () => unit.verticalPhase === 'DESCENT')
-  // Put the aircraft 500 ft below TOLGU's AT 3000, still before TOLGU.
+  // Put the aircraft 500 ft below DEMEL's AT 3000, still before DEMEL.
   unit.setAircraft({ altitude: 2500, verticalSpeed: 0 })
-  expect(active(unit)).toBe('TOLGU')
+  expect(active(unit)).toBe('DEMEL')
   expect(unit.profile().points[0].altitude).toBe(2500)
   let worstVs = -Infinity, climbMode = false
   fly(60, () => { worstVs = Math.max(worstVs, unit.verticalSpeed); if (sim.verticalMode === 'VNAV CLB') climbMode = true })
@@ -130,18 +133,18 @@ test('in the descent, below a constraint ahead, VNAV holds the altitude rather t
 
 test('DES NOW descends at 1000 fpm to the planned altitude at the active fix and levels there', () => {
   const { unit, sim, fly } = setup()
-  // At cruise on the leg into FERDI, whose altitude is 1500 (the FAF).
-  fly(4 * 3600, () => active(unit) === 'FERDI')
+  // At cruise on the leg into DEMEL, whose altitude is 3000 (the downwind).
+  fly(4 * 3600, () => active(unit) === 'DEMEL')
   expect(unit.altitude).toBeGreaterThan(4490)
   unit.vnav.desNow = true
   fly(20)
   expect(unit.verticalPhase).toBe('DESCENT')
   expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'VNAV DESCENT', detail: 'DES NOW' })
   expect(unit.verticalSpeed).toBeLessThanOrEqual(-990)
-  // 3000 ft at 1000 fpm is three minutes; five minutes later it is level at 1500, not below it.
+  // 1500 ft at 1000 fpm is a minute and a half; five minutes later it is level at 3000, not below it.
   fly(300)
-  expect(unit.altitude).toBeGreaterThanOrEqual(1450)
-  expect(unit.altitude).toBeLessThanOrEqual(1550)
+  expect(unit.altitude).toBeGreaterThanOrEqual(2950)
+  expect(unit.altitude).toBeLessThanOrEqual(3050)
   expect(Math.abs(unit.verticalSpeed)).toBeLessThan(100)
 })
 
