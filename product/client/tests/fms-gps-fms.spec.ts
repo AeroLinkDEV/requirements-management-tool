@@ -59,6 +59,32 @@ test('a GPS1 receiver fault moves navigation to GPS2 without GPS NAV LOST, and t
   expect(unit.navSourceLog.map(entry => entry.source)).toContain('GPS2')
 })
 
+test('a position word that is not Normal is not used: the FMS moves to GPS2 even with the value present (3a.2)', () => {
+  const { unit, advance } = setup()
+  const word = bus(unit, 0)!['110']
+  // The value is still on the bus, but No Computed Data: the FMS must not navigate on it.
+  receivers(unit)[0]?.override('110', { kind: 'FORCE', value: word.value!, ssm: 'NCD' })
+  advance(1000)
+  expect(bus(unit, 0)!['110'].value).not.toBeNull()
+  expect(unit.navState.mode).toBe('GPS')
+  expect(navStatus(unit)[2]).toMatch(/^GPS2\b/)
+})
+
+test('on an RNAV approach a receiver reporting no approach level gives NO APPR INTEGRITY while GPS still navigates (3a.4)', () => {
+  const { unit, advance } = setup()
+  unit.selectProcedure('APPROACH', 'R24R')
+  unit.press('EXEC')
+  for (let i = 0; i < 3; i += 1) unit.sequence()
+  advance(1000)
+  expect(unit.flightPhase).toBe('APPROACH')
+  expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(false)
+  for (const receiver of receivers(unit)) receiver.override('305', { kind: 'FORCE', value: { paActive: false, provider: null, level: 'NONE' }, ssm: 'NORMAL' })
+  advance(1000)
+  expect(unit.navState.mode).toBe('GPS')
+  expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(true)
+  expect(unit.approachType).toBe('NO APPR')
+})
+
 test('GPS1 with HIL over the phase alert limit gives GPS POS UNCERTAIN and GPS2 takes over (3a.4)', () => {
   const { unit, advance } = setup()
   expect(unit.flightPhase).toBe('TERMINAL')
@@ -93,6 +119,8 @@ test('the GPS integrity condition is a satellite fault neither receiver can excl
   }
   expect(recalled(unit, 'GPS POS UNCERTAIN')).toBe(true)
   expect(unit.navState.mode).not.toBe('GPS')
+  // The GPS line on NAV STATUS reads the RAIM state from 273, not a fixed text.
+  expect(navStatus(unit)[6]).toMatch(/\b5 SAT NO RAIM$/)
   unit.setCondition('gpsIntegrity', false)
   expect(unit.navState.mode).toBe('GPS')
 })
@@ -169,7 +197,9 @@ test('the GPS pages show the receivers\' counts, HIL and mode, not fixed values 
   expect(navStatus(unit)[6]).toMatch(new RegExp(`\\b${status.used} SAT\\b`))
   press(unit, 'LSK3R')
   expect(lines(unit)[0]).toMatch(/^GPS STATUS/)
-  expect(lines(unit).join('\n')).toMatch(new RegExp(`\\b${status.used}/${status.visible}\\b`))
+  const second = bus(unit, 1)!['273'].value!
+  // SAT USED/VIS: GPS1 in the left column, GPS2 in the right.
+  expect(lines(unit)[4]).toMatch(new RegExp(`^${status.used}/${status.visible}\\s.*\\s${second.used}/${second.visible}$`))
   press(unit, 'LSK6R')
   expect(lines(unit)[0]).toMatch(/^POS SENSORS/)
   expect(lines(unit)[SCRATCHPAD_LINE].trim()).toBe('')
