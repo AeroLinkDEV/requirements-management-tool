@@ -16,8 +16,9 @@ import type { CduFunction } from "./variants";
 // - A step due at time t runs at the first tick at or after t. Nothing runs after maxSeconds: at the first tick past
 //   it, every step not yet finished is not reached.
 // - An expectation is checked at each tick from its trigger. With `within` w it passes at the first tick where it
-//   holds no later than w seconds after the trigger, and fails at the tick w seconds after it; without `within` it is
-//   checked once. A condition first met after its window does not satisfy it.
+//   holds no later than w seconds after the trigger, and fails at the first tick at or after the deadline where it
+//   does not hold; without `within` it is checked once. An observation strictly after the deadline never satisfies it,
+//   even when the deadline falls between ticks (a window shorter than a tick can only pass at its trigger).
 // - A scenario is validated before it runs. An unknown step, a malformed payload or a step that throws is an
 //   invalid scenario or an execution error, never a pass. A run with no checks is "no checks", not a pass.
 
@@ -92,7 +93,7 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "armApproach": return "arm the approach";
       case "goAround": return "press TOGA";
       case "expectLine": return `check that screen line ${a.line + 1} matches /${a.pattern}/${within}`;
-      case "expectScratchpad": return `check that the scratchpad shows ${a.text}${within}`;
+      case "expectScratchpad": return a.text ? `check that the scratchpad shows ${a.text}${within}` : `check that the scratchpad is blank${within}`;
       case "expectAlert": return `check that the alert ${a.text} has been raised${within}`;
       case "expectNoAlert": return `check that the alert ${a.text} has not been raised at that moment`;
       case "expectLamp": return `check that the ${a.lamp} annunciator is ${a.lit ? "lit" : "out"}${within}`;
@@ -142,8 +143,9 @@ function actionProblem(action: unknown): string | null {
     case "condition": return typeof a.condition === "string" && CONDITION_IDS.has(a.condition) && typeof a.on === "boolean" ? null : "condition needs a known condition and on true or false";
     case "alert":
     case "expectAlert":
-    case "expectNoAlert":
-    case "expectScratchpad": return text(a.text, /^.{1,24}$/) ? null : `${a.kind} needs text of 1 to 24 characters`;
+    case "expectNoAlert": return text(a.text, /^.{1,24}$/) ? null : `${a.kind} needs text of 1 to 24 characters`;
+    // A blank scratchpad is a state worth checking: the text may be empty.
+    case "expectScratchpad": return text(a.text, /^.{0,24}$/) ? null : "expectScratchpad needs text of at most 24 characters";
     case "procedure": return (a.procedure === "SID" || a.procedure === "STAR" || a.procedure === "APPROACH") && text(a.ident, /^[A-Z0-9]{1,7}$/) ? null : "procedure needs SID, STAR or APPROACH and an ident";
     case "armApproach":
     case "goAround": return null;
@@ -248,9 +250,12 @@ export class ScenarioRunner {
           const waited = now - this.eligibleAt;
           const window = step.within ?? 0;
           const check = this.check(step.action);
-          if (check.ok) { this.finish({ status: "pass", at: now, actual: check.actual }); continue; }
+          // An observation strictly after the window cannot satisfy it, even when the deadline fell between ticks and
+          // this is the first tick since: the condition was not seen in time. At the deadline exactly, it counts.
+          const late = waited > window + 1e-9;
+          if (check.ok && !late) { this.finish({ status: "pass", at: now, actual: check.actual }); continue; }
           // Not met: wait while the window is open (and the run has time left), otherwise it has failed.
-          if (waited < window - 1e-9 && now < this.scenario.maxSeconds - 1e-9) break;
+          if (!late && waited < window - 1e-9 && now < this.scenario.maxSeconds - 1e-9) break;
           this.finish({ status: "fail", at: now, actual: check.actual });
         } else {
           this.act(step.action);

@@ -281,3 +281,32 @@ test('the same scenario gives the same timeline however the ticks are grouped, a
     expect(grouped.altitude).toBe(oneAtATime.altitude)
   }
 })
+
+// N05, second review (Astra C07): a window shorter than a tick. The deadline falls between observations; a condition
+// first seen after it must fail, even when the next tick is the first chance to look.
+test('a check first observed strictly after its window fails, even when the deadline falls between ticks (N05)', () => {
+  // The DEMO-2609 cycle ends at 23:59:00Z; starting 0.125 s before, DATABASE OUT OF DATE first appears at the 0.25 s tick.
+  const start = Date.UTC(2026, 8, 30, 23, 58, 59, 875)
+  const run = (within: number) => runHeadless(scenarioOf([
+    { when: { kind: 'start' }, action: { kind: 'expectAlert', text: 'DATABASE OUT OF DATE' }, within },
+  ], 10), start).runner
+  const late = run(0.1)
+  expect(late.results[0]).toMatchObject({ status: 'fail', at: 0.25 })
+  expect(late.outcome).toBe('failed')
+  // Observed exactly at the deadline, or inside it, it passes.
+  expect(run(0.25).results[0]).toMatchObject({ status: 'pass', at: 0.25 })
+  expect(run(0.3).results[0]).toMatchObject({ status: 'pass', at: 0.25 })
+})
+
+test('a cleared scratchpad can be checked with an empty expectation (second review C12)', () => {
+  const scenario = scenarioOf([
+    { when: { kind: 'start' }, action: { kind: 'type', text: 'ABC' } },
+    { when: { kind: 'start' }, action: { kind: 'expectScratchpad', text: 'ABC' } },
+    { when: { kind: 'start' }, action: { kind: 'keys', keys: ['CLR', 'CLR', 'CLR'] } },
+    { when: { kind: 'start' }, action: { kind: 'expectScratchpad', text: '' } },
+  ])
+  expect(() => parseScenario(JSON.stringify(scenario))).not.toThrow()
+  expect(runHeadless(scenario).runner.outcome).toBe('passed')
+  // Alert text still needs something to look for.
+  expect(() => parseScenario(JSON.stringify(scenarioOf([{ when: { kind: 'start' }, action: { kind: 'expectAlert', text: '' } }])))).toThrow(/1 to 24 characters/)
+})

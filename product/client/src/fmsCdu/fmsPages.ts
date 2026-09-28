@@ -133,7 +133,7 @@ function vnavDescent(fms: ScriptedFms): (Line | undefined)[] {
   const profile = fms.profile();
   const first = profile.points[0];
   const tan = Math.tan((fms.vnav.pathAngle * Math.PI) / 180);
-  const pathAltitude = first && first.distance !== null ? Math.min(fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * tan) : null;
+  const pathAltitude = first && first.distance !== null && first.altitude !== null ? Math.min(fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * tan) : null;
   const vdev = profile.descending && pathAltitude !== null ? Math.round((fms.altitude - pathAltitude) / 10) * 10 : null;
   const edLeg = fms.activeRoute.legs.find(l => l.kind === "wpt" && l.ident === profile.endOfDescent);
   return [

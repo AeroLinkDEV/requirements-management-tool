@@ -171,3 +171,29 @@ test('PROGRESS 2/4 shows the landing EFOB, and dashes when the route is not pred
   press(unit, 'PROG', 'NEXT')
   expect(lines(unit)[4]).toMatch(/-----KG$/)
 })
+
+test('constraints beyond an unresolved gap are not evaluated and do not command the connected segment (R08, second review C11)', () => {
+  // From 1000 ft, cruise 5000 ft: a known 10 NM leg to KNOWN, then a leg of unknown length to AFTER.
+  const plan = (after: string | undefined, afterLeg: number | null) => computeProfile({
+    waypoints: [
+      { ident: 'KNOWN', legDistance: 10, groundSpeed: 120, constraint: null, endOfDescent: false },
+      { ident: 'AFTER', legDistance: afterLeg, groundSpeed: 120, constraint: parseConstraint(after) ?? null, endOfDescent: false },
+    ],
+    altitude: 1000, cruiseAltitude: 5000, climbRate: 1000, pathAngle: 3, fuel: 1000, fuelFlow: 500, now: 0,
+  })
+  const unconstrained = plan(undefined, null)
+  for (const after of ['1500B', '9000A']) {
+    const gap = plan(after, null)
+    // The point past the gap has no predicted altitude and an unevaluated constraint, and raises no UNABLE.
+    expect(gap.points[1]).toMatchObject({ ident: 'AFTER', basis: 'unknown', altitude: null, constraintMet: null })
+    expect(gap.unableNext, after).toBeNull()
+    // The connected segment is the same whatever lies behind the gap.
+    expect(gap.points[0]).toEqual(unconstrained.points[0])
+    expect(gap.climbCap, after).toBe(5000)
+  }
+  // Connected, the at-or-below 1500 ft constraint caps the climb and is assessed.
+  const joined = plan('1500B', 10)
+  expect(joined.climbCap).toBe(1500)
+  expect(joined.points[1]).toMatchObject({ basis: 'known', constraintMet: true })
+  expect(plan('9000A', 10).unableNext).toBe('AFTER')
+})
