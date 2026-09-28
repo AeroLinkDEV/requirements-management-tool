@@ -14,6 +14,19 @@ import { apiLogin, login, selectProgram, surfacePainted, layoutSettled } from '.
  * under the readability floor or pushes a control off the side of the page is worse than no compact
  * setting at all.
  */
+/**
+ * The one accepted exception to the readability floor: the Digital Thread canvas (#880 §10.1).
+ *
+ * Accepted by the product owner on 2026-08-31 and recorded in DECISIONS_AND_OPEN_QUESTIONS.md. The canvas is
+ * a *scaled* surface — cards are drawn at a zoom the reader controls — so a CSS pixel is not what a reader
+ * sees, and the density tiers deliberately shed content rather than shrink type. The rule for this surface
+ * is legibility at the default zoom, which its own tests assert, not a flat CSS-pixel number.
+ *
+ * Deliberately narrow: only elements inside the scaled canvas are exempt. The Digital Thread page itself
+ * stays audited — its toolbar, view switch, export control, evidence table and every state message are held
+ * to the same 12px floor as the rest of the product, and so is every other surface. This is an exception for
+ * one scaled subtree, not a licence for small type anywhere.
+ */
 const READABLE_MINIMUM = 12
 
 const surfaces = [
