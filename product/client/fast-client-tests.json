@@ -32,6 +32,7 @@
     "fms-efis.spec.ts"
   ],
   "rendered": [
+    "review-workflow-rendered.spec.ts",
     "code-source-rendered.spec.ts",
     "code-evidence-rendered.spec.ts",
     "code-workspace-rendered.spec.ts",
