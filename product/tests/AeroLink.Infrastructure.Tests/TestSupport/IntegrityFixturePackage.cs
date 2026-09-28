@@ -11,7 +11,8 @@ internal static class IntegrityFixturePackage
     public static string Repository()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "AGENTS.md"))) directory = directory.Parent;
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "product", "tools", "integrity-extractor", "Build-Extractor.ps1")))
+            directory = directory.Parent;
         return directory?.FullName ?? throw new InvalidOperationException("Repository root not found.");
     }
     private static async Task<(byte[], string)> BuildAsync()
