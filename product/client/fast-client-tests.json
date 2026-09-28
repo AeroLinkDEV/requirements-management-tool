@@ -24,7 +24,9 @@
     "fms-tactical-maint.spec.ts",
     "fms-scenario.spec.ts",
     "fms-authority.spec.ts",
-    "fms-predictions.spec.ts"
+    "fms-predictions.spec.ts",
+    "fms-lab-controls.spec.ts",
+    "fms-modes.spec.ts"
   ],
   "rendered": [
     "code-source-rendered.spec.ts",

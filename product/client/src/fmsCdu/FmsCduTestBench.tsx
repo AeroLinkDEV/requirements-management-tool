@@ -67,6 +67,7 @@ export default function FmsCduTestBench() {
   const [range, setRange] = useState(20);
   const [navLoad, setNavLoad] = useState<string | null>(null);
   const [headingInput, setHeadingInput] = useState("090");
+  const [jumpNote, setJumpNote] = useState<string | null>(null);
   const variant = variantById(variantId);
 
   // Time moves in ticks (scenario.ts): while flying, each callback runs `rate` ticks, each advancing the clock, the
@@ -207,7 +208,8 @@ export default function FmsCduTestBench() {
                 : next?.kind === "cond" ? <>Active leg <strong>{conditionalLabel(next)}</strong></> : next ? "Route discontinuity ahead" : "End of route"}
             </p>
             <div className="fmsBenchActions">
-              <button type="button" onClick={() => setPlaying(value => !value)} disabled={failedFms} aria-pressed={playing}>
+              {/* Pause is a bench control: it stays usable whatever has failed in the simulated aircraft. */}
+              <button type="button" onClick={() => setPlaying(value => !value)} aria-pressed={playing}>
                 {playing ? "Pause" : "Fly"}
               </button>
               {!playing ? <span className="fmsBenchHint">{runner && !runner.finished ? "Run paused: its clock is stopped." : "Aircraft frozen: the clock runs."}</span> : null}
@@ -217,27 +219,38 @@ export default function FmsCduTestBench() {
                   {[1, 4, 16, 64].map(value => <option key={value} value={value}>{value}×</option>)}
                 </select>
               </label>
-              <button type="button" onClick={() => backend.sequence()} disabled={failedFms}>Jump to next waypoint</button>
+              <button type="button" disabled={failedFms}
+                onClick={() => setJumpNote(backend.sequence() === "discontinuity" ? "Jump stops at a route discontinuity. Close it on LEGS, or override it (engineering)." : null)}>
+                Jump to next waypoint
+              </button>
+              {next?.kind === "disco" && !failedFms
+                ? <button type="button" onClick={() => { backend.overrideDiscontinuity(); setJumpNote("Discontinuity overridden (engineering action, logged)."); }}>Override discontinuity</button>
+                : null}
               <button type="button" onClick={reset}>Restart the simulation</button>
             </div>
             {/* The flight mode annunciator: engaged modes in green, armed ones in white, as on the PFD. */}
+            {jumpNote ? <p className="fmsBenchHint" role="status">{jumpNote}</p> : null}
+            {/* The flight mode annunciator shows the modes the controller is in (flight.ts), not a reading of the motion. */}
             <div className="fmsBenchFma" role="status" aria-label="Flight modes">
-              <span className="engaged">{sim.lateralMode === "LNAV" ? (onFinal && backend.approachType ? backend.approachType : guidance.mode === "HDG" ? "LNAV" : guidance.mode) : "HDG SEL"}</span>
+              <span className="engaged">{sim.lateralMode === "LNAV" ? (onFinal && backend.approachType ? backend.approachType : guidance.mode) : sim.headingHeld ? "HDG HOLD" : "HDG SEL"}</span>
               {sim.lnavIsArmed ? <span className="armed">LNAV</span> : null}
               {backend.approachArmed && !onFinal ? <span className="armed">APPR</span> : null}
-              <span className="engaged">{Math.abs(backend.verticalSpeed) > 100 ? "VNAV PTH" : "VNAV ALT"}</span>
+              <span className="engaged">{sim.verticalMode}</span>
             </div>
+            {sim.modeEvents.length ? <p className="fmsBenchHint">Last mode change: {sim.modeEvents.at(-1)!.event}, {sim.modeEvents.at(-1)!.detail}</p> : null}
             <form className="fmsBenchAutopilot" onSubmit={event => { event.preventDefault(); sim.selectHeading(Number(headingInput) || 0); }}>
               <label>
                 <span>Heading</span>
                 <input inputMode="numeric" value={headingInput} maxLength={3} aria-label="Selected heading"
                   onChange={event => setHeadingInput(event.target.value.replace(/\D/g, ""))} />
               </label>
-              <button type="submit" disabled={failedFms} aria-pressed={sim.lateralMode === "HDG"}>HDG SEL</button>
+              {/* HDG SEL is the autopilot's basic mode, so it stays available when the FMS has failed. */}
+              <button type="submit" aria-pressed={sim.lateralMode === "HDG"}>HDG SEL</button>
               <button type="button" disabled={failedFms || sim.lateralMode === "LNAV"} aria-pressed={sim.lnavIsArmed} onClick={() => sim.armLnav()}>LNAV</button>
               <button type="button" disabled={failedFms || !backend.approachType} aria-pressed={backend.approachArmed}
                 onClick={() => { if (!backend.approachArmed) recordTo?.armApproach(); backend.armApproach(!backend.approachArmed); }}>APPR</button>
               <button type="button" disabled={failedFms} onClick={() => { recordTo?.goAround(); backend.goAround(); }}>TOGA</button>
+              <button type="button" disabled={failedFms || sim.altitudeHoldReference === null} onClick={() => sim.engageVnav()}>VNAV</button>
             </form>
             <dl className="fmsBenchGuidance" aria-label="Guidance">
               <dt>Mode</dt><dd>{guidance.mode}</dd>

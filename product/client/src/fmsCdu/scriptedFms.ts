@@ -257,16 +257,41 @@ export class ScriptedFms implements CduBackend {
   /**
    * Flies the aircraft to the active waypoint and sequences it, as crossing the waypoint would. A hold or a search
    * pattern at that waypoint is entered instead, and each further call flies one more circuit until the pilot exits.
+   * This is the bench's Jump, an engineering control: it refuses at a route discontinuity, which only
+   * overrideDiscontinuity crosses.
    */
-  sequence() {
-    if (this.injected.has("fmsFail")) return;
-    if (this.active.legs[0]?.kind === "disco") this.active.legs.shift();
+  sequence(): "jumped" | "discontinuity" | "failed" | "end" {
+    if (this.injected.has("fmsFail")) return "failed";
     const leg = this.active.legs[0];
-    const at = leg?.kind === "wpt" ? this.coordinates(leg.ident) : undefined;
+    if (!leg) return "end";
+    if (leg.kind === "disco") return "discontinuity";
+    const at = leg.kind === "wpt" ? this.coordinates(leg.ident) : undefined;
     if (at) { this.truth = { ...at }; this.here = this.withError(this.truth); }
     this.arrive();
     this.emit();
+    return "jumped";
   }
+
+  /**
+   * Override discontinuity (an engineering control): removes the gap at the head of the active route, so the next
+   * leg becomes active, and records the override. A crew would close the gap on LEGS instead.
+   */
+  overrideDiscontinuity(): boolean {
+    if (this.injected.has("fmsFail") || this.active.legs[0]?.kind !== "disco") return false;
+    const legs = this.active.legs;
+    legs.shift();
+    const next = legs[0];
+    this.engineering = [...this.engineering, {
+      at: this.now, action: "OVERRIDE DISCONTINUITY",
+      detail: `gap removed; active leg now ${next?.kind === "wpt" ? next.ident : next?.kind === "cond" ? next.path : "none"}`,
+    }];
+    this.emit();
+    return true;
+  }
+
+  /** Engineering interventions made in this session, oldest first: they are not crew actions. */
+  get engineeringLog(): readonly { at: Date; action: string; detail: string }[] { return this.engineering; }
+  private engineering: { at: Date; action: string; detail: string }[] = [];
 
   /**
    * The aircraft has reached the active waypoint. It is sequenced, unless it is the fix of a hold that is not armed
