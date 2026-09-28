@@ -74,6 +74,24 @@ export class ScriptedFms implements CduBackend {
     unableSince: null as number | null, unableAlerted: false, integrityAlerted: false, approachIntegrityAlerted: false, armAlerted: false,
   };
   private armedApproach = false;
+  /** Waypoints that move (a ship, a formation lead): position advanced by track and speed as time passes. */
+  private moving: Record<string, { track: number; speed: number }> = {};
+  private faults: { at: Date; text: string }[] = [];
+  private selfTest: { startedAt: number | null; result: "PASS" | "FAIL" | null } = { startedAt: null, result: null };
+  /** The other FMS: in dual operation every executed route is cross-loaded to it; in independent operation not. */
+  private crossRoute: Route = demoRoute();
+  /** Navigation database cycles: the active one first. The demonstration data is the same in both. */
+  private cycles = [
+    { id: "DEMO-2609", from: Date.UTC(2026, 8, 3), to: Date.UTC(2026, 8, 30, 23, 59) },
+    { id: "DEMO-2610", from: Date.UTC(2026, 9, 1), to: Date.UTC(2026, 9, 28, 23, 59) },
+  ];
+  private outOfDateAlerted = false;
+  /** The MOVING WPT page's entries before CREATE. */
+  movingDraft = { ident: null as string | null, position: null as LatLon | null, motion: null as string | null };
+  /** RNDZ: arrive at a waypoint at a time, flying the speed that needs within the limits. */
+  readonly rndz = { wpt: null as string | null, time: null as number | null, minSpeed: 60, maxSpeed: 160, active: false, alerted: false };
+  /** TDN: a tactical descent to an altitude a distance before a reference, if the angle is flyable. */
+  readonly tdn = { targetAltitude: 500, refId: null as string | null, distanceBefore: 1.0, maxAngle: 6, active: false, level: false };
   private perf = { notEnoughAlerted: false, unableAlertedFor: null as string | null };
   private inhibited: string[] = [];
   private gpsSelected = true;
@@ -222,6 +240,11 @@ export class ScriptedFms implements CduBackend {
         break;
       default:
         if (on) this.injected.add(id); else this.injected.delete(id);
+        if (on && ["fmsFail", "gpsLost", "gpsIntegrity", "dmeOutage", "independent"].includes(id)) {
+          this.recordFault({ fmsFail: "FMS FAILURE", gpsLost: "GPS LOST", gpsIntegrity: "GPS INTEGRITY LOST", dmeOutage: "DME OUTAGE", independent: "X-SIDE SYNC LOST" }[id as string] ?? id);
+        }
+        // Leaving independent operation resynchronises the other FMS to this one.
+        if (!on && id === "independent") this.crossRoute = structuredClone(this.active);
         if (on && id === "rnpExceeded") this.alert(alert("CHECK ANP"));
         if (id === "gpsLost" || id === "gpsIntegrity" || id === "dmeOutage") this.updateNavigation(0);
         if (on && id === "independent") this.alert(alert("INDEPENDENT OP"));
@@ -393,7 +416,7 @@ export class ScriptedFms implements CduBackend {
   // ------------------------------------------------------------------ vertical profile and predictions (vnav.ts)
 
   /** Ground speed on a course, from the true airspeed and the wind. */
-  groundSpeedOn(course: number, tas = this.targetSpeed) {
+  groundSpeedOn(course: number, tas = this.plannedSpeed) {
     return Math.max(30, tas - this.wind.speed * Math.cos(((this.wind.direction - course) * Math.PI) / 180));
   }
 
@@ -405,12 +428,21 @@ export class ScriptedFms implements CduBackend {
 
   get fafAltitudeCorrected() { return this.vnav.fafAltitude + this.coldCorrection; }
 
-  /** The true airspeed flown: the cruise speed, reduced by a speed constraint at the active fix or the hold. */
-  get targetSpeed() {
+  /** The speed limit at the active fix or in the hold, if any. */
+  private get speedLimit() {
     const leg = this.active.legs[0];
     const constraint = leg?.kind === "wpt" ? leg.speed : undefined;
     const hold = this.active.hold?.status === "IN PROGRESS" ? this.active.hold.speed : undefined;
-    return Math.min(this.vnav.cruiseSpeed, constraint ?? Infinity, hold ?? Infinity);
+    return Math.min(constraint ?? Infinity, hold ?? Infinity);
+  }
+
+  /** The planned speed: cruise, within the speed limit. The predictions (and so the rendezvous) use it. */
+  get plannedSpeed() { return Math.min(this.vnav.cruiseSpeed, this.speedLimit); }
+
+  /** The true airspeed flown: the planned speed, or during an active rendezvous the speed that arrives on time. */
+  get targetSpeed() {
+    const rendezvous = this.rndz.active ? this.rendezvous()?.speed : undefined;
+    return rendezvous === undefined ? this.plannedSpeed : Math.min(rendezvous, this.speedLimit);
   }
 
   /**
@@ -442,6 +474,15 @@ export class ScriptedFms implements CduBackend {
    * the alert list, so the advisory is used) when a climb constraint cannot be made.
    */
   updatePerformance(dt: number) {
+    for (const [ident, motion] of Object.entries(this.moving)) {
+      const at = this.points[ident];
+      if (at) this.points[ident] = offset(at, motion.track, (motion.speed * dt) / 3600);
+    }
+    const rendezvous = this.rndz.active ? this.rendezvous() : null;
+    if (rendezvous && !rendezvous.achievable && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE")); }
+    if (rendezvous?.achievable) this.rndz.alerted = false;
+    // At the target altitude the descent ends and the aircraft levels there until the crew cancels it.
+    if (this.tdn.active && this.altitude <= this.tdn.targetAltitude + 20) { this.tdn.active = false; this.tdn.level = true; }
     const before = this.fuel.quantity;
     this.fuel.quantity = Math.max(0, before - (this.fuel.flow * dt) / 3600);
     if (before > this.fuel.reserve && this.fuel.quantity <= this.fuel.reserve) this.alert(alert("FUEL RESERVE"));
@@ -453,6 +494,98 @@ export class ScriptedFms implements CduBackend {
     if (profile.unableNext && profile.unableNext !== this.perf.unableAlertedFor) { this.perf.unableAlertedFor = profile.unableNext; this.advisory("UNABLE NEXT ALT"); }
     if (!profile.unableNext) this.perf.unableAlertedFor = null;
   }
+
+  // ------------------------------------------------------------------ tactical: rendezvous, moving waypoints, TDN
+
+  /**
+   * The rendezvous: the distance along the route to the waypoint, the time left, and the speed that arrives on time.
+   * Achievable when that speed is within the limits; the flown speed is then held within them.
+   */
+  rendezvous(): { distance: number; required: number; speed: number; achievable: boolean; eta: number } | null {
+    const { wpt, time } = this.rndz;
+    if (!wpt || time === null) return null;
+    const point = this.profile().points.find(p => p.ident === wpt);
+    if (!point) return null;
+    const hours = (time - this.now.getTime()) / 3_600_000;
+    const required = hours > 0 ? point.distance / hours : Infinity;
+    const speed = Math.min(this.rndz.maxSpeed, Math.max(this.rndz.minSpeed, required));
+    return { distance: point.distance, required, speed, achievable: required >= this.rndz.minSpeed && required <= this.rndz.maxSpeed, eta: point.eta };
+  }
+
+  /** Defines a moving waypoint at a position, moving on a track at a speed. */
+  defineMoving(ident: string, position: LatLon, track: number, speed: number) {
+    this.points[ident] = position;
+    this.moving[ident] = { track, speed };
+    this.pilot = [...this.pilot.filter(p => p.ident !== ident), { ident, position, definition: `MOVING ${String(track).padStart(3, "0")}/${speed}KT` }];
+  }
+
+  get movingWaypoints() { return this.moving; }
+
+  /** The TDN path angle from present altitude to the target altitude at the point before the reference. */
+  tdnAngle(): number | null {
+    const ref = this.tdn.refId ? this.coordinates(this.tdn.refId) : undefined;
+    if (!ref) return null;
+    const run = distanceNm(this.here, ref) - this.tdn.distanceBefore;
+    const drop = this.altitude - this.tdn.targetAltitude;
+    if (run <= 0 || drop <= 0) return null;
+    return (Math.atan(drop / (run * 6076.12)) * 180) / Math.PI;
+  }
+
+  /** EXECUTE TDN: begins the tactical descent, or says TDN NOT POSSIBLE when the angle is too steep or undefined. */
+  executeTdn(): boolean {
+    const angle = this.tdnAngle();
+    if (angle === null || angle > this.tdn.maxAngle) { this.alert(alert("TDN NOT POSSIBLE")); return false; }
+    this.tdn.active = true;
+    this.tdn.level = false;
+    return true;
+  }
+
+  /** CANCEL TDN: ends the descent, or the level-off at its altitude, and hands the altitude back to VNAV. */
+  cancelTdn() {
+    this.tdn.active = false;
+    this.tdn.level = false;
+  }
+
+  // ------------------------------------------------------------------ navigation database cycles
+
+  get activeCycle() { return this.cycles[0]; }
+  get inactiveCycle() { return this.cycles[1] ?? null; }
+
+  /** Swaps the active and inactive cycles, as the crew does on IDENT when a new cycle becomes effective. */
+  swapCycles() {
+    if (this.cycles.length < 2) return;
+    this.cycles = [this.cycles[1], this.cycles[0]];
+    this.outOfDateAlerted = false;
+  }
+
+  /** Removes a pilot waypoint that was only a step in defining another (a WPTnn made from a position entry). */
+  forgetPilot(ident: string) {
+    delete this.points[ident];
+    this.pilot = this.pilot.filter(p => p.ident !== ident);
+  }
+
+  /** Defines a waypoint in the temporary database, from REF NAV DATA: an ident of its own at a position. */
+  defineTemporary(ident: string, position: LatLon) {
+    this.points[ident] = position;
+    this.pilot = [...this.pilot.filter(p => p.ident !== ident), { ident, position, definition: "TEMP DB" }];
+  }
+
+  // ------------------------------------------------------------------ maintenance and dual operation
+
+  get faultLog() { return this.faults; }
+  get selfTestState() { return this.selfTest; }
+  get otherFms() { return this.crossRoute; }
+
+  /** Whether the other FMS holds the same active route: always in dual operation, not necessarily when independent. */
+  get crossSideInSync() {
+    const signature = (route: Route) => JSON.stringify(route.legs.map(leg => (leg.kind === "wpt" ? leg.ident : leg.kind)));
+    return signature(this.crossRoute) === signature(this.active);
+  }
+
+  /** SELF TEST: runs for five seconds, then passes unless a fault condition is present. */
+  startSelfTest() { this.selfTest = { startedAt: this.now.getTime(), result: null }; }
+
+  private recordFault(text: string) { this.faults = [{ at: this.now, text }, ...this.faults].slice(0, 20); }
 
   /** On an approach that is not an ILS: the NPA annunciator. */
   get nonPrecisionApproach() {
@@ -522,6 +655,12 @@ export class ScriptedFms implements CduBackend {
   /** Advances time-driven state: the timer alarms, the call duration and the clocks on the display. */
   tick() {
     const now = this.now.getTime();
+    // A database past the end of its cycle is flagged once; swapping to the next cycle clears it.
+    if (now > this.activeCycle.to && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE")); }
+    if (this.selfTest.startedAt !== null && this.selfTest.result === null && now - this.selfTest.startedAt >= 5000) {
+      const failing = ["fmsFail", "gpsLost", "dmeOutage"].some(id => this.injected.has(id as ConditionId));
+      this.selfTest = { ...this.selfTest, result: failing ? "FAIL" : "PASS" };
+    }
     if (this.timer.alarmAt !== null && now >= this.timer.alarmAt) { this.timer.alarmAt = null; this.alert(alert("TIMER ALARM")); }
     if (this.timer.countdownEnd !== null && now >= this.timer.countdownEnd) { this.timer.countdownEnd = null; this.alert(alert("TIMER ALARM")); }
     this.emit();
@@ -576,6 +715,7 @@ export class ScriptedFms implements CduBackend {
   /** Merges loaded navigation data (ARINC 424) over the database. */
   loadNavData(data: NavData) {
     this.db = this.db.merge(data);
+    this.cycles = [{ id: data.cycle.id, from: this.now.getTime(), to: this.now.getTime() + 28 * 86_400_000 }, ...this.cycles];
     this.emit();
   }
 
@@ -929,6 +1069,8 @@ export class ScriptedFms implements CduBackend {
     this.directBypassed = [];
     this.active = route;
     this.modified = null;
+    // In dual operation the executed route is cross-loaded to the other FMS.
+    if (!this.injected.has("independent")) this.crossRoute = structuredClone(route);
   }
 
   private handle(fn: CduFunction, { held }: { held?: boolean }) {

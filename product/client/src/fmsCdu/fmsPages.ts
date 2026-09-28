@@ -41,6 +41,13 @@ const altitudeText = (leg: Leg) => {
 
 const eta = (ms: number) => hhmm(new Date(ms)).slice(0, 4) + "Z";
 
+const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+/** A database cycle's effective dates as the FMS prints them: 03SEP-30SEP. */
+const cycleDates = (cycle: { from: number; to: number }) => {
+  const day = (ms: number) => { const d = new Date(ms); return `${String(d.getUTCDate()).padStart(2, "0")}${MONTHS[d.getUTCMonth()]}`; };
+  return `${day(cycle.from)}-${day(cycle.to)}`;
+};
+
 /** VNAV CRZ: the planned cruise, path angle and wind, with the top and end of descent the profile works out. */
 function vnavCruise(fms: ScriptedFms): (Line | undefined)[] {
   const profile = fms.profile();
@@ -167,6 +174,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         { left: prompt("<RTE"), right: prompt("RADIO>") },
         undefined,
         { left: prompt("<HOLD"), right: prompt("TIMER>") },
+        undefined,
+        { left: prompt("<MAINT") },
       ]
       : [
         title("INIT/REF INDEX", "2/2"),
@@ -180,11 +189,13 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         { left: prompt("<FIX INFO"), right: prompt("GSM/SMS>") },
         undefined,
         { left: prompt("<SEC FPLN"), right: prompt("NAV STATUS>") },
+        undefined,
+        { left: prompt("<MOVING WPT"), right: prompt("RNDZ>") },
       ],
     lsk: (fms, side, row, _scratch, index) => {
       const target: Record<string, PageId> = index === 0
-        ? { L1: "IDENT", L2: "POS", L3: "FUEL", L4: "RTE", L5: "HOLD", R1: "NAV_DATA", R2: "PREDEF", R3: "MSG_RECALL", R4: "RADIO", R5: "TIMER" }
-        : { L1: "TACT", L2: "TACT_APPR", L3: "HOVER", L4: "FIX", L5: "SEC_FPLN", R1: "VNAV", R2: "ATC", R3: "FMC_COMM", R4: "ANS", R5: "NAV_STATUS" };
+        ? { L1: "IDENT", L2: "POS", L3: "FUEL", L4: "RTE", L5: "HOLD", R1: "NAV_DATA", R2: "PREDEF", R3: "MSG_RECALL", R4: "RADIO", R5: "TIMER", L6: "MAINT" }
+        : { L1: "TACT", L2: "TACT_APPR", L3: "HOVER", L4: "FIX", L5: "SEC_FPLN", R1: "VNAV", R2: "ATC", R3: "FMC_COMM", R4: "ANS", R5: "NAV_STATUS", L6: "MOVING_WPT", R6: "RNDZ" };
       const page = target[`${side}${row}`];
       if (page === "HOLD" && !fms.route.hold) { fms.open("LEGS"); fms.setScratch("/H"); return; }
       if (page) fms.open(page);
@@ -198,16 +209,19 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       caption(" MODEL", "OP PROGRAM "),
       { left: medium("CMA-9000"), right: medium("AEROLINK SIM") },
       caption(" NAV DATA", "ACTIVE "),
-      { left: medium(fms.navdb.cycle.id), right: medium(fms.navdb.cycle.from ? `${fms.navdb.cycle.from}-${fms.navdb.cycle.to}` : "LOADED") },
+      { left: medium(fms.activeCycle.id), right: medium(cycleDates(fms.activeCycle), fms.now.getTime() > fms.activeCycle.to ? "amber" : "white") },
+      caption(undefined, fms.inactiveCycle ? "INACTIVE " : undefined),
+      fms.inactiveCycle ? { left: small(fms.inactiveCycle.id), right: prompt(cycleDates(fms.inactiveCycle)) } : undefined,
       undefined,
       { center: small("SIMULATION - NOT FOR", "amber") },
       { center: small("NAVIGATION", "amber") },
-      undefined, undefined, undefined,
+      undefined,
       { left: dashes(24) },
       { left: back("INDEX"), right: prompt("POS INIT>") },
     ],
     lsk: (fms, side, row) => {
       if (row === 6) fms.open(side === "L" ? "INIT_REF" : "POS");
+      if (side === "R" && row === 3 && fms.inactiveCycle) fms.swapCycles();
     },
   },
 
@@ -755,6 +769,32 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         fms.vnav.qnh = scratch;
         return void fms.setScratch("");
       }
+    },
+  },
+
+  MAINT: {
+    pages: () => 1,
+    render: fms => {
+      const test = fms.selfTestState;
+      const lines: (Line | undefined)[] = [
+        title("MAINTENANCE", "1/1"),
+        caption(" OP PROGRAM", "NAV DATA "),
+        { left: medium("AEROLINK SIM 1"), right: medium(fms.activeCycle.id) },
+        caption(" SELF TEST", "RESULT "),
+        { left: prompt("<START"), right: medium(test.result ?? (test.startedAt === null ? "-----" : "IN PROG"), test.result === "FAIL" ? "amber" : test.result === "PASS" ? "green" : "white") },
+        caption(" CROSS-SIDE"),
+        { left: medium(fms.hasCondition("independent") ? "INDEPENDENT" : "DUAL SYNC", fms.hasCondition("independent") ? "amber" : "green"), right: medium(fms.crossSideInSync ? "RTE MATCH" : "RTE DIFFER", fms.crossSideInSync ? "white" : "amber") },
+        caption(" FAULT LOG"),
+      ];
+      fms.faultLog.slice(0, 3).forEach((fault, i) => { lines[8 + i] = { left: small(`${hhmm(fault.at).slice(0, 4)}Z ${fault.text}`) }; });
+      if (!fms.faultLog.length) lines[8] = { left: small("NO FAULTS") };
+      lines[11] = { left: dashes(24) };
+      lines[12] = { left: back("INDEX") };
+      return lines;
+    },
+    lsk: (fms, side, row) => {
+      if (side === "L" && row === 2) fms.startSelfTest();
+      if (side === "L" && row === 6) fms.open("INIT_REF");
     },
   },
 

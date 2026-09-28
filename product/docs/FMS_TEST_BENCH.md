@@ -2,23 +2,25 @@
 
 *27 September 2026. Written for the CMA-9000 simulator roadmap.*
 
+> **Read this first.** Everything above "Current capability register" is the 27 September research baseline: what airline practice and the cited sources suggest, measured against the simulator as it was then. It is not a statement of current bench behaviour, and it is not CMA-9000 authority; generic airline practice (Boeing, Airbus) informs questions, not CMA behaviour. The current state of each capability, with its open review findings, is in the register near the end.
+
 ## Sources I used
 
-- **ICAO Doc 9613, Performance-based Navigation (PBN) Manual, 5th edition.** The unedited version is on the PBN Portal. I used the RNAV 1/2, RNP 4, RNP 1 and Advanced RNP functional requirements, and the crew knowledge and procedures that go with them. This is the certification-grade list of what a navigation FMS *must* do.
+- **ICAO Doc 9613, Performance-based Navigation (PBN) Manual, 5th edition.** The unedited version is on the PBN Portal. I used the RNAV 1/2, RNP 4, RNP 1 and Advanced RNP functional requirements, and the crew knowledge and procedures that go with them. These are per navigation specification: a capability inventory to check against, not one universal requirement list for every installation.
 - **Boeing 737 FCOM, Chapter 11, Flight Management and Navigation (2004–2006 revision).** 348 pages. It describes how a mainstream airline FMS behaves in service: position updating, ANP/RNP, waypoint naming, VNAV, RTA, route modification, offsets, REF NAV DATA and messages.
 - **Airbus Flight Operations Briefing Note, "Optimum Use of Automation" (via SKYbrary).** It covers what airlines train crews to expect from the FMS and autoflight: managed versus selected guidance, mode awareness, and cross-checking.
 - **American Airlines 965 (Cali) accident material.** From the MIT course pack, the FAA Lessons Learned page and Wikipedia. It shows how a direct-to and a duplicate identifier contributed to a fatal accident.
-- **Flight Safety Foundation, "Data-entry errors can lead aircraft off course"**, and the SKYbrary work on FMS data-entry errors. One study cited there found 309 air-safety reports on FMS data-entry errors between 2007 and 2011; 80% involved navigation data.
+- **Flight Safety Foundation, "Data-entry errors can lead aircraft off course"**, and the SKYbrary work on FMS data-entry errors. IATA's 2015 *FMS Data Entry Error Prevention* guide reports 309 relevant reports in its 2007–2011 dataset, 80% of them involving navigation data. That is a historical dataset, not a current or CMA-specific error rate.
 - **Honeywell, "Understanding FMS navigation procedures" (ARINC 424 path terminators)**, plus Honeywell and Airbus material on FMS upgrades, datalink and RNP AR.
 - **FAA/MITRE and IFATCA findings on predictability.** Different manufacturers' FMSs build turns and vertical paths differently. ATC needs repeatable paths, and airlines need the aircraft to do what the crew expects.
 - **NASA and Flight Safety Foundation work on VNAV "automation surprise"**, from search summaries only: the FAA and NASA servers refused automated download.
 
-The FAA advisory circulars AC 20-138D and AC 90-105A would not download, so I used ICAO Doc 9613, which covers the same functional requirements.
+The FAA advisory circulars AC 20-138D and AC 90-105A would not download at the time. They are not interchangeable with ICAO Doc 9613: AC 90-105A is operational guidance for specific RNP and baro-VNAV operations, and AC 20-138D is airworthiness guidance. Both should be cited by section where a behaviour depends on them.
 
 ## What airlines look for, in short
 
-1. **Predictability over cleverness.** Pilots ask "what is it doing now, and what will it do next?" Automation surprise, especially in VNAV, is a recurring cause of incidents, and VNAV is the FMS function pilots most want more training on. A good FMS makes every mode, transition and target visible before it happens.
-2. **Error-tolerant data entry with verification.** Airlines lean on the MOD → review → EXEC pattern, on route discontinuities as deliberate stops, and on cross-checking the map against the CDU. Accidents show the dangers: a direct-to silently removes intermediate reporting points, and a duplicate or chart-mismatched identifier can pick the wrong fix. Good FMSs show nearest-first SELECT DESIRED WPT lists with facility type and position, and offer abeam points on a direct-to.
+1. **Predictability over cleverness.** Pilots ask "what is it doing now, and what will it do next?" Published research and incident reports identify vertical-guidance understanding and mode awareness as recurring concerns. A good FMS makes every mode, transition and target visible before it happens.
+2. **Error-tolerant data entry with verification.** Airlines lean on the MOD → review → EXEC pattern, on route discontinuities as deliberate stops, and on cross-checking the map against the CDU. Accidents show the dangers: a direct-to silently removes intermediate reporting points, and a duplicate or chart-mismatched identifier can pick the wrong fix. Good FMSs show SELECT DESIRED WPT lists with facility type and position, so the crew chooses the intended entry deliberately, and offer abeam points on a direct-to.
 3. **Certified navigation behaviour (PBN).** This means:
    - automatic leg sequencing;
    - direct-to and intercept course;
@@ -80,26 +82,56 @@ The FAA advisory circulars AC 20-138D and AC 90-105A would not download, so I us
 
 ## Human-factors design rules to build in
 
-1. **Everything is a MOD until EXEC**, with the dashed route on the map. *Done.* Carry the same rule into VNAV and offset changes.
+1. **Route edits are a MOD until EXEC**, with the dashed route on the map, and a pending edit must not change the active route's geometry, guidance or predictions (it currently does: review findings R01, R05, R12). This is not a rule for every command: radio tuning, brightness and acknowledgements are immediate, and each command needs its own declared commit policy.
 2. **Show the next mode, not only the current one.** Add a flight mode annunciator strip showing the engaged and armed lateral mode (LNAV, HDG, HOLD, SAR) and vertical mode (VNAV PTH, VNAV SPD, ALT), and show transitions as they happen.
 3. **Make direct-to consequences visible.** Offer ABEAM PTS so the reporting points survive a direct-to; the Cali accident is the lesson. Keep INTC CRS beside it.
-4. **Duplicate identifiers:** show the list nearest first, with facility type and position. *Done:* our SELECT DESIRED WPT shows type and position; nearest-first ordering is next.
+4. **Duplicate identifiers:** show every candidate with facility type and position, so the intended one (not necessarily the nearest) is chosen deliberately; nearest-first is a useful ordering, not established CMA behaviour. *Done:* our SELECT DESIRED WPT shows type and position; the chosen entry is not yet pinned to the leg (R05, R06).
 5. **Messages** must be specific, amber for alerts, recallable, and able to light MSG. *Done.* Add the in-service messages the new features need: UNABLE NEXT ALTITUDE, RTA UNACHIEVABLE, USING RSV FUEL, INSUFFICIENT FUEL, UNABLE REQD NAV PERF–RNP, POS SHIFT, VERIFY RNP.
 6. **Repeatable paths:** document the turn and bypass rules and test them, so engineers can compare the simulator's path with the real CMA-9000's.
 
-## Revised plan for the remaining work
+## Current capability register
 
-The order is revised by what airlines and certification treat as core. The gap tables above are the 27 September baseline; steps 2 to 6 were built and shipped together, and `PROJECT_STATE.md` describes what the bench does now. Steps 7 and 8 remain.
+The gap tables above are the 27 September research baseline. This register is the current state, per capability, after the independent review of 27 September (Astra, reviewed at `193bfc3c`; finding IDs R01–R26). A roadmap step being "built" does not mean its capabilities are complete: each row carries its own status.
 
-| PR | Scope |
-|---|---|
-| 1 (merged, #1211) | Conditions, deeper pages, lighting |
-| 2 (done) | Flight simulation and navigation map |
-| 3 (done) | Navigation database and flight planning: airports, runways, navaids, airways, SIDs, STARs and approaches with transitions, missed approach and hold, VIA/TO airways, pilot waypoints (latitude/longitude, place-bearing-distance, place-bearing/place-bearing, along-track), SELECT DESIRED WPT, REF NAV DATA, company routes, SEC FPLN, ARINC 424 loader |
-| 4 (done) | **Lateral guidance fidelity:**<br>• path terminators (CF, DF, CA, VA and FA conditional legs; VI and VM vector legs; FM; RF arcs; HA, HF and HM holds);<br>• INTC CRS and ABEAM PTS;<br>• a parallel offset that is flown, with start and end;<br>• leg bypass;<br>• selected heading versus managed LNAV, with arm and capture;<br>• a flight mode annunciator strip. |
-| 5 (done) | **Navigation sensors, RNP and approaches:**<br>• GPS/DME/VOR/inertial blending with priority and reversion;<br>• NAV STATUS and NAV OPTIONS pages, including navaid inhibit;<br>• DME autotune;<br>• computed ANP;<br>• default RNP by phase, time to alert and UNABLE RNP;<br>• on-approach logic;<br>• POS SHIFT;<br>• RAIM and SBAS;<br>• approach types (LNAV, LNAV/VNAV, LPV) and go-around. |
-| 6 (done) | **VNAV and performance:**<br>• speed and altitude restrictions;<br>• VNAV PTH and VNAV SPD;<br>• top and end of descent;<br>• DES NOW;<br>• UNABLE NEXT ALTITUDE;<br>• winds;<br>• ETA and fuel predictions at each waypoint;<br>• fuel alerts;<br>• RTA;<br>• cold-temperature correction;<br>• altitude formats and transition altitude. |
-| 7 | **Tactical, maintenance and dual FMS:**<br>• rendezvous and moving waypoints;<br>• tactical descent;<br>• AIRAC active and inactive cycles, DATABASE OUT OF DATE, temporary and supplemental databases;<br>• built-in test and maintenance pages;<br>• cross-side synchronisation and independent mode. |
-| 8 | **Scenarios and AeroLink integration:**<br>• scripted scenarios (for example, GPS lost 2 NM before the final approach fix);<br>• record and playback;<br>• screen assertions;<br>• links to test procedures and evidence. |
+Status vocabulary: **Demonstrated** (works on the bench and has a behavioural test, within the demonstration envelope); **Partial** (works for the common path; named gaps or defects remain); **Placeholder** (a page or label exists without the behaviour behind it); **Not implemented**. Nothing here is independently verified or qualified for engineering use, and the built-in model is not an oracle for software under test.
 
-Honesty rule, unchanged: the simulator stays labelled as a simulation. The demonstration navigation data is invented. Where the CMA-9000 manual differs from this generic airline practice, the manual wins; where the manual is silent, the behaviour above is the default.
+| Capability | Status | Notes and open review findings |
+|---|---|---|
+| CDU panel, variants, keys, scratchpad, lighting | Demonstrated | Held CLR survives focus loss (R18); luminance is a simulated value, not a physical NVIS claim |
+| MOD / EXEC / ERASE for route edits | Partial | Pending edits leak into final-path guidance (R01), runway lookup (R05) and PROGRESS (R12) |
+| Navigation database, airways, SID/STAR/approach selection | Partial | Lookups by ident string, not pinned entries; a data load changes active geometry (R05, R06) |
+| ARINC 424 loader | Partial | Subset reader; no range checks or activation gate (R16, R06) |
+| Pilot waypoints, SELECT DESIRED WPT, REF NAV DATA | Demonstrated | Regional geometry only; the date line takes the long way round (R17) |
+| Company routes, SEC FPLN | Partial | Session memory only; SAVE keeps the en-route legs, not constraints |
+| POS INIT SET POS | Placeholder | Accepts the entry and does nothing (R26) |
+| TF, CF, DF, RF legs; fly-by and fly-over | Demonstrated | Regional envelope (R17) |
+| CA, FA, VA, VI, VM, FM conditional legs | Partial | Altitude termination is climb-oriented |
+| Holds | Partial | Entries and racetrack flown; HA/HF/HM termination is a one-turn exit only |
+| Leg bypass | Not implemented | Only a direct-to's bypassed points are kept (for ABEAM PTS) |
+| DIRECT TO, INTC CRS, ABEAM PTS, offset | Partial | The pending direct-to leaked into active guidance (R01; fix in progress) |
+| HDG SEL and LNAV arm/capture | Partial | The flight mode strip is inferred from motion, not a mode state (R10) |
+| Discontinuities | Partial | Jump crosses them silently (R15); predictions bridge them as zero distance (R08) |
+| Sensor selection and reversion | Demonstrated | Priority selection with synthetic errors, not blending or estimation; ANP is derived from simulated truth |
+| RNP by phase, time to alert, CHECK ANP | Demonstrated | Demonstration parameters, not sourced CMA values; forced RNP/NPA disagree across pages (R11); NAV STATUS captions collide (R19) |
+| RAIM / SBAS | Placeholder | Condition-driven flags, no satellite or protection-level model |
+| Approach type, ARM APPROACH, go-around | Partial | The type is a GPS-integrity classifier; arming and integrity do not govern the final path (R03) |
+| Altitude and speed constraints | Partial | Upper bounds are not checked, so a violated constraint reads as met (R04) |
+| T/D, E/D, VNAV path, DES NOW | Partial | Simplified geometric path; no VNAV mode state (R10) |
+| VNAV SPD | Not implemented | |
+| RTA | Not implemented | |
+| ETA and fuel predictions | Partial | Destination can be the missed-approach end (R07); gaps (R08); future speed constraints ignored (R09) |
+| Cold temperature correction | Demonstrated | Test uses the production helper; needs an independent worked example |
+| FMS failure | Partial | Blanks the CDU but guidance continues, and Pause is disabled (R02) |
+| MSG and message recall | Partial | MSG can stay lit after recovery with nothing to acknowledge (R13) |
+| ATC / FMC COMM datalink | Placeholder | Representative workflow; STANDBY clears the pending indication (R14) |
+| Rendezvous, moving waypoints, tactical descent | Partial | Rendezvous uses the route predictions, so it inherits R08 and R09; moving waypoints have no data age or expiry |
+| Database cycles, DATABASE OUT OF DATE | Partial | A metadata swap over one shared demonstration data set, not two datasets; a loaded file merges into the active database and is given invented effective dates (R06, R16, N09) |
+| MAINT self test and fault log | Placeholder | A demonstration of the page, not equipment built-in test |
+| Dual FMS, independent operation | Placeholder | One model with a copy of the route; not a dual-channel protocol |
+| Scenarios, recording, procedure text, run report | Partial | A 0.25 s tick contract shared by the bench and headless runs; validated admission; distinct outcomes (passed, failed, no checks, timed out, stopped, invalid, error); the report's context is fixed at run start (N01–N08). In-process against the built-in model only: no external software-under-test adapter, run manifest or controlled evidence import (R21–R23, R25) |
+
+The review's order is adopted: repair active-plan authority, guidance validity and prediction validity (R01–R09) before adding breadth.
+
+Delivery history, for tracing: #1209 (panel), #1211 (conditions, deeper pages, lighting), #1212 (flight simulation, planning, lateral guidance, sensors, VNAV), #1218 (tactical functions, database cycles, maintenance and dual pages, scenarios).
+
+Honesty rules: the simulator stays labelled as a simulation, and the demonstration navigation data is invented. The CMA-9000 manual governs where it speaks. Where it is silent, the behaviour here is a named engineering assumption that needs a source before any fidelity claim; generic airline practice (Boeing, Airbus) informs questions, not CMA behaviour.

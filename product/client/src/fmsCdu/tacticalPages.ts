@@ -1,6 +1,6 @@
 import {
   SAR_PATTERNS, WAYPOINT, boxes, caption, courseDeg, dashes, distanceNm, fixed, formatPosition, maxSarGroundSpeed, medium,
-  numberIn, offset, prompt, three, title, type Leg, type Page, type TacticalPageId,
+  numberIn, offset, prompt, small, three, title, type Leg, type Page, type TacticalPageId,
 } from "./fmsModel";
 import type { Line, Segment } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
@@ -43,6 +43,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
       { left: prompt("<SECTOR"), right: prompt("TACT APPR>") },
       undefined,
       { left: prompt("<FLY OVER"), right: prompt("TACTICAL DTO>") },
+      undefined,
       { left: dashes(24) },
       { left: prompt("<INDEX"), right: prompt("TIMER>") },
     ],
@@ -82,6 +83,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
           if (!result) fms.open("LEGS");
           return result;
         }
+        case 5: fms.open("TDN"); return;
         case 6: fms.open("TIMER"); return;
       }
     },
@@ -270,6 +272,164 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
           a.transitionLevel = n;
           return done();
         }
+      }
+    },
+  },
+
+  RNDZ: {
+    pages: () => 1,
+    render: fms => {
+      const r = fms.rndz;
+      const plan = fms.rendezvous();
+      const utc = (ms: number) => { const d = new Date(ms); return `${String(d.getUTCHours()).padStart(2, "0")}${String(d.getUTCMinutes()).padStart(2, "0")}Z`; };
+      return [
+        title("RENDEZVOUS", "1/1", r.active ? "ACT" : undefined),
+        caption(" WPT", "TIME "),
+        { left: r.wpt ? { text: r.wpt, color: "green" } : boxes(5), right: r.time === null ? boxes(4) : { text: utc(r.time) } },
+        caption(" DIST", "REQ SPD "),
+        { left: medium(plan ? `${fixed(plan.distance, 1)}NM` : "-----"), right: medium(plan ? (Number.isFinite(plan.required) ? `${Math.round(plan.required)}KT` : "---KT") : "-----", plan && !plan.achievable ? "amber" : "white") },
+        caption(" MIN SPD", "MAX SPD "),
+        { left: { text: `${r.minSpeed}KT` }, right: { text: `${r.maxSpeed}KT` } },
+        caption(" STATUS"),
+        { left: medium(!plan ? "-----" : plan.achievable ? "ON TIME" : "UNACHIEVABLE", plan && !plan.achievable ? "amber" : "green") },
+        undefined, undefined,
+        { left: dashes(24) },
+        { left: prompt("<INDEX"), right: plan ? prompt(r.active ? "CANCEL>" : "ACTIVATE>") : undefined },
+      ];
+    },
+    lsk: (fms, side, row, scratch) => {
+      const r = fms.rndz;
+      if (row === 6) {
+        if (side === "L") { fms.open("INIT_REF", 1); return; }
+        if (!fms.rendezvous()) return;
+        r.active = !r.active;
+        r.alerted = false;
+        return;
+      }
+      if (!scratch) return;
+      if (side === "L" && row === 1) {
+        if (!fms.activeRoute.legs.some(leg => leg.kind === "wpt" && leg.ident === scratch)) return "invalid";
+        r.wpt = scratch;
+        return void fms.setScratch("");
+      }
+      if (side === "R" && row === 1) {
+        // A time of day, HHMM or HHMMZ: the next occurrence of it.
+        const shape = /^([01]\d|2[0-3])([0-5]\d)Z?$/.exec(scratch);
+        if (!shape) return "invalid";
+        const now = fms.now.getTime();
+        const at = new Date(now);
+        at.setUTCHours(Number(shape[1]), Number(shape[2]), 0, 0);
+        r.time = at.getTime() <= now ? at.getTime() + 86_400_000 : at.getTime();
+        return void fms.setScratch("");
+      }
+      if (row === 3) {
+        const speed = numberIn(scratch, 40, 300, /^\d{2,3}$/);
+        if (speed === null) return "invalid";
+        if (side === "L") { if (speed >= r.maxSpeed) return "invalid"; r.minSpeed = speed; } else { if (speed <= r.minSpeed) return "invalid"; r.maxSpeed = speed; }
+        return void fms.setScratch("");
+      }
+    },
+  },
+
+  MOVING_WPT: {
+    pages: () => 1,
+    render: fms => {
+      const moving = Object.entries(fms.movingWaypoints);
+      const lines: (Line | undefined)[] = [
+        title("MOVING WPT", "1/1"),
+        caption(" IDENT", "TRK/SPD "),
+        { left: fms.movingDraft.ident ? { text: fms.movingDraft.ident } : boxes(5), right: fms.movingDraft.motion ? { text: fms.movingDraft.motion } : boxes(6) },
+        caption(" POSITION"),
+        { left: fms.movingDraft.position ? medium(formatPosition(fms.movingDraft.position)) : boxes(15) },
+        caption(" MOVING"),
+      ];
+      moving.slice(0, 3).forEach(([ident, motion], i) => {
+        const at = fms.coordinates(ident);
+        lines[6 + i] = { left: medium(`${ident} ${three(motion.track)}°/${motion.speed}KT`, "green"), right: at ? small(formatPosition(at)) : undefined };
+      });
+      lines[11] = { left: dashes(24) };
+      lines[12] = { left: prompt("<INDEX"), right: fms.movingDraft.ident && fms.movingDraft.position && fms.movingDraft.motion ? prompt("CREATE>") : undefined };
+      return lines;
+    },
+    lsk: (fms, side, row, scratch) => {
+      const draft = fms.movingDraft;
+      if (row === 6) {
+        if (side === "L") { fms.open("INIT_REF", 1); return; }
+        const motion = draft.motion ? /^(\d{3})\/(\d{1,3})$/.exec(draft.motion) : null;
+        if (!draft.ident || !draft.position || !motion) return;
+        fms.defineMoving(draft.ident, draft.position, Number(motion[1]), Number(motion[2]));
+        fms.movingDraft = { ident: null, position: null, motion: null };
+        return;
+      }
+      if (!scratch) return;
+      if (side === "L" && row === 1) {
+        if (!WAYPOINT.test(scratch) || fms.coordinates(scratch)) return "invalid";
+        draft.ident = scratch;
+        return void fms.setScratch("");
+      }
+      if (side === "R" && row === 1) {
+        const motion = /^(\d{3})\/(\d{1,3})$/.exec(scratch);
+        if (!motion || Number(motion[1]) > 360 || Number(motion[2]) > 60) return "invalid";
+        draft.motion = scratch;
+        return void fms.setScratch("");
+      }
+      if (side === "L" && row === 2) {
+        // Where it is now: an existing waypoint, a latitude/longitude or a place/bearing/distance.
+        const resolved = fms.resolveWaypoint(scratch);
+        if (typeof resolved === "string") return resolved;
+        if ("select" in resolved) return "invalid";
+        const at = fms.coordinates(resolved.ident);
+        if (!at) return "not-in-database";
+        draft.position = at;
+        return void fms.setScratch("");
+      }
+    },
+  },
+
+  TDN: {
+    pages: () => 1,
+    render: fms => {
+      const t = fms.tdn;
+      const angle = fms.tdnAngle();
+      return [
+        title("TACTICAL DESCENT", "1/1", t.active || t.level ? "ACT" : undefined),
+        caption(" TGT ALT", "REF ID "),
+        { left: { text: `${t.targetAltitude}FT` }, right: t.refId ? { text: t.refId, color: "green" } : boxes(5) },
+        caption(" DIST BEFORE REF", "ANGLE "),
+        { left: { text: `${fixed(t.distanceBefore, 1)}NM` }, right: medium(angle === null ? "--.-°" : `${fixed(angle, 1)}°`, angle !== null && angle > t.maxAngle ? "amber" : "white") },
+        caption(" MAX ANGLE"),
+        { left: medium(`${fixed(t.maxAngle, 1)}°`) },
+        undefined, undefined, undefined, undefined,
+        { left: dashes(24) },
+        { left: prompt("<DES+SAR"), right: prompt(t.active || t.level ? "CANCEL>" : "EXECUTE>") },
+      ];
+    },
+    lsk: (fms, side, row, scratch) => {
+      const t = fms.tdn;
+      if (row === 6) {
+        if (side === "L") { fms.open("TACT"); return; }
+        if (t.active || t.level) fms.cancelTdn();
+        else fms.executeTdn();
+        return;
+      }
+      if (!scratch) return;
+      if (side === "L" && row === 1) {
+        const altitude = numberIn(scratch, 100, 10000, /^\d{3,5}$/);
+        if (altitude === null) return "invalid";
+        t.targetAltitude = altitude;
+        return void fms.setScratch("");
+      }
+      if (side === "R" && row === 1) {
+        if (!WAYPOINT.test(scratch)) return "invalid";
+        if (!fms.coordinates(scratch)) return "not-in-database";
+        t.refId = scratch;
+        return void fms.setScratch("");
+      }
+      if (side === "L" && row === 2) {
+        const nm = numberIn(scratch, 0, 30);
+        if (nm === null) return "invalid";
+        t.distanceBefore = nm;
+        return void fms.setScratch("");
       }
     },
   },

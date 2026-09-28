@@ -409,7 +409,9 @@ display unit for engineers.
   the manual's rules for scratchpad entry, CLR/DELETE, line select entry and copy, MOD/ACT with EXEC and ERASE,
   paging, BRT and the MSG and EXEC annunciators. It is labelled as a simulation and is not a navigation computer.
   Its scope is measured against ICAO PBN and airline practice in
-  [`product/docs/FMS_TEST_BENCH.md`](product/docs/FMS_TEST_BENCH.md). It models:
+  [`product/docs/FMS_TEST_BENCH.md`](product/docs/FMS_TEST_BENCH.md), whose capability register holds each
+  function's status (demonstrated, partial, placeholder, not implemented) and the open findings of the
+  27 September independent review. It is a demonstrator, not an oracle for software under test. It models:
   - **Flight planning** from a navigation database (`navData.ts`): airports and runways, navaids, fixes, airways,
     and SIDs, STARs and approaches with transitions and missed approaches. The route is built through RTE (VIA/TO
     airway entry, company routes, SAVE), DEP/ARR, pilot waypoints (latitude/longitude, place/bearing/distance,
@@ -430,10 +432,21 @@ display unit for engineers.
     windows, flight levels); a vertical profile with top and end of descent, climbs that level at constraints,
     UNABLE NEXT ALT, DES NOW and the VNAV descent path; winds; ETA and fuel predictions with FUEL RESERVE and
     NOT ENOUGH FUEL; cold temperature correction.
+  - **Tactical functions**: RENDEZVOUS (arrive at a waypoint at a time, flying the required speed within crew
+    limits, with RENDEZVOUS UNACHIEVABLE), moving waypoints that advance on a track and speed, and the tactical
+    descent (TDN) at a computed angle to a target altitude before a reference point, which levels there until
+    cancelled and is refused as TDN NOT POSSIBLE above the maximum angle.
+  - **Database cycles, maintenance and dual operation**: IDENT shows the active and inactive navigation database
+    cycles with their effective dates and swaps them; past the active cycle's end the FMS raises DATABASE OUT OF
+    DATE; REF NAV DATA defines idents in a temporary database; a loaded ARINC 424 file becomes the active cycle.
+    The MAINT page runs a self test that fails while a fault is present and keeps a fault log. In dual operation
+    the executed route is cross-loaded to the other FMS; in independent operation the sides can differ, and they
+    resynchronise when it ends.
   - The earlier pages: HOLD, the SQUARE, LADDER and SECTOR search patterns, the tactical approach, HOVER and
     TIMER. The ATC, FMC COMM and GSM/SMS pages are representative only (no datalink) and say so on screen.
 - A **flight simulation** (`flight.ts`) flies the active route as an FMS-coupled autopilot would, in real or
-  accelerated time. It is a point-mass model with a bank-limited turn, not a flight dynamics model. A north-up
+  accelerated time. It is a point-mass model with a bank-limited turn, not a flight dynamics model. Pause is a
+  position freeze: the clock keeps running, so timers and the self test still complete. A north-up
   **navigation map** (route, holds, patterns, offset track, navaids and airports, and the true position when the
   FMS has drifted), a flight mode annunciator and a guidance readout sit beside the CDU.
 - The bench injects conditions that light the variation's annunciators and change the pages (FMS failure, GPS
@@ -444,8 +457,20 @@ display unit for engineers.
   annunciators, and display luminance from the light sensor (an ambient-light control) combined with BRT; NVG
   holds the display between 0.1 and 3 fL.
 - The panel talks only to the `CduBackend` interface, so the real CMA-9000 operational program can replace the
-  simulation later. The bench's key event log is where test-procedure integration will attach; it is not
-  integrated with test procedures or evidence today.
+  simulation later.
+- **Scenarios** (`scenario.ts`) script a test on the bench: ordered steps triggered at the start, at a time, within
+  a distance of a waypoint or when a waypoint becomes active, which press keys, inject conditions, raise alerts,
+  select procedures, arm the approach or go around, and check screen lines, the scratchpad, alerts, annunciators and
+  the active waypoint (optionally waiting a number of seconds). Built-in scenarios cover GPS lost before the final
+  approach fix, GPS integrity lost on the approach, dead reckoning, and a crew RNP the navigation cannot meet. A run
+  restarts the simulation and shows each step's result live. Time moves in 0.25 s ticks (clock, flight, then the
+  scenario's observation), the same in the bench at any rate as in headless tests; a step due between ticks runs at
+  the next one, nothing runs after the time limit, and a check met after its `within` window fails. A scenario is
+  validated before it runs, and a run ends passed, failed, no checks, timed out, stopped, invalid or execution
+  error: only a run whose checks all held is a pass. Pausing during a run stops its clock. The bench records a scenario from keys, conditions,
+  alerts, APPR, TOGA and screen-line checks, and saves or loads scenarios as JSON. A scenario is written out as the
+  fields of an AeroLink test procedure proposal to copy into a procedure change, and a run as a Markdown report
+  marked as simulation evidence; the bench does not change controlled procedures or record evidence itself.
 
 ## Documents and publications
 

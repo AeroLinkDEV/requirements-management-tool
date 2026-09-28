@@ -1,0 +1,512 @@
+import { CONDITIONS, type ConditionId } from "./conditions";
+import { FlightSimulator } from "./flight";
+import { distanceNm } from "./fmsModel";
+import { ScriptedFms } from "./scriptedFms";
+import { SCRATCHPAD_LINE, screenText, type Lamp } from "./screen";
+import type { CduFunction } from "./variants";
+
+// Scripted test scenarios for the FMS Test Bench (product/docs/FMS_TEST_BENCH.md, step 8). A scenario is an ordered
+// list of steps; each waits for its trigger, then acts on the simulation or checks what the crew would see. Steps
+// run one after another, so a scenario reads as a test procedure does. Scenarios are plain data: they can be
+// recorded on the bench, saved as JSON, played back, and written out as test procedure text.
+//
+// The run contract (independent review of 27 and 28 September, N01 to N08):
+// - Time moves in fixed ticks of TICK_SECONDS. Each tick advances the clock, integrates the flight and then lets the
+//   runner observe, in that order, whether the bench or a headless test drives it, and at any bench rate.
+// - A step due at time t runs at the first tick at or after t. Nothing runs after maxSeconds: at the first tick past
+//   it, every step not yet finished is not reached.
+// - An expectation is checked at each tick from its trigger. With `within` w it passes at the first tick where it
+//   holds no later than w seconds after the trigger, and fails at the tick w seconds after it; without `within` it is
+//   checked once. A condition first met after its window does not satisfy it.
+// - A scenario is validated before it runs. An unknown step, a malformed payload or a step that throws is an
+//   invalid scenario or an execution error, never a pass. A run with no checks is "no checks", not a pass.
+
+export const TICK_SECONDS = 0.25;
+
+/** When a step runs. Times are simulated seconds from the start of the run. */
+export type Trigger =
+  | { kind: "start" }
+  | { kind: "time"; seconds: number }
+  | { kind: "distance"; waypoint: string; nm: number }
+  | { kind: "active"; waypoint: string };
+
+export type Action =
+  | { kind: "keys"; keys: CduFunction[] }
+  | { kind: "type"; text: string }
+  | { kind: "condition"; condition: ConditionId; on: boolean }
+  | { kind: "alert"; text: string }
+  | { kind: "procedure"; procedure: "SID" | "STAR" | "APPROACH"; ident: string }
+  | { kind: "armApproach" }
+  | { kind: "goAround" }
+  | { kind: "expectLine"; line: number; pattern: string }
+  | { kind: "expectScratchpad"; text: string }
+  | { kind: "expectAlert"; text: string }
+  | { kind: "expectNoAlert"; text: string }
+  | { kind: "expectLamp"; lamp: Lamp; lit: boolean }
+  | { kind: "expectActive"; waypoint: string };
+
+/** One step. An expectation not yet met waits up to `within` seconds for it before failing. */
+export type ScenarioStep = { when: Trigger; action: Action; within?: number };
+
+export type Scenario = {
+  id: string;
+  title: string;
+  objective: string;
+  /** The run ends then: any step not finished is not reached. */
+  maxSeconds: number;
+  steps: ScenarioStep[];
+};
+
+export type StepStatus = "pending" | "done" | "pass" | "fail" | "not reached" | "error";
+export type StepResult = { status: StepStatus; at?: number; actual?: string };
+
+/** How a run ended. Only "passed" is a pass: every check held, and there was at least one. */
+export type RunOutcome = "running" | "passed" | "failed" | "no checks" | "timed out" | "stopped" | "invalid" | "error";
+
+/** What the run describes, fixed when it starts, so the report cannot change after it finishes. */
+export type RunContext = { variant: string; cycle: string };
+
+const isExpectation = (action: Action) => action.kind.startsWith("expect");
+
+/** Characters a scenario's text entry can type, as the keys that type them. */
+export const keysFor = (text: string): CduFunction[] =>
+  [...text].map(ch => (ch === "." ? "DOT" : ch === "/" ? "SLASH" : ch === "-" ? "PLUSMINUS" : ch === " " ? "SP" : `CHAR_${ch}`) as CduFunction);
+
+/** A regular expression matching a screen line as shown, with any run of spaces standing for layout. */
+export const linePattern = (text: string) =>
+  `^\\s*${text.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ +/g, "\\s+")}\\s*$`;
+
+/** The step in words, for the run log, the report and the test procedure. After the first step, "start" means "then". */
+export function describeStep(step: ScenarioStep, index = 0): string {
+  const w = step.when;
+  const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : `When ${w.waypoint} is the active waypoint`;
+  const a = step.action;
+  const within = step.within ? ` within ${step.within} s` : "";
+  const what = (() => {
+    switch (a.kind) {
+      case "keys": return `press ${a.keys.map(key => key.replace(/^CHAR_/, "")).join(" ")}`;
+      case "type": return `type ${a.text} into the scratchpad`;
+      case "condition": return `${a.on ? "inject" : "remove"} the condition ${a.condition}`;
+      case "alert": return `raise the alert ${a.text}`;
+      case "procedure": return `select the ${a.procedure === "APPROACH" ? "approach" : a.procedure} ${a.ident}`;
+      case "armApproach": return "arm the approach";
+      case "goAround": return "press TOGA";
+      case "expectLine": return `check that screen line ${a.line + 1} matches /${a.pattern}/${within}`;
+      case "expectScratchpad": return `check that the scratchpad shows ${a.text}${within}`;
+      case "expectAlert": return `check that the alert ${a.text} has been raised${within}`;
+      case "expectNoAlert": return `check that the alert ${a.text} has not been raised at that moment`;
+      case "expectLamp": return `check that the ${a.lamp} annunciator is ${a.lit ? "lit" : "out"}${within}`;
+      case "expectActive": return `check that ${a.waypoint} is the active waypoint${within}`;
+    }
+  })();
+  return when === "Then" ? `Then ${what}.` : `${when}, ${what}.`;
+}
+
+const formatSeconds = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const s = Math.round((seconds % 60) * 100) / 100;
+  return m ? `${m} min${s ? ` ${s} s` : ""}` : `${s} s`;
+};
+
+// ------------------------------------------------------------------ validation
+
+const KEY = /^(LSK[1-6][LR]|MENU|PREV|NEXT|INIT_REF|RTE|DEP_ARR|LEGS|PROG|EXEC|RADIO|FUEL|MARK|HOLD|FIX|BRT|TPDR|MSG|ANS|SQK_IDT|FMC_COMM|VNAV|TACT|ATC|CLR|SP|SLASH|DOT|PLUSMINUS|CHAR_[A-Z0-9])$/;
+const LAMPS = new Set(["FAIL", "MSG", "POS", "OFST", "NPA", "GSM", "SMS", "TX1", "TX2", "RNP", "IND", "ATC", "V/UHF", "HF", "MENU", "EXEC"]);
+const CONDITION_IDS = new Set(CONDITIONS.map(condition => condition.id as string));
+const IDENT = /^[A-Z0-9]{1,7}$/;
+const MAX_RUN_SECONDS = 24 * 3600;
+
+const finite = (value: unknown, min: number, max: number) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+const text = (value: unknown, pattern: RegExp) => typeof value === "string" && pattern.test(value);
+
+/** Why a trigger is not one the runner supports, or null if it is. */
+function triggerProblem(when: unknown): string | null {
+  const w = when as Record<string, unknown> | null;
+  if (!w || typeof w !== "object") return "a trigger (when) is required";
+  switch (w.kind) {
+    case "start": return null;
+    case "time": return finite(w.seconds, 0, MAX_RUN_SECONDS) ? null : "a time trigger needs seconds between 0 and 86400";
+    case "distance": return text(w.waypoint, IDENT) && finite(w.nm, 0.01, 1000) ? null : "a distance trigger needs a waypoint ident and nm between 0.01 and 1000";
+    case "active": return text(w.waypoint, IDENT) ? null : "an active trigger needs a waypoint ident";
+    default: return `unsupported trigger "${String(w.kind)}"`;
+  }
+}
+
+/** Why an action is not one the runner supports, or null if it is. */
+function actionProblem(action: unknown): string | null {
+  const a = action as Record<string, unknown> | null;
+  if (!a || typeof a !== "object") return "an action is required";
+  switch (a.kind) {
+    case "keys": return Array.isArray(a.keys) && a.keys.length > 0 && a.keys.every(key => typeof key === "string" && KEY.test(key)) ? null : "keys must be a non-empty list of CDU functions";
+    case "type": return text(a.text, /^[A-Z0-9 ./-]{1,24}$/) ? null : "type needs up to 24 scratchpad characters";
+    case "condition": return typeof a.condition === "string" && CONDITION_IDS.has(a.condition) && typeof a.on === "boolean" ? null : "condition needs a known condition and on true or false";
+    case "alert":
+    case "expectAlert":
+    case "expectNoAlert":
+    case "expectScratchpad": return text(a.text, /^.{1,24}$/) ? null : `${a.kind} needs text of 1 to 24 characters`;
+    case "procedure": return (a.procedure === "SID" || a.procedure === "STAR" || a.procedure === "APPROACH") && text(a.ident, /^[A-Z0-9]{1,7}$/) ? null : "procedure needs SID, STAR or APPROACH and an ident";
+    case "armApproach":
+    case "goAround": return null;
+    case "expectLine": {
+      if (!(Number.isInteger(a.line) && finite(a.line, 0, SCRATCHPAD_LINE))) return `expectLine needs a line from 0 to ${SCRATCHPAD_LINE}`;
+      if (typeof a.pattern !== "string") return "expectLine needs a pattern";
+      try { new RegExp(a.pattern); } catch { return `expectLine pattern /${a.pattern}/ is not a valid regular expression`; }
+      return null;
+    }
+    case "expectLamp": return typeof a.lamp === "string" && LAMPS.has(a.lamp) && typeof a.lit === "boolean" ? null : "expectLamp needs a known annunciator and lit true or false";
+    case "expectActive": return text(a.waypoint, IDENT) ? null : "expectActive needs a waypoint ident";
+    default: return `unsupported action "${String(a.kind)}"`;
+  }
+}
+
+/** Every reason the scenario cannot run as written; empty when it can. */
+export function scenarioProblems(value: unknown): string[] {
+  const s = value as Partial<Scenario> | null;
+  const problems: string[] = [];
+  if (!s || typeof s !== "object") return ["not a scenario"];
+  if (typeof s.title !== "string" || !s.title.trim()) problems.push("it needs a title");
+  if (!finite(s.maxSeconds, TICK_SECONDS, MAX_RUN_SECONDS)) problems.push("it needs maxSeconds between 0.25 and 86400");
+  if (!Array.isArray(s.steps)) return [...problems, "it needs steps"];
+  s.steps.forEach((step, i) => {
+    const where = `step ${i + 1}`;
+    if (!step || typeof step !== "object") { problems.push(`${where}: not a step`); return; }
+    const when = triggerProblem(step.when), action = actionProblem(step.action);
+    if (when) problems.push(`${where}: ${when}`);
+    if (action) problems.push(`${where}: ${action}`);
+    if (step.within !== undefined) {
+      if (!finite(step.within, 0, MAX_RUN_SECONDS)) problems.push(`${where}: within must be between 0 and 86400 seconds`);
+      else if (!action && !isExpectation(step.action)) problems.push(`${where}: within applies only to a check`);
+      else if (!action && step.action.kind === "expectNoAlert") problems.push(`${where}: expectNoAlert is checked at one moment; within would read as "stays absent", which it does not check`);
+    }
+  });
+  return problems;
+}
+
+// ------------------------------------------------------------------ running
+
+/**
+ * Runs a scenario against a simulation. It observes; it does not fly the aircraft or move the clock. Whoever owns
+ * them (the bench, or runHeadless) advances them one tick at a time with advanceTicks, which polls after each tick.
+ */
+export class ScenarioRunner {
+  readonly results: StepResult[];
+  readonly scenario: Scenario;
+  readonly context: RunContext;
+  /** Why the scenario could not run, when it is invalid. */
+  readonly problems: readonly string[];
+  private readonly fms: ScriptedFms;
+  private readonly start: number;
+  private next = 0;
+  /** When the current step's trigger came, for an expectation that is waiting. */
+  private eligibleAt: number | null = null;
+  private stopped = false;
+  private failure: "error" | null = null;
+  private endedAt: number | null = null;
+
+  constructor(scenario: Scenario, fms: ScriptedFms, context: RunContext = { variant: "not recorded", cycle: fms.activeCycle.id }) {
+    this.scenario = structuredClone(scenario);
+    this.context = { ...context };
+    this.fms = fms;
+    this.start = fms.now.getTime();
+    this.problems = scenarioProblems(scenario);
+    this.results = this.scenario.steps.map(() => ({ status: "pending" }));
+    if (this.problems.length) { this.next = this.results.length; this.endedAt = 0; return; }
+    this.poll();
+  }
+
+  get startedAt() { return new Date(this.start); }
+  get elapsed() { return (this.fms.now.getTime() - this.start) / 1000; }
+  /** Simulated seconds from the start to the end of the run, once it has ended. */
+  get endedAfter() { return this.endedAt; }
+  get finished() { return this.next >= this.scenario.steps.length; }
+  get current() { return this.finished ? null : this.next; }
+  get passed() { return this.outcome === "passed"; }
+
+  get outcome(): RunOutcome {
+    if (this.problems.length) return "invalid";
+    if (!this.finished) return "running";
+    if (this.failure === "error" || this.results.some(result => result.status === "error")) return "error";
+    if (this.results.some(result => result.status === "fail")) return "failed";
+    if (this.stopped) return "stopped";
+    if (this.results.some(result => result.status === "not reached")) return "timed out";
+    return this.scenario.steps.some(step => isExpectation(step.action)) ? "passed" : "no checks";
+  }
+
+  /** Runs every step whose trigger has come, in order; past maxSeconds, ends the run with the rest not reached. */
+  poll() {
+    if (this.finished) return;
+    const now = this.elapsed;
+    if (now > this.scenario.maxSeconds + 1e-9) { this.end("not reached"); return; }
+    while (!this.finished) {
+      const step = this.scenario.steps[this.next];
+      try {
+        if (this.eligibleAt === null) {
+          if (!this.triggered(step.when)) break;
+          this.eligibleAt = now;
+        }
+        if (isExpectation(step.action)) {
+          const waited = now - this.eligibleAt;
+          const window = step.within ?? 0;
+          const check = this.check(step.action);
+          if (check.ok) { this.finish({ status: "pass", at: now, actual: check.actual }); continue; }
+          // Not met: wait while the window is open (and the run has time left), otherwise it has failed.
+          if (waited < window - 1e-9 && now < this.scenario.maxSeconds - 1e-9) break;
+          this.finish({ status: "fail", at: now, actual: check.actual });
+        } else {
+          this.act(step.action);
+          this.finish({ status: "done", at: now });
+        }
+      } catch (error) {
+        this.results[this.next] = { status: "error", at: now, actual: error instanceof Error ? error.message : String(error) };
+        this.next += 1;
+        this.failure = "error";
+        this.end("not reached");
+        return;
+      }
+    }
+    if (this.finished) this.endedAt ??= now;
+  }
+
+  /** Stops the run where it is, at the operator's request: steps not yet run are not reached. */
+  abandon() {
+    if (this.finished) return;
+    this.stopped = true;
+    this.end("not reached");
+  }
+
+  private end(status: "not reached") {
+    for (let i = this.next; i < this.results.length; i += 1) this.results[i] = { status };
+    this.next = this.results.length;
+    this.endedAt ??= this.elapsed;
+  }
+
+  private finish(result: StepResult) {
+    this.results[this.next] = result;
+    this.next += 1;
+    this.eligibleAt = null;
+  }
+
+  private triggered(when: Trigger) {
+    switch (when.kind) {
+      case "start": return true;
+      case "time": return this.elapsed >= when.seconds - 1e-9;
+      case "distance": {
+        const at = this.fms.coordinates(when.waypoint);
+        return at !== undefined && distanceNm(this.fms.truePosition, at) <= when.nm;
+      }
+      case "active": return this.activeWaypoint() === when.waypoint;
+      default: throw new Error(`Unsupported trigger "${(when as { kind: string }).kind}".`);
+    }
+  }
+
+  private activeWaypoint() {
+    const leg = this.fms.activeRoute.legs[0];
+    return leg?.kind === "wpt" ? leg.ident : null;
+  }
+
+  private act(action: Action) {
+    const fms = this.fms;
+    switch (action.kind) {
+      case "keys": for (const key of action.keys) fms.press(key); return;
+      case "type": for (const key of keysFor(action.text)) fms.press(key); return;
+      case "condition": fms.setCondition(action.condition, action.on); return;
+      case "alert": fms.raiseAlert(action.text); return;
+      case "procedure": fms.selectProcedure(action.procedure, action.ident); return;
+      case "armApproach": fms.armApproach(true); return;
+      case "goAround": fms.goAround(); return;
+      default: throw new Error(`Unsupported action "${action.kind}".`);
+    }
+  }
+
+  private check(action: Action): { ok: boolean; actual: string } {
+    const fms = this.fms;
+    const lines = screenText(fms.screen());
+    switch (action.kind) {
+      case "expectLine": {
+        const line = lines[action.line] ?? "";
+        return { ok: new RegExp(action.pattern).test(line), actual: line.trimEnd() };
+      }
+      case "expectScratchpad": {
+        const shown = lines[SCRATCHPAD_LINE].trim();
+        return { ok: shown === action.text, actual: shown };
+      }
+      case "expectAlert": {
+        const raised = fms.recallList.some(message => message.text === action.text);
+        return { ok: raised, actual: raised ? action.text : fms.recallList.map(message => message.text).join(", ") || "no alerts" };
+      }
+      case "expectNoAlert": {
+        const raised = fms.recallList.some(message => message.text === action.text);
+        return { ok: !raised, actual: raised ? action.text : "not raised" };
+      }
+      case "expectLamp": {
+        const lit = fms.lamps().has(action.lamp);
+        return { ok: lit === action.lit, actual: lit ? "lit" : "out" };
+      }
+      case "expectActive": {
+        const active = this.activeWaypoint() ?? "none";
+        return { ok: active === action.waypoint, actual: active };
+      }
+      default: throw new Error(`Unsupported check "${action.kind}".`);
+    }
+  }
+}
+
+/**
+ * Advances a simulation by whole ticks: each moves the clock, integrates the flight and then lets the runner observe.
+ * The bench and runHeadless both use it, so a scenario sees the same timeline at any rate.
+ */
+export function advanceTicks(ticks: number, moveClock: (ms: number) => void, sim: FlightSimulator, runner: ScenarioRunner | null) {
+  const running = runner !== null && !runner.finished;
+  for (let i = 0; i < ticks; i += 1) {
+    moveClock(TICK_SECONDS * 1000);
+    sim.step(TICK_SECONDS);
+    runner?.poll();
+    // A run's timeline ends on the tick where it finishes, however many ticks the caller asked for.
+    if (running && runner.finished) return;
+  }
+}
+
+/** Runs a scenario to its end on a fresh simulation, tick by tick, as the tests do. */
+export function runHeadless(scenario: Scenario, start = Date.UTC(2026, 8, 27, 14, 0, 0), context?: RunContext) {
+  let now = start;
+  const fms = new ScriptedFms(() => new Date(now));
+  const sim = new FlightSimulator(fms);
+  const runner = new ScenarioRunner(scenario, fms, context);
+  // The runner ends itself at maxSeconds; the bound only keeps a broken runner from looping forever.
+  const limit = Math.ceil((Number.isFinite(scenario.maxSeconds) ? scenario.maxSeconds : 0) / TICK_SECONDS) + 2;
+  for (let t = 0; !runner.finished && t < limit; t += 1) advanceTicks(1, ms => { now += ms; }, sim, runner);
+  return { runner, fms, sim };
+}
+
+// ------------------------------------------------------------------ outputs
+
+/** The scenario as test procedure text, in the fields of an AeroLink test procedure proposal. */
+export function procedureText(scenario: Scenario) {
+  const checks = scenario.steps.filter(step => isExpectation(step.action));
+  return {
+    title: scenario.title,
+    objective: scenario.objective,
+    preconditions: [
+      "The AeroLink FMS Test Bench is open with the scripted CMA-9000 simulation (not a navigation computer).",
+      "The simulation is restarted, with the demonstration route and navigation database loaded.",
+      `The flight is flown at any rate; the scenario allows ${formatSeconds(scenario.maxSeconds)} of simulated time.`,
+    ].join("\n"),
+    steps: scenario.steps.map((step, i) => `${i + 1}. ${describeStep(step, i)}`).join("\n"),
+    // Only the checks the scenario actually makes; a scenario without checks verifies nothing and says so.
+    expectedResult: checks.length
+      ? checks.map(step => `- ${describeStep(step).replace(/^.*?check that /, "").replace(/\.$/, "")}.`).join("\n")
+      : "None: this scenario has no checks. It plays back its actions and verifies no outcome.",
+  };
+}
+
+const OUTCOME_TEXT: Record<RunOutcome, string> = {
+  running: "RUNNING",
+  passed: "PASS",
+  failed: "FAIL",
+  "no checks": "NO CHECKS (actions played back; nothing verified)",
+  "timed out": "TIMED OUT (steps not reached by the time limit)",
+  stopped: "STOPPED BY THE OPERATOR",
+  invalid: "INVALID SCENARIO (not run)",
+  error: "EXECUTION ERROR",
+};
+
+/** A short, stable fingerprint of the scenario as run (FNV-1a over its JSON), so a report names what it ran. */
+export function scenarioDigest(scenario: Scenario) {
+  let hash = 0x811c9dc5;
+  for (const ch of JSON.stringify(scenario)) {
+    hash ^= ch.codePointAt(0)!;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `fnv1a-${hash.toString(16).padStart(8, "0")}`;
+}
+
+/** A run report in Markdown, from the run as it was: its scenario, context and results are fixed when it starts. */
+export function reportMarkdown(runner: ScenarioRunner) {
+  const { scenario, results, context } = runner;
+  const rows = scenario.steps.map((step, i) => {
+    const result = results[i];
+    const at = result.at === undefined ? "—" : formatSeconds(result.at);
+    const actual = result.actual ? result.actual.replace(/\|/g, "\\|") : "";
+    return `| ${i + 1} | ${describeStep(step, i).replace(/\|/g, "\\|")} | ${at} | ${result.status.toUpperCase()} | ${actual} |`;
+  });
+  return [
+    `# FMS Test Bench run: ${scenario.title}`,
+    "",
+    `**Result: ${OUTCOME_TEXT[runner.outcome]}**`,
+    "",
+    `- Objective: ${scenario.objective}`,
+    `- Scenario: ${scenario.id}, ${scenarioDigest(scenario)}`,
+    `- Started: ${runner.startedAt.toISOString()}${runner.endedAfter === null ? "" : `; ended after ${formatSeconds(runner.endedAfter)} of simulated time`}`,
+    `- Hardware variation: ${context.variant}`,
+    `- Navigation data: ${context.cycle} (invented demonstration data)`,
+    `- Time: ${TICK_SECONDS} s ticks; a step due between ticks runs at the next one.`,
+    "- Driven by the scripted CMA-9000 simulation, not the operational program. This is not flight-qualified evidence.",
+    ...(runner.problems.length ? ["", "Not run, because:", ...runner.problems.map(problem => `- ${problem}`)] : []),
+    "",
+    "| # | Step | At | Result | Actual |",
+    "|---|---|---|---|---|",
+    ...rows,
+    "",
+  ].join("\n");
+}
+
+// ------------------------------------------------------------------ recording and import
+
+/**
+ * Records what an engineer does on the bench as scenario steps, timed from the start of the recording on the tick
+ * grid, so the same sequence can be played back and checked.
+ */
+export class ScenarioRecorder {
+  readonly steps: ScenarioStep[] = [];
+  private readonly start: number;
+  private readonly clock: () => Date;
+  private lastKeyAt: number | null = null;
+
+  constructor(clock: () => Date) {
+    this.clock = clock;
+    this.start = clock().getTime();
+  }
+
+  /** Seconds since the start, rounded up to the next tick: the time at which playback will run the step. */
+  private get seconds() { return Math.ceil((this.clock().getTime() - this.start) / (TICK_SECONDS * 1000) - 1e-9) * TICK_SECONDS; }
+
+  private add(action: Action) {
+    const seconds = this.seconds;
+    const last = this.steps.at(-1);
+    // Keys pressed less than a second apart are one step, as a crew member types an entry.
+    if (action.kind === "keys" && last?.action.kind === "keys" && this.lastKeyAt !== null && seconds - this.lastKeyAt < 1) {
+      last.action.keys.push(...action.keys);
+    } else {
+      this.steps.push({ when: seconds === 0 ? { kind: "start" } : { kind: "time", seconds }, action });
+    }
+    this.lastKeyAt = action.kind === "keys" ? seconds : null;
+  }
+
+  key(fn: CduFunction) { this.add({ kind: "keys", keys: [fn] }); }
+  condition(condition: ConditionId, on: boolean) { this.add({ kind: "condition", condition, on }); }
+  alert(text: string) { this.add({ kind: "alert", text }); }
+  armApproach() { this.add({ kind: "armApproach" }); }
+  goAround() { this.add({ kind: "goAround" }); }
+  /** Checks a screen line as it is shown now; a few seconds' grace lets playback at another rate catch up. */
+  checkLine(line: number, text: string) { this.add({ kind: "expectLine", line, pattern: linePattern(text) }); this.steps.at(-1)!.within = 5; }
+
+  toScenario(title: string): Scenario {
+    const last = this.steps.at(-1)?.when;
+    const end = last?.kind === "time" ? last.seconds : 0;
+    return {
+      id: `recorded-${this.start}`,
+      title,
+      objective: "Replay a sequence recorded on the FMS Test Bench and check the screen lines captured during it.",
+      maxSeconds: Math.max(60, Math.ceil(end + 30)),
+      steps: structuredClone(this.steps),
+    };
+  }
+}
+
+/** Reads a scenario from JSON, refusing anything the runner does not support, with every reason. */
+export function parseScenario(json: string): Scenario {
+  const value = JSON.parse(json) as Partial<Scenario>;
+  const problems = scenarioProblems(value);
+  if (problems.length) throw new Error(`Not a runnable FMS Test Bench scenario: ${problems.join("; ")}.`);
+  return { ...value, id: value.id ?? `imported-${value.title}`, objective: value.objective ?? "" } as Scenario;
+}
