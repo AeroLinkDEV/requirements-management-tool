@@ -38,7 +38,9 @@ public static class IntegrityImportEndpoints
                     return Results.BadRequest(new { error = "An import operation identity is required." });
                 return Results.Ok(await service.CommitAsync(form.ProjectId, operationId, form.Bytes!, form.Package!, form.Mapping!,
                     form.Form["previewHash"].ToString(), actor, http.Connection.RemoteIpAddress?.ToString() ?? "local",
-                    () => AuthorizedAsync(http, db, identity, form.ProjectId, ct), ct));
+                    async scope => await http.HasFreshProjectRoleAsync(db, identity, scope, ct,
+                        ProgramRole.ConfigurationManager, ProgramRole.ProgramManager, ProgramRole.Administrator)
+                        && (await ProjectFeatureService.EffectiveAsync(db, form.ProjectId, ct)).HasFlag(ProjectFeature.ProblemReports), ct));
             }
             catch (Exception ex) when (ex is IntegrityImportConflict or ManagedDocumentStorageConflictException)
             { return Results.Conflict(new { error = ex.Message, code = "integrity_import_conflict" }); }

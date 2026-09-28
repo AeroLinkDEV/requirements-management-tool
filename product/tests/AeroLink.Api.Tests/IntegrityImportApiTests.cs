@@ -35,7 +35,8 @@ public sealed class IntegrityImportApiTests
             var program = new ProgramRecord("Integrity import", "INT"); var project = new ProjectRecord(program.Id, "Destination", "PR");
             var account = new UserAccount(engineer, "Engineer", "engineer@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
             var cm = new UserAccount(manager, "Configuration Manager", "cm@example.test", IdentityService.HashPassword(AeroLinkApiFactory.MemberPassword), now);
-            db.AddRange(cm, new ProgramMembership(cm.Id, program.Id, ProgramRole.ConfigurationManager, "admin", now));
+            db.AddRange(cm, new ProgramMembership(cm.Id, program.Id, ProgramRole.ConfigurationManager, "admin", now),
+                new ProjectLeadershipAssignment(program.Id, ProjectLeadershipPosition.ConfigurationManager, cm.Id, "admin", now));
             db.AddRange(program, project, account, new ProgramMembership(account.Id, program.Id, ProgramRole.SoftwareEngineer, "admin", now));
             await db.SaveChangesAsync(); projectId = project.Id;
         }
@@ -102,7 +103,10 @@ public sealed class IntegrityImportApiTests
         {
             var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
             var cmId = await db.UserAccounts.Where(x => x.UserName == manager).Select(x => x.Id).SingleAsync();
-            db.ProgramMemberships.RemoveRange(await db.ProgramMemberships.Where(x => x.UserId == cmId).ToListAsync());
+            foreach (var assignment in await db.ProjectLeadershipAssignments.Where(x => x.HolderUserId == cmId && x.EndedAt == null).ToListAsync())
+                assignment.End("admin", DateTimeOffset.UtcNow);
+            foreach (var membership in await db.ProgramMemberships.Where(x => x.UserId == cmId && x.EndedAt == null).ToListAsync())
+                membership.End("admin", DateTimeOffset.UtcNow);
             var program = new ProgramRecord("No Problem Reports", "NOPR");
             var project = new ProjectRecord(program.Id, "Feature disabled", "NONE");
             db.AddRange(program, project, new ProjectFeatureSet(project.Id, ProjectFeature.TeamWork, "admin", DateTimeOffset.UtcNow));

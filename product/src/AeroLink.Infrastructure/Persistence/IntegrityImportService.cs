@@ -148,7 +148,7 @@ public sealed class IntegrityImportService(AeroLinkDbContext db, EvidenceFileSto
 
     public async Task<IntegrityImportReceipt> CommitAsync(Guid projectId, Guid operationId, byte[] bytes,
         IntegritySourcePackage package, ProblemReportImportMapping mapping, string expectedPreviewHash,
-        AuthenticatedUser actor, string remoteAddress, Func<Task<bool>> authorized, CancellationToken ct)
+        AuthenticatedUser actor, string remoteAddress, Func<ProjectControlledWriteScope, Task<bool>> authorized, CancellationToken ct)
     {
         if (operationId == Guid.Empty) throw new DomainException("An import operation identity is required.");
         ValidateMapping(mapping);
@@ -193,7 +193,7 @@ public sealed class IntegrityImportService(AeroLinkDbContext db, EvidenceFileSto
                 x.File.StagingKey, x.File.StorageKey, x.File.Size, x.File.Sha256)).ToArray(), "{}", now, ct);
             await storage.PromoteAsync(operation, objects.Select(x => x.File), ct);
             await using var write = await ProjectControlledWriteScope.AcquireAsync(db, projectId, ct);
-            if (!await authorized()) throw new DomainException("Import authority or project features changed. Review again.");
+            if (!await authorized(write)) throw new DomainException("Import authority, session or project features changed. Review again.");
             prior = await db.IntegrityImportBatches.AsNoTracking().SingleOrDefaultAsync(x => x.ProjectId == projectId
                 && x.ActorId == actor.Id && x.OperationId == operationId, ct);
             if (prior is not null) throw new IntegrityImportConflict("This operation completed concurrently. Retry to retrieve its original receipt.");

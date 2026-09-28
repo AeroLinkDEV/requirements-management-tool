@@ -81,7 +81,7 @@ document exports do not embed their restricted bytes.
 
 Password confirmation accepts the exact preview, including outcomes and findings, package root, mapping,
 project and resolved destination identities. Commit rebuilds the preview under the provider's project
-write lock and refuses changed intent. It stages and verifies files first, then commits reports, source
+write lock, rechecks the live session and authority, and refuses changed intent. It stages and verifies files first, then commits reports, source
 identities, immutable reconciliation, the importer's signature and blob references together.
 Source signatures create no native signatures; the sole new signature accepts the import.
 
@@ -116,7 +116,7 @@ database and evidence store. The normal developer database on port 54329 is neve
 - Hosted API tests exercise preview, password confirmation, stale intent, retry, restricted retrieval,
   source/native separation and two interruption windows.
 - PostgreSQL qualification migrates a new disposable database and forces overlapping imports through a
-  held provider lock, asserting one batch and an exact microsecond instant.
+  held provider lock, asserting one batch and an exact microsecond instant; a session revoked during a lock wait cannot publish.
 - The browser journey verifies the actual package review, raster preview and invalidation after mapping
   changes. It does not submit an import into shared showcase data.
 
