@@ -198,6 +198,8 @@ test('a frozen build refuses a withdrawal, says what reopening costs, and the wo
   await page.getByRole('link', { name: 'Change Requests' }).click()
   await expect(page.locator('.historyTable')).toBeVisible({ timeout: 30_000 })
 
+  // The register is server-paged in controlled-number order. Earlier journeys can fill page one.
+  await page.getByRole('textbox', { name: 'Search change requests' }).fill(scr.baseNumber)
   await page.locator('[data-register-row]', { hasText: `WITHDRAW-REOPEN oceanic annunciation ${suffix}` }).click()
   await page.getByRole('link', { name: 'Open change request →' }).click()
   await expect(page.getByRole('button', { name: 'Withdraw' })).toBeVisible({ timeout: 30_000 })
@@ -229,6 +231,7 @@ test('a frozen build refuses a withdrawal, says what reopening costs, and the wo
   await openNavigationGroup(page, 'SYSTEMS ENGINEERING')
   await page.getByRole('link', { name: 'Change Requests' }).click()
   await expect(page.locator('.historyTable')).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('textbox', { name: 'Search change requests' }).fill(dependent.baseNumber)
   await page.locator('[data-register-row]', { hasText: `WITHDRAW-REOPEN dependent tightening ${suffix}` }).click()
   await page.getByRole('link', { name: 'Open change request →' }).click()
   await expect(page.getByTestId('rebase-required')).toContainText('was reopened', { timeout: 30_000 })
@@ -238,6 +241,7 @@ test('a frozen build refuses a withdrawal, says what reopening costs, and the wo
   // stays readable, which is the whole reason it is a withdrawal rather than a delete.
   await page.getByRole('link', { name: 'Change Requests' }).click()
   await expect(page.locator('.historyTable')).toBeVisible({ timeout: 30_000 })
+  await page.getByRole('textbox', { name: 'Search change requests' }).fill(scr.baseNumber)
   await page.locator('[data-register-row]', { hasText: `WITHDRAW-REOPEN oceanic annunciation ${suffix}` }).click()
   await page.getByRole('link', { name: 'Open change request →' }).click()
   page.once('dialog', (dialog) => dialog.accept('Superseded by a better approach.'))
