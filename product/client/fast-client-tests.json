@@ -23,7 +23,8 @@
     "fms-vnav.spec.ts",
     "fms-tactical-maint.spec.ts",
     "fms-scenario.spec.ts",
-    "fms-gps.spec.ts"
+    "fms-gps.spec.ts",
+    "fms-gps-sbas.spec.ts"
   ],
   "rendered": [
     "code-source-rendered.spec.ts",
