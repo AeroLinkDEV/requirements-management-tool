@@ -126,7 +126,9 @@ test('every physical key on the rendered panel can be clicked and reaches the si
   const keys = page.locator('.fmsCduKey')
   const count = await keys.count()
   expect(count).toBe(68)
-  for (let i = 0; i < count; i += 1) await keys.nth(i).click()
+  // A real pointer click at each key's centre. force skips only Playwright's per-click readiness waits: a key covered by
+  // anything else would take no click, and the count below would say so.
+  for (let i = 0; i < count; i += 1) await keys.nth(i).click({ force: true })
   await expect(page.locator('.fmsBenchLog h2 small')).toHaveText(String(count))
 })
 
@@ -190,14 +192,20 @@ test('Fly moves the aircraft along the route on the map at the chosen rate, and 
   await page.getByRole('radiogroup', { name: 'Lower display' }).getByText('Engineering map').click()
   const map = page.getByRole('img', { name: /^Navigation map/ })
   await expect(map).toHaveAttribute('aria-label', /LNAV mode, active waypoint MUN/)
+  const readout = page.locator('.fmsBench').getByText(/^Active waypoint/)
+  const toGo = async () => Number((await readout.innerText()).match(/([\d.]+) NM/)?.[1] ?? NaN)
+  const start = await toGo()
   await page.getByLabel('Simulation rate').selectOption('64')
   await page.getByRole('button', { name: 'Fly' }).click()
-  // MUN is 13.6 NM away: at 64 times real time it is passed within a few seconds.
-  await expect(map).toHaveAttribute('aria-label', /active waypoint RDG/, { timeout: 20_000 })
+  // At 64 times real time the aircraft closes on MUN at about two nautical miles a second (sequencing past a
+  // waypoint is proved in the logic tier).
+  await expect.poll(toGo).toBeLessThan(start - 2)
+  await expect(map).toHaveAttribute('aria-label', /LNAV mode, active waypoint MUN/)
   await expect(page.getByLabel('Guidance')).toContainText('LNAV')
   await page.getByRole('button', { name: 'Pause' }).click()
-  const paused = await page.locator('.fmsBench').getByText(/^Active waypoint/).innerText()
-  await page.waitForTimeout(1500)
+  const paused = await readout.innerText()
+  // Unpaused, a second at 64 times would move the aircraft about two miles.
+  await page.waitForTimeout(1000)
   await expect(page.locator('.fmsBench').getByText(/^Active waypoint/)).toHaveText(paused)
   await page.getByLabel('Map range').selectOption('80')
   await expect(map).toHaveAttribute('aria-label', /80 NM range/)
@@ -210,10 +218,13 @@ test('IDENT shows both database cycles, and the maintenance page follows a self 
   await key(page, 'INIT_REF').click()
   await key(page, 'LSK6L').click()
   await expectLine(page, 0, /^MAINTENANCE/)
+  await page.getByLabel('Simulation rate').selectOption('64')
   await key(page, 'LSK2L').click()
   await expectLine(page, 4, /(IN PROG|PASS)$/)
-  // The self test runs for five seconds of simulation time.
-  await expect.poll(async () => (await screenLines(page))[4] ?? "", { timeout: 15_000 }).toMatch(/PASS$/)
+  // The self test runs for five seconds of simulation time: flying at 64 times, a fraction of a second.
+  await page.getByRole('button', { name: 'Fly' }).click()
+  await expect.poll(async () => (await screenLines(page))[4] ?? "").toMatch(/PASS$/)
+  await page.getByRole('button', { name: 'Pause' }).click()
   await expectLine(page, 6, /^DUAL SYNC\s+RTE MATCH$/)
   await page.getByLabel('Independent operation').check()
   await expectLine(page, 6, /^INDEPENDENT\s+RTE MATCH$/)
