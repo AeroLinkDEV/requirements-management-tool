@@ -158,6 +158,18 @@ test('117 withdrawn after capture, the level still LPV, is loss of vertical guid
   expect(fmsOutputs(unit, sim).verticalDeviation.status).toBe('FAIL')
 })
 
+test('305 reporting LNAV while 117 stays Normal is no vertical guidance: the FMS believes the level, not the word (3b.4)', () => {
+  const { unit, sim, fly } = setup()
+  unit.armApproach(true)
+  fly(3 * 3600, () => sim.approachMode === 'CAPTURED' && unit.verticalSpeed < -300)
+  for (const receiver of receivers(unit)) receiver.override('305', { kind: 'FORCE', value: { paActive: true, provider: 'WAAS', level: 'LNAV' }, ssm: 'NORMAL' })
+  fly(2)
+  expect(selected(unit)['117'].ssm).toBe('NORMAL')
+  expect(unit.approachType).toBe('LNAV')
+  expect(sim.approachMode).toBe('OFF')
+  expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'APPR LOST' })
+})
+
 test('with SBAS set do-not-use the level is LNAV: armed, nothing is annunciated vertically and the approach does not descend (3b.2, 3b.4)', () => {
   const { unit, sim, fly } = setup()
   for (const receiver of receivers(unit)) receiver.setSbas({ doNotUse: true })
