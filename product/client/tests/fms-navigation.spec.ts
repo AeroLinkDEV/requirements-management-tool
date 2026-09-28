@@ -113,7 +113,8 @@ test('RNP defaults by phase: terminal near the airports, en route between them, 
   expect(unit.flightPhase).toBe('EN ROUTE')
   press(unit, 'PROG')
   expect(lines(unit)[9]).toMatch(/RNP\/ANP EN ROUTE/)
-  expect(lines(unit)[10]).toMatch(/^2\.00\/0\.05NM/)
+  // ANP in GPS mode is the receiver's HFOM with a 0.02 NM floor (GPS phase 3a); navigating on SBAS, HFOM is a few thousandths.
+  expect(lines(unit)[10]).toMatch(/^2\.00\/0\.02NM/)
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
   unit.sequence()
@@ -124,8 +125,9 @@ test('RNP defaults by phase: terminal near the airports, en route between them, 
 test('ANP above RNP raises CHECK ANP only after the time to alert for the phase', () => {
   const { unit, fly } = setup()
   press(unit, 'PROG')
-  enter(unit, '.03', 'LSK5L')
-  expect(lines(unit)[10]).toMatch(/^0\.03\/0\.05NM/)
+  // 0.01 NM is below the 0.02 NM ANP floor, so it is below ANP whatever the satellite geometry (GPS phase 3a).
+  enter(unit, '.01', 'LSK5L')
+  expect(lines(unit)[10]).toMatch(/^0\.01\/0\.02NM/)
   expect(lines(unit)[9]).toMatch(/MANUAL/)
   expect(unit.lamps().has('RNP')).toBe(true)
   // Terminal phase: 60 seconds.
@@ -156,14 +158,17 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, larger ANP, and no RNAV approach
   expect(unit.approachType).toBe('LPV')
   unit.setCondition('gpsIntegrity', true)
   expect(scratch(unit)).toBe('GPS POS UNCERTAIN')
-  expect(unit.navState.anp).toBe(0.3)
+  // Neither receiver can be used (GPS phase 3a): the FMS navigates on the radios, with their larger ANP.
+  expect(unit.navState.mode).not.toBe('GPS')
+  expect(unit.navState.anp).toBeGreaterThan(0.3)
   expect(unit.approachType).toBe('NO APPR')
   for (let i = 0; i < 3; i += 1) unit.sequence()
   unit.updateNavigation(0)
   expect(unit.flightPhase).toBe('APPROACH')
   expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(true)
   press(unit, 'INIT_REF', 'NEXT', 'LSK5R')
-  expect(lines(unit)[6]).toMatch(/9 SAT NO RAIM$/)
+  // The condition leaves each receiver five satellites (one degree of freedom: detection without exclusion).
+  expect(lines(unit)[6]).toMatch(/5 SAT NO RAIM$/)
 })
 
 test('NAV OPTIONS inhibits a navaid from updating, and GPS can be selected out', () => {
@@ -173,7 +178,8 @@ test('NAV OPTIONS inhibits a navaid from updating, and GPS can be selected out',
   expect(lines(unit)[2]).toMatch(/^GPS/)
   unit.press('LSK6R')
   expect(lines(unit)[0]).toMatch(/^NAV OPTIONS/)
-  unit.press('LSK3L')
+  // GPS NAV steps AUTO, GPS1, GPS2, OFF (GPS phase 3a): the third press selects GPS out.
+  press(unit, 'LSK3L', 'LSK3L', 'LSK3L')
   expect(unit.gpsNavSelected).toBe(false)
   expect(unit.navState.mode).toBe('VOR/DME')
   expect(recalled(unit, 'GPS NAV LOST')).toBe(true)

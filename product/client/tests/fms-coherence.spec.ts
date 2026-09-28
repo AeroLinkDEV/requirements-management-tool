@@ -268,6 +268,10 @@ const STATES: [string, (unit: ScriptedFms) => void][] = [
   ['dead reckoning', unit => { unit.setCondition('gpsLost', true); unit.setCondition('dmeOutage', true) }],
   ['a manual RNP', unit => unit.setRnp(0.5)],
   ['an ATC uplink', unit => unit.setCondition('atcUplink', true)],
+  // GPS phase 3a: the receiver pages at their longest (integrity DETECTED, one receiver failed, GPS selected out).
+  ['GPS integrity lost', unit => unit.setCondition('gpsIntegrity', true)],
+  ['GPS1 failed, on GPS2', unit => { unit.gps[0].injectFault('RECEIVER', true); unit.gpsUpdated() }],
+  ['GPS selected out', unit => unit.selectGpsReceiver('OFF')],
 ]
 
 test('no authored page line writes one caption or value over another, or past the 24th column (R19)', () => {
