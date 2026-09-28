@@ -75,7 +75,7 @@ export function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now
           {[-20, -10, -5, 5, 10, 20].map(p => (
             <g key={p}>
               <line x1={cx - (Math.abs(p) % 10 === 0 ? 30 : 15)} y1={cy - p * pitchPx} x2={cx + (Math.abs(p) % 10 === 0 ? 30 : 15)} y2={cy - p * pitchPx} stroke={WHITE} strokeWidth="1.5" />
-              {Math.abs(p) % 10 === 0 ? <text x={cx + 38} y={cy - p * pitchPx + 4} fill={WHITE} fontSize="11">{Math.abs(p)}</text> : null}
+              {Math.abs(p) % 10 === 0 ? <text x={cx + 38} y={cy - p * pitchPx + 4} fill={WHITE} fontSize="12">{Math.abs(p)}</text> : null}
             </g>
           ))}
         </g>
@@ -121,7 +121,7 @@ export function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now
       <g>
         <clipPath id="efisAlt"><rect x="336" y="60" width="66" height="240" /></clipPath>
         <rect x="336" y="60" width="66" height="240" fill="#2a2f38" />
-        <g clipPath="url(#efisAlt)" fontSize="11" fill={WHITE}>
+        <g clipPath="url(#efisAlt)" fontSize="12" fill={WHITE}>
           {altTicks.map(v => (
             <g key={v}>
               <line x1="336" y1={cy - (v - air.altitude) * altScale} x2="346" y2={cy - (v - air.altitude) * altScale} stroke={WHITE} />
@@ -142,7 +142,7 @@ export function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now
       <g>
         <rect x="404" y="90" width="14" height="180" fill="#2a2f38" />
         <line x1="404" y1={cy} x2="418" y2={clamp(cy - air.verticalSpeed / 20, 92, 268)} stroke={WHITE} strokeWidth="2" />
-        <text x="411" y="84" textAnchor="middle" fontSize="10" fill={WHITE}>{Math.round(air.verticalSpeed / 50) * 50}</text>
+        <text x="411" y="84" textAnchor="middle" fontSize="12" fill={WHITE}>{Math.round(air.verticalSpeed / 50) * 50}</text>
       </g>
       {/* Vertical deviation (label 117): filled diamond when the path is flown, hollow when only advisory. */}
       {verticalDots !== null ? (
@@ -151,9 +151,9 @@ export function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now
           <line x1="319" y1={cy} x2="333" y2={cy} stroke={WHITE} />
           <polygon points={`326,${cy + verticalDots * 80 - 8} 333,${cy + verticalDots * 80} 326,${cy + verticalDots * 80 + 8} 319,${cy + verticalDots * 80}`}
             fill={bus.verticalCoupled ? MAGENTA : "none"} stroke={MAGENTA} strokeWidth="2" />
-          <text x="326" y={cy - 92} textAnchor="middle" fontSize="10" fill={WHITE}>{bus.verticalSource === "APPR" ? "GP" : "VPTH"}</text>
+          <text x="326" y={cy - 92} textAnchor="middle" fontSize="12" fill={WHITE}>{bus.verticalSource === "APPR" ? "GP" : "VPTH"}</text>
         </g>
-      ) : bus.verticalDeviation.status === "FAIL" ? <text x="326" y={cy} textAnchor="middle" fontSize="11" fill={AMBER}>V</text> : null}
+      ) : bus.verticalDeviation.status === "FAIL" ? <text x="326" y={cy} textAnchor="middle" fontSize="12" fill={AMBER}>V</text> : null}
       {/* Lateral deviation (label 116), full scale for the phase, and the navigation source annunciation. */}
       <g>
         {[-1, -0.5, 0.5, 1].map(d => <circle key={d} cx={cx + d * 90} cy="318" r="3" fill="none" stroke={WHITE} />)}
@@ -161,14 +161,14 @@ export function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now
         {lateralDots !== null ? (
           <polygon data-testid="ldev" points={`${cx + lateralDots * 90 - 8},318 ${cx + lateralDots * 90},311 ${cx + lateralDots * 90 + 8},318 ${cx + lateralDots * 90},325`} fill={MAGENTA} />
         ) : null}
-        <text x="104" y="308" fontSize="11" fill={bus.failed ? AMBER : GREEN} data-testid="nav-source">{bus.failed ? "FMS" : `${bus.source} ${bus.phase === "EN ROUTE" ? "ENR" : bus.phase === "TERMINAL" ? "TERM" : "APPR"}`}</text>
-        <text x="316" y="308" fontSize="11" fill={WHITE} textAnchor="end">{lateralDots !== null ? `${bus.lateralFullScaleNm}NM` : ""}</text>
+        <text x="104" y="308" fontSize="12" fill={bus.failed ? AMBER : GREEN} data-testid="nav-source">{bus.failed ? "FMS" : `${bus.source} ${bus.phase === "EN ROUTE" ? "ENR" : bus.phase === "TERMINAL" ? "TERM" : "APPR"}`}</text>
+        <text x="316" y="308" fontSize="12" fill={WHITE} textAnchor="end">{lateralDots !== null ? `${bus.lateralFullScaleNm}NM` : ""}</text>
       </g>
       {/* Heading: current heading, the desired track (magenta) and a crew-selected heading (cyan). */}
       <g>
         <clipPath id="efisHdg"><rect x="100" y="334" width="220" height="60" /></clipPath>
         <rect x="100" y="334" width="220" height="60" fill="#2a2f38" />
-        <g clipPath="url(#efisHdg)" fontSize="11" fill={WHITE}>
+        <g clipPath="url(#efisHdg)" fontSize="12" fill={WHITE}>
           {Array.from({ length: 25 }, (_, i) => Math.round(air.heading / 5) * 5 + (i - 12) * 5).map(h => {
             const x = cx + (((h - air.heading + 540) % 360) - 180) * 4;
             return (
@@ -241,9 +241,9 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
       </g>
       {/* Half-range arc and track line. */}
       <path d={`M ${cx - radius / 2} ${cy} A ${radius / 2} ${radius / 2} 0 0 1 ${cx + radius / 2} ${cy}`} fill="none" stroke="#6a7384" strokeDasharray="3 6" />
-      <text x={cx - radius / 2 - 4} y={cy - 6} fontSize="11" fill={WHITE} textAnchor="end">{range / 2}</text>
+      <text x={cx - radius / 2 - 4} y={cy - 6} fontSize="12" fill={WHITE} textAnchor="end">{range / 2}</text>
       <line x1={cx} y1={cy} x2={cx} y2={cy - radius} stroke="#6a7384" />
-      <g clipPath="url(#efisMap)" fontSize="11">
+      <g clipPath="url(#efisMap)" fontSize="12">
         {/* Modified route: dashed white; offset: dashed magenta; active route: solid magenta. */}
         {bus.modifiedRoute ? <polyline points={polyline(route(bus.modifiedRoute))} fill="none" stroke={WHITE} strokeWidth="2" strokeDasharray="8 6" data-testid="nd-mod-route" /> : null}
         {bus.offsetTrack ? <polyline points={polyline(bus.offsetTrack)} fill="none" stroke={MAGENTA} strokeWidth="2" strokeDasharray="8 6" /> : null}
@@ -255,7 +255,7 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
             <g key={point.ident} data-testid={point.active ? "nd-active-wpt" : undefined}>
               <polygon points={`${q.x},${q.y - 7} ${q.x + 2},${q.y - 2} ${q.x + 7},${q.y} ${q.x + 2},${q.y + 2} ${q.x},${q.y + 7} ${q.x - 2},${q.y + 2} ${q.x - 7},${q.y} ${q.x - 2},${q.y - 2}`} fill="none" stroke={colour} />
               <text x={q.x + 9} y={q.y - 4} fill={colour}>{point.ident}</text>
-              {point.constraint ? <text x={q.x + 9} y={q.y + 10} fill={colour} fontSize="10">{point.constraint}</text> : null}
+              {point.constraint ? <text x={q.x + 9} y={q.y + 10} fill={colour} fontSize="12">{point.constraint}</text> : null}
             </g>
           );
         })}
@@ -282,8 +282,8 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
             <text x="410" y="56">{bus.eta.status === "NORMAL" ? utc(bus.eta.value!) : ""}</text>
           </g>
         ) : null}
-        <text x="10" y="408" fontSize="11" fill={bus.failed ? AMBER : GREEN} data-testid="nd-source">{bus.failed ? "MAP" : `${bus.source} ${bus.navMode}`}</text>
-        {!bus.failed ? <text x="410" y="408" fontSize="11" textAnchor="end">RNP {bus.rnp.toFixed(2)} ANP {bus.anp.toFixed(2)}</text> : null}
+        <text x="10" y="408" fontSize="12" fill={bus.failed ? AMBER : GREEN} data-testid="nd-source">{bus.failed ? "MAP" : `${bus.source} ${bus.navMode}`}</text>
+        {!bus.failed ? <text x="410" y="408" fontSize="12" textAnchor="end">RNP {bus.rnp.toFixed(2)} ANP {bus.anp.toFixed(2)}</text> : null}
       </g>
       {bus.failed ? <text x={cx} y="200" textAnchor="middle" fontSize="18" fill={AMBER} data-testid="nd-map-flag">MAP</text> : null}
     </svg>
