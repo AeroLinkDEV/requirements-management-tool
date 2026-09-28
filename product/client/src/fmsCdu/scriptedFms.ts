@@ -9,7 +9,7 @@ import {
   type SarPattern, type Uplink,
 } from "./fmsModel";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
-import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput } from "./vnav";
+import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
 import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
 import { NAV_PAGES } from "./navPages";
 import { PLANNING_PAGES } from "./planningPages";
@@ -37,7 +37,12 @@ const wpt = (ident: string, altitude?: string): Leg => ({ kind: "wpt", ident, al
 
 const demoRoute = (): Route => ({
   origin: "CYOW", dest: "CYUL", coRoute: "OWUL1", flightNo: "LIFE21",
-  legs: [wpt("MUN", "3000"), wpt("RDG", "4500"), wpt("TOLGU", "4500"), wpt("FERDI", "1500A"), wpt("RW24R", "168"), wpt("CYUL")],
+  legs: [
+    wpt("MUN", "3000"), wpt("RDG", "4500"), wpt("TOLGU", "4500"),
+    // Downwind, base and final to runway 24R (navData.ts): the old TOLGU to FERDI leg overflew the airport and turned
+    // 150 degrees at the FAF.
+    wpt("DEMEL", "3000"), wpt("ALNIT", "3000"), wpt("ULIDA", "2500"), wpt("FERDI", "1500A"), wpt("RW24R", "168"), wpt("CYUL"),
+  ],
 });
 
 /** A navigation database cycle: its own dataset, and its effective dates (null when the data does not give them). */
@@ -143,6 +148,8 @@ export class ScriptedFms implements CduBackend {
   private uplinksSent = 0;
   private enteredHold: HoldEntry | null = null;
   private sequenced: string | null = null;
+  /** The latched VNAV phase (updateVerticalPhase), and the cruise altitude it last saw, to notice a new entry. */
+  private vphase = { phase: "CLIMB" as VerticalPhase, reason: "initial", cruise: null as number | null };
 
   /** The active cycle's database. */
   private get db() { return this.cycles[0].db; }
@@ -550,9 +557,41 @@ export class ScriptedFms implements CduBackend {
       lastFix = to;
     });
     return computeProfile({
-      waypoints, altitude: this.altitude, cruiseAltitude: this.vnav.cruiseAltitude, climbRate: 1000, pathAngle: this.vnav.pathAngle,
+      waypoints, altitude: this.altitude, cruiseAltitude: this.vnav.cruiseAltitude, climbRate: 1000, pathAngle: this.vnav.pathAngle, phase: this.vphase.phase,
       fuel: this.fuel.quantity, fuelFlow: this.fuel.flow, now: this.now.getTime(),
     });
+  }
+
+  /** The latched VNAV phase, and why it last changed (the flight simulation records each change as a mode event). */
+  get verticalPhase(): VerticalPhase { return this.vphase.phase; }
+  get verticalPhaseReason() { return this.vphase.reason; }
+
+  /**
+   * Latches the VNAV phase. CLIMB becomes CRUISE on reaching the cruise altitude. CLIMB or CRUISE becomes DESCENT at
+   * the top of descent (the profile first reports descending) or on DES NOW. DESCENT is left only by an explicit
+   * event, never by comparing the altitude with cruise: a cruise altitude entered above the aircraft, or the missed
+   * approach becoming the active leg (a go-around, or passing the runway). Both return to CLIMB. A route change that
+   * puts climb constraints ahead does not leave the descent; the crew enters a cruise altitude for that.
+   */
+  private updateVerticalPhase() {
+    const v = this.vphase, cruise = this.vnav.cruiseAltitude;
+    const raised = v.cruise !== null && cruise !== v.cruise && cruise > this.altitude + 50;
+    v.cruise = cruise;
+    const set = (phase: VerticalPhase, reason: string) => { v.phase = phase; v.reason = reason; };
+    if (v.phase === "DESCENT") {
+      const leg = this.active.legs[0];
+      const leave = raised ? `cruise altitude ${cruise} entered above the aircraft`
+        : leg && leg.kind !== "disco" && leg.source === "MISSED" ? "missed approach" : null;
+      if (leave === null) return;
+      set("CLIMB", leave);
+      // Leaving the descent cancels a DES NOW, which would otherwise start it again.
+      this.vnav.desNow = false;
+      return;
+    }
+    if (raised) set("CLIMB", `cruise altitude ${cruise} entered above the aircraft`);
+    else if (v.phase === "CLIMB" && this.altitude >= cruise - 50) set("CRUISE", `cruise altitude ${cruise} reached`);
+    if (this.vnav.desNow) set("DESCENT", "DES NOW");
+    else if (this.profile().descending) set("DESCENT", "top of descent");
   }
 
   /**
@@ -573,6 +612,7 @@ export class ScriptedFms implements CduBackend {
     const before = this.fuel.quantity;
     this.fuel.quantity = Math.max(0, before - (this.fuel.flow * dt) / 3600);
     if (before > this.fuel.reserve && this.fuel.quantity <= this.fuel.reserve) this.alert(alert("FUEL RESERVE"));
+    this.updateVerticalPhase();
     const profile = this.profile();
     const atDestination = profile.destination?.fuel ?? null;
     if (atDestination !== null && atDestination < this.fuel.reserve) {
