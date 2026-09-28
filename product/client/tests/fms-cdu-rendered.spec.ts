@@ -8,6 +8,8 @@ const open = async (page: Page) => {
   await page.goto('/tests/fixtures/fms-cdu.html')
   await expect(page.locator('.fmsCdu')).toBeVisible()
 }
+// The bench's tools sit in tabs under the cockpit (Scenarios first).
+const tab = (page: Page, name: string) => page.getByRole('tab', { name, exact: true }).click()
 const key = (page: Page, id: string) => page.locator(`.fmsCduKey[data-key="${id}"]`)
 const screenLines = async (page: Page) => ((await page.locator('.fmsCduScreen').getAttribute('aria-label')) ?? '').split('\n')
 const expectLine = async (page: Page, line: number, pattern: RegExp) =>
@@ -27,6 +29,7 @@ test('keys on the rendered panel enter data, make a modification and execute it'
   await expectLine(page, 0, /^ACT RTE 1/)
   await expectLine(page, 2, /CYYZ\s*$/)
   await expect(page.locator('.fmsCduLamp[data-lamp="EXEC_LIGHT"]')).not.toHaveClass(/\blit\b/)
+  await tab(page, 'Lighting and keys')
   await expect(page.locator('.fmsBenchLog li').first()).toContainText('EXEC')
 })
 
@@ -112,6 +115,7 @@ test('an alert raised from the bench lights MSG until CLR on the panel acknowled
   await open(page)
   const msg = page.locator('.fmsCduLamp[data-lamp="MSG"]')
   await expect(msg).not.toHaveClass(/\blit\b/)
+  await tab(page, 'Conditions')
   await page.getByLabel('Alert message to raise').fill('unable rnp')
   await page.getByRole('button', { name: 'Raise alert' }).click()
   await expect(msg).toHaveClass(/\blit\b/)
@@ -127,6 +131,7 @@ test('every physical key on the rendered panel can be clicked and reaches the si
   const count = await keys.count()
   expect(count).toBe(68)
   for (let i = 0; i < count; i += 1) await keys.nth(i).click()
+  await tab(page, 'Lighting and keys')
   await expect(page.locator('.fmsBenchLog h2 small')).toHaveText(String(count))
 })
 
@@ -134,6 +139,7 @@ test('conditions from the bench light the panel annunciators, and FMS failure bl
   await open(page)
   const lamp = (code: string) => page.locator(`.fmsCduLamp[data-lamp="${code}"]`)
   // With GPS lost the FMS updates from radio; only with the DMEs lost as well does it dead reckon and light POS.
+  await tab(page, 'Conditions')
   await page.getByRole('checkbox', { name: /^GPS lost sensor/ }).check()
   await expectLine(page, 13, /^GPS NAV LOST/)
   await expect(lamp('POS')).not.toHaveClass(/\blit\b/)
@@ -154,6 +160,7 @@ test('conditions from the bench light the panel annunciators, and FMS failure bl
 
 test('a library alert and a sequenced waypoint reach the panel', async ({ page }) => {
   await open(page)
+  await tab(page, 'Conditions')
   await page.getByRole('combobox', { name: 'Alert from the manual' }).selectOption('TIMER ALARM')
   await page.getByRole('button', { name: 'Raise', exact: true }).click()
   await expectLine(page, 13, /^TIMER ALARM/)
@@ -170,6 +177,7 @@ test('NVG lighting backlights the legends green and holds the display in the NVG
   const panel = page.locator('.fmsCdu')
   const luminance = async () => Number(await panel.getAttribute('data-luminance'))
   const day = await luminance()
+  await tab(page, 'Lighting and keys')
   await page.getByText('NVG', { exact: true }).click()
   await expect(panel).toHaveClass(/\bmode-nvg\b/)
   expect(await luminance()).toBeLessThanOrEqual(3)
@@ -215,6 +223,7 @@ test('IDENT shows both database cycles, and the maintenance page follows a self 
   // The self test runs for five seconds of simulation time.
   await expect.poll(async () => (await screenLines(page))[4] ?? "", { timeout: 15_000 }).toMatch(/PASS$/)
   await expectLine(page, 6, /^DUAL SYNC\s+RTE MATCH$/)
+  await tab(page, 'Conditions')
   await page.getByLabel('Independent operation').check()
   await expectLine(page, 6, /^INDEPENDENT\s+RTE MATCH$/)
   await expectLine(page, 8, /^\d{4}Z X-SIDE SYNC LOST/)
@@ -257,6 +266,7 @@ test('an FMS failure in flight reverts the flight modes, and Pause still works (
   await page.getByRole('button', { name: 'Fly' }).click()
   const modes = page.getByRole('status', { name: 'Flight modes' })
   await expect(modes).toContainText('LNAV')
+  await tab(page, 'Conditions')
   await page.getByLabel('FMS failure').check()
   await expect(modes).toContainText('HDG HOLD')
   await expect(modes).toContainText('ALT HOLD')
@@ -276,6 +286,7 @@ test('the EFIS shows the FMS modes, route and TO waypoint, and flags them when t
   await expect(efis.getByTestId('nd-to-wpt')).toContainText('MUN')
   await expect(efis.getByTestId('nd-route')).toBeVisible()
   await expect(efis.getByTestId('nav-source')).toHaveText(/^FMS1 TERM$/)
+  await tab(page, 'Conditions')
   await page.getByLabel('FMS failure').check()
   await page.getByLabel('Simulation rate').selectOption('4')
   await page.getByRole('button', { name: 'Fly' }).click()
@@ -284,4 +295,57 @@ test('the EFIS shows the FMS modes, route and TO waypoint, and flags them when t
   await expect(efis.getByTestId('nd-route')).toHaveCount(0)
   await expect(efis.getByTestId('fma-lateral')).toHaveText('HDG HOLD')
   await expect(efis.getByTestId('fma-vertical')).toHaveText('ALT HOLD')
+})
+
+test('the bench tools are tabs under the cockpit, keyboard-navigable, and the chosen one is remembered', async ({ page }) => {
+  // A fresh context starts with no remembered tab; this test keeps what it stores across the reload.
+  await page.goto('/tests/fixtures/fms-cdu.html')
+  await expect(page.locator('.fmsCdu')).toBeVisible()
+  const tabs = page.getByRole('tablist', { name: 'Bench tools' }).getByRole('tab')
+  await expect(tabs).toHaveText(['Scenarios', 'Conditions', 'GPS sensors', 'Nav data', 'Lighting and keys'])
+  await expect(page.getByRole('tab', { name: 'Scenarios' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('region', { name: 'Scenarios' })).toBeVisible()
+  await tab(page, 'GPS sensors')
+  await expect(page.getByRole('tab', { name: 'GPS sensors' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('region', { name: 'GPS 1', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'GPS 2', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Scenarios' })).toBeHidden()
+  await page.reload()
+  await expect(page.getByRole('tab', { name: 'GPS sensors' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByRole('region', { name: 'Sensor routing' })).toBeVisible()
+  await page.getByRole('tab', { name: 'GPS sensors' }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('tab', { name: 'Nav data' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByLabel('ARINC 424 navigation data file')).toBeVisible()
+})
+
+test('the GPS sensors tab shows the receivers acquiring and reacts to masking and a receiver fault', async ({ page }) => {
+  await open(page)
+  await tab(page, 'GPS sensors')
+  const gps1 = page.getByRole('region', { name: 'GPS 1', exact: true })
+  const gps2 = page.getByRole('region', { name: 'GPS 2', exact: true })
+  await expect(gps1.getByTestId('gps-mode')).toHaveText(/^(SELF TEST|INITIALIZATION|ACQUISITION)$/)
+  await page.getByLabel('Simulation rate').selectOption('64')
+  await page.getByRole('button', { name: 'Fly' }).click()
+  // The time to first fix is 45 s of simulation time: seconds at 64 times real time.
+  await expect(gps1.getByTestId('gps-mode')).toHaveText(/^(NAV|SBAS NAV)$/, { timeout: 20_000 })
+  await expect(gps2.getByTestId('gps-mode')).toHaveText(/^(NAV|SBAS NAV)$/, { timeout: 20_000 })
+  await page.getByRole('button', { name: 'Pause' }).click()
+  const used = async () => Number(((await gps1.getByTestId('gps-used').innerText()).split('/'))[0])
+  const before = await used()
+  await page.getByRole('region', { name: 'GPS 1 faults' }).getByRole('button', { name: /^Mask low satellites/ }).click()
+  await expect.poll(used).toBeLessThan(before)
+  await expect(gps1.getByRole('list', { name: 'GPS 1 active faults' })).toContainText('MASKED')
+
+  await page.getByLabel('GPS 1 Receiver fault').check()
+  await expect(gps1.getByTestId('gps-mode')).toHaveText('FAULT')
+  await expect(gps1.getByRole('list', { name: 'GPS 1 active faults' })).toContainText('RECEIVER FAULT')
+  await expect(gps2.getByTestId('gps-mode')).toHaveText(/^(NAV|SBAS NAV)$/)
+  // GPS 1 no longer feeds: its link to the FMS is drawn dashed.
+  await expect(page.getByTestId('route-link-gps1')).toHaveClass(/dashed/)
+  // Its bus: position words Failure Warning, the status word still Normal.
+  await page.getByText('GPS 1 bus monitor').click()
+  const monitor = page.getByRole('table', { name: 'GPS 1 bus monitor' })
+  await expect(monitor.locator('tr[data-label="110"] .fmsGpsSsm')).toHaveText('FW')
+  await expect(monitor.locator('tr[data-label="273"] .fmsGpsSsm')).toHaveText('NORMAL')
 })
