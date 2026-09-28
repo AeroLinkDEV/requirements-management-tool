@@ -29,7 +29,7 @@ const FT_PER_NM_3DEG = 6076.12 * Math.tan((3 * Math.PI) / 180)
 // FERDI (the FAF, 1500).
 const FIXES = {
   DEMEL: { lat: 45.5349, lon: -73.7698 }, ALNIT: { lat: 45.6166, lon: -73.5902 },
-  ULIDA: { lat: 45.5607, lon: -73.5386 }, FERDI: { lat: 45.5200, lon: -73.6313 },
+  ULIDA: { lat: 45.56051, lon: -73.53842 }, FERDI: { lat: 45.51889, lon: -73.63027 },
 }
 
 test('the demonstration route descends to the downwind, flies it level, and meets each approach constraint without climbing', () => {

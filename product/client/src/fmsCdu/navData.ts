@@ -93,7 +93,8 @@ export const DEMO_NAV_DATA: NavData = {
     // A second BOBTU far to the south: duplicate idents exist in real data, and the FMS asks which one is meant.
     { kind: "navaid", ident: "BOBTU", type: "NDB", position: { lat: 44.2000, lon: -76.5000 }, frequency: "284", name: "KINGSTON NDB DEMO" },
     fix("MUN", 45.2150, -75.3900), fix("RDG", 45.4300, -74.9800), fix("TOLGU", 45.5020, -74.5100),
-    fix("FERDI", 45.5200, -73.6313), fix("ELIBA", 45.6500, -75.1000), fix("BOBTU", 45.2100, -74.6500),
+    // FERDI, the FAF, is on the RW24R extended centreline (057/237), 4.40 NM from the threshold.
+    fix("FERDI", 45.51889, -73.63027), fix("ELIBA", 45.6500, -75.1000), fix("BOBTU", 45.2100, -74.6500),
     fix("KILLA", 45.3900, -74.3300), fix("AGBEK", 45.4400, -73.9100), fix("YUL01", 45.5200, -73.9800),
     // Terminal fixes of the demonstration procedures.
     fix("OW501", 45.2800, -75.8200), fix("OW511", 45.3700, -75.4900), fix("OW512", 45.4100, -75.2500),
@@ -103,7 +104,7 @@ export const DEMO_NAV_DATA: NavData = {
     // Arriving from the west, the runway 24R approaches fly a downwind, base and final north of the airport, so no turn
     // is sharper than about 90 degrees and the final is straight: DEMEL joins downwind 4 NM from the RW24R threshold on
     // 327, ALNIT ends it 9 NM along 057, and ULIDA is the intermediate fix on the extended centreline, 9 NM out on 057.
-    fix("DEMEL", 45.5349, -73.7698), fix("ALNIT", 45.6166, -73.5902), fix("ULIDA", 45.5607, -73.5386),
+    fix("DEMEL", 45.5349, -73.7698), fix("ALNIT", 45.6166, -73.5902), fix("ULIDA", 45.56051, -73.53842),
   ],
   airways: [
     { ident: "V300", fixes: ["YOW", "MUN", "RDG", "TOLGU", "YUL"] },
