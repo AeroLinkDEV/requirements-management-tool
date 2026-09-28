@@ -214,3 +214,21 @@ test('a recording of panel keys and a screen check plays back as a scenario and 
   await card.getByRole('button', { name: 'Run the scenario' }).click()
   await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible({ timeout: 15_000 })
 })
+
+test('an FMS failure in flight reverts the flight modes, and Pause still works (R02)', async ({ page }) => {
+  await open(page)
+  await page.getByLabel('Simulation rate').selectOption('16')
+  await page.getByRole('button', { name: 'Fly' }).click()
+  const modes = page.getByRole('status', { name: 'Flight modes' })
+  await expect(modes).toContainText('LNAV')
+  await page.getByLabel('FMS failure').check()
+  await expect(modes).toContainText('HDG HOLD')
+  await expect(modes).toContainText('ALT HOLD')
+  await expect(page.getByText(/^Last mode change: FMS FAILURE/)).toBeVisible()
+  // Pause is a bench control: it stays usable whatever has failed in the simulated aircraft.
+  const pause = page.getByRole('button', { name: 'Pause' })
+  await expect(pause).toBeEnabled()
+  await pause.click()
+  await expect(page.getByRole('button', { name: 'Fly' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'LNAV', exact: true })).toBeDisabled()
+})
