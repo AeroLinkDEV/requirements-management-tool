@@ -1,0 +1,108 @@
+{
+  "id": "1001",
+  "project": "/Fixture",
+  "type": "Problem Report",
+  "snapshot": "2026-09-27T12:00:00Z",
+  "fields": [
+    {
+      "name": "Summary",
+      "type": "string",
+      "value": "Navigation freeze",
+      "representation": "text"
+    },
+    {
+      "name": "Description",
+      "type": "string",
+      "value": "<p>Display <strong>freezes</strong> on waypoint insertion.</p><p><a href=\"https://example.invalid/do-not-fetch\">Source context</a></p><p><img src=\"mks:///1001/Attachments?fieldid=9&amp;attachmentname=pixel.png\" alt=\"Preserved source image\" /></p>",
+      "representation": "xhtml"
+    },
+    {
+      "name": "State",
+      "type": "string",
+      "value": "Active",
+      "representation": "text"
+    },
+    {
+      "name": "Owner",
+      "type": "user",
+      "value": "Source Engineer",
+      "representation": "text"
+    },
+    {
+      "name": "Reporter",
+      "type": "user",
+      "value": "Jane Source",
+      "representation": "text"
+    },
+    {
+      "name": "Created",
+      "type": "date",
+      "value": "2024-03-01T05:34:56.123456-05:00",
+      "representation": "text"
+    },
+    {
+      "name": "Category",
+      "type": "pick",
+      "value": "CodeFunctional",
+      "representation": "text"
+    },
+    {
+      "name": "Custom Japanese",
+      "type": "string",
+      "value": "東京",
+      "representation": "text"
+    },
+    {
+      "name": "External Key",
+      "type": "string",
+      "value": "PR-ſ",
+      "representation": "text"
+    }
+  ],
+  "history": [
+    {
+      "state": "Submitted",
+      "actor": "historical.jane",
+      "at": "2024-03-01",
+      "sourceSignature": {
+        "reportedSigner": "historical.jane",
+        "meaning": "Source review only"
+      }
+    }
+  ],
+  "annotations": [
+    {
+      "kind": "source-audit",
+      "text": "Original source annotation"
+    }
+  ],
+  "relationships": [
+    {
+      "kind": "spawns",
+      "direction": "forward",
+      "target": "9999",
+      "targetRevision": "1.2"
+    }
+  ],
+  "attachments": [
+    {
+      "field": "Attachments",
+      "name": "original-evidence.txt",
+      "contentType": "text/plain",
+      "sourceAuthor": "historical.jane",
+      "sourceDate": "2024-03-01",
+      "sourceUri": null,
+      "fixtureFile": "evidence.txt"
+    },
+    {
+      "field": "Attachments",
+      "name": "pixel.png",
+      "contentType": "image/png",
+      "sourceAuthor": "historical.jane",
+      "sourceDate": "2024-03-01",
+      "sourceUri": "mks:///1001/Attachments?fieldid=9&attachmentname=pixel.png",
+      "fixtureFile": "pixel.png"
+    }
+  ],
+  "findings": []
+}

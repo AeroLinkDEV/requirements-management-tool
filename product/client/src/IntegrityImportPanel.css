@@ -1,0 +1,8 @@
+.integrityImport .prImportRows td { vertical-align: top; }
+.integrityImport .prImportRows td:nth-child(4) { overflow-wrap: anywhere; min-width: 10rem; }
+.integrityImport .prImportRows td:last-child { min-width: 17rem; }
+.integrityImport .richImageFigure img { max-height: 180px; object-fit: contain; }
+.integrityImport details > summary { cursor: pointer; color: #23657a; }
+.integrityImport li { overflow-wrap: anywhere; margin-bottom: 6px; }
+.integrityImport [role="alert"] { color: #a33648; }
+.integrityImport > label { max-width: 24rem; margin: 12px 0; }

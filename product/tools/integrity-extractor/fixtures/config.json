@@ -1,0 +1,14 @@
+{
+  "sourceInstanceId": "9b3b7580-09f4-42ed-aa1b-a18091a45fe1",
+  "sourceName": "Synthetic Integrity fixture",
+  "serverVersion": "fixture-no-server",
+  "query": "fixture inventory: 1001,1002",
+  "capturedAt": "2026-09-27T12:00:00Z",
+  "projects": ["/Fixture"],
+  "types": ["Problem Report"],
+  "itemIds": ["1001", "1002"],
+  "inventoryAcceptedBy": "synthetic-fixture-author",
+  "freezeReference": "immutable checked-in fixture; no Integrity server contacted",
+  "fixtureDirectory": "source",
+  "qualification": null
+}

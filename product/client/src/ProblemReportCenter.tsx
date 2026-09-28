@@ -19,6 +19,7 @@ import { useLocalDraft } from "./autosave";
 import "./ProblemReportCenter.css";
 import type { ProjectFeature } from "./projectFeatures";
 import ProblemReportImportPanel from "./ProblemReportImportPanel";
+import IntegrityImportPanel from "./IntegrityImportPanel";
 
 type Link = {
   artifactType: string;
@@ -419,6 +420,7 @@ export default function ProblemReportCenter({
     categoryFamily: "",
   });
   const [showImport, setShowImport] = useState(false);
+  const [showIntegrityImport, setShowIntegrityImport] = useState(false);
   const [showCreate, setShowCreate] = useState(false),
     [showEdit, setShowEdit] = useState(false),
     [tab, setTab] = useState<"record" | "history" | "code">("record"),
@@ -1059,6 +1061,16 @@ export default function ProblemReportCenter({
           <button
             type="button"
             className="secondaryAction"
+            onClick={() => {
+              setShowIntegrityImport((value) => !value);
+              setShowImport(false);
+            }}
+          >
+            Import from Integrity…
+          </button>
+          <button
+            type="button"
+            className="secondaryAction"
             onClick={() => setShowImport((value) => !value)}
           >
             Import…
@@ -1074,6 +1086,15 @@ export default function ProblemReportCenter({
           projectId={projectId}
           releases={releases}
           onClose={() => setShowImport(false)}
+          onImported={() => void refresh()}
+        />
+      )}
+      {showIntegrityImport && (
+        <IntegrityImportPanel
+          api={api}
+          projectId={projectId}
+          releases={releases}
+          onClose={() => setShowIntegrityImport(false)}
           onImported={() => void refresh()}
         />
       )}

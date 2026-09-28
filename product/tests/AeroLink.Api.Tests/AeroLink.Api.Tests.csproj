@@ -30,6 +30,7 @@
   <ItemGroup>
     <Compile Include="..\AeroLink.Infrastructure.Tests\TestSupport\DisposablePostgresFactAttribute.cs"
              Link="TestSupport\DisposablePostgresFactAttribute.cs" />
+    <Compile Include="..\AeroLink.Infrastructure.Tests\TestSupport\IntegrityFixturePackage.cs" Link="TestSupport\IntegrityFixturePackage.cs" />
     <Compile Include="..\AeroLink.Infrastructure.Tests\TestSupport\DisposablePostgresDatabase.cs"
              Link="TestSupport\DisposablePostgresDatabase.cs" />
     <Compile Include="..\AeroLink.Infrastructure.Tests\TestSupport\PostgresQualificationCategoryTests.cs"

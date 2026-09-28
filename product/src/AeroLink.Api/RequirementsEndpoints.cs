@@ -971,10 +971,11 @@ public static class RequirementsEndpoints
             }
         }).DisableAntiforgery();
 
-        app.MapGet("/api/content/images/{id:guid}",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
+        app.MapGet("/api/content/images/{id:guid}",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,IdentityService identity,CancellationToken ct)=>
         {
-            var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id&&(x.ArtifactType=="InlineImage"||x.ArtifactType=="InlineImageDraft"),ct);
+            var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id&&(x.ArtifactType=="InlineImage"||x.ArtifactType=="InlineImageDraft"||x.ArtifactType==IntegrityImportService.ImageArtifact),ct);
             if(item is null)return Results.NotFound();
+            if(item.ArtifactType==IntegrityImportService.ImageArtifact&&!await IntegrityImportEndpoints.AuthorizedAsync(http,db,identity,item.ProjectId,ct))return Results.Forbid();
             // Recovery bytes are a private browser draft until the owner claims them. Project membership alone
             // is enough for a claimed controlled image, never for somebody else's still-unclaimed draft.
             if(item.ArtifactType=="InlineImageDraft"&&!string.Equals(item.UploadedBy,http.UserAccount().UserName,StringComparison.OrdinalIgnoreCase))return Results.Forbid();

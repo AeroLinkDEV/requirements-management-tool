@@ -1,0 +1,1 @@
+Original Integrity fixture evidence: preserve these bytes exactly.

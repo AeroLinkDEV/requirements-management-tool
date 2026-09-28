@@ -14,6 +14,7 @@ For project/product-level orientation, use the repository-root [`PROJECT_STATE.m
 - [`BUILD_SCOPED_WORKSPACES.md`](BUILD_SCOPED_WORKSPACES.md) — build-scoped workspace behavior.
 - [`SCALE_FOUNDATION.md`](SCALE_FOUNDATION.md) — scale/performance foundation and evidence boundaries.
 - [`TEST_RISK_LAYERS.md`](TEST_RISK_LAYERS.md) — where a test belongs, the authoring gate for new tests, and the evidence needed to move or delete one.
+- [`INTEGRITY_IMPORT.md`](INTEGRITY_IMPORT.md) — Integrity source extraction, package review, custody and qualification limits.
 
 Other files in this directory document focused implementation/qualification surfaces. They may describe a specific subsystem or measured checkpoint; the current code and accepted decisions remain authoritative when a historical implementation note has been superseded.
 

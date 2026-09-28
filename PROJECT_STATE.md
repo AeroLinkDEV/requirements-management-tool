@@ -336,6 +336,22 @@ Problem Reports can be imported from another tool's CSV/XLSX export (DEC-139): e
 signed; source keys, reporters, dates and statuses stay source facts, source-closed reports arrive read-only as Closed in
 source, and an already-imported key is skipped on re-import.
 
+Integrity source packages have a separate one-time import path (DEC-145,
+[#1186](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1186)).
+The Java extractor seals a bounded source package; AeroLink verifies its member hashes, previews mapped
+Problem Reports and date meanings, and signs the exact reviewed Create/Skip outcomes. Reports, immutable
+source identities, reconciliation, signature and staged-file references publish in one transaction. The
+original package remains retrievable only to Configuration Manager, Program Manager and Administrator
+roles with project access and Problem Reports enabled. Source history, signatures and relationships remain
+source evidence; they grant no native approval, closure, effectivity or relationship authority.
+
+Fixture execution is supported in disposable hosts. **Live Integrity qualification remains pending**:
+the adapter's SDK response profile, visibility, full history, attachment coverage and source-freeze checks
+must be demonstrated on the customer's server. Unproven packages are refused. Historical attachment
+retrieval is not implemented; a live capture cannot be marked qualified unless the administrator's
+inventory and qualification evidence establish that no historical attachment bytes are missing.
+See [the Integrity import contract and operator guide](product/docs/INTEGRITY_IMPORT.md).
+
 Upstream change requests and exact Case origins provide inherited Problem Report context for downstream authoring. Authors explicitly select direct links under the existing project/build and review-version rules; source approval does not automatically copy those links into a new verification assessment. Refreshing source context does not change independently accepted links or frozen review history. Software Procedure packages retain their exact Case origin when secondary Problem Reports are explicitly linked.
 
 ## Baselines, builds, and release control

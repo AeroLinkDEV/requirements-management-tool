@@ -1,0 +1,11 @@
+{
+  "id":"1002","project":"/Fixture","type":"Problem Report","snapshot":"2026-09-27T12:00:00Z",
+  "fields":[
+    {"name":"Summary","type":"string","value":"Closed source report","representation":"text"},
+    {"name":"Description","type":"string","value":"Fixed in the old tool; this is no AeroLink approval.","representation":"text"},
+    {"name":"State","type":"string","value":"Closed","representation":"text"},
+    {"name":"Reporter","type":"user","value":"Jane Source","representation":"text"},
+    {"name":"Created","type":"date","value":"2023-01-01","representation":"text"},
+    {"name":"Category","type":"pick","value":"CodeFunctional","representation":"text"}
+  ],"history":[],"annotations":[],"relationships":[],"attachments":[],"findings":[]
+}

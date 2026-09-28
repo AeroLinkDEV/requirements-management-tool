@@ -2726,3 +2726,25 @@ choices are created as focused issues only when their trigger and acceptance bou
   - execution status in place of coverage;
   - the Digital Thread;
   - tracing after Requirements is switched on.
+
+### DEC-145 - Integrity Package Acceptance and Preserved Source Access
+
+- **Date:** 2026-09-27
+- **Status:** Accepted owner decisions for the bounded first slice of [#1186](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1186).
+- **Authority:** In the Codex conversation the owner asked to build both pieces, chose "Yes — import exactly what I reviewed",
+  "Preserve source meaning and raw values", and "Configuration Manager, Program Manager and Administrator only".
+  With no server available, he authorized fixtures and explicitly required live validation to remain pending.
+  The implementation scope is recorded in [the issue comment](https://github.com/AeroLinkDEV/requirements-management-tool/issues/1186#issuecomment-5860947794).
+- **Acceptance:** The importer's signature covers the source package root, mapping, destination and exact reviewed
+  outcomes, including skips, date interpretations and findings. A changed result requires another preview.
+- **Dates:** Retain original source representations and meaning durably. Date-only and unknown-zone values
+  do not become instants. Preserve unreadable or finer-than-microsecond values with a visible finding;
+  never invent a zone or silently truncate while claiming exactness.
+- **Disclosure:** Preserved source history, custom fields, attachments and package bytes require project
+  access, the Problem Reports feature, and Configuration Manager, Program Manager or Administrator authority.
+  Package-backed inline images follow this same rule.
+- **Scope retained:** Native Problem Reports only. Source approvals, signatures, history, directed relations
+  and exact-revision references stay source facts. No native verification execution, synchronization,
+  write-back, historical correction or accepted data loss is authorized by this decision.
+- **Qualification:** Fixture evidence is not customer-server qualification. Real migration still requires
+  an administrator-validated inventory, a demonstrated extraction profile, source consistency and reconciliation.

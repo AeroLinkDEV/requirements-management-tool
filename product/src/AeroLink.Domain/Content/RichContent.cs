@@ -68,6 +68,8 @@ public sealed record RichBlock(
 /// </summary>
 public static class RichContent
 {
+    /// <summary>Accept typed conversion output through the same limits as authored content.</summary>
+    public static string FromBlocks(IReadOnlyList<RichBlock> blocks) => Canonicalize(Write(blocks));
     public const string Empty = "{\"blocks\":[]}";
 
     /// <summary>An authored artifact's content is capped so one record cannot exhaust a page or a request.</summary>

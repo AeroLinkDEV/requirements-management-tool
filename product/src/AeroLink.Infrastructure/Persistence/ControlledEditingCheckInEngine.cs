@@ -1049,7 +1049,8 @@ public sealed class ProblemReportControlledEditingAdapter(AeroLinkDbContext db) 
         {
             var validImages = await db.ControlledAttachments.AsNoTracking()
                 .Where(image => referencedImages.Contains(image.Id) && image.ProjectId == item.ProjectId
-                    && image.ArtifactType == "InlineImage" && image.State != ControlledAttachmentState.Withdrawn)
+                    && (image.ArtifactType == "InlineImage" || (image.ArtifactType == IntegrityImportService.ImageArtifact && image.ArtifactId == item.Id))
+                    && image.State != ControlledAttachmentState.Withdrawn)
                 .Select(image => image.Id).ToListAsync(ct);
             var missing = referencedImages.Except(validImages).ToArray();
             if (missing.Length > 0)
