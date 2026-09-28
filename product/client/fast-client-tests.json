@@ -27,6 +27,7 @@
     "fms-predictions.spec.ts",
     "fms-lab-controls.spec.ts",
     "fms-modes.spec.ts",
+    "fms-vnav-phase.spec.ts",
     "fms-dataset.spec.ts",
     "fms-efis.spec.ts"
   ],
