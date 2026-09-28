@@ -123,7 +123,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     rollCommand: fail(), distanceToGo: fail(), toWaypoint: fail(), eta: fail(), targetSpeed: fail(), targetAltitude: fail(),
     lateralMode: sim.lateralMode === "HDG" ? (sim.headingHeld ? "HDG HOLD" : "HDG SEL") : g.mode, lateralArmed: [],
     verticalMode: sim.verticalMode, verticalArmed: [], approach: { type: null, state: "OFF" },
-    lateralFullScaleNm: LATERAL_FULL_SCALE[phase], verticalFullScaleFt: 400, phase, rnp: fms.requiredRnp, anp: fms.navState.anp,
+    lateralFullScaleNm: LATERAL_FULL_SCALE[phase], verticalFullScaleFt: 400, phase, rnp: fms.navPerformance.rnp, anp: fms.navPerformance.anp,
     navMode: fms.navState.mode, activeRoute: [], modifiedRoute: null, offsetTrack: null, holdFix: null, topOfDescent: null, endOfDescent: null,
   };
   // A failed FMS publishes failure warnings; the displays remove its data and flag it. The modes remain: they are the

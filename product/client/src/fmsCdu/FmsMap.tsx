@@ -1,5 +1,5 @@
 import { racetrackOutline, sarTrack, type FlightSimulator } from "./flight";
-import { arcSweep, bearingDeg, distanceNm, offset, type LatLon, type Route } from "./fmsModel";
+import { arcSweep, bearingDeg, distanceNm, longitudeDelta, offset, type LatLon, type Route } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
 import "./FmsMap.css";
 
@@ -17,7 +17,7 @@ export default function FmsMap({ fms, sim, range }: Props) {
   const centre = fms.position;
   const scale = R / range;
   const project = (p: LatLon) => ({
-    x: (p.lon - centre.lon) * 60 * Math.cos((centre.lat * Math.PI) / 180) * scale,
+    x: longitudeDelta(centre.lon, p.lon) * 60 * Math.cos((centre.lat * Math.PI) / 180) * scale,
     y: -(p.lat - centre.lat) * 60 * scale,
   });
   const path = (points: LatLon[]) => points.map((p, i) => { const q = project(p); return `${i ? "L" : "M"}${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join("");

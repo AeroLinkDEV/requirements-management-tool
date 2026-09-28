@@ -1,7 +1,7 @@
 import { alert } from "./alerts";
 import { formatConstraint, parseAltitude, parseConstraint } from "./vnav";
 import {
-  WAYPOINT, boxes, caption, conditionalLabel, courseDeg, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, offset, pad, prompt, simulated,
+  WAYPOINT, boxes, caption, conditionalLabel, courseDeg, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, offset, pad, parsePosition, prompt, simulated,
   small, three, title, type CorePageId, type Leg, type LskResult, type Page, type PageId,
 } from "./fmsModel";
 import type { Line } from "./screen";
@@ -246,14 +246,22 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       caption(" GPS POS"),
       { left: fms.navState.mode !== "GPS" ? dashes(15) : medium(formatPosition(fms.position)) },
       caption(" UTC", "SET POS "),
-      { left: medium(hhmm(fms.now)), right: boxes(15) },
+      // The crew's last SET POS entry, or boxes until there is one (R26).
+      { left: medium(hhmm(fms.now)), right: fms.positionReferenceEntry ? medium(formatPosition(fms.positionReferenceEntry.position)) : boxes(15) },
       undefined, undefined, undefined, undefined,
       { left: dashes(24) },
       { left: back("INDEX"), right: prompt("RTE>") },
     ],
     lsk: (fms, side, row, scratch) => {
       if (row === 6) { fms.open(side === "L" ? "INIT_REF" : "RTE"); return; }
-      if (side === "R" && row === 3) return /^[NS]\d{4}\.\d[EW]\d{5}\.\d$/.test(scratch) ? void fms.setScratch("") : "invalid";
+      // SET POS: a real position-reference initialisation, or a refusal that changes nothing (R26).
+      if (side === "R" && row === 3) {
+        const position = parsePosition(scratch);
+        if (!position) return "invalid";
+        fms.initializePosition(position);
+        fms.setScratch("");
+        return;
+      }
       if (side === "L" && row === 1 && !scratch) fms.setScratch(formatPosition(fms.position));
       if (side === "L" && row === 2 && !scratch && fms.navState.mode === "GPS") fms.setScratch(formatPosition(fms.position));
     },
@@ -424,9 +432,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const nav = fms.navState;
       const gpsLost = nav.mode !== "GPS";
       if (index === 0) {
-        // RNP: the crew's entry or the default for the phase; ANP from the navigation sources (navigation.ts).
-        const rnp = fms.hasCondition("npa") ? 0.3 : fms.requiredRnp;
-        const anp = fms.hasCondition("rnpExceeded") ? Math.max(1.35, rnp + 0.35) : nav.anp;
+        // RNP and ANP as every page, lamp and alert reads them; a bench-forced value is labelled TEST (R11).
+        const { rnp, anp, forced } = fms.navPerformance;
         const toDistance = toLeg?.distance ?? 0;
         return [
           title("PROGRESS", "1/4", "ACT"),
@@ -438,7 +445,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           { left: medium(` ${three(fms.wind.direction)}°/ ${fms.wind.speed}KT`), right: medium(`${three(fms.track)}°/${Math.round(fms.groundSpeed)}KT`) },
           caption(undefined, "TKE/XTK "),
           { right: medium(`${fms.trackError < 0 ? "L" : "R"}${three(Math.abs(fms.trackError))}°/${fms.crossTrack < 0 ? "L" : "R"}${fixed(Math.abs(fms.crossTrack), 2)}NM`) },
-          caption(`RNP/ANP ${nav.rnpManual === null ? fms.flightPhase : "MANUAL"}`),
+          caption(`RNP/ANP ${forced ? "TEST" : nav.rnpManual === null ? fms.flightPhase : "MANUAL"}`),
           { left: medium(`${fixed(rnp, 2)}/${fixed(anp, 2)}NM`, anp > rnp ? "amber" : "white") },
           caption("NAV MODE"),
           { left: { text: nav.mode, color: nav.mode === "DR" ? "amber" : "cyan" }, right: prompt("NAV STATUS>") },

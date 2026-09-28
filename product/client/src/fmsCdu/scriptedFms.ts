@@ -4,7 +4,8 @@ import type { ConditionId } from "./conditions";
 import { DATALINK_PAGES, DEMO_SMS, DEMO_UPLINKS } from "./datalinkPages";
 import { CORE_PAGES } from "./fmsPages";
 import {
-  START_POSITION, WAYPOINT, arcLength, bearingIntersection, courseDeg, distanceNm, fromLocal, toLocal, holdEntry, maxSarGroundSpeed, offset,
+  START_POSITION, WAYPOINT, arcLength, bearingDeg, bearingIntersection, courseDeg, distanceNm, fromLocal, toLocal, holdEntry, isOutstanding,
+  maxSarGroundSpeed, offset,
   type Hold, type HoldEntry, type LatLon, type Leg, type LskResult, type Message, type Offset, type Page, type PageId, type Route, type Sar,
   type SarPattern, type Uplink,
 } from "./fmsModel";
@@ -77,7 +78,14 @@ export class ScriptedFms implements CduBackend {
   private index = 0;
   private scratch = "";
   private message: Message | null = null;
-  private unacknowledged = false;
+  /**
+   * The latest alert the crew has not acknowledged, which lights MSG. Only CLR on that alert acknowledges it. If
+   * something else takes it off the scratchpad (typing, a restart after FMS failure), CLR on an empty scratchpad, or
+   * the restart itself, shows it again, so the lamp always has an acknowledgement path (R13).
+   */
+  private pendingAlert: Message | null = null;
+  /** The crew's last SET POS entry on POS INIT, and when it was made (R26). */
+  private positionReference: { position: LatLon; at: Date } | null = null;
   private recall: Message[] = [];
   private active: Route = demoRoute();
   private modified: Route | null = null;
@@ -214,7 +222,7 @@ export class ScriptedFms implements CduBackend {
     // A failed FMS drives nothing but its FAIL annunciator.
     if (this.injected.has("fmsFail")) return new Set<Lamp>(["FAIL"]);
     const lamps = new Set<Lamp>();
-    if (this.unacknowledged) lamps.add("MSG");
+    if (this.pendingAlert) lamps.add("MSG");
     if (this.modified) lamps.add("EXEC");
     const lampFor: Partial<Record<ConditionId, Lamp>> = {
       offset: "OFST", independent: "IND", gsmCall: "GSM", sms: "SMS",
@@ -259,7 +267,7 @@ export class ScriptedFms implements CduBackend {
       case "offset": return this.active.offset !== undefined;
       case "gsmCall": return this.call.state !== "none";
       case "sms": return this.messages.some(message => !message.read);
-      case "atcUplink": return this.uplinkList.some(uplink => uplink.response === "OPEN");
+      case "atcUplink": return this.uplinkList.some(isOutstanding);
       default: return this.injected.has(id);
     }
   }
@@ -279,7 +287,7 @@ export class ScriptedFms implements CduBackend {
           const text = DEMO_UPLINKS[this.uplinksSent % DEMO_UPLINKS.length];
           this.uplinksSent += 1;
           this.uplinkList.unshift({ id: this.uplinksSent, at: this.now, text, response: "OPEN" });
-        } else this.uplinkList = this.uplinkList.filter(uplink => uplink.response !== "OPEN");
+        } else this.uplinkList = this.uplinkList.filter(uplink => !isOutstanding(uplink));
         break;
       default:
         if (on) this.injected.add(id); else this.injected.delete(id);
@@ -288,11 +296,16 @@ export class ScriptedFms implements CduBackend {
         }
         // Leaving independent operation resynchronises the other FMS to this one.
         if (!on && id === "independent") this.crossRoute = structuredClone(this.active);
-        if (on && id === "rnpExceeded") this.alert(alert("CHECK ANP"));
+        // Forcing RNP exceeded raises CHECK ANP at once, and that counts as this episode's alert (R11).
+        if (on && id === "rnpExceeded") {
+          this.alert(alert("CHECK ANP"));
+          this.nav = { ...this.nav, unableSince: this.now.getTime(), unableAlerted: true };
+        }
         if (id === "gpsLost" || id === "gpsIntegrity" || id === "dmeOutage") this.updateNavigation(0);
         if (on && id === "independent") this.alert(alert("INDEPENDENT OP"));
         // The FMS restarts on its IDENT page when it comes back.
-        if (!on && id === "fmsFail") { this.open("IDENT"); this.message = null; }
+        // An alert still unacknowledged when it fails is shown again, so MSG keeps its acknowledgement path (R13).
+        if (!on && id === "fmsFail") { this.open("IDENT"); this.message = this.pendingAlert; }
     }
     this.emit();
   }
@@ -452,10 +465,12 @@ export class ScriptedFms implements CduBackend {
     if (selection.mode === "GPS" && !inputs.gpsIntegrity && !this.nav.integrityAlerted) { this.nav.integrityAlerted = true; this.alert(alert("GPS POS UNCERTAIN")); }
     if (inputs.gpsIntegrity) this.nav.integrityAlerted = false;
 
-    // ANP above RNP for longer than the time to alert of the phase: CHECK ANP, once per episode.
+    // ANP above RNP for longer than the time to alert of the phase: CHECK ANP, once per episode. It reads the same
+    // effective values as the pages and the lamp (R11).
     const now = this.now.getTime();
     const { alertSeconds } = RNP_DEFAULTS[this.flightPhase];
-    if (this.nav.anp > this.requiredRnp) {
+    const performance = this.navPerformance;
+    if (performance.anp > performance.rnp) {
       this.nav.unableSince ??= now;
       if (!this.nav.unableAlerted && now - this.nav.unableSince >= alertSeconds * 1000) { this.nav.unableAlerted = true; this.alert(alert("CHECK ANP")); }
     } else { this.nav.unableSince = null; this.nav.unableAlerted = false; }
@@ -796,8 +811,42 @@ export class ScriptedFms implements CduBackend {
   get truePosition() { return this.truth; }
   get inhibitedNavaids() { return this.inhibited; }
   get gpsNavSelected() { return this.gpsSelected; }
-  /** Whether ANP has exceeded RNP (the RNP annunciator), computed or injected. */
-  get rnpExceeded() { return this.injected.has("rnpExceeded") || this.nav.anp > this.requiredRnp; }
+  /**
+   * RNP and ANP as every consumer reads them: PROGRESS, NAV STATUS, the EFIS, the RNP annunciator and CHECK ANP (R11).
+   * The sensor layer is what navigation computes (the phase or crew RNP, the sources' ANP). A bench condition is a
+   * second, named layer on top: forced NPA sets the approach RNP of 0.30 NM, forced RNP exceeded sets an ANP above
+   * it. `forced` is true when either applies, and the pages label the value TEST so it is not mistaken for a sensor.
+   */
+  get navPerformance() {
+    const forcedNpa = this.injected.has("npa"), forcedAnp = this.injected.has("rnpExceeded");
+    const rnp = forcedNpa ? RNP_DEFAULTS.APPROACH.rnp : this.requiredRnp;
+    const anp = forcedAnp ? Math.max(1.35, rnp + 0.35) : this.nav.anp;
+    return {
+      rnp, anp, sensorRnp: this.requiredRnp, sensorAnp: this.nav.anp, forced: forcedNpa || forcedAnp,
+      rnpSource: forcedNpa ? "TEST" as const : this.nav.rnpManual === null ? "PHASE" as const : "MANUAL" as const,
+    };
+  }
+
+  /** Whether ANP has exceeded RNP (the RNP annunciator), on the effective values every page shows. */
+  get rnpExceeded() { const { rnp, anp } = this.navPerformance; return anp > rnp; }
+
+  /** The crew's SET POS reference, or null before one is entered (R26). */
+  get positionReferenceEntry() { return this.positionReference; }
+
+  /**
+   * SET POS on POS INIT (R26). The entry is recorded as the position reference. In dead reckoning, with no sensor to
+   * correct it, it also resets the position estimate to the entry, from where inertial drift continues. It never moves
+   * the aircraft itself. With GPS or DME navigating, the sensors keep setting the position.
+   */
+  initializePosition(position: LatLon) {
+    this.positionReference = { position, at: this.now };
+    if (this.nav.mode === "DR") {
+      const nm = distanceNm(this.truth, position), bearing = bearingDeg(this.truth, position);
+      this.error = { x: nm * Math.sin((bearing * Math.PI) / 180), y: nm * Math.cos((bearing * Math.PI) / 180) };
+      this.here = this.withError(this.truth);
+    }
+    this.emit();
+  }
 
   /** A manual RNP (PROGRESS), or null to return to the default for the phase. */
   setRnp(rnp: number | null) {
@@ -1123,7 +1172,7 @@ export class ScriptedFms implements CduBackend {
     const message = { text: text.toUpperCase().slice(0, COLUMNS), alert: true };
     this.recall.unshift(message);
     this.message = message;
-    this.unacknowledged = true;
+    this.pendingAlert = message;
   }
 
   addMark() {
@@ -1346,10 +1395,12 @@ export class ScriptedFms implements CduBackend {
     if (this.message) {
       // CLR clears alert and advisory messages from the scratchpad, which also acknowledges the alert.
       this.message = null;
-      this.unacknowledged = false;
+      this.pendingAlert = null;
       return;
     }
     if (this.scratch === "DELETE") { this.scratch = ""; return; }
+    // An unacknowledged alert that typing took off the scratchpad comes back on an empty scratchpad (R13).
+    if (!this.scratch && this.pendingAlert) { this.message = this.pendingAlert; return; }
     if (!this.scratch) { this.scratch = "DELETE"; return; }
     this.scratch = held ? "" : this.scratch.slice(0, -1);
   }

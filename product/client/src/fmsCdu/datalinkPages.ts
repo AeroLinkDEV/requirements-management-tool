@@ -1,4 +1,4 @@
-import { caption, dashes, hhmm, medium, prompt, simulated, small, title, wrap, type DatalinkPageId, type Leg, type Page } from "./fmsModel";
+import { caption, dashes, hhmm, isOutstanding, medium, prompt, simulated, small, title, wrap, type DatalinkPageId, type Leg, type Page } from "./fmsModel";
 import type { Line } from "./screen";
 
 /**
@@ -43,7 +43,7 @@ export const DATALINK_PAGES: Record<DatalinkPageId, Page> = {
         lines[12] = { center: simulated("SIMULATED DATALINK").center };
         return lines;
       }
-      const current = uplinks.find(uplink => uplink.response === "OPEN" || uplink.response === "STANDBY");
+      const current = uplinks.find(isOutstanding);
       const lines: (Line | undefined)[] = [title("ATC UPLINK", "1/2")];
       if (!current) {
         lines[2] = { center: medium("NO OPEN UPLINK") };
@@ -59,7 +59,7 @@ export const DATALINK_PAGES: Record<DatalinkPageId, Page> = {
     },
     lsk: (fms, side, row, _scratch, index) => {
       if (index !== 0) return;
-      const current = fms.uplinks.find(uplink => uplink.response === "OPEN" || uplink.response === "STANDBY");
+      const current = fms.uplinks.find(isOutstanding);
       if (!current) return;
       if (side === "L" && row === 5) current.response = "STANDBY";
       if (side === "L" && row === 6) current.response = "UNABLE";
