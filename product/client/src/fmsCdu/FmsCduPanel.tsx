@@ -75,7 +75,20 @@ export default function FmsCduPanel({ backend, variant, layout, onKey, lighting 
       if (!heldFired.current) fire(keyId);
     }
   };
-  useEffect(() => () => { if (holdTimer.current !== null) window.clearTimeout(holdTimer.current); }, []);
+  /**
+   * Abandons every press without firing anything: the key-up may never reach the panel once focus, pointer capture or
+   * the page itself has gone, and a CLR hold timer left running would clear the scratchpad after the operator moved
+   * away (R18).
+   */
+  const cancel = useCallback(() => {
+    setPressed(new Set());
+    if (holdTimer.current !== null) { window.clearTimeout(holdTimer.current); holdTimer.current = null; }
+  }, []);
+  useEffect(() => {
+    const hidden = () => { if (document.visibilityState === "hidden") cancel(); };
+    document.addEventListener("visibilitychange", hidden);
+    return () => { document.removeEventListener("visibilitychange", hidden); cancel(); };
+  }, [cancel, backend]);
 
   const keyForFunction = useMemo(() => {
     const map = new Map<CduFunction, string>();
@@ -118,7 +131,7 @@ export default function FmsCduPanel({ backend, variant, layout, onKey, lighting 
       aria-label={`CMA-9000 control display unit, hardware variation ${variant.id}`}
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
-      onBlur={() => setPressed(new Set())}
+      onBlur={cancel}
     >
       <img className="fmsCduImage" src={`${ASSETS}panel.webp`} alt="" draggable={false} />
 
@@ -166,7 +179,7 @@ export default function FmsCduPanel({ backend, variant, layout, onKey, lighting 
             }}
             onPointerDown={event => { event.preventDefault(); event.currentTarget.parentElement?.focus(); event.currentTarget.setPointerCapture(event.pointerId); down(key.id); }}
             onPointerUp={() => up(key.id)}
-            onPointerCancel={() => up(key.id)}
+            onPointerCancel={cancel}
           >
             {key.kind === "lsk" ? <i className={`lskTick ${key.id.endsWith("L") ? "l" : "r"}`} /> : null}
             {legend.length > 0 && (

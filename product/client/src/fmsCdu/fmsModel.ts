@@ -52,16 +52,22 @@ export function offset(from: LatLon, bearing: number, nm: number): LatLon {
   const d = nm / 3440.065, b = toRad(bearing), lat1 = toRad(from.lat), lon1 = toRad(from.lon);
   const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(b));
   const lon2 = lon1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
-  return { lat: toDeg(lat2), lon: toDeg(lon2) };
+  return { lat: toDeg(lat2), lon: wrapLongitude(toDeg(lon2)) };
 }
+
+/** A longitude brought into -180..180, so positions either side of the date line compare correctly (R17). */
+export const wrapLongitude = (lon: number) => ((((lon + 180) % 360) + 360) % 360) - 180;
+
+/** The short way from one longitude to another, -180..180 degrees: east positive, across the date line if nearer. */
+export const longitudeDelta = (from: number, to: number) => wrapLongitude(to - from);
 
 /** East/north nautical miles from an origin; accurate enough over the tens of miles the simulation works in. */
 export function toLocal(origin: LatLon, p: LatLon) {
-  return { x: (p.lon - origin.lon) * 60 * Math.cos(toRad(origin.lat)), y: (p.lat - origin.lat) * 60 };
+  return { x: longitudeDelta(origin.lon, p.lon) * 60 * Math.cos(toRad(origin.lat)), y: (p.lat - origin.lat) * 60 };
 }
 
 export function fromLocal(origin: LatLon, { x, y }: { x: number; y: number }): LatLon {
-  return { lat: origin.lat + y / 60, lon: origin.lon + x / (60 * Math.cos(toRad(origin.lat))) };
+  return { lat: origin.lat + y / 60, lon: wrapLongitude(origin.lon + x / (60 * Math.cos(toRad(origin.lat)))) };
 }
 
 /** Where two true bearings from two places cross, ahead of both; null if they are parallel or cross behind. */
@@ -73,6 +79,20 @@ export function bearingIntersection(p1: LatLon, b1: number, p2: LatLon, b2: numb
   const t1 = (q.x * d2.y - q.y * d2.x) / cross, t2 = (q.x * d1.y - q.y * d1.x) / cross;
   if (t1 <= 0 || t2 <= 0) return null;
   return fromLocal(p1, { x: d1.x * t1, y: d1.y * t1 });
+}
+
+/**
+ * A position entry in the form formatPosition shows ("N4000.0W07000.0": degrees and minutes to a tenth), or null when
+ * it is not that form or its minutes, latitude or longitude are out of range (R26).
+ */
+export function parsePosition(text: string): LatLon | null {
+  const m = /^([NS])(\d{2})(\d{2}\.\d)([EW])(\d{3})(\d{2}\.\d)$/.exec(text);
+  if (!m) return null;
+  const [latDeg, latMin, lonDeg, lonMin] = [m[2], m[3], m[5], m[6]].map(Number);
+  if (latMin >= 60 || lonMin >= 60) return null;
+  const lat = latDeg + latMin / 60, lon = lonDeg + lonMin / 60;
+  if (lat > 90 || lon > 180) return null;
+  return { lat: m[1] === "S" ? -lat : lat, lon: m[4] === "W" ? -lon : lon };
 }
 
 export function formatPosition(p: LatLon) {
@@ -160,6 +180,12 @@ export function maxSarGroundSpeed(sar: Sar, pattern: SarPattern) {
 export type Message = { text: string; alert: boolean };
 
 export type Uplink = { id: number; at: Date; text: string; response: "OPEN" | "WILCO" | "UNABLE" | "STANDBY" };
+
+/**
+ * Whether an uplink still needs a crew response. STANDBY acknowledges without answering, so the uplink stays
+ * outstanding (it keeps the ATC lamp lit and can still be answered) until WILCO or UNABLE (R14).
+ */
+export const isOutstanding = (uplink: Uplink) => uplink.response === "OPEN" || uplink.response === "STANDBY";
 
 // ---------------------------------------------------------------------------------------------- pages
 
