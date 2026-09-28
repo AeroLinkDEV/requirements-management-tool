@@ -71,8 +71,13 @@ export type FasDataBlock = {
 };
 /** What the FMS selects: the approach identifier it chose, and the FAS block it sent (null until it has). */
 export type ApproachSelection = { id: string; fas: FasDataBlock | null; parked?: boolean };
-/** Label 156, approach selection status. */
-export type ApproachStatus = { selected: boolean; available: boolean; crcInvalid: boolean; mismatch: boolean; incomplete: boolean; parked: boolean };
+/** Label 156, approach selection status; armed: valid and selected, but outside the approach region (SBAS NAV). */
+export type ApproachStatus = { armed: boolean; selected: boolean; available: boolean; crcInvalid: boolean; mismatch: boolean; incomplete: boolean; parked: boolean };
+/** The deviation scaling alongside 116/117 (a model output in engineering units, not an ARINC label). */
+export type DeviationScale = { lateralFullScaleFt: number; lateralAngleDeg: number; verticalFullScaleFt: number; verticalAngleDeg: number };
+/** The status words a typed override can patch, field by field. */
+export type StatusLabel = "273" | "355" | "156" | "305";
+export type StatusPatch = { "273": Partial<GpsStatus>; "355": Partial<Omit<FaultSummary, "buses">> & { buses?: Partial<FaultSummary["buses"]> }; "156": Partial<ApproachStatus>; "305": Partial<SbasStatus> };
 export type ApproachLevel = "LPV" | "LNAV/VNAV" | "LNAV" | "NONE";
 /** Label 305, SBAS PA mode and service provider; the approach level it can support is an assumption of this model. */
 export type SbasStatus = { paActive: boolean; provider: string | null; level: ApproachLevel };
@@ -91,6 +96,7 @@ type NumberLabel = "110" | "120" | "111" | "121" | "076" | "370" | "103" | "112"
 export type GpsBus = { [L in NumberLabel]: Word<number> } & {
   "156": Word<ApproachStatus>;
   "305": Word<SbasStatus>;
+  scale: Word<DeviationScale>;
   "150": Word<{ hours: number; minutes: number; seconds: number }>;
   "260": Word<{ day: number; month: number; year: number }>;
   "273": Word<GpsStatus>;
@@ -124,6 +130,11 @@ export type GpsOptions = {
   /** SBAS on (the unit's normal state), and how long a geostationary satellite must be tracked before its corrections are in, s: a laboratory parameter. */
   sbas?: boolean;
   sbasAcquireSeconds?: number;
+  /**
+   * SBAS PA is entered only within this distance of the landing threshold, NM; outside it the selected approach is armed
+   * in SBAS NAV. A laboratory value after the 30 NM terminal area convention (AC 20-138D), not a CMA-5024 figure.
+   */
+  approachRegionNm?: number;
 };
 
 const SELF_TEST_S = 10;
@@ -145,6 +156,34 @@ const K_H_NPA = 6.18, K_H_PA = 6.0, K_V_PA = 5.33;
 const HAL_LNAV_M = 556, VAL_LNAV_VNAV_M = 50;
 /** The Earth radius distanceNm uses, NM. */
 const EARTH_RADIUS_NM = 3440.065;
+/** The GNSS azimuth reference point lies 305 m beyond the flight path alignment point. */
+const GARP_BEYOND_FPAP_M = 305;
+const MODES: GpsMode[] = ["SELF_TEST", "INITIALIZATION", "ACQUISITION", "NAV", "SBAS_NAV", "SBAS_PA", "ALT_AIDING", "FAULT"];
+export type FieldType = "number" | "boolean" | "string?" | readonly string[] | { [field: string]: FieldType };
+/** The fields of each status word and their types, for validating a typed override. */
+export const STATUS_FIELDS: Record<StatusLabel, { [field: string]: FieldType }> = {
+  "273": { mode: MODES, used: "number", visible: "number", baroAiding: "boolean", integrity: ["OK", "DETECTED", "UNAVAILABLE"] },
+  "355": { unit: "boolean", rfInput: "boolean", buses: { irsFms: "boolean", airData: "boolean", crossTalk: "boolean", ils: "boolean", dme: "boolean" } },
+  "156": { armed: "boolean", selected: "boolean", available: "boolean", crcInvalid: "boolean", mismatch: "boolean", incomplete: "boolean", parked: "boolean" },
+  "305": { paActive: "boolean", provider: "string?", level: ["LPV", "LNAV/VNAV", "LNAV", "NONE"] },
+};
+function validPatch(fields: { [field: string]: FieldType }, patch: object): boolean {
+  return Object.entries(patch).every(([field, value]) => {
+    const type = fields[field];
+    if (type === undefined) return false;
+    if (Array.isArray(type)) return type.includes(value as string);
+    if (type === "number") return typeof value === "number" && Number.isFinite(value);
+    if (type === "boolean") return typeof value === "boolean";
+    if (type === "string?") return value === null || typeof value === "string";
+    return typeof value === "object" && value !== null && validPatch(type as { [field: string]: FieldType }, value);
+  });
+}
+function merge(value: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...value };
+  for (const [field, change] of Object.entries(patch))
+    out[field] = typeof change === "object" && change !== null && typeof value[field] === "object" ? merge(value[field] as Record<string, unknown>, change as Record<string, unknown>) : change;
+  return out;
+}
 const PROVIDERS = ["WAAS", "EGNOS", "MSAS", "GAGAN", "SDCM"];
 
 export class GpsReceiver {
@@ -166,11 +205,14 @@ export class GpsReceiver {
   /** Since when a geostationary satellite has been tracked without a break: its corrections take sbasAcquireSeconds. */
   private sbasSince: number | null = null;
   private jamDb = 0;
+  /** Where the aircraft is (the antenna's input): the approach region is judged from it. */
+  private here: LatLon | null = null;
+  private statusOverrides = new Map<StatusLabel, Record<string, unknown>>();
   private spoof: { spoof: Spoof; since: number | null } | null = null;
 
   constructor(options: GpsOptions) {
     this.o = {
-      ttffSeconds: 45, initSeconds: 2, sigmaUere: 1.5, maskDeg: 5, trackCn0: 30, falseAlert: 1e-5, geoidSeparation: -32, seed: options.constellation.seed, sbas: true, sbasAcquireSeconds: 30,
+      ttffSeconds: 45, initSeconds: 2, sigmaUere: 1.5, maskDeg: 5, trackCn0: 30, falseAlert: 1e-5, geoidSeparation: -32, seed: options.constellation.seed, sbas: true, sbasAcquireSeconds: 30, approachRegionNm: 30,
       ...options,
     };
     this.raw = this.assemble(null, [], null);
@@ -201,6 +243,14 @@ export class GpsReceiver {
   /** Spoofing: a consistent false position, reported as valid. null ends it. */
   setSpoof(spoof: Spoof | null) { this.spoof = spoof ? { spoof, since: null } : null; }
 
+  /** A typed override of a status word: the given fields replace the computed ones. Returns false, and changes nothing, if invalid. */
+  overrideStatus<L extends StatusLabel>(label: L, patch: StatusPatch[L] | null): boolean {
+    if (patch === null) { this.statusOverrides.delete(label); return true; }
+    if (!validPatch(STATUS_FIELDS[label], patch)) return false;
+    this.statusOverrides.set(label, patch as Record<string, unknown>);
+    return true;
+  }
+
   injectFault(kind: ReceiverFault, on: boolean) { if (on) this.faults.add(kind); else this.faults.delete(kind); }
 
   override(label: GpsLabel, override: Override | null) {
@@ -225,11 +275,16 @@ export class GpsReceiver {
         : override.kind === "BIAS" ? shift(override.amount)
         : shift(override.perSecond * elapsed);
     }
+    for (const [label, patch] of this.statusOverrides) {
+      const word = this.raw[label] as Word<Record<string, unknown>>;
+      out[label] = { ...word, value: word.value === null ? null : merge(word.value, patch) };
+    }
     return out as GpsBus;
   }
 
   step(input: GpsInput) {
     this.now = input.time;
+    this.here = input.position;
     if (this.powerOn === null) this.powerOn = input.time;
     // A receiver fault is Fault mode; clearing it restarts the unit from its self-test, ephemeris kept.
     if (this.faults.has("RECEIVER")) this.currentMode = "FAULT";
@@ -253,7 +308,7 @@ export class GpsReceiver {
         const geoTracked = satellites.some(s => s.sbas && s.tracked);
         this.sbasSince = geoTracked ? this.sbasSince ?? input.time : null;
         const sbas = this.o.sbas && !this.sbasState.doNotUse && this.sbasSince !== null && input.time - this.sbasSince >= this.o.sbasAcquireSeconds * 1000;
-        if (this.currentMode === "NAV" && sbas) this.currentMode = this.approachStatus().available && !this.approach?.parked ? "SBAS_PA" : "SBAS_NAV";
+        if (this.currentMode === "NAV" && sbas) this.currentMode = this.approachActive() ? "SBAS_PA" : "SBAS_NAV";
         if (this.currentMode !== "ACQUISITION") {
           solution = this.solve(input, satellites);
           // The exclusion may have changed which satellites are used.
@@ -358,11 +413,16 @@ export class GpsReceiver {
     const selection = this.approach, fas = selection?.fas ?? null;
     const crcInvalid = fas !== null && fasCrc(fas) !== fas.crc;
     const mismatch = fas !== null && !crcInvalid && fas.referencePathId !== selection!.id;
+    const available = fas !== null && !crcInvalid && !mismatch, parked = selection?.parked ?? false;
+    const inRegion = available && this.here !== null && distanceNm(this.here, { lat: fas.ltp.lat, lon: fas.ltp.lon }) <= this.o.approachRegionNm;
     return {
-      selected: selection !== null, available: fas !== null && !crcInvalid && !mismatch, crcInvalid, mismatch,
-      incomplete: selection !== null && fas === null, parked: selection?.parked ?? false,
+      armed: available && !parked && !inRegion, selected: selection !== null, available, crcInvalid, mismatch,
+      incomplete: selection !== null && fas === null, parked,
     };
   }
+
+  /** The approach is active: valid, not parked, and inside the approach region. */
+  private approachActive() { const status = this.approachStatus(); return status.available && !status.parked && !status.armed; }
 
   /**
    * The approach level the GPS can support: LPV in SBAS PA within the FAS block's alert limits; LNAV/VNAV with SBAS within
@@ -390,12 +450,12 @@ export class GpsReceiver {
    * The rectilinear deviations from the FAS final approach path, from the GPS's own fix (latitude, longitude, height
    * above the ellipsoid in metres): 116 lateral (ft, positive right of the landing course), 117 vertical (ft, positive
    * above the path, which rises from the threshold crossing height at the glide path angle) and 201 distance to the
-   * threshold (NM). None without an active approach: nothing selected, the block invalid, or the approach parked.
+   * threshold (NM). None without an active approach: nothing selected, the block invalid, the approach parked, or the
+   * aircraft outside the approach region.
    */
   private deviations(lat: number, lon: number, heightM: number): Record<"116" | "117" | "201", number | null> {
-    const status = this.approachStatus();
     const fas = this.approach?.fas;
-    if (!status.available || status.parked || !fas) return { "116": null, "117": null, "201": null };
+    if (!this.approachActive() || !fas) return { "116": null, "117": null, "201": null };
     const ltp = { lat: fas.ltp.lat, lon: fas.ltp.lon };
     // On the sphere, from the LTP: the cross-track distance from the course line, and the distance along it.
     const course = bearingDeg(ltp, { lat: ltp.lat + fas.fpapDelta.lat, lon: ltp.lon + fas.fpapDelta.lon });
@@ -404,6 +464,28 @@ export class GpsReceiver {
     const before = -Math.atan2(Math.tan(d) * Math.cos(angle), 1) * EARTH_RADIUS_NM;
     const path = fas.ltp.heightM + fas.tchFt * 0.3048 + before * 1852 * Math.tan((fas.gpaDeg * Math.PI) / 180);
     return { "116": right * 6076.12, "117": (heightM - path) / 0.3048, "201": before };
+  }
+
+  /**
+   * The deviation scaling at a distance before the threshold (NM), in engineering units beside 116/117. Laterally, the
+   * FAS course width at the threshold splays from the GNSS azimuth reference point (GARP), 305 m beyond the FPAP.
+   * Vertically, ±0.25 × the glide path angle from the path's origin (TCH / tan GPA beyond the threshold), bounded to
+   * 15-150 m. That scaling is as commonly described for LPV (DO-229 through public summaries); the bounds are
+   * assumptions to confirm against the standard.
+   */
+  private deviationScale(before: number): DeviationScale | null {
+    const fas = this.approach?.fas;
+    if (!fas) return null;
+    const ltp = { lat: fas.ltp.lat, lon: fas.ltp.lon };
+    const garp = distanceNm(ltp, { lat: ltp.lat + fas.fpapDelta.lat, lon: ltp.lon + fas.fpapDelta.lon }) * 1852 + GARP_BEYOND_FPAP_M;
+    const gpa = (fas.gpaDeg * Math.PI) / 180, vertical = gpa / 4;
+    const fromOrigin = before * 1852 + (fas.tchFt * 0.3048) / Math.tan(gpa);
+    return {
+      lateralFullScaleFt: (fas.courseWidthM * (before * 1852 + garp)) / garp / 0.3048,
+      lateralAngleDeg: (Math.atan(fas.courseWidthM / garp) * 180) / Math.PI,
+      verticalFullScaleFt: Math.min(150, Math.max(15, fromOrigin * Math.tan(vertical))) / 0.3048,
+      verticalAngleDeg: (vertical * 180) / Math.PI,
+    };
   }
 
   private assemble(input: GpsInput | null, satellites: Satellite[], s: Solution | null): GpsBus {
@@ -453,6 +535,8 @@ export class GpsReceiver {
       ssm: "NORMAL",
     };
     bus["156"] = { value: this.approachStatus(), ssm: "NORMAL" };
+    const scale = bus["201"]?.ssm === "NORMAL" ? this.deviationScale(bus["201"].value!) : null;
+    bus.scale = scale ? { value: scale, ssm: "NORMAL" } : { value: null, ssm: "NCD" };
     const sbasMode = mode === "SBAS_NAV" || mode === "SBAS_PA";
     const provider = !sbasMode ? null : PROVIDERS[this.approach?.fas?.sbasProvider ?? 0] ?? "ANY";
     bus["305"] = { value: { paActive: mode === "SBAS_PA", provider, level }, ssm: "NORMAL" };

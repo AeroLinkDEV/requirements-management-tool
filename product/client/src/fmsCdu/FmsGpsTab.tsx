@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { GpsBus, GpsLabel, GpsReceiver, Override, SatelliteStatus, Ssm, Word } from "./gps";
+import { STATUS_FIELDS, type FieldType, type GpsBus, type GpsLabel, type GpsReceiver, type Override, type SatelliteStatus, type Ssm, type StatusLabel, type StatusPatch, type Word } from "./gps";
 import { MONITOR_LABELS, alertLimits, lowSatellites, modeLabel, overrideFor, type GpsPair } from "./gpsBench";
 import type { ScriptedFms } from "./scriptedFms";
 import "./FmsGpsTab.css";
@@ -338,7 +338,8 @@ function BusMonitor({ name, rx }: { name: string; rx: GpsReceiver }) {
                 <td>{title}</td>
                 <td className="value">{word ? valueText(word) : "—"}</td>
                 <td>{word ? <span className={`fmsGpsSsm ${word.ssm}`}>{word.ssm}</span> : <span className="fmsGpsSsm FW">SILENT</span>}</td>
-                <td>{numeric ? <OverrideForm label={label} active={active[label]} onSet={(o, text) => set(label, o, text)} /> : <small>status word</small>}</td>
+                <td>{numeric ? <OverrideForm label={label} active={active[label]} onSet={(o, text) => set(label, o, text)} />
+                  : label in STATUS_FIELDS ? <StatusOverrideForm label={label as StatusLabel} rx={rx} /> : <small>model output</small>}</td>
               </tr>
             );
           })}
@@ -362,3 +363,49 @@ function OverrideForm({ label, active, onSet }: { label: GpsLabel; active: strin
     </form>
   );
 }
+
+/** The fields of a status word as the form offers them: nested ones (355's input buses) as "buses.dme". */
+function statusFields(fields: { [field: string]: FieldType }, prefix = ""): { path: string; type: Exclude<FieldType, object> | readonly string[] }[] {
+  return Object.entries(fields).flatMap(([field, type]) => (typeof type === "object" && !Array.isArray(type)
+    ? statusFields(type as { [field: string]: FieldType }, `${prefix}${field}.`)
+    : [{ path: `${prefix}${field}`, type: type as Exclude<FieldType, object> | readonly string[] }]));
+}
+
+/**
+ * A typed override of a status word (273, 355, 156, 305): pick a field, give it a value of its type, and Set. Fields
+ * set one after another add up; Clear removes them all. The receiver validates the patch and refuses an invalid one.
+ */
+function StatusOverrideForm({ label, rx }: { label: StatusLabel; rx: GpsReceiver }) {
+  const fields = statusFields(STATUS_FIELDS[label]);
+  const [path, setPath] = useState(fields[0].path);
+  const [text, setText] = useState("");
+  const [patch, setPatch] = useState<Record<string, unknown> | null>(null);
+  const [refused, setRefused] = useState(false);
+  const field = fields.find(entry => entry.path === path)!;
+  const choices = Array.isArray(field.type) ? field.type : field.type === "boolean" ? ["true", "false"] : null;
+  const value = choices ? (text || choices[0]) : text;
+  const typed = field.type === "boolean" ? value === "true" : field.type === "number" ? Number(value) : field.type === "string?" && value === "" ? null : value;
+  const submit = () => {
+    const [head, tail] = path.split(".");
+    const next = { ...(patch ?? {}) };
+    next[head] = tail ? { ...((next[head] as object | undefined) ?? {}), [tail]: typed } : typed;
+    const ok = rx.overrideStatus(label, next as StatusPatch[typeof label]);
+    setRefused(!ok);
+    if (ok) setPatch(next);
+  };
+  return (
+    <form className="fmsGpsOverride" onSubmit={event => { event.preventDefault(); submit(); }}>
+      {patch ? <b title={JSON.stringify(patch)}>FORCE {Object.keys(patch).join(", ")}</b> : null}
+      <select value={path} aria-label={`Status field ${label}`} onChange={event => { setPath(event.target.value); setText(""); }}>
+        {fields.map(entry => <option key={entry.path}>{entry.path}</option>)}
+      </select>
+      {choices
+        ? <select value={value} aria-label={`Status value ${label}`} onChange={event => setText(event.target.value)}>{choices.map(choice => <option key={choice}>{choice}</option>)}</select>
+        : <input value={text} type={field.type === "number" ? "number" : "text"} aria-label={`Status value ${label}`} onChange={event => setText(event.target.value)} />}
+      <button type="submit">Set</button>
+      {patch ? <button type="button" onClick={() => { rx.overrideStatus(label, null); setPatch(null); setRefused(false); }}>Clear</button> : null}
+      {refused ? <small role="status">Refused: not a valid value for that field</small> : null}
+    </form>
+  );
+}
+

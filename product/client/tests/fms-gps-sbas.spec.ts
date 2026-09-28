@@ -95,7 +95,7 @@ test('label 156 reports the approach selection: available, CRC invalid, mismatch
   expect(bus(rx)['156'].value).toMatchObject({ selected: false, available: false })
   rx.selectApproach({ id: 'W24A', fas: fas() })
   run(rx, 61, 61)
-  expect(bus(rx)['156']).toEqual({ ssm: 'NORMAL', value: { selected: true, available: true, crcInvalid: false, mismatch: false, incomplete: false, parked: false } })
+  expect(bus(rx)['156']).toEqual({ ssm: 'NORMAL', value: { armed: false, selected: true, available: true, crcInvalid: false, mismatch: false, incomplete: false, parked: false } })
   expect(rx.mode).toBe('SBAS_PA')
 
   // A field changed after the CRC was computed: refused.
@@ -180,4 +180,73 @@ test('the approach level follows the protection levels: LPV, LNAV/VNAV, LNAV, or
   expect(bus(rx)['305'].value).toMatchObject({ level: 'NONE' })
   expect(bus(rx)['116'].ssm).toBe('FW')
   expect(bus(rx)['117'].ssm).toBe('FW')
+})
+
+// Phase 3b groundwork: typed status overrides, the approach region, and the deviation scaling.
+const at = (nm: number): Partial<GpsInput> => ({ position: onFinal(nm), altitude: pathMslFt(nm), baroAltitude: pathMslFt(nm) })
+
+test('a status word can be forced field by field, typed and validated; an invalid patch is refused and changes nothing', () => {
+  const rx = receiver()
+  run(rx, 0, 60)
+  const raw273 = rx.rawBus()['273'].value!
+  expect(rx.overrideStatus('273', { mode: 'FAULT', used: 0 })).toBe(true)
+  expect(bus(rx)['273']).toEqual({ ssm: 'NORMAL', value: { ...raw273, mode: 'FAULT', used: 0 } })
+  expect(rx.rawBus()['273'].value!.mode).toBe('SBAS_NAV')
+  // Wrong enum, wrong type, unknown field: refused whole.
+  expect(rx.overrideStatus('273', { mode: 'BOGUS' } as never)).toBe(false)
+  expect(rx.overrideStatus('273', { used: 'x' } as never)).toBe(false)
+  expect(rx.overrideStatus('273', { used: 3, colour: 1 } as never)).toBe(false)
+  expect(bus(rx)['273'].value).toMatchObject({ mode: 'FAULT', used: 0 })
+  // Nested flags in 355, and the approach words.
+  expect(rx.overrideStatus('355', { buses: { dme: true } })).toBe(true)
+  expect(bus(rx)['355'].value).toEqual({ ...rx.rawBus()['355'].value!, buses: { ...rx.rawBus()['355'].value!.buses, dme: true } })
+  expect(rx.overrideStatus('156', { crcInvalid: true })).toBe(true)
+  expect(bus(rx)['156'].value!.crcInvalid).toBe(true)
+  expect(rx.overrideStatus('305', { level: 'LPV' })).toBe(true)
+  expect(rx.overrideStatus('305', { level: 'ILS' } as never)).toBe(false)
+  expect(bus(rx)['305'].value!.level).toBe('LPV')
+  rx.overrideStatus('273', null)
+  expect(bus(rx)['273']).toEqual(rx.rawBus()['273'])
+})
+
+test('SBAS PA only inside the approach region: outside it the approach is armed in SBAS NAV, with no deviations', () => {
+  const rx = receiver()
+  run(rx, 0, 60, at(40))
+  rx.selectApproach({ id: 'W24A', fas: fas() })
+  run(rx, 61, 61, at(40))
+  expect(rx.mode).toBe('SBAS_NAV')
+  expect(bus(rx)['156'].value).toMatchObject({ available: true, armed: true })
+  expect(bus(rx)['116'].ssm).toBe('NCD')
+  // 30 NM from the threshold is the region's edge (a laboratory value).
+  run(rx, 62, 62, at(29))
+  expect(rx.mode).toBe('SBAS_PA')
+  expect(bus(rx)['156'].value).toMatchObject({ available: true, armed: false })
+  expect(bus(rx)['116'].ssm).toBe('NORMAL')
+})
+
+test('the deviation scaling: lateral full scale splays from the course width, vertical is a quarter of the path angle, bounded', () => {
+  const rx = receiver()
+  run(rx, 0, 60, at(5))
+  rx.selectApproach({ id: 'W24A', fas: fas() })
+  run(rx, 61, 61, at(5))
+  // The GARP is 305 m beyond the FPAP: 3352.8 + 305 = 3657.8 m from the LTP. 5 NM out the aircraft is 12 917.8 m from
+  // it, so the 105 m course width at the threshold has splayed to 105 × 12917.8 / 3657.8 = 370.8 m (1216.6 ft), an
+  // angle of atan(105 / 3657.8) = 1.644°. Vertically, the path origin is TCH / tan GPA = 290.8 m beyond the LTP, so
+  // 9550.8 m away; ±0.75° there is 125.0 m (410.2 ft).
+  let scale = bus(rx).scale
+  expect(scale.ssm).toBe('NORMAL')
+  expect(scale.value!.lateralFullScaleFt).toBeCloseTo(1216.6, 0)
+  expect(scale.value!.lateralAngleDeg).toBeCloseTo(1.644, 2)
+  expect(scale.value!.verticalFullScaleFt).toBeCloseTo(410.2, 0)
+  expect(scale.value!.verticalAngleDeg).toBeCloseTo(0.75, 6)
+  // Close in, the vertical full scale stops at 15 m (49.2 ft); far out, at 150 m (492.1 ft).
+  run(rx, 62, 62, at(0.3))
+  expect(bus(rx).scale.value!.verticalFullScaleFt).toBeCloseTo(49.2, 0)
+  run(rx, 63, 63, at(10))
+  expect(bus(rx).scale.value!.verticalFullScaleFt).toBeCloseTo(492.1, 0)
+  // No active approach, no scale.
+  rx.selectApproach(null)
+  run(rx, 64, 64, at(10))
+  scale = bus(rx).scale
+  expect(scale).toEqual({ value: null, ssm: 'NCD' })
 })

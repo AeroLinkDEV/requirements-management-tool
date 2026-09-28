@@ -92,4 +92,5 @@ export const MONITOR_LABELS: { label: GpsLabel; name: string; numeric: boolean }
   { label: "150", name: "UTC", numeric: false }, { label: "260", name: "Date", numeric: false },
   { label: "273", name: "GLSSU status", numeric: false }, { label: "355", name: "Fault summary", numeric: false },
   { label: "156", name: "Approach selection status", numeric: false }, { label: "305", name: "SBAS PA status", numeric: false },
+  { label: "scale", name: "Deviation scaling (model output)", numeric: false },
 ];
