@@ -188,7 +188,12 @@ test('an undetected satellite bias on GPS1 stays under the compare limit: integr
 
 test('the GPS pages show the receivers\' counts, HIL and mode, not fixed values (3a.6)', () => {
   const { unit } = setup()
+  // One satellite deselected on GPS1: still visible but not used, so the page must show both numbers, not one twice.
+  const highest = bus(unit, 0)!['060'].map(word => word.value!).filter(sat => sat.used && !sat.sbas)[0]
+  receivers(unit)[0]?.deselect([highest.prn])
+  unit.gpsUpdated()
   const status = bus(unit, 0)!['273'].value!
+  expect(status.used).toBeLessThan(status.visible)
   const hil = bus(unit, 0)!['130'].value!
   press(unit, 'PROG', 'NEXT', 'NEXT')
   expect(lines(unit)[0]).toMatch(/\bPROGRESS\s+3\/4$/)
