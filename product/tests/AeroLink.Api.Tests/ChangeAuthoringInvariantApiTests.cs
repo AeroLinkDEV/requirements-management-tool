@@ -16,6 +16,59 @@ public sealed class ChangeAuthoringInvariantApiTests
 {
     private sealed record Scenario(Guid ProjectId, Guid ReleaseId, Guid SystemSectionId, Guid HlrSectionId);
 
+    // #1217: JSON omission and explicit null bypass C# non-null annotations. Both creation routes
+    // must preserve DEC-071's title-only drafts; existing tests always supplied non-null case text.
+    [Theory]
+    [InlineData("/api/change-request-drafts", false)]
+    [InlineData("/api/change-request-drafts", true)]
+    [InlineData("/api/change-requests", false)]
+    [InlineData("/api/change-requests", true)]
+    public async Task Missing_case_fields_save_an_empty_draft_without_relaxing_the_title_guard(
+        string route, bool explicitNull)
+    {
+        using var factory = new AeroLinkApiFactory();
+        using var client = factory.CreateClient();
+        var scenario = await SeedAsync(factory);
+        await SignInAsync(client);
+        var payload = new Dictionary<string, object?>
+        {
+            ["projectId"] = scenario.ProjectId,
+            ["targetReleaseId"] = scenario.ReleaseId,
+            ["type"] = "System",
+            ["title"] = "Case to be authored later",
+            ["requirementChanges"] = Array.Empty<object>()
+        };
+        if (explicitNull)
+            foreach (var field in new[] { "problem", "analysis", "solution" }) payload[field] = null;
+
+        using var created = await client.PostAsJsonAsync(route, payload);
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var createdBody = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var id = createdBody.GetProperty("id").GetGuid();
+
+        // A fresh request proves the normalized values were persisted, not just projected in the response.
+        using var reopened = await client.GetAsync($"/api/change-requests/{id}");
+        Assert.Equal(HttpStatusCode.OK, reopened.StatusCode);
+        var draft = await reopened.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Draft", draft.GetProperty("state").GetString());
+        Assert.Equal("Case to be authored later", draft.GetProperty("title").GetString());
+        Assert.Empty(draft.GetProperty("requirementChanges").EnumerateArray());
+        foreach (var field in new[] { "problem", "analysis", "solution" })
+        {
+            Assert.Equal("", draft.GetProperty(field).GetString());
+            Assert.Equal("{\"blocks\":[]}", draft.GetProperty(field + "Rich").GetString());
+        }
+
+        payload["title"] = " ";
+        using var rejected = await client.PostAsJsonAsync(route, payload);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Contains("title", await rejected.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AeroLinkDbContext>();
+        Assert.Equal(id, Assert.Single(await db.SystemChangeRequests
+            .Where(x => x.ProjectId == scenario.ProjectId).ToListAsync()).Id);
+    }
+
     [Fact]
     public async Task Authored_attributes_and_sections_survive_creation_and_server_owned_derived_cannot_be_spoofed()
     {

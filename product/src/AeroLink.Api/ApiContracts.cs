@@ -8,8 +8,8 @@ using AeroLink.Domain.Verification;
 // The shapes the browser sends.
 //
 // Records rather than classes, because a request body is a value that arrives once and is never mutated, and
-// because a positional record turns a missing field into a compile error at the call site instead of a null
-// discovered at runtime.
+// positional records make required constructor arguments explicit for C# callers. JSON binding can still
+// supply null for omitted fields; request boundaries and domain rules must handle that input.
 //
 // Deliberately still in the global namespace, which is where they were declared alongside the endpoints that
 // consume them. Moving them into AeroLink.Api would be tidier and would also rename every one of them for
@@ -21,9 +21,9 @@ record ConfirmMfaRequest(string Code);
 record DisableMfaRequest(string Password,string Code);
 record ResetPasswordRequest(string TemporaryPassword,string Reason);
 record BootstrapAdministratorRequest(string DisplayName, string Email, string Password);
-record CreateChangeRequestRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, ChangeRequestType Type = ChangeRequestType.System, string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null, List<Guid>? ProblemReportIds = null, RequirementLevel? SoftwareLevel = null);
+record CreateChangeRequestRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string? Problem, string? Analysis, string? Solution, ChangeRequestType Type = ChangeRequestType.System, string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null, List<Guid>? ProblemReportIds = null, RequirementLevel? SoftwareLevel = null);
 record DraftRequirementRequest(string BaseNumber, int Revision, RequirementLevel Level, RequirementChangeKind Kind, string Statement, string Rationale, string VerificationMethod,string RichText="",string AttributesJson="{}",string ImpactDispositionJson="{}",bool IsDerived=false,Guid? TargetSectionId=null,List<Guid>? UpstreamRevisionIds=null);
-record CreateChangeRequestDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string Problem, string Analysis, string Solution, List<DraftRequirementRequest> RequirementChanges, ChangeRequestType Type = ChangeRequestType.System, string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null, List<Guid>? ProblemReportIds = null, RequirementLevel? SoftwareLevel = null, List<AeroLink.Infrastructure.Persistence.ChangeRequestUpstreamDraft>? UpstreamLinks = null, string? NoUpstreamRationale = null);
+record CreateChangeRequestDraftRequest(string BaseNumber, Guid ProjectId, Guid TargetReleaseId, string Title, string? Problem, string? Analysis, string? Solution, List<DraftRequirementRequest> RequirementChanges, ChangeRequestType Type = ChangeRequestType.System, string? ProblemRich = null, string? AnalysisRich = null, string? SolutionRich = null, List<Guid>? ProblemReportIds = null, RequirementLevel? SoftwareLevel = null, List<AeroLink.Infrastructure.Persistence.ChangeRequestUpstreamDraft>? UpstreamLinks = null, string? NoUpstreamRationale = null);
 record CreateWorkspaceRequest(string ProgramName, string ProgramCode, string ProjectName, string SoftwareProduct, string InitialRelease, bool InitialReleaseIsReleased);
 record CreateReleaseRequest(Guid ProjectId, string Version, Guid? PredecessorReleaseId);
 record RetargetChangeRequestRequest(Guid TargetReleaseId, string Reason);
