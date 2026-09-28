@@ -152,6 +152,9 @@ test('NVG lighting backlights the legends green and holds the display in the NVG
 
 test('Fly moves the aircraft along the route on the map at the chosen rate, and Pause stops it', async ({ page }) => {
   await open(page)
+  // The engineering map shares the lower display beside the CDU with the ND; the ND is shown first.
+  await expect(page.getByRole('img', { name: /^Navigation display/ })).toBeVisible()
+  await page.getByRole('radiogroup', { name: 'Lower display' }).getByText('Engineering map').click()
   const map = page.getByRole('img', { name: /^Navigation map/ })
   await expect(map).toHaveAttribute('aria-label', /LNAV mode, active waypoint MUN/)
   await page.getByLabel('Simulation rate').selectOption('64')

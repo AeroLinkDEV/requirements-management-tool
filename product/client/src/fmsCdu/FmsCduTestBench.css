@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   gap: 18px;
-  max-width: 1180px;
+  max-width: 1600px;
 }
 
 .fmsBenchHeader {
@@ -54,22 +54,68 @@
   font: 500 13px var(--font-body);
 }
 
-.fmsBenchBody {
+/* The cockpit: the CDU beside the flight displays (PFD and ND side by side, as on a flight deck), with the flight
+   controls under the displays. Narrower, the displays stack; narrower still, everything stacks. */
+.fmsBenchCockpit {
   display: grid;
-  grid-template-columns: minmax(300px, 620px) minmax(260px, 1fr);
-  gap: 24px;
+  /* The CDU gives way first on narrower screens, so the displays stay readable. */
+  grid-template-columns: minmax(340px, min(600px, 40%)) minmax(0, 1fr);
+  grid-template-areas: "cdu displays" "cdu flight";
+  grid-template-rows: auto 1fr;
+  gap: 14px 18px;
   align-items: start;
 }
 
-@media (max-width: 900px) {
-  .fmsBenchBody { grid-template-columns: 1fr; }
+.fmsBenchCockpit > .fmsBenchPanel { grid-area: cdu; }
+.fmsBenchCockpit > .fmsBenchDisplays { grid-area: displays; }
+.fmsBenchCockpit > .fmsBenchFlight { grid-area: flight; }
+
+@media (max-width: 960px) {
+  .fmsBenchCockpit { grid-template-columns: minmax(0, 1fr); grid-template-areas: "cdu" "displays" "flight"; }
 }
 
-.fmsBenchMain {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+.fmsBenchDisplays {
+  display: grid;
+  /* Two displays side by side when each can be at least 280 px wide, otherwise one above the other. */
+  grid-template-columns: repeat(auto-fit, minmax(max(280px, calc(50% - 5px)), 1fr));
+  gap: 10px;
   min-width: 0;
+  /* Its width comes from the page, never from the displays drawn in it (which would widen the page on a phone). */
+  container-type: inline-size;
+}
+
+.fmsBenchDisplays > .fmsBenchMapHead,
+.fmsBenchDisplays > .fmsBenchHint { grid-column: 1 / -1; }
+
+.fmsBenchDisplays .fmsBenchMapHead {
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 0;
+}
+
+.fmsBenchDisplayControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.fmsBenchDisplays .fmsBenchHint {
+  margin: 0;
+}
+
+/* The displays dim with the cockpit, as the CDU does. */
+.fmsBenchDisplays.mode-night svg { filter: brightness(0.7); }
+.fmsBenchDisplays.mode-nvg svg { filter: brightness(0.4); }
+
+/* The flight controls sit directly under the displays, across the page. */
+
+/* Everything else on the bench: scenarios, conditions, data, alerts, lighting, keyboard, key events. */
+.fmsBenchCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 14px;
+  align-items: start;
 }
 
 .fmsBenchPanel {
@@ -93,13 +139,6 @@
 .fmsBenchLoading {
   color: #d7dce4;
   font-size: 13px;
-}
-
-.fmsBenchSide {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
 }
 
 .fmsBenchCard {
@@ -392,10 +431,6 @@
   border-radius: 12px;
   background: #11151b;
 }
-
-/* The display dims with the cockpit, as the CDU does. */
-.fmsBenchMapScreen.mode-night .fmsMap { filter: brightness(0.7); }
-.fmsBenchMapScreen.mode-nvg .fmsMap { filter: brightness(0.4); }
 
 .fmsBenchFile {
   display: flex;

@@ -1,8 +1,6 @@
 import { useRef } from "react";
-import { aircraftData, fmsOutputs, type AircraftData, type FmsOutputs, type RoutePoint } from "./efis";
-import type { FlightSimulator } from "./flight";
+import type { AircraftData, FmsOutputs, RoutePoint } from "./efis";
 import { toLocal, type LatLon } from "./fmsModel";
-import type { ScriptedFms } from "./scriptedFms";
 import "./FmsEfis.css";
 
 // A generic EFIS for the bench: a primary flight display and a navigation display, drawn only from the FMS output bus
@@ -32,7 +30,8 @@ function useModeChangeBoxes(modes: Record<string, string>, now: number) {
   return boxed;
 }
 
-function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now: number }) {
+/** The primary flight display. The bench places it and the navigation display beside the CDU. */
+export function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now: number }) {
   const boxed = useModeChangeBoxes({ lateral: bus.lateralMode, vertical: bus.verticalMode ?? "" }, now);
   const pitchPx = 6; // pixels per degree of pitch
   const cx = 210, cy = 196;
@@ -192,7 +191,8 @@ function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now: numbe
   );
 }
 
-function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; range: number }) {
+/** The navigation display (MAP mode, track-up). */
+export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; range: number }) {
   const cx = 210, cy = 360, radius = 300;
   const px = radius / range;
   // Track-up map: positions relative to the aircraft, rotated so the present track points up.
@@ -287,17 +287,5 @@ function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; range: nu
       </g>
       {bus.failed ? <text x={cx} y="200" textAnchor="middle" fontSize="18" fill={AMBER} data-testid="nd-map-flag">MAP</text> : null}
     </svg>
-  );
-}
-
-/** The EFIS pair, drawn from the FMS output bus and the aircraft data only. */
-export default function FmsEfis({ fms, sim, range }: { fms: ScriptedFms; sim: FlightSimulator; range: number }) {
-  const bus = fmsOutputs(fms, sim);
-  const air = aircraftData(fms, sim);
-  return (
-    <div className="efis">
-      <Pfd bus={bus} air={air} now={fms.now.getTime()} />
-      <Nd bus={bus} air={air} range={range} />
-    </div>
   );
 }
