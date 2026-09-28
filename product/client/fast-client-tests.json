@@ -29,7 +29,8 @@
     "fms-modes.spec.ts",
     "fms-dataset.spec.ts",
     "fms-efis.spec.ts",
-    "fms-coherence.spec.ts"
+    "fms-coherence.spec.ts",
+    "fms-gps.spec.ts"
   ],
   "rendered": [
     "code-source-rendered.spec.ts",
