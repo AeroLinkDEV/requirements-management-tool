@@ -44,6 +44,10 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await expect(
     page.getByRole("heading", { name: "Change case" }),
   ).toBeVisible();
+  await expect(page.getByText("Record version 1", { exact: true })).toBeVisible();
+  const proposal = page.locator(".requirementView");
+  await expect(proposal).toHaveCount(1);
+  const proposedNumber = await proposal.locator("b").first().innerText();
   await page.getByRole("button", { name: "Check out & edit" }).click();
   await expect(
     page.getByRole("heading", { name: "Controlled requirement authoring" }),
@@ -69,6 +73,12 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await expect(page.getByText("Known downstream context", { exact: true })).toBeVisible();
   await expect(page.locator(".editorColumns aside select")).toHaveCount(0);
   await page.getByRole("button", { name: "Save & check in" }).click();
-  await expect(page.getByText("Requirement impact")).toHaveCount(0);
-  await expect(page.getByText(/Record version/)).toBeVisible();
+  // The read-only result also has Requirement impact. Its absence can pass before check-in completes,
+  // or even after a refused check-in, so wait for the authoritative result and the same proposal instead.
+  await expect(page.getByRole("status")).toContainText("Draft checked in.");
+  await expect(page.getByRole("heading", { name: "Controlled requirement authoring" })).toHaveCount(0);
+  await expect(page.getByText("Record version 2", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Requirement impact", exact: true })).toBeVisible();
+  await expect(proposal).toHaveCount(1);
+  await expect(proposal.getByText(proposedNumber, { exact: true })).toBeVisible();
 });
