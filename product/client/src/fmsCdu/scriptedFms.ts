@@ -37,7 +37,12 @@ const wpt = (ident: string, altitude?: string): Leg => ({ kind: "wpt", ident, al
 
 const demoRoute = (): Route => ({
   origin: "CYOW", dest: "CYUL", coRoute: "OWUL1", flightNo: "LIFE21",
-  legs: [wpt("MUN", "3000"), wpt("RDG", "4500"), wpt("TOLGU", "4500"), wpt("FERDI", "1500A"), wpt("RW24R", "168"), wpt("CYUL")],
+  legs: [
+    wpt("MUN", "3000"), wpt("RDG", "4500"), wpt("TOLGU", "4500"),
+    // Downwind, base and final to runway 24R (navData.ts): the old TOLGU to FERDI leg overflew the airport and turned
+    // 150 degrees at the FAF.
+    wpt("DEMEL", "3000"), wpt("ALNIT", "3000"), wpt("ULIDA", "2500"), wpt("FERDI", "1500A"), wpt("RW24R", "168"), wpt("CYUL"),
+  ],
 });
 
 /** A navigation database cycle: its own dataset, and its effective dates (null when the data does not give them). */
@@ -575,8 +580,12 @@ export class ScriptedFms implements CduBackend {
     const set = (phase: VerticalPhase, reason: string) => { v.phase = phase; v.reason = reason; };
     if (v.phase === "DESCENT") {
       const leg = this.active.legs[0];
-      if (raised) set("CLIMB", `cruise altitude ${cruise} entered above the aircraft`);
-      else if (leg && leg.kind !== "disco" && leg.source === "MISSED") set("CLIMB", "missed approach");
+      const leave = raised ? `cruise altitude ${cruise} entered above the aircraft`
+        : leg && leg.kind !== "disco" && leg.source === "MISSED" ? "missed approach" : null;
+      if (leave === null) return;
+      set("CLIMB", leave);
+      // Leaving the descent cancels a DES NOW, which would otherwise start it again.
+      this.vnav.desNow = false;
       return;
     }
     if (raised) set("CLIMB", `cruise altitude ${cruise} entered above the aircraft`);

@@ -40,7 +40,7 @@ test('the aircraft flies the demonstration route leg by leg, on track, and repor
       worst = Math.max(worst, Math.abs(g.crossTrack))
     return now === null
   })
-  expect(sequenced).toEqual(['MUN', 'RDG', 'TOLGU', 'FERDI', 'RW24R', 'CYUL'])
+  expect(sequenced).toEqual(['MUN', 'RDG', 'TOLGU', 'DEMEL', 'ALNIT', 'ULIDA', 'FERDI', 'RW24R', 'CYUL'])
   expect(worst).toBeLessThan(0.3)
   expect(unit.recallList.some(message => message.text === 'END OF ROUTE')).toBe(true)
 })
@@ -48,17 +48,17 @@ test('the aircraft flies the demonstration route leg by leg, on track, and repor
 test('a fly-by waypoint is sequenced before the aircraft reaches it, by the turn anticipation distance', () => {
   const { unit, fly } = setup()
   const tolgu = unit.coordinates('TOLGU')!
-  const ferdi = unit.coordinates('FERDI')!
+  const demel = unit.coordinates('DEMEL')!
   let atSequence = -1
   fly(3600, () => {
-    if (activeIdent(unit) === 'FERDI' && atSequence < 0) { atSequence = distanceNm(unit.position, tolgu); return true }
+    if (activeIdent(unit) === 'DEMEL' && atSequence < 0) { atSequence = distanceNm(unit.position, tolgu); return true }
   })
-  // TOLGU to FERDI turns little, so the lead is small but real; the aircraft never overflies it.
+  // RDG-TOLGU (077) to TOLGU-DEMEL (086) turns little, so the lead is small but real; the aircraft never overflies it.
   expect(atSequence).toBeGreaterThan(0.005)
   expect(atSequence).toBeLessThan(0.5)
-  // After the turn the aircraft is established on the FERDI leg.
+  // After the turn the aircraft is established on the DEMEL leg.
   fly(300)
-  expect(Math.abs(legGeometry(tolgu, ferdi, unit.position).crossTrack)).toBeLessThan(0.3)
+  expect(Math.abs(legGeometry(tolgu, demel, unit.position).crossTrack)).toBeLessThan(0.3)
 })
 
 test('the aircraft climbs to each leg constraint and descends on the VNAV path from the FAF to the runway', () => {
@@ -70,8 +70,6 @@ test('the aircraft climbs to each leg constraint and descends on the VNAV path f
   unit.armApproach(true)
   fly(3600, () => activeIdent(unit) === 'TOLGU')
   expect(unit.altitude).toBeGreaterThan(4400)
-  // The demonstration route turns 148 degrees at the FAF, so the fly-by turn rolls out on final short of it and the
-  // aircraft catches the path from above. What matters is that it is on the path well before the threshold.
   const runway = unit.coordinates('RW24R')!, faf = unit.coordinates('FERDI')!
   const vpa = Math.atan((1500 - 118) / (distanceNm(faf, runway) * 6076.12))
   let threshold = 0, worstLate = 0
@@ -85,35 +83,36 @@ test('the aircraft climbs to each leg constraint and descends on the VNAV path f
     // The threshold is where the runway is sequenced; the missed approach follows it in this route.
     if (activeIdent(unit) !== 'RW24R' && lateVs.length && !threshold) { threshold = unit.altitude; return true }
   })
-  // On the three-degree path over the last mile and a half, descending at about 630 fpm, near threshold height.
-  // 175 ft, not 150, since the vertical acceleration limit and approach capture (R03) were added: the aircraft crosses
-  // this route's FAF high after its 148-degree turn. The coherent demonstration route (review A23) removes that turn.
-  expect(worstLate).toBeLessThan(175)
+  // On the three-degree path over the last mile and a half, descending at about 580 fpm, near threshold height. The
+  // straight-in final from ULIDA puts the aircraft at the FAF on the path, so it tracks it within 50 ft (150 ft was the
+  // allowance when the route turned 148 degrees at the FAF and caught the path from above).
+  expect(worstLate).toBeLessThan(50)
   expect(Math.min(...lateVs)).toBeGreaterThan(-900)
   expect(Math.max(...lateVs)).toBeLessThan(-450)
   expect(threshold).toBeGreaterThan(80)
   expect(threshold).toBeLessThan(400)
 })
 
-test('VNAV holds cruise until the top of descent, then descends on the planned path to the FAF', () => {
+test('VNAV holds cruise until the top of descent, then descends on the planned path to the first descent constraint', () => {
   const { unit, fly } = setup()
   const profile = unit.profile()
   expect(profile.endOfDescent).toBe('RW24R')
-  // Descending 3000 ft at three degrees takes about 9.4 NM: the T/D is that far before the FAF.
-  const ferdi = profile.points.find(p => p.ident === 'FERDI')!
-  expect(ferdi.altitude).toBe(1500)
-  expect(ferdi.distance - profile.topOfDescent!).toBeCloseTo(9.4, 0)
+  // The first constraint below cruise is DEMEL at 3000, joining the downwind. Descending 1500 ft at three degrees
+  // (318.4 ft/NM) takes 4.71 NM: the T/D is that far before DEMEL.
+  const demel = profile.points.find(p => p.ident === 'DEMEL')!
+  expect(demel.altitude).toBe(3000)
+  expect(demel.distance - profile.topOfDescent!).toBeCloseTo(4.71, 1)
   let leftCruiseAt = -1
-  const alongAtLeaving = { toFerdi: 0 }
+  const alongAtLeaving = { toDemel: 0 }
   fly(3 * 3600, () => {
-    if (activeIdent(unit) === 'FERDI' && unit.altitude < 4480 && leftCruiseAt < 0) {
+    if (activeIdent(unit) === 'DEMEL' && unit.altitude < 4480 && leftCruiseAt < 0) {
       leftCruiseAt = 1
-      alongAtLeaving.toFerdi = distanceNm(unit.position, unit.coordinates('FERDI')!)
+      alongAtLeaving.toDemel = distanceNm(unit.position, unit.coordinates('DEMEL')!)
     }
     return activeIdent(unit) === 'RW24R'
   })
-  expect(alongAtLeaving.toFerdi).toBeGreaterThan(8.5)
-  expect(alongAtLeaving.toFerdi).toBeLessThan(10.5)
+  expect(alongAtLeaving.toDemel).toBeGreaterThan(3.8)
+  expect(alongAtLeaving.toDemel).toBeLessThan(5.8)
 })
 
 /** Signed distance from the inbound course line through the fix, positive right of the inbound course. */

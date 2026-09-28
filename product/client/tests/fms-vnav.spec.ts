@@ -60,16 +60,21 @@ test('speed and altitude constraints are entered on the right of LEGS as a modif
   expect(lines(unit)[4]).toMatch(/^RDG\s+-----$/)
 })
 
-test('the profile puts the top of descent where a three-degree path from the FAF reaches cruise, and predicts each waypoint', () => {
+test('the profile puts the top of descent where a three-degree path from the first descent constraint reaches cruise, and predicts each waypoint', () => {
   const unit = new ScriptedFms(() => new Date(Date.UTC(2026, 8, 27, 14, 0, 0)))
   const profile = unit.profile()
   expect(profile.endOfDescent).toBe('RW24R')
-  const [mun, rdg, , ferdi, runway] = profile.points
+  const [mun, rdg, , demel, alnit, ulida, ferdi, runway] = profile.points
   expect(mun.altitude).toBe(3000)
   expect(rdg.altitude).toBe(4500)
+  // The downwind at 3000, the base down to 2500, the FAF at 1500 and the runway: each at its constraint.
+  expect(demel.altitude).toBe(3000)
+  expect(alnit.altitude).toBe(3000)
+  expect(ulida.altitude).toBe(2500)
   expect(ferdi.altitude).toBe(1500)
   expect(runway.altitude).toBe(168)
-  expect(ferdi.distance - profile.topOfDescent!).toBeCloseTo((4500 - 1500) / (6076.12 * Math.tan((3 * Math.PI) / 180)), 1)
+  // DEMEL, 3000, is the first constraint below cruise: the path descends 1500 ft to it.
+  expect(demel.distance - profile.topOfDescent!).toBeCloseTo((4500 - 3000) / (6076.12 * Math.tan((3 * Math.PI) / 180)), 1)
   // ETA and fuel fall along the route at the ground speed and fuel flow.
   expect(rdg.eta).toBeGreaterThan(mun.eta)
   expect(rdg.fuel).toBeLessThan(mun.fuel)
@@ -111,7 +116,8 @@ test('DES NOW starts the descent early at 1000 fpm and then follows the path', (
   // At 80 kt the path descends at about 420 fpm, so the 1000 fpm of DES NOW is its own rate.
   press(unit, 'VNAV', 'NEXT')
   enter(unit, '80', 'LSK1R')
-  fly(3 * 3600, () => active(unit) === 'FERDI')
+  // At cruise on the leg into DEMEL, the first descent constraint, before the top of descent.
+  fly(3 * 3600, () => active(unit) === 'DEMEL')
   expect(unit.profile().topOfDescent).not.toBeNull()
   press(unit, 'VNAV', 'NEXT', 'NEXT')
   expect(lines(unit)[12]).toMatch(/^<DES NOW/)

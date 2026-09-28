@@ -29,7 +29,7 @@ test('DIRECT-TO a waypoint in the route deletes the legs before it, as a modific
   unit.press('LEGS')
   enter(unit, 'TOLGU', 'LSK1L')
   expect(titleLine(unit)).toMatch(/^MOD RTE 1 LEGS/)
-  expect(idents(unit)).toEqual(['TOLGU', 'FERDI', 'RW24R', 'CYUL'])
+  expect(idents(unit)).toEqual(['TOLGU', 'DEMEL', 'ALNIT', 'ULIDA', 'FERDI', 'RW24R', 'CYUL'])
   // The leg into TOLGU is computed from present position, not left blank.
   expect(lines(unit)[1]).toMatch(/^ 0\d\d°\s+\d+\.\dNM/)
   unit.press('EXEC')
@@ -138,8 +138,9 @@ test('VNAV derives the path angle from the FAF altitude and alerts outside 2.75 
   unit.press('CLR')
   enter(unit, '1500', 'LSK1R')
   expect(scratch(unit)).toBe('')
-  unit.press('LEGS')
-  expect(lines(unit)[8]).toMatch(/^FERDI\s+1500A$/)
+  // FERDI is the seventh leg: the second row of LEGS page 2.
+  press(unit, 'LEGS', 'NEXT')
+  expect(lines(unit)[4]).toMatch(/^FERDI\s+1500A$/)
 })
 
 test('VNAV takes a destination temperature and QNH in range, and shows VDEV once on final', () => {
@@ -151,7 +152,8 @@ test('VNAV takes a destination temperature and QNH in range, and shows VDEV once
   enter(unit, '1013', 'LSK4R')
   enter(unit, '-5', 'LSK4L')
   expect(lines(unit)[8]).toMatch(/^-5°C\s+1013$/)
-  for (let i = 0; i < 4; i += 1) unit.sequence()
+  // Jump through MUN, RDG, TOLGU and the downwind, base and final fixes to the FAF.
+  for (let i = 0; i < 7; i += 1) unit.sequence()
   // At the FAF, 3000 ft against a 1500 ft path: 1500 ft high.
   expect(lines(unit)[12]).toMatch(/^\+1500FT/)
 })
