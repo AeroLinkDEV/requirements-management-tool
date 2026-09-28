@@ -1,23 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { STATUS_FIELDS, type FieldType, type GpsBus, type GpsLabel, type GpsReceiver, type Override, type SatelliteStatus, type Ssm, type StatusLabel, type StatusPatch, type Word } from "./gps";
-import { MONITOR_LABELS, alertLimits, lowSatellites, modeLabel, overrideFor, type GpsPair } from "./gpsBench";
+import { MONITOR_LABELS, alertLimits, lowSatellites, modeLabel, overrideFor, type GpsView } from "./gpsBench";
 import type { ScriptedFms } from "./scriptedFms";
 import "./FmsGpsTab.css";
 
 /**
- * The GPS sensors tab: the two simulated CMA-5024 receivers (gps.ts), where they route to, what each sees and reports,
- * the faults the bench can inject into each, and a live monitor of each output bus with per-word overrides. The FMS does
- * not read these receivers yet (the GPS integration is a later phase), so the routing strip shows the FMS read-only.
+ * The GPS sensors tab: the FMS's two simulated CMA-5024 receivers (gps.ts, owned and fed by scriptedFms.ts), which one
+ * the FMS navigates on, what each sees and reports, the faults the bench can inject into each, and a live monitor of each
+ * output bus with per-word overrides. Every change here is followed by the FMS re-reading the receivers (view.updated).
  */
-export default function FmsGpsTab({ pair, fms }: { pair: GpsPair; fms: ScriptedFms }) {
-  const [one, two] = pair.receivers;
-  const nav = fms.navState;
+export default function FmsGpsTab({ view, fms }: { view: GpsView; fms: ScriptedFms }) {
+  const [one, two] = view.receivers;
   return (
     <div className="fmsGps">
-      <RoutingStrip pair={pair} fmsMode={nav.mode} anp={nav.anp} rnp={fms.requiredRnp} />
+      <RoutingStrip view={view} fms={fms} />
       <div className="fmsGpsReceivers">
         {[one, two].map((rx, index) => (
-          <ReceiverColumn key={index} name={`GPS ${index + 1}`} rx={rx} pair={pair} index={index as 0 | 1} fms={fms} />
+          <ReceiverColumn key={index} name={`GPS ${index + 1}`} rx={rx} view={view} index={index as 0 | 1} fms={fms} />
         ))}
       </div>
     </div>
@@ -28,10 +27,16 @@ const NAV_MODES = new Set(["NAV", "SBAS_NAV", "SBAS_PA", "ALT_AIDING"]);
 const feeding = (bus: GpsBus | null) => bus !== null && NAV_MODES.has(bus["273"].value!.mode);
 const modeText = (rx: GpsReceiver) => { const bus = rx.bus(); return bus ? modeLabel(bus["273"].value!.mode) : "NO DATA"; };
 
-/** GPS 1 and GPS 2 into the FMS navigation solution, and on to the EFIS. Solid feeds, dashed is standby or lost. */
-function RoutingStrip({ pair, fmsMode, anp, rnp }: { pair: GpsPair; fmsMode: string; anp: number; rnp: number }) {
-  const [one, two] = pair.receivers;
-  const apart = pair.difference();
+/**
+ * GPS 1 and GPS 2 into the FMS navigation solution, and on to the EFIS: the link of the receiver the FMS navigates on is
+ * solid, the other dashed (standby, or not usable). The selector is the FMS's GPS selection (NAV OPTIONS).
+ */
+function RoutingStrip({ view, fms }: { view: GpsView; fms: ScriptedFms }) {
+  const [one, two] = view.receivers;
+  const apart = view.difference();
+  const nav = fms.navState, chosen = fms.gpsStatus.chosen;
+  const source = chosen === null ? nav.mode : `GPS${chosen + 1}`;
+  const lastChange = fms.navSourceLog[0];
   const box = (x: number, y: number, w: number, title: string, detail: string, tone: string, id: string) => (
     <g data-testid={id}>
       <rect x={x} y={y} width={w} height={44} rx={8} className={`fmsGpsBox ${tone}`} />
@@ -39,26 +44,31 @@ function RoutingStrip({ pair, fmsMode, anp, rnp }: { pair: GpsPair; fmsMode: str
       <text x={x + w / 2} y={y + 34} textAnchor="middle" className="fmsGpsBoxDetail">{detail}</text>
     </g>
   );
-  const oneFeeds = feeding(one.bus()), twoAvailable = feeding(two.bus());
+  const tone = (index: 0 | 1, bus: GpsBus | null) => (chosen === index ? "ok" : feeding(bus) ? "standby" : bus ? "warn" : "fail");
+  const role = (index: 0 | 1, bus: GpsBus | null) => (chosen === index ? "in use" : feeding(bus) ? "standby" : "not usable");
   return (
     <section className="fmsBenchCard fmsGpsRouting" aria-label="Sensor routing">
       <h2>Sensor routing</h2>
-      <svg viewBox="0 0 640 128" role="img" aria-label={`Sensor routing: GPS 1 ${modeText(one)} ${oneFeeds ? "feeding" : "not feeding"}, GPS 2 ${modeText(two)} standby, FMS ${fmsMode}`}>
-        {box(8, 8, 150, "GPS 1", modeText(one), oneFeeds ? "ok" : one.bus() ? "warn" : "fail", "route-gps1")}
-        {box(8, 72, 150, "GPS 2", `${modeText(two)} · standby`, twoAvailable ? "standby" : "fail", "route-gps2")}
-        {box(250, 40, 170, "FMS nav solution", `${fmsMode} · ANP ${anp.toFixed(2)}/RNP ${rnp.toFixed(2)}`, "ok", "route-fms")}
+      <svg viewBox="0 0 640 128" role="img"
+        aria-label={`Sensor routing: GPS 1 ${modeText(one)} ${role(0, one.bus())}, GPS 2 ${modeText(two)} ${role(1, two.bus())}, FMS on ${source}`}>
+        {box(8, 8, 150, "GPS 1", `${modeText(one)} · ${role(0, one.bus())}`, tone(0, one.bus()), "route-gps1")}
+        {box(8, 72, 150, "GPS 2", `${modeText(two)} · ${role(1, two.bus())}`, tone(1, two.bus()), "route-gps2")}
+        {box(250, 40, 170, "FMS nav solution", `${source} · ANP ${nav.anp.toFixed(2)}/RNP ${fms.requiredRnp.toFixed(2)}`, chosen === null && nav.mode === "DR" ? "warn" : "ok", "route-fms")}
         {box(512, 40, 120, "EFIS", "PFD · ND", "ok", "route-efis")}
-        <path d="M158 30 C 205 30, 205 62, 250 62" className={`fmsGpsLink ${oneFeeds ? "" : "dashed"}`} data-testid="route-link-gps1" />
-        <path d="M158 94 C 205 94, 205 62, 250 62" className="fmsGpsLink dashed" data-testid="route-link-gps2" />
+        <path d="M158 30 C 205 30, 205 62, 250 62" className={`fmsGpsLink ${chosen === 0 ? "" : "dashed"}`} data-testid="route-link-gps1" />
+        <path d="M158 94 C 205 94, 205 62, 250 62" className={`fmsGpsLink ${chosen === 1 ? "" : "dashed"}`} data-testid="route-link-gps2" />
         <path d="M420 62 L 512 62" className="fmsGpsLink" />
         <text x={172} y={120} className="fmsGpsBoxDetail" data-testid="route-difference">{apart === null ? "GPS 1–GPS 2 Δ —" : `GPS 1–GPS 2 Δ ${apart.toFixed(1)} m`}</text>
       </svg>
       <label className="fmsGpsSelector">
-        <span>FMS sensor selection</span>
-        <select disabled aria-label="FMS sensor selection" value="AUTO" onChange={() => undefined}>
-          {["AUTO", "GPS1", "GPS2", "DME-DME", "IRS"].map(option => <option key={option}>{option}</option>)}
+        <span>FMS GPS selection</span>
+        <select aria-label="FMS GPS selection" value={view.choice} onChange={event => view.select(event.target.value as GpsView["choice"])}>
+          {(["AUTO", "GPS1", "GPS2", "OFF"] as const).map(option => <option key={option}>{option}</option>)}
         </select>
-        <small>FMS sensor selection arrives with the GPS integration. Until then the FMS uses its own condition-driven sensors.</small>
+        <small data-testid="route-source-note">
+          AUTO navigates on GPS1, then GPS2 when GPS1 is not usable; GPS1 or GPS2 uses only that receiver; OFF deselects GPS
+          (the FMS then uses DME/DME, VOR/DME or dead reckoning). {lastChange ? `Last source change: ${lastChange.source} at ${lastChange.at.toISOString().slice(11, 19)}Z.` : ""}
+        </small>
       </label>
     </section>
   );
@@ -75,35 +85,43 @@ const NO_FAULTS: BenchFaults = {
   lowPrns: [], masked: [], jamDb: 0, satFault: null, doNotUse: false, outage: [], ionoStorm: 1, receiver: false, rfInput: false, baroLost: false, stopped: false, spoof: null,
 };
 
-function ReceiverColumn({ name, rx, pair, index, fms }: { name: string; rx: GpsReceiver; pair: GpsPair; index: 0 | 1; fms: ScriptedFms }) {
+function ReceiverColumn({ name, rx, view, index, fms }: { name: string; rx: GpsReceiver; view: GpsView; index: 0 | 1; fms: ScriptedFms }) {
   const [faults, setFaults] = useState<BenchFaults>(NO_FAULTS);
   const bus = rx.bus();
   // The receiver as last computed, even when it has stopped transmitting: the card shows what the unit knows.
   const raw = rx.rawBus();
+  // While the GPS integrity condition is on it owns the satellite selection, and clears it when it ends: the bench's
+  // masking is replaced, so it is shown as cleared rather than left looking applied.
+  const held = view.integrityHeld;
+  useEffect(() => {
+    if (held) setFaults(current => (current.lowPrns.length || current.masked.length ? { ...current, lowPrns: [], masked: [] } : current));
+  }, [held]);
 
   const apply = (next: BenchFaults) => {
     setFaults(next);
-    rx.deselect([...new Set([...next.lowPrns, ...next.masked])]);
+    if (!held) rx.deselect([...new Set([...next.lowPrns, ...next.masked])]);
     rx.setJamming(next.jamDb);
     rx.setSbas({ doNotUse: next.doNotUse, outage: next.outage, ionoStorm: next.ionoStorm });
     rx.injectFault("RECEIVER", next.receiver);
     rx.injectFault("RF_INPUT", next.rfInput);
     rx.injectFault("STOP_TRANSMITTING", next.stopped);
-    pair.baroLost[index] = next.baroLost;
     rx.setSpoof(next.spoof ? { northM: next.spoof.northM, eastM: 0, driftNorthMps: 0, driftEastMps: next.spoof.driftEastMps } : null);
+    // setBaroLost re-reads the receivers too.
+    view.setBaroLost(index, next.baroLost);
   };
   const setSatFault = (fault: BenchFaults["satFault"]) => {
     if (faults.satFault && faults.satFault.prn !== fault?.prn) rx.satelliteFault(faults.satFault.prn, null);
     if (fault) rx.satelliteFault(fault.prn, fault.kind === "RAMP" ? { kind: "RAMP", metresPerSecond: fault.amount } : { kind: "STEP", metres: fault.amount });
     else if (faults.satFault) rx.satelliteFault(faults.satFault.prn, null);
     setFaults({ ...faults, satFault: fault });
+    view.updated();
   };
 
   return (
     <div className="fmsGpsColumn">
-      <ReceiverCard name={name} raw={raw} transmitting={bus !== null} faults={faults} phase={fms.flightPhase} />
-      <FaultControls name={name} raw={raw} faults={faults} apply={apply} setSatFault={setSatFault} />
-      <BusMonitor name={name} rx={rx} />
+      <ReceiverCard name={name} raw={raw} transmitting={bus !== null} faults={faults} phase={fms.flightPhase} inUse={fms.gpsStatus.chosen === index} />
+      <FaultControls name={name} raw={raw} faults={faults} apply={apply} setSatFault={setSatFault} held={held} />
+      <BusMonitor name={name} rx={rx} updated={view.updated} />
     </div>
   );
 }
@@ -112,7 +130,7 @@ const MODE_TONE: Record<string, string> = {
   SBAS_PA: "ok", SBAS_NAV: "ok", NAV: "ok", ALT_AIDING: "warn", ACQUISITION: "warn", INITIALIZATION: "idle", SELF_TEST: "idle", FAULT: "fail",
 };
 
-function ReceiverCard({ name, raw, transmitting, faults, phase }: { name: string; raw: GpsBus; transmitting: boolean; faults: BenchFaults; phase: ScriptedFms["flightPhase"] }) {
+function ReceiverCard({ name, raw, transmitting, faults, phase, inUse }: { name: string; raw: GpsBus; transmitting: boolean; faults: BenchFaults; phase: ScriptedFms["flightPhase"]; inUse: boolean }) {
   const status = raw["273"].value!;
   const sats = raw["060"].map(word => word.value!);
   const sbas = raw["305"].value!;
@@ -126,6 +144,7 @@ function ReceiverCard({ name, raw, transmitting, faults, phase }: { name: string
         <h2>{name} <small>CMA-5024 simulation</small></h2>
         <span className={`fmsGpsChip ${MODE_TONE[status.mode] ?? "idle"}`} data-testid="gps-mode">{modeLabel(status.mode)}</span>
         {!transmitting ? <span className="fmsGpsChip fail">NOT TRANSMITTING</span> : null}
+        {inUse ? <span className="fmsGpsChip ok" data-testid="gps-in-use">FMS IN USE</span> : null}
       </div>
       <div className="fmsGpsSky">
         <SkyPlot name={name} sats={sats} />
@@ -234,8 +253,8 @@ function IntegrityBar({ label, value, limit, limitLabel }: { label: string; valu
   );
 }
 
-function FaultControls({ name, raw, faults, apply, setSatFault }: {
-  name: string; raw: GpsBus; faults: BenchFaults; apply: (next: BenchFaults) => void; setSatFault: (fault: BenchFaults["satFault"]) => void;
+function FaultControls({ name, raw, faults, apply, setSatFault, held }: {
+  name: string; raw: GpsBus; faults: BenchFaults; apply: (next: BenchFaults) => void; setSatFault: (fault: BenchFaults["satFault"]) => void; held: boolean;
 }) {
   const gps = raw["060"].map(word => word.value!).filter(s => !s.sbas);
   const [prn, setPrn] = useState<number | "">("");
@@ -250,14 +269,20 @@ function FaultControls({ name, raw, faults, apply, setSatFault }: {
   return (
     <section className="fmsBenchCard fmsGpsFaults" aria-label={`${name} faults`}>
       <h2>{name} faults</h2>
+      {held ? (
+        <p className="fmsGpsHeld" role="note">
+          The GPS integrity lost condition holds this receiver's satellites (five kept, a 200 m step on one): masking is off
+          until it ends, and it clears any masking when it does.
+        </p>
+      ) : null}
       <div className="fmsGpsFaultRow">
-        <button type="button" aria-pressed={faults.lowPrns.length > 0} onClick={() => apply({ ...faults, lowPrns: faults.lowPrns.length ? [] : lowSatellites(raw) })}>Mask low satellites (below 15°)</button>
+        <button type="button" disabled={held} aria-pressed={faults.lowPrns.length > 0} onClick={() => apply({ ...faults, lowPrns: faults.lowPrns.length ? [] : lowSatellites(raw) })}>Mask low satellites (below 15°)</button>
       </div>
       <div className="fmsGpsPrns" role="group" aria-label={`${name} mask satellites`}>
         {gps.map(s => {
           const masked = faults.masked.includes(s.prn);
           return (
-            <button key={s.prn} type="button" aria-pressed={masked || faults.lowPrns.includes(s.prn)} title={`Mask PRN ${s.prn} (${s.elevation.toFixed(0)}°)`}
+            <button key={s.prn} type="button" disabled={held} aria-pressed={masked || faults.lowPrns.includes(s.prn)} title={`Mask PRN ${s.prn} (${s.elevation.toFixed(0)}°)`}
               onClick={() => apply({ ...faults, masked: masked ? faults.masked.filter(p => p !== s.prn) : [...faults.masked, s.prn] })}>{s.prn}</button>
           );
         })}
@@ -317,11 +342,12 @@ const valueText = (word: Word<unknown>) => {
 };
 
 /** The receiver's output words, live, each with its status; numeric words can be forced, frozen, biased or ramped. */
-function BusMonitor({ name, rx }: { name: string; rx: GpsReceiver }) {
+function BusMonitor({ name, rx, updated }: { name: string; rx: GpsReceiver; updated: () => void }) {
   const [active, setActive] = useState<Partial<Record<GpsLabel, string>>>({});
   const bus = rx.bus();
   const set = (label: GpsLabel, override: Override | null, text: string) => {
     rx.override(label, override);
+    updated();
     setActive(current => { const next = { ...current }; if (override) next[label] = text; else delete next[label]; return next; });
   };
   return (
@@ -339,7 +365,7 @@ function BusMonitor({ name, rx }: { name: string; rx: GpsReceiver }) {
                 <td className="value">{word ? valueText(word) : "—"}</td>
                 <td>{word ? <span className={`fmsGpsSsm ${word.ssm}`}>{word.ssm}</span> : <span className="fmsGpsSsm FW">SILENT</span>}</td>
                 <td>{numeric ? <OverrideForm label={label} active={active[label]} onSet={(o, text) => set(label, o, text)} />
-                  : label in STATUS_FIELDS ? <StatusOverrideForm label={label as StatusLabel} rx={rx} /> : <small>model output</small>}</td>
+                  : label in STATUS_FIELDS ? <StatusOverrideForm label={label as StatusLabel} rx={rx} updated={updated} /> : <small>{label === "scale" ? "model output" : "read only"}</small>}</td>
               </tr>
             );
           })}
@@ -375,7 +401,7 @@ function statusFields(fields: { [field: string]: FieldType }, prefix = ""): { pa
  * A typed override of a status word (273, 355, 156, 305): pick a field, give it a value of its type, and Set. Fields
  * set one after another add up; Clear removes them all. The receiver validates the patch and refuses an invalid one.
  */
-function StatusOverrideForm({ label, rx }: { label: StatusLabel; rx: GpsReceiver }) {
+function StatusOverrideForm({ label, rx, updated }: { label: StatusLabel; rx: GpsReceiver; updated: () => void }) {
   const fields = statusFields(STATUS_FIELDS[label]);
   const [path, setPath] = useState(fields[0].path);
   const [text, setText] = useState("");
@@ -390,6 +416,7 @@ function StatusOverrideForm({ label, rx }: { label: StatusLabel; rx: GpsReceiver
     const next = { ...(patch ?? {}) };
     next[head] = tail ? { ...((next[head] as object | undefined) ?? {}), [tail]: typed } : typed;
     const ok = rx.overrideStatus(label, next as StatusPatch[typeof label]);
+    if (ok) updated();
     setRefused(!ok);
     if (ok) setPatch(next);
   };
@@ -403,7 +430,7 @@ function StatusOverrideForm({ label, rx }: { label: StatusLabel; rx: GpsReceiver
         ? <select value={value} aria-label={`Status value ${label}`} onChange={event => setText(event.target.value)}>{choices.map(choice => <option key={choice}>{choice}</option>)}</select>
         : <input value={text} type={field.type === "number" ? "number" : "text"} aria-label={`Status value ${label}`} onChange={event => setText(event.target.value)} />}
       <button type="submit">Set</button>
-      {patch ? <button type="button" onClick={() => { rx.overrideStatus(label, null); setPatch(null); setRefused(false); }}>Clear</button> : null}
+      {patch ? <button type="button" onClick={() => { rx.overrideStatus(label, null); updated(); setPatch(null); setRefused(false); }}>Clear</button> : null}
       {refused ? <small role="status">Refused: not a valid value for that field</small> : null}
     </form>
   );

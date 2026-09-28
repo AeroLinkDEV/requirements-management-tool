@@ -330,35 +330,68 @@ test('the bench tools are tabs under the cockpit, keyboard-navigable, and the ch
   await expect(page.getByLabel('ARINC 424 navigation data file')).toBeVisible()
 })
 
-test('the GPS sensors tab shows the receivers acquiring and reacts to masking and a receiver fault', async ({ page }) => {
+test('the GPS sensors tab drives the FMS receivers: a fault on GPS 1 moves the FMS to GPS 2, both give GPS NAV LOST', async ({ page }) => {
   await open(page)
   await tab(page, 'GPS sensors')
   const gps1 = page.getByRole('region', { name: 'GPS 1', exact: true })
   const gps2 = page.getByRole('region', { name: 'GPS 2', exact: true })
-  await expect(gps1.getByTestId('gps-mode')).toHaveText(/^(SELF TEST|INITIALIZATION|ACQUISITION)$/)
-  await page.getByLabel('Simulation rate').selectOption('64')
-  await page.getByRole('button', { name: 'Fly' }).click()
-  // The time to first fix is 45 s of simulation time: seconds at 64 times real time.
-  await expect(gps1.getByTestId('gps-mode')).toHaveText(/^(NAV|SBAS NAV)$/, { timeout: 20_000 })
-  await expect(gps2.getByTestId('gps-mode')).toHaveText(/^(NAV|SBAS NAV)$/, { timeout: 20_000 })
-  await page.getByRole('button', { name: 'Pause' }).click()
+  const routing = page.getByRole('img', { name: /^Sensor routing/ })
+  // The FMS's receivers start warm, navigating; the FMS is on GPS 1.
+  await expect(gps1.getByTestId('gps-mode')).toHaveText(/^(NAV|SBAS NAV)$/)
+  await expect(gps2.getByTestId('gps-mode')).toHaveText(/^(NAV|SBAS NAV)$/)
+  await expect(routing).toHaveAttribute('aria-label', /FMS on GPS1$/)
+  await expect(page.getByTestId('route-link-gps1')).not.toHaveClass(/dashed/)
+  await expect(gps1.getByTestId('gps-in-use')).toBeVisible()
+
   const used = async () => Number(((await gps1.getByTestId('gps-used').innerText()).split('/'))[0])
   const before = await used()
   await page.getByRole('region', { name: 'GPS 1 faults' }).getByRole('button', { name: /^Mask low satellites/ }).click()
   await expect.poll(used).toBeLessThan(before)
   await expect(gps1.getByRole('list', { name: 'GPS 1 active faults' })).toContainText('MASKED')
 
+  // A GPS 1 receiver fault reaches the FMS at once: it navigates on GPS 2, and the strip shows it.
   await page.getByLabel('GPS 1 Receiver fault').check()
   await expect(gps1.getByTestId('gps-mode')).toHaveText('FAULT')
   await expect(gps1.getByRole('list', { name: 'GPS 1 active faults' })).toContainText('RECEIVER FAULT')
-  await expect(gps2.getByTestId('gps-mode')).toHaveText(/^(NAV|SBAS NAV)$/)
-  // GPS 1 no longer feeds: its link to the FMS is drawn dashed.
+  await expect(routing).toHaveAttribute('aria-label', /FMS on GPS2$/)
   await expect(page.getByTestId('route-link-gps1')).toHaveClass(/dashed/)
+  await expect(page.getByTestId('route-link-gps2')).not.toHaveClass(/dashed/)
+  await expect(gps2.getByTestId('gps-in-use')).toBeVisible()
   // Its bus: position words Failure Warning, the status word still Normal.
   await page.getByText('GPS 1 bus monitor').click()
   const monitor = page.getByRole('table', { name: 'GPS 1 bus monitor' })
   await expect(monitor.locator('tr[data-label="110"] .fmsGpsSsm')).toHaveText('FW')
   await expect(monitor.locator('tr[data-label="273"] .fmsGpsSsm')).toHaveText('NORMAL')
+
+  // Both faulted: the FMS has no GPS and says so on the CDU.
+  await page.getByLabel('GPS 2 Receiver fault').check()
+  await expectLine(page, 13, /^GPS NAV LOST/)
+  await expect(routing).not.toHaveAttribute('aria-label', /FMS on GPS/)
+
+  // The product's 12 px text floor (tests/production) holds across the tab, open monitor and chips included.
+  const small = await page.locator('.fmsGps').evaluate(root => [...root.querySelectorAll('*')]
+    .filter(element => element.children.length === 0 && (element.textContent ?? '').trim() && parseFloat(getComputedStyle(element).fontSize) < 12)
+    .map(element => `${element.tagName}.${element.getAttribute('class') ?? ''} ${getComputedStyle(element).fontSize}`))
+  expect(small).toEqual([])
+})
+
+test('the FMS GPS selection is set from the routing strip, and the integrity condition holds the satellite masking', async ({ page }) => {
+  await open(page)
+  await tab(page, 'GPS sensors')
+  const routing = page.getByRole('img', { name: /^Sensor routing/ })
+  await page.getByLabel('FMS GPS selection').selectOption('GPS2')
+  await expect(routing).toHaveAttribute('aria-label', /FMS on GPS2$/)
+  await page.getByLabel('FMS GPS selection').selectOption('OFF')
+  await expect(routing).not.toHaveAttribute('aria-label', /FMS on GPS/)
+  await page.getByLabel('FMS GPS selection').selectOption('AUTO')
+  await expect(routing).toHaveAttribute('aria-label', /FMS on GPS1$/)
+  const faults = page.getByRole('region', { name: 'GPS 1 faults' })
+  await expect(faults.getByRole('button', { name: /^Mask low satellites/ })).toBeEnabled()
+  await tab(page, 'Conditions')
+  await page.getByRole('checkbox', { name: /^GPS integrity lost/ }).check()
+  await tab(page, 'GPS sensors')
+  await expect(faults.getByRole('note')).toContainText('GPS integrity lost condition holds')
+  await expect(faults.getByRole('button', { name: /^Mask low satellites/ })).toBeDisabled()
 })
 
 test('a status word is overridden field by field from the bus monitor: what is transmitted changes, not what the receiver knows', async ({ page }) => {

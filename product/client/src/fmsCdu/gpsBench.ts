@@ -1,50 +1,41 @@
-import type { FlightSimulator } from "./flight";
 import { distanceNm } from "./fmsModel";
-import { Constellation } from "./gnss";
-import { GpsReceiver, type ApproachLevel, type GpsBus, type GpsInput, type GpsLabel, type GpsMode, type Override, type Ssm } from "./gps";
+import type { ApproachLevel, GpsBus, GpsLabel, GpsMode, GpsReceiver, Override, Ssm } from "./gps";
+import { busFix, type GpsChoice } from "./gpsSensors";
 import type { FlightPhase } from "./navigation";
 import type { ScriptedFms } from "./scriptedFms";
 
 /**
- * The bench side of the CMA-5024 simulation: two receivers fed from the simulated aircraft's TRUE state (as a real
- * antenna would be), and the helpers the GPS sensors tab draws from. The FMS does not read these receivers yet: that is
- * the GPS integration (phase 3).
+ * The bench side of the CMA-5024 simulation. The FMS owns GPS1 and GPS2 and feeds them from the aircraft's true state
+ * (scriptedFms.ts); the GPS sensors tab reads them through this view, and every change the bench makes (a fault, an
+ * override, a deselection) is followed by the FMS re-reading them, so it reaches the FMS's choice at once.
  */
-
-/** What a receiver's antenna sees of the aircraft: its true position, altitude, attitude and velocity, at the bench time. */
-export function gpsInput(fms: ScriptedFms, sim: FlightSimulator, options: { baroLost?: boolean } = {}): GpsInput {
-  const speedFtPerS = Math.max(1, fms.groundSpeed * 1.68781);
-  // Pitch from the flight path: the point-mass model has no angle of attack.
-  const pitch = (Math.atan(fms.verticalSpeed / 60 / speedFtPerS) * 180) / Math.PI;
-  return {
-    time: fms.now.getTime(), position: fms.truePosition, altitude: fms.altitude, baroAltitude: options.baroLost ? null : fms.altitude,
-    track: fms.track, groundSpeed: fms.groundSpeed, verticalSpeed: fms.verticalSpeed,
-    attitude: { bank: sim.bankAngle, pitch, heading: fms.track },
-  };
-}
-
-/** GPS 1 and GPS 2: one constellation, two receivers with their own error seeds (independent antennas and errors). */
-export class GpsPair {
-  readonly constellation = new Constellation(7);
-  readonly receivers: [GpsReceiver, GpsReceiver] = [
-    new GpsReceiver({ constellation: this.constellation, seed: 101 }),
-    new GpsReceiver({ constellation: this.constellation, seed: 202 }),
-  ];
-  /** The bench's "baro lost" per receiver: its air data input goes silent. */
-  readonly baroLost: [boolean, boolean] = [false, false];
-
-  step(fms: ScriptedFms, sim: FlightSimulator) {
-    this.receivers.forEach((rx, i) => rx.step(gpsInput(fms, sim, { baroLost: this.baroLost[i] })));
-  }
-
+export type GpsView = {
+  receivers: readonly GpsReceiver[];
   /** The distance between the two receivers' reported positions, m; null unless both report a valid one. */
-  difference(): number | null {
-    const [a, b] = this.receivers.map(rx => rx.bus());
-    const position = (bus: GpsBus | null) => (bus && bus["110"].ssm === "NORMAL" && bus["111"].ssm === "NORMAL"
-      ? { lat: bus["110"].value! + bus["120"].value!, lon: bus["111"].value! + bus["121"].value! } : null);
-    const pa = position(a), pb = position(b);
-    return pa && pb ? distanceNm(pa, pb) * 1852 : null;
-  }
+  difference(): number | null;
+  setBaroLost(index: number, lost: boolean): void;
+  /** Tell the FMS a receiver was changed from the bench. */
+  updated(): void;
+  select(choice: GpsChoice | "OFF"): void;
+  /** The FMS's GPS selection (NAV OPTIONS): AUTO, one receiver, or OFF (GPS deselected). */
+  choice: GpsChoice | "OFF";
+  /** The GPS integrity condition holds the receivers' satellite selection: bench masking is replaced while it is on. */
+  integrityHeld: boolean;
+};
+
+export function fmsGpsView(fms: ScriptedFms): GpsView {
+  return {
+    receivers: fms.gps,
+    difference: () => {
+      const [a, b] = fms.gps.map(rx => { const bus = rx.bus(); return bus ? busFix(bus) : null; });
+      return a && b ? distanceNm(a, b) * 1852 : null;
+    },
+    setBaroLost: (index, lost) => { fms.setGpsBaro(index, !lost); fms.gpsUpdated(); },
+    updated: () => fms.gpsUpdated(),
+    select: choice => fms.selectGpsReceiver(choice),
+    choice: fms.gpsNavSelected ? fms.gpsReceiverChoice : "OFF",
+    integrityHeld: fms.hasCondition("gpsIntegrity"),
+  };
 }
 
 /**

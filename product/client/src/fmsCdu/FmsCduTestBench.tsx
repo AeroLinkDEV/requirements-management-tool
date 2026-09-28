@@ -9,7 +9,7 @@ import FmsMap from "./FmsMap";
 import FmsGpsTab from "./FmsGpsTab";
 import FmsScenarioCard from "./FmsScenarioCard";
 import { conditionalLabel } from "./fmsModel";
-import { GpsPair } from "./gpsBench";
+import { fmsGpsView } from "./gpsBench";
 import { useCduLayout, type CduKeyEvent } from "./layout";
 import { LIGHTING_MODES, displayLuminance, type Lighting, type LightingMode } from "./lighting";
 import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, type Scenario } from "./scenario";
@@ -54,7 +54,7 @@ export default function FmsCduTestBench() {
   // A scenario run or a recording starts on the next session, so it always begins from a restarted simulation.
   const pendingScenario = useRef<Scenario | null>(null);
   const pendingRecording = useRef(false);
-  const { backend, sim, runner, recorder, gps } = useMemo(() => {
+  const { backend, sim, runner, recorder } = useMemo(() => {
     simTime.current = Date.now();
     const fms = new ScriptedFms(() => new Date(simTime.current));
     // The run's context is fixed as it starts, so its report describes the run and not the controls afterwards.
@@ -65,8 +65,7 @@ export default function FmsCduTestBench() {
     const recorder = pendingRecording.current ? new ScenarioRecorder(() => new Date(simTime.current)) : null;
     pendingScenario.current = null;
     pendingRecording.current = false;
-    // GPS 1 and GPS 2 power up with the simulation: a restart restarts them too.
-    return { backend: fms, sim: new FlightSimulator(fms), runner, recorder, gps: new GpsPair() };
+    return { backend: fms, sim: new FlightSimulator(fms), runner, recorder };
   }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
   const [recording, setRecording] = useState(false);
   const recordTo = recording ? recorder : null;
@@ -98,13 +97,11 @@ export default function FmsCduTestBench() {
       const running = runner !== null && !runner.finished;
       if (playing) advanceTicks(rate, ms => { simTime.current += ms; }, sim, runner);
       else if (!running) { simTime.current += interval; backend.tick(); }
-      // The receivers see the aircraft's true state at the bench time (the FMS does not read them yet).
-      gps.step(backend, sim);
       // A finished scenario pauses the flight once; flying on afterwards is the engineer's choice.
       if (runner?.finished && pausedFor.current !== runner) { pausedFor.current = runner; setPlaying(false); }
     }, interval);
     return () => window.clearInterval(timer);
-  }, [backend, sim, runner, gps, playing, rate]);
+  }, [backend, sim, runner, playing, rate]);
 
   const chooseVariant = (id: string) => {
     setVariantId(id);
@@ -348,7 +345,7 @@ export default function FmsCduTestBench() {
           </section>
         </div>
         <div className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-gps" aria-labelledby="fms-bench-tabbutton-gps" hidden={tab !== "gps"}>
-          {tab === "gps" ? <FmsGpsTab pair={gps} fms={backend} /> : null}
+          {tab === "gps" ? <FmsGpsTab view={fmsGpsView(backend)} fms={backend} /> : null}
         </div>
         <div className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-navdata" aria-labelledby="fms-bench-tabbutton-navdata" hidden={tab !== "navdata"}>
           <section className="fmsBenchCard">

@@ -194,7 +194,9 @@ export class ScriptedFms implements CduBackend {
   /** The ident shown on REF NAV DATA, and an airway chosen on RTE 2 waiting for its TO fix. */
   navDataQuery: string | null = null;
   pendingVia: string | null = null;
-  private aircraft = { track: courseDeg(START_POSITION, { lat: 45.2150, lon: -75.3900 }), groundSpeed: 120, altitude: 3000, verticalSpeed: 0, crossTrack: 0, trackError: 0 };
+  private aircraft = { track: courseDeg(START_POSITION, { lat: 45.2150, lon: -75.3900 }), groundSpeed: 120, altitude: 3000, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0 };
+  /** Whether each receiver has its baro altitude input (the bench can take it from one). */
+  private gpsBaro: [boolean, boolean] = [true, true];
   /** Where the active leg starts: the last waypoint passed, or present position when a direct-to was executed. */
   private legStart: LatLon = { ...START_POSITION };
   private directPending = false;
@@ -454,7 +456,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** The flight simulation reports the aircraft's state after each step. */
-  setAircraft(state: Partial<{ position: LatLon; track: number; groundSpeed: number; altitude: number; verticalSpeed: number; crossTrack: number; trackError: number }>) {
+  setAircraft(state: Partial<{ position: LatLon; track: number; groundSpeed: number; altitude: number; verticalSpeed: number; crossTrack: number; trackError: number; bank: number; pitch: number }>) {
     // The simulation reports where the aircraft really is; the FMS position is that plus its navigation error.
     if (state.position) { this.truth = state.position; this.here = this.withError(this.truth); }
     const { position: _position, ...rest } = state;
@@ -551,11 +553,11 @@ export class ScriptedFms implements CduBackend {
 
   // ------------------------------------------------------------------ GPS receivers (GPS phase 3a)
 
-  /** What the receivers are given: the aircraft's true state. The antenna is level (bank not fed in yet; a known limit). */
+  /** What the receivers are given: the aircraft's true state, the antenna tilted with its bank and pitch. */
   private gpsInput(time: number): GpsInput {
     return {
       time, position: this.truth, altitude: this.altitude, baroAltitude: this.altitude, track: this.track,
-      groundSpeed: this.groundSpeed, verticalSpeed: this.verticalSpeed, attitude: { bank: 0, pitch: 0, heading: this.track },
+      groundSpeed: this.groundSpeed, verticalSpeed: this.verticalSpeed, attitude: { bank: this.aircraft.bank, pitch: this.aircraft.pitch, heading: this.track },
     };
   }
 
@@ -563,7 +565,7 @@ export class ScriptedFms implements CduBackend {
   private updateGps() {
     const input = this.gpsInput(this.now.getTime());
     if (this.injected.has("gpsIntegrity")) this.applyGpsIntegrityCondition(input);
-    for (const receiver of this.receivers) receiver.step(input);
+    this.receivers.forEach((receiver, i) => receiver.step(this.gpsBaro[i] ? input : { ...input, baroAltitude: null }));
     const hal = HAL_NM[this.flightPhase];
     const assessed = this.receivers.map(receiver => assessReceiver(receiver.bus(), hal));
     const order = candidates(this.gpsChoice, this.gpsSelected);
@@ -618,6 +620,12 @@ export class ScriptedFms implements CduBackend {
 
   /** Re-reads the receivers after the bench changed one (a fault, an override), without advancing time. */
   gpsUpdated() { this.updateNavigation(0); this.emit(); }
+
+  /** The aircraft attitude the flight simulation reports (bank, flight-path pitch), which tilts the GPS antennas. */
+  get attitude() { return { bank: this.aircraft.bank, pitch: this.aircraft.pitch }; }
+
+  /** Gives or takes one receiver's baro altitude input (its air data bus); call gpsUpdated after. */
+  setGpsBaro(index: number, available: boolean) { this.gpsBaro[index] = available; }
 
   /** The phase that sets the default RNP: approach on an approach leg, terminal within 30 NM of either airport. */
   get flightPhase(): FlightPhase {
