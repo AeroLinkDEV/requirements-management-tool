@@ -360,7 +360,7 @@ export class FlightSimulator {
     const first = profile.points[0];
     // No descent is flown toward a point whose distance is not known, and beyond the FAF only the approach descends.
     if (this.onFinal && this.approach !== "CAPTURED") return null;
-    if (!first || first.distance === null || !profile.endOfDescent || (!profile.descending && !fms.vnav.desNow)) return null;
+    if (!first || first.distance === null || first.altitude === null || !profile.endOfDescent || (!profile.descending && !fms.vnav.desNow)) return null;
     const tan = Math.tan(rad(fms.vnav.pathAngle));
     const pathAltitude = profile.descending ? Math.min(fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * tan) : -Infinity;
     const above = fms.altitude - pathAltitude;

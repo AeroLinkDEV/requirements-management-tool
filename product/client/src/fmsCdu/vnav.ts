@@ -94,7 +94,11 @@ export type ProfileInput = {
 };
 
 export type ProfilePoint = {
-  ident: string; distance: number | null; altitude: number; eta: number | null; fuel: number | null; constraintMet: boolean; basis: PredictionBasis;
+  ident: string; distance: number | null; eta: number | null; fuel: number | null; basis: PredictionBasis;
+  /** The predicted altitude; null past an unknown segment, where it cannot be predicted. */
+  altitude: number | null;
+  /** Whether the plan meets the constraint here; null where it is not evaluated (past an unknown segment). */
+  constraintMet: boolean | null;
 };
 export type Profile = {
   points: ProfilePoint[];
@@ -177,7 +181,16 @@ export function computeProfile(input: ProfileInput): Profile {
 
   // The climb levels at the lowest "at" or "at or below" constraint ahead in the climb, until passing it.
   let climbCap = cruiseAltitude;
-  for (let i = 0; i < waypoints.length && descent[i] === Infinity; i += 1) climbCap = Math.min(climbCap, capOf(waypoints[i].constraint));
+  // Only constraints on the known part of the route cap the climb: nothing behind a gap commands the connected segment.
+  for (let i = 0; i < waypoints.length && descent[i] === Infinity && basis[i] !== "unknown"; i += 1) climbCap = Math.min(climbCap, capOf(waypoints[i].constraint));
+
+  // The climb at each point levels at the lowest at-or-below constraint at or after it on the known climb segment, as
+  // guidance does (climbCap): a restriction ahead holds the climb before it, not only at its own fix.
+  const aheadCap: number[] = waypoints.map(() => cruiseAltitude);
+  for (let i = waypoints.length - 1, lowest = cruiseAltitude; i >= 0; i -= 1) {
+    if (descent[i] === Infinity && basis[i] !== "unknown") lowest = Math.min(lowest, capOf(waypoints[i].constraint));
+    aheadCap[i] = lowest;
+  }
 
   // Climb: forward from the aircraft at the climb rate, levelling at B constraints and cruise.
   const points: ProfilePoint[] = [];
@@ -186,18 +199,19 @@ export function computeProfile(input: ProfileInput): Profile {
     const hours = (w.legDistance ?? 0) / Math.max(30, w.groundSpeed);
     time += hours * 3_600_000;
     fuel -= hours * input.fuelFlow;
-    const cap = Math.min(cruiseAltitude, capOf(w.constraint));
+    const cap = Math.min(cruiseAltitude, capOf(w.constraint), aheadCap[i]);
     const climbed = altitude < cap ? Math.min(cap, altitude + input.climbRate * hours * 60) : altitude;
     const predicted = Math.min(climbed, descent[i]);
     // Both bounds count: a restriction the plan stays above is missed just as one it cannot climb to.
     const lower = w.constraint?.kind === "A" || w.constraint?.kind === "AT" ? w.constraint.altitude : w.constraint?.kind === "WINDOW" ? w.constraint.lower : -Infinity;
     const upper = w.constraint?.kind === "B" || w.constraint?.kind === "AT" ? w.constraint.altitude : w.constraint?.kind === "WINDOW" ? w.constraint.upper : Infinity;
-    const met = predicted >= lower - 50 && predicted <= upper + 50;
-    if (!met && unableNext === null) unableNext = w.ident;
-    altitude = predicted;
     const known = basis[i] !== "unknown";
+    // Past an unknown segment a constraint is not evaluated: neither met nor missed, and it raises no UNABLE.
+    const met = known ? predicted >= lower - 50 && predicted <= upper + 50 : null;
+    if (met === false && unableNext === null) unableNext = w.ident;
+    altitude = predicted;
     points.push({
-      ident: w.ident, distance: known ? cumulative[i] : null, altitude: predicted, eta: known ? time : null, fuel: known ? fuel : null,
+      ident: w.ident, distance: known ? cumulative[i] : null, altitude: known ? predicted : null, eta: known ? time : null, fuel: known ? fuel : null,
       constraintMet: met, basis: basis[i],
     });
   });
