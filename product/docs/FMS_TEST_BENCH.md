@@ -80,10 +80,10 @@ The FAA advisory circulars AC 20-138D and AC 90-105A would not download at the t
 
 ## Human-factors design rules to build in
 
-1. **Everything is a MOD until EXEC**, with the dashed route on the map. *Done.* Carry the same rule into VNAV and offset changes.
+1. **Route edits are a MOD until EXEC**, with the dashed route on the map, and a pending edit must not change the active route's geometry, guidance or predictions (it currently does: review findings R01, R05, R12). This is not a rule for every command: radio tuning, brightness and acknowledgements are immediate, and each command needs its own declared commit policy.
 2. **Show the next mode, not only the current one.** Add a flight mode annunciator strip showing the engaged and armed lateral mode (LNAV, HDG, HOLD, SAR) and vertical mode (VNAV PTH, VNAV SPD, ALT), and show transitions as they happen.
 3. **Make direct-to consequences visible.** Offer ABEAM PTS so the reporting points survive a direct-to; the Cali accident is the lesson. Keep INTC CRS beside it.
-4. **Duplicate identifiers:** show the list nearest first, with facility type and position. *Done:* our SELECT DESIRED WPT shows type and position; nearest-first ordering is next.
+4. **Duplicate identifiers:** show every candidate with facility type and position, so the intended one (not necessarily the nearest) is chosen deliberately; nearest-first is a useful ordering, not established CMA behaviour. *Done:* our SELECT DESIRED WPT shows type and position; the chosen entry is not yet pinned to the leg (R05, R06).
 5. **Messages** must be specific, amber for alerts, recallable, and able to light MSG. *Done.* Add the in-service messages the new features need: UNABLE NEXT ALTITUDE, RTA UNACHIEVABLE, USING RSV FUEL, INSUFFICIENT FUEL, UNABLE REQD NAV PERF–RNP, POS SHIFT, VERIFY RNP.
 6. **Repeatable paths:** document the turn and bypass rules and test them, so engineers can compare the simulator's path with the real CMA-9000's.
 
