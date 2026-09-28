@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
@@ -11,8 +11,7 @@ export function browserStoragePath(runId) {
 }
 
 function assertNoLinks(path) {
-  if (!existsSync(path)) return
-  if (lstatSync(path).isSymbolicLink()) throw new Error(`Browser storage refuses a link: ${path}`)
+  if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`Browser storage refuses a link: ${path}`)
 }
 
 export function createBrowserStorage(runId) {
@@ -33,6 +32,7 @@ export function createBrowserStorage(runId) {
 
 export function removeBrowserStorage(runId) {
   const root = browserStoragePath(runId)
+  assertNoLinks(root)
   if (!existsSync(root)) return
   if (dirname(resolve(root)) !== resolve(tmpdir())) throw new Error('Browser cleanup escaped temp.')
   assertNoLinks(root)
@@ -48,5 +48,23 @@ export function removeBrowserStorage(runId) {
     }
   }
   checkTree(root)
-  rmSync(root, { recursive: true, force: false, maxRetries: 3, retryDelay: 100 })
+  // Recursive removal of the root can delete .owner before hitting a locked database.
+  // Keep the marker until every payload has gone so a failed run remains safely retryable.
+  for (const entry of readdirSync(root)) {
+    if (entry === '.owner') continue
+    const child = join(root, entry)
+    assertNoLinks(child)
+    rmSync(child, { recursive: true, force: false, maxRetries: 3, retryDelay: 100 })
+  }
+  unlinkSync(marker)
+  try {
+    // Non-recursive: do not remove anything created after the payload scan.
+    rmdirSync(root)
+  } catch (error) {
+    // A handle can also block removing the empty directory itself. Restore ownership
+    // exclusively, without following a replacement link or overwriting another marker.
+    assertNoLinks(root)
+    if (existsSync(root)) writeFileSync(marker, runId, { flag: 'wx' })
+    throw error
+  }
 }
