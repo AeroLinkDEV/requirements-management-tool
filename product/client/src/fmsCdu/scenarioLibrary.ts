@@ -7,7 +7,7 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
   {
     id: "gps-lost-before-faf",
     title: "GPS lost 2 NM before the final approach fix",
-    objective: "Show that losing GPS on the RNAV (GNSS) approach removes approach guidance, alerts the crew, and that the missed approach is flown after TOGA.",
+    objective: "Show that losing GPS on the RNAV (GNSS) approach removes approach capability (the approach does not capture), alerts the crew, and that the missed approach is flown after TOGA. On DME/DME the navigation still meets RNP 0.3 here, so no CHECK ANP is expected.",
     maxSeconds: 3600,
     steps: [
       { when: { kind: "start" }, action: { kind: "procedure", procedure: "APPROACH", ident: "R24R" } },
@@ -17,7 +17,6 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
       { when: { kind: "start" }, action: { kind: "expectAlert", text: "GPS NAV LOST" }, within: 5 },
       { when: { kind: "start" }, action: { kind: "expectAlert", text: "NO APPR INTEGRITY" }, within: 5 },
       { when: { kind: "start" }, action: { kind: "expectLamp", lamp: "MSG", lit: true } },
-      { when: { kind: "start" }, action: { kind: "expectAlert", text: "CHECK ANP" }, within: 60 },
       { when: { kind: "start" }, action: { kind: "goAround" } },
       // TOGA drops the rest of the approach: without it the aircraft would reach UL501 only minutes later, via the runway.
       { when: { kind: "start" }, action: { kind: "expectActive", waypoint: "UL501" }, within: 30 },
