@@ -161,3 +161,66 @@ test('integrity lost after capture drops to altitude hold; restoring it does not
   expect(sim.approachMode).toBe('OFF')
   expect(Math.abs(unit.altitude - held)).toBeLessThan(40)
 })
+
+// The laboratory go-around and the approach exits (third review D02 and D03): an accepted TOGA leaves the approach the
+// same way however the approach ended, and the commanded target is always the one the controlling authority flies.
+const capturedApproach = () => {
+  const run = approachSetup(true)
+  run.fly(600, () => run.sim.approachMode === 'CAPTURED' && run.unit.verticalSpeed < -300)
+  expect(run.sim.approachMode).toBe('CAPTURED')
+  return run
+}
+
+test('TOGA climbs on the missed approach whether the approach was captured or had lost its integrity (third review D02)', () => {
+  // The degraded case first: it is the one that went wrong (the normal go-around already climbed).
+  for (const lostIntegrity of [true, false]) {
+    const { unit, sim, fly } = capturedApproach()
+    if (lostIntegrity) {
+      unit.setCondition('gpsIntegrity', true)
+      fly(2)
+      expect(sim.verticalMode).toBe('ALT HOLD')
+      // In altitude hold the commanded target is the held altitude, not the planned one.
+      expect(sim.guidance.targetAltitude).toBe(sim.altitudeHoldReference)
+    }
+    const from = unit.altitude
+    expect(unit.goAround()).toBe(true)
+    fly(60)
+    const leg = unit.activeRoute.legs[0]
+    expect(leg && leg.kind !== 'disco' ? leg.source : null).toBe('MISSED')
+    expect(sim.altitudeHoldReference, `integrity lost: ${lostIntegrity}`).toBeNull()
+    expect(sim.verticalMode).toBe('VNAV CLB')
+    expect(sim.guidance.targetAltitude).toBe(3000)
+    expect(unit.altitude - from).toBeGreaterThan(500)
+    const goAround = sim.modeEvents.find(e => e.event === 'GO AROUND')!
+    expect(goAround.detail).toContain('VNAV climbs on the missed approach')
+    expect(goAround.detail.includes('released')).toBe(lostIntegrity)
+  }
+})
+
+test('TOGA is refused while the FMS has failed, and the route is left as it was (third review D02)', () => {
+  const { unit, sim, fly } = capturedApproach()
+  unit.setCondition('fmsFail', true)
+  fly(1)
+  const legs = structuredClone(unit.activeRoute.legs)
+  expect(unit.goAround()).toBe(false)
+  expect(unit.activeRoute.legs).toEqual(legs)
+  fly(2)
+  expect(sim.modeEvents.some(e => e.event === 'GO AROUND')).toBe(false)
+})
+
+test('after capture, APPR pressed off or HDG SEL cancels the approach to an altitude hold at the altitude it had (third review D03)', () => {
+  for (const how of ['APPR pressed off', 'HDG SEL']) {
+    const { unit, sim, fly } = capturedApproach()
+    if (how === 'HDG SEL') sim.selectHeading(240)
+    else unit.armApproach(false)
+    fly(2)
+    expect(sim.approachMode, how).toBe('OFF')
+    expect(sim.verticalMode).toBe('ALT HOLD')
+    expect(unit.approachArmed).toBe(false)
+    expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'APPR CANCELLED', detail: expect.stringContaining(how) })
+    const held = sim.altitudeHoldReference!
+    expect(sim.guidance.targetAltitude).toBe(held)
+    fly(20)
+    expect(Math.abs(unit.altitude - held)).toBeLessThan(40)
+  }
+})

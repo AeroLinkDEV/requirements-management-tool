@@ -55,6 +55,16 @@ const demoCycle = (id: string, from: string, to: string) => cycleOf(new NavDatab
 const onGlobe = (p: LatLon) => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
 const samePlace = (a: LatLon | undefined, b: LatLon | undefined) => a !== undefined && b !== undefined && a.lat === b.lat && a.lon === b.lon;
 
+/** The legs of a route as text (DISC for a gap), for the engineering record. */
+const legText = (legs: Route["legs"]) => legs.map(leg => (leg.kind === "wpt" ? leg.ident : leg.kind === "cond" ? leg.path : "DISC")).join(" ");
+
+/** A short fingerprint of a route's legs (FNV-1a), so a record identifies the exact plan it changed. */
+function planFingerprint(legs: Route["legs"]) {
+  let hash = 0x811c9dc5;
+  for (const char of legText(legs)) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193) >>> 0;
+  return hash.toString(16).padStart(8, "0");
+}
+
 /** The ICAO maximum holding speed up to 14 000 ft. */
 const MAX_HOLDING_SPEED = 230;
 
@@ -108,7 +118,13 @@ export class ScriptedFms implements CduBackend {
    * cycle. The active plan's consumers (guidance, predictions, sequencing, the pages) use these, not a fresh lookup, so
    * activating another cycle never moves a fix the aircraft is flying.
    */
-  private pins = new Map<string, LatLon>();
+  /**
+   * The active plan's database fixes as they were resolved when it became active: a position, or null for a fix the
+   * plan was executed without (unresolved stays unresolved until the crew executes the plan again).
+   */
+  private pins = new Map<string, LatLon | null>();
+  /** The active plan's revision: each EXEC (and each engineering change to it) makes a new one. */
+  private planRevision = 0;
   private pinnedIn: NavCycle = this.cycles[0];
   private outOfDateAlerted = false;
   /** The MOVING WPT page's entries before CREATE. */
@@ -306,11 +322,14 @@ export class ScriptedFms implements CduBackend {
   overrideDiscontinuity(): boolean {
     if (this.injected.has("fmsFail") || this.active.legs[0]?.kind !== "disco") return false;
     const legs = this.active.legs;
+    const before = { revision: this.planRevision, fingerprint: planFingerprint(legs), legs: legText(legs) };
     legs.shift();
+    this.planRevision += 1;
     const next = legs[0];
     this.engineering = [...this.engineering, {
       at: this.now, action: "OVERRIDE DISCONTINUITY",
-      detail: `gap removed; active leg now ${next?.kind === "wpt" ? next.ident : next?.kind === "cond" ? next.path : "none"}`,
+      detail: `gap removed; active leg now ${next?.kind === "wpt" ? next.ident : next?.kind === "cond" ? next.path : "none"}; `
+        + `plan rev ${before.revision} (${before.fingerprint}: ${before.legs}) -> rev ${this.planRevision} (${planFingerprint(legs)}: ${legText(legs)})`,
     }];
     this.emit();
     return true;
@@ -639,10 +658,13 @@ export class ScriptedFms implements CduBackend {
     // SELECT DESIRED WPT choices index the previous cycle's entries.
     this.chosen = {};
     this.outOfDateAlerted = false;
-    const differ = [...this.pins].filter(([ident, at]) => this.planIdents().has(ident) && !samePlace(this.lookup(ident, this.active), at)).map(([ident]) => ident);
-    this.recordDataset(`ACTIVATE ${this.activeCycle.id}`, [
-      this.activeCycle.source, `${this.inactiveCycle!.id} now inactive`, "active plan kept on its pinned positions",
-      ...(differ.length ? [`placed differently or absent in ${this.activeCycle.id}: ${differ.join(", ")}`] : []),
+    const change = this.resolutionChange(this.pins, ident => this.lookup(ident, this.active));
+    const id = this.activeCycle.id;
+    this.recordDataset(`ACTIVATE ${id}`, [
+      this.activeCycle.source, `${this.inactiveCycle!.id} now inactive`, "active plan kept as executed: pinned positions, unresolved fixes still unresolved",
+      ...(change.moved.length ? [`placed differently in ${id}: ${change.moved.join(", ")}`] : []),
+      ...(change.missing.length ? [`absent from ${id}: ${change.missing.join(", ")}`] : []),
+      ...(change.resolved.length ? [`newly defined in ${id}, unresolved in the active plan until EXEC: ${change.resolved.join(", ")}`] : []),
     ].join("; "));
     this.emit();
   }
@@ -658,13 +680,33 @@ export class ScriptedFms implements CduBackend {
     const before = this.pins, cycleChanged = this.pinnedIn !== this.activeCycle;
     this.pins = new Map();
     this.pinnedIn = this.activeCycle;
+    this.planRevision += 1;
     for (const ident of this.planIdents()) {
       if (this.ownPoint(ident)) continue;
-      const at = this.lookup(ident, this.active);
-      if (at) this.pins.set(ident, at);
+      this.pins.set(ident, this.lookup(ident, this.active) ?? null);
     }
-    const moved = [...this.pins].filter(([ident, at]) => before.has(ident) && !samePlace(before.get(ident), at)).map(([ident]) => ident);
-    if (cycleChanged && moved.length) this.recordDataset("ROUTE RE-RESOLVED", `executed plan resolved in ${this.activeCycle.id}; moved: ${moved.join(", ")}`);
+    if (!cycleChanged) return;
+    const change = this.resolutionChange(before, ident => this.pins.get(ident) ?? undefined);
+    const parts = [
+      ...(change.moved.length ? [`moved: ${change.moved.join(", ")}`] : []),
+      ...(change.resolved.length ? [`newly resolved: ${change.resolved.join(", ")}`] : []),
+      ...(change.missing.length ? [`newly missing: ${change.missing.join(", ")}`] : []),
+    ];
+    if (parts.length) this.recordDataset("ROUTE RE-RESOLVED", `executed plan resolved in ${this.activeCycle.id}; ${parts.join("; ")}`);
+  }
+
+  /** How the plan's pinned fixes compare with where another source places them: moved, now missing, newly defined. */
+  private resolutionChange(pins: Map<string, LatLon | null>, place: (ident: string) => LatLon | undefined) {
+    const plan = this.planIdents();
+    const moved: string[] = [], missing: string[] = [], resolved: string[] = [];
+    for (const [ident, at] of pins) {
+      if (!plan.has(ident)) continue;
+      const now = place(ident);
+      if (at && now && !samePlace(at, now)) moved.push(ident);
+      else if (at && !now) missing.push(ident);
+      else if (!at && now) resolved.push(ident);
+    }
+    return { moved, missing, resolved };
   }
 
   /** Removes a pilot waypoint that was only a step in defining another (a WPTnn made from a position entry). */
@@ -722,6 +764,7 @@ export class ScriptedFms implements CduBackend {
    * active route from present position, its hold armed.
    */
   goAround() {
+    if (this.injected.has("fmsFail")) return false;
     const route = this.active;
     const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
     // Only from the approach: once the missed approach is being flown there is nothing left to go around from.
@@ -729,10 +772,16 @@ export class ScriptedFms implements CduBackend {
     route.legs.splice(0, missed);
     this.legStart = { ...this.here };
     this.armedApproach = false;
+    this.goArounds += 1;
     this.armMissedHold(route);
     this.emit();
     return true;
   }
+
+  /** Accepted go-arounds, so the flight simulation takes the go-around transition however TOGA was pressed. */
+  goArounds = 0;
+  /** The active plan's revision and fingerprint, as the engineering record states them. */
+  get planIdentity() { return { revision: this.planRevision, fingerprint: planFingerprint(this.active.legs) }; }
 
   private armMissedHold(route: Route) {
     const missedHold = findProcedure(this.db, route, "APPROACH")?.missedHold;
@@ -803,9 +852,10 @@ export class ScriptedFms implements CduBackend {
   coordinates(ident: string, route: Route = this.active): LatLon | undefined {
     const own = this.ownPoint(ident);
     if (own) return own;
-    // The active plan flies its fixes where they were when it became active (pinActive).
-    const pinned = route === this.active ? this.pins.get(ident) : undefined;
-    return pinned ?? this.lookup(ident, route);
+    // The active plan flies its fixes as they were resolved when it became active (pinActive): a fix it was executed
+    // without stays unresolved, even if a later cycle defines it. Only fixes outside the executed plan are looked up.
+    if (route === this.active && this.pins.has(ident)) return this.pins.get(ident) ?? undefined;
+    return this.lookup(ident, route);
   }
 
   private ownPoint(ident: string) { return this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position; }

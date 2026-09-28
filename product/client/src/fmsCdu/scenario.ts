@@ -37,7 +37,8 @@ export type Action =
   | { kind: "condition"; condition: ConditionId; on: boolean }
   | { kind: "alert"; text: string }
   | { kind: "procedure"; procedure: "SID" | "STAR" | "APPROACH"; ident: string }
-  | { kind: "armApproach" }
+  /** APPR: arms the approach, or (on false) presses it off: a disarm, or after capture a cancellation. */
+  | { kind: "armApproach"; on?: boolean }
   | { kind: "goAround" }
   | { kind: "expectLine"; line: number; pattern: string }
   | { kind: "expectScratchpad"; text: string }
@@ -90,7 +91,7 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "condition": return `${a.on ? "inject" : "remove"} the condition ${a.condition}`;
       case "alert": return `raise the alert ${a.text}`;
       case "procedure": return `select the ${a.procedure === "APPROACH" ? "approach" : a.procedure} ${a.ident}`;
-      case "armApproach": return "arm the approach";
+      case "armApproach": return a.on === false ? "press APPR off" : "arm the approach";
       case "goAround": return "press TOGA";
       case "expectLine": return `check that screen line ${a.line + 1} matches /${a.pattern}/${within}`;
       case "expectScratchpad": return a.text ? `check that the scratchpad shows ${a.text}${within}` : `check that the scratchpad is blank${within}`;
@@ -147,7 +148,7 @@ function actionProblem(action: unknown): string | null {
     // A blank scratchpad is a state worth checking: the text may be empty.
     case "expectScratchpad": return text(a.text, /^.{0,24}$/) ? null : "expectScratchpad needs text of at most 24 characters";
     case "procedure": return (a.procedure === "SID" || a.procedure === "STAR" || a.procedure === "APPROACH") && text(a.ident, /^[A-Z0-9]{1,7}$/) ? null : "procedure needs SID, STAR or APPROACH and an ident";
-    case "armApproach":
+    case "armApproach": return a.on === undefined || typeof a.on === "boolean" ? null : "armApproach on must be true or false when given";
     case "goAround": return null;
     case "expectLine": {
       if (!(Number.isInteger(a.line) && finite(a.line, 0, SCRATCHPAD_LINE))) return `expectLine needs a line from 0 to ${SCRATCHPAD_LINE}`;
@@ -317,7 +318,7 @@ export class ScenarioRunner {
       case "condition": fms.setCondition(action.condition, action.on); return;
       case "alert": fms.raiseAlert(action.text); return;
       case "procedure": fms.selectProcedure(action.procedure, action.ident); return;
-      case "armApproach": fms.armApproach(true); return;
+      case "armApproach": fms.armApproach(action.on !== false); return;
       case "goAround": fms.goAround(); return;
       default: throw new Error(`Unsupported action "${action.kind}".`);
     }
@@ -490,7 +491,7 @@ export class ScenarioRecorder {
   key(fn: CduFunction) { this.add({ kind: "keys", keys: [fn] }); }
   condition(condition: ConditionId, on: boolean) { this.add({ kind: "condition", condition, on }); }
   alert(text: string) { this.add({ kind: "alert", text }); }
-  armApproach() { this.add({ kind: "armApproach" }); }
+  armApproach(on = true) { this.add(on ? { kind: "armApproach" } : { kind: "armApproach", on: false }); }
   goAround() { this.add({ kind: "goAround" }); }
   /** Checks a screen line as it is shown now; a few seconds' grace lets playback at another rate catch up. */
   checkLine(line: number, text: string) { this.add({ kind: "expectLine", line, pattern: linePattern(text) }); this.steps.at(-1)!.within = 5; }
