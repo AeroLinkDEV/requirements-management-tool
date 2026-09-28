@@ -263,6 +263,11 @@ or hash mismatch opens a deduplicated critical operational alert and remains Rep
 operation IDs and quarantined keys. Operations and health use the configured evidence root and never infer a
 software-build freeze.
 
+Reconciliation only moves staged files owned by the managed-document operations being reconciled, including
+their unmanifested stages after lease expiry. The shared staging root also holds ordinary attachments, inline
+images and verification imports; absence from the managed-document ledger does not make those files abandoned.
+Unattributed files require an ownership inventory before any cleanup.
+
 Backup recovery is proven as an application outcome, not only as archive consistency. Restore first binds a
 shadow database to its isolated evidence root, then a one-use loopback validation process downloads every
 managed-document attachment through the normal integrity-verifying API and independently recomputes size and
