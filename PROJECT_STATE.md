@@ -409,7 +409,9 @@ display unit for engineers.
   the manual's rules for scratchpad entry, CLR/DELETE, line select entry and copy, MOD/ACT with EXEC and ERASE,
   paging, BRT and the MSG and EXEC annunciators. It is labelled as a simulation and is not a navigation computer.
   Its scope is measured against ICAO PBN and airline practice in
-  [`product/docs/FMS_TEST_BENCH.md`](product/docs/FMS_TEST_BENCH.md). It models:
+  [`product/docs/FMS_TEST_BENCH.md`](product/docs/FMS_TEST_BENCH.md), whose capability register holds each
+  function's status (demonstrated, partial, placeholder, not implemented) and the open findings of the
+  27 September independent review. It is a demonstrator, not an oracle for software under test. It models:
   - **Flight planning** from a navigation database (`navData.ts`): airports and runways, navaids, fixes, airways,
     and SIDs, STARs and approaches with transitions and missed approaches. The route is built through RTE (VIA/TO
     airway entry, company routes, SAVE), DEP/ARR, pilot waypoints (latitude/longitude, place/bearing/distance,
