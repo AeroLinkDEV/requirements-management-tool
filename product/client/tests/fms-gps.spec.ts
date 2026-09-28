@@ -12,7 +12,8 @@ const input = (t: number, extra: Partial<GpsInput> = {}): GpsInput => ({
   time: T0 + t * 1000, position: AT, altitude: 3000, baroAltitude: 3000, track: 90, groundSpeed: 120, verticalSpeed: 0,
   attitude: { bank: 0, pitch: 0, heading: 90 }, ...extra,
 })
-const receiver = () => new GpsReceiver({ constellation: new Constellation(7), ttffSeconds: 45 })
+// GPS only: these prove the receiver's own RAIM, FDE and modes; SBAS is proved in fms-gps-sbas.spec.ts.
+const receiver = () => new GpsReceiver({ constellation: new Constellation(7), ttffSeconds: 45, sbas: false })
 /** Steps once a second from `from` to `to` seconds after power-up, inclusive. */
 const run = (rx: GpsReceiver, from: number, to: number, extra: Partial<GpsInput> = {}) => { for (let t = from; t <= to; t += 1) rx.step(input(t, extra)) }
 const bus = (rx: GpsReceiver) => rx.bus()!

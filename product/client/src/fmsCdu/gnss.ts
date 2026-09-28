@@ -81,33 +81,53 @@ export class Constellation {
   /** Every satellite seen from a place (altitude in feet) at a time (ms since 1970), with the antenna mask in degrees. */
   sky(time: number, at: LatLon, altitudeFt: number, attitude: Attitude, maskDeg = 5): SkySatellite[] {
     const t = (time - EPOCH) / 1000;
-    const lat = rad(at.lat), lon = rad(at.lon);
-    const r = EARTH_RADIUS_M + altitudeFt * 0.3048;
-    const rx = [r * Math.cos(lat) * Math.cos(lon), r * Math.cos(lat) * Math.sin(lon), r * Math.sin(lat)];
-    const east = [-Math.sin(lon), Math.cos(lon), 0];
-    const north = [-Math.sin(lat) * Math.cos(lon), -Math.sin(lat) * Math.sin(lon), Math.cos(lat)];
-    const up = [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)];
-    const normal = antennaNormal(attitude);
+    const view = viewer(at, altitudeFt, attitude, maskDeg);
     return this.orbits.map(orbit => {
       const u = orbit.phase + (2 * Math.PI * t) / ORBIT_PERIOD_S;
       // In the orbital plane, inclined, turned to the plane's node, and into the rotating Earth frame.
       const xp = ORBIT_RADIUS_M * Math.cos(u), yp = ORBIT_RADIUS_M * Math.sin(u);
       const yi = yp * Math.cos(INCLINATION), zi = yp * Math.sin(INCLINATION);
       const node = orbit.raan - EARTH_RATE * t;
-      const sat = [xp * Math.cos(node) - yi * Math.sin(node), xp * Math.sin(node) + yi * Math.cos(node), zi];
-      const d = [sat[0] - rx[0], sat[1] - rx[1], sat[2] - rx[2]];
-      const range = Math.hypot(d[0], d[1], d[2]);
-      const e = dot(d, east) / range, n = dot(d, north) / range, v = dot(d, up) / range;
-      const elevation = deg(Math.asin(v));
-      const antennaElevation = deg(Math.asin(e * normal[0] + n * normal[1] + v * normal[2]));
-      // Stronger overhead, weaker toward the antenna's horizon: a parameter, not a correlator output.
-      const cn0 = 45 + orbit.cn0Offset - 10 * (1 - Math.sin(rad(Math.max(0, antennaElevation))));
-      return {
-        prn: orbit.prn, elevation, azimuth: (deg(Math.atan2(e, n)) + 360) % 360, antennaElevation, cn0,
-        visible: elevation >= 0 && antennaElevation >= maskDeg, los: [e, n, v] as [number, number, number],
-      };
+      return view(orbit.prn, [xp * Math.cos(node) - yi * Math.sin(node), xp * Math.sin(node) + yi * Math.cos(node), zi], orbit.cn0Offset);
     });
   }
+
+  /**
+   * The SBAS geostationary satellites seen from a place: two, fixed over the equator at the longitudes of WAAS
+   * geostationary satellites (117° W and 129° W), their PRNs 131 and 133. They carry corrections and integrity; their
+   * signal is taken as 2 dB weaker than a GPS satellite's at the same elevation (a parameter).
+   */
+  geos(at: LatLon, altitudeFt: number, attitude: Attitude, maskDeg = 5): SkySatellite[] {
+    const view = viewer(at, altitudeFt, attitude, maskDeg);
+    return GEOS.map(({ prn, lon }) => view(prn, [GEO_RADIUS_M * Math.cos(rad(lon)), GEO_RADIUS_M * Math.sin(rad(lon)), 0], -2));
+  }
+}
+
+const GEO_RADIUS_M = 42_164_000;
+const GEOS = [{ prn: 131, lon: -117 }, { prn: 133, lon: -129 }];
+
+/** How a receiver at a place, with its antenna tilted by the attitude, sees a satellite at an Earth-fixed position. */
+function viewer(at: LatLon, altitudeFt: number, attitude: Attitude, maskDeg: number) {
+  const lat = rad(at.lat), lon = rad(at.lon);
+  const r = EARTH_RADIUS_M + altitudeFt * 0.3048;
+  const rx = [r * Math.cos(lat) * Math.cos(lon), r * Math.cos(lat) * Math.sin(lon), r * Math.sin(lat)];
+  const east = [-Math.sin(lon), Math.cos(lon), 0];
+  const north = [-Math.sin(lat) * Math.cos(lon), -Math.sin(lat) * Math.sin(lon), Math.cos(lat)];
+  const up = [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)];
+  const normal = antennaNormal(attitude);
+  return (prn: number, sat: number[], cn0Offset: number): SkySatellite => {
+    const d = [sat[0] - rx[0], sat[1] - rx[1], sat[2] - rx[2]];
+    const range = Math.hypot(d[0], d[1], d[2]);
+    const e = dot(d, east) / range, n = dot(d, north) / range, v = dot(d, up) / range;
+    const elevation = deg(Math.asin(v));
+    const antennaElevation = deg(Math.asin(e * normal[0] + n * normal[1] + v * normal[2]));
+    // Stronger overhead, weaker toward the antenna's horizon: a parameter, not a correlator output.
+    const cn0 = 45 + cn0Offset - 10 * (1 - Math.sin(rad(Math.max(0, antennaElevation))));
+    return {
+      prn, elevation, azimuth: (deg(Math.atan2(e, n)) + 360) % 360, antennaElevation, cn0,
+      visible: elevation >= 0 && antennaElevation >= maskDeg, los: [e, n, v],
+    };
+  };
 }
 
 /**
