@@ -242,9 +242,12 @@ test('the ARINC 424 reader loads waypoints, navaids, airports, runways and airwa
   expect(result.read).toBe(7)
   expect(result.skipped).toBe(2)
   expect(result.errors).toEqual([])
+  expect(result.invalid).toEqual([])
 
   const unit = fms()
   unit.loadNavData(result.data)
+  // A load is an inactive cycle until activated (R06).
+  unit.swapCycles()
   expect(unit.coordinates('TESTA')).toEqual({ lat: 45.5, lon: -75 })
   expect(unit.navdb.find('TST')[0]).toMatchObject({ type: 'VORDME', frequency: '112.50', name: 'TEST VORDME' })
   expect(unit.navdb.find('TN')[0]).toMatchObject({ type: 'NDB', frequency: '350' })

@@ -42,8 +42,9 @@ const altitudeText = (leg: Leg) => {
 const eta = (ms: number) => hhmm(new Date(ms)).slice(0, 4) + "Z";
 
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-/** A database cycle's effective dates as the FMS prints them: 03SEP-30SEP. */
-const cycleDates = (cycle: { from: number; to: number }) => {
+/** A database cycle's effective dates as the FMS prints them: 03SEP-30SEP, or UNKNOWN when its data gives none. */
+const cycleDates = (cycle: { from: number | null; to: number | null }) => {
+  if (cycle.from === null || cycle.to === null) return "UNKNOWN";
   const day = (ms: number) => { const d = new Date(ms); return `${String(d.getUTCDate()).padStart(2, "0")}${MONTHS[d.getUTCMonth()]}`; };
   return `${day(cycle.from)}-${day(cycle.to)}`;
 };
@@ -220,7 +221,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       caption(" MODEL", "OP PROGRAM "),
       { left: medium("CMA-9000"), right: medium("AEROLINK SIM") },
       caption(" NAV DATA", "ACTIVE "),
-      { left: medium(fms.activeCycle.id), right: medium(cycleDates(fms.activeCycle), fms.now.getTime() > fms.activeCycle.to ? "amber" : "white") },
+      { left: medium(fms.activeCycle.id), right: medium(cycleDates(fms.activeCycle), fms.activeCycle.to !== null && fms.now.getTime() > fms.activeCycle.to ? "amber" : "white") },
       caption(undefined, fms.inactiveCycle ? "INACTIVE " : undefined),
       fms.inactiveCycle ? { left: small(fms.inactiveCycle.id), right: prompt(cycleDates(fms.inactiveCycle)) } : undefined,
       undefined,
