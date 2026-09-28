@@ -128,9 +128,61 @@ Status vocabulary: **Demonstrated** (works on the bench and has a behavioural te
 | Database cycles, DATABASE OUT OF DATE | Partial | Each cycle holds its own dataset; the two demonstration cycles hold the same demonstration data, and the bench says so. A loaded file, merged over the active cycle's data, becomes the inactive cycle. Activating it (IDENT, or the bench) is recorded and does not re-resolve the active plan: its fixes stay pinned, the record names those the new cycle places differently, and they take the new positions only when the crew executes a modification, recorded as ROUTE RE-RESOLVED. Dates come from the data or show UNKNOWN; an unknown end never raises DATABASE OUT OF DATE (R06, R16). No changeover-date or ground-only rule (N09) |
 | MAINT self test and fault log | Placeholder | A demonstration of the page, not equipment built-in test |
 | Dual FMS, independent operation | Placeholder | One model with a copy of the route; not a dual-channel protocol |
+| EFIS: primary flight and navigation displays | Partial | Generic displays drawn only from the FMS output bus (efis.ts); conventions from FAA and Boeing sources, not a CMA installation's EFIS; pitch is derived from the flight path (the point-mass model has no attitude) |
 | Scenarios, recording, procedure text, run report | Partial | A 0.25 s tick contract shared by the bench and headless runs; validated admission; distinct outcomes (passed, failed, no checks, timed out, stopped, invalid, error); the report's context is fixed at run start (N01–N08). In-process against the built-in model only: no external software-under-test adapter, run manifest or controlled evidence import (R21–R23, R25) |
 
 The review's order is adopted: repair active-plan authority, guidance validity and prediction validity (R01–R09) before adding breadth.
+
+## How FMS outputs reach the EFIS (research for the displays)
+
+**The FMS does not draw the flight displays.** An EFIS draws them from data the FMS publishes, plus the aircraft's own sensors. Examples of what the FMS publishes, as ARINC 429 labels:
+- 114, desired track;
+- 116, cross-track distance;
+- 117, vertical deviation;
+- 121, roll steering command;
+- 251, distance to go.
+
+It also publishes the active waypoint, target speed and altitude, and mode and validity data. Each word carries a status: normal, no computed data, or failure warning. The symbology therefore belongs to the EFIS installation, not the FMS. A CMA-9000 drives whatever EFIS its aircraft has.
+
+The bench follows the same structure. `efis.ts` defines the only data the displays may take from the FMS, and `FmsEfis.tsx` draws a generic primary flight display (PFD) and navigation display (ND) from it. A future FMS under test (Sean's embedded software) would drive the displays by producing the same bus.
+
+### Conventions used
+
+**Colours:**
+- **Magenta:** what the FMS commands. This covers target speed and altitude bugs, the active route and waypoint, deviation pointers and flight director bars.
+- **Green:** engaged modes.
+- **White:** armed modes and inactive route data.
+- **Cyan:** crew-selected values.
+- **Amber:** flags.
+
+**Route drawing:** active in solid magenta; modifications in dashed white; an executed offset in dashed magenta; inactive routes in dashed cyan.
+
+**Flight mode annunciator:** speed, lateral and vertical columns. Engaged modes are green, with armed modes in white below. A newly engaged mode is boxed for ten seconds.
+
+**Lateral deviation:** full scale is 5 NM en route, 1 NM in the terminal area and 0.3 NM on approach. The navigation source is annunciated beside the scale, and the display switches to approach sensitivity near the final approach fix.
+
+**Vertical deviation:** a scale against the VNAV path or the final approach path. The diamond is filled when the path is being flown, and hollow when the information is advisory only (for example, an approach not armed).
+
+**Navigation display** (Boeing MAP style), track-up:
+- a compass arc and a heading pointer;
+- a range arc;
+- the active waypoint with its distance and ETA;
+- ground speed, true airspeed and wind;
+- the top and end of descent as green circles;
+- the position trend vector;
+- the map source, with RNP and ANP.
+
+**Failure:** a failed FMS publishes failure words. The displays remove its data and flag FMS FAIL on the PFD and MAP on the ND, and the mode annunciator shows the basic reversion modes.
+
+### Sources
+
+- FAA-H-8083-6, *Advanced Avionics Handbook*: mode annunciation, CDI sensitivity and navigation source annunciation.
+- Boeing 737 FCOM D6-27370-TBC, chapter 11 (Flight Management, Navigation): route colours, active restrictions, approach deviation scaling by RNP.
+- Boeing 737 NG flight instruments and displays training notes: the ND symbol inventory and map modes.
+- NASA TM-102710, *Description of the Primary Flight Display*: PFD elements and bugs.
+- ARINC 429 label assignments (for example 114, 116, 117, 121 and 251), from the published general-aviation subset and label lists.
+
+These are generic airline and general-aviation conventions. They are labelled as such and are not a claim about any CMA installation's EFIS.
 
 Delivery history, for tracing: #1209 (panel), #1211 (conditions, deeper pages, lighting), #1212 (flight simulation, planning, lateral guidance, sensors, VNAV), #1218 (tactical functions, database cycles, maintenance and dual pages, scenarios).
 

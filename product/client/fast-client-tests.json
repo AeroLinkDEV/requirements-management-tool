@@ -27,7 +27,8 @@
     "fms-predictions.spec.ts",
     "fms-lab-controls.spec.ts",
     "fms-modes.spec.ts",
-    "fms-dataset.spec.ts"
+    "fms-dataset.spec.ts",
+    "fms-efis.spec.ts"
   ],
   "rendered": [
     "code-source-rendered.spec.ts",
