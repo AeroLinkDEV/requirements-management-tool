@@ -245,7 +245,8 @@ export class FlightSimulator {
     const fms = this.fms;
     const profile = fms.profile();
     const first = profile.points[0];
-    if (!first || !profile.endOfDescent || (!profile.descending && !fms.vnav.desNow)) return null;
+    // No descent is flown toward a point whose distance is not known.
+    if (!first || first.distance === null || !profile.endOfDescent || (!profile.descending && !fms.vnav.desNow)) return null;
     const tan = Math.tan(rad(fms.vnav.pathAngle));
     const pathAltitude = profile.descending ? Math.min(fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * tan) : -Infinity;
     const above = fms.altitude - pathAltitude;
