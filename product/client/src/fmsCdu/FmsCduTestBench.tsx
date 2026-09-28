@@ -3,6 +3,7 @@ import { ALERTS } from "./alerts";
 import { CONDITIONS } from "./conditions";
 import { FlightSimulator, MAP_RANGES } from "./flight";
 import FmsCduPanel from "./FmsCduPanel";
+import FmsEfis from "./FmsEfis";
 import FmsMap from "./FmsMap";
 import FmsScenarioCard from "./FmsScenarioCard";
 import { conditionalLabel } from "./fmsModel";
@@ -160,9 +161,21 @@ export default function FmsCduTestBench() {
               : <p className="fmsBenchLoading" role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU model…"}</p>}
           </div>
 
+          <section className="fmsBenchCard" aria-label="EFIS">
+            <div className="fmsBenchMapHead">
+              <h2>EFIS: primary flight and navigation displays</h2>
+            </div>
+            <p className="fmsBenchHint">
+              A generic EFIS drawn only from what the FMS publishes (desired track, cross-track, vertical deviation, roll
+              command, distance to go, targets and modes, each with a validity status) and the aircraft's own attitude and
+              air data. Magenta is what the FMS commands, green an engaged mode, white armed, cyan selected, amber a flag.
+            </p>
+            <FmsEfis fms={backend} sim={sim} range={range} />
+          </section>
+
           <section className="fmsBenchCard fmsBenchMapCard">
             <div className="fmsBenchMapHead">
-              <h2>Navigation map</h2>
+              <h2>Engineering map (north-up, with the true position)</h2>
               <label>
                 <span>Range</span>
                 <select value={range} onChange={event => setRange(Number(event.target.value))} aria-label="Map range">

@@ -452,6 +452,12 @@ display unit for engineers.
   position freeze: the clock keeps running, so timers and the self test still complete. A north-up
   **navigation map** (route, holds, patterns, offset track, navaids and airports, and the true position when the
   FMS has drifted), a flight mode annunciator and a guidance readout sit beside the CDU.
+- An **EFIS** card draws a generic primary flight display and navigation display from an explicit FMS output bus
+  (`efis.ts`: desired track, cross-track, vertical deviation, roll command, distance to go, targets and modes, each
+  with a normal, no-data or failure status) plus the aircraft's attitude and air data. It uses airline colour
+  conventions and the flight mode annunciator from the real mode state. A failed FMS removes its data and flags FMS
+  FAIL and MAP. It is generic, not a CMA installation's EFIS; the bus is where an FMS under test would drive the
+  displays later.
 - The bench injects conditions that light the variation's annunciators and change the pages (FMS failure, GPS
   loss, GPS integrity loss, DME outage, forced RNP or NPA, offset, independent operation, GSM, SMS, ATC uplink,
   radio transmit, subsystem request) and raises any alert from the manual's alert message list. The POS, RNP and
