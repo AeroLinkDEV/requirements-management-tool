@@ -449,9 +449,16 @@ display unit for engineers.
     TIMER. The ATC, FMC COMM and GSM/SMS pages are representative only (no datalink) and say so on screen.
 - A **flight simulation** (`flight.ts`) flies the active route as an FMS-coupled autopilot would, in real or
   accelerated time. It is a point-mass model with a bank-limited turn, not a flight dynamics model. Pause is a
-  position freeze: the clock keeps running, so timers and the self test still complete. A north-up
+  position freeze: the clock keeps running, so timers and the self test still complete. A north-up engineering
   **navigation map** (route, holds, patterns, offset track, navaids and airports, and the true position when the
-  FMS has drifted), a flight mode annunciator and a guidance readout sit beside the CDU.
+  FMS has drifted) can replace the ND beside the CDU. The flight controls, flight mode annunciator and guidance
+  readout sit under the displays; the scenario, condition, data, alert and lighting cards sit below.
+- An **EFIS** beside the CDU draws a generic primary flight display and navigation display from an explicit FMS output bus
+  (`efis.ts`: desired track, cross-track, vertical deviation, roll command, distance to go, targets and modes, each
+  with a normal, no-data or failure status) plus the aircraft's attitude and air data. It uses airline colour
+  conventions and the flight mode annunciator from the real mode state. A failed FMS removes its data and flags FMS
+  FAIL and MAP. It is generic, not a CMA installation's EFIS; the bus is where an FMS under test would drive the
+  displays later.
 - The bench injects conditions that light the variation's annunciators and change the pages (FMS failure, GPS
   loss, GPS integrity loss, DME outage, forced RNP or NPA, offset, independent operation, GSM, SMS, ATC uplink,
   radio transmit, subsystem request) and raises any alert from the manual's alert message list. The POS, RNP and

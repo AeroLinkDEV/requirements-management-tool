@@ -1,0 +1,291 @@
+import { useRef } from "react";
+import type { AircraftData, FmsOutputs, RoutePoint } from "./efis";
+import { toLocal, type LatLon } from "./fmsModel";
+import "./FmsEfis.css";
+
+// A generic EFIS for the bench: a primary flight display and a navigation display, drawn only from the FMS output bus
+// and the aircraft data (efis.ts). Colour conventions follow common airline and FAA practice (FAA-H-8083-6; Boeing
+// 737 FCOM 10 and 11): magenta for what the FMS commands (targets, active route and waypoint, deviations), green for
+// engaged modes, white for armed modes and inactive route data, cyan for crew-selected values, amber for flags. A real
+// CMA-9000 installation drives whatever EFIS the aircraft has; these are not that EFIS's exact pages.
+
+const MAGENTA = "#ff5ad9", GREEN = "#43e37c", CYAN = "#48d4ff", WHITE = "#f2f4f7", AMBER = "#ffb020";
+
+const three = (deg: number) => String(Math.round(((deg % 360) + 360) % 360) || 360).padStart(3, "0");
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+const utc = (ms: number) => { const d = new Date(ms); return `${String(d.getUTCHours()).padStart(2, "0")}${String(d.getUTCMinutes()).padStart(2, "0")}.${Math.floor(d.getUTCSeconds() / 6)}Z`; };
+
+/**
+ * Newly engaged modes are boxed for ten seconds, as airline mode annunciators do, so a change the crew did not command
+ * is noticed. The box times use the simulation clock.
+ */
+function useModeChangeBoxes(modes: Record<string, string>, now: number) {
+  const seen = useRef<Record<string, { mode: string; since: number }>>({});
+  const boxed: Record<string, boolean> = {};
+  for (const [slot, mode] of Object.entries(modes)) {
+    const previous = seen.current[slot];
+    if (!previous || previous.mode !== mode) seen.current[slot] = { mode, since: previous ? now : now - 10_000 };
+    boxed[slot] = now - seen.current[slot].since < 10_000;
+  }
+  return boxed;
+}
+
+/** The primary flight display. The bench places it and the navigation display beside the CDU. */
+export function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now: number }) {
+  const boxed = useModeChangeBoxes({ lateral: bus.lateralMode, vertical: bus.verticalMode ?? "" }, now);
+  const pitchPx = 6; // pixels per degree of pitch
+  const cx = 210, cy = 196;
+  // Speed and altitude tapes.
+  const speedScale = 3; // px per knot
+  const altScale = 0.3; // px per foot
+  const speedTicks = Array.from({ length: 17 }, (_, i) => Math.round(air.airspeed / 10) * 10 + (i - 8) * 10).filter(v => v >= 0);
+  const altTicks = Array.from({ length: 13 }, (_, i) => Math.round(air.altitude / 100) * 100 + (i - 6) * 100);
+  const lateralDots = bus.crossTrack.status === "NORMAL" ? clamp(bus.crossTrack.value! / bus.lateralFullScaleNm, -1.1, 1.1) : null;
+  const verticalDots = bus.verticalDeviation.status === "NORMAL" ? clamp(bus.verticalDeviation.value! / bus.verticalFullScaleFt, -1.1, 1.1) : null;
+  // Flight director: roll from the FMS roll command (label 121) when LNAV guides; pitch toward the path or the target.
+  const fdRoll = bus.rollCommand.status === "NORMAL" ? clamp(bus.rollCommand.value! - air.bank, -20, 20) : null;
+  const fdPitch = bus.failed ? null
+    : verticalDots !== null && bus.verticalCoupled ? clamp(-verticalDots * 4, -6, 6)
+    : bus.targetAltitude.status === "NORMAL" ? clamp((bus.targetAltitude.value! - air.altitude) / 150 - air.pitch, -6, 6) : null;
+  const approachLabel = bus.approach.type && bus.approach.state !== "OFF" ? bus.approach.type : null;
+  return (
+    <svg className="efisPfd" viewBox="0 0 420 400" role="img" aria-label={`Primary flight display: ${bus.lateralMode} ${bus.verticalMode ?? ""}${bus.failed ? ", FMS failed" : ""}`}>
+      <rect width="420" height="400" fill="#05070a" />
+      {/* Flight mode annunciator: speed, lateral and vertical columns; engaged green, armed white below. */}
+      <g className="efisFma" fontSize="15" fontFamily="inherit" textAnchor="middle">
+        <line x1="140" y1="4" x2="140" y2="44" stroke="#3a4250" />
+        <line x1="280" y1="4" x2="280" y2="44" stroke="#3a4250" />
+        <text x="70" y="22" fill={bus.targetSpeed.status === "NORMAL" ? GREEN : AMBER}>{bus.targetSpeed.status === "NORMAL" ? "FMS SPD" : "SPD"}</text>
+        <text x="210" y="22" fill={GREEN} data-testid="fma-lateral">{bus.lateralMode}</text>
+        {boxed.lateral ? <rect x="160" y="7" width="100" height="20" fill="none" stroke={GREEN} /> : null}
+        <text x="210" y="40" fill={WHITE} fontSize="12">{bus.lateralArmed.join(" ")}</text>
+        <text x="350" y="22" fill={GREEN} data-testid="fma-vertical">{bus.verticalMode ?? ""}</text>
+        {boxed.vertical ? <rect x="298" y="7" width="104" height="20" fill="none" stroke={GREEN} /> : null}
+        <text x="350" y="40" fill={WHITE} fontSize="12">{bus.verticalArmed.join(" ")}</text>
+      </g>
+      {/* Attitude: sky and ground move with pitch and bank; the aircraft symbol is fixed. */}
+      <defs>
+        <clipPath id="efisAtt"><rect x="100" y="60" width="220" height="240" rx="18" /></clipPath>
+      </defs>
+      <g clipPath="url(#efisAtt)">
+        <g transform={`rotate(${-air.bank} ${cx} ${cy}) translate(0 ${air.pitch * pitchPx})`}>
+          <rect x="-200" y={cy - 600} width="820" height="600" fill="#1f6fbf" />
+          <rect x="-200" y={cy} width="820" height="600" fill="#7a4a1f" />
+          <line x1="-200" y1={cy} x2="620" y2={cy} stroke={WHITE} strokeWidth="2" />
+          {[-20, -10, -5, 5, 10, 20].map(p => (
+            <g key={p}>
+              <line x1={cx - (Math.abs(p) % 10 === 0 ? 30 : 15)} y1={cy - p * pitchPx} x2={cx + (Math.abs(p) % 10 === 0 ? 30 : 15)} y2={cy - p * pitchPx} stroke={WHITE} strokeWidth="1.5" />
+              {Math.abs(p) % 10 === 0 ? <text x={cx + 38} y={cy - p * pitchPx + 4} fill={WHITE} fontSize="12">{Math.abs(p)}</text> : null}
+            </g>
+          ))}
+        </g>
+        {/* Flight director bars (magenta): steering the FMS commands. Removed when there is nothing valid to steer. */}
+        {fdRoll !== null ? <line x1={cx + fdRoll * 3} y1={cy - 60} x2={cx + fdRoll * 3} y2={cy + 60} stroke={MAGENTA} strokeWidth="3" data-testid="fd-roll" /> : null}
+        {fdPitch !== null ? <line x1={cx - 60} y1={cy - fdPitch * pitchPx} x2={cx + 60} y2={cy - fdPitch * pitchPx} stroke={MAGENTA} strokeWidth="3" /> : null}
+      </g>
+      {/* Bank scale and pointer. */}
+      <g stroke={WHITE} strokeWidth="2">
+        {[-60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60].map(a => {
+          const r = 118, rad = ((a - 90) * Math.PI) / 180, len = a % 30 === 0 ? 12 : 7;
+          return <line key={a} x1={cx + r * Math.cos(rad)} y1={cy + r * Math.sin(rad)} x2={cx + (r + len) * Math.cos(rad)} y2={cy + (r + len) * Math.sin(rad)} />;
+        })}
+        <polygon points={`${cx},${cy - 116} ${cx - 7},${cy - 104} ${cx + 7},${cy - 104}`} fill={WHITE} stroke="none" transform={`rotate(${-air.bank} ${cx} ${cy})`} />
+      </g>
+      {/* Aircraft symbol. */}
+      <g stroke="#ffd23a" strokeWidth="4" fill="none">
+        <polyline points={`${cx - 60},${cy} ${cx - 20},${cy} ${cx - 12},${cy + 8}`} />
+        <polyline points={`${cx + 60},${cy} ${cx + 20},${cy} ${cx + 12},${cy + 8}`} />
+        <rect x={cx - 3} y={cy - 3} width="6" height="6" fill="#ffd23a" />
+      </g>
+      {approachLabel ? <text x="112" y="80" fontSize="14" fill={bus.approach.state === "CAPTURED" ? GREEN : WHITE} data-testid="pfd-approach">{approachLabel}</text> : null}
+      {/* Speed tape with the FMS target speed bug (magenta). */}
+      <g>
+        <clipPath id="efisSpd"><rect x="16" y="60" width="70" height="240" /></clipPath>
+        <rect x="16" y="60" width="70" height="240" fill="#2a2f38" />
+        <g clipPath="url(#efisSpd)" fontSize="12" fill={WHITE}>
+          {speedTicks.map(v => (
+            <g key={v}>
+              <line x1="72" y1={cy - (v - air.airspeed) * speedScale} x2="86" y2={cy - (v - air.airspeed) * speedScale} stroke={WHITE} />
+              <text x="66" y={cy - (v - air.airspeed) * speedScale + 4} textAnchor="end">{v}</text>
+            </g>
+          ))}
+          {bus.targetSpeed.status === "NORMAL" ? (
+            <polygon points={`86,${cy - (bus.targetSpeed.value! - air.airspeed) * speedScale} 78,${cy - (bus.targetSpeed.value! - air.airspeed) * speedScale - 7} 78,${cy - (bus.targetSpeed.value! - air.airspeed) * speedScale + 7}`} fill={MAGENTA} />
+          ) : null}
+        </g>
+        <rect x="18" y={cy - 14} width="62" height="28" fill="#000" stroke={WHITE} />
+        <text x="72" y={cy + 6} textAnchor="end" fontSize="17" fill={WHITE}>{Math.round(air.airspeed)}</text>
+        <text x="51" y="54" textAnchor="middle" fontSize="13" fill={bus.targetSpeed.status === "NORMAL" ? MAGENTA : AMBER}>{bus.targetSpeed.status === "NORMAL" ? Math.round(bus.targetSpeed.value!) : "---"}</text>
+      </g>
+      {/* Altitude tape: the FMS target altitude (magenta), or the latched altitude hold reference (cyan). */}
+      <g>
+        <clipPath id="efisAlt"><rect x="336" y="60" width="66" height="240" /></clipPath>
+        <rect x="336" y="60" width="66" height="240" fill="#2a2f38" />
+        <g clipPath="url(#efisAlt)" fontSize="12" fill={WHITE}>
+          {altTicks.map(v => (
+            <g key={v}>
+              <line x1="336" y1={cy - (v - air.altitude) * altScale} x2="346" y2={cy - (v - air.altitude) * altScale} stroke={WHITE} />
+              {v % 200 === 0 ? <text x="350" y={cy - (v - air.altitude) * altScale + 4}>{v}</text> : null}
+            </g>
+          ))}
+          {bus.targetAltitude.status === "NORMAL" ? (
+            <rect x="336" y={clamp(cy - (bus.targetAltitude.value! - air.altitude) * altScale - 8, 58, 286)} width="8" height="16" fill={MAGENTA} data-testid="alt-bug" />
+          ) : null}
+        </g>
+        <rect x="338" y={cy - 14} width="64" height="28" fill="#000" stroke={WHITE} />
+        <text x="398" y={cy + 6} textAnchor="end" fontSize="16" fill={WHITE}>{Math.round(air.altitude)}</text>
+        <text x="369" y="54" textAnchor="middle" fontSize="13" fill={bus.targetAltitude.status === "NORMAL" ? MAGENTA : CYAN}>
+          {bus.targetAltitude.status === "NORMAL" ? Math.round(bus.targetAltitude.value!) : bus.verticalMode === "ALT HOLD" ? "HOLD" : "----"}
+        </text>
+      </g>
+      {/* Vertical speed. */}
+      <g>
+        <rect x="404" y="90" width="14" height="180" fill="#2a2f38" />
+        <line x1="404" y1={cy} x2="418" y2={clamp(cy - air.verticalSpeed / 20, 92, 268)} stroke={WHITE} strokeWidth="2" />
+        <text x="411" y="84" textAnchor="middle" fontSize="12" fill={WHITE}>{Math.round(air.verticalSpeed / 50) * 50}</text>
+      </g>
+      {/* Vertical deviation (label 117): filled diamond when the path is flown, hollow when only advisory. */}
+      {verticalDots !== null ? (
+        <g data-testid="vdev">
+          {[-1, -0.5, 0.5, 1].map(d => <circle key={d} cx="326" cy={cy + d * 80} r="3" fill="none" stroke={WHITE} />)}
+          <line x1="319" y1={cy} x2="333" y2={cy} stroke={WHITE} />
+          <polygon points={`326,${cy + verticalDots * 80 - 8} 333,${cy + verticalDots * 80} 326,${cy + verticalDots * 80 + 8} 319,${cy + verticalDots * 80}`}
+            fill={bus.verticalCoupled ? MAGENTA : "none"} stroke={MAGENTA} strokeWidth="2" />
+          <text x="326" y={cy - 92} textAnchor="middle" fontSize="12" fill={WHITE}>{bus.verticalSource === "APPR" ? "GP" : "VPTH"}</text>
+        </g>
+      ) : bus.verticalDeviation.status === "FAIL" ? <text x="326" y={cy} textAnchor="middle" fontSize="12" fill={AMBER}>V</text> : null}
+      {/* Lateral deviation (label 116), full scale for the phase, and the navigation source annunciation. */}
+      <g>
+        {[-1, -0.5, 0.5, 1].map(d => <circle key={d} cx={cx + d * 90} cy="318" r="3" fill="none" stroke={WHITE} />)}
+        <line x1={cx} y1="311" x2={cx} y2="325" stroke={WHITE} />
+        {lateralDots !== null ? (
+          <polygon data-testid="ldev" points={`${cx + lateralDots * 90 - 8},318 ${cx + lateralDots * 90},311 ${cx + lateralDots * 90 + 8},318 ${cx + lateralDots * 90},325`} fill={MAGENTA} />
+        ) : null}
+        <text x="104" y="308" fontSize="12" fill={bus.failed ? AMBER : GREEN} data-testid="nav-source">{bus.failed ? "FMS" : `${bus.source} ${bus.phase === "EN ROUTE" ? "ENR" : bus.phase === "TERMINAL" ? "TERM" : "APPR"}`}</text>
+        <text x="316" y="308" fontSize="12" fill={WHITE} textAnchor="end">{lateralDots !== null ? `${bus.lateralFullScaleNm}NM` : ""}</text>
+      </g>
+      {/* Heading: current heading, the desired track (magenta) and a crew-selected heading (cyan). */}
+      <g>
+        <clipPath id="efisHdg"><rect x="100" y="334" width="220" height="60" /></clipPath>
+        <rect x="100" y="334" width="220" height="60" fill="#2a2f38" />
+        <g clipPath="url(#efisHdg)" fontSize="12" fill={WHITE}>
+          {Array.from({ length: 25 }, (_, i) => Math.round(air.heading / 5) * 5 + (i - 12) * 5).map(h => {
+            const x = cx + (((h - air.heading + 540) % 360) - 180) * 4;
+            return (
+              <g key={h}>
+                <line x1={x} y1="334" x2={x} y2={h % 10 === 0 ? 346 : 340} stroke={WHITE} />
+                {h % 30 === 0 ? <text x={x} y="360" textAnchor="middle">{three(h)}</text> : null}
+              </g>
+            );
+          })}
+          {bus.desiredTrack.status === "NORMAL" ? (
+            <line x1={cx + (((bus.desiredTrack.value! - air.heading + 540) % 360) - 180) * 4} y1="334" x2={cx + (((bus.desiredTrack.value! - air.heading + 540) % 360) - 180) * 4} y2="352" stroke={MAGENTA} strokeWidth="3" />
+          ) : null}
+        </g>
+        <polygon points={`${cx},334 ${cx - 6},326 ${cx + 6},326`} fill={WHITE} />
+        <rect x={cx - 24} y="366" width="48" height="22" fill="#000" stroke={WHITE} />
+        <text x={cx} y="382" textAnchor="middle" fontSize="15" fill={WHITE}>{three(air.heading)}</text>
+      </g>
+      {bus.failed ? <text x={cx} y="120" textAnchor="middle" fontSize="16" fill={AMBER} data-testid="pfd-fms-flag">FMS FAIL</text> : null}
+    </svg>
+  );
+}
+
+/** The navigation display (MAP mode, track-up). */
+export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; range: number }) {
+  const cx = 210, cy = 360, radius = 300;
+  const px = radius / range;
+  // Track-up map: positions relative to the aircraft, rotated so the present track points up.
+  const project = (p: LatLon) => {
+    const { x, y } = toLocal(air.position, p);
+    // Rotate by the track, so a point straight ahead along it lands straight up the screen.
+    const a = (air.track * Math.PI) / 180;
+    return { x: cx + (x * Math.cos(a) - y * Math.sin(a)) * px, y: cy - (x * Math.sin(a) + y * Math.cos(a)) * px };
+  };
+  const polyline = (points: LatLon[]) => points.map(p => { const q = project(p); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(" ");
+  const route = (points: RoutePoint[]) => [air.position, ...points.map(point => point.position)];
+  // Position trend vector: where the present bank takes the aircraft in 30, 60 and 90 seconds.
+  const turnRate = (1091 * Math.tan((air.bank * Math.PI) / 180)) / Math.max(air.airspeed, 30); // degrees per second
+  const trend: { x: number; y: number }[] = [];
+  let heading = 0, x = cx, y = cy;
+  for (let t = 0; t < 90; t += 5) {
+    heading += turnRate * 5;
+    const step = (air.groundSpeed / 3600) * 5 * px;
+    x += step * Math.sin((heading * Math.PI) / 180);
+    y -= step * Math.cos((heading * Math.PI) / 180);
+    trend.push({ x, y });
+  }
+  const headingOffset = ((air.heading - air.track + 540) % 360) - 180;
+  return (
+    <svg className="efisNd" viewBox="0 0 420 420" role="img" aria-label={`Navigation display, ${range} NM range${bus.failed ? ", map failed" : ""}`}>
+      <rect width="420" height="420" fill="#05070a" />
+      <defs><clipPath id="efisMap"><circle cx={cx} cy={cy} r={radius} /></clipPath></defs>
+      {/* Compass arc: the present track at the top, heading pointer beside it. */}
+      <g stroke={WHITE} fill={WHITE} fontSize="12">
+        <path d={`M ${cx - radius * Math.sin(Math.PI / 3)} ${cy - radius * Math.cos(Math.PI / 3)} A ${radius} ${radius} 0 0 1 ${cx + radius * Math.sin(Math.PI / 3)} ${cy - radius * Math.cos(Math.PI / 3)}`} fill="none" />
+        {Array.from({ length: 25 }, (_, i) => Math.round(air.track / 5) * 5 + (i - 12) * 5).map(h => {
+          const off = ((h - air.track + 540) % 360) - 180;
+          if (Math.abs(off) > 58) return null;
+          const a = (off * Math.PI) / 180;
+          const len = h % 10 === 0 ? 12 : 6;
+          return (
+            <g key={h}>
+              <line x1={cx + radius * Math.sin(a)} y1={cy - radius * Math.cos(a)} x2={cx + (radius - len) * Math.sin(a)} y2={cy - (radius - len) * Math.cos(a)} />
+              {h % 30 === 0 ? <text x={cx + (radius - 24) * Math.sin(a)} y={cy - (radius - 24) * Math.cos(a) + 4} textAnchor="middle" stroke="none">{three(h).slice(0, 2)}</text> : null}
+            </g>
+          );
+        })}
+        <polygon points={`${cx + (radius + 2) * Math.sin((headingOffset * Math.PI) / 180)},${cy - (radius + 2) * Math.cos((headingOffset * Math.PI) / 180)} ${cx + (radius + 12) * Math.sin(((headingOffset - 2) * Math.PI) / 180)},${cy - (radius + 12) * Math.cos(((headingOffset - 2) * Math.PI) / 180)} ${cx + (radius + 12) * Math.sin(((headingOffset + 2) * Math.PI) / 180)},${cy - (radius + 12) * Math.cos(((headingOffset + 2) * Math.PI) / 180)}`} fill={WHITE} />
+        <rect x={cx - 26} y={cy - radius - 34} width="52" height="20" fill="#000" />
+        <text x={cx} y={cy - radius - 19} textAnchor="middle" stroke="none" fontSize="14">{three(air.track)} TRK</text>
+      </g>
+      {/* Half-range arc and track line. */}
+      <path d={`M ${cx - radius / 2} ${cy} A ${radius / 2} ${radius / 2} 0 0 1 ${cx + radius / 2} ${cy}`} fill="none" stroke="#6a7384" strokeDasharray="3 6" />
+      <text x={cx - radius / 2 - 4} y={cy - 6} fontSize="12" fill={WHITE} textAnchor="end">{range / 2}</text>
+      <line x1={cx} y1={cy} x2={cx} y2={cy - radius} stroke="#6a7384" />
+      <g clipPath="url(#efisMap)" fontSize="12">
+        {/* Modified route: dashed white; offset: dashed magenta; active route: solid magenta. */}
+        {bus.modifiedRoute ? <polyline points={polyline(route(bus.modifiedRoute))} fill="none" stroke={WHITE} strokeWidth="2" strokeDasharray="8 6" data-testid="nd-mod-route" /> : null}
+        {bus.offsetTrack ? <polyline points={polyline(bus.offsetTrack)} fill="none" stroke={MAGENTA} strokeWidth="2" strokeDasharray="8 6" /> : null}
+        {bus.activeRoute.length ? <polyline points={polyline(route(bus.activeRoute))} fill="none" stroke={MAGENTA} strokeWidth="2.5" data-testid="nd-route" /> : null}
+        {bus.activeRoute.map(point => {
+          const q = project(point.position);
+          const colour = point.active ? MAGENTA : WHITE;
+          return (
+            <g key={point.ident} data-testid={point.active ? "nd-active-wpt" : undefined}>
+              <polygon points={`${q.x},${q.y - 7} ${q.x + 2},${q.y - 2} ${q.x + 7},${q.y} ${q.x + 2},${q.y + 2} ${q.x},${q.y + 7} ${q.x - 2},${q.y + 2} ${q.x - 7},${q.y} ${q.x - 2},${q.y - 2}`} fill="none" stroke={colour} />
+              <text x={q.x + 9} y={q.y - 4} fill={colour}>{point.ident}</text>
+              {point.constraint ? <text x={q.x + 9} y={q.y + 10} fill={colour} fontSize="12">{point.constraint}</text> : null}
+            </g>
+          );
+        })}
+        {/* Profile points from VNAV: top and end of descent, green circles. */}
+        {([["T/D", bus.topOfDescent], ["E/D", bus.endOfDescent]] as const).map(([label, p]) => {
+          if (!p) return null;
+          const q = project(p);
+          return <g key={label} data-testid={`nd-${label === "T/D" ? "tod" : "ed"}`}><circle cx={q.x} cy={q.y} r="5" fill="none" stroke={GREEN} strokeWidth="2" /><text x={q.x + 8} y={q.y + 14} fill={GREEN}>{label}</text></g>;
+        })}
+        {bus.holdFix ? (() => { const q = project(bus.holdFix); return <ellipse cx={q.x} cy={q.y - 12} rx="9" ry="16" fill="none" stroke={MAGENTA} strokeWidth="2" />; })() : null}
+        {/* Position trend vector (white): the path the present bank gives over 90 seconds. */}
+        <polyline points={[{ x: cx, y: cy }, ...trend].map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} fill="none" stroke={WHITE} strokeWidth="1.5" strokeDasharray="10 5" />
+      </g>
+      {/* Aircraft symbol. */}
+      <polygon points={`${cx},${cy - 12} ${cx - 9},${cy + 10} ${cx},${cy + 5} ${cx + 9},${cy + 10}`} fill="none" stroke={WHITE} strokeWidth="2" />
+      {/* Data corners: ground speed, true airspeed and wind; the active waypoint, its distance and ETA. */}
+      <g fontSize="13" fill={WHITE}>
+        <text x="10" y="20">GS <tspan fontSize="16">{Math.round(air.groundSpeed)}</tspan>  TAS <tspan fontSize="16">{Math.round(air.airspeed)}</tspan></text>
+        <text x="10" y="38">{three(air.wind.direction)}°/{Math.round(air.wind.speed)}</text>
+        {bus.toWaypoint.status === "NORMAL" ? (
+          <g textAnchor="end" data-testid="nd-to-wpt">
+            <text x="410" y="20" fill={MAGENTA} fontSize="15">{bus.toWaypoint.value}</text>
+            <text x="410" y="38">{bus.distanceToGo.status === "NORMAL" ? `${bus.distanceToGo.value!.toFixed(1)} NM` : ""}</text>
+            <text x="410" y="56">{bus.eta.status === "NORMAL" ? utc(bus.eta.value!) : ""}</text>
+          </g>
+        ) : null}
+        <text x="10" y="408" fontSize="12" fill={bus.failed ? AMBER : GREEN} data-testid="nd-source">{bus.failed ? "MAP" : `${bus.source} ${bus.navMode}`}</text>
+        {!bus.failed ? <text x="410" y="408" fontSize="12" textAnchor="end">RNP {bus.rnp.toFixed(2)} ANP {bus.anp.toFixed(2)}</text> : null}
+      </g>
+      {bus.failed ? <text x={cx} y="200" textAnchor="middle" fontSize="18" fill={AMBER} data-testid="nd-map-flag">MAP</text> : null}
+    </svg>
+  );
+}

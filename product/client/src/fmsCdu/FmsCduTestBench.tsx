@@ -3,6 +3,8 @@ import { ALERTS } from "./alerts";
 import { CONDITIONS } from "./conditions";
 import { FlightSimulator, MAP_RANGES } from "./flight";
 import FmsCduPanel from "./FmsCduPanel";
+import { aircraftData, fmsOutputs } from "./efis";
+import { Nd, Pfd } from "./FmsEfis";
 import FmsMap from "./FmsMap";
 import FmsScenarioCard from "./FmsScenarioCard";
 import { conditionalLabel } from "./fmsModel";
@@ -64,6 +66,8 @@ export default function FmsCduTestBench() {
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
   const [range, setRange] = useState(20);
+  // The lower display beside the CDU: the cockpit ND, or the engineering map with the true position.
+  const [lowerDisplay, setLowerDisplay] = useState<"nd" | "map">("nd");
   const [navLoad, setNavLoad] = useState<string | null>(null);
   const [headingInput, setHeadingInput] = useState("090");
   const [jumpNote, setJumpNote] = useState<string | null>(null);
@@ -120,6 +124,8 @@ export default function FmsCduTestBench() {
     return recorder ? recorder.toScenario(title) : null;
   };
   const guidance = sim.guidance;
+  const bus = fmsOutputs(backend, sim);
+  const air = aircraftData(backend, sim);
   const signed = (value: number, digits = 0) => `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
 
   const next = backend.activeRoute.legs[0];
@@ -152,17 +158,25 @@ export default function FmsCduTestBench() {
         </label>
       </header>
 
-      <div className="fmsBenchBody">
-        <div className="fmsBenchMain">
-          <div className={`fmsBenchPanel mode-${lighting.mode}`}>
-            {layout
-              ? <FmsCduPanel backend={backend} variant={variant} layout={layout} onKey={onKey} lighting={lighting} />
-              : <p className="fmsBenchLoading" role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU model…"}</p>}
-          </div>
+      <div className="fmsBenchCockpit">
+        <div className={`fmsBenchPanel mode-${lighting.mode}`}>
+          {layout
+            ? <FmsCduPanel backend={backend} variant={variant} layout={layout} onKey={onKey} lighting={lighting} />
+            : <p className="fmsBenchLoading" role="status">{failed ? "The CDU model could not be loaded." : "Loading the CDU model…"}</p>}
+        </div>
 
-          <section className="fmsBenchCard fmsBenchMapCard">
-            <div className="fmsBenchMapHead">
-              <h2>Navigation map</h2>
+        <section className={`fmsBenchCard fmsBenchDisplays mode-${lighting.mode}`} aria-label="EFIS">
+          <div className="fmsBenchMapHead">
+            <h2>EFIS</h2>
+            <div className="fmsBenchDisplayControls">
+              <div className="fmsBenchModes" role="radiogroup" aria-label="Lower display">
+                {([["nd", "ND"], ["map", "Engineering map"]] as const).map(([id, label]) => (
+                  <label key={id} className={lowerDisplay === id ? "selected" : undefined}>
+                    <input type="radio" name="fmsBenchLowerDisplay" value={id} checked={lowerDisplay === id} onChange={() => setLowerDisplay(id)} />
+                    {label}
+                  </label>
+                ))}
+              </div>
               <label>
                 <span>Range</span>
                 <select value={range} onChange={event => setRange(Number(event.target.value))} aria-label="Map range">
@@ -170,208 +184,213 @@ export default function FmsCduTestBench() {
                 </select>
               </label>
             </div>
-            <div className={`fmsBenchMapScreen mode-${lighting.mode}`}>
-              <FmsMap fms={backend} sim={sim} range={range} />
-            </div>
-          </section>
+          </div>
+          <Pfd bus={bus} air={air} now={backend.now.getTime()} />
+          {lowerDisplay === "nd"
+            ? <Nd bus={bus} air={air} range={range} />
+            : <div className="fmsBenchMapScreen"><FmsMap fms={backend} sim={sim} range={range} /></div>}
+          <p className="fmsBenchHint">
+            {lowerDisplay === "nd"
+              ? "A generic EFIS drawn only from what the FMS publishes and the aircraft's own attitude and air data. Magenta is what the FMS commands, green an engaged mode, white armed, cyan selected, amber a flag."
+              : "Engineering map: north-up, with the aircraft's true position as well as the FMS position. Not a cockpit display."}
+          </p>
+        </section>
 
-          <section className="fmsBenchCard">
-            <h2>Cockpit lighting</h2>
-            <div className="fmsBenchModes" role="radiogroup" aria-label="Cockpit lighting">
-              {LIGHTING_MODES.map(option => (
-                <label key={option.id} className={lighting.mode === option.id ? "selected" : undefined}>
-                  <input type="radio" name="fmsBenchLighting" value={option.id} checked={lighting.mode === option.id}
-                    onChange={() => chooseLighting(option.id)} />
-                  {option.label}
-                </label>
-              ))}
-            </div>
-            <label className="fmsBenchAmbient">
-              <span>Ambient light at the light sensor</span>
-              <input type="range" min={0} max={100} value={Math.round(lighting.ambient * 100)} aria-label="Ambient light"
-                onChange={event => setLighting(current => ({ ...current, ambient: Number(event.target.value) / 100 }))} />
-            </label>
-            <p className="fmsBenchReadout">
-              Display <strong data-testid="fms-luminance">{formatLuminance(displayLuminance(backend.brightness(), lighting))} fL</strong>
-              {lighting.mode === "nvg" ? " (NVG range 0.1–3 fL)" : ""}. BRT on the panel adjusts it within the range.
-            </p>
-          </section>
-        </div>
-
-        <aside className="fmsBenchSide">
-          <section className="fmsBenchCard">
-            <h2>Flight</h2>
-            <p className="fmsBenchReadout">
-              {next?.kind === "wpt"
-                ? <>Active waypoint <strong>{next.ident}</strong>{guidance.distanceToGo !== null && guidance.mode === "LNAV" ? `, ${guidance.distanceToGo.toFixed(1)} NM` : ""}</>
-                : next?.kind === "cond" ? <>Active leg <strong>{conditionalLabel(next)}</strong></> : next ? "Route discontinuity ahead" : "End of route"}
-            </p>
-            <div className="fmsBenchActions">
-              {/* Pause is a bench control: it stays usable whatever has failed in the simulated aircraft. */}
-              <button type="button" onClick={() => setPlaying(value => !value)} aria-pressed={playing}>
-                {playing ? "Pause" : "Fly"}
-              </button>
-              {!playing ? <span className="fmsBenchHint">{runner && !runner.finished ? "Run paused: its clock is stopped." : "Aircraft frozen: the clock runs."}</span> : null}
-              <label className="fmsBenchRate">
-                <span>Rate</span>
-                <select value={rate} onChange={event => setRate(Number(event.target.value))} aria-label="Simulation rate">
-                  {[1, 4, 16, 64].map(value => <option key={value} value={value}>{value}×</option>)}
-                </select>
-              </label>
-              <button type="button" disabled={failedFms}
-                onClick={() => setJumpNote(backend.sequence() === "discontinuity" ? "Jump stops at a route discontinuity. Close it on LEGS, or override it (engineering)." : null)}>
-                Jump to next waypoint
-              </button>
-              {next?.kind === "disco" && !failedFms
-                ? <button type="button" onClick={() => { backend.overrideDiscontinuity(); setJumpNote("Discontinuity overridden (engineering action, logged)."); }}>Override discontinuity</button>
-                : null}
-              <button type="button" onClick={reset}>Restart the simulation</button>
-            </div>
-            {/* The flight mode annunciator: engaged modes in green, armed ones in white, as on the PFD. */}
-            {jumpNote ? <p className="fmsBenchHint" role="status">{jumpNote}</p> : null}
-            {/* The flight mode annunciator shows the modes the controller is in (flight.ts), not a reading of the motion. */}
-            <div className="fmsBenchFma" role="status" aria-label="Flight modes">
-              <span className="engaged">{sim.lateralMode === "LNAV" ? (onFinal && backend.approachType ? backend.approachType : guidance.mode) : sim.headingHeld ? "HDG HOLD" : "HDG SEL"}</span>
-              {sim.lnavIsArmed ? <span className="armed">LNAV</span> : null}
-              {backend.approachArmed && !onFinal ? <span className="armed">APPR</span> : null}
-              <span className="engaged">{sim.verticalMode}</span>
-            </div>
-            {sim.modeEvents.length ? <p className="fmsBenchHint">Last mode change: {sim.modeEvents.at(-1)!.event}, {sim.modeEvents.at(-1)!.detail}</p> : null}
-            <form className="fmsBenchAutopilot" onSubmit={event => { event.preventDefault(); sim.selectHeading(Number(headingInput) || 0); }}>
-              <label>
-                <span>Heading</span>
-                <input inputMode="numeric" value={headingInput} maxLength={3} aria-label="Selected heading"
-                  onChange={event => setHeadingInput(event.target.value.replace(/\D/g, ""))} />
-              </label>
-              {/* HDG SEL is the autopilot's basic mode, so it stays available when the FMS has failed. */}
-              <button type="submit" aria-pressed={sim.lateralMode === "HDG"}>HDG SEL</button>
-              <button type="button" disabled={failedFms || sim.lateralMode === "LNAV"} aria-pressed={sim.lnavIsArmed} onClick={() => sim.armLnav()}>LNAV</button>
-              <button type="button" disabled={failedFms || !backend.approachType} aria-pressed={backend.approachArmed}
-                onClick={() => { if (!backend.approachArmed) recordTo?.armApproach(); backend.armApproach(!backend.approachArmed); }}>APPR</button>
-              <button type="button" disabled={failedFms} onClick={() => { recordTo?.goAround(); backend.goAround(); }}>TOGA</button>
-              <button type="button" disabled={failedFms || sim.altitudeHoldReference === null} onClick={() => sim.engageVnav()}>VNAV</button>
-            </form>
-            <dl className="fmsBenchGuidance" aria-label="Guidance">
-              <dt>Mode</dt><dd>{guidance.mode}</dd>
-              <dt>DTK</dt><dd>{guidance.desiredTrack === null ? "---" : `${String(Math.round(guidance.desiredTrack) || 360).padStart(3, "0")}°`}</dd>
-              <dt>TRK</dt><dd>{String(Math.round(backend.track) || 360).padStart(3, "0")}°</dd>
-              <dt>XTK</dt><dd>{guidance.crossTrack >= 0 ? "R" : "L"}{Math.abs(guidance.crossTrack).toFixed(2)} NM</dd>
-              <dt>Bank</dt><dd>{guidance.mode === "HDG" ? "—" : `${sim.bankAngle >= 0 ? "R" : "L"}${Math.abs(sim.bankAngle).toFixed(0)}°`}</dd>
-              <dt>GS</dt><dd>{Math.round(backend.groundSpeed)} kt</dd>
-              <dt>ALT</dt><dd>{Math.round(backend.altitude)} ft → {Math.round(guidance.targetAltitude)}</dd>
-              <dt>VS</dt><dd>{signed(Math.round(backend.verticalSpeed / 10) * 10)} fpm</dd>
-            </dl>
-          </section>
-
-          <FmsScenarioCard
-            runner={runner}
-            recording={recording}
-            screenLines={screenText(backend.screen())}
-            onRun={runScenario}
-            onStop={() => runner?.abandon()}
-            onRecord={startRecording}
-            onFinishRecording={finishRecording}
-            onCheckLine={line => recorder?.checkLine(line, screenText(backend.screen())[line])}
-          />
-
-          <section className="fmsBenchCard">
-            <h2>Conditions</h2>
-            <ul className="fmsBenchConditions">
-              {CONDITIONS.map(condition => (
-                <li key={condition.id}>
-                  <label>
-                    <input type="checkbox" checked={backend.hasCondition(condition.id)}
-                      disabled={failedFms && condition.id !== "fmsFail"}
-                      onChange={event => { recordTo?.condition(condition.id, event.target.checked); backend.setCondition(condition.id, event.target.checked); }} />
-                    <span>
-                      <b>{condition.label}</b> <small className={lampNote(condition.lamp).startsWith("no ") ? "absent" : undefined}>{lampNote(condition.lamp)}</small>
-                      <span className="fmsBenchHint">{condition.description}</span>
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section className="fmsBenchCard">
-            <h2>Navigation data</h2>
-            <p className="fmsBenchReadout">
-              Active <strong>{backend.activeCycle.id}</strong> ({backend.activeCycle.source}): {backend.navdb.counts.airports} airports, {backend.navdb.counts.navaids} navaids,{" "}
-              {backend.navdb.counts.fixes} fixes, {backend.navdb.counts.airways} airways, {backend.navdb.counts.procedures} procedures.
-              The built-in set is invented demonstration data; its two cycles hold the same data.
-            </p>
-            {backend.inactiveCycle ? (
-              <p className="fmsBenchReadout">
-                Inactive <strong>{backend.inactiveCycle.id}</strong> ({backend.inactiveCycle.source}).{" "}
-                <button type="button" disabled={failedFms} onClick={() => backend.swapCycles()}>Activate {backend.inactiveCycle.id}</button>
-              </p>
-            ) : null}
-            <label className="fmsBenchFile">
-              <span>Load ARINC 424 data (waypoints, navaids, airports, runways, airways) as the inactive cycle</span>
-              <input type="file" accept=".pc,.dat,.txt,.424,text/plain" aria-label="ARINC 424 navigation data file"
-                onChange={async event => {
-                  const file = event.target.files?.[0];
-                  if (!file) return;
-                  const outcome = backend.loadArinc424(await file.text(), file.name);
-                  setNavLoad("refused" in outcome
-                    ? `Refused, nothing changed. ${outcome.refused}.`
-                    : `${file.name}: ${outcome.read} records read, ${outcome.skipped} skipped${outcome.errors.length ? `; ${outcome.errors[0]}` : ""}. Loaded as inactive cycle ${outcome.loaded}: activate it on IDENT or here.`);
-                  event.target.value = "";
-                }} />
-            </label>
-            {navLoad ? <p className="fmsBenchHint" role="status">{navLoad}</p> : null}
-            {backend.datasetLog.length ? (
-              <ul className="fmsBenchHint" aria-label="Navigation data record">
-                {backend.datasetLog.map((entry, index) => <li key={index}><b>{entry.action}</b> {entry.detail}</li>)}
-              </ul>
-            ) : null}
-          </section>
-
-          <section className="fmsBenchCard">
-            <h2>Alerts</h2>
-            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); recordTo?.alert(libraryAlert); backend.raiseAlert(libraryAlert); }}>
-              <select value={libraryAlert} aria-label="Alert from the manual" onChange={event => setLibraryAlert(event.target.value)}>
-                {ALERTS.map(entry => <option key={entry.text} value={entry.text}>{entry.text}</option>)}
+        <section className="fmsBenchCard fmsBenchFlight" aria-label="Flight">
+          <h2>Flight</h2>
+          <p className="fmsBenchReadout">
+            {next?.kind === "wpt"
+              ? <>Active waypoint <strong>{next.ident}</strong>{guidance.distanceToGo !== null && guidance.mode === "LNAV" ? `, ${guidance.distanceToGo.toFixed(1)} NM` : ""}</>
+              : next?.kind === "cond" ? <>Active leg <strong>{conditionalLabel(next)}</strong></> : next ? "Route discontinuity ahead" : "End of route"}
+          </p>
+          <div className="fmsBenchActions">
+            {/* Pause is a bench control: it stays usable whatever has failed in the simulated aircraft. */}
+            <button type="button" onClick={() => setPlaying(value => !value)} aria-pressed={playing}>
+              {playing ? "Pause" : "Fly"}
+            </button>
+            {!playing ? <span className="fmsBenchHint">{runner && !runner.finished ? "Run paused: its clock is stopped." : "Aircraft frozen: the clock runs."}</span> : null}
+            <label className="fmsBenchRate">
+              <span>Rate</span>
+              <select value={rate} onChange={event => setRate(Number(event.target.value))} aria-label="Simulation rate">
+                {[1, 4, 16, 64].map(value => <option key={value} value={value}>{value}×</option>)}
               </select>
-              <button type="submit" disabled={failedFms}>Raise</button>
-            </form>
-            {meaning ? <p className="fmsBenchHint">{meaning}</p> : null}
-            <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (alert.trim()) { recordTo?.alert(alert.trim()); backend.raiseAlert(alert.trim()); setAlert(""); } }}>
-              <input value={alert} maxLength={24} placeholder="Other text, e.g. UNABLE RNP" aria-label="Alert message to raise"
-                onChange={event => setAlert(event.target.value)} />
-              <button type="submit" disabled={!alert.trim() || failedFms}>Raise alert</button>
-            </form>
-          </section>
+            </label>
+            <button type="button" disabled={failedFms}
+              onClick={() => setJumpNote(backend.sequence() === "discontinuity" ? "Jump stops at a route discontinuity. Close it on LEGS, or override it (engineering)." : null)}>
+              Jump to next waypoint
+            </button>
+            {next?.kind === "disco" && !failedFms
+              ? <button type="button" onClick={() => { backend.overrideDiscontinuity(); setJumpNote("Discontinuity overridden (engineering action, logged)."); }}>Override discontinuity</button>
+              : null}
+            <button type="button" onClick={reset}>Restart the simulation</button>
+          </div>
+          {/* The flight mode annunciator: engaged modes in green, armed ones in white, as on the PFD. */}
+          {jumpNote ? <p className="fmsBenchHint" role="status">{jumpNote}</p> : null}
+          {/* The flight mode annunciator shows the modes the controller is in (flight.ts), not a reading of the motion. */}
+          <div className="fmsBenchFma" role="status" aria-label="Flight modes">
+            <span className="engaged">{sim.lateralMode === "LNAV" ? (onFinal && backend.approachType ? backend.approachType : guidance.mode) : sim.headingHeld ? "HDG HOLD" : "HDG SEL"}</span>
+            {sim.lnavIsArmed ? <span className="armed">LNAV</span> : null}
+            {backend.approachArmed && !onFinal ? <span className="armed">APPR</span> : null}
+            <span className="engaged">{sim.verticalMode}</span>
+          </div>
+          {sim.modeEvents.length ? <p className="fmsBenchHint">Last mode change: {sim.modeEvents.at(-1)!.event}, {sim.modeEvents.at(-1)!.detail}</p> : null}
+          <form className="fmsBenchAutopilot" onSubmit={event => { event.preventDefault(); sim.selectHeading(Number(headingInput) || 0); }}>
+            <label>
+              <span>Heading</span>
+              <input inputMode="numeric" value={headingInput} maxLength={3} aria-label="Selected heading"
+                onChange={event => setHeadingInput(event.target.value.replace(/\D/g, ""))} />
+            </label>
+            {/* HDG SEL is the autopilot's basic mode, so it stays available when the FMS has failed. */}
+            <button type="submit" aria-pressed={sim.lateralMode === "HDG"}>HDG SEL</button>
+            <button type="button" disabled={failedFms || sim.lateralMode === "LNAV"} aria-pressed={sim.lnavIsArmed} onClick={() => sim.armLnav()}>LNAV</button>
+            <button type="button" disabled={failedFms || !backend.approachType} aria-pressed={backend.approachArmed}
+              onClick={() => { if (!backend.approachArmed) recordTo?.armApproach(); backend.armApproach(!backend.approachArmed); }}>APPR</button>
+            <button type="button" disabled={failedFms} onClick={() => { recordTo?.goAround(); backend.goAround(); }}>TOGA</button>
+            <button type="button" disabled={failedFms || sim.altitudeHoldReference === null} onClick={() => sim.engageVnav()}>VNAV</button>
+          </form>
+          <dl className="fmsBenchGuidance" aria-label="Guidance">
+            <dt>Mode</dt><dd>{guidance.mode}</dd>
+            <dt>DTK</dt><dd>{guidance.desiredTrack === null ? "---" : `${String(Math.round(guidance.desiredTrack) || 360).padStart(3, "0")}°`}</dd>
+            <dt>TRK</dt><dd>{String(Math.round(backend.track) || 360).padStart(3, "0")}°</dd>
+            <dt>XTK</dt><dd>{guidance.crossTrack >= 0 ? "R" : "L"}{Math.abs(guidance.crossTrack).toFixed(2)} NM</dd>
+            <dt>Bank</dt><dd>{guidance.mode === "HDG" ? "—" : `${sim.bankAngle >= 0 ? "R" : "L"}${Math.abs(sim.bankAngle).toFixed(0)}°`}</dd>
+            <dt>GS</dt><dd>{Math.round(backend.groundSpeed)} kt</dd>
+            <dt>ALT</dt><dd>{Math.round(backend.altitude)} ft → {Math.round(guidance.targetAltitude)}</dd>
+            <dt>VS</dt><dd>{signed(Math.round(backend.verticalSpeed / 10) * 10)} fpm</dd>
+          </dl>
+        </section>
+      </div>
 
-          <section className="fmsBenchCard">
-            <h2>Keyboard</h2>
-            <dl className="fmsBenchKeys">
-              <dt>A–Z, 0–9</dt><dd>Type into the scratchpad</dd>
-              <dt>F1–F6</dt><dd>Left line select keys (Shift for right)</dd>
-              <dt>Backspace</dt><dd>CLR (hold for one second to clear all)</dd>
-              <dt>Enter</dt><dd>EXEC</dd>
-              <dt>PgUp / PgDn</dt><dd>PREV / NEXT</dd>
-              <dt>Space . / -</dt><dd>SP, decimal, slash, +/-</dd>
-            </dl>
-          </section>
+      <div className="fmsBenchCards">
+        <FmsScenarioCard
+          runner={runner}
+          recording={recording}
+          screenLines={screenText(backend.screen())}
+          onRun={runScenario}
+          onStop={() => runner?.abandon()}
+          onRecord={startRecording}
+          onFinishRecording={finishRecording}
+          onCheckLine={line => recorder?.checkLine(line, screenText(backend.screen())[line])}
+        />
 
-          <section className="fmsBenchCard fmsBenchLog">
-            <h2>Key events <small>{log.length}</small></h2>
-            {log.length === 0
-              ? <p className="fmsBenchEmpty">Press a key on the panel.</p>
-              : (
-                <ol>
-                  {log.map((entry, index) => (
-                    <li key={`${entry.at.getTime()}-${index}`}>
-                      <time>{entry.at.toLocaleTimeString(undefined, { hour12: false })}</time>
-                      <b>{entry.fn.replace(/^CHAR_/, "")}{entry.held ? " (held)" : ""}</b>
-                      <span>{entry.title}</span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-          </section>
-        </aside>
+        <section className="fmsBenchCard">
+          <h2>Conditions</h2>
+          <ul className="fmsBenchConditions">
+            {CONDITIONS.map(condition => (
+              <li key={condition.id}>
+                <label>
+                  <input type="checkbox" checked={backend.hasCondition(condition.id)}
+                    disabled={failedFms && condition.id !== "fmsFail"}
+                    onChange={event => { recordTo?.condition(condition.id, event.target.checked); backend.setCondition(condition.id, event.target.checked); }} />
+                  <span>
+                    <b>{condition.label}</b> <small className={lampNote(condition.lamp).startsWith("no ") ? "absent" : undefined}>{lampNote(condition.lamp)}</small>
+                    <span className="fmsBenchHint">{condition.description}</span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="fmsBenchCard">
+          <h2>Navigation data</h2>
+          <p className="fmsBenchReadout">
+            Active <strong>{backend.activeCycle.id}</strong> ({backend.activeCycle.source}): {backend.navdb.counts.airports} airports, {backend.navdb.counts.navaids} navaids,{" "}
+            {backend.navdb.counts.fixes} fixes, {backend.navdb.counts.airways} airways, {backend.navdb.counts.procedures} procedures.
+            The built-in set is invented demonstration data; its two cycles hold the same data.
+          </p>
+          {backend.inactiveCycle ? (
+            <p className="fmsBenchReadout">
+              Inactive <strong>{backend.inactiveCycle.id}</strong> ({backend.inactiveCycle.source}).{" "}
+              <button type="button" disabled={failedFms} onClick={() => backend.swapCycles()}>Activate {backend.inactiveCycle.id}</button>
+            </p>
+          ) : null}
+          <label className="fmsBenchFile">
+            <span>Load ARINC 424 data (waypoints, navaids, airports, runways, airways) as the inactive cycle</span>
+            <input type="file" accept=".pc,.dat,.txt,.424,text/plain" aria-label="ARINC 424 navigation data file"
+              onChange={async event => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                const outcome = backend.loadArinc424(await file.text(), file.name);
+                setNavLoad("refused" in outcome
+                  ? `Refused, nothing changed. ${outcome.refused}.`
+                  : `${file.name}: ${outcome.read} records read, ${outcome.skipped} skipped${outcome.errors.length ? `; ${outcome.errors[0]}` : ""}. Loaded as inactive cycle ${outcome.loaded}: activate it on IDENT or here.`);
+                event.target.value = "";
+              }} />
+          </label>
+          {navLoad ? <p className="fmsBenchHint" role="status">{navLoad}</p> : null}
+          {backend.datasetLog.length ? (
+            <ul className="fmsBenchHint" aria-label="Navigation data record">
+              {backend.datasetLog.map((entry, index) => <li key={index}><b>{entry.action}</b> {entry.detail}</li>)}
+            </ul>
+          ) : null}
+        </section>
+
+        <section className="fmsBenchCard">
+          <h2>Alerts</h2>
+          <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); recordTo?.alert(libraryAlert); backend.raiseAlert(libraryAlert); }}>
+            <select value={libraryAlert} aria-label="Alert from the manual" onChange={event => setLibraryAlert(event.target.value)}>
+              {ALERTS.map(entry => <option key={entry.text} value={entry.text}>{entry.text}</option>)}
+            </select>
+            <button type="submit" disabled={failedFms}>Raise</button>
+          </form>
+          {meaning ? <p className="fmsBenchHint">{meaning}</p> : null}
+          <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (alert.trim()) { recordTo?.alert(alert.trim()); backend.raiseAlert(alert.trim()); setAlert(""); } }}>
+            <input value={alert} maxLength={24} placeholder="Other text, e.g. UNABLE RNP" aria-label="Alert message to raise"
+              onChange={event => setAlert(event.target.value)} />
+            <button type="submit" disabled={!alert.trim() || failedFms}>Raise alert</button>
+          </form>
+        </section>
+
+        <section className="fmsBenchCard">
+          <h2>Cockpit lighting</h2>
+          <div className="fmsBenchModes" role="radiogroup" aria-label="Cockpit lighting">
+            {LIGHTING_MODES.map(option => (
+              <label key={option.id} className={lighting.mode === option.id ? "selected" : undefined}>
+                <input type="radio" name="fmsBenchLighting" value={option.id} checked={lighting.mode === option.id}
+                  onChange={() => chooseLighting(option.id)} />
+                {option.label}
+              </label>
+            ))}
+          </div>
+          <label className="fmsBenchAmbient">
+            <span>Ambient light at the light sensor</span>
+            <input type="range" min={0} max={100} value={Math.round(lighting.ambient * 100)} aria-label="Ambient light"
+              onChange={event => setLighting(current => ({ ...current, ambient: Number(event.target.value) / 100 }))} />
+          </label>
+          <p className="fmsBenchReadout">
+            Display <strong data-testid="fms-luminance">{formatLuminance(displayLuminance(backend.brightness(), lighting))} fL</strong>
+            {lighting.mode === "nvg" ? " (NVG range 0.1–3 fL)" : ""}. BRT on the panel adjusts it within the range.
+          </p>
+        </section>
+        <section className="fmsBenchCard">
+          <h2>Keyboard</h2>
+          <dl className="fmsBenchKeys">
+            <dt>A–Z, 0–9</dt><dd>Type into the scratchpad</dd>
+            <dt>F1–F6</dt><dd>Left line select keys (Shift for right)</dd>
+            <dt>Backspace</dt><dd>CLR (hold for one second to clear all)</dd>
+            <dt>Enter</dt><dd>EXEC</dd>
+            <dt>PgUp / PgDn</dt><dd>PREV / NEXT</dd>
+            <dt>Space . / -</dt><dd>SP, decimal, slash, +/-</dd>
+          </dl>
+        </section>
+
+        <section className="fmsBenchCard fmsBenchLog">
+          <h2>Key events <small>{log.length}</small></h2>
+          {log.length === 0
+            ? <p className="fmsBenchEmpty">Press a key on the panel.</p>
+            : (
+              <ol>
+                {log.map((entry, index) => (
+                  <li key={`${entry.at.getTime()}-${index}`}>
+                    <time>{entry.at.toLocaleTimeString(undefined, { hour12: false })}</time>
+                    <b>{entry.fn.replace(/^CHAR_/, "")}{entry.held ? " (held)" : ""}</b>
+                    <span>{entry.title}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+        </section>
       </div>
     </main>
   );

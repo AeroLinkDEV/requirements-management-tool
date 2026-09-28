@@ -70,7 +70,7 @@
 
 .fmsCduKey.role-alpha .legend,
 .fmsCduKey.role-numeric .legend {
-  font-size: 3.05cqw;
+  font-size: max(12px, 3.05cqw);
   font-weight: 500;
 }
 
@@ -106,7 +106,7 @@
   height: 4.1cqw;
   border: 0.22cqw solid currentColor;
   border-radius: 50%;
-  font-size: 2.55cqw;
+  font-size: max(12px, 2.55cqw);
 }
 
 .fmsCduKey.pressed .legend {
@@ -190,7 +190,7 @@
   justify-content: center;
   height: 100%;
   line-height: 1;
-  font-size: 2.95cqw;
+  font-size: max(12px, 2.95cqw);
   /* The AMLCD's slight bloom. */
   text-shadow: 0 0 0.35cqw currentColor;
   white-space: pre;

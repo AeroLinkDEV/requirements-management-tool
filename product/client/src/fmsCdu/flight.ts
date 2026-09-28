@@ -189,6 +189,13 @@ export type VerticalMode = "ALT HOLD" | "TDN" | "APPR" | "VNAV PTH" | "DES NOW" 
 /** A recorded change of mode or authority: what happened and the references it set. */
 export type ModeEvent = { at: Date; event: string; detail: string };
 
+/**
+ * The vertical path at the aircraft's position, for a vertical deviation display: the VNAV descent path, or the final
+ * approach path on the final leg. `coupled` says whether the aircraft is being flown on it; an approach path that has
+ * not been captured is advisory information only.
+ */
+export type VerticalPath = { altitude: number; source: "VNAV" | "APPR"; coupled: boolean };
+
 export class FlightSimulator {
   private readonly fms: ScriptedFms;
   /** True airspeed in knots: the speed VNAV flies (cruise speed, or a speed constraint). */
@@ -210,6 +217,7 @@ export class FlightSimulator {
   /** The approach mode: off, armed, or captured on the final leg (the only mode that descends beyond the FAF). */
   private approach: "OFF" | "ARMED" | "CAPTURED" = "OFF";
   private events: ModeEvent[] = [];
+  private path: VerticalPath | null = null;
   private holdPlan: { segments: Segment[]; index: number; elapsed: number; loop: Segment[] } | null = null;
   private sarPlan: { points: LatLon[]; index: number } | null = null;
   private last: Guidance;
@@ -222,6 +230,27 @@ export class FlightSimulator {
   get guidance() { return this.last; }
   get verticalMode() { return this.vertical; }
   get approachMode() { return this.approach; }
+  /** The vertical path here, or null where there is none (climb, cruise, or no computable path). */
+  get verticalPath() { return this.path; }
+
+  /** The final approach path altitude at the aircraft, from the FAF (at its corrected altitude) to the runway. */
+  private finalPathAltitude(): number | null {
+    const fms = this.fms;
+    const leg = fms.activeRoute.legs[0];
+    if (!this.onFinal || leg?.kind !== "wpt" || !fms.lastSequenced) return null;
+    const fafPos = fms.coordinates(fms.lastSequenced), rwyPos = fms.coordinates(leg.ident);
+    if (!fafPos || !rwyPos) return null;
+    const tan = (fms.fafAltitudeCorrected - fms.vnav.runwayElevation) / (distanceNm(fafPos, rwyPos) * 6076.12);
+    return fms.vnav.runwayElevation + distanceNm(fms.position, rwyPos) * 6076.12 * tan;
+  }
+
+  /** The VNAV descent path altitude at the aircraft, once past the top of descent; null otherwise. */
+  private descentPathAltitude(): number | null {
+    const profile = this.fms.profile();
+    const first = profile.points[0];
+    if (!profile.descending || !first || first.distance === null || first.altitude === null) return null;
+    return Math.min(this.fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * Math.tan(rad(this.fms.vnav.pathAngle)));
+  }
 
   /** On the final leg: the FAF has been sequenced and the runway is the active waypoint. */
   private get onFinal() {
@@ -344,6 +373,12 @@ export class FlightSimulator {
     const altitude = fms.altitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
     fms.setAircraft({ position, track, groundSpeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError });
+    // The path for the deviation display: the final approach path on final (coupled only when captured), otherwise the
+    // descent path. None while the FMS has failed: it computes nothing to show.
+    const final = this.fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
+    const descentPath = final === null && !this.fms.hasCondition("fmsFail") ? this.descentPathAltitude() : null;
+    this.path = final !== null ? { altitude: final, source: "APPR", coupled: this.approach === "CAPTURED" }
+      : descentPath !== null ? { altitude: descentPath, source: "VNAV", coupled: this.vertical === "VNAV PTH" && this.altitudeHold === null } : null;
     fms.updateNavigation(dt);
     fms.updatePerformance(dt);
     // DES NOW ends once the aircraft is on the descent path.

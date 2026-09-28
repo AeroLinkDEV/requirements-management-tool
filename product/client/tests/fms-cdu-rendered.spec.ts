@@ -152,6 +152,9 @@ test('NVG lighting backlights the legends green and holds the display in the NVG
 
 test('Fly moves the aircraft along the route on the map at the chosen rate, and Pause stops it', async ({ page }) => {
   await open(page)
+  // The engineering map shares the lower display beside the CDU with the ND; the ND is shown first.
+  await expect(page.getByRole('img', { name: /^Navigation display/ })).toBeVisible()
+  await page.getByRole('radiogroup', { name: 'Lower display' }).getByText('Engineering map').click()
   const map = page.getByRole('img', { name: /^Navigation map/ })
   await expect(map).toHaveAttribute('aria-label', /LNAV mode, active waypoint MUN/)
   await page.getByLabel('Simulation rate').selectOption('64')
@@ -231,4 +234,21 @@ test('an FMS failure in flight reverts the flight modes, and Pause still works (
   await pause.click()
   await expect(page.getByRole('button', { name: 'Fly' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'LNAV', exact: true })).toBeDisabled()
+})
+
+test('the EFIS shows the FMS modes, route and TO waypoint, and flags them when the FMS fails', async ({ page }) => {
+  await open(page)
+  const efis = page.getByRole('region', { name: 'EFIS' })
+  await expect(efis.getByTestId('fma-lateral')).toHaveText('LNAV')
+  await expect(efis.getByTestId('nd-to-wpt')).toContainText('MUN')
+  await expect(efis.getByTestId('nd-route')).toBeVisible()
+  await expect(efis.getByTestId('nav-source')).toHaveText(/^FMS1 TERM$/)
+  await page.getByLabel('FMS failure').check()
+  await page.getByLabel('Simulation rate').selectOption('4')
+  await page.getByRole('button', { name: 'Fly' }).click()
+  await expect(efis.getByTestId('pfd-fms-flag')).toHaveText('FMS FAIL')
+  await expect(efis.getByTestId('nd-map-flag')).toHaveText('MAP')
+  await expect(efis.getByTestId('nd-route')).toHaveCount(0)
+  await expect(efis.getByTestId('fma-lateral')).toHaveText('HDG HOLD')
+  await expect(efis.getByTestId('fma-vertical')).toHaveText('ALT HOLD')
 })
