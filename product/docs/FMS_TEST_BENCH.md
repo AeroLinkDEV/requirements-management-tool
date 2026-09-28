@@ -99,7 +99,7 @@ Status vocabulary: **Demonstrated** (works on the bench and has a behavioural te
 |---|---|---|
 | CDU panel, variants, keys, scratchpad, lighting | Demonstrated | Held CLR survives focus loss (R18); luminance is a simulated value, not a physical NVIS claim |
 | MOD / EXEC / ERASE for route edits | Partial | Pending edits leak into final-path guidance (R01), runway lookup (R05) and PROGRESS (R12) |
-| Navigation database, airways, SID/STAR/approach selection | Partial | Pages and new entries look up by ident string (R05); the active plan's fixes are pinned when it becomes active (EXEC, the initial plan), so loading or activating a cycle does not move them or their guidance and predictions (R06) |
+| Navigation database, airways, SID/STAR/approach selection | Partial | Pages and new entries look up by ident string (R05). The active plan's fixes are pinned as resolved when it becomes active (EXEC, the initial plan), including fixes it was executed without, which stay unresolved: loading or activating a cycle neither moves a fix nor gives one a position (R06, third review D01). Pins are keyed by ident, a declared limit: two different entries with one ident in one plan are not told apart. Procedure definitions are not pinned |
 | ARINC 424 loader | Partial | Subset reader with degree, minute and second range checks. A file that is empty, not recognised or holds an impossible coordinate is refused whole with the reason, and nothing changes; a valid file becomes the inactive cycle (R16 loader part, R06). Procedures and cycle dates are not read |
 | Pilot waypoints, SELECT DESIRED WPT, REF NAV DATA | Demonstrated | Regional geometry only; the date line takes the long way round (R17) |
 | Company routes, SEC FPLN | Partial | Session memory only; SAVE keeps the en-route legs, not constraints |
@@ -109,19 +109,19 @@ Status vocabulary: **Demonstrated** (works on the bench and has a behavioural te
 | Holds | Partial | Entries and racetrack flown; HA/HF/HM termination is a one-turn exit only |
 | Leg bypass | Not implemented | Only a direct-to's bypassed points are kept (for ABEAM PTS) |
 | DIRECT TO, INTC CRS, ABEAM PTS, offset | Partial | The pending direct-to leaked into active guidance (R01; fix in progress) |
-| HDG SEL and LNAV arm/capture | Partial | The flight mode strip is inferred from motion, not a mode state (R10) |
-| Discontinuities | Partial | Jump crosses them silently (R15); predictions bridge them as zero distance (R08) |
+| HDG SEL and LNAV arm/capture | Demonstrated | The flight mode strip shows the controller's modes (flight.ts), not a reading of the motion; the approach capability is annunciated armed until captured and engaged after it (R10, third review D03). LNAV lost at a gap reverts to HDG HOLD and is recorded |
+| Discontinuities | Demonstrated | Jump refuses at a gap; a separate, logged engineering override crosses it, and its record names the plan revision, fingerprint and legs before and after (R15, Q-A3, third review D04). Predictions past a gap are unknown (R08) |
 | Sensor selection and reversion | Demonstrated | Priority selection with synthetic errors, not blending or estimation; ANP is derived from simulated truth |
 | RNP by phase, time to alert, CHECK ANP | Demonstrated | Demonstration parameters, not sourced CMA values; forced RNP/NPA disagree across pages (R11); NAV STATUS captions collide (R19) |
 | RAIM / SBAS | Placeholder | Condition-driven flags, no satellite or protection-level model |
-| Approach type, ARM APPROACH, go-around | Partial | The type is a GPS-integrity classifier; arming and integrity do not govern the final path (R03) |
+| Approach type, ARM APPROACH, go-around | Partial | Laboratory contract (Q-A1): beyond the FAF only a captured approach descends; capture needs APPR armed, ILS or LPV capability, LNAV and the aircraft on the final course. Integrity lost after capture latches ALT HOLD. APPR pressed off after capture, or HDG SEL, cancels the approach to ALT HOLD (third review D03). TOGA, refused while the FMS has failed, makes the missed approach active, ends the approach, releases any hold and climbs in VNAV the same way from every approach state (third review D02). The approach type is a GPS-integrity classifier, not a receiver output (the CMA-5024 work replaces it) |
 | Altitude and speed constraints | Partial | Upper bounds are not checked, so a violated constraint reads as met (R04) |
 | T/D, E/D, VNAV path, DES NOW | Partial | Simplified geometric path; no VNAV mode state (R10) |
 | VNAV SPD | Not implemented | |
 | RTA | Not implemented | |
 | ETA and fuel predictions | Partial | Destination can be the missed-approach end (R07); gaps (R08); future speed constraints ignored (R09) |
 | Cold temperature correction | Demonstrated | Test uses the production helper; needs an independent worked example |
-| FMS failure | Partial | Blanks the CDU but guidance continues, and Pause is disabled (R02) |
+| FMS failure | Demonstrated | Laboratory reversion (Q-A2): managed guidance becomes invalid, heading and altitude are latched and flown as HDG HOLD and ALT HOLD, recovery resumes nothing until LNAV and VNAV are selected, and Pause and HDG SEL stay usable (R02). The commanded target shown is the held altitude while a hold commands (third review D02) |
 | MSG and message recall | Partial | MSG can stay lit after recovery with nothing to acknowledge (R13) |
 | ATC / FMC COMM datalink | Placeholder | Representative workflow; STANDBY clears the pending indication (R14) |
 | Rendezvous, moving waypoints, tactical descent | Partial | Rendezvous uses the route predictions, so it inherits R08 and R09; moving waypoints have no data age or expiry |

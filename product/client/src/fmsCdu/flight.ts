@@ -216,6 +216,8 @@ export class FlightSimulator {
   private fmsFailed = false;
   /** The approach mode: off, armed, or captured on the final leg (the only mode that descends beyond the FAF). */
   private approach: "OFF" | "ARMED" | "CAPTURED" = "OFF";
+  /** The FMS's go-around count at the last step, to take each accepted TOGA as a transition (watchGoAround). */
+  private goArounds: number;
   private events: ModeEvent[] = [];
   private path: VerticalPath | null = null;
   private holdPlan: { segments: Segment[]; index: number; elapsed: number; loop: Segment[] } | null = null;
@@ -224,6 +226,7 @@ export class FlightSimulator {
 
   constructor(fms: ScriptedFms) {
     this.fms = fms;
+    this.goArounds = fms.goArounds;
     this.last = this.guide();
   }
 
@@ -263,6 +266,10 @@ export class FlightSimulator {
    * leg only when armed, with valid approach capability (ILS, or LPV with integrity), LNAV engaged and the aircraft
    * within 1 NM of the final course and not moving away from it. Loss of capability after capture drops the approach to a latched altitude
    * hold; its return does not re-capture, because the approach is disarmed and must be armed again.
+   *
+   * APPR is an arm and disengage control. Before capture, pressing it off disarms. After capture, pressing it off, or
+   * leaving LNAV (HDG SEL), cancels the approach: the aircraft levels in a latched altitude hold at the altitude it had,
+   * and VNAV or TOGA must be selected to go on. TOGA leaves the approach with a climb (watchGoAround).
    */
   private previousCrossTrack: number | null = null;
 
@@ -273,6 +280,14 @@ export class FlightSimulator {
     const capable = fms.approachType === "ILS" || fms.approachType === "LPV";
     if (this.approach === "CAPTURED") {
       if (!this.onFinal || fms.hasCondition("fmsFail")) { this.approach = fms.approachArmed ? "ARMED" : "OFF"; return; }
+      const cancel = !fms.approachArmed ? "APPR pressed off" : this.lateral !== "LNAV" ? "HDG SEL" : null;
+      if (cancel) {
+        this.approach = "OFF";
+        fms.armApproach(false);
+        this.altitudeHold = Math.round(fms.altitude);
+        this.record("APPR CANCELLED", `${cancel}; ALT HOLD ${this.altitudeHold} FT`);
+        return;
+      }
       if (!capable) {
         this.approach = "OFF";
         fms.armApproach(false);
@@ -314,6 +329,22 @@ export class FlightSimulator {
     this.fmsFailed = failed;
   }
 
+  /**
+   * The laboratory go-around (a labelled engineering assumption, not a certified TOGA law): an accepted TOGA makes the
+   * missed approach active (ScriptedFms.goAround), ends any approach mode, releases a latched altitude hold, and climbs
+   * in VNAV to the missed approach altitude. It is taken the same way whether the approach was captured, cancelled, or
+   * lost its integrity, so the one control never means two things. TOGA is refused while the FMS has failed.
+   */
+  private watchGoAround() {
+    if (this.fms.goArounds === this.goArounds) return;
+    this.goArounds = this.fms.goArounds;
+    const released = this.altitudeHold;
+    this.altitudeHold = null;
+    this.approach = "OFF";
+    this.previousCrossTrack = null;
+    this.record("GO AROUND", `missed approach active; VNAV climbs on the missed approach altitudes${released === null ? "" : `; ALT HOLD ${released} FT released`}`);
+  }
+
   /** VNAV: managed vertical guidance again, after an altitude hold. Refused while the FMS has failed. */
   engageVnav() {
     if (this.fms.hasCondition("fmsFail") || this.altitudeHold === null) return false;
@@ -340,6 +371,7 @@ export class FlightSimulator {
   private integrate(dt: number) {
     const fms = this.fms;
     this.watchFailure();
+    this.watchGoAround();
     const guidance = this.guide(dt);
     this.updateApproach(guidance.crossTrack);
     this.last = guidance;
@@ -424,6 +456,8 @@ export class FlightSimulator {
   }
 
   private targetAltitude() {
+    // The commanded target is the one the controlling authority flies: a latched altitude hold, when there is one.
+    if (this.altitudeHold !== null) return this.altitudeHold;
     const leg = this.fms.activeRoute.legs[0];
     const hold = this.fms.activeRoute.hold;
     if (this.holdPlan && hold) return constraintAltitude(hold.altitude) ?? this.fms.altitude;
