@@ -8,7 +8,7 @@ import {
   type SarPattern, type Uplink,
 } from "./fmsModel";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
-import { coldTemperatureCorrection, computeProfile, parseConstraint, type Profile } from "./vnav";
+import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput } from "./vnav";
 import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
 import { NAV_PAGES } from "./navPages";
 import { PLANNING_PAGES } from "./planningPages";
@@ -453,14 +453,30 @@ export class ScriptedFms implements CduBackend {
     const geometry = this.legGeometry(route);
     // The descent meets the approach: the final approach fix is crossed at its (temperature-corrected) altitude.
     const runwayAt = route.legs.findIndex(leg => leg.kind === "wpt" && /^RW\d{2}/.test(leg.ident));
-    const waypoints = route.legs.flatMap((leg, i) => {
-      if (leg.kind !== "wpt") return [];
-      const g = geometry[i];
+    let basis: PredictionBasis = "known";
+    let lastFix: LatLon | null = this.here;
+    const waypoints: ProfileInput["waypoints"] = [];
+    route.legs.forEach((leg, i) => {
+      // Past a discontinuity or a manually terminated leg the path is not defined; after a course or heading leg that
+      // ends on an event, the leg into the next fix is estimated from the last fixed point.
+      if (leg.kind === "disco") { basis = "unknown"; return; }
+      if (leg.kind === "cond") {
+        if (leg.path === "VM" || leg.path === "FM") basis = "unknown";
+        else if (basis === "known") basis = "estimated";
+        return;
+      }
+      const to = this.coordinates(leg.ident, route) ?? null;
+      let legDistance = geometry[i]?.distance ?? null, course = geometry[i]?.course;
+      if (legDistance === null && basis === "estimated" && lastFix && to) { legDistance = distanceNm(lastFix, to); course = courseDeg(lastFix, to); }
+      // The active leg is flown at the planned speed (its constraint, a hold); a later leg at the cruise speed or its
+      // own speed constraint, which applies to the leg into its fix.
+      const tas = i === 0 ? this.plannedSpeed : Math.min(this.vnav.cruiseSpeed, leg.speed ?? Infinity);
       const constraint = i === runwayAt - 1 ? { kind: "AT" as const, altitude: this.fafAltitudeCorrected } : parseConstraint(leg.altitude);
-      return [{
-        ident: leg.ident, legDistance: g?.distance ?? 0, groundSpeed: this.groundSpeedOn(g?.course ?? this.track),
-        constraint, endOfDescent: i === runwayAt,
-      }];
+      waypoints.push({
+        ident: leg.ident, legDistance, groundSpeed: this.groundSpeedOn(course ?? this.track, tas),
+        constraint, endOfDescent: i === runwayAt, basis, missed: leg.source === "MISSED",
+      });
+      lastFix = to;
     });
     return computeProfile({
       waypoints, altitude: this.altitude, cruiseAltitude: this.vnav.cruiseAltitude, climbRate: 1000, pathAngle: this.vnav.pathAngle,
@@ -487,8 +503,8 @@ export class ScriptedFms implements CduBackend {
     this.fuel.quantity = Math.max(0, before - (this.fuel.flow * dt) / 3600);
     if (before > this.fuel.reserve && this.fuel.quantity <= this.fuel.reserve) this.alert(alert("FUEL RESERVE"));
     const profile = this.profile();
-    const atDestination = profile.points.at(-1)?.fuel;
-    if (atDestination !== undefined && atDestination < this.fuel.reserve) {
+    const atDestination = profile.destination?.fuel ?? null;
+    if (atDestination !== null && atDestination < this.fuel.reserve) {
       if (!this.perf.notEnoughAlerted) { this.perf.notEnoughAlerted = true; this.alert(alert("NOT ENOUGH FUEL")); }
     } else this.perf.notEnoughAlerted = false;
     if (profile.unableNext && profile.unableNext !== this.perf.unableAlertedFor) { this.perf.unableAlertedFor = profile.unableNext; this.advisory("UNABLE NEXT ALT"); }
@@ -505,7 +521,7 @@ export class ScriptedFms implements CduBackend {
     const { wpt, time } = this.rndz;
     if (!wpt || time === null) return null;
     const point = this.profile().points.find(p => p.ident === wpt);
-    if (!point) return null;
+    if (!point || point.distance === null || point.eta === null) return null;
     const hours = (time - this.now.getTime()) / 3_600_000;
     const required = hours > 0 ? point.distance / hours : Infinity;
     const speed = Math.min(this.rndz.maxSpeed, Math.max(this.rndz.minSpeed, required));

@@ -23,7 +23,8 @@
     "fms-vnav.spec.ts",
     "fms-tactical-maint.spec.ts",
     "fms-scenario.spec.ts",
-    "fms-authority.spec.ts"
+    "fms-authority.spec.ts",
+    "fms-predictions.spec.ts"
   ],
   "rendered": [
     "code-source-rendered.spec.ts",

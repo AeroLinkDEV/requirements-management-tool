@@ -48,6 +48,12 @@ const cycleDates = (cycle: { from: number; to: number }) => {
   return `${day(cycle.from)}-${day(cycle.to)}`;
 };
 
+/** EFOB at the landing, or dashes when the route has no prediction to it. */
+const efobText = (fms: ScriptedFms) => {
+  const fuel = fms.profile().destination?.fuel ?? null;
+  return fuel === null ? "-----KG" : `${Math.max(0, Math.round(fuel))}KG`;
+};
+
 /** VNAV CRZ: the planned cruise, path angle and wind, with the top and end of descent the profile works out. */
 function vnavCruise(fms: ScriptedFms): (Line | undefined)[] {
   const profile = fms.profile();
@@ -105,14 +111,19 @@ function vnavCruiseLsk(fms: ScriptedFms, side: "L" | "R", row: number, scratch: 
   }
 }
 
-/** The destination ETA and fuel on board there, from the profile predictions; amber below the reserve. */
+/**
+ * The landing ETA and fuel on board there, from the profile predictions; amber below the reserve. Past a gap in the
+ * route there is no prediction, and the page says so rather than showing a number.
+ */
 function destinationPrediction(fms: ScriptedFms): (Line | undefined)[] {
-  const last = fms.profile().points.at(-1);
-  if (!last) return [];
-  const short = last.fuel < fms.fuelState.reserve;
+  const dest = fms.profile().destination;
+  if (!dest) return [];
+  if (dest.eta === null || dest.fuel === null)
+    return [caption(` DEST ${fms.activeRoute.dest}`, "EFOB "), { left: medium("-----"), right: medium("-----KG") }];
+  const short = dest.fuel < fms.fuelState.reserve;
   return [
-    caption(` DEST ${last.ident}`, "EFOB "),
-    { left: medium(eta(last.eta)), right: medium(`${Math.max(0, Math.round(last.fuel))}KG`, short ? "amber" : "white") },
+    caption(` DEST ${fms.activeRoute.dest}`, "EFOB "),
+    { left: medium(eta(dest.eta)), right: medium(`${Math.max(0, Math.round(dest.fuel))}KG`, short ? "amber" : "white") },
   ];
 }
 
@@ -121,7 +132,7 @@ function vnavDescent(fms: ScriptedFms): (Line | undefined)[] {
   const profile = fms.profile();
   const first = profile.points[0];
   const tan = Math.tan((fms.vnav.pathAngle * Math.PI) / 180);
-  const pathAltitude = first ? Math.min(fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * tan) : null;
+  const pathAltitude = first && first.distance !== null ? Math.min(fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * tan) : null;
   const vdev = profile.descending && pathAltitude !== null ? Math.round((fms.altitude - pathAltitude) / 10) * 10 : null;
   const edLeg = fms.activeRoute.legs.find(l => l.kind === "wpt" && l.ident === profile.endOfDescent);
   return [
@@ -438,7 +449,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           caption(" FUEL QTY", "FUEL FLOW "),
           { left: medium(`${fms.fuelState.quantity}KG`), right: medium(`${fms.fuelState.flow}KG/H`) },
           caption(" DEST", "EFOB "),
-          { left: { text: fms.activeRoute.dest, color: "green" }, right: medium(`${Math.max(0, Math.round(fms.profile().points.at(-1)?.fuel ?? fms.fuelState.quantity))}KG`) },
+          { left: { text: fms.activeRoute.dest, color: "green" }, right: medium(efobText(fms)) },
         ];
       if (index === 2)
         return [
