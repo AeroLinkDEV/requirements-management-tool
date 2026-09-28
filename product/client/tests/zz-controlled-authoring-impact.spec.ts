@@ -75,7 +75,7 @@ test("engineer analyzes impact and creates a rich controlled requirement proposa
   await page.getByRole("button", { name: "Save & check in" }).click();
   // The read-only result also has Requirement impact. Its absence can pass before check-in completes,
   // or even after a refused check-in, so wait for the authoritative result and the same proposal instead.
-  await expect(page.getByRole("status")).toContainText("Draft checked in.");
+  await expect(page.getByRole("status").filter({ hasText: "Draft checked in." })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Controlled requirement authoring" })).toHaveCount(0);
   await expect(page.getByText("Record version 2", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Requirement impact", exact: true })).toBeVisible();
