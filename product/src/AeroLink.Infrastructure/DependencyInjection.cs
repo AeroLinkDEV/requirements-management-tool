@@ -127,6 +127,7 @@ public static class DependencyInjection
         services.AddScoped<ProjectVerificationVocabularyService>();
         services.AddScoped<ProjectFeatureService>();
         services.AddScoped<ProblemReportImportService>();
+        services.AddScoped<IntegrityImportService>();
         services.AddScoped<IdentitySeeder>();
         services.AddScoped<ExternalIdentityAdministrationService>();
         services.AddScoped<EnterpriseRequirementsService>();

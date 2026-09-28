@@ -48,7 +48,9 @@ public static class EditSessionEndpoints
             // Browser-recovery images are private, transient authoring state, not controlled attachment-vault
             // records. Never enumerate them through this project-scoped generic surface; the dedicated image
             // endpoint applies the uploader/session boundary when an editor needs to preview one.
-            if(artifactType.Equals("InlineImageDraft",StringComparison.OrdinalIgnoreCase))return Results.Ok(Array.Empty<object>());
+            if(artifactType.Equals("InlineImageDraft",StringComparison.OrdinalIgnoreCase)
+                || artifactType.Equals(IntegrityImportService.PackageArtifact,StringComparison.OrdinalIgnoreCase)
+                || artifactType.Equals(IntegrityImportService.ImageArtifact,StringComparison.OrdinalIgnoreCase))return Results.Ok(Array.Empty<object>());
             var rows=await db.ControlledAttachments.AsNoTracking().Where(x=>x.ProjectId==projectId&&x.ArtifactType==artifactType&&x.ArtifactId==artifactId).OrderBy(x=>x.LogicalId).ThenByDescending(x=>x.Version).ToListAsync(ct);
             return Results.Ok(rows.Select(x=>new{x.Id,x.LogicalId,x.Version,x.RevisionId,x.Label,x.Description,x.OriginalFileName,x.ContentType,x.Size,x.Sha256,state=x.State.ToString(),x.UploadedBy,x.UploadedAt,x.IntegrityVerifiedAt,x.SupersedesId}));
         });
@@ -72,14 +74,14 @@ public static class EditSessionEndpoints
         {
             var item=await db.ControlledAttachments.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);
             if(item is null)return Results.NotFound();
-            if(item.ArtifactType=="InlineImageDraft")return Results.NotFound();
+            if(item.ArtifactType is "InlineImageDraft" or IntegrityImportService.PackageArtifact or IntegrityImportService.ImageArtifact)return Results.NotFound();
             if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();
             try{return Results.File(await store.OpenVerifiedReadAsync(item.StorageKey,item.Size,item.Sha256,ct),item.ContentType,SafeDownloadFileName(item.OriginalFileName,item.Id),enableRangeProcessing:true);}
             catch(EvidenceIntegrityException){return Results.NotFound();}
         });
 
         app.MapPost("/api/enterprise-hardening/attachments/{id:guid}/verify",async(Guid id,HttpContext http,AeroLinkDbContext db,EvidenceFileStore store,CancellationToken ct)=>
-        {var item=await db.ControlledAttachments.SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var actual=await store.ComputeSha256Async(item.StorageKey,ct);var valid=CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual),Convert.FromHexString(item.Sha256));if(valid){item.RecordIntegrityVerification(DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);}return Results.Ok(new{valid,expected=item.Sha256,actual,verifiedAt=item.IntegrityVerifiedAt});});
+        {var item=await db.ControlledAttachments.SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null || item.ArtifactType is IntegrityImportService.PackageArtifact or IntegrityImportService.ImageArtifact)return Results.NotFound();if(!await http.HasProjectAccessAsync(db,item.ProjectId,ct))return Results.Forbid();var actual=await store.ComputeSha256Async(item.StorageKey,ct);var valid=CryptographicOperations.FixedTimeEquals(Convert.FromHexString(actual),Convert.FromHexString(item.Sha256));if(valid){item.RecordIntegrityVerification(DateTimeOffset.UtcNow);await db.SaveChangesAsync(ct);}return Results.Ok(new{valid,expected=item.Sha256,actual,verifiedAt=item.IntegrityVerifiedAt});});
 
         app.MapPost("/api/enterprise-hardening/jobs",async(CreateEnterpriseJobRequest request,HttpContext http,AeroLinkDbContext db,CancellationToken ct)=>
         {

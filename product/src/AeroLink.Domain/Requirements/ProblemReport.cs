@@ -571,7 +571,7 @@ public sealed class ProblemReport
         ProblemReportSeverity severity, ProblemReportPriority priority, ProblemReportCategory? category,
         Guid? targetReleaseId, string sourceSystem, string sourceKey, string? sourceReportedBy,
         DateTimeOffset? sourceCreatedAt, string sourceState, ProblemReportState landingState, bool closedInSource,
-        string rootCause = "", string correctiveAction = "")
+        string rootCause = "", string correctiveAction = "", string problemRich = "", ProblemReportNarrative? narrative = null)
     {
         var allowed = closedInSource
             ? landingState == ProblemReportState.Closed
@@ -582,7 +582,7 @@ public sealed class ProblemReport
             throw new DomainException("A category is required for an imported report beyond Draft.");
         var report = new ProblemReport(projectId, reportNumber, title, problem, analysis, raisedBy, now,
             severity: severity, priority: priority, origin: $"Imported from {sourceSystem.Trim()}",
-            targetReleaseId: targetReleaseId, responsibleEngineerId: responsibleEngineerId, category: category);
+            targetReleaseId: targetReleaseId, responsibleEngineerId: responsibleEngineerId, category: category, problemRich: problemRich);
         if (category is not null) report.CategoryProvenance = ProblemReportCategoryProvenance.ImportMapped;
         report.SourceSystem = Required(sourceSystem, "An imported report requires its source system.");
         report.SourceKey = Required(sourceKey, "An imported report requires its source key.");
@@ -591,6 +591,15 @@ public sealed class ProblemReport
         report.SourceState = string.IsNullOrWhiteSpace(sourceState) ? null : sourceState.Trim();
         report.ClosedInSource = closedInSource ? true : null;
         report.RootCause = rootCause.Trim(); report.CorrectiveAction = correctiveAction.Trim();
+        if (narrative is not null)
+        {
+            report.AnalysisRich = CanonicalRich(narrative.AnalysisRich);
+            report.Analysis = ProjectionOrPlain(report.AnalysisRich, report.Analysis);
+            report.RootCauseRich = CanonicalRich(narrative.RootCauseRich);
+            report.RootCause = ProjectionOrPlain(report.RootCauseRich, report.RootCause);
+            report.CorrectiveActionRich = CanonicalRich(narrative.CorrectiveActionRich);
+            report.CorrectiveAction = ProjectionOrPlain(report.CorrectiveActionRich, report.CorrectiveAction);
+        }
         report.State = landingState;
         return report;
     }

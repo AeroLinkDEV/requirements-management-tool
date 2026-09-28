@@ -124,6 +124,8 @@ export default defineConfig({
         Database__SqliteSynchronous: 'Off',
         Evidence__Root: storage.evidence,
         DemoData__Enabled: 'false',
+        // Synthetic source packages are accepted only by this disposable browser-test host.
+        IntegrityImport__AllowFixtures: 'true',
         Identity__SeedDemoAccounts: 'true',
         Identity__AllowDemoAccounts: 'true',
         Identity__CookieSecure: 'false',

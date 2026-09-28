@@ -72,6 +72,8 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
     public DbSet<ProjectFeatureSet> ProjectFeatureSets => Set<ProjectFeatureSet>();
     public DbSet<ProjectFeatureSetHistory> ProjectFeatureSetHistories => Set<ProjectFeatureSetHistory>();
     public DbSet<ProblemReportImportBatch> ProblemReportImportBatches => Set<ProblemReportImportBatch>();
+    public DbSet<IntegrityImportBatch> IntegrityImportBatches => Set<IntegrityImportBatch>();
+    public DbSet<IntegrityReportSource> IntegrityReportSources => Set<IntegrityReportSource>();
     public DbSet<ProjectVerificationMethod> ProjectVerificationMethods => Set<ProjectVerificationMethod>();
     public DbSet<SoftwareRelease> Releases => Set<SoftwareRelease>();
     public DbSet<SoftwareBuild> SoftwareBuilds => Set<SoftwareBuild>();
@@ -615,6 +617,25 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
             b.Property(x => x.SourceHash).HasMaxLength(64);
             b.Property(x => x.PreviewHash).HasMaxLength(64);
             b.Property(x => x.ImportedBy).HasMaxLength(200);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<IntegrityImportBatch>(b =>
+        {
+            b.ToTable("integrity_import_batches"); b.HasKey(x => x.Id);
+            b.HasIndex(x => new { x.ProjectId, x.ActorId, x.OperationId }).IsUnique();
+            b.Property(x => x.ManifestHash).HasMaxLength(64); b.Property(x => x.RequestHash).HasMaxLength(64);
+            b.Property(x => x.PreviewHash).HasMaxLength(64); b.Property(x => x.ImportedBy).HasMaxLength(200);
+            b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ControlledAttachment>().WithMany().HasForeignKey(x => x.PackageAttachmentId).OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<IntegrityReportSource>(b =>
+        {
+            b.ToTable("integrity_report_sources"); b.HasKey(x => x.Id);
+            b.HasIndex(x => new { x.ProjectId, x.SourceInstanceId, x.SourceKey }).IsUnique();
+            b.HasIndex(x => x.ReportId).IsUnique();
+            b.Property(x => x.SourceKey).HasMaxLength(19); b.Property(x => x.ItemPath).HasMaxLength(240);
+            b.HasOne<IntegrityImportBatch>().WithMany().HasForeignKey(x => x.BatchId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ProblemReport>().WithMany().HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<ProjectRecord>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<ProjectFeatureSetHistory>(b =>
@@ -2331,6 +2352,9 @@ public sealed class AeroLinkDbContext(DbContextOptions<AeroLinkDbContext> option
         PendingLadderSeals.Clear();
         try
         {
+            if (ChangeTracker.Entries().Any(x => x.Entity is IntegrityImportBatch or IntegrityReportSource
+                && x.State is EntityState.Modified or EntityState.Deleted))
+                throw new DomainException("Integrity import acceptances and source identities are immutable.");
             foreach (var entry in ChangeTracker.Entries<TestChangeReview>()
                          .Where(x => x.State is EntityState.Added or EntityState.Modified))
                 entry.Entity.ValidateOriginForPersistence();

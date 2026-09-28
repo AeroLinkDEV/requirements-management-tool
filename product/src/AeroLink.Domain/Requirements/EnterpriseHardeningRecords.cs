@@ -12,13 +12,15 @@ public sealed class ControlledAttachment
     private ControlledAttachment() { }
     public ControlledAttachment(Guid projectId, string artifactType, Guid artifactId, Guid? revisionId, Guid logicalId, int version,
         string label, string description, string originalFileName, string contentType, long size, string sha256, string storageKey,
-        Guid? supersedesId, string actor, DateTimeOffset now, string? validationProfile = null, string? validationResult = null)
+        Guid? supersedesId, string actor, DateTimeOffset now, string? validationProfile = null, string? validationResult = null,
+        Guid? reservedId = null)
     {
         if (size <= 0) throw new DomainException("An attachment cannot be empty.");
         if (version < 1) throw new DomainException("Attachment versions begin at one.");
         if (string.IsNullOrWhiteSpace(validationProfile) != string.IsNullOrWhiteSpace(validationResult))
             throw new DomainException("Attachment validation profile and result must be recorded together.");
-        Id = Guid.NewGuid(); ProjectId = projectId; ArtifactType = Required(artifactType); ArtifactId = artifactId; RevisionId = revisionId;
+        if (reservedId == Guid.Empty) throw new DomainException("An attachment identity cannot be empty.");
+        Id = reservedId ?? Guid.NewGuid(); ProjectId = projectId; ArtifactType = Required(artifactType); ArtifactId = artifactId; RevisionId = revisionId;
         LogicalId = logicalId; Version = version; Label = Required(label); Description = description.Trim(); OriginalFileName = Required(originalFileName);
         ContentType = Required(contentType); Size = size; Sha256 = Required(sha256).ToLowerInvariant(); StorageKey = Required(storageKey);
         SupersedesId = supersedesId; State = ControlledAttachmentState.Active; UploadedBy = Required(actor); UploadedAt = now;

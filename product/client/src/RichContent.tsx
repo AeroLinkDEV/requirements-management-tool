@@ -18,7 +18,7 @@ import "./RichContent.css";
  * whichever it discarded as missing, so the client compiled on Linux and nowhere else.
  */
 
-export function RichContentView({ api, value, empty }: { api: string; value: string; empty?: string }) {
+export function RichContentView({ api, value, empty, previewImages }: { api: string; value: string; empty?: string; previewImages?: Record<string, string> }) {
   const blocks = useMemo(() => readBlocks(value), [value]);
   if (blocks.length === 0)
     return <p className="richEmpty">{empty ?? "No content recorded."}</p>;
@@ -43,6 +43,7 @@ export function RichContentView({ api, value, empty }: { api: string; value: str
                 <ControlledInlineImage
                   api={api}
                   attachmentId={image.attachmentId}
+                  previewSource={previewImages?.[image.attachmentId]}
                   alt={image.alt || "Controlled inline image"}
                 />
                 {(image.caption || image.alt) && <figcaption>{image.caption || image.alt}</figcaption>}
@@ -466,18 +467,20 @@ function ControlledInlineImage({
   attachmentId,
   alt,
   style,
+  previewSource,
 }: {
   api: string;
   attachmentId: string;
   alt: string;
   style?: CSSProperties;
+  previewSource?: string;
 }) {
   const [unavailable, setUnavailable] = useState(false);
   if (unavailable)
     return <p className="richImageUnavailable" role="status" style={style}>Image unavailable in the current record: {alt}</p>;
   return (
     <img
-      src={`${api}/api/content/images/${attachmentId}`}
+      src={previewSource?.match(/^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/) ? previewSource : `${api}/api/content/images/${attachmentId}`}
       alt={alt}
       style={style}
       onError={() => setUnavailable(true)}
