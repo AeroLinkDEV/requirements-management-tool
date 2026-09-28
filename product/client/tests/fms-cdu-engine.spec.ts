@@ -96,9 +96,10 @@ test('DELETE removes a leg as a modification; the destination leg cannot be dele
   expect(lines(unit)[4]).toMatch(/^TOLGU/)
   expect(unit.lamps().has('EXEC')).toBe(true)
 
-  // Five legs now fit on one page; the destination is the last of them.
-  expect(lines(unit)[10]).toMatch(/^CYUL/)
-  press(unit, 'CLR', 'LSK5L')
+  // Eight legs remain, five to a page: the destination is the third leg of page 2 (after FERDI and RW24R).
+  unit.press('NEXT')
+  expect(lines(unit)[6]).toMatch(/^CYUL/)
+  press(unit, 'CLR', 'LSK3L')
   expect(scratch(unit)).toBe('INVALID DELETE')
 })
 

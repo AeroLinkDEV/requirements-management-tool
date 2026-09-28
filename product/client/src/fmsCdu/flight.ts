@@ -1,6 +1,6 @@
 import { bearingDeg, courseDeg, distanceNm, offset, type Hold, type HoldEntry, type LatLon, type Leg, type Sar, type SarPattern } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
-import type { VerticalPhase } from "./vnav";
+import type { ProfilePoint, VerticalPhase } from "./vnav";
 
 /**
  * A simple flight model for the test bench: an aircraft that flies what the scripted FMS asks for, the way an
@@ -220,6 +220,13 @@ export class FlightSimulator {
   private events: ModeEvent[] = [];
   /** The FMS's latched VNAV phase at the last step, to record each change as a mode event. */
   private phase: VerticalPhase;
+  /**
+   * The fly-by turn lead at the active fix, NM: the fix is sequenced this far before it. The descent path reaches the
+   * fix's altitude there, so a constraint at a fly-by fix is met where the turn begins, not lost with it.
+   */
+  private lead = 0;
+  /** The planned path altitude at the fix the active leg began from, and the fix it leads to (see descentPath). */
+  private legStartPath: { to: string; altitude: number } | null = null;
   private path: VerticalPath | null = null;
   private holdPlan: { segments: Segment[]; index: number; elapsed: number; loop: Segment[] } | null = null;
   private sarPlan: { points: LatLon[]; index: number } | null = null;
@@ -252,8 +259,23 @@ export class FlightSimulator {
   private descentPathAltitude(): number | null {
     const profile = this.fms.profile();
     const first = profile.points[0];
-    if (!profile.descending || !first || first.distance === null || first.altitude === null) return null;
-    return Math.min(this.fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * Math.tan(rad(this.fms.vnav.pathAngle)));
+    if (!profile.descending || !first) return null;
+    return this.descentPath(first)?.altitude ?? null;
+  }
+
+  /**
+   * The descent path at the aircraft, toward the active fix. It rises behind the fix's planned altitude at the path
+   * angle from where that altitude is due (the fix, less the fly-by lead, where the fix is sequenced), and is capped by
+   * cruise and by the planned altitude at the fix the leg began from, so a leg between two constraints at the same
+   * altitude is level. sloped: whether the path descends here.
+   */
+  private descentPath(first: ProfilePoint): { altitude: number; sloped: boolean } | null {
+    if (first.distance === null || first.altitude === null) return null;
+    const along = Math.max(0, first.distance - this.lead);
+    const raw = first.altitude + along * 6076.12 * Math.tan(rad(this.fms.vnav.pathAngle));
+    const start = this.legStartPath?.to === first.ident ? this.legStartPath.altitude : Infinity;
+    const ceiling = Math.min(this.fms.vnav.cruiseAltitude, start);
+    return { altitude: Math.min(ceiling, raw), sloped: along > 0 && raw < ceiling };
   }
 
   /** On the final leg: the FAF has been sequenced and the runway is the active waypoint. */
@@ -389,9 +411,9 @@ export class FlightSimulator {
     // DES NOW ends once the aircraft is on the descent path: the path, rising behind the active fix, has come down to it.
     if (fms.vnav.desNow) {
       const first = fms.profile().points[0];
-      const onPath = first?.distance != null && first.altitude !== null
-        && first.altitude + first.distance * 6076.12 * Math.tan(rad(fms.vnav.pathAngle)) <= fms.altitude + 50;
-      if (onPath) fms.vnav.desNow = false;
+      const path = first ? this.descentPath(first) : null;
+      // The path, uncapped by cruise: DES NOW began below it, so it ends where the sloping path reaches the aircraft.
+      if (path && path.sloped && path.altitude <= fms.altitude + 50) fms.vnav.desNow = false;
     }
   }
 
@@ -410,10 +432,11 @@ export class FlightSimulator {
     // DES NOW: 1000 fpm down to the planned altitude at the active fix, levelling there, until the path comes down to
     // the aircraft (integrate ends DES NOW there). Never upward.
     if (fms.vnav.desNow) return clamp((first.altitude - fms.altitude) * 2, -MAX_VS, 0);
-    const pathAltitude = Math.min(fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * tan);
-    const above = fms.altitude - pathAltitude;
+    const path = this.descentPath(first)!;
+    const above = fms.altitude - path.altitude;
     if (above < -50) return 0;
-    return -groundSpeed * 101.27 * tan + clamp(-above * 2, -300, 300);
+    // The path's descent rate where it slopes; where it is level only the correction toward it.
+    return (path.sloped ? -groundSpeed * 101.27 * tan : 0) + clamp(-above * 2, -300, 300);
   }
 
   /** With the approach captured on final, the aircraft follows the final approach path angle down (active route only). */
@@ -504,6 +527,7 @@ export class FlightSimulator {
     const leg = route.legs[0];
     const base = { targetAltitude: this.targetAltitude() };
     const sequencing = dt > 0 && this.lateral === "LNAV";
+    this.lead = 0;
 
     if (this.holdPlan && !(route.hold && leg?.kind === "wpt" && leg.ident === route.hold.fix)) this.holdPlan = null;
     if (this.sarPlan && !(fms.sar.status === "IN PROGRESS")) this.sarPlan = null;
@@ -530,7 +554,11 @@ export class FlightSimulator {
     const flyOver = leg.qualifier !== undefined || !nextTo || next?.kind === "wpt" && next.path === "RF";
     const outbound = next?.kind === "wpt" && next.path === "CF" && next.course !== undefined ? next.course : nextTo ? courseDeg(to, nextTo) : g.track;
     const lead = flyOver ? 0 : turnLead(this.tas, angleDiff(g.track, outbound));
+    this.lead = lead;
     if (sequencing && (g.toGo <= lead || g.toGo <= 0.02)) {
+      // The altitude planned at the fix becomes the start of the next leg's path.
+      const planned = fms.profile().points[0]?.altitude ?? null;
+      this.legStartPath = planned !== null && next?.kind === "wpt" ? { to: next.ident, altitude: planned } : null;
       const result = fms.arrive();
       if (result === "hold") this.startHold();
       if (result === "sar") this.startSar(to);
