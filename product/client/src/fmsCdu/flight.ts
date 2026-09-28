@@ -441,7 +441,9 @@ export class FlightSimulator {
     verticalSpeed = fms.verticalSpeed + clamp(verticalSpeed - fms.verticalSpeed, -VS_RATE * dt, VS_RATE * dt);
     const altitude = fms.altitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
-    fms.setAircraft({ position, track, groundSpeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError });
+    // Bank and flight-path pitch too: they tilt the GPS antennas (a point-mass model has no angle of attack).
+    const pitch = (Math.atan(verticalSpeed / 60 / (groundSpeed * 1.68781)) * 180) / Math.PI;
+    fms.setAircraft({ position, track, groundSpeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError, bank: this.bank, pitch });
     // The path for the deviation display: the final approach path on final (coupled only when captured), otherwise the
     // descent path. None while the FMS has failed: it computes nothing to show.
     const final = this.fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
