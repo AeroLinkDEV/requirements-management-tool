@@ -129,8 +129,8 @@ export default function FmsCduTestBench() {
   const signed = (value: number, digits = 0) => `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
 
   const next = backend.activeRoute.legs[0];
-  // On the final approach: armed approach and the aircraft past the FAF (the runway is the active waypoint).
-  const onFinal = backend.approachArmed && next?.kind === "wpt" && /^RW\d{2}/.test(next.ident);
+  // The approach as the controller has it: the capability (ILS, LPV) is annunciated armed until captured, engaged after.
+  const approachLabel = backend.approachType === "ILS" || backend.approachType === "LPV" ? backend.approachType : "APPR";
   const failedFms = backend.hasCondition("fmsFail");
   const lampNote = (lamp: string | undefined) =>
     lamp === undefined ? "sensor" : lamp === "MENU" ? "MENU light" : variant.annunciators.some(code => code === lamp) ? `${lamp} lamp` : "no lamp on this variation";
@@ -228,9 +228,9 @@ export default function FmsCduTestBench() {
           {jumpNote ? <p className="fmsBenchHint" role="status">{jumpNote}</p> : null}
           {/* The flight mode annunciator shows the modes the controller is in (flight.ts), not a reading of the motion. */}
           <div className="fmsBenchFma" role="status" aria-label="Flight modes">
-            <span className="engaged">{sim.lateralMode === "LNAV" ? (onFinal && backend.approachType ? backend.approachType : guidance.mode) : sim.headingHeld ? "HDG HOLD" : "HDG SEL"}</span>
+            <span className="engaged">{sim.lateralMode === "LNAV" ? (sim.approachMode === "CAPTURED" ? approachLabel : guidance.mode) : sim.headingHeld ? "HDG HOLD" : "HDG SEL"}</span>
             {sim.lnavIsArmed ? <span className="armed">LNAV</span> : null}
-            {backend.approachArmed && !onFinal ? <span className="armed">APPR</span> : null}
+            {sim.approachMode === "ARMED" ? <span className="armed">{approachLabel}</span> : null}
             <span className="engaged">{sim.verticalMode}</span>
           </div>
           {sim.modeEvents.length ? <p className="fmsBenchHint">Last mode change: {sim.modeEvents.at(-1)!.event}, {sim.modeEvents.at(-1)!.detail}</p> : null}
@@ -243,8 +243,10 @@ export default function FmsCduTestBench() {
             {/* HDG SEL is the autopilot's basic mode, so it stays available when the FMS has failed. */}
             <button type="submit" aria-pressed={sim.lateralMode === "HDG"}>HDG SEL</button>
             <button type="button" disabled={failedFms || sim.lateralMode === "LNAV"} aria-pressed={sim.lnavIsArmed} onClick={() => sim.armLnav()}>LNAV</button>
-            <button type="button" disabled={failedFms || !backend.approachType} aria-pressed={backend.approachArmed}
-              onClick={() => { if (!backend.approachArmed) recordTo?.armApproach(); backend.armApproach(!backend.approachArmed); }}>APPR</button>
+            {/* APPR arms the approach; pressed off it disarms, or after capture cancels the approach to an altitude hold. */}
+            <button type="button" disabled={failedFms || !backend.approachType} aria-pressed={backend.approachArmed || sim.approachMode === "CAPTURED"}
+              title={sim.approachMode === "CAPTURED" ? "Approach captured: press to cancel it (the aircraft levels), or TOGA to go around" : backend.approachArmed ? "Approach armed: press to disarm" : "Arm the approach"}
+              onClick={() => { const on = !backend.approachArmed; recordTo?.armApproach(on); backend.armApproach(on); }}>APPR</button>
             <button type="button" disabled={failedFms} onClick={() => { recordTo?.goAround(); backend.goAround(); }}>TOGA</button>
             <button type="button" disabled={failedFms || sim.altitudeHoldReference === null} onClick={() => sim.engageVnav()}>VNAV</button>
           </form>

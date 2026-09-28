@@ -167,3 +167,35 @@ test('the two demonstration cycles are separate datasets: swapping changes the d
   expect(unit.navdb).not.toBe(first)
   expect(unit.navdb.cycle.id).toBe('DEMO-2610')
 })
+
+test('a fix the active plan was executed without stays unresolved when a later cycle defines it, until EXEC (third review D01)', () => {
+  const { unit } = setup()
+  const typeText = (text: string) => { for (const ch of text) unit.press(`CHAR_${ch}` as CduFunction) }
+  unit.replaceLegs([{ kind: 'wpt', ident: 'MUN' }])
+  unit.press('EXEC')
+  // An airway through a fix no loaded cycle defines yet.
+  const airway = ['MUN', 'GAPX', 'RDG'].map((fix, i) => record([[1, 'SCAN'], [5, 'ER'], [14, 'T900'], [26, String(i + 1).padStart(4, '0')], [30, fix], [39, '0']])).join('\r\n')
+  expect(unit.loadArinc424(airway, 'airway-with-missing-fix.pc')).toMatchObject({ skipped: 0 })
+  unit.swapCycles()
+  press(unit, 'RTE', 'NEXT')
+  typeText('T900')
+  unit.press('LSK2L')
+  typeText('RDG')
+  unit.press('LSK2R')
+  unit.press('EXEC')
+  expect(unit.activeRoute.legs.flatMap(leg => (leg.kind === 'wpt' ? [leg.ident] : []))).toEqual(expect.arrayContaining(['MUN', 'GAPX', 'RDG']))
+  expect(unit.coordinates('GAPX')).toBeUndefined()
+  const before = structuredClone(unit.profile().points)
+  // A later cycle defines GAPX. Activating it does not give the executed plan a position it was executed without.
+  expect(unit.loadArinc424(waypoint('GAPX', 'N45180000', 'W075120000'), 'added-fix.pc')).toMatchObject({ skipped: 0 })
+  unit.swapCycles()
+  expect(unit.coordinates('GAPX')).toBeUndefined()
+  expect(unit.profile().points).toEqual(before)
+  expect(unit.datasetLog.at(-1)!.detail).toMatch(/newly defined in \S+, unresolved in the active plan until EXEC: .*GAPX/)
+  // A modification is shown against the new cycle; executing it resolves GAPX and records that it was newly resolved.
+  unit.selectProcedure('APPROACH', 'R24R')
+  expect(unit.coordinates('GAPX', unit.route)).toEqual({ lat: 45.3, lon: -75.2 })
+  unit.press('EXEC')
+  expect(unit.coordinates('GAPX')).toEqual({ lat: 45.3, lon: -75.2 })
+  expect(unit.datasetLog.at(-1)).toMatchObject({ action: 'ROUTE RE-RESOLVED', detail: expect.stringMatching(/newly resolved: .*GAPX/) })
+})

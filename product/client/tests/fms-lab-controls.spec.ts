@@ -40,7 +40,17 @@ test('the override crosses a discontinuity and records what it did (R15)', () =>
   unit.sequence()
   const next = unit.activeRoute.legs[1]
   expect(next?.kind).toBe('wpt')
+  const legsBefore = unit.activeRoute.legs.map(leg => (leg.kind === 'wpt' ? leg.ident : leg.kind === 'disco' ? 'DISC' : leg.path)).join(' ')
   expect(unit.overrideDiscontinuity()).toBe(true)
+  // The record identifies the plan it changed and the plan it made: revision, fingerprint and legs (third review D04).
+  const identity = unit.engineeringLog[0]?.detail.match(/plan rev (\d+) \(([0-9a-f]{8}): (.*)\) -> rev (\d+) \(([0-9a-f]{8}): (.*)\)$/)
+  expect(identity, unit.engineeringLog[0]?.detail).not.toBeNull()
+  const [, revBefore, printBefore, textBefore, revAfter, printAfter, textAfter] = identity!
+  expect(textBefore).toBe(legsBefore)
+  expect(textAfter).toBe(legsBefore.replace(/^DISC /, ''))
+  expect(Number(revAfter)).toBe(Number(revBefore) + 1)
+  expect(printAfter).not.toBe(printBefore)
+  expect(unit.planIdentity).toEqual({ revision: Number(revAfter), fingerprint: printAfter })
   expect(unit.activeRoute.legs[0]).toEqual(next)
   expect(unit.engineeringLog).toHaveLength(1)
   expect(unit.engineeringLog[0]).toMatchObject({ action: 'OVERRIDE DISCONTINUITY', detail: expect.stringContaining(next!.kind === 'wpt' ? next!.ident : '') })
