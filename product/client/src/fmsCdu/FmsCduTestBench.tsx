@@ -148,8 +148,9 @@ export default function FmsCduTestBench() {
   const signed = (value: number, digits = 0) => `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
 
   const next = backend.activeRoute.legs[0];
-  // The approach as the controller has it: the capability (ILS, LPV) is annunciated armed until captured, engaged after.
-  const approachLabel = backend.approachType === "ILS" || backend.approachType === "LPV" ? backend.approachType : "APPR";
+  // The approach as the controller has it: the capability (ILS, or the GPS level: LPV, LNAV/VNAV, LNAV) is annunciated
+  // armed until captured, engaged after.
+  const approachLabel = backend.approachType && backend.approachType !== "NO APPR" ? backend.approachType : "APPR";
   const failedFms = backend.hasCondition("fmsFail");
   const lampNote = (lamp: string | undefined) =>
     lamp === undefined ? "sensor" : lamp === "MENU" ? "MENU light" : variant.annunciators.some(code => code === lamp) ? `${lamp} lamp` : "no lamp on this variation";

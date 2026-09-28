@@ -10,8 +10,10 @@ import {
   type SarPattern, type Uplink,
 } from "./fmsModel";
 import { Constellation } from "./gnss";
-import { GpsReceiver, residualShares, type GpsInput } from "./gps";
-import { ANP_FLOOR_NM, GPS_DISAGREE_NM, HAL_NM, assessReceiver, candidates, type GpsAssessment, type GpsChoice } from "./gpsSensors";
+import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput } from "./gps";
+import {
+  ANP_FLOOR_NM, GPS_DISAGREE_NM, HAL_NM, VERTICAL_LEVELS, approachWords, assessReceiver, buildFas, candidates, type GpsApproachWords, type GpsAssessment, type GpsChoice,
+} from "./gpsSensors";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
 import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
 import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
@@ -118,6 +120,8 @@ export class ScriptedFms implements CduBackend {
   private nav = {
     mode: "GPS" as NavMode, anp: 0.05, dmes: [] as string[], vor: null as string | null, rnpManual: null as number | null,
     unableSince: null as number | null, unableAlerted: false, integrityAlerted: false, approachIntegrityAlerted: false, armAlerted: false,
+    /** The RNAV approach had vertical guidance from the GPS while in the approach phase (to catch its loss, 3b). */
+    approachVerticalSeen: false,
     /** The receiver navigating in GPS mode (1 or 2), null otherwise; and whether GPS DISAGREE has been raised. */
     gpsSource: null as 1 | 2 | null, disagreeAlerted: false,
   };
@@ -132,6 +136,10 @@ export class ScriptedFms implements CduBackend {
   ];
   private gpsChoice: GpsChoice = "AUTO";
   private gpsAssessment: GpsAssessment = { assessed: [], chosen: null };
+  /** The approach selection last sent to the receivers (its path identifier and CRC), so it is sent once per change. */
+  private sentApproach: string | null = null;
+  /** The FAS block last sent, for the final approach course the GPS deviations are measured from. */
+  private sentFas: FasDataBlock | null = null;
   /** The satellite the GPS integrity condition faults, so a change of PRN clears the old one. */
   private integrityFaultPrn: number | null = null;
   /** Every change of navigation source: GPS1, GPS2, DME/DME, VOR/DME or DR, when it changed. */
@@ -545,8 +553,12 @@ export class ScriptedFms implements CduBackend {
     // On an RNAV approach, a position without GPS integrity is not good enough to continue.
     const approach = findProcedure(this.db, this.active, "APPROACH");
     const rnavApproach = approach?.approachType === "RNAV" && this.flightPhase === "APPROACH";
-    // In 3a the approach needs a receiver reporting some approach level (305 not NONE); 3b asks for LPV itself.
-    if (rnavApproach && (selection.mode !== "GPS" || chosen?.level === "NONE")) {
+    // The approach needs a receiver reporting an approach level (305 not NONE), and once it has had vertical guidance
+    // (LPV or LNAV/VNAV with 117 valid) in the approach phase, losing it is a loss of approach integrity too (3b).
+    const vertical = this.gpsApproachVertical;
+    if (rnavApproach && vertical) this.nav.approachVerticalSeen = true;
+    if (!rnavApproach) this.nav.approachVerticalSeen = false;
+    if (rnavApproach && (selection.mode !== "GPS" || chosen?.level === "NONE" || (this.nav.approachVerticalSeen && !vertical))) {
       if (!this.nav.approachIntegrityAlerted) { this.nav.approachIntegrityAlerted = true; this.alert(alert("NO APPR INTEGRITY")); }
     } else this.nav.approachIntegrityAlerted = false;
   }
@@ -565,6 +577,7 @@ export class ScriptedFms implements CduBackend {
   private updateGps() {
     const input = this.gpsInput(this.now.getTime());
     if (this.injected.has("gpsIntegrity")) this.applyGpsIntegrityCondition(input);
+    this.sendApproach();
     this.receivers.forEach((receiver, i) => receiver.step(this.gpsBaro[i] ? input : { ...input, baroAltitude: null }));
     const hal = HAL_NM[this.flightPhase];
     const assessed = this.receivers.map(receiver => assessReceiver(receiver.bus(), hal));
@@ -572,6 +585,21 @@ export class ScriptedFms implements CduBackend {
     const chosen = order.find(index => assessed[index].usable) ?? null;
     this.gpsAssessment = { assessed, chosen };
     return { assessed, chosen, integrityLost: order.some(index => assessed[index].reason === "INTEGRITY") };
+  }
+
+  /**
+   * The FAS data block of the active RNAV approach, sent to both receivers whenever the approach changes (GPS phase 3b);
+   * no selection when the route has none, or an ILS.
+   */
+  private sendApproach() {
+    const approach = findProcedure(this.db, this.active, "APPROACH");
+    const runway = approach ? this.db.airport(approach.airport)?.runways.find(entry => entry.ident === approach.runways[0]) : undefined;
+    const fas = approach ? buildFas(approach, runway, approach.airport, approach.faf ? this.coordinates(approach.faf) : undefined) : null;
+    const key = fas ? `${fas.referencePathId}:${fas.crc}` : null;
+    if (key === this.sentApproach) return;
+    this.sentApproach = key;
+    this.sentFas = fas;
+    for (const receiver of this.receivers) receiver.selectApproach(fas ? { id: fas.referencePathId, fas } : null);
   }
 
   /**
@@ -928,16 +956,44 @@ export class ScriptedFms implements CduBackend {
   }
 
   /**
-   * The approach the crew is flying, as the FMA and VNAV page name it: an ILS; an RNAV approach to LPV minima on
-   * GPS with integrity (the receiver reports an approach level, 305; LPV itself from 305 is GPS phase 3b); and no
-   * approach guidance without it.
+   * The approach the crew is flying, as the FMA, the EFIS bus and the VNAV page name it: an ILS; for an RNAV approach the
+   * level the selected GPS reports it can support (305: LPV inside the approach region with the FAS block's limits met,
+   * LNAV/VNAV with SBAS, LNAV); and no approach guidance without GPS navigation or a level (GPS phase 3b).
    */
-  get approachType(): "ILS" | "LPV" | "NO APPR" | null {
+  get approachType(): "ILS" | "LPV" | "LNAV/VNAV" | "LNAV" | "NO APPR" | null {
     const approach = findProcedure(this.db, this.active, "APPROACH");
     if (!approach) return null;
     if (approach.approachType === "ILS") return "ILS";
-    const { assessed, chosen } = this.gpsAssessment;
-    return this.nav.mode !== "GPS" || chosen === null || assessed[chosen].level === "NONE" ? "NO APPR" : "LPV";
+    const level = this.gpsApproach?.level ?? "NONE";
+    return this.nav.mode !== "GPS" || level === "NONE" ? "NO APPR" : level;
+  }
+
+  /**
+   * The selected receiver's approach words (116, 117, 201, the scaling, 156 and 305) on an RNAV approach in GPS mode;
+   * null otherwise. Guidance on the final approach comes from here once the approach is captured (GPS phase 3b).
+   */
+  get gpsApproach(): GpsApproachWords | null {
+    if (findProcedure(this.db, this.active, "APPROACH")?.approachType !== "RNAV" || this.nav.mode !== "GPS") return null;
+    const chosen = this.gpsAssessment.chosen;
+    return chosen === null ? null : approachWords(this.receivers[chosen].bus());
+  }
+
+  /** The final approach course of the FAS block sent (LTP to FPAP), degrees true; null without one. */
+  get finalApproachCourse() {
+    const fas = this.sentFas;
+    return fas ? bearingDeg(fas.ltp, { lat: fas.ltp.lat + fas.fpapDelta.lat, lon: fas.ltp.lon + fas.fpapDelta.lon }) : null;
+  }
+
+  /** The GPS gives vertical guidance for the RNAV approach: a vertical level (LPV, LNAV/VNAV) with 117 Normal. */
+  get gpsApproachVertical() {
+    const words = this.gpsApproach;
+    return words !== null && VERTICAL_LEVELS.includes(words.level) && words.verticalFt !== null;
+  }
+
+  /** The approach can be captured and flown down its path: an ILS, or an RNAV approach with GPS vertical guidance. */
+  get approachVertical() {
+    const type = this.approachType;
+    return type === "ILS" || (type !== null && type !== "NO APPR" && this.gpsApproachVertical);
   }
 
   get approachArmed() { return this.armedApproach; }

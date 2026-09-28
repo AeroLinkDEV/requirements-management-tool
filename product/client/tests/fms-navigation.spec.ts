@@ -155,7 +155,9 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, larger ANP, and no RNAV approach
   const unit = new ScriptedFms()
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
-  expect(unit.approachType).toBe('LPV')
+  // The level the GPS reports (305, GPS phase 3b): outside the 30 NM approach region SBAS NAV supports LNAV/VNAV; LPV
+  // comes only inside it, in SBAS PA.
+  expect(unit.approachType).toBe('LNAV/VNAV')
   unit.setCondition('gpsIntegrity', true)
   expect(scratch(unit)).toBe('GPS POS UNCERTAIN')
   // Neither receiver can be used (GPS phase 3a): the FMS navigates on the radios, with their larger ANP.

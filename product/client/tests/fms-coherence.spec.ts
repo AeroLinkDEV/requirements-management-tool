@@ -272,6 +272,9 @@ const STATES: [string, (unit: ScriptedFms) => void][] = [
   ['GPS integrity lost', unit => unit.setCondition('gpsIntegrity', true)],
   ['GPS1 failed, on GPS2', unit => { unit.gps[0].injectFault('RECEIVER', true); unit.gpsUpdated() }],
   ['GPS selected out', unit => unit.selectGpsReceiver('OFF')],
+  // GPS phase 3b: an RNAV approach in the route, its level LNAV/VNAV (outside the approach region) or none without GPS.
+  ['an RNAV approach, LNAV/VNAV', unit => { unit.selectProcedure('APPROACH', 'R24R'); unit.press('EXEC') }],
+  ['an RNAV approach without GPS', unit => { unit.selectProcedure('APPROACH', 'R24R'); unit.press('EXEC'); unit.setCondition('gpsLost', true) }],
 ]
 
 test('no authored page line writes one caption or value over another, or past the 24th column (R19)', () => {

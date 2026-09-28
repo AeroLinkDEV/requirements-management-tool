@@ -749,7 +749,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const targetVs = Math.round((fms.groundSpeed * 101.27 * tan) / 10) * 10;
       const outside = path.vpa < GLIDEPATH_LIMITS.low || path.vpa > GLIDEPATH_LIMITS.high;
       return [
-        title(`VNAV ${path.runway} ${fms.approachType ?? ""}`.trim(), "1/3", "ACT"),
+        // The runway without its RW and LNAV/VNAV as L/VNAV, so the longest title (NO APPR) fits beside 1/3 (R19, 3b).
+        title(`VNAV ${path.runway.replace(/^RW/, "")} ${fms.approachType === "LNAV/VNAV" ? "L/VNAV" : fms.approachType ?? ""}`.trim(), "1/3", "ACT"),
         caption(" MDA-DA", fms.coldCorrection ? "FAF ALT TEMP COMP " : "FAF ALT "),
         { left: { text: `${fms.vnav.mda}FT` }, right: { text: `${path.faf} ${fms.fafAltitudeCorrected}A`, color: fms.coldCorrection ? "cyan" : "white" } },
         caption(" ACT WPT", "CRS/DIST "),
