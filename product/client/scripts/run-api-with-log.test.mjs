@@ -22,7 +22,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawn } from 'node:child_process'
 import { createServer } from 'node:net'
-import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync, statSync } from 'node:fs'
+import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync, statSync, mkdirSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -94,6 +94,8 @@ const portFree = port => new Promise(resolve => {
 const startWrapper = (argv, { logPath, env = {}, registry } = {}) => {
   // The host and native captures default on in CI on Windows; tests opt in explicitly so they stay hermetic.
   const childEnv = { ...process.env, AEROLINK_E2E_HOST_SNAPSHOT_ARGV: '', AEROLINK_E2E_NATIVE_STACK_ARGV: '', AEROLINK_E2E_API_ARGV: JSON.stringify(argv), ...env }
+  // A test that needs a variable truly absent (so a default applies) passes it as undefined.
+  for (const [name, value] of Object.entries(childEnv)) if (value === undefined) delete childEnv[name]
   // Never inherited by accident: a caller that happens to have this set must not silently give a test a
   // transcript it did not ask for.
   if (logPath) childEnv.AEROLINK_E2E_API_LOG = logPath
@@ -627,6 +629,41 @@ test('a stall marker runs the configured capture against the pid it names and ke
     assert.match(log, /stk ==== capturing managed stacks of pid 4242 \(1\/5\) ====/)
     // The pid comes from the marker, not from the process the wrapper started.
     assert.match(log, /^\S+ stk fake-stack report -p 4242$/m)
+    killTree(state.proc.pid)
+    await withDeadline(state.closed, 'the wrapper to exit')
+  } finally {
+    registry.forEach(killTree)
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the default native capture attaches without suspending the process it observes', {
+  skip: process.platform !== 'win32' && 'the default native capture exists only on Windows',
+}, async () => {
+  // #1220: `cdb -pv` suspends every thread until `qd`; a capture killed at its budget left the API suspended and
+  // the showcase seed hung for 480 s. The stand-in debugger is node itself, which refuses the attach flag it is
+  // given and names it, so the transcript shows exactly what the default capture asked for.
+  const dir = scratch()
+  const registry = []
+  const logPath = join(dir, 'api.log')
+  const kits = join(dir, 'Windows Kits', '10', 'Debuggers', 'x64')
+  mkdirSync(kits, { recursive: true })
+  copyFileSync(process.execPath, join(kits, 'cdb.exe'))
+  try {
+    const state = startWrapper(
+      nodeArgv("console.log('AEROLINK-STALL pid=4242 method=POST path=/api/showcase/seed'); setTimeout(() => {}, 30000)"),
+      {
+        logPath, registry,
+        env: {
+          CI: 'true', 'ProgramFiles(x86)': dir, ProgramFiles: dir,
+          AEROLINK_E2E_STACK_ARGV: fakeStackArgv, AEROLINK_E2E_NATIVE_STACK_ARGV: undefined,
+        },
+      },
+    )
+    await waitFor(() => /nat ==== capture ended/.test(readFileSync(logPath, 'utf8')), 'the native capture to finish')
+    const log = readFileSync(logPath, 'utf8')
+    assert.match(log, /^\S+ nat .*bad option: -pvr$/m)
+    assert.doesNotMatch(log, /bad option: -pv$/m)
     killTree(state.proc.pid)
     await withDeadline(state.closed, 'the wrapper to exit')
   } finally {
