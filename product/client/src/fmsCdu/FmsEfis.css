@@ -1,0 +1,14 @@
+.efis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.efisPfd,
+.efisNd {
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  background: #05070a;
+  font-family: "Consolas", "Lucida Console", monospace;
+}
