@@ -1,4 +1,5 @@
 import { alert } from "./alerts";
+import { parseArinc424, type Arinc424Result } from "./arinc424";
 import type { ConditionId } from "./conditions";
 import { DATALINK_PAGES, DEMO_SMS, DEMO_UPLINKS } from "./datalinkPages";
 import { CORE_PAGES } from "./fmsPages";
@@ -8,7 +9,7 @@ import {
   type SarPattern, type Uplink,
 } from "./fmsModel";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
-import { coldTemperatureCorrection, computeProfile, parseConstraint, type Profile } from "./vnav";
+import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput } from "./vnav";
 import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
 import { NAV_PAGES } from "./navPages";
 import { PLANNING_PAGES } from "./planningPages";
@@ -38,6 +39,21 @@ const demoRoute = (): Route => ({
   origin: "CYOW", dest: "CYUL", coRoute: "OWUL1", flightNo: "LIFE21",
   legs: [wpt("MUN", "3000"), wpt("RDG", "4500"), wpt("TOLGU", "4500"), wpt("FERDI", "1500A"), wpt("RW24R", "168"), wpt("CYUL")],
 });
+
+/** A navigation database cycle: its own dataset, and its effective dates (null when the data does not give them). */
+export type NavCycle = { id: string; from: number | null; to: number | null; source: string; db: NavDatabase };
+
+/** A date the data gives (YYYY-MM-DD): the start of the day, or with end the last minute of it; null if none. */
+const cycleDate = (text: string, end: boolean) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!m || Number(m[2]) < 1 || Number(m[2]) > 12 || Number(m[3]) < 1 || Number(m[3]) > 31) return null;
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), end ? 23 : 0, end ? 59 : 0);
+};
+const cycleOf = (db: NavDatabase, source: string): NavCycle =>
+  ({ id: db.cycle.id, from: cycleDate(db.cycle.from, false), to: cycleDate(db.cycle.to, true), source, db });
+const demoCycle = (id: string, from: string, to: string) => cycleOf(new NavDatabase({ ...DEMO_NAV_DATA, cycle: { id, from, to } }), "demonstration data");
+const onGlobe = (p: LatLon) => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
+const samePlace = (a: LatLon | undefined, b: LatLon | undefined) => a !== undefined && b !== undefined && a.lat === b.lat && a.lon === b.lon;
 
 /** The ICAO maximum holding speed up to 14 000 ft. */
 const MAX_HOLDING_SPEED = 230;
@@ -80,11 +96,20 @@ export class ScriptedFms implements CduBackend {
   private selfTest: { startedAt: number | null; result: "PASS" | "FAIL" | null } = { startedAt: null, result: null };
   /** The other FMS: in dual operation every executed route is cross-loaded to it; in independent operation not. */
   private crossRoute: Route = demoRoute();
-  /** Navigation database cycles: the active one first. The demonstration data is the same in both. */
-  private cycles = [
-    { id: "DEMO-2609", from: Date.UTC(2026, 8, 3), to: Date.UTC(2026, 8, 30, 23, 59) },
-    { id: "DEMO-2610", from: Date.UTC(2026, 9, 1), to: Date.UTC(2026, 9, 28, 23, 59) },
-  ];
+  /**
+   * Navigation database cycles, the active one first, each with its own dataset. The two demonstration cycles are
+   * separate datasets built from the same demonstration data: only their idents and dates differ. A loaded file
+   * replaces the inactive one.
+   */
+  private cycles: NavCycle[] = [demoCycle("DEMO-2609", "2026-09-03", "2026-09-30"), demoCycle("DEMO-2610", "2026-10-01", "2026-10-28")];
+  private datasetEvents: { at: Date; action: string; detail: string }[] = [];
+  /**
+   * Where the database fixes of the active plan were when it became active (EXEC, or the initial plan), and in which
+   * cycle. The active plan's consumers (guidance, predictions, sequencing, the pages) use these, not a fresh lookup, so
+   * activating another cycle never moves a fix the aircraft is flying.
+   */
+  private pins = new Map<string, LatLon>();
+  private pinnedIn: NavCycle = this.cycles[0];
   private outOfDateAlerted = false;
   /** The MOVING WPT page's entries before CREATE. */
   movingDraft = { ident: null as string | null, position: null as LatLon | null, motion: null as string | null };
@@ -103,7 +128,8 @@ export class ScriptedFms implements CduBackend {
   private enteredHold: HoldEntry | null = null;
   private sequenced: string | null = null;
 
-  private db = new NavDatabase(DEMO_NAV_DATA);
+  /** The active cycle's database. */
+  private get db() { return this.cycles[0].db; }
   /** Which of several same-ident entries the crew chose on SELECT DESIRED WPT. */
   private chosen: Record<string, number> = {};
   private selectPending: { ident: string; apply: (ident: string) => LskResult; back: { page: PageId; index: number } } | null = null;
@@ -153,6 +179,7 @@ export class ScriptedFms implements CduBackend {
 
   constructor(clock: () => Date = () => new Date()) {
     this.clock = clock;
+    this.pinActive();
     this.updateNavigation(0);
   }
 
@@ -257,16 +284,41 @@ export class ScriptedFms implements CduBackend {
   /**
    * Flies the aircraft to the active waypoint and sequences it, as crossing the waypoint would. A hold or a search
    * pattern at that waypoint is entered instead, and each further call flies one more circuit until the pilot exits.
+   * This is the bench's Jump, an engineering control: it refuses at a route discontinuity, which only
+   * overrideDiscontinuity crosses.
    */
-  sequence() {
-    if (this.injected.has("fmsFail")) return;
-    if (this.active.legs[0]?.kind === "disco") this.active.legs.shift();
+  sequence(): "jumped" | "discontinuity" | "failed" | "end" {
+    if (this.injected.has("fmsFail")) return "failed";
     const leg = this.active.legs[0];
-    const at = leg?.kind === "wpt" ? this.coordinates(leg.ident) : undefined;
+    if (!leg) return "end";
+    if (leg.kind === "disco") return "discontinuity";
+    const at = leg.kind === "wpt" ? this.coordinates(leg.ident) : undefined;
     if (at) { this.truth = { ...at }; this.here = this.withError(this.truth); }
     this.arrive();
     this.emit();
+    return "jumped";
   }
+
+  /**
+   * Override discontinuity (an engineering control): removes the gap at the head of the active route, so the next
+   * leg becomes active, and records the override. A crew would close the gap on LEGS instead.
+   */
+  overrideDiscontinuity(): boolean {
+    if (this.injected.has("fmsFail") || this.active.legs[0]?.kind !== "disco") return false;
+    const legs = this.active.legs;
+    legs.shift();
+    const next = legs[0];
+    this.engineering = [...this.engineering, {
+      at: this.now, action: "OVERRIDE DISCONTINUITY",
+      detail: `gap removed; active leg now ${next?.kind === "wpt" ? next.ident : next?.kind === "cond" ? next.path : "none"}`,
+    }];
+    this.emit();
+    return true;
+  }
+
+  /** Engineering interventions made in this session, oldest first: they are not crew actions. */
+  get engineeringLog(): readonly { at: Date; action: string; detail: string }[] { return this.engineering; }
+  private engineering: { at: Date; action: string; detail: string }[] = [];
 
   /**
    * The aircraft has reached the active waypoint. It is sequenced, unless it is the fix of a hold that is not armed
@@ -453,14 +505,30 @@ export class ScriptedFms implements CduBackend {
     const geometry = this.legGeometry(route);
     // The descent meets the approach: the final approach fix is crossed at its (temperature-corrected) altitude.
     const runwayAt = route.legs.findIndex(leg => leg.kind === "wpt" && /^RW\d{2}/.test(leg.ident));
-    const waypoints = route.legs.flatMap((leg, i) => {
-      if (leg.kind !== "wpt") return [];
-      const g = geometry[i];
+    let basis: PredictionBasis = "known";
+    let lastFix: LatLon | null = this.here;
+    const waypoints: ProfileInput["waypoints"] = [];
+    route.legs.forEach((leg, i) => {
+      // Past a discontinuity or a manually terminated leg the path is not defined; after a course or heading leg that
+      // ends on an event, the leg into the next fix is estimated from the last fixed point.
+      if (leg.kind === "disco") { basis = "unknown"; return; }
+      if (leg.kind === "cond") {
+        if (leg.path === "VM" || leg.path === "FM") basis = "unknown";
+        else if (basis === "known") basis = "estimated";
+        return;
+      }
+      const to = this.coordinates(leg.ident, route) ?? null;
+      let legDistance = geometry[i]?.distance ?? null, course = geometry[i]?.course;
+      if (legDistance === null && basis === "estimated" && lastFix && to) { legDistance = distanceNm(lastFix, to); course = courseDeg(lastFix, to); }
+      // The active leg is flown at the planned speed (its constraint, a hold); a later leg at the cruise speed or its
+      // own speed constraint, which applies to the leg into its fix.
+      const tas = i === 0 ? this.plannedSpeed : Math.min(this.vnav.cruiseSpeed, leg.speed ?? Infinity);
       const constraint = i === runwayAt - 1 ? { kind: "AT" as const, altitude: this.fafAltitudeCorrected } : parseConstraint(leg.altitude);
-      return [{
-        ident: leg.ident, legDistance: g?.distance ?? 0, groundSpeed: this.groundSpeedOn(g?.course ?? this.track),
-        constraint, endOfDescent: i === runwayAt,
-      }];
+      waypoints.push({
+        ident: leg.ident, legDistance, groundSpeed: this.groundSpeedOn(course ?? this.track, tas),
+        constraint, endOfDescent: i === runwayAt, basis, missed: leg.source === "MISSED",
+      });
+      lastFix = to;
     });
     return computeProfile({
       waypoints, altitude: this.altitude, cruiseAltitude: this.vnav.cruiseAltitude, climbRate: 1000, pathAngle: this.vnav.pathAngle,
@@ -487,8 +555,8 @@ export class ScriptedFms implements CduBackend {
     this.fuel.quantity = Math.max(0, before - (this.fuel.flow * dt) / 3600);
     if (before > this.fuel.reserve && this.fuel.quantity <= this.fuel.reserve) this.alert(alert("FUEL RESERVE"));
     const profile = this.profile();
-    const atDestination = profile.points.at(-1)?.fuel;
-    if (atDestination !== undefined && atDestination < this.fuel.reserve) {
+    const atDestination = profile.destination?.fuel ?? null;
+    if (atDestination !== null && atDestination < this.fuel.reserve) {
       if (!this.perf.notEnoughAlerted) { this.perf.notEnoughAlerted = true; this.alert(alert("NOT ENOUGH FUEL")); }
     } else this.perf.notEnoughAlerted = false;
     if (profile.unableNext && profile.unableNext !== this.perf.unableAlertedFor) { this.perf.unableAlertedFor = profile.unableNext; this.advisory("UNABLE NEXT ALT"); }
@@ -505,7 +573,7 @@ export class ScriptedFms implements CduBackend {
     const { wpt, time } = this.rndz;
     if (!wpt || time === null) return null;
     const point = this.profile().points.find(p => p.ident === wpt);
-    if (!point) return null;
+    if (!point || point.distance === null || point.eta === null) return null;
     const hours = (time - this.now.getTime()) / 3_600_000;
     const required = hours > 0 ? point.distance / hours : Infinity;
     const speed = Math.min(this.rndz.maxSpeed, Math.max(this.rndz.minSpeed, required));
@@ -551,11 +619,52 @@ export class ScriptedFms implements CduBackend {
   get activeCycle() { return this.cycles[0]; }
   get inactiveCycle() { return this.cycles[1] ?? null; }
 
-  /** Swaps the active and inactive cycles, as the crew does on IDENT when a new cycle becomes effective. */
+  /** Loads, activations and re-resolutions of navigation data in this session, oldest first. */
+  get datasetLog(): readonly { at: Date; action: string; detail: string }[] { return this.datasetEvents; }
+
+  private recordDataset(action: string, detail: string) {
+    this.datasetEvents = [...this.datasetEvents, { at: this.now, action, detail }];
+  }
+
+  /**
+   * Activates the inactive cycle, as the crew does on IDENT when a new cycle becomes effective (or the bench's
+   * Activate): the two swap, and the change is recorded. The active plan is NOT re-resolved: its fixes keep the
+   * positions pinned when it became active, and the record names those the new cycle places differently or lacks.
+   * They take the new cycle's positions only when the crew executes a modification, which shows the route against the
+   * new cycle before EXEC; that EXEC is recorded as ROUTE RE-RESOLVED with the fixes that moved.
+   */
   swapCycles() {
     if (this.cycles.length < 2) return;
     this.cycles = [this.cycles[1], this.cycles[0]];
+    // SELECT DESIRED WPT choices index the previous cycle's entries.
+    this.chosen = {};
     this.outOfDateAlerted = false;
+    const differ = [...this.pins].filter(([ident, at]) => this.planIdents().has(ident) && !samePlace(this.lookup(ident, this.active), at)).map(([ident]) => ident);
+    this.recordDataset(`ACTIVATE ${this.activeCycle.id}`, [
+      this.activeCycle.source, `${this.inactiveCycle!.id} now inactive`, "active plan kept on its pinned positions",
+      ...(differ.length ? [`placed differently or absent in ${this.activeCycle.id}: ${differ.join(", ")}`] : []),
+    ].join("; "));
+    this.emit();
+  }
+
+  private planIdents() { return new Set(this.active.legs.flatMap(leg => (leg.kind === "wpt" ? [leg.ident] : []))); }
+
+  /**
+   * Pins the database fixes of the active plan where the active cycle places them now: on EXEC and for the initial
+   * plan. Executing after a cycle change is the crew accepting the new cycle's positions; the fixes that moved are
+   * recorded.
+   */
+  private pinActive() {
+    const before = this.pins, cycleChanged = this.pinnedIn !== this.activeCycle;
+    this.pins = new Map();
+    this.pinnedIn = this.activeCycle;
+    for (const ident of this.planIdents()) {
+      if (this.ownPoint(ident)) continue;
+      const at = this.lookup(ident, this.active);
+      if (at) this.pins.set(ident, at);
+    }
+    const moved = [...this.pins].filter(([ident, at]) => before.has(ident) && !samePlace(before.get(ident), at)).map(([ident]) => ident);
+    if (cycleChanged && moved.length) this.recordDataset("ROUTE RE-RESOLVED", `executed plan resolved in ${this.activeCycle.id}; moved: ${moved.join(", ")}`);
   }
 
   /** Removes a pilot waypoint that was only a step in defining another (a WPTnn made from a position entry). */
@@ -597,7 +706,7 @@ export class ScriptedFms implements CduBackend {
    * GPS with integrity (SBAS is assumed available); and no approach guidance without GPS integrity.
    */
   get approachType(): "ILS" | "LPV" | "NO APPR" | null {
-    const approach = findProcedure(this.db, this.active, "APPROACH") ?? findProcedure(this.db, this.route, "APPROACH");
+    const approach = findProcedure(this.db, this.active, "APPROACH");
     if (!approach) return null;
     if (approach.approachType === "ILS") return "ILS";
     return this.nav.mode !== "GPS" || this.injected.has("gpsIntegrity") ? "NO APPR" : "LPV";
@@ -656,7 +765,8 @@ export class ScriptedFms implements CduBackend {
   tick() {
     const now = this.now.getTime();
     // A database past the end of its cycle is flagged once; swapping to the next cycle clears it.
-    if (now > this.activeCycle.to && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE")); }
+    // A cycle whose data gives no dates is never out of date: its end is unknown, not past.
+    if (this.activeCycle.to !== null && now > this.activeCycle.to && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE")); }
     if (this.selfTest.startedAt !== null && this.selfTest.result === null && now - this.selfTest.startedAt >= 5000) {
       const failing = ["fmsFail", "gpsLost", "dmeOutage"].some(id => this.injected.has(id as ConditionId));
       this.selfTest = { ...this.selfTest, result: failing ? "FAIL" : "PASS" };
@@ -686,12 +796,23 @@ export class ScriptedFms implements CduBackend {
   /** The last waypoint sequenced: once past the FAF, the approach still measures its path from it. */
   get lastSequenced() { return this.sequenced; }
 
-  /** A waypoint's position: a search or tactical point, a Mark On Top, or the navigation database. */
-  coordinates(ident: string): LatLon | undefined {
-    const own = this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position;
+  /**
+   * A waypoint's position: a search or tactical point, a Mark On Top, or the navigation database. A runway belongs to
+   * an airport, so it resolves in the context of a route: the active route unless a page asks about the modification.
+   */
+  coordinates(ident: string, route: Route = this.active): LatLon | undefined {
+    const own = this.ownPoint(ident);
     if (own) return own;
+    // The active plan flies its fixes where they were when it became active (pinActive).
+    const pinned = route === this.active ? this.pins.get(ident) : undefined;
+    return pinned ?? this.lookup(ident, route);
+  }
+
+  private ownPoint(ident: string) { return this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position; }
+
+  /** A database position in the active cycle, looked up now: a runway in the context of the route's airports. */
+  private lookup(ident: string, route: Route): LatLon | undefined {
     if (/^RW\d{2}[LRC]?$/.test(ident)) {
-      const route = this.route;
       return (this.db.runway(ident, route.dest) ?? this.db.runway(ident, route.origin) ?? this.db.runway(ident))?.threshold;
     }
     return this.entryFor(ident)?.position;
@@ -712,11 +833,37 @@ export class ScriptedFms implements CduBackend {
   get secondary() { return this.secondaryRoute; }
   get selection() { return this.selectPending; }
 
-  /** Merges loaded navigation data (ARINC 424) over the database. */
-  loadNavData(data: NavData) {
-    this.db = this.db.merge(data);
-    this.cycles = [{ id: data.cycle.id, from: this.now.getTime(), to: this.now.getTime() + 28 * 86_400_000 }, ...this.cycles];
+  /**
+   * Loads navigation data as a new INACTIVE cycle, merged over the active cycle's data (a bench file is usually
+   * partial), in place of the inactive cycle. Nothing changes unless the data is valid: data with nothing in it, or
+   * with a position off the globe, is refused whole. Its dates are the ones the data gives, or unknown. The crew
+   * activates it on IDENT (swapCycles).
+   */
+  loadNavData(data: NavData, source = data.cycle.id): { loaded: string } | { refused: string } {
+    if (!data.entries.length && !data.airways.length && !data.procedures.length) return { refused: `${source}: no usable navigation data` };
+    const impossible = data.entries.find(e => !onGlobe(e.position) || (e.kind === "airport" && e.runways.some(r => !onGlobe(r.threshold))));
+    if (impossible) return { refused: `${source}: impossible position for ${impossible.ident}` };
+    const cycle = cycleOf(this.db.merge(data), source);
+    const replaced = this.inactiveCycle;
+    this.cycles = [this.activeCycle, cycle];
+    this.recordDataset(`LOAD ${cycle.id}`, [
+      source, "inactive until activated", ...(replaced ? [`replaces ${replaced.id}`] : []),
+      cycle.from === null || cycle.to === null ? "dates unknown" : "dates from the data",
+    ].join("; "));
     this.emit();
+    return { loaded: cycle.id };
+  }
+
+  /**
+   * Reads an ARINC 424 file and loads it (loadNavData). A file with no usable records, or with an impossible value
+   * anywhere in it, is refused whole with the reason, and nothing changes.
+   */
+  loadArinc424(text: string, source: string): ({ loaded: string } & Pick<Arinc424Result, "read" | "skipped" | "errors">) | { refused: string } {
+    const result = parseArinc424(text);
+    if (result.invalid.length) return { refused: `${source}: ${result.invalid[0]}` };
+    if (result.read === 0) return { refused: `${source}: no usable ARINC 424 records${result.skipped ? ` (${result.skipped} lines not recognised)` : ""}` };
+    const outcome = this.loadNavData(result.data, source);
+    return "refused" in outcome ? outcome : { ...outcome, read: result.read, skipped: result.skipped, errors: result.errors };
   }
 
   /**
@@ -847,7 +994,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** Where new enroute legs go: before the arrival, the approach and missed approach, or the destination. */
-  enrouteEnd(route: Route = this.route) {
+  enrouteEnd(route: Route) {
     const legs = route.legs;
     const arrival = legs.findIndex(leg => leg.kind !== "disco" && (leg.source === "STAR" || leg.source === "APPR" || leg.source === "MISSED"));
     if (arrival >= 0) return arrival;
@@ -856,12 +1003,12 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** Course and distance into each leg, from present position. There is no computed leg after a discontinuity. */
-  legGeometry(route: Route = this.route): LegGeometry[] {
+  legGeometry(route: Route): LegGeometry[] {
     let from: LatLon | null = this.here;
     return route.legs.map(leg => {
       // After a gap or a conditional leg the start of the next leg is not known in advance.
       if (leg.kind !== "wpt") { from = null; return null; }
-      const to = this.coordinates(leg.ident) ?? null;
+      const to = this.coordinates(leg.ident, route) ?? null;
       let result = from && to ? { course: courseDeg(from, to), distance: distanceNm(from, to) } : null;
       if (result && from && to && leg.path === "RF" && leg.arc) result = { course: result.course, distance: arcLength(from, to, leg.arc) };
       if (result && leg.path === "CF" && leg.course !== undefined) result = { ...result, course: leg.course };
@@ -871,7 +1018,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** The entry the aircraft will fly (or flew) into the hold, from the track that arrives at the holding fix. */
-  holdEntryFor(route: Route = this.route): HoldEntry | null {
+  holdEntryFor(route: Route): HoldEntry | null {
     const hold = route.hold;
     if (!hold) return null;
     if (hold.status === "IN PROGRESS" || hold.status === "EXIT ARMED") return this.enteredHold;
@@ -1068,6 +1215,7 @@ export class ScriptedFms implements CduBackend {
     this.directPending = false;
     this.directBypassed = [];
     this.active = route;
+    this.pinActive();
     this.modified = null;
     // In dual operation the executed route is cross-loaded to the other FMS.
     if (!this.injected.has("independent")) this.crossRoute = structuredClone(route);

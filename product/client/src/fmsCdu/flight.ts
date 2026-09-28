@@ -16,6 +16,8 @@ export const MAP_RANGES = [2, 5, 10, 20, 40, 80] as const;
 export const MAX_BANK = 25;
 const ROLL_RATE = 5;
 const MAX_VS = 1000;
+/** Vertical acceleration limit, fpm per second: the vertical speed changes over seconds, not in one step. */
+const VS_RATE = 600;
 const G_TURN = 1091; // turn rate (deg/s) = 1091 * tan(bank) / TAS (kt)
 
 export type GuidanceMode = "LNAV" | "HOLD" | "SAR" | "HDG";
@@ -176,6 +178,17 @@ export function racetrackOutline(fix: LatLon, hold: Hold, groundSpeed: number, t
 
 // ---------------------------------------------------------------------------------------------- simulator
 
+/**
+ * The vertical mode that commands the aircraft, named for the branch of the controller that produced the vertical
+ * speed (not inferred from the motion): basic altitude hold, the tactical descent, the VNAV path (the descent path
+ * or the final approach path), DES NOW, a VNAV climb or descent to the target altitude, or level at it. Generic
+ * engineering names, not CMA mode annunciations.
+ */
+export type VerticalMode = "ALT HOLD" | "TDN" | "APPR" | "VNAV PTH" | "DES NOW" | "VNAV CLB" | "VNAV DES" | "VNAV ALT";
+
+/** A recorded change of mode or authority: what happened and the references it set. */
+export type ModeEvent = { at: Date; event: string; detail: string };
+
 export class FlightSimulator {
   private readonly fms: ScriptedFms;
   /** True airspeed in knots: the speed VNAV flies (cruise speed, or a speed constraint). */
@@ -184,6 +197,19 @@ export class FlightSimulator {
   private lateral: "LNAV" | "HDG" = "LNAV";
   private lnavArmed = false;
   private heading = 0;
+  /** Whether the heading was latched by a reversion (heading hold) rather than selected by the crew. */
+  private held = false;
+  /**
+   * Basic altitude hold: the altitude latched when managed vertical guidance was lost or not selected. While set it
+   * alone commands the vertical axis, until VNAV is selected again.
+   */
+  private altitudeHold: number | null = null;
+  private vertical: VerticalMode = "VNAV ALT";
+  /** Whether the FMS had failed at the last step, to catch the failure and the recovery as transitions. */
+  private fmsFailed = false;
+  /** The approach mode: off, armed, or captured on the final leg (the only mode that descends beyond the FAF). */
+  private approach: "OFF" | "ARMED" | "CAPTURED" = "OFF";
+  private events: ModeEvent[] = [];
   private holdPlan: { segments: Segment[]; index: number; elapsed: number; loop: Segment[] } | null = null;
   private sarPlan: { points: LatLon[]; index: number } | null = null;
   private last: Guidance;
@@ -194,6 +220,80 @@ export class FlightSimulator {
   }
 
   get guidance() { return this.last; }
+  get verticalMode() { return this.vertical; }
+  get approachMode() { return this.approach; }
+
+  /** On the final leg: the FAF has been sequenced and the runway is the active waypoint. */
+  private get onFinal() {
+    const leg = this.fms.activeRoute.legs[0];
+    return leg?.kind === "wpt" && /^RW\d{2}/.test(leg.ident) && this.fms.lastSequenced !== null;
+  }
+
+  /**
+   * The laboratory approach contract (Q-A1, a labelled engineering assumption): the approach captures on the final
+   * leg only when armed, with valid approach capability (ILS, or LPV with integrity), LNAV engaged and the aircraft
+   * within 1 NM of the final course and not moving away from it. Loss of capability after capture drops the approach to a latched altitude
+   * hold; its return does not re-capture, because the approach is disarmed and must be armed again.
+   */
+  private previousCrossTrack: number | null = null;
+
+  private updateApproach(crossTrack: number) {
+    const converging = this.previousCrossTrack === null || Math.abs(crossTrack) <= Math.abs(this.previousCrossTrack) + 1e-6;
+    this.previousCrossTrack = crossTrack;
+    const fms = this.fms;
+    const capable = fms.approachType === "ILS" || fms.approachType === "LPV";
+    if (this.approach === "CAPTURED") {
+      if (!this.onFinal || fms.hasCondition("fmsFail")) { this.approach = fms.approachArmed ? "ARMED" : "OFF"; return; }
+      if (!capable) {
+        this.approach = "OFF";
+        fms.armApproach(false);
+        this.altitudeHold = Math.round(fms.altitude);
+        this.record("APPR LOST", `approach capability lost (${fms.approachType ?? "none"}); ALT HOLD ${this.altitudeHold} FT`);
+      }
+      return;
+    }
+    if (fms.approachArmed && capable && this.onFinal && this.lateral === "LNAV" && Math.abs(crossTrack) < 1 && converging && this.altitudeHold === null) {
+      this.approach = "CAPTURED";
+      this.record("APPR CAPTURED", `${fms.approachType} final approach path`);
+      return;
+    }
+    this.approach = fms.approachArmed ? "ARMED" : "OFF";
+  }
+  /** Mode and authority changes, oldest first: failure, reversion, recovery, LNAV lost. */
+  get modeEvents(): readonly ModeEvent[] { return this.events; }
+
+  private record(event: string, detail: string) { this.events = [...this.events, { at: this.fms.now, event, detail }]; }
+
+  /**
+   * The laboratory reversion on FMS failure (a labelled engineering assumption, not CMA installation behaviour):
+   * managed guidance becomes invalid, the heading (true) and altitude at that moment are latched once, and basic
+   * heading and altitude hold fly them through the aircraft's own dynamics. On recovery nothing managed resumes by
+   * itself: LNAV and VNAV must be selected again.
+   */
+  private watchFailure() {
+    const failed = this.fms.hasCondition("fmsFail");
+    if (failed && !this.fmsFailed) {
+      this.lateral = "HDG";
+      this.lnavArmed = false;
+      this.heading = Math.round(norm360(this.fms.track));
+      this.held = true;
+      this.altitudeHold = Math.round(this.fms.altitude);
+      this.record("FMS FAILURE", `managed guidance invalid; HDG HOLD ${String(this.heading).padStart(3, "0")}°T, ALT HOLD ${this.altitudeHold} FT`);
+    } else if (!failed && this.fmsFailed) {
+      this.record("FMS RECOVERED", "basic modes kept; select LNAV and VNAV to resume managed guidance");
+    }
+    this.fmsFailed = failed;
+  }
+
+  /** VNAV: managed vertical guidance again, after an altitude hold. Refused while the FMS has failed. */
+  engageVnav() {
+    if (this.fms.hasCondition("fmsFail") || this.altitudeHold === null) return false;
+    this.altitudeHold = null;
+    this.record("VNAV SELECTED", "managed vertical guidance");
+    return true;
+  }
+
+  get altitudeHoldReference() { return this.altitudeHold; }
   get bankAngle() { return this.bank; }
   get sarPath() { return this.sarPlan?.points ?? null; }
 
@@ -210,7 +310,9 @@ export class FlightSimulator {
 
   private integrate(dt: number) {
     const fms = this.fms;
+    this.watchFailure();
     const guidance = this.guide(dt);
+    this.updateApproach(guidance.crossTrack);
     this.last = guidance;
     // Bank toward the command at the roll-rate limit, then turn at the rate that bank gives.
     this.bank += clamp(guidance.bankCommand - this.bank, -ROLL_RATE * dt, ROLL_RATE * dt);
@@ -226,8 +328,19 @@ export class FlightSimulator {
     // A tactical descent flies its own angle down to its altitude.
     const tdnAngle = fms.tdn.active ? fms.tdnAngle() : null;
     const tdn = tdnAngle === null ? null : -groundSpeed * 101.27 * Math.tan(rad(tdnAngle));
-    const onPath = tdn ?? this.pathVerticalSpeed(groundSpeed) ?? (ownAltitude ? null : this.descentVerticalSpeed(groundSpeed));
-    const verticalSpeed = onPath ?? vs;
+    // Altitude hold, when latched, is the only vertical authority; otherwise the managed branches in order.
+    let verticalSpeed: number;
+    if (this.altitudeHold !== null) { verticalSpeed = clamp((this.altitudeHold - fms.altitude) * 2, -MAX_VS, MAX_VS); this.vertical = "ALT HOLD"; }
+    else if (tdn !== null) { verticalSpeed = tdn; this.vertical = "TDN"; }
+    else {
+      const final = this.pathVerticalSpeed(groundSpeed);
+      const descent = final === null && !ownAltitude ? this.descentVerticalSpeed(groundSpeed) : null;
+      if (final !== null) { verticalSpeed = final; this.vertical = "APPR"; }
+      else if (descent !== null) { verticalSpeed = descent; this.vertical = fms.vnav.desNow ? "DES NOW" : "VNAV PTH"; }
+      else { verticalSpeed = vs; this.vertical = guidance.targetAltitude > fms.altitude + 50 ? "VNAV CLB" : guidance.targetAltitude < fms.altitude - 50 ? "VNAV DES" : "VNAV ALT"; }
+    }
+    // The commanded vertical speed is reached at the vertical acceleration limit, so captures have a transient.
+    verticalSpeed = fms.verticalSpeed + clamp(verticalSpeed - fms.verticalSpeed, -VS_RATE * dt, VS_RATE * dt);
     const altitude = fms.altitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
     fms.setAircraft({ position, track, groundSpeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError });
@@ -245,7 +358,9 @@ export class FlightSimulator {
     const fms = this.fms;
     const profile = fms.profile();
     const first = profile.points[0];
-    if (!first || !profile.endOfDescent || (!profile.descending && !fms.vnav.desNow)) return null;
+    // No descent is flown toward a point whose distance is not known, and beyond the FAF only the approach descends.
+    if (this.onFinal && this.approach !== "CAPTURED") return null;
+    if (!first || first.distance === null || first.altitude === null || !profile.endOfDescent || (!profile.descending && !fms.vnav.desNow)) return null;
     const tan = Math.tan(rad(fms.vnav.pathAngle));
     const pathAltitude = profile.descending ? Math.min(fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * tan) : -Infinity;
     const above = fms.altitude - pathAltitude;
@@ -254,11 +369,11 @@ export class FlightSimulator {
     return -groundSpeed * 101.27 * tan + clamp(-above * 2, -300, 300);
   }
 
-  /** On final (FAF sequenced, runway active) the aircraft follows the VNAV path angle down. */
+  /** With the approach captured on final, the aircraft follows the final approach path angle down (active route only). */
   private pathVerticalSpeed(groundSpeed: number) {
     const fms = this.fms;
-    const leg = fms.route.legs[0];
-    if (leg?.kind !== "wpt" || !/^RW\d{2}/.test(leg.ident) || !fms.lastSequenced) return null;
+    const leg = fms.activeRoute.legs[0];
+    if (this.approach !== "CAPTURED" || leg?.kind !== "wpt" || !fms.lastSequenced) return null;
     const fafPos = fms.coordinates(fms.lastSequenced), rwyPos = fms.coordinates(leg.ident);
     if (!fafPos || !rwyPos) return null;
     const vpa = Math.atan((fms.fafAltitudeCorrected - fms.vnav.runwayElevation) / (distanceNm(fafPos, rwyPos) * 6076.12));
@@ -279,6 +394,8 @@ export class FlightSimulator {
     if (this.holdPlan && hold) return constraintAltitude(hold.altitude) ?? this.fms.altitude;
     if (leg?.kind === "cond" && leg.altitude !== undefined) return Math.max(leg.altitude, this.fms.altitude);
     if (this.fms.tdn.active || this.fms.tdn.level) return this.fms.tdn.targetAltitude;
+    // On final without a captured approach, nothing authorizes a descent below the FAF altitude.
+    if (this.onFinal && this.approach !== "CAPTURED") return Math.max(this.fms.fafAltitudeCorrected, Math.min(this.fms.altitude, this.fms.vnav.cruiseAltitude));
     // VNAV: in the climb, the cruise altitude or the lowest restriction ahead; in the descent, the planned altitude at
     // the active waypoint.
     const profile = this.fms.profile();
@@ -292,21 +409,37 @@ export class FlightSimulator {
   selectHeading(heading: number) {
     this.lateral = "HDG";
     this.heading = norm360(heading);
+    this.held = false;
   }
 
   /** LNAV: engages at once when the aircraft is close to the active leg, otherwise arms until it gets there. */
   armLnav() {
-    if (this.lateral === "LNAV") return;
+    if (this.lateral === "LNAV" || this.fms.hasCondition("fmsFail")) return;
     this.lnavArmed = true;
   }
 
   get lateralMode() { return this.lateral; }
   get lnavIsArmed() { return this.lnavArmed; }
   get selectedHeading() { return this.heading; }
+  get headingHeld() { return this.held; }
 
   /** Works out the guidance for this instant, and sequences waypoints, holds and patterns as they are reached. */
   private guide(dt = 0): Guidance {
+    // With the FMS failed there is no managed guidance to consume: basic heading hold only.
+    if (this.fms.hasCondition("fmsFail")) {
+      return {
+        mode: "HDG", legFrom: null, legTo: null, desiredTrack: null, crossTrack: 0, distanceToGo: null,
+        bankCommand: clamp(angleDiff(this.fms.track, this.heading), -MAX_BANK, MAX_BANK), targetAltitude: this.altitudeHold ?? this.fms.altitude,
+      };
+    }
     const managed = this.managedGuidance(dt);
+    // LNAV with no leg to fly (a discontinuity or the end of the route) is lost: heading hold on the current track.
+    if (this.lateral === "LNAV" && managed.mode === "HDG" && managed.desiredTrack === null) {
+      this.lateral = "HDG";
+      this.heading = Math.round(norm360(this.fms.track));
+      this.held = true;
+      if (dt > 0) this.record("LNAV LOST", `no active leg; HDG HOLD ${String(this.heading).padStart(3, "0")}°T`);
+    }
     if (this.lateral === "LNAV") return managed;
     // Capture when the managed path is close and the aircraft is not heading away from it.
     if (this.lnavArmed && managed.desiredTrack !== null && Math.abs(managed.crossTrack) < 0.6 && Math.abs(angleDiff(this.fms.track, managed.desiredTrack)) < 100) {

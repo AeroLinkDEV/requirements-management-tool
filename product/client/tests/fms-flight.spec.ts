@@ -63,6 +63,11 @@ test('a fly-by waypoint is sequenced before the aircraft reaches it, by the turn
 
 test('the aircraft climbs to each leg constraint and descends on the VNAV path from the FAF to the runway', () => {
   const { unit, fly } = setup()
+  // Beyond the FAF only a captured approach descends (review finding R03): the approach is loaded and armed. The
+  // runway alone, reached without an approach procedure, no longer brings the aircraft down.
+  unit.selectProcedure('APPROACH', 'R24R')
+  unit.press('EXEC')
+  unit.armApproach(true)
   fly(3600, () => activeIdent(unit) === 'TOLGU')
   expect(unit.altitude).toBeGreaterThan(4400)
   // The demonstration route turns 148 degrees at the FAF, so the fly-by turn rolls out on final short of it and the
@@ -77,10 +82,13 @@ test('the aircraft climbs to each leg constraint and descends on the VNAV path f
       worstLate = Math.max(worstLate, Math.abs(unit.altitude - (118 + toGo * 6076.12 * Math.tan(vpa))))
       lateVs.push(unit.verticalSpeed)
     }
-    if (activeIdent(unit) === 'CYUL' && !threshold) { threshold = unit.altitude; return true }
+    // The threshold is where the runway is sequenced; the missed approach follows it in this route.
+    if (activeIdent(unit) !== 'RW24R' && lateVs.length && !threshold) { threshold = unit.altitude; return true }
   })
   // On the three-degree path over the last mile and a half, descending at about 630 fpm, near threshold height.
-  expect(worstLate).toBeLessThan(150)
+  // 175 ft, not 150, since the vertical acceleration limit and approach capture (R03) were added: the aircraft crosses
+  // this route's FAF high after its 148-degree turn. The coherent demonstration route (review A23) removes that turn.
+  expect(worstLate).toBeLessThan(175)
   expect(Math.min(...lateVs)).toBeGreaterThan(-900)
   expect(Math.max(...lateVs)).toBeLessThan(-450)
   expect(threshold).toBeGreaterThan(80)

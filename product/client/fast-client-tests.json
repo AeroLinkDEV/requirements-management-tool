@@ -22,7 +22,12 @@
     "fms-navigation.spec.ts",
     "fms-vnav.spec.ts",
     "fms-tactical-maint.spec.ts",
-    "fms-scenario.spec.ts"
+    "fms-scenario.spec.ts",
+    "fms-authority.spec.ts",
+    "fms-predictions.spec.ts",
+    "fms-lab-controls.spec.ts",
+    "fms-modes.spec.ts",
+    "fms-dataset.spec.ts"
   ],
   "rendered": [
     "code-source-rendered.spec.ts",
