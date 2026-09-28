@@ -222,10 +222,17 @@ const hostSnapshotArgv = process.env.AEROLINK_E2E_HOST_SNAPSHOT_ARGV !== undefin
   : inCiOnWindows ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', SNAPSHOT_SCRIPT] : null
 const debuggerCandidates = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles]
   .filter(Boolean).map(root => join(root, 'Windows Kits', '10', 'Debuggers', 'x64', 'cdb.exe'))
-/** Non-invasive (`-pv`): the process is suspended for the walk and resumed on `qd`, never altered. */
+/**
+ * Non-invasive and non-suspending (`-pvr`). Plain `-pv` suspends every thread of the target and resumes them
+ * only on `qd`. When the walk overran its budget, the capture was killed before `qd` and the API stayed
+ * suspended for the rest of the job, so the showcase seed hung until its 480 s timeout (#1220: three shards on
+ * 2026-09-28, each right after a native capture that ended `exit=null`). A capture must never be able to stop
+ * the process it observes, so the walk runs against live threads; a stack may be slightly torn, which a
+ * diagnostic can afford and a hung qualification cannot.
+ */
 const nativeStackArgv = process.env.AEROLINK_E2E_NATIVE_STACK_ARGV !== undefined
   ? argvFromEnvironment('AEROLINK_E2E_NATIVE_STACK_ARGV')
-  : inCiOnWindows ? (found => found ? [found, '-pv', '-c', '~*kc 40; qd'] : null)(debuggerCandidates.find(existsSync)) : null
+  : inCiOnWindows ? (found => found ? [found, '-pvr', '-c', '~*kc 40; qd'] : null)(debuggerCandidates.find(existsSync)) : null
 const databasePath = /Data Source=([^;]+)/i.exec(process.env.ConnectionStrings__AeroLink ?? '')?.[1]?.trim() || null
 
 const fileSize = path => {
