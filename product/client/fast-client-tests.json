@@ -31,7 +31,8 @@
     "fms-dataset.spec.ts",
     "fms-efis.spec.ts",
     "fms-gps.spec.ts",
-    "fms-gps-sbas.spec.ts"
+    "fms-gps-sbas.spec.ts",
+    "fms-gps-bench.spec.ts"
   ],
   "rendered": [
     "code-source-rendered.spec.ts",

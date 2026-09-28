@@ -637,3 +637,35 @@
   font: 12px "Consolas", "Lucida Console", monospace;
   resize: vertical;
 }
+
+/* The bench's tools under the cockpit, as tabs. */
+.fmsBenchTools {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.fmsBenchTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid #dfe4eb;
+}
+.fmsBenchTabs button {
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  font: 600 13px var(--font-body);
+  color: var(--ink-600, #4b5868);
+  cursor: pointer;
+}
+.fmsBenchTabs button[aria-selected="true"] {
+  border-color: #dfe4eb;
+  background: white;
+  color: var(--teal-700, #176c63);
+  margin-bottom: -1px;
+}
+.fmsBenchTabs button:focus-visible { outline: 2px solid var(--teal-500, #1b8a7d); outline-offset: -2px; }
+.fmsBenchTabPanel[hidden] { display: none; }

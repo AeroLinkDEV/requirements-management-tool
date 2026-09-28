@@ -235,3 +235,39 @@ test('Fault mode: the fault discrete, the unit fault in 355, no tracking; RF inp
   run(rx, 86, 86)
   expect(rx.bus()).not.toBeNull()
 })
+
+test('jamming lowers every satellite C/N0 by the given dB: enough of it loses the fix, and removing it recovers', () => {
+  const rx = receiver()
+  run(rx, 0, 60)
+  const before = new Map(bus(rx)['060'].map(w => [w.value!.prn, w.value!.cn0]))
+  rx.setJamming(8)
+  run(rx, 61, 61)
+  for (const w of bus(rx)['060']) expect(w.value!.cn0).toBeCloseTo(before.get(w.value!.prn)! - 8, 0)
+  // At most 46 dB-Hz overhead; 20 dB of jamming puts every satellite under the 30 dB-Hz tracking threshold.
+  rx.setJamming(20)
+  run(rx, 62, 62)
+  expect(rx.mode).toBe('ACQUISITION')
+  expect(bus(rx)['273'].value!.used).toBe(0)
+  rx.setJamming(0)
+  run(rx, 63, 63)
+  expect(rx.mode).toBe('NAV')
+})
+
+test('spoofing moves the reported position by a consistent offset or drift that the receiver reports as valid', () => {
+  const control = receiver(), spoofed = receiver()
+  run(control, 0, 60); run(spoofed, 0, 60)
+  spoofed.setSpoof({ northM: 300, eastM: 0, driftNorthMps: 0, driftEastMps: 0 })
+  run(control, 61, 61); run(spoofed, 61, 61)
+  const north = (a: GpsBus, b: GpsBus) => (latitude(a) - latitude(b)) * 111_120
+  expect(north(bus(spoofed), bus(control))).toBeCloseTo(300, 1)
+  expect(bus(spoofed)['110'].ssm).toBe('NORMAL')
+  expect(bus(spoofed)['273'].value!.integrity).toBe('OK')
+  // A drift of 5 m/s east from the step it is set: 60 s later, 300 m east.
+  spoofed.setSpoof({ northM: 0, eastM: 0, driftNorthMps: 0, driftEastMps: 5 })
+  run(control, 62, 122); run(spoofed, 62, 122)
+  const east = (longitude(bus(spoofed)) - longitude(bus(control))) * 111_120 * Math.cos((AT.lat * Math.PI) / 180)
+  expect(east).toBeCloseTo(300, 0)
+  spoofed.setSpoof(null)
+  run(control, 123, 123); run(spoofed, 123, 123)
+  expect(latitude(bus(spoofed))).toBe(latitude(bus(control)))
+})
