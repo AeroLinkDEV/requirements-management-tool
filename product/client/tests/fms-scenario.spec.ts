@@ -27,15 +27,15 @@ test('GPS lost 2 NM before the FAF: the loss is injected at the distance, and th
   // The condition went in when the aircraft reached 2 NM from FERDI, not at the start.
   expect(runner.results[3].at).toBeGreaterThan(600)
   expect(runner.results[4]).toMatchObject({ status: 'pass', actual: 'GPS NAV LOST' })
-  expect(runner.results[9].at! - runner.results[8].at!).toBeLessThanOrEqual(30)
-  expect(runner.results[10]).toEqual({ status: 'pass', at: runner.results[9].at, actual: 'not raised' })
+  expect(runner.results[8].at! - runner.results[7].at!).toBeLessThanOrEqual(30)
+  expect(runner.results[9]).toEqual({ status: 'pass', at: runner.results[8].at, actual: 'not raised' })
   expect(fms.hasCondition('gpsLost')).toBe(true)
 
   // The checks prove the actions: without TOGA the aircraft reaches UL501 too late, and unarmed the FMS asks for it.
   const scenario = library('gps-lost-before-faf')
   const without = (kind: string) => runHeadless({ ...scenario, steps: scenario.steps.map(step => (step.action.kind === kind ? { ...step, action: { kind: 'keys' as const, keys: ['PROG' as const] } } : step)) }).runner.results
-  expect(without('goAround')[9]).toMatchObject({ status: 'fail' })
-  expect(without('armApproach')[10]).toMatchObject({ status: 'fail', actual: 'ARM APPROACH' })
+  expect(without('goAround')[8]).toMatchObject({ status: 'fail' })
+  expect(without('armApproach')[9]).toMatchObject({ status: 'fail', actual: 'ARM APPROACH' })
 })
 
 test('steps run strictly in order: a later step waits for an earlier one even if its own trigger has come', () => {
