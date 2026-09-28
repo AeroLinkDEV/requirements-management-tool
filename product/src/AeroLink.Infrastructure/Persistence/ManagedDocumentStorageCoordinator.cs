@@ -141,12 +141,9 @@ public sealed class ManagedDocumentStorageCoordinator(AeroLinkDbContext db, Evid
             else if (operation.State == ManagedDocumentStorageOperationState.RolledBack && before != operation.State) rolledBack++;
             else if (operation.State == ManagedDocumentStorageOperationState.RepairRequired) repair++;
         }
-        var allOpenOperations = await db.ManagedDocumentStorageOperations.AsNoTracking().Where(x => x.State == ManagedDocumentStorageOperationState.Pending
-            || x.State == ManagedDocumentStorageOperationState.RepairRequired).ToListAsync(ct);
-        var knownStages = allOpenOperations.SelectMany(Objects).Select(x => x.StagingKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var open in allOpenOperations) foreach (var stage in OperationStages(open.Id)) knownStages.Add(stage);
-        foreach (var unknown in files.EnumerateStagedKeys().Where(x => !knownStages.Contains(x)))
-        { var key = files.Quarantine(unknown, Guid.Empty, "unregistered-stage"); if (key is not null) quarantined.Add(key); }
+        // The shared staging root also holds ordinary attachments, inline images and verification imports.
+        // Absence from this ledger is not ownership: only reconcile files belonging to the operations above.
+        // ReconcileOperationAsync still quarantines an expired operation's stages before its manifest exists.
         var integrityResult = await integrity.ScanProjectAsync(projectId, actor, ct); repair += integrityResult.Failed;
         var documentIds = await db.ManagedDocuments.AsNoTracking().Where(x => x.ProjectId == projectId).Select(x => x.Id).ToListAsync(ct);
         var revisions = await db.ManagedDocumentRevisions.AsNoTracking().Where(x => documentIds.Contains(x.DocumentId)).ToListAsync(ct);

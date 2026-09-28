@@ -11,6 +11,46 @@ namespace AeroLink.Infrastructure.Tests;
 public sealed class ManagedDocumentStorageCoordinatorTests
 {
     [Fact]
+    public async Task Project_reconciliation_preserves_an_ordinary_upload_between_staging_and_promotion()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"aerolink-storage-ordinary-upload-{Guid.NewGuid():N}");
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AeroLinkDbContext>().UseSqlite(connection).Options;
+        try
+        {
+            await using var db = new AeroLinkDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var program = new ProgramRecord("Storage Program", "STORAGE");
+            var project = new ProjectRecord(program.Id, "Storage Project", "Controlled documents");
+            db.AddRange(program, project);
+            await db.SaveChangesAsync();
+            var store = new EvidenceFileStore(root);
+            var coordinator = new ManagedDocumentStorageCoordinator(db, new EvidenceFileStore(root),
+                new ManagedDocumentIntegrityService(db, store), new NoManagedDocumentStorageFaultInjector());
+            var bytes = Encoding.UTF8.GetBytes("ordinary change request attachment");
+
+            // StoreAsync uses these two public boundaries without a managed-document operation.
+            // Interleave the periodic worker after the file closes, before its atomic promotion.
+            var staged = await store.StageAsync(new MemoryStream(bytes), Guid.NewGuid(), "object",
+                "evidence.txt", "text/plain", default);
+            Assert.True(store.Exists(staged.StagingKey));
+            var result = await coordinator.ReconcileProjectAsync(project.Id, "system.integrity",
+                DateTimeOffset.UtcNow, default);
+            await store.PromoteAsync(staged, default);
+
+            Assert.Empty(result.QuarantinedKeys);
+            Assert.False(store.Exists(staged.StagingKey));
+            await using var verified = await store.OpenVerifiedReadAsync(staged.StorageKey,
+                bytes.Length, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)), default);
+            using var downloaded = new MemoryStream();
+            await verified.CopyToAsync(downloaded);
+            Assert.Equal(bytes, downloaded.ToArray());
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task Operation_key_retry_rejects_different_content_intent()
     {
         var root = Path.Combine(Path.GetTempPath(), $"aerolink-storage-key-conflict-{Guid.NewGuid():N}");
