@@ -310,3 +310,20 @@ test('a cleared scratchpad can be checked with an empty expectation (second revi
   // Alert text still needs something to look for.
   expect(() => parseScenario(JSON.stringify(scenarioOf([{ when: { kind: 'start' }, action: { kind: 'expectAlert', text: '' } }])))).toThrow(/1 to 24 characters/)
 })
+
+test('APPR pressed off is recorded and replayed, and a non-boolean on is refused at import (third review D03)', () => {
+  let now = START
+  const recorder = new ScenarioRecorder(() => new Date(now))
+  recorder.armApproach()
+  now += 2000
+  recorder.armApproach(false)
+  const scenario = recorder.toScenario('APPR on then off')
+  expect(scenario.steps.map(step => step.action)).toEqual([{ kind: 'armApproach' }, { kind: 'armApproach', on: false }])
+  expect(procedureText(scenario).steps).toContain('press APPR off')
+  const replayed = parseScenario(JSON.stringify(scenario))
+  const { fms } = runHeadless(replayed)
+  expect(fms.approachArmed).toBe(false)
+  const armedOnly = runHeadless(parseScenario(JSON.stringify({ ...scenario, steps: scenario.steps.slice(0, 1) }))).fms
+  expect(armedOnly.approachArmed).toBe(true)
+  expect(() => parseScenario(JSON.stringify({ ...scenario, steps: [{ when: { kind: 'start' }, action: { kind: 'armApproach', on: 'no' } }] }))).toThrow(/armApproach on must be true or false/)
+})
