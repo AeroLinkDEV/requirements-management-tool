@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ALERTS } from "./alerts";
-import { parseArinc424 } from "./arinc424";
 import { CONDITIONS } from "./conditions";
 import { FlightSimulator, MAP_RANGES } from "./flight";
 import FmsCduPanel from "./FmsCduPanel";
@@ -297,23 +296,35 @@ export default function FmsCduTestBench() {
           <section className="fmsBenchCard">
             <h2>Navigation data</h2>
             <p className="fmsBenchReadout">
-              <strong>{backend.navdb.cycle.id}</strong>: {backend.navdb.counts.airports} airports, {backend.navdb.counts.navaids} navaids,{" "}
+              Active <strong>{backend.activeCycle.id}</strong> ({backend.activeCycle.source}): {backend.navdb.counts.airports} airports, {backend.navdb.counts.navaids} navaids,{" "}
               {backend.navdb.counts.fixes} fixes, {backend.navdb.counts.airways} airways, {backend.navdb.counts.procedures} procedures.
-              The built-in set is invented demonstration data.
+              The built-in set is invented demonstration data; its two cycles hold the same data.
             </p>
+            {backend.inactiveCycle ? (
+              <p className="fmsBenchReadout">
+                Inactive <strong>{backend.inactiveCycle.id}</strong> ({backend.inactiveCycle.source}).{" "}
+                <button type="button" disabled={failedFms} onClick={() => backend.swapCycles()}>Activate {backend.inactiveCycle.id}</button>
+              </p>
+            ) : null}
             <label className="fmsBenchFile">
-              <span>Load ARINC 424 data (waypoints, navaids, airports, runways, airways)</span>
+              <span>Load ARINC 424 data (waypoints, navaids, airports, runways, airways) as the inactive cycle</span>
               <input type="file" accept=".pc,.dat,.txt,.424,text/plain" aria-label="ARINC 424 navigation data file"
                 onChange={async event => {
                   const file = event.target.files?.[0];
                   if (!file) return;
-                  const result = parseArinc424(await file.text());
-                  backend.loadNavData(result.data);
-                  setNavLoad(`${file.name}: ${result.read} records read, ${result.skipped} skipped${result.errors.length ? `; ${result.errors[0]}` : ""}.`);
+                  const outcome = backend.loadArinc424(await file.text(), file.name);
+                  setNavLoad("refused" in outcome
+                    ? `Refused, nothing changed. ${outcome.refused}.`
+                    : `${file.name}: ${outcome.read} records read, ${outcome.skipped} skipped${outcome.errors.length ? `; ${outcome.errors[0]}` : ""}. Loaded as inactive cycle ${outcome.loaded}: activate it on IDENT or here.`);
                   event.target.value = "";
                 }} />
             </label>
             {navLoad ? <p className="fmsBenchHint" role="status">{navLoad}</p> : null}
+            {backend.datasetLog.length ? (
+              <ul className="fmsBenchHint" aria-label="Navigation data record">
+                {backend.datasetLog.map((entry, index) => <li key={index}><b>{entry.action}</b> {entry.detail}</li>)}
+              </ul>
+            ) : null}
           </section>
 
           <section className="fmsBenchCard">

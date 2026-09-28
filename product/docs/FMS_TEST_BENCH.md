@@ -99,8 +99,8 @@ Status vocabulary: **Demonstrated** (works on the bench and has a behavioural te
 |---|---|---|
 | CDU panel, variants, keys, scratchpad, lighting | Demonstrated | Held CLR survives focus loss (R18); luminance is a simulated value, not a physical NVIS claim |
 | MOD / EXEC / ERASE for route edits | Partial | Pending edits leak into final-path guidance (R01), runway lookup (R05) and PROGRESS (R12) |
-| Navigation database, airways, SID/STAR/approach selection | Partial | Lookups by ident string, not pinned entries; a data load changes active geometry (R05, R06) |
-| ARINC 424 loader | Partial | Subset reader; no range checks or activation gate (R16, R06) |
+| Navigation database, airways, SID/STAR/approach selection | Partial | Pages and new entries look up by ident string (R05); the active plan's fixes are pinned when it becomes active (EXEC, the initial plan), so loading or activating a cycle does not move them or their guidance and predictions (R06) |
+| ARINC 424 loader | Partial | Subset reader with degree, minute and second range checks. A file that is empty, not recognised or holds an impossible coordinate is refused whole with the reason, and nothing changes; a valid file becomes the inactive cycle (R16 loader part, R06). Procedures and cycle dates are not read |
 | Pilot waypoints, SELECT DESIRED WPT, REF NAV DATA | Demonstrated | Regional geometry only; the date line takes the long way round (R17) |
 | Company routes, SEC FPLN | Partial | Session memory only; SAVE keeps the en-route legs, not constraints |
 | POS INIT SET POS | Placeholder | Accepts the entry and does nothing (R26) |
@@ -125,7 +125,7 @@ Status vocabulary: **Demonstrated** (works on the bench and has a behavioural te
 | MSG and message recall | Partial | MSG can stay lit after recovery with nothing to acknowledge (R13) |
 | ATC / FMC COMM datalink | Placeholder | Representative workflow; STANDBY clears the pending indication (R14) |
 | Rendezvous, moving waypoints, tactical descent | Partial | Rendezvous uses the route predictions, so it inherits R08 and R09; moving waypoints have no data age or expiry |
-| Database cycles, DATABASE OUT OF DATE | Partial | A metadata swap over one shared demonstration data set, not two datasets; a loaded file merges into the active database and is given invented effective dates (R06, R16, N09) |
+| Database cycles, DATABASE OUT OF DATE | Partial | Each cycle holds its own dataset; the two demonstration cycles hold the same demonstration data, and the bench says so. A loaded file, merged over the active cycle's data, becomes the inactive cycle. Activating it (IDENT, or the bench) is recorded and does not re-resolve the active plan: its fixes stay pinned, the record names those the new cycle places differently, and they take the new positions only when the crew executes a modification, recorded as ROUTE RE-RESOLVED. Dates come from the data or show UNKNOWN; an unknown end never raises DATABASE OUT OF DATE (R06, R16). No changeover-date or ground-only rule (N09) |
 | MAINT self test and fault log | Placeholder | A demonstration of the page, not equipment built-in test |
 | Dual FMS, independent operation | Placeholder | One model with a copy of the route; not a dual-channel protocol |
 | Scenarios, recording, procedure text, run report | Partial | A 0.25 s tick contract shared by the bench and headless runs; validated admission; distinct outcomes (passed, failed, no checks, timed out, stopped, invalid, error); the report's context is fixed at run start (N01–N08). In-process against the built-in model only: no external software-under-test adapter, run manifest or controlled evidence import (R21–R23, R25) |
