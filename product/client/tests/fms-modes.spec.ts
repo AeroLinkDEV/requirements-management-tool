@@ -226,3 +226,53 @@ test('after capture, APPR pressed off or HDG SEL cancels the approach to an alti
     expect(Math.abs(unit.altitude - held)).toBeLessThan(40)
   }
 })
+
+test('a failure after TOGA is accepted keeps its hold, whatever the order within a step, and recovery keeps it (fourth review E01)', () => {
+  // TOGA accepted, then the FMS fails before the next step: the failure's hold survives the go-around.
+  {
+    const { unit, sim, fly } = capturedApproach()
+    expect(unit.goAround()).toBe(true)
+    unit.setCondition('fmsFail', true)
+    fly(1)
+    const held = sim.altitudeHoldReference
+    expect(held, 'TOGA then failure in one step').not.toBeNull()
+    expect(sim.verticalMode).toBe('ALT HOLD')
+    expect(sim.guidance.targetAltitude).toBe(held)
+    const goAround = sim.modeEvents.find(e => e.event === 'GO AROUND')!
+    expect(goAround.detail).toContain('not flown: FMS failed')
+    expect(goAround.detail).not.toContain('released')
+    // Recovery without reselecting LNAV and VNAV keeps the basic hold.
+    unit.setCondition('fmsFail', false)
+    fly(10)
+    expect(sim.altitudeHoldReference).toBe(held)
+    expect(sim.verticalMode).toBe('ALT HOLD')
+  }
+  // TOGA flown for a step, then the failure: the failure latches its hold as usual.
+  {
+    const { unit, sim, fly } = capturedApproach()
+    expect(unit.goAround()).toBe(true)
+    fly(1)
+    expect(sim.altitudeHoldReference).toBeNull()
+    unit.setCondition('fmsFail', true)
+    fly(1)
+    expect(sim.altitudeHoldReference).not.toBeNull()
+    expect(sim.verticalMode).toBe('ALT HOLD')
+  }
+})
+
+test('on the first step after an approach ends, the published target is the hold it flies (fourth review E02)', () => {
+  for (const how of ['integrity lost', 'APPR pressed off', 'HDG SEL']) {
+    const { unit, sim, fly } = capturedApproach()
+    if (how === 'integrity lost') unit.setCondition('gpsIntegrity', true)
+    else if (how === 'APPR pressed off') unit.armApproach(false)
+    else sim.selectHeading(240)
+    fly(1)
+    const held = sim.altitudeHoldReference
+    expect(held, how).not.toBeNull()
+    expect(sim.verticalMode, how).toBe('ALT HOLD')
+    expect(sim.guidance.targetAltitude, how).toBe(held)
+    // Stable on the next step too.
+    fly(1)
+    expect(sim.guidance.targetAltitude, how).toBe(held)
+  }
+})
