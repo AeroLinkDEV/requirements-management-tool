@@ -44,7 +44,7 @@ public sealed class SystemChangeRequest
     private SystemChangeRequest() { }
 
     public SystemChangeRequest(string baseNumber, int revision, Guid projectId, Guid targetReleaseId,
-        string title, string problem, string analysis, string solution, string authorId, DateTimeOffset now,
+        string title, string? problem, string? analysis, string? solution, string authorId, DateTimeOffset now,
         ChangeRequestType type = ChangeRequestType.System,
         string? problemRich = null, string? analysisRich = null, string? solutionRich = null,
         RequirementLevel? softwareLevel = null, ILadderPolicy? ladderPolicy = null)
@@ -528,7 +528,7 @@ public sealed class SystemChangeRequest
             $"Removed {change.DisplayNumber} from {DisplayNumber}.", now);
     }
 
-    public void UpdateDraft(string actorId, string title, string problem, string analysis, string solution,
+    public void UpdateDraft(string actorId, string title, string? problem, string? analysis, string? solution,
         IReadOnlyList<RequirementChangeDraft> changes, DateTimeOffset now,
         string? problemRich = null, string? analysisRich = null, string? solutionRich = null,
         bool administratorAuthority = false, bool allowIncomplete = false, ILadderPolicy? ladderPolicy = null)
@@ -1053,18 +1053,18 @@ public sealed class SystemChangeRequest
     /// When rich content is given it is authoritative and the plain text is derived from it; when it is not,
     /// the plain text is what was written and the rich form is that same text as a single paragraph. Either
     /// way both are populated and both say the same thing, so no reader has to know which one the author
-    /// used.
+    /// used. Case fields may be absent in an unfinished draft; store those as empty content.
     /// </summary>
-    private void SetCase(string problem, string analysis, string solution,
+    private void SetCase(string? problem, string? analysis, string? solution,
         string? problemRich, string? analysisRich, string? solutionRich)
     {
         (Problem, ProblemRich) = Resolve(problem, problemRich);
         (Analysis, AnalysisRich) = Resolve(analysis, analysisRich);
         (Solution, SolutionRich) = Resolve(solution, solutionRich);
 
-        static (string Plain, string Rich) Resolve(string plain, string? rich)
+        static (string Plain, string Rich) Resolve(string? plain, string? rich)
         {
-            if (string.IsNullOrWhiteSpace(rich)) return (plain.Trim(), Content.RichContent.FromPlainText(plain));
+            if (string.IsNullOrWhiteSpace(rich)) return (plain?.Trim() ?? string.Empty, Content.RichContent.FromPlainText(plain));
             var canonical = Content.RichContent.Canonicalize(rich);
             return (Content.RichContent.ToPlainText(canonical), canonical);
         }
