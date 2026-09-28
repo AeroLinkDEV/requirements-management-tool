@@ -99,6 +99,8 @@ export type GpsBus = { [L in NumberLabel]: Word<number> } & {
 };
 export type GpsLabel = Exclude<keyof GpsBus, "060">;
 export type SatelliteFault = { kind: "RAMP"; metresPerSecond: number } | { kind: "STEP"; metres: number };
+/** A spoofed position: an offset (m) plus a drift (m/s) from the step it is set. */
+export type Spoof = { northM: number; eastM: number; driftNorthMps: number; driftEastMps: number };
 export type ReceiverFault = "RECEIVER" | "RF_INPUT" | "STOP_TRANSMITTING";
 /** The override layer: force a word's value and/or SSM, freeze it, bias it, or ramp it from when it was set. */
 export type Override = { kind: "FORCE"; value?: number; ssm?: Ssm } | { kind: "FREEZE" } | { kind: "BIAS"; amount: number } | { kind: "RAMP"; perSecond: number };
@@ -163,6 +165,8 @@ export class GpsReceiver {
   private approach: ApproachSelection | null = null;
   /** Since when a geostationary satellite has been tracked without a break: its corrections take sbasAcquireSeconds. */
   private sbasSince: number | null = null;
+  private jamDb = 0;
+  private spoof: { spoof: Spoof; since: number | null } | null = null;
 
   constructor(options: GpsOptions) {
     this.o = {
@@ -190,6 +194,12 @@ export class GpsReceiver {
 
   /** The approach the FMS selects, with its FAS block; null deselects it. */
   selectApproach(selection: ApproachSelection | null) { this.approach = selection; }
+
+  /** Jamming: every satellite's C/N0 lowered by this many dB. */
+  setJamming(db: number) { this.jamDb = Math.max(0, db); }
+
+  /** Spoofing: a consistent false position, reported as valid. null ends it. */
+  setSpoof(spoof: Spoof | null) { this.spoof = spoof ? { spoof, since: null } : null; }
 
   injectFault(kind: ReceiverFault, on: boolean) { if (on) this.faults.add(kind); else this.faults.delete(kind); }
 
@@ -225,6 +235,7 @@ export class GpsReceiver {
     if (this.faults.has("RECEIVER")) this.currentMode = "FAULT";
     else if (this.currentMode === "FAULT") { this.powerOn = input.time; this.currentMode = "SELF_TEST"; }
     for (const entry of this.satelliteFaults.values()) entry.since ??= input.time;
+    if (this.spoof) this.spoof.since ??= input.time;
 
     let satellites: Satellite[] = [];
     let solution: Solution | null = null;
@@ -261,7 +272,9 @@ export class GpsReceiver {
 
   /** The satellites in view, and which are tracked and used: signal above the threshold, not deselected, a channel free. */
   private track(input: GpsInput): Satellite[] {
-    const sky = this.o.constellation.sky(input.time, input.position, input.altitude, input.attitude, this.o.maskDeg).filter(s => s.visible);
+    // Jamming lowers every signal alike.
+    const jam = (s: SkySatellite) => ({ ...s, cn0: s.cn0 - this.jamDb });
+    const sky = this.o.constellation.sky(input.time, input.position, input.altitude, input.attitude, this.o.maskDeg).filter(s => s.visible).map(jam);
     const noSignal = this.faults.has("RF_INPUT");
     const trackable = sky.filter(s => !noSignal && s.cn0 >= this.o.trackCn0 && !this.deselected.has(s.prn))
       .sort((a, b) => b.elevation - a.elevation).slice(0, GPS_CHANNELS).map(s => s.prn);
@@ -272,7 +285,7 @@ export class GpsReceiver {
       return { ...s, tracked, excluded: this.excluded.has(s.prn), used: tracked && !this.excluded.has(s.prn), sbas: false };
     });
     // The SBAS channels: a geostationary satellite in view, strong enough, not deselected and not in an outage.
-    const geos = this.o.sbas ? this.o.constellation.geos(input.position, input.altitude, input.attitude, this.o.maskDeg).filter(s => s.visible) : [];
+    const geos = this.o.sbas ? this.o.constellation.geos(input.position, input.altitude, input.attitude, this.o.maskDeg).filter(s => s.visible).map(jam) : [];
     return [...gps, ...geos.map(s => {
       const tracked = !noSignal && s.cn0 >= this.o.trackCn0 && !this.deselected.has(s.prn) && !this.sbasState.outage.includes(s.prn);
       return { ...s, tracked, excluded: false, used: false, sbas: true };
@@ -400,8 +413,12 @@ export class GpsReceiver {
     const bus: Partial<GpsBus> = {};
     const level = this.approachLevel(s);
     if (input && s) {
-      const lat = input.position.lat + s.enu[1] / M_PER_DEG_LAT;
-      const lon = input.position.lon + s.enu[0] / (M_PER_DEG_LAT * Math.cos((input.position.lat * Math.PI) / 180));
+      // A spoofer's false position is consistent across the satellites, so RAIM sees nothing: it is reported as valid.
+      const spoofed = this.spoof ? this.spoof.spoof : null, since = this.spoof?.since ?? input.time, drift = (input.time - since) / 1000;
+      const north = s.enu[1] + (spoofed ? spoofed.northM + spoofed.driftNorthMps * drift : 0);
+      const east = s.enu[0] + (spoofed ? spoofed.eastM + spoofed.driftEastMps * drift : 0);
+      const lat = input.position.lat + north / M_PER_DEG_LAT;
+      const lon = input.position.lon + east / (M_PER_DEG_LAT * Math.cos((input.position.lat * Math.PI) / 180));
       const coarse = (v: number) => Math.round(v / LAT_RESOLUTION) * LAT_RESOLUTION;
       const msl = input.altitude + s.enu[2] / 0.3048;
       const track = (input.track * Math.PI) / 180;

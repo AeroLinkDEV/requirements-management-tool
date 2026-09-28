@@ -33,7 +33,8 @@
     "fms-coherence.spec.ts",
     "fms-gps.spec.ts",
     "fms-gps-sbas.spec.ts",
-    "fms-gps-fms.spec.ts"
+    "fms-gps-fms.spec.ts",
+    "fms-gps-bench.spec.ts"
   ],
   "rendered": [
     "review-workflow-rendered.spec.ts",
