@@ -88,3 +88,23 @@ test('an approach selected but not executed is not the approach being flown', ()
   unit.press('EXEC')
   expect(unit.approachType).not.toBeNull()
 })
+
+test('the modified route measures its own runway; the active route keeps its own (R05)', () => {
+  const { unit } = setup()
+  unit.loadNavData({
+    cycle: { id: 'TEST', from: '', to: '' },
+    entries: [{ kind: 'airport', ident: 'CZZZ', name: 'TEST FIELD', position: { lat: 49, lon: -80 }, elevation: 500,
+      runways: [{ ident: 'RW24R', threshold: { lat: 49, lon: -80 }, course: 240, elevation: 500, length: 8000 }] }],
+    airways: [], procedures: [],
+  })
+  const runwayAt = unit.activeRoute.legs.findIndex(leg => leg.kind === 'wpt' && leg.ident === 'RW24R')
+  expect(runwayAt).toBeGreaterThan(0)
+  const active = unit.legGeometry(unit.activeRoute)[runwayAt]
+  press(unit, 'RTE')
+  typeText(unit, 'CZZZ')
+  press(unit, 'LSK1R')
+  const pending = unit.legGeometry(unit.route)[unit.route.legs.findIndex(leg => leg.kind === 'wpt' && leg.ident === 'RW24R')]
+  // The MOD route's RW24R is CZZZ's, hundreds of miles away; the active route's is unchanged.
+  expect(Math.abs(pending!.distance - active!.distance)).toBeGreaterThan(100)
+  expect(unit.legGeometry(unit.activeRoute)[runwayAt]).toEqual(active)
+})

@@ -68,9 +68,22 @@ export function applyConstraint(altitude: number, c: AltitudeConstraint | null) 
   }
 }
 
+/**
+ * How far a prediction can be relied on: known geometry; estimated (after a course or heading leg that ends on an
+ * event, the next leg is taken from the last fixed point); or unknown (past a route discontinuity or a manually
+ * terminated leg, where the path is not defined). Unknown predictions carry no distance, time or fuel.
+ */
+export type PredictionBasis = "known" | "estimated" | "unknown";
+
 export type ProfileInput = {
-  /** One entry per waypoint ahead, in order: the distance of the leg into it and its constraint. */
-  waypoints: { ident: string; legDistance: number; groundSpeed: number; constraint: AltitudeConstraint | null; endOfDescent: boolean }[];
+  /**
+   * One entry per waypoint ahead, in order: the distance of the leg into it (null when that leg's path is not
+   * defined), its constraint, how its prediction is based, and whether it belongs to the missed approach.
+   */
+  waypoints: {
+    ident: string; legDistance: number | null; groundSpeed: number; constraint: AltitudeConstraint | null; endOfDescent: boolean;
+    basis?: PredictionBasis; missed?: boolean;
+  }[];
   altitude: number;
   cruiseAltitude: number;
   climbRate: number;
@@ -80,14 +93,18 @@ export type ProfileInput = {
   now: number;
 };
 
-export type ProfilePoint = { ident: string; distance: number; altitude: number; eta: number; fuel: number; constraintMet: boolean };
+export type ProfilePoint = {
+  ident: string; distance: number | null; altitude: number; eta: number | null; fuel: number | null; constraintMet: boolean; basis: PredictionBasis;
+};
 export type Profile = {
   points: ProfilePoint[];
   /** Distance ahead of the aircraft to the top of descent, null if the descent has begun or there is none. */
   topOfDescent: number | null;
   endOfDescent: string | null;
-  /** The first climb constraint the aircraft cannot make at its climb rate. */
+  /** The first constraint the plan does not meet: a climb it cannot make, or a restriction it stays above. */
   unableNext: string | null;
+  /** The landing: the end of descent (the runway), or the last point before the missed approach. */
+  destination: ProfilePoint | null;
   /** The altitude the climb may go to now: cruise, or the lowest "at" or "at or below" constraint ahead in the climb. */
   climbCap: number;
   /** Past the top of descent: the active waypoint is on the descent path. */
@@ -101,7 +118,15 @@ export function computeProfile(input: ProfileInput): Profile {
   const tan = Math.tan((pathAngle * Math.PI) / 180);
   const cumulative: number[] = [];
   let total = 0;
-  for (const w of waypoints) { total += w.legDistance; cumulative.push(total); }
+  for (const w of waypoints) { total += w.legDistance ?? 0; cumulative.push(total); }
+  // The basis only gets worse along the route: once the path is unknown, everything after it is too.
+  const basis: PredictionBasis[] = [];
+  const rank = { known: 0, estimated: 1, unknown: 2 } as const;
+  waypoints.forEach((w, i) => {
+    const own: PredictionBasis = w.legDistance === null ? "unknown" : w.basis ?? "known";
+    const before = i > 0 ? basis[i - 1] : "known";
+    basis.push(rank[own] > rank[before] ? own : before);
+  });
 
   // The capping constraints of the climb: cruise, or an "at" or "at or below" constraint.
   const capOf = (c: AltitudeConstraint | null) =>
@@ -116,7 +141,7 @@ export function computeProfile(input: ProfileInput): Profile {
       topOfClimb = waypoints.length;
       for (let i = 0; i < waypoints.length; i += 1) {
         const cap = Math.min(cruiseAltitude, capOf(waypoints[i].constraint));
-        altitude = Math.min(Math.max(cap, altitude), altitude + input.climbRate * (waypoints[i].legDistance / Math.max(30, waypoints[i].groundSpeed)) * 60);
+        altitude = Math.min(Math.max(cap, altitude), altitude + input.climbRate * ((waypoints[i].legDistance ?? 0) / Math.max(30, waypoints[i].groundSpeed)) * 60);
         if (altitude >= cruiseAltitude - 1) { topOfClimb = i; break; }
       }
     }
@@ -129,7 +154,10 @@ export function computeProfile(input: ProfileInput): Profile {
     const ed = waypoints[edIndex].constraint;
     descent[edIndex] = ed?.kind === "AT" ? ed.altitude : ed?.kind === "B" ? ed.altitude : ed?.kind === "WINDOW" ? ed.lower : ed?.altitude ?? 0;
     for (let i = edIndex - 1; i >= 0; i -= 1) {
-      const up = descent[i + 1] + waypoints[i + 1].legDistance * FT_PER_NM * tan;
+      // The path is not carried back across a leg whose length is unknown: no descent is planned from a gap.
+      const leg = waypoints[i + 1].legDistance;
+      if (leg === null) break;
+      const up = descent[i + 1] + leg * FT_PER_NM * tan;
       // In the climb the path stops at cruise: those constraints belong to the climb.
       if (i <= topOfClimb && up >= cruiseAltitude) break;
       descent[i] = applyConstraint(Math.min(up, cruiseAltitude), waypoints[i].constraint);
@@ -140,7 +168,7 @@ export function computeProfile(input: ProfileInput): Profile {
   let topOfDescent: number | null = null;
   if (edIndex >= 0) {
     const firstBelow = descent.findIndex((alt, i) => i <= edIndex && alt < cruiseAltitude - 1);
-    if (firstBelow >= 0) {
+    if (firstBelow >= 0 && basis[firstBelow] !== "unknown") {
       const back = (cruiseAltitude - descent[firstBelow]) / (FT_PER_NM * tan);
       const at = cumulative[firstBelow] - back;
       topOfDescent = at > 0 ? at : null;
@@ -155,19 +183,30 @@ export function computeProfile(input: ProfileInput): Profile {
   const points: ProfilePoint[] = [];
   let altitude = input.altitude, time = input.now, fuel = input.fuel, unableNext: string | null = null;
   waypoints.forEach((w, i) => {
-    const hours = w.legDistance / Math.max(30, w.groundSpeed);
+    const hours = (w.legDistance ?? 0) / Math.max(30, w.groundSpeed);
     time += hours * 3_600_000;
     fuel -= hours * input.fuelFlow;
     const cap = Math.min(cruiseAltitude, capOf(w.constraint));
     const climbed = altitude < cap ? Math.min(cap, altitude + input.climbRate * hours * 60) : altitude;
     const predicted = Math.min(climbed, descent[i]);
-    const needed = w.constraint?.kind === "A" || w.constraint?.kind === "AT" ? w.constraint.altitude : w.constraint?.kind === "WINDOW" ? w.constraint.lower : -Infinity;
-    const met = predicted >= needed - 50 || descent[i] < needed;
-    if (!met && unableNext === null && predicted < needed) unableNext = w.ident;
+    // Both bounds count: a restriction the plan stays above is missed just as one it cannot climb to.
+    const lower = w.constraint?.kind === "A" || w.constraint?.kind === "AT" ? w.constraint.altitude : w.constraint?.kind === "WINDOW" ? w.constraint.lower : -Infinity;
+    const upper = w.constraint?.kind === "B" || w.constraint?.kind === "AT" ? w.constraint.altitude : w.constraint?.kind === "WINDOW" ? w.constraint.upper : Infinity;
+    const met = predicted >= lower - 50 && predicted <= upper + 50;
+    if (!met && unableNext === null) unableNext = w.ident;
     altitude = predicted;
-    points.push({ ident: w.ident, distance: cumulative[i], altitude: predicted, eta: time, fuel, constraintMet: met });
+    const known = basis[i] !== "unknown";
+    points.push({
+      ident: w.ident, distance: known ? cumulative[i] : null, altitude: predicted, eta: known ? time : null, fuel: known ? fuel : null,
+      constraintMet: met, basis: basis[i],
+    });
   });
-  return { points, topOfDescent, endOfDescent: edIndex >= 0 ? waypoints[edIndex].ident : null, unableNext, climbCap, descending: edIndex >= 0 && topOfDescent === null && descent[0] !== Infinity };
+  const landing = edIndex >= 0 ? edIndex : waypoints.findLastIndex(w => !w.missed);
+  return {
+    points, topOfDescent, endOfDescent: edIndex >= 0 ? waypoints[edIndex].ident : null, unableNext, climbCap,
+    descending: edIndex >= 0 && topOfDescent === null && descent[0] !== Infinity,
+    destination: landing >= 0 ? points[landing] : null,
+  };
 }
 
 /**
