@@ -1,0 +1,101 @@
+/* The navigation display: a dark screen with the conventional colours (magenta active, white route, cyan holds and
+   search patterns, green range rings). */
+
+.fmsMap {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  margin: 0 auto;
+  border-radius: 12px;
+  background: #07090c;
+  font-family: "Consolas", "Lucida Console", monospace;
+}
+
+.fmsMap .ring {
+  fill: none;
+  stroke: #2f6f4b;
+  stroke-width: 0.8;
+}
+
+.fmsMap .ring.half {
+  stroke-dasharray: 3 4;
+}
+
+.fmsMap .ringLabel {
+  fill: #4fae78;
+  font-size: 12px;
+}
+
+.fmsMap .north {
+  fill: #e8e8e2;
+  font-size: 13px;
+  text-anchor: middle;
+}
+
+.fmsMap path.active,
+.fmsMap path.later,
+.fmsMap path.modified,
+.fmsMap path.hold,
+.fmsMap path.sar {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+}
+
+.fmsMap path.active { stroke: #ff5cf0; }
+.fmsMap path.later { stroke: #f4f4f0; }
+.fmsMap path.modified { stroke: #f4f4f0; stroke-dasharray: 5 4; opacity: 0.8; }
+.fmsMap path.hold { stroke: #34e7ff; }
+.fmsMap path.sar { stroke: #34e7ff; stroke-width: 1.1; }
+.fmsMap path.offset { fill: none; stroke: #ff5cf0; stroke-width: 1.4; stroke-dasharray: 6 4; }
+
+.fmsMap .wpt path {
+  fill: #f4f4f0;
+}
+
+.fmsMap .wpt text {
+  fill: #f4f4f0;
+  font-size: 12px;
+}
+
+.fmsMap .activeWpt path,
+.fmsMap .activeWpt text {
+  fill: #ff5cf0;
+}
+
+.fmsMap .aircraft {
+  fill: #f4f4f0;
+  stroke: #07090c;
+  stroke-width: 0.6;
+}
+
+.fmsMap .trackLine {
+  stroke: #f4f4f0;
+  stroke-width: 0.6;
+  stroke-dasharray: 2 4;
+  opacity: 0.6;
+}
+
+.fmsMap .navaid path,
+.fmsMap .airport circle {
+  fill: none;
+  stroke: #34e7ff;
+  stroke-width: 1;
+}
+
+.fmsMap .navaid text,
+.fmsMap .airport text {
+  fill: #34e7ff;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.fmsMap .truePosition path {
+  stroke: #ffb21e;
+  stroke-width: 1.5;
+}
+
+.fmsMap .truePosition text {
+  fill: #ffb21e;
+  font-size: 12px;
+}

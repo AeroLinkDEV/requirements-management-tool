@@ -100,9 +100,12 @@ test('every physical key on the rendered panel can be clicked and reaches the si
 test('conditions from the bench light the panel annunciators, and FMS failure blanks the display', async ({ page }) => {
   await open(page)
   const lamp = (code: string) => page.locator(`.fmsCduLamp[data-lamp="${code}"]`)
-  await page.getByLabel('GPS lost (dead reckoning)').check()
-  await expect(lamp('POS')).toHaveClass(/\blit\b/)
+  // With GPS lost the FMS updates from radio; only with the DMEs lost as well does it dead reckon and light POS.
+  await page.getByRole('checkbox', { name: /^GPS lost sensor/ }).check()
   await expectLine(page, 13, /^GPS NAV LOST/)
+  await expect(lamp('POS')).not.toHaveClass(/\blit\b/)
+  await page.getByRole('checkbox', { name: /^DME outage/ }).check()
+  await expect(lamp('POS')).toHaveClass(/\blit\b/)
   await page.getByLabel('Subsystem request').check()
   await expect(lamp('MENU_LIGHT')).toHaveClass(/\blit\b/)
 
@@ -123,7 +126,7 @@ test('a library alert and a sequenced waypoint reach the panel', async ({ page }
   await expectLine(page, 13, /^TIMER ALARM/)
   await expect(page.locator('.fmsCduLamp[data-lamp="MSG"]')).toHaveClass(/\blit\b/)
   await expect(page.locator('.fmsBench')).toContainText('Active waypoint MUN')
-  await page.getByRole('button', { name: 'Sequence to next waypoint' }).click()
+  await page.getByRole('button', { name: 'Jump to next waypoint' }).click()
   await expect(page.locator('.fmsBench')).toContainText('Active waypoint RDG')
   await key(page, 'LEGS').click()
   await expectLine(page, 2, /^RDG/)
@@ -145,4 +148,21 @@ test('NVG lighting backlights the legends green and holds the display in the NVG
   expect(await luminance()).toBeLessThanOrEqual(3)
   await page.getByText('Day', { exact: true }).click()
   await expect.poll(luminance).toBe(day)
+})
+
+test('Fly moves the aircraft along the route on the map at the chosen rate, and Pause stops it', async ({ page }) => {
+  await open(page)
+  const map = page.getByRole('img', { name: /^Navigation map/ })
+  await expect(map).toHaveAttribute('aria-label', /LNAV mode, active waypoint MUN/)
+  await page.getByLabel('Simulation rate').selectOption('64')
+  await page.getByRole('button', { name: 'Fly' }).click()
+  // MUN is 13.6 NM away: at 64 times real time it is passed within a few seconds.
+  await expect(map).toHaveAttribute('aria-label', /active waypoint RDG/, { timeout: 20_000 })
+  await expect(page.getByLabel('Guidance')).toContainText('LNAV')
+  await page.getByRole('button', { name: 'Pause' }).click()
+  const paused = await page.locator('.fmsBench').getByText(/^Active waypoint/).innerText()
+  await page.waitForTimeout(1500)
+  await expect(page.locator('.fmsBench').getByText(/^Active waypoint/)).toHaveText(paused)
+  await page.getByLabel('Map range').selectOption('80')
+  await expect(map).toHaveAttribute('aria-label', /80 NM range/)
 })

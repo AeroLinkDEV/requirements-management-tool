@@ -3,10 +3,16 @@ import type { ConditionId } from "./conditions";
 import { DATALINK_PAGES, DEMO_SMS, DEMO_UPLINKS } from "./datalinkPages";
 import { CORE_PAGES } from "./fmsPages";
 import {
-  NAV_DATABASE, START_POSITION, courseDeg, distanceNm, holdEntry, maxSarGroundSpeed, offset,
-  type Hold, type HoldEntry, type LatLon, type Leg, type LskResult, type Message, type Page, type PageId, type Route, type Sar,
+  START_POSITION, WAYPOINT, arcLength, bearingIntersection, courseDeg, distanceNm, fromLocal, toLocal, holdEntry, maxSarGroundSpeed, offset,
+  type Hold, type HoldEntry, type LatLon, type Leg, type LskResult, type Message, type Offset, type Page, type PageId, type Route, type Sar,
   type SarPattern, type Uplink,
 } from "./fmsModel";
+import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
+import { coldTemperatureCorrection, computeProfile, parseConstraint, type Profile } from "./vnav";
+import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
+import { NAV_PAGES } from "./navPages";
+import { PLANNING_PAGES } from "./planningPages";
+import { composeRoute, enrouteLegs, findProcedure } from "./procedures";
 import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line } from "./screen";
 import { TACTICAL_PAGES } from "./tacticalPages";
 import type { CduFunction } from "./variants";
@@ -17,12 +23,14 @@ import type { CduFunction } from "./variants";
  * It follows the Operator's Manual rules for the keys (scratchpad entry, CLR, DELETE, +/-, line select entry and
  * copy, MOD/ACT with EXEC and ERASE, PREV/NEXT, BRT, the MSG annunciator) and for the pages it models: direct-to,
  * holds with their standard entry, the VNAV approach path, the search patterns, the tactical approach and the
- * timer. Courses and distances come from a small demonstration navigation database, and the aircraft only moves
- * when the bench sequences it to the next waypoint. It is labelled as a simulation on its IDENT page and is not a
- * navigation computer.
+ * timer. Courses and distances come from a small demonstration navigation database. The aircraft is flown by the
+ * flight simulation (flight.ts), which reports its state here and calls arrive() at each waypoint passage. It is
+ * labelled as a simulation on its IDENT page and is not a navigation computer.
  */
 
-const PAGES: Record<PageId, Page> = { ...CORE_PAGES, ...TACTICAL_PAGES, ...DATALINK_PAGES };
+const PAGES: Record<PageId, Page> = { ...CORE_PAGES, ...PLANNING_PAGES, ...NAV_PAGES, ...TACTICAL_PAGES, ...DATALINK_PAGES };
+
+export type WaypointResolution = { ident: string } | { select: string } | "invalid" | "not-in-database";
 
 const wpt = (ident: string, altitude?: string): Leg => ({ kind: "wpt", ident, altitude });
 
@@ -57,8 +65,19 @@ export class ScriptedFms implements CduBackend {
   private lastBrt = -Infinity;
   private squawkIdentUntil = 0;
   private here: LatLon = { ...START_POSITION };
+  /** Where the aircraft really is; here is where the FMS believes it is. */
+  private truth: LatLon = { ...START_POSITION };
+  /** The FMS position error, NM east and north of the true position. */
+  private error = { x: 0, y: 0 };
+  private nav = {
+    mode: "GPS" as NavMode, anp: 0.05, dmes: [] as string[], vor: null as string | null, rnpManual: null as number | null,
+    unableSince: null as number | null, unableAlerted: false, integrityAlerted: false, approachIntegrityAlerted: false, armAlerted: false,
+  };
+  private armedApproach = false;
+  private perf = { notEnoughAlerted: false, unableAlertedFor: null as string | null };
+  private inhibited: string[] = [];
+  private gpsSelected = true;
   private injected = new Set<ConditionId>();
-  private offsetNm: number | null = null;
   private call: { state: "none" | "ringing" | "active"; from: string; since: number } = { state: "none", from: "", since: 0 };
   private messages: { from: string; text: string; at: Date; read: boolean }[] = [];
   private uplinkList: Uplink[] = [];
@@ -66,11 +85,40 @@ export class ScriptedFms implements CduBackend {
   private enteredHold: HoldEntry | null = null;
   private sequenced: string | null = null;
 
-  readonly groundSpeed = 120;
-  readonly altitude = 3000;
+  private db = new NavDatabase(DEMO_NAV_DATA);
+  /** Which of several same-ident entries the crew chose on SELECT DESIRED WPT. */
+  private chosen: Record<string, number> = {};
+  private selectPending: { ident: string; apply: (ident: string) => LskResult; back: { page: PageId; index: number } } | null = null;
+  private pilot: { ident: string; position: LatLon; definition: string }[] = [];
+  private companyRoutes: StoredRoute[] = structuredClone(DEMO_COMPANY_ROUTES);
+  private secondaryRoute: Route | null = null;
+  /** The ident shown on REF NAV DATA, and an airway chosen on RTE 2 waiting for its TO fix. */
+  navDataQuery: string | null = null;
+  pendingVia: string | null = null;
+  private aircraft = { track: courseDeg(START_POSITION, { lat: 45.2150, lon: -75.3900 }), groundSpeed: 120, altitude: 3000, verticalSpeed: 0, crossTrack: 0, trackError: 0 };
+  /** Where the active leg starts: the last waypoint passed, or present position when a direct-to was executed. */
+  private legStart: LatLon = { ...START_POSITION };
+  private directPending = false;
+  private directBypassed: string[] = [];
+
+  get groundSpeed() { return this.aircraft.groundSpeed; }
+  get altitude() { return this.aircraft.altitude; }
+  get track() { return this.aircraft.track; }
+  get verticalSpeed() { return this.aircraft.verticalSpeed; }
+  /** Guidance deviations the flight simulation reports: cross-track NM (positive right) and track error degrees. */
+  get crossTrack() { return this.aircraft.crossTrack; }
+  get trackError() { return this.aircraft.trackError; }
+  get activeLegStart() { return this.legStart; }
+  /** The active route, whatever a pending modification shows on the pages. Guidance flies this one. */
+  get activeRoute(): Route { return this.active; }
+
   readonly wind = { direction: 270, speed: 12 };
   /** Entries on the VNAV approach page. The FAF altitude sets the vertical path angle to the threshold. */
-  readonly vnav = { mda: 560, fafAltitude: 1500, runwayElevation: 118, destTemp: null as number | null, qnh: null as string | null };
+  readonly vnav = {
+    mda: 560, fafAltitude: 1500, runwayElevation: 118, destTemp: null as number | null, qnh: null as string | null,
+    /** The planned cruise, the descent path angle, and DES NOW (an early descent to capture the path). */
+    cruiseAltitude: 4500, cruiseSpeed: 120, pathAngle: 3.0, desNow: false,
+  };
   readonly timer = { alarmAt: null as number | null, countdownEnd: null as number | null };
   readonly sar: Sar = {
     id: { SQUARE: "SQR01", LADDER: "LAD01", SECTOR: "SEC01" }, refId: null, relativeBearing: null, distance: null,
@@ -85,7 +133,10 @@ export class ScriptedFms implements CduBackend {
 
   private readonly clock: () => Date;
 
-  constructor(clock: () => Date = () => new Date()) { this.clock = clock; }
+  constructor(clock: () => Date = () => new Date()) {
+    this.clock = clock;
+    this.updateNavigation(0);
+  }
 
   // ------------------------------------------------------------------ CduBackend
 
@@ -105,11 +156,16 @@ export class ScriptedFms implements CduBackend {
     if (this.unacknowledged) lamps.add("MSG");
     if (this.modified) lamps.add("EXEC");
     const lampFor: Partial<Record<ConditionId, Lamp>> = {
-      gpsLost: "POS", rnpExceeded: "RNP", npa: "NPA", offset: "OFST", independent: "IND", gsmCall: "GSM", sms: "SMS",
+      offset: "OFST", independent: "IND", gsmCall: "GSM", sms: "SMS",
       atcUplink: "ATC", tx1: "TX1", tx2: "TX2", vuhf: "V/UHF", hf: "HF", menuRequest: "MENU",
     };
     for (const [condition, lamp] of Object.entries(lampFor) as [ConditionId, Lamp][])
       if (this.hasCondition(condition)) lamps.add(lamp);
+    // Navigation annunciators follow the navigation state: POS in dead reckoning, RNP when ANP exceeds RNP, NPA on a
+    // non-precision approach. The bench can still force RNP and NPA on.
+    if (this.nav.mode === "DR") lamps.add("POS");
+    if (this.rnpExceeded) lamps.add("RNP");
+    if (this.hasCondition("npa") || this.nonPrecisionApproach) lamps.add("NPA");
     return lamps;
   }
 
@@ -139,7 +195,7 @@ export class ScriptedFms implements CduBackend {
 
   hasCondition(id: ConditionId): boolean {
     switch (id) {
-      case "offset": return this.offsetNm !== null;
+      case "offset": return this.active.offset !== undefined;
       case "gsmCall": return this.call.state !== "none";
       case "sms": return this.messages.some(message => !message.read);
       case "atcUplink": return this.uplinkList.some(uplink => uplink.response === "OPEN");
@@ -150,7 +206,8 @@ export class ScriptedFms implements CduBackend {
   setCondition(id: ConditionId, on: boolean) {
     if (on === this.hasCondition(id)) return;
     switch (id) {
-      case "offset": this.offsetNm = on ? -2.0 : null; break;
+      // Injected as an executed offset, as though the crew had entered and executed it.
+      case "offset": if (on) this.active.offset = { nm: -2.0 }; else this.active.offset = undefined; break;
       case "gsmCall": this.call = on ? { state: "ringing", from: "+1 613 555 0142", since: this.now.getTime() } : { state: "none", from: "", since: 0 }; break;
       case "sms":
         if (on) this.messages.unshift({ ...DEMO_SMS[this.messages.length % DEMO_SMS.length], at: this.now, read: false });
@@ -165,8 +222,8 @@ export class ScriptedFms implements CduBackend {
         break;
       default:
         if (on) this.injected.add(id); else this.injected.delete(id);
-        if (on && id === "gpsLost") this.alert(alert("GPS NAV LOST"));
         if (on && id === "rnpExceeded") this.alert(alert("CHECK ANP"));
+        if (id === "gpsLost" || id === "gpsIntegrity" || id === "dmeOutage") this.updateNavigation(0);
         if (on && id === "independent") this.alert(alert("INDEPENDENT OP"));
         // The FMS restarts on its IDENT page when it comes back.
         if (!on && id === "fmsFail") { this.open("IDENT"); this.message = null; }
@@ -180,37 +237,287 @@ export class ScriptedFms implements CduBackend {
    */
   sequence() {
     if (this.injected.has("fmsFail")) return;
+    if (this.active.legs[0]?.kind === "disco") this.active.legs.shift();
+    const leg = this.active.legs[0];
+    const at = leg?.kind === "wpt" ? this.coordinates(leg.ident) : undefined;
+    if (at) { this.truth = { ...at }; this.here = this.withError(this.truth); }
+    this.arrive();
+    this.emit();
+  }
+
+  /**
+   * The aircraft has reached the active waypoint. It is sequenced, unless it is the fix of a hold that is not armed
+   * to exit (the hold is entered, or another circuit begins) or the start of the active search pattern. Returns what
+   * the aircraft flies next; the flight simulation calls this at each waypoint passage.
+   */
+  arrive(): "route" | "hold" | "sar" | "end" {
     const route = this.active;
-    if (route.legs[0]?.kind === "disco") route.legs.shift();
     const leg = route.legs[0];
-    if (!leg || leg.kind !== "wpt") { this.alert(alert("END OF ROUTE")); this.emit(); return; }
-    const at = this.coordinates(leg.ident);
+    if (!leg || leg.kind === "disco") { this.alert(alert("END OF ROUTE")); return "end"; }
+    // A conditional leg ends where its event happened: the next leg starts from here.
+    if (leg.kind === "cond") { this.passLeg(null); return "route"; }
     const hold = route.hold;
+    // A hold with a one-turn exit (HF) leaves at the first fix crossing after its entry.
+    if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && hold.exit === "1 TURN") hold.status = "EXIT ARMED";
     if (hold && hold.fix === leg.ident && hold.status !== "EXIT ARMED") {
       if (hold.status === "ARMED") {
         this.enteredHold = this.holdEntryFor(route);
         hold.status = "IN PROGRESS";
         if (hold.speed > MAX_HOLDING_SPEED) this.alert(alert("HIGH HOLDING SPEED"));
       }
-      if (at) this.here = at;
-      this.emit();
-      return;
+      return "hold";
     }
     if (hold && hold.fix === leg.ident) { route.hold = undefined; this.enteredHold = null; }
     if (leg.qualifier === "/S" && this.sar.active) {
       this.sar.status = "IN PROGRESS";
-      if (at) this.here = at;
-      this.emit();
+      return "sar";
+    }
+    this.passLeg(leg.ident);
+    return route.legs.some(next => next.kind !== "disco") ? "route" : "end";
+  }
+
+  /** The search pattern has been flown to its end: the route continues after the search pattern waypoint. */
+  completeSar() {
+    const leg = this.active.legs[0];
+    this.sar.active = null;
+    this.sar.status = null;
+    if (leg?.kind === "wpt" && leg.qualifier === "/S") this.passLeg(leg.ident);
+  }
+
+  /** Sequences the active leg: a waypoint (by ident) or, with null, a conditional leg that has ended. */
+  private passLeg(ident: string | null) {
+    const route = this.active;
+    this.legStart = (ident && this.coordinates(ident)) || { ...this.here };
+    if (ident) this.sequenced = ident;
+    const passed = route.legs.shift();
+    // A direct-to-fix leg is flown from wherever the aircraft is when it becomes active.
+    const next = route.legs[0];
+    if (next?.kind === "wpt" && next.path === "DF") this.legStart = { ...this.here };
+    // The offset ends at its end waypoint, where the aircraft returns to the route.
+    if (ident && route.offset?.end === ident) route.offset = undefined;
+    if (!ident) {
+      const pendingCond = this.modified?.legs[0];
+      if (pendingCond?.kind === "cond") this.modified?.legs.shift();
+      if (!route.legs.some(l => l.kind !== "disco")) this.alert(alert("END OF ROUTE"));
       return;
     }
-    if (at) this.here = at;
-    this.sequenced = leg.ident;
-    route.legs.shift();
+    // Passing the runway starts the missed approach; its hold is armed so the aircraft holds at the end of it.
+    if (passed?.kind === "wpt" && passed.source === "APPR" && /^RW\d{2}/.test(ident)) this.armMissedHold(route);
     const pending = this.modified?.legs[0];
-    if (pending?.kind === "wpt" && pending.ident === leg.ident) this.modified?.legs.shift();
+    if (pending?.kind === "wpt" && pending.ident === ident) this.modified?.legs.shift();
     if (!route.legs.some(next => next.kind === "wpt")) this.alert(alert("END OF ROUTE"));
-    this.emit();
   }
+
+  /** The flight simulation reports the aircraft's state after each step. */
+  setAircraft(state: Partial<{ position: LatLon; track: number; groundSpeed: number; altitude: number; verticalSpeed: number; crossTrack: number; trackError: number }>) {
+    // The simulation reports where the aircraft really is; the FMS position is that plus its navigation error.
+    if (state.position) { this.truth = state.position; this.here = this.withError(this.truth); }
+    const { position: _position, ...rest } = state;
+    Object.assign(this.aircraft, rest);
+  }
+
+  // ------------------------------------------------------------------ navigation sensors (navigation.ts)
+
+  private withError(at: LatLon) {
+    const nm = Math.hypot(this.error.x, this.error.y);
+    if (nm < 1e-6) return { ...at };
+    return offset(at, (Math.atan2(this.error.x, this.error.y) * 180) / Math.PI, nm);
+  }
+
+  /**
+   * Chooses the navigation source and updates the FMS position error and ANP, then checks ANP against RNP. In
+   * dead reckoning the error grows with inertial drift; when a better source returns the position jumps back,
+   * which the FMS reports as a POSITION SHIFT.
+   */
+  updateNavigation(dt: number) {
+    const inputs = {
+      gpsAvailable: !this.injected.has("gpsLost") && this.gpsSelected,
+      gpsIntegrity: !this.injected.has("gpsIntegrity"),
+      dmeAvailable: !this.injected.has("dmeOutage"),
+      inhibited: this.inhibited,
+    };
+    const previous = this.nav.mode;
+    const selection = selectSources(this.db.nearby(this.truth, 160), this.truth, this.altitude, inputs);
+    if (selection.mode === "DR") {
+      const drift = sourceError("DR");
+      const grow = (IRS_DRIFT_NM_PER_HOUR * dt) / 3600;
+      this.error = { x: this.error.x + grow * Math.sin((drift.bearing * Math.PI) / 180), y: this.error.y + grow * Math.cos((drift.bearing * Math.PI) / 180) };
+    } else {
+      const target = sourceError(selection.mode);
+      const next = { x: target.nm * Math.sin((target.bearing * Math.PI) / 180), y: target.nm * Math.cos((target.bearing * Math.PI) / 180) };
+      if (Math.hypot(next.x - this.error.x, next.y - this.error.y) > 0.5) this.alert(alert("POSITION SHIFT"));
+      this.error = next;
+    }
+    this.here = this.withError(this.truth);
+    const errorNm = Math.hypot(this.error.x, this.error.y);
+    this.nav = {
+      ...this.nav, mode: selection.mode, dmes: selection.dmes.map(d => d.ident), vor: selection.vor?.ident ?? null,
+      anp: selection.mode === "DR" ? Math.max(0.1, errorNm * 1.3 + 0.05) : selection.baseAnp,
+    };
+    if (previous === "GPS" && selection.mode !== "GPS") this.alert(alert("GPS NAV LOST"));
+    if (selection.mode === "GPS" && !inputs.gpsIntegrity && !this.nav.integrityAlerted) { this.nav.integrityAlerted = true; this.alert(alert("GPS POS UNCERTAIN")); }
+    if (inputs.gpsIntegrity) this.nav.integrityAlerted = false;
+
+    // ANP above RNP for longer than the time to alert of the phase: CHECK ANP, once per episode.
+    const now = this.now.getTime();
+    const { alertSeconds } = RNP_DEFAULTS[this.flightPhase];
+    if (this.nav.anp > this.requiredRnp) {
+      this.nav.unableSince ??= now;
+      if (!this.nav.unableAlerted && now - this.nav.unableSince >= alertSeconds * 1000) { this.nav.unableAlerted = true; this.alert(alert("CHECK ANP")); }
+    } else { this.nav.unableSince = null; this.nav.unableAlerted = false; }
+
+    const faf = findProcedure(this.db, this.active, "APPROACH")?.faf;
+    const first = this.active.legs[0];
+    const fafPosition = faf ? this.coordinates(faf) : undefined;
+    const nearFaf = first?.kind === "wpt" && first.ident === faf && fafPosition !== undefined && distanceNm(this.here, fafPosition) <= 2;
+    if (nearFaf && !this.armedApproach) {
+      if (!this.nav.armAlerted) { this.nav.armAlerted = true; this.alert(alert("ARM APPROACH")); }
+    } else if (!nearFaf) this.nav.armAlerted = false;
+
+    // On an RNAV approach, a position without GPS integrity is not good enough to continue.
+    const approach = findProcedure(this.db, this.active, "APPROACH");
+    const rnavApproach = approach?.approachType === "RNAV" && this.flightPhase === "APPROACH";
+    if (rnavApproach && (selection.mode !== "GPS" || !inputs.gpsIntegrity)) {
+      if (!this.nav.approachIntegrityAlerted) { this.nav.approachIntegrityAlerted = true; this.alert(alert("NO APPR INTEGRITY")); }
+    } else this.nav.approachIntegrityAlerted = false;
+  }
+
+  /** The phase that sets the default RNP: approach on an approach leg, terminal within 30 NM of either airport. */
+  get flightPhase(): FlightPhase {
+    const leg = this.active.legs[0];
+    if (leg && leg.kind !== "disco" && leg.source === "APPR") return "APPROACH";
+    const near = (icao: string) => { const airport = this.db.airport(icao); return airport !== undefined && distanceNm(this.here, airport.position) <= 30; };
+    return near(this.active.origin) || near(this.active.dest) ? "TERMINAL" : "EN ROUTE";
+  }
+
+  // ------------------------------------------------------------------ vertical profile and predictions (vnav.ts)
+
+  /** Ground speed on a course, from the true airspeed and the wind. */
+  groundSpeedOn(course: number, tas = this.targetSpeed) {
+    return Math.max(30, tas - this.wind.speed * Math.cos(((this.wind.direction - course) * Math.PI) / 180));
+  }
+
+  /** The cold temperature correction to the FAF altitude, from the destination temperature on VNAV (0 at or above ISA). */
+  get coldCorrection() {
+    const { destTemp, fafAltitude, runwayElevation } = this.vnav;
+    return destTemp === null ? 0 : coldTemperatureCorrection(fafAltitude - runwayElevation, destTemp, runwayElevation);
+  }
+
+  get fafAltitudeCorrected() { return this.vnav.fafAltitude + this.coldCorrection; }
+
+  /** The true airspeed flown: the cruise speed, reduced by a speed constraint at the active fix or the hold. */
+  get targetSpeed() {
+    const leg = this.active.legs[0];
+    const constraint = leg?.kind === "wpt" ? leg.speed : undefined;
+    const hold = this.active.hold?.status === "IN PROGRESS" ? this.active.hold.speed : undefined;
+    return Math.min(this.vnav.cruiseSpeed, constraint ?? Infinity, hold ?? Infinity);
+  }
+
+  /**
+   * The planned vertical profile and predictions along the active route: altitude, ETA and fuel at each waypoint,
+   * the top and end of descent, and the first climb constraint that cannot be met. The E/D is the runway.
+   */
+  profile(route: Route = this.active): Profile {
+    const geometry = this.legGeometry(route);
+    // The descent meets the approach: the final approach fix is crossed at its (temperature-corrected) altitude.
+    const runwayAt = route.legs.findIndex(leg => leg.kind === "wpt" && /^RW\d{2}/.test(leg.ident));
+    const waypoints = route.legs.flatMap((leg, i) => {
+      if (leg.kind !== "wpt") return [];
+      const g = geometry[i];
+      const constraint = i === runwayAt - 1 ? { kind: "AT" as const, altitude: this.fafAltitudeCorrected } : parseConstraint(leg.altitude);
+      return [{
+        ident: leg.ident, legDistance: g?.distance ?? 0, groundSpeed: this.groundSpeedOn(g?.course ?? this.track),
+        constraint, endOfDescent: i === runwayAt,
+      }];
+    });
+    return computeProfile({
+      waypoints, altitude: this.altitude, cruiseAltitude: this.vnav.cruiseAltitude, climbRate: 1000, pathAngle: this.vnav.pathAngle,
+      fuel: this.fuel.quantity, fuelFlow: this.fuel.flow, now: this.now.getTime(),
+    });
+  }
+
+  /**
+   * Burns fuel for dt seconds and checks the plan: FUEL RESERVE when fuel on board reaches the reserve, NOT ENOUGH
+   * FUEL when the prediction at the destination is below it, UNABLE NEXT ALTITUDE (the manual’s wording is not in
+   * the alert list, so the advisory is used) when a climb constraint cannot be made.
+   */
+  updatePerformance(dt: number) {
+    const before = this.fuel.quantity;
+    this.fuel.quantity = Math.max(0, before - (this.fuel.flow * dt) / 3600);
+    if (before > this.fuel.reserve && this.fuel.quantity <= this.fuel.reserve) this.alert(alert("FUEL RESERVE"));
+    const profile = this.profile();
+    const atDestination = profile.points.at(-1)?.fuel;
+    if (atDestination !== undefined && atDestination < this.fuel.reserve) {
+      if (!this.perf.notEnoughAlerted) { this.perf.notEnoughAlerted = true; this.alert(alert("NOT ENOUGH FUEL")); }
+    } else this.perf.notEnoughAlerted = false;
+    if (profile.unableNext && profile.unableNext !== this.perf.unableAlertedFor) { this.perf.unableAlertedFor = profile.unableNext; this.advisory("UNABLE NEXT ALT"); }
+    if (!profile.unableNext) this.perf.unableAlertedFor = null;
+  }
+
+  /** On an approach that is not an ILS: the NPA annunciator. */
+  get nonPrecisionApproach() {
+    return this.flightPhase === "APPROACH" && findProcedure(this.db, this.active, "APPROACH")?.approachType !== "ILS";
+  }
+
+  /**
+   * The approach the crew is flying, as the FMA and VNAV page name it: an ILS; an RNAV approach to LPV minima on
+   * GPS with integrity (SBAS is assumed available); and no approach guidance without GPS integrity.
+   */
+  get approachType(): "ILS" | "LPV" | "NO APPR" | null {
+    const approach = findProcedure(this.db, this.active, "APPROACH") ?? findProcedure(this.db, this.route, "APPROACH");
+    if (!approach) return null;
+    if (approach.approachType === "ILS") return "ILS";
+    return this.nav.mode !== "GPS" || this.injected.has("gpsIntegrity") ? "NO APPR" : "LPV";
+  }
+
+  get approachArmed() { return this.armedApproach; }
+
+  /** APPR: arms the approach; it becomes active on the final approach. */
+  armApproach(on = true) { this.armedApproach = on; this.emit(); }
+
+  /**
+   * TOGA: a go-around before the runway. The rest of the approach is dropped and the missed approach becomes the
+   * active route from present position, its hold armed.
+   */
+  goAround() {
+    const route = this.active;
+    const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
+    // Only from the approach: once the missed approach is being flown there is nothing left to go around from.
+    if (missed <= 0) return false;
+    route.legs.splice(0, missed);
+    this.legStart = { ...this.here };
+    this.armedApproach = false;
+    this.armMissedHold(route);
+    this.emit();
+    return true;
+  }
+
+  private armMissedHold(route: Route) {
+    const missedHold = findProcedure(this.db, route, "APPROACH")?.missedHold;
+    if (!missedHold || route.hold) return;
+    route.hold = { fix: missedHold.fix, turn: missedHold.turn, inbound: missedHold.inbound, legTime: 1, legDistance: null, exit: "MANUAL", speed: 180, altitude: missedHold.altitude, status: "ARMED" };
+    for (const leg of route.legs) if (leg.kind === "wpt" && leg.ident === missedHold.fix) leg.qualifier = "/H";
+  }
+
+  /** RNP in force: the entry the crew made, or the default for the phase of flight. */
+  get requiredRnp() { return this.nav.rnpManual ?? RNP_DEFAULTS[this.flightPhase].rnp; }
+  get navState() { return this.nav; }
+  get truePosition() { return this.truth; }
+  get inhibitedNavaids() { return this.inhibited; }
+  get gpsNavSelected() { return this.gpsSelected; }
+  /** Whether ANP has exceeded RNP (the RNP annunciator), computed or injected. */
+  get rnpExceeded() { return this.injected.has("rnpExceeded") || this.nav.anp > this.requiredRnp; }
+
+  /** A manual RNP (PROGRESS), or null to return to the default for the phase. */
+  setRnp(rnp: number | null) {
+    this.nav.rnpManual = rnp;
+    if (rnp !== null && rnp > RNP_DEFAULTS[this.flightPhase].rnp) this.alert(alert("VERIFY RNP VALUE"));
+    this.updateNavigation(0);
+  }
+
+  /** NAV OPTIONS: navaids excluded from position updating, and GPS selected in or out. */
+  setInhibited(idents: string[]) { this.inhibited = idents.slice(0, 3); this.updateNavigation(0); }
+  selectGps(on: boolean) { this.gpsSelected = on; this.updateNavigation(0); }
 
   /** Advances time-driven state: the timer alarms, the call duration and the clocks on the display. */
   tick() {
@@ -231,7 +538,8 @@ export class ScriptedFms implements CduBackend {
   get markList() { return this.marks; }
   get recallList() { return this.recall; }
   get squawkIdent() { return this.clock().getTime() < this.squawkIdentUntil; }
-  get lateralOffset() { return this.offsetNm; }
+  /** The lateral offset the pages show: the modification's if there is one, otherwise the active route's. */
+  get lateralOffset() { return this.route.offset; }
   get callState() { return this.call; }
   get smsList() { return this.messages; }
   get uplinks() { return this.uplinkList; }
@@ -241,16 +549,182 @@ export class ScriptedFms implements CduBackend {
 
   /** A waypoint's position: a search or tactical point, a Mark On Top, or the navigation database. */
   coordinates(ident: string): LatLon | undefined {
-    return this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position ?? NAV_DATABASE[ident];
+    const own = this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position;
+    if (own) return own;
+    if (/^RW\d{2}[LRC]?$/.test(ident)) {
+      const route = this.route;
+      return (this.db.runway(ident, route.dest) ?? this.db.runway(ident, route.origin) ?? this.db.runway(ident))?.threshold;
+    }
+    return this.entryFor(ident)?.position;
+  }
+
+  /** The database entry an ident means: the only one, the one chosen on SELECT DESIRED WPT, or the nearest. */
+  entryFor(ident: string): NavEntry | undefined {
+    const entries = this.db.find(ident);
+    if (entries.length <= 1) return entries[0];
+    const chosen = this.chosen[ident];
+    if (chosen !== undefined && entries[chosen]) return entries[chosen];
+    return [...entries].sort((a, b) => distanceNm(this.here, a.position) - distanceNm(this.here, b.position))[0];
+  }
+
+  get navdb() { return this.db; }
+  get pilotWaypoints() { return this.pilot; }
+  get storedRoutes() { return this.companyRoutes; }
+  get secondary() { return this.secondaryRoute; }
+  get selection() { return this.selectPending; }
+
+  /** Merges loaded navigation data (ARINC 424) over the database. */
+  loadNavData(data: NavData) {
+    this.db = this.db.merge(data);
+    this.emit();
+  }
+
+  /**
+   * Resolves a waypoint entry. A known ident is itself (a duplicate ident needs SELECT DESIRED WPT first). A latitude
+   * and longitude (N4530.0W07530.0), a place/bearing/distance (RDG045/10) or a place-bearing/place-bearing
+   * (RDG045/MUN090) entry creates a pilot waypoint, named WPTnn or after the place.
+   */
+  resolveWaypoint(text: string): WaypointResolution {
+    if (WAYPOINT.test(text)) {
+      if (!this.coordinates(text)) return "not-in-database";
+      const own = this.points[text] !== undefined || this.marks.some(mark => mark.ident === text);
+      if (!own && this.db.find(text).length > 1 && this.chosen[text] === undefined) return { select: text };
+      return { ident: text };
+    }
+    const latLon = /^([NS])(\d{2})(\d{2}(?:\.\d)?)?([EW])(\d{3})(\d{2}(?:\.\d)?)?$/.exec(text);
+    if (latLon) {
+      const lat = Number(latLon[2]) + Number(latLon[3] ?? 0) / 60, lon = Number(latLon[5]) + Number(latLon[6] ?? 0) / 60;
+      if (lat > 90 || lon > 180 || Number(latLon[3] ?? 0) >= 60 || Number(latLon[6] ?? 0) >= 60) return "invalid";
+      return { ident: this.createPilot("WPT", { lat: latLon[1] === "S" ? -lat : lat, lon: latLon[4] === "W" ? -lon : lon }, text) };
+    }
+    const pbd = /^([A-Z0-9]{2,5})(\d{3})\/(\d{1,3}(?:\.\d)?)$/.exec(text);
+    if (pbd) {
+      const place = this.coordinates(pbd[1]);
+      const bearing = Number(pbd[2]), distance = Number(pbd[3]);
+      if (!place) return "not-in-database";
+      if (bearing < 1 || bearing > 360 || distance <= 0) return "invalid";
+      return { ident: this.createPilot(pbd[1].slice(0, 3), offset(place, bearing, distance), text) };
+    }
+    const pbpb = /^([A-Z0-9]{2,5})(\d{3})\/([A-Z0-9]{2,5})(\d{3})$/.exec(text);
+    if (pbpb) {
+      const p1 = this.coordinates(pbpb[1]), p2 = this.coordinates(pbpb[3]);
+      if (!p1 || !p2) return "not-in-database";
+      const crossing = bearingIntersection(p1, Number(pbpb[2]), p2, Number(pbpb[4]));
+      if (!crossing) return "invalid";
+      return { ident: this.createPilot(pbpb[1].slice(0, 3), crossing, text) };
+    }
+    return "invalid";
+  }
+
+  /** Stores a pilot waypoint under the next free name for its prefix (WPT01, RDG01...). */
+  createPilot(prefix: string, position: LatLon, definition: string) {
+    let n = 1;
+    let ident = `${prefix}${String(n).padStart(2, "0")}`;
+    while (this.coordinates(ident)) { n += 1; ident = `${prefix}${String(n).padStart(2, "0")}`; }
+    this.points[ident] = position;
+    this.pilot.push({ ident, position, definition });
+    return ident;
+  }
+
+  /** Resolves a waypoint entry and uses it, going through SELECT DESIRED WPT first for a duplicate ident. */
+  enterWaypoint(text: string, apply: (ident: string) => LskResult): LskResult {
+    const resolved = this.resolveWaypoint(text);
+    if (typeof resolved === "string") return resolved;
+    if ("select" in resolved) {
+      this.selectPending = { ident: resolved.select, apply, back: { page: this.page, index: this.index } };
+      this.open("SELECT_WPT");
+      return;
+    }
+    return apply(resolved.ident);
+  }
+
+  /** SELECT DESIRED WPT: the crew picks one of the same-ident entries, and the entry that asked continues. */
+  chooseEntry(index: number): LskResult {
+    const pending = this.selectPending;
+    if (!pending || !this.db.find(pending.ident)[index]) return;
+    this.chosen[pending.ident] = index;
+    this.selectPending = null;
+    this.open(pending.back.page, pending.back.index);
+    return pending.apply(pending.ident);
+  }
+
+  /** Selects (or with null, removes) a SID, STAR or approach and its transition, rebuilding the route as a MOD. */
+  selectProcedure(kind: "SID" | "STAR" | "APPROACH", ident: string | null, transition?: string) {
+    this.modify(route => {
+      const enroute = enrouteLegs(route);
+      const choice = ident ? { ident, transition } : undefined;
+      if (kind === "SID") route.sid = choice;
+      else if (kind === "STAR") route.star = choice;
+      else route.approach = choice;
+      route.legs = composeRoute(route, this.db, enroute);
+    });
+  }
+
+  selectRunway(ident: string) {
+    this.modify(route => {
+      route.runway = route.runway === ident ? undefined : ident;
+      const sid = findProcedure(this.db, route, "SID");
+      if (sid && route.runway && !sid.runways.includes(route.runway)) {
+        const enroute = enrouteLegs(route);
+        route.sid = undefined;
+        route.legs = composeRoute(route, this.db, enroute);
+      }
+    });
+  }
+
+  /** Loads a company route into the active route (as a MOD) or into the secondary flight plan. */
+  loadCompanyRoute(name: string, target: "active" | "secondary" = "active"): boolean {
+    const stored = this.companyRoutes.find(route => route.name === name);
+    if (!stored) return false;
+    const build = (route: Route) => {
+      route.origin = stored.origin;
+      route.dest = stored.dest;
+      route.coRoute = stored.name;
+      route.sid = route.star = route.approach = undefined;
+      route.hold = undefined;
+      route.legs = [...stored.legs.map(leg => ({ kind: "wpt" as const, ...leg })), { kind: "wpt", ident: stored.dest }];
+    };
+    if (target === "active") this.modify(build);
+    else { const route = structuredClone(this.secondaryRoute ?? this.active); build(route); this.secondaryRoute = route; }
+    return true;
+  }
+
+  /** SAVE: stores the route's enroute legs under its CO ROUTE name, replacing a stored route of that name. */
+  saveCompanyRoute() {
+    const route = this.route;
+    const legs = enrouteLegs(route).flatMap(leg => (leg.kind === "wpt" ? [{ ident: leg.ident, via: leg.via, altitude: leg.altitude }] : []));
+    this.companyRoutes = [...this.companyRoutes.filter(stored => stored.name !== route.coRoute), { name: route.coRoute, origin: route.origin, dest: route.dest, legs }];
+  }
+
+  copyActiveToSecondary() { this.secondaryRoute = structuredClone({ ...this.active, hold: undefined }); }
+
+  /** ACTIVATE on SEC FPLN: the secondary flight plan becomes a modification of the active route. */
+  activateSecondary() {
+    const secondary = this.secondaryRoute;
+    if (!secondary) return false;
+    this.modify(route => { Object.assign(route, structuredClone(secondary), { hold: undefined }); });
+    return true;
+  }
+
+  /** Where new enroute legs go: before the arrival, the approach and missed approach, or the destination. */
+  enrouteEnd(route: Route = this.route) {
+    const legs = route.legs;
+    const arrival = legs.findIndex(leg => leg.kind !== "disco" && (leg.source === "STAR" || leg.source === "APPR" || leg.source === "MISSED"));
+    if (arrival >= 0) return arrival;
+    const last = legs.at(-1);
+    return last?.kind === "wpt" && last.ident === route.dest ? legs.length - 1 : legs.length;
   }
 
   /** Course and distance into each leg, from present position. There is no computed leg after a discontinuity. */
   legGeometry(route: Route = this.route): LegGeometry[] {
     let from: LatLon | null = this.here;
     return route.legs.map(leg => {
-      if (leg.kind === "disco") { from = null; return null; }
+      // After a gap or a conditional leg the start of the next leg is not known in advance.
+      if (leg.kind !== "wpt") { from = null; return null; }
       const to = this.coordinates(leg.ident) ?? null;
-      const result = from && to ? { course: courseDeg(from, to), distance: distanceNm(from, to) } : null;
+      let result = from && to ? { course: courseDeg(from, to), distance: distanceNm(from, to) } : null;
+      if (result && from && to && leg.path === "RF" && leg.arc) result = { course: result.course, distance: arcLength(from, to, leg.arc) };
+      if (result && leg.path === "CF" && leg.course !== undefined) result = { ...result, course: leg.course };
       from = to;
       return result;
     });
@@ -281,12 +755,20 @@ export class ScriptedFms implements CduBackend {
   eraseModification() {
     this.modified = null;
     this.sar.pending = null;
+    this.directPending = false;
+    this.directBypassed = [];
   }
 
   setScratch(text: string) { this.scratch = text.slice(0, COLUMNS); }
   setRadio(key: keyof ScriptedFms["radios"], value: string) { this.radios[key] = value; }
   setFuel(key: keyof ScriptedFms["fuel"], value: number) { this.fuel[key] = value; }
-  setOffset(nm: number | null) { this.offsetNm = nm; }
+  /** Enters, changes or (with null) deletes the lateral offset, as a modification to execute. */
+  setOffset(change: Partial<Offset> | null) {
+    this.modify(route => {
+      if (change === null) route.offset = undefined;
+      else if (change.nm !== undefined || route.offset) route.offset = { ...(route.offset ?? { nm: 0 }), ...change };
+    });
+  }
 
   /** The FAF altitude constraint, on the VNAV page and on the FAF leg of both the active and modified routes. */
   setFafAltitude(altitude: number) {
@@ -321,9 +803,51 @@ export class ScriptedFms implements CduBackend {
    */
   directTo(ident: string): LskResult {
     const at = this.route.legs.findIndex(leg => leg.kind === "wpt" && leg.ident === ident);
-    if (at >= 0) { this.modify(route => { route.legs.splice(0, at); }); return; }
-    if (!this.coordinates(ident)) return "not-in-database";
+    if (at < 0 && !this.coordinates(ident)) return "not-in-database";
+    this.directPending = true;
+    // A direct-to must not silently lose the points it bypasses (the Cali lesson): they are kept for ABEAM PTS.
+    this.directBypassed = at > 0 ? this.route.legs.slice(0, at).flatMap(leg => (leg.kind === "wpt" ? [leg.ident] : [])) : [];
+    if (at >= 0) {
+      this.modify(route => {
+        route.legs.splice(0, at);
+        const first = route.legs[0];
+        // Direct from present position: whatever path the leg had (a published course, an arc) no longer applies.
+        if (first?.kind === "wpt") route.legs[0] = { ...first, path: undefined, course: undefined, arc: undefined };
+      });
+      return;
+    }
     this.modify(route => { route.legs.unshift({ kind: "wpt", ident }, { kind: "disco" }); });
+  }
+
+  /** Whether the pending modification is a direct-to, for the INTC CRS and ABEAM PTS prompts. */
+  get directModification() { return this.directPending && this.modified !== null; }
+  get bypassedByDirect() { return this.directBypassed; }
+
+  /** INTC CRS: fly the entered course into the active waypoint instead of direct from present position. */
+  interceptCourse(course: number) {
+    this.modify(route => {
+      const leg = route.legs[0];
+      if (leg?.kind === "wpt") route.legs[0] = { ...leg, path: "CF", course };
+    });
+  }
+
+  /** ABEAM PTS: each waypoint the direct-to bypassed becomes a point abeam it on the new direct track. */
+  abeamPoints() {
+    const target = this.route.legs[0];
+    const to = target?.kind === "wpt" ? this.coordinates(target.ident) : undefined;
+    if (!to || !this.directBypassed.length) return;
+    const direct = toLocal(this.here, to);
+    const points = this.directBypassed.flatMap(ident => {
+      const at = this.coordinates(ident);
+      if (!at) return [];
+      const p = toLocal(this.here, at);
+      const along = (p.x * direct.x + p.y * direct.y) / (direct.x ** 2 + direct.y ** 2);
+      if (along <= 0 || along >= 1) return [];
+      const position = fromLocal(this.here, { x: direct.x * along, y: direct.y * along });
+      return [{ kind: "wpt" as const, ident: this.createPilot(ident.slice(0, 3), position, `ABEAM ${ident}`) }];
+    });
+    this.modify(route => { route.legs.splice(0, 0, ...points); });
+    this.directBypassed = [];
   }
 
   /** Defines a hold at a fix as a modification. A fix that is not in the route becomes the next waypoint. */
@@ -398,6 +922,11 @@ export class ScriptedFms implements CduBackend {
     if (!route) return;
     if (route.hold?.status === "INACTIVE") route.hold.status = "ARMED";
     if (this.sar.pending) { this.sar.active = this.sar.pending; this.sar.status = "ARMED"; this.sar.pending = null; }
+    // A new active waypoint, or a direct-to, starts the active leg at present position.
+    const first = (legs: Leg[]) => { const leg = legs[0]; return leg?.kind === "wpt" ? leg.ident : null; };
+    if (this.directPending || first(route.legs) !== first(this.active.legs)) this.legStart = { ...this.here };
+    this.directPending = false;
+    this.directBypassed = [];
     this.active = route;
     this.modified = null;
   }

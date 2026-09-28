@@ -407,15 +407,39 @@ display unit for engineers.
   (including CLR held for one second) and the physical keyboard.
 - Today a **scripted simulation** drives the display (`product/client/src/fmsCdu/scriptedFms.ts`). It implements
   the manual's rules for scratchpad entry, CLR/DELETE, line select entry and copy, MOD/ACT with EXEC and ERASE,
-  paging, BRT and the MSG and EXEC annunciators. It also models DIRECT-TO (with route discontinuity), holds with
-  their standard entry and status, the VNAV approach path with the glidepath-angle alerts, the SQUARE, LADDER and
-  SECTOR search patterns, the tactical approach, HOVER and TIMER. Courses and distances come from a small
-  demonstration navigation database, and the aircraft moves only when the bench sequences it to the next
-  waypoint. It is labelled as a simulation and is not a navigation computer. The ATC, FMC COMM and GSM/SMS pages
-  are representative only (no datalink) and say so on screen.
+  paging, BRT and the MSG and EXEC annunciators. It is labelled as a simulation and is not a navigation computer.
+  Its scope is measured against ICAO PBN and airline practice in
+  [`product/docs/FMS_TEST_BENCH.md`](product/docs/FMS_TEST_BENCH.md). It models:
+  - **Flight planning** from a navigation database (`navData.ts`): airports and runways, navaids, fixes, airways,
+    and SIDs, STARs and approaches with transitions and missed approaches. The route is built through RTE (VIA/TO
+    airway entry, company routes, SAVE), DEP/ARR, pilot waypoints (latitude/longitude, place/bearing/distance,
+    place-bearing/place-bearing, along-track), SELECT DESIRED WPT for duplicate idents, REF NAV DATA and a
+    secondary flight plan. The built-in data is invented demonstration data; engineers can load waypoints,
+    navaids, airports, runways and airways from an ARINC 424 file (`arinc424.ts`, a subset reader).
+  - **Lateral guidance**: automatic leg sequencing with fly-by and fly-over turns; ARINC 424 path terminators
+    (TF, CF, DF, RF arcs, and the CA/FA/VA, VI and VM/FM conditional legs); DIRECT-TO with INTC CRS and ABEAM
+    PTS; holds with their standard entry and status (including a one-turn exit); a lateral offset flown between
+    start and end waypoints; search patterns flown along their geometry; and selected heading versus LNAV with
+    arm and capture.
+  - **Navigation sensors** (`navigation.ts`): GPS, DME/DME, VOR/DME and inertial position in the airline priority
+    order with automatic reversion; the FMS position drifts from the true position in dead reckoning and shifts
+    back when a sensor returns (POSITION SHIFT); ANP from the sources, RNP by phase of flight or crew entry, and
+    CHECK ANP after the phase's time to alert; NAV STATUS and NAV OPTIONS (navaid inhibit, GPS deselect).
+  - **Approaches and VNAV** (`vnav.ts`): the approach type (ILS, or RNAV to LPV minima with GPS integrity), ARM
+    APPROACH, NO APPR INTEGRITY and go-around; speed and altitude constraints (at, at or above, at or below,
+    windows, flight levels); a vertical profile with top and end of descent, climbs that level at constraints,
+    UNABLE NEXT ALT, DES NOW and the VNAV descent path; winds; ETA and fuel predictions with FUEL RESERVE and
+    NOT ENOUGH FUEL; cold temperature correction.
+  - The earlier pages: HOLD, the SQUARE, LADDER and SECTOR search patterns, the tactical approach, HOVER and
+    TIMER. The ATC, FMC COMM and GSM/SMS pages are representative only (no datalink) and say so on screen.
+- A **flight simulation** (`flight.ts`) flies the active route as an FMS-coupled autopilot would, in real or
+  accelerated time. It is a point-mass model with a bank-limited turn, not a flight dynamics model. A north-up
+  **navigation map** (route, holds, patterns, offset track, navaids and airports, and the true position when the
+  FMS has drifted), a flight mode annunciator and a guidance readout sit beside the CDU.
 - The bench injects conditions that light the variation's annunciators and change the pages (FMS failure, GPS
-  loss and dead reckoning, RNP, NPA, offset, independent operation, GSM, SMS, ATC uplink, radio transmit,
-  subsystem request) and raises any alert from the manual's alert message list.
+  loss, GPS integrity loss, DME outage, forced RNP or NPA, offset, independent operation, GSM, SMS, ATC uplink,
+  radio transmit, subsystem request) and raises any alert from the manual's alert message list. The POS, RNP and
+  NPA annunciators follow the navigation state.
 - The bench has Day, Night and NVG cockpit lighting: backlit key legends (NVIS green for NVG), NVIS-compatible
   annunciators, and display luminance from the light sensor (an ambient-light control) combined with BRT; NVG
   holds the display between 0.1 and 3 fL.

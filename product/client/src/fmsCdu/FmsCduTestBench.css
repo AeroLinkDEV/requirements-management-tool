@@ -322,3 +322,156 @@
   color: var(--ink-500, #6b7686);
   font-size: 12px;
 }
+
+.fmsBenchRate {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-600, #4b5868);
+}
+
+.fmsBenchRate select,
+.fmsBenchMapHead select {
+  padding: 6px 8px;
+  border: 1px solid #c9d3de;
+  border-radius: 8px;
+  background: white;
+  font: 600 12px var(--font-body);
+}
+
+.fmsBenchActions button[aria-pressed="true"] {
+  color: white;
+  background: var(--teal-700, #176c63);
+  border-color: var(--teal-700, #176c63);
+}
+
+.fmsBenchGuidance {
+  display: grid;
+  grid-template-columns: repeat(4, max-content 1fr);
+  gap: 4px 8px;
+  margin: 12px 0 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fmsBenchGuidance dt {
+  font-weight: 700;
+  color: var(--ink-500, #6b7686);
+}
+
+.fmsBenchGuidance dd {
+  margin: 0;
+  color: var(--ink-900, #14212e);
+  white-space: nowrap;
+}
+
+.fmsBenchMapHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.fmsBenchMapHead h2 {
+  margin: 0;
+}
+
+.fmsBenchMapHead label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-600, #4b5868);
+}
+
+.fmsBenchMapScreen {
+  padding: 10px;
+  border-radius: 12px;
+  background: #11151b;
+}
+
+/* The display dims with the cockpit, as the CDU does. */
+.fmsBenchMapScreen.mode-night .fmsMap { filter: brightness(0.7); }
+.fmsBenchMapScreen.mode-nvg .fmsMap { filter: brightness(0.4); }
+
+.fmsBenchFile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-600, #4b5868);
+}
+
+.fmsBenchFile input {
+  max-width: 100%;
+  font: 12px var(--font-body);
+}
+
+.fmsBenchFma {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #0b0e12;
+  font: 700 12px "Consolas", "Lucida Console", monospace;
+}
+
+.fmsBenchFma span {
+  padding: 2px 8px;
+  border: 1px solid #2a323c;
+  border-radius: 4px;
+}
+
+.fmsBenchFma .engaged { color: #3df070; }
+.fmsBenchFma .armed { color: #f4f4f0; }
+
+.fmsBenchAutopilot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.fmsBenchAutopilot label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-600, #4b5868);
+}
+
+.fmsBenchAutopilot input {
+  width: 56px;
+  padding: 6px 8px;
+  border: 1px solid #c9d3de;
+  border-radius: 8px;
+  font: 600 13px "Consolas", monospace;
+  text-align: center;
+}
+
+.fmsBenchAutopilot button {
+  padding: 7px 12px;
+  border: 1px solid #c9d3de;
+  border-radius: 8px;
+  background: #f5f8fb;
+  font: 600 12px var(--font-body);
+  color: var(--ink-900, #14212e);
+  cursor: pointer;
+}
+
+.fmsBenchAutopilot button[aria-pressed="true"] {
+  color: white;
+  background: var(--teal-700, #176c63);
+  border-color: var(--teal-700, #176c63);
+}
+
+.fmsBenchAutopilot button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
