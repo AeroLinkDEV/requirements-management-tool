@@ -35,7 +35,7 @@ export function routeSegments(route: Route): RouteSegment[] {
 
 /** The fix the next enroute entry continues from: the last waypoint before the arrival, or the origin. */
 function continueFrom(fms: ScriptedFms) {
-  const legs = fms.route.legs.slice(0, fms.enrouteEnd());
+  const legs = fms.route.legs.slice(0, fms.enrouteEnd(fms.route));
   const last = [...legs].reverse().find(leg => leg.kind === "wpt");
   return last?.kind === "wpt" ? last.ident : fms.route.origin;
 }

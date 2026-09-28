@@ -254,10 +254,10 @@ export class FlightSimulator {
     return -groundSpeed * 101.27 * tan + clamp(-above * 2, -300, 300);
   }
 
-  /** On final (FAF sequenced, runway active) the aircraft follows the VNAV path angle down. */
+  /** On final (FAF sequenced, runway active) the aircraft follows the VNAV path angle down, on the active route only. */
   private pathVerticalSpeed(groundSpeed: number) {
     const fms = this.fms;
-    const leg = fms.route.legs[0];
+    const leg = fms.activeRoute.legs[0];
     if (leg?.kind !== "wpt" || !/^RW\d{2}/.test(leg.ident) || !fms.lastSequenced) return null;
     const fafPos = fms.coordinates(fms.lastSequenced), rwyPos = fms.coordinates(leg.ident);
     if (!fafPos || !rwyPos) return null;

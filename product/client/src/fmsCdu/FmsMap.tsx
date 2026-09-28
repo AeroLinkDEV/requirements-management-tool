@@ -1,5 +1,5 @@
 import { racetrackOutline, sarTrack, type FlightSimulator } from "./flight";
-import { arcSweep, bearingDeg, distanceNm, offset, type LatLon, type Leg } from "./fmsModel";
+import { arcSweep, bearingDeg, distanceNm, offset, type LatLon, type Route } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
 import "./FmsMap.css";
 
@@ -23,13 +23,14 @@ export default function FmsMap({ fms, sim, range }: Props) {
   const path = (points: LatLon[]) => points.map((p, i) => { const q = project(p); return `${i ? "L" : "M"}${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join("");
 
   /** Polylines of a route from a starting point; a discontinuity breaks the line. */
-  const routeLines = (start: LatLon, legs: Leg[]) => {
+  const routeLines = (start: LatLon, route: Route) => {
+    const legs = route.legs;
     const lines: LatLon[][] = [];
     let current: LatLon[] = [start];
     for (const leg of legs) {
       // A gap, or a conditional leg with no fixed end, breaks the drawn line.
       if (leg.kind !== "wpt") { if (current.length > 1) lines.push(current); current = []; continue; }
-      const at = fms.coordinates(leg.ident);
+      const at = fms.coordinates(leg.ident, route);
       if (!at) continue;
       // An RF leg is drawn as its arc, not as the chord.
       const previous = current.at(-1);
@@ -45,13 +46,13 @@ export default function FmsMap({ fms, sim, range }: Props) {
 
   const active = fms.activeRoute;
   const activeTo = active.legs[0]?.kind === "wpt" ? fms.coordinates(active.legs[0].ident) : undefined;
-  const [first, ...later] = routeLines(fms.activeLegStart, active.legs);
+  const [first, ...later] = routeLines(fms.activeLegStart, active);
   const waypoints = active.legs.flatMap((leg, i) => {
     if (leg.kind !== "wpt") return [];
     const at = fms.coordinates(leg.ident);
     return at ? [{ ident: leg.ident, at, active: i === 0 }] : [];
   });
-  const modified = fms.routeStatus === "MOD" ? routeLines(fms.position, fms.route.legs) : [];
+  const modified = fms.routeStatus === "MOD" ? routeLines(fms.position, fms.route) : [];
 
   const hold = active.hold ?? (fms.routeStatus === "MOD" ? fms.route.hold : undefined);
   const holdFix = hold ? fms.coordinates(hold.fix) : undefined;

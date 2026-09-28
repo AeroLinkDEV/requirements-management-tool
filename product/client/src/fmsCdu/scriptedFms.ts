@@ -597,7 +597,7 @@ export class ScriptedFms implements CduBackend {
    * GPS with integrity (SBAS is assumed available); and no approach guidance without GPS integrity.
    */
   get approachType(): "ILS" | "LPV" | "NO APPR" | null {
-    const approach = findProcedure(this.db, this.active, "APPROACH") ?? findProcedure(this.db, this.route, "APPROACH");
+    const approach = findProcedure(this.db, this.active, "APPROACH");
     if (!approach) return null;
     if (approach.approachType === "ILS") return "ILS";
     return this.nav.mode !== "GPS" || this.injected.has("gpsIntegrity") ? "NO APPR" : "LPV";
@@ -686,12 +686,14 @@ export class ScriptedFms implements CduBackend {
   /** The last waypoint sequenced: once past the FAF, the approach still measures its path from it. */
   get lastSequenced() { return this.sequenced; }
 
-  /** A waypoint's position: a search or tactical point, a Mark On Top, or the navigation database. */
-  coordinates(ident: string): LatLon | undefined {
+  /**
+   * A waypoint's position: a search or tactical point, a Mark On Top, or the navigation database. A runway belongs to
+   * an airport, so it resolves in the context of a route: the active route unless a page asks about the modification.
+   */
+  coordinates(ident: string, route: Route = this.active): LatLon | undefined {
     const own = this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position;
     if (own) return own;
     if (/^RW\d{2}[LRC]?$/.test(ident)) {
-      const route = this.route;
       return (this.db.runway(ident, route.dest) ?? this.db.runway(ident, route.origin) ?? this.db.runway(ident))?.threshold;
     }
     return this.entryFor(ident)?.position;
@@ -847,7 +849,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** Where new enroute legs go: before the arrival, the approach and missed approach, or the destination. */
-  enrouteEnd(route: Route = this.route) {
+  enrouteEnd(route: Route) {
     const legs = route.legs;
     const arrival = legs.findIndex(leg => leg.kind !== "disco" && (leg.source === "STAR" || leg.source === "APPR" || leg.source === "MISSED"));
     if (arrival >= 0) return arrival;
@@ -856,12 +858,12 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** Course and distance into each leg, from present position. There is no computed leg after a discontinuity. */
-  legGeometry(route: Route = this.route): LegGeometry[] {
+  legGeometry(route: Route): LegGeometry[] {
     let from: LatLon | null = this.here;
     return route.legs.map(leg => {
       // After a gap or a conditional leg the start of the next leg is not known in advance.
       if (leg.kind !== "wpt") { from = null; return null; }
-      const to = this.coordinates(leg.ident) ?? null;
+      const to = this.coordinates(leg.ident, route) ?? null;
       let result = from && to ? { course: courseDeg(from, to), distance: distanceNm(from, to) } : null;
       if (result && from && to && leg.path === "RF" && leg.arc) result = { course: result.course, distance: arcLength(from, to, leg.arc) };
       if (result && leg.path === "CF" && leg.course !== undefined) result = { ...result, course: leg.course };
@@ -871,7 +873,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** The entry the aircraft will fly (or flew) into the hold, from the track that arrives at the holding fix. */
-  holdEntryFor(route: Route = this.route): HoldEntry | null {
+  holdEntryFor(route: Route): HoldEntry | null {
     const hold = route.hold;
     if (!hold) return null;
     if (hold.status === "IN PROGRESS" || hold.status === "EXIT ARMED") return this.enteredHold;
