@@ -101,3 +101,29 @@ test('unarmed on final, the glidepath deviation is shown as advisory information
   expect(bus.verticalDeviation.value!).toBeGreaterThan(0)
   expect(bus.approach.state).toBe('OFF')
 })
+
+test('the ND route stops at a fix without a position and marks only the active leg active (fourth review E03)', () => {
+  const route = (...legs: ({ kind: 'wpt'; ident: string } | { kind: 'disco' } | { kind: 'cond'; path: 'CA'; course: number; altitude: number })[]) => {
+    const { unit, sim } = setup()
+    unit.replaceLegs(legs)
+    unit.press('EXEC')
+    return fmsOutputs(unit, sim)
+  }
+  const wpt = (ident: string) => ({ kind: 'wpt' as const, ident })
+  // GAPX is in no cycle: the plan has no geometry past MUN, so nothing is drawn beyond it.
+  const middle = route(wpt('MUN'), wpt('GAPX'), wpt('RDG'))
+  expect(middle.activeRoute.map(point => [point.ident, point.active])).toEqual([['MUN', true]])
+  // The active fix itself unresolved: nothing is drawn and nothing is marked active, while the TO waypoint stays GAPX.
+  const first = route(wpt('GAPX'), wpt('RDG'))
+  expect(first.activeRoute).toEqual([])
+  expect(first.toWaypoint.value).toBe('GAPX')
+  // Control: an explicit discontinuity stops the route the same way.
+  const disco = route(wpt('MUN'), { kind: 'disco' }, wpt('RDG'))
+  expect(disco.activeRoute.map(point => point.ident)).toEqual(['MUN'])
+  // A conditional leg active (a climb to an altitude): the fix after it is drawn but is not the active leg.
+  const climbing = route({ kind: 'cond', path: 'CA', course: 237, altitude: 1000 }, wpt('RDG'))
+  expect(climbing.activeRoute.map(point => [point.ident, point.active])).toEqual([['RDG', false]])
+  // And a fully resolved route is drawn whole, its first fix active.
+  const whole = route(wpt('MUN'), wpt('RDG'))
+  expect(whole.activeRoute.map(point => [point.ident, point.active])).toEqual([['MUN', true], ['RDG', false]])
+})

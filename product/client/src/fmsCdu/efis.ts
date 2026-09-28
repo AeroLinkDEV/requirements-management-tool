@@ -89,14 +89,19 @@ export type AircraftData = {
 
 const LATERAL_FULL_SCALE = { "EN ROUTE": 5, TERMINAL: 1, APPROACH: 0.3 } as const;
 
-/** Points of a route from a start position, up to the first discontinuity. */
+/**
+ * The connected points of a route for the map, up to the first discontinuity or the first fix without a position: the
+ * line never bridges geometry the plan does not have. The active marker is on the active leg's fix only (the first leg
+ * of the route), so an unresolved active fix leaves nothing marked active.
+ */
 function routePoints(fms: ScriptedFms, route: Route): RoutePoint[] {
   const points: RoutePoint[] = [];
-  for (const leg of route.legs) {
+  for (const [index, leg] of route.legs.entries()) {
     if (leg.kind === "disco") break;
     if (leg.kind !== "wpt") continue;
     const position = fms.coordinates(leg.ident, route);
-    if (position) points.push({ ident: leg.ident, position, active: points.length === 0, constraint: leg.altitude ?? null });
+    if (!position) break;
+    points.push({ ident: leg.ident, position, active: index === 0, constraint: leg.altitude ?? null });
   }
   return points;
 }
