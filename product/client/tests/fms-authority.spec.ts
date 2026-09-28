@@ -51,6 +51,8 @@ test('a pending destination with the same runway ident does not move the active 
       runways: [{ ident: 'RW24R', threshold: { lat: 49, lon: -80 }, course: 240, elevation: 500, length: 8000 }] }],
     airways: [], procedures: [],
   })
+  // A load is an inactive cycle until activated (R06).
+  unit.swapCycles()
   const before = unit.coordinates('RW24R')
   expect(unit.activeRoute.dest).toBe('CYUL')
   press(unit, 'RTE')
@@ -97,6 +99,8 @@ test('the modified route measures its own runway; the active route keeps its own
       runways: [{ ident: 'RW24R', threshold: { lat: 49, lon: -80 }, course: 240, elevation: 500, length: 8000 }] }],
     airways: [], procedures: [],
   })
+  // A load is an inactive cycle until activated (R06).
+  unit.swapCycles()
   const runwayAt = unit.activeRoute.legs.findIndex(leg => leg.kind === 'wpt' && leg.ident === 'RW24R')
   expect(runwayAt).toBeGreaterThan(0)
   const active = unit.legGeometry(unit.activeRoute)[runwayAt]

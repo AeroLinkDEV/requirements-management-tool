@@ -6,7 +6,8 @@ import { distanceNm, offset, type ConditionalPath, type FixPath, type LatLon } f
  *
  * The built-in data is a DEMONSTRATION set around Ottawa and Montréal. The two airports are real and roughly placed;
  * every fix, airway, procedure, frequency and runway position is invented for the simulation and must not be used for
- * navigation. Engineers can load their own data in ARINC 424 format (see arinc424.ts), which is merged over it.
+ * navigation. Engineers can load their own data in ARINC 424 format (see arinc424.ts): it is merged over the active
+ * cycle's data into a new, inactive cycle, which the crew then activates (ScriptedFms.loadNavData).
  */
 
 export type NavaidType = "VOR" | "VORDME" | "VORTAC" | "DME" | "NDB";
@@ -39,6 +40,7 @@ export type Procedure = {
 };
 
 export type NavData = {
+  /** The cycle's effective dates as the data gives them (YYYY-MM-DD), or "" when the data does not say. */
   cycle: { id: string; from: string; to: string };
   entries: NavEntry[];
   airways: Airway[];
@@ -70,7 +72,7 @@ const cyul24R: Runway = { ident: "RW24R", threshold: { lat: 45.4790, lon: -73.71
 const cyul06L: Runway = { ident: "RW06L", threshold: offset(cyul24R.threshold, 237, 11000 / 6076.12), course: 57, elevation: 118, length: 11000 };
 
 export const DEMO_NAV_DATA: NavData = {
-  cycle: { id: "DEMO-2610", from: "01OCT", to: "28OCT" },
+  cycle: { id: "DEMO-2610", from: "2026-10-01", to: "2026-10-28" },
   entries: [
     { kind: "airport", ident: "CYOW", name: "OTTAWA INTL", position: CYOW_REF, elevation: 374,
       runways: [...runwayPair(CYOW_REF, "07", "25", 71, 8000, 374), ...runwayPair(CYOW_REF, "14", "32", 136, 10000, 374)] },

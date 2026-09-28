@@ -10,30 +10,47 @@ import type { Airport, Airway, NavData, NavEntry, NavaidType } from "./navData";
  * field layout, not qualified against a supplier's data file.
  */
 
-export type Arinc424Result = { data: NavData; read: number; skipped: number; errors: string[] };
+/**
+ * The records read, and what was not. errors are records that could not be used (a DME-only station without a VOR
+ * position, a blank field); invalid are records whose values are impossible (a latitude of 100 degrees, 61 minutes),
+ * which mean the file itself is damaged and must be refused whole.
+ */
+export type Arinc424Result = { data: NavData; read: number; skipped: number; errors: string[]; invalid: string[] };
 
 /** Columns a..b inclusive, 1-based. */
 const col = (line: string, a: number, b: number) => line.slice(a - 1, b).trim();
 
+/**
+ * Degrees, minutes, seconds and hundredths as a signed angle, or null when a part is out of range: minutes and seconds
+ * below 60, and the whole no more than the limit (90 for latitude, 180 for longitude).
+ */
+function angle(m: RegExpExecArray | null, negative: string, limit: number) {
+  if (!m) return null;
+  const [degrees, minutes, seconds, hundredths] = [m[2], m[3], m[4], m[5]].map(Number);
+  if (minutes > 59 || seconds > 59) return null;
+  const value = degrees + minutes / 60 + (seconds + hundredths / 100) / 3600;
+  if (value > limit) return null;
+  return m[1] === negative ? -value : value;
+}
+
 /** Latitude "N45183600" and longitude "W075405000" (hemisphere, degrees, minutes, seconds, hundredths). */
 export function arincLatitude(text: string) {
-  const m = /^([NS])(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(text);
-  if (!m) return null;
-  const value = Number(m[2]) + Number(m[3]) / 60 + (Number(m[4]) + Number(m[5]) / 100) / 3600;
-  return m[1] === "S" ? -value : value;
+  return angle(/^([NS])(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(text), "S", 90);
 }
 
 export function arincLongitude(text: string) {
-  const m = /^([EW])(\d{3})(\d{2})(\d{2})(\d{2})$/.exec(text);
-  if (!m) return null;
-  const value = Number(m[2]) + Number(m[3]) / 60 + (Number(m[4]) + Number(m[5]) / 100) / 3600;
-  return m[1] === "W" ? -value : value;
+  return angle(/^([EW])(\d{3})(\d{2})(\d{2})(\d{2})$/.exec(text), "W", 180);
 }
 
-/** Latitude 33-41 and longitude 42-51, common to the records read here. */
+/**
+ * Latitude 33-41 and longitude 42-51, common to the records read here: a position, "missing" when the fields do not
+ * hold coordinates, or "impossible" when they have the shape of coordinates but a value out of range.
+ */
 function position(line: string) {
-  const lat = arincLatitude(col(line, 33, 41)), lon = arincLongitude(col(line, 42, 51));
-  return lat === null || lon === null ? null : { lat, lon };
+  const latText = col(line, 33, 41), lonText = col(line, 42, 51);
+  const lat = arincLatitude(latText), lon = arincLongitude(lonText);
+  if (lat !== null && lon !== null) return { lat, lon };
+  return /^[NS]\d{8}$/.test(latText) && /^[EW]\d{9}$/.test(lonText) ? "impossible" as const : "missing" as const;
 }
 
 function navaidType(navaidClass: string, ndb: boolean): NavaidType {
@@ -50,6 +67,7 @@ export function parseArinc424(text: string): Arinc424Result {
   const airports = new Map<string, Airport>();
   const airwayFixes = new Map<string, { sequence: number; fix: string }[]>();
   const errors: string[] = [];
+  const invalid: string[] = [];
   let read = 0, skipped = 0;
 
   const lines = text.split(/\r?\n/);
@@ -58,12 +76,19 @@ export function parseArinc424(text: string): Arinc424Result {
     const section = line[4], subsection = line[5];
     const airportSubsection = line[12];
     const fail = (what: string) => { errors.push(`line ${index + 1}: ${what}`); skipped += 1; };
+    // The position a record needs: without one it is skipped; an impossible one condemns the file.
+    const located = (what: string) => {
+      const at = position(line);
+      if (typeof at === "object") return at;
+      if (at === "impossible") { invalid.push(`line ${index + 1}: impossible ${what}`); skipped += 1; } else fail(what);
+      return null;
+    };
 
     // Enroute waypoint (EA): ident 14-18, continuation 22.
     if (section === "E" && subsection === "A") {
       if (!"01".includes(line[21])) { skipped += 1; return; }
-      const at = position(line);
-      if (!at) return fail("waypoint position");
+      const at = located("waypoint position");
+      if (!at) return;
       entries.push({ kind: "fix", ident: col(line, 14, 18), position: at });
       read += 1;
       return;
@@ -81,9 +106,9 @@ export function parseArinc424(text: string): Arinc424Result {
     if (section === "D" && (subsection === " " || subsection === "B")) {
       if (!"01".includes(line[21])) { skipped += 1; return; }
       const ndb = subsection === "B";
-      const vhf = position(line);
+      const vhf = located("navaid position");
       // A DME-only station has no VOR position; it gives its DME position at 56-74, which this reader does not use.
-      if (!vhf) return fail("navaid position");
+      if (!vhf) return;
       const raw = col(line, 23, 27);
       const frequency = ndb ? String(Number(raw) / 10) : (Number(raw) / 100).toFixed(2);
       entries.push({ kind: "navaid", ident: col(line, 14, 17), type: navaidType(col(line, 28, 32), ndb), position: vhf, frequency, name: col(line, 94, 123) });
@@ -96,8 +121,8 @@ export function parseArinc424(text: string): Arinc424Result {
       if (airportSubsection === "A") {
         // Airport reference point: continuation 22, elevation 57-61, name 94-123.
         if (!"01".includes(line[21])) { skipped += 1; return; }
-        const at = position(line);
-        if (!at) return fail("airport position");
+        const at = located("airport position");
+        if (!at) return;
         const existing = airports.get(icao);
         const airport: Airport = { kind: "airport", ident: icao, name: col(line, 94, 123), position: at, elevation: Number(col(line, 57, 61)) || 0, runways: existing?.runways ?? [] };
         airports.set(icao, airport);
@@ -107,8 +132,8 @@ export function parseArinc424(text: string): Arinc424Result {
       if (airportSubsection === "G") {
         // Runway: ident 14-18, continuation 22, length 23-27, magnetic bearing 28-31 (tenths), threshold elevation 67-71.
         if (!"01".includes(line[21])) { skipped += 1; return; }
-        const at = position(line);
-        if (!at) return fail("runway threshold");
+        const at = located("runway threshold");
+        if (!at) return;
         const airport = airports.get(icao) ?? { kind: "airport" as const, ident: icao, name: "", position: at, elevation: 0, runways: [] };
         airport.runways.push({ ident: col(line, 14, 18), threshold: at, course: Number(col(line, 28, 31)) / 10, elevation: Number(col(line, 67, 71)) || 0, length: Number(col(line, 23, 27)) || 0 });
         airports.set(icao, airport);
@@ -118,8 +143,8 @@ export function parseArinc424(text: string): Arinc424Result {
       if (airportSubsection === "C") {
         // Terminal waypoint: ident 14-18, continuation 22.
         if (!"01".includes(line[21])) { skipped += 1; return; }
-        const at = position(line);
-        if (!at) return fail("terminal waypoint position");
+        const at = located("terminal waypoint position");
+        if (!at) return;
         entries.push({ kind: "fix", ident: col(line, 14, 18), position: at });
         read += 1;
         return;
@@ -131,6 +156,6 @@ export function parseArinc424(text: string): Arinc424Result {
   const airways: Airway[] = [...airwayFixes].map(([ident, fixes]) => ({ ident, fixes: fixes.sort((a, b) => a.sequence - b.sequence).map(f => f.fix) }));
   return {
     data: { cycle: { id: "LOADED", from: "", to: "" }, entries: [...entries, ...airports.values()], airways, procedures: [] },
-    read, skipped, errors: errors.slice(0, 20),
+    read, skipped, errors: errors.slice(0, 20), invalid,
   };
 }

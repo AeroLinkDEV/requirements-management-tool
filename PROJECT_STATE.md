@@ -417,7 +417,10 @@ display unit for engineers.
     airway entry, company routes, SAVE), DEP/ARR, pilot waypoints (latitude/longitude, place/bearing/distance,
     place-bearing/place-bearing, along-track), SELECT DESIRED WPT for duplicate idents, REF NAV DATA and a
     secondary flight plan. The built-in data is invented demonstration data; engineers can load waypoints,
-    navaids, airports, runways and airways from an ARINC 424 file (`arinc424.ts`, a subset reader).
+    navaids, airports, runways and airways from an ARINC 424 file (`arinc424.ts`, a subset reader). A file is
+    validated first (refused whole, with no change, when empty, not recognised or holding an impossible coordinate)
+    and becomes the inactive database cycle. Activating it on IDENT is recorded and does not move the active plan,
+    whose fixes are pinned when it becomes active; they re-resolve only when the crew executes a modification.
   - **Lateral guidance**: automatic leg sequencing with fly-by and fly-over turns; ARINC 424 path terminators
     (TF, CF, DF, RF arcs, and the CA/FA/VA, VI and VM/FM conditional legs); DIRECT-TO with INTC CRS and ABEAM
     PTS; holds with their standard entry and status (including a one-turn exit); a lateral offset flown between
