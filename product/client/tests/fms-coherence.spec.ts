@@ -53,7 +53,29 @@ test('forced NPA and forced RNP exceeded give one RNP and ANP on PROGRESS, NAV S
     expect(status, label).toEqual(progress)
     expect({ rnp: Number(efis.rnp.toFixed(2)), anp: Number(efis.anp.toFixed(2)) }, label).toEqual(progress)
     expect(unit.lamps().has('RNP'), label).toBe(progress.anp > progress.rnp)
+    // And the forced layer really applies: NPA gives the approach RNP, RNP exceeded puts ANP above it.
+    if (conditions.includes('npa' as never)) expect(progress.rnp, label).toBe(0.3)
+    if (conditions.includes('rnpExceeded' as never)) expect(progress.anp, label).toBeGreaterThan(progress.rnp)
   }
+})
+
+test('CHECK ANP times out on the same effective RNP the pages show, not the sensor RNP beneath it (R11)', () => {
+  let now = START
+  const unit = new ScriptedFms(() => new Date(now))
+  unit.setCondition('gpsLost', true)
+  unit.setCondition('dmeOutage', true)
+  unit.setRnp(2)
+  unit.setCondition('npa', true)
+  // Twenty minutes of dead reckoning: drift takes ANP above the forced 0.30 NM but far below the 2 NM entered.
+  now += 1_200_000
+  unit.updateNavigation(1200)
+  const { anp } = progressPerformance(unit)
+  expect(anp).toBeGreaterThan(0.3)
+  expect(anp).toBeLessThan(2)
+  expect(unit.recallList.some(message => message.text === 'CHECK ANP')).toBe(false)
+  now += 61_000
+  unit.updateNavigation(1)
+  expect(unit.recallList.some(message => message.text === 'CHECK ANP')).toBe(true)
 })
 
 test('a forced value is labelled as forced on the pages that show it (R11)', () => {
@@ -172,10 +194,12 @@ test('impossible field values condemn an ARINC 424 file; boundary values are rea
   expect(boundary.read).toBe(8)
 })
 
-test('a record without an ident is not read (R16)', () => {
-  const result = parseArinc424(waypoint('     '))
-  expect(result.read).toBe(0)
-  expect(result.errors.length + result.invalid.length).toBeGreaterThan(0)
+test('a record missing a required field (ident, navaid frequency) is skipped with an error (R16)', () => {
+  for (const [name, line] of [['a blank ident', waypoint('     ')], ['a blank VOR frequency', vhf('     ')], ['a blank NDB frequency', ndb('     ')]] as const) {
+    const result = parseArinc424(line)
+    expect(result.read, name).toBe(0)
+    expect(result.errors.length, name).toBeGreaterThan(0)
+  }
 })
 
 // ------------------------------------------------------------------------------------------------ R17
