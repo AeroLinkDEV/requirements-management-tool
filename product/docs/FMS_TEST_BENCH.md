@@ -116,7 +116,7 @@ Status vocabulary: **Demonstrated** (works on the bench and has a behavioural te
 | RAIM / SBAS | Placeholder | Condition-driven flags, no satellite or protection-level model |
 | Approach type, ARM APPROACH, go-around | Partial | Laboratory contract (Q-A1): beyond the FAF only a captured approach descends; capture needs APPR armed, ILS or LPV capability, LNAV and the aircraft on the final course. Integrity lost after capture latches ALT HOLD. APPR pressed off after capture, or HDG SEL, cancels the approach to ALT HOLD (third review D03). TOGA, refused while the FMS has failed, makes the missed approach active, ends the approach, releases any hold and climbs in VNAV the same way from every approach state (third review D02). The approach type is a GPS-integrity classifier, not a receiver output (the CMA-5024 work replaces it) |
 | Altitude and speed constraints | Partial | Upper bounds are not checked, so a violated constraint reads as met (R04) |
-| T/D, E/D, VNAV path, DES NOW | Partial | Simplified geometric path; no VNAV mode state (R10) |
+| T/D, E/D, VNAV path, DES NOW | Partial | Simplified geometric path. The VNAV phase (CLIMB, CRUISE, DESCENT) is latched and recorded: past the T/D or on DES NOW the descent holds through level segments at its constraints and never climbs back, and only a cruise altitude entered above the aircraft or the missed approach leaves it. DES NOW descends at 1000 fpm to the active fix's planned altitude |
 | VNAV SPD | Not implemented | |
 | RTA | Not implemented | |
 | ETA and fuel predictions | Partial | Destination can be the missed-approach end (R07); gaps (R08); future speed constraints ignored (R09) |
