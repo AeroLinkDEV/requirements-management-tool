@@ -331,6 +331,9 @@ test('the bench tools are tabs under the cockpit, keyboard-navigable, and the ch
 })
 
 test('the GPS sensors tab drives the FMS receivers: a fault on GPS 1 moves the FMS to GPS 2, both give GPS NAV LOST', async ({ page }) => {
+  // The bench starts its simulated time at the wall clock, and the sky moves with it: pin it, so the geometry is the same
+  // whenever the test runs.
+  await page.clock.setFixedTime(new Date('2026-09-28T14:00:00Z'))
   await open(page)
   await tab(page, 'GPS sensors')
   const gps1 = page.getByRole('region', { name: 'GPS 1', exact: true })
@@ -345,9 +348,11 @@ test('the GPS sensors tab drives the FMS receivers: a fault on GPS 1 moves the F
 
   const used = async () => Number(((await gps1.getByTestId('gps-used').innerText()).split('/'))[0])
   const before = await used()
-  await page.getByRole('region', { name: 'GPS 1 faults' }).getByRole('button', { name: /^Mask low satellites/ }).click()
-  await expect.poll(used).toBeLessThan(before)
-  await expect(gps1.getByRole('list', { name: 'GPS 1 active faults' })).toContainText('MASKED')
+  // Mask one satellite GPS 1 is using: whatever the sky, it is then used one fewer.
+  const prn = await gps1.getByRole('list', { name: 'Signal strength, dB-Hz' }).locator('li:has(.bar.used) small').first().innerText()
+  await page.getByRole('group', { name: 'GPS 1 mask satellites' }).getByRole('button', { name: prn, exact: true }).click()
+  await expect.poll(used).toBe(before - 1)
+  await expect(gps1.getByRole('list', { name: 'GPS 1 active faults' })).toContainText('1 MASKED')
 
   // A GPS 1 receiver fault reaches the FMS at once: it navigates on GPS 2, and the strip shows it.
   await page.getByLabel('GPS 1 Receiver fault').check()

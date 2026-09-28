@@ -30,7 +30,7 @@ const onFinal = (unit: ScriptedFms) => active(unit) === 'RW24R'
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
 const threshold = { lat: 45.4790, lon: -73.7180 }
 // The FAS path by hand: the runway at 118 ft, a 50 ft TCH (the RW24R leg's 168 ft), and the angle through FERDI at 1500 ft.
-const ferdi = { lat: 45.5200, lon: -73.6313 }
+const ferdi = { lat: 45.51889, lon: -73.63027 }
 const gpa = Math.atan((1500 - 168) / (distanceNm(threshold, ferdi) * 6076.12))
 const pathAt = (toThresholdNm: number) => 168 + toThresholdNm * 6076.12 * Math.tan(gpa)
 
@@ -90,27 +90,42 @@ test('captured on final, the guidance and the deviations shown are the selected 
   expect(out.approach).toEqual({ type: 'LPV', state: 'CAPTURED' })
 })
 
+test('the demonstration final is straight in: ULIDA and FERDI lie on the RW24R extended centreline', () => {
+  const unit = new ScriptedFms(() => new Date(Date.UTC(2026, 8, 28, 14, 0, 0)))
+  // Cross-track from the 057 centreline through the threshold, on the sphere: asin(sin(d / R) sin(bearing - 057)) R.
+  const offCentrelineFt = (ident: string) => {
+    const at = unit.coordinates(ident)!, d = distanceNm(threshold, at) / 3440.065
+    return Math.asin(Math.sin(d) * Math.sin(((bearingDeg(threshold, at) - 57) * Math.PI) / 180)) * 3440.065 * 6076.12
+  }
+  expect(Math.abs(offCentrelineFt('FERDI'))).toBeLessThan(10)
+  expect(Math.abs(offCentrelineFt('ULIDA'))).toBeLessThan(10)
+  // And at their distances out: the FAF 4.40 NM, the intermediate fix 9.00 NM.
+  expect(distanceNm(threshold, unit.coordinates('FERDI')!)).toBeCloseTo(4.40, 2)
+  expect(distanceNm(threshold, unit.coordinates('ULIDA')!)).toBeCloseTo(9.00, 2)
+})
+
 test('flying the GPS deviations, the aircraft stays on the FAS path down to the threshold (3b.3)', () => {
   const { unit, sim, fly } = setup()
   unit.armApproach(true)
   fly(3 * 3600, () => sim.approachMode === 'CAPTURED')
-  // The demonstration FAF lies about 420 ft off the extended centreline (its leg is 236.0 degrees, the runway 237.0), so
-  // the GPS guidance first brings the aircraft onto the FAS course; over the last 2 NM it must be established.
+  // ULIDA and FERDI are on the RW24R extended centreline, so the route's final is the FAS course: the aircraft is
+  // established from capture, only settling out of the 90-degree turn at ULIDA 4.6 NM before the FAF.
   let worstLateral = 0, worstVertical = 0
   fly(900, () => {
     const b = selected(unit)
     const toGo = b['201'].value
     if (toGo !== null && toGo < 0.3) return true
     worstVertical = Math.max(worstVertical, Math.abs(b['117'].value ?? Infinity))
-    if (toGo !== null && toGo < 2) worstLateral = Math.max(worstLateral, Math.abs(b['116'].value ?? Infinity))
+    worstLateral = Math.max(worstLateral, Math.abs(b['116'].value ?? Infinity))
   })
   expect(sim.approachMode).toBe('CAPTURED')
   // The path the GPS measures from is the hand-derived one: the aircraft less its 117 deviation, within the GPS's own
   // vertical error, at the TCH-plus-angle height for the distance it reports (201).
   const b = selected(unit)
   expect(Math.abs(unit.altitude - b['117'].value! - pathAt(b['201'].value!))).toBeLessThan(20)
-  // Established: within 100 ft laterally (the full scale there is a few hundred feet) and 30 ft of the path.
-  expect(worstLateral).toBeLessThan(100)
+  // Established from capture to the threshold: within 30 ft laterally (the full scale is over a thousand feet at the FAF,
+  // a few hundred near the threshold) and 30 ft of the path.
+  expect(worstLateral).toBeLessThan(30)
   expect(worstVertical).toBeLessThan(30)
   // Near the threshold on a 3-degree-ish path: a few hundred feet above the runway (118 ft), not at the FAF altitude.
   expect(unit.altitude).toBeLessThan(400)
