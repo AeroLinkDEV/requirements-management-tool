@@ -96,3 +96,68 @@ test('LNAV with no leg to fly is lost to heading hold, and the loss is recorded 
   expect(sim.modeEvents.some(e => e.event === 'LNAV LOST')).toBe(true)
 })
 
+
+// Approach authority (finding R03, with the laboratory contract agreed as Q-A1): beyond the final approach fix only a
+// captured approach mode descends toward the runway. Capture needs the approach armed, valid approach capability,
+// LNAV engaged and the aircraft established on the final leg. Loss of integrity after capture drops the approach mode
+// to a latched altitude hold, and restoring integrity does not re-capture by itself.
+const onFinal = (unit: ScriptedFms) => active(unit) === 'RW24R'
+const approachSetup = (arm: boolean) => {
+  const run = setup()
+  run.unit.selectProcedure('APPROACH', 'R24R')
+  run.unit.press('EXEC')
+  if (arm) run.unit.armApproach(true)
+  run.fly(3 * 3600, () => onFinal(run.unit))
+  expect(onFinal(run.unit)).toBe(true)
+  return run
+}
+
+test('armed with valid capability, the approach captures on final and descends on its path (R03)', () => {
+  const { unit, sim, fly } = approachSetup(true)
+  let captured = false, descended = false
+  fly(600, () => {
+    if (sim.approachMode === 'CAPTURED') captured = true
+    if (sim.verticalMode === 'APPR' && unit.verticalSpeed < -300) descended = true
+    return !onFinal(unit)
+  })
+  expect(captured).toBe(true)
+  expect(descended).toBe(true)
+  expect(sim.modeEvents.some(e => e.event === 'APPR CAPTURED')).toBe(true)
+})
+
+test('unarmed, the aircraft does not descend below the FAF altitude on final (R03)', () => {
+  const { unit, sim, fly } = approachSetup(false)
+  const faf = unit.fafAltitudeCorrected
+  let lowest = Infinity
+  fly(600, () => { lowest = Math.min(lowest, unit.altitude); expect(sim.approachMode).not.toBe('CAPTURED'); return !onFinal(unit) })
+  expect(lowest).toBeGreaterThan(faf - 60)
+})
+
+test('without approach integrity the armed approach does not capture (R03)', () => {
+  const run = setup()
+  run.unit.selectProcedure('APPROACH', 'R24R')
+  run.unit.press('EXEC')
+  run.unit.armApproach(true)
+  run.unit.setCondition('gpsIntegrity', true)
+  run.fly(3 * 3600, () => onFinal(run.unit))
+  const faf = run.unit.fafAltitudeCorrected
+  let lowest = Infinity
+  run.fly(600, () => { lowest = Math.min(lowest, run.unit.altitude); expect(run.sim.approachMode).not.toBe('CAPTURED'); return !onFinal(run.unit) })
+  expect(lowest).toBeGreaterThan(faf - 60)
+})
+
+test('integrity lost after capture drops to altitude hold; restoring it does not re-capture (R03)', () => {
+  const { unit, sim, fly } = approachSetup(true)
+  fly(600, () => sim.approachMode === 'CAPTURED' && unit.verticalSpeed < -300)
+  expect(sim.approachMode).toBe('CAPTURED')
+  unit.setCondition('gpsIntegrity', true)
+  fly(2)
+  expect(sim.approachMode).toBe('OFF')
+  expect(sim.verticalMode).toBe('ALT HOLD')
+  expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'APPR LOST' })
+  const held = sim.altitudeHoldReference!
+  unit.setCondition('gpsIntegrity', false)
+  fly(20)
+  expect(sim.approachMode).toBe('OFF')
+  expect(Math.abs(unit.altitude - held)).toBeLessThan(40)
+})
