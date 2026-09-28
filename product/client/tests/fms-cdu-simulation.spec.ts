@@ -125,7 +125,8 @@ test('hold fields are range-checked, and entering the hold above the holding spe
 test('VNAV derives the path angle from the FAF altitude and alerts outside 2.75 to 3.77 degrees', () => {
   const { unit } = fms()
   unit.press('VNAV')
-  expect(titleLine(unit)).toMatch(/^ACT VNAV RW24R/)
+  // The runway without RW: the title must fit its approach level beside the page number (GPS phase 3b, R19).
+  expect(titleLine(unit)).toMatch(/^ACT VNAV 24R\b/)
   expect(lines(unit)[10]).toMatch(/-2\.9\d°$/)
   expect(lines(unit)[12]).toMatch(/^-----\s+-6\d0FPM$/)
 

@@ -54,9 +54,15 @@ export type FmsOutputs = {
   verticalMode: VerticalMode | null;
   verticalArmed: string[];
   approach: { type: string | null; state: "OFF" | "ARMED" | "CAPTURED" };
-  /** Full-scale lateral deviation for the phase (5 NM en route, 1 NM terminal, 0.3 NM approach: FAA-H-8083-6). */
+  /**
+   * Full-scale lateral deviation for the phase (5 NM en route, 1 NM terminal, 0.3 NM approach: FAA-H-8083-6); on an RNAV
+   * final, the selected GPS's angular scaling (GPS phase 3b).
+   */
   lateralFullScaleNm: number;
-  /** Full-scale vertical deviation, feet: 400 ft for the VNAV path, 150 ft on the approach (laboratory values). */
+  /**
+   * Full-scale vertical deviation, feet: 400 ft for the VNAV path, 150 ft on the approach (laboratory values); on an RNAV
+   * final, the selected GPS's angular scaling (GPS phase 3b).
+   */
   verticalFullScaleFt: number;
   phase: string;
   rnp: number;
@@ -143,12 +149,22 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
   const activeRoute = routePoints(fms, active);
   const line = [fms.position, ...activeRoute.map(point => point.position)];
   const offsetNm = active.offset?.nm;
-  const approachCapable = fms.approachType === "ILS" || fms.approachType === "LPV";
+  // Armed, the vertical column names the approach when it has a vertical level: ILS, or the GPS's LPV or LNAV/VNAV (305).
+  const type = fms.approachType;
+  const verticalLevel = type === "ILS" || type === "LPV" || type === "LNAV/VNAV";
+  // On an RNAV final the deviations are the GPS's, scaled as it scales them (the scaling beside 116/117).
+  const onFinal = path?.source === "APPR" || sim.verticalFlag;
+  const gpsScale = onFinal ? fms.gpsApproach?.scale ?? null : null;
+  // On an RNAV final with GPS vertical guidance, the receiver's own 117 as it stands.
+  const gpsVertical = onFinal && fms.gpsApproachVertical ? fms.gpsApproach!.verticalFt : null;
+  const gpsLateral = sim.approachMode === "CAPTURED" && onFinal ? fms.gpsApproach?.lateralFt ?? null : null;
   return {
     ...empty,
     desiredTrack: managed ? normal(g.desiredTrack!) : ncd(),
-    crossTrack: managed ? normal(g.crossTrack) : ncd(),
-    verticalDeviation: path ? normal(fms.altitude - path.altitude) : ncd(),
+    // Captured on an RNAV final, the receiver's own 116 as it stands, converted to NM (GPS phase 3b).
+    crossTrack: !managed ? ncd() : gpsLateral !== null ? normal(gpsLateral / 6076.12) : normal(g.crossTrack),
+    // Flagged on an RNAV final without GPS vertical guidance: the receiver withdrew it, so no path is shown (3b).
+    verticalDeviation: sim.verticalFlag ? fail() : gpsVertical !== null ? normal(gpsVertical) : path ? normal(fms.altitude - path.altitude) : ncd(),
     verticalSource: path?.source ?? null,
     verticalCoupled: path?.coupled ?? false,
     rollCommand: managed ? normal(g.bankCommand) : ncd(),
@@ -158,10 +174,10 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     targetSpeed: normal(fms.targetSpeed),
     targetAltitude: sim.altitudeHoldReference === null ? normal(g.targetAltitude) : ncd(),
     lateralArmed: sim.lnavIsArmed ? ["LNAV"] : [],
-    verticalArmed: sim.approachMode === "ARMED" && approachCapable ? [fms.approachType!] : [],
-    approach: { type: fms.approachType, state: sim.approachMode },
-    lateralFullScaleNm: LATERAL_FULL_SCALE[phase],
-    verticalFullScaleFt: path?.source === "APPR" ? 150 : 400,
+    verticalArmed: sim.approachMode === "ARMED" && verticalLevel ? [type] : [],
+    approach: { type, state: sim.approachMode },
+    lateralFullScaleNm: gpsScale ? gpsScale.lateralFullScaleFt / 6076.12 : LATERAL_FULL_SCALE[phase],
+    verticalFullScaleFt: gpsScale ? gpsScale.verticalFullScaleFt : path?.source === "APPR" ? 150 : 400,
     activeRoute,
     modifiedRoute: fms.routeStatus === "MOD" ? routePoints(fms, fms.route) : null,
     offsetTrack: offsetNm ? line.slice(1).map((p, i) => offset(p, courseDeg(line[i], p) + (offsetNm > 0 ? 90 : -90), Math.abs(offsetNm))) : null,

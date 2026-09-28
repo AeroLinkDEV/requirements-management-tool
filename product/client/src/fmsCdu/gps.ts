@@ -140,6 +140,8 @@ export type GpsOptions = {
 const SELF_TEST_S = 10;
 /** 20 of the 24 channels are GPS (the other 4 SBAS, phase 2). */
 const GPS_CHANNELS = 20;
+/** The geoid height above the ellipsoid the receiver uses by default, m (a laboratory value); the FMS builds its FAS blocks with it. */
+export const DEFAULT_GEOID_SEPARATION_M = -32;
 const K_MISSED = 3.09;
 const M_PER_DEG_LAT = 111_120;
 const LAT_RESOLUTION = 180 / 2 ** 20;
@@ -212,7 +214,7 @@ export class GpsReceiver {
 
   constructor(options: GpsOptions) {
     this.o = {
-      ttffSeconds: 45, initSeconds: 2, sigmaUere: 1.5, maskDeg: 5, trackCn0: 30, falseAlert: 1e-5, geoidSeparation: -32, seed: options.constellation.seed, sbas: true, sbasAcquireSeconds: 30, approachRegionNm: 30,
+      ttffSeconds: 45, initSeconds: 2, sigmaUere: 1.5, maskDeg: 5, trackCn0: 30, falseAlert: 1e-5, geoidSeparation: DEFAULT_GEOID_SEPARATION_M, seed: options.constellation.seed, sbas: true, sbasAcquireSeconds: 30, approachRegionNm: 30,
       ...options,
     };
     this.raw = this.assemble(null, [], null);

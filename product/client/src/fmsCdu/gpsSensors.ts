@@ -1,5 +1,6 @@
-import type { LatLon } from "./fmsModel";
-import type { ApproachLevel, GpsBus, GpsMode, Integrity } from "./gps";
+import { distanceNm, offset, type LatLon } from "./fmsModel";
+import { DEFAULT_GEOID_SEPARATION_M, fasCrc, type ApproachLevel, type ApproachStatus, type DeviationScale, type FasDataBlock, type GpsBus, type GpsMode, type Integrity } from "./gps";
+import type { Procedure, Runway } from "./navData";
 import type { FlightPhase } from "./navigation";
 
 /**
@@ -81,3 +82,76 @@ export function shownReceiver(status: GpsAssessment, choice: GpsChoice) {
 export const MODE_TEXT: Record<GpsMode, string> = {
   SELF_TEST: "TEST", INITIALIZATION: "INIT", ACQUISITION: "ACQ", NAV: "NAV", SBAS_NAV: "SBAS", SBAS_PA: "SBAS PA", ALT_AIDING: "ALT AID", FAULT: "FAULT",
 };
+
+// ------------------------------------------------------------------ GPS approach guidance (GPS phase 3b)
+
+/**
+ * The FAS block alert limits the FMS sends for an LPV approach, m: HAL 40 and VAL 50, the LPV values as commonly cited
+ * (DO-229 through public summaries). Laboratory values, like the rest of the block: the demonstration database has no
+ * published FAS data.
+ */
+export const FAS_HAL_M = 40, FAS_VAL_M = 50;
+/** The FAS course width at the threshold, m (the usual 105 m, a lateral full scale of about 350 ft there). */
+export const FAS_COURSE_WIDTH_M = 105;
+/** The threshold crossing height when the approach's runway leg gives none, ft. */
+export const DEFAULT_TCH_FT = 50;
+
+/** A leading number in a procedure altitude ("1500A", "168"), ft; null when there is none. */
+const feet = (altitude: string | undefined) => { const match = /^(\d+)/.exec(altitude ?? ""); return match ? Number(match[1]) : null; };
+
+/**
+ * The FAS data block the FMS builds for an RNAV approach from its navigation database (GPS phase 3b): the landing
+ * threshold point (height above the ellipsoid through the receiver's default geoid), the flight path alignment point at
+ * the runway's far end, the threshold crossing height from the runway leg's altitude above the runway, and the glide
+ * path angle through the FAF altitude and the TCH. The path identifier is the procedure ident. Null for anything that is
+ * not an RNAV approach with its runway and FAF.
+ */
+export function buildFas(approach: Procedure, runway: Runway | undefined, airport: string, fafPosition: LatLon | undefined): FasDataBlock | null {
+  if (approach.kind !== "APPROACH" || approach.approachType !== "RNAV" || !runway || !fafPosition || !approach.faf) return null;
+  const altitudeAt = (ident: string) => {
+    const leg = approach.legs.find(entry => "ident" in entry && entry.ident === ident);
+    return leg && "ident" in leg && typeof leg.altitude === "string" ? feet(leg.altitude) : null;
+  };
+  const fafAltitude = altitudeAt(approach.faf);
+  if (fafAltitude === null) return null;
+  const tch = (altitudeAt(runway.ident) ?? runway.elevation + DEFAULT_TCH_FT) - runway.elevation;
+  const fromThresholdFt = distanceNm(runway.threshold, fafPosition) * 6076.12;
+  const gpaDeg = Math.round(((Math.atan((fafAltitude - runway.elevation - tch) / fromThresholdFt) * 180) / Math.PI) * 100) / 100;
+  const fpap = offset(runway.threshold, runway.course, runway.length / 6076.12);
+  const [, number, designator] = /^RW(\d{2})([LRC]?)$/.exec(runway.ident) ?? ["", "0", ""];
+  const block: Omit<FasDataBlock, "crc"> = {
+    operationType: 0, sbasProvider: 0, airport, runway: Number(number), designator: designator as FasDataBlock["designator"],
+    performance: 0, routeIndicator: "A", referencePathSelector: 0, referencePathId: approach.ident,
+    ltp: { lat: runway.threshold.lat, lon: runway.threshold.lon, heightM: runway.elevation * 0.3048 + DEFAULT_GEOID_SEPARATION_M },
+    fpapDelta: { lat: fpap.lat - runway.threshold.lat, lon: fpap.lon - runway.threshold.lon },
+    tchFt: tch, gpaDeg, courseWidthM: FAS_COURSE_WIDTH_M, lengthOffsetM: 0, halM: FAS_HAL_M, valM: FAS_VAL_M,
+  };
+  return { ...block, crc: fasCrc(block) };
+}
+
+export type GpsApproachWords = {
+  /** 305: the approach level the receiver can support. */
+  level: ApproachLevel;
+  /** 156: the selection status (armed outside the approach region), or null when the word is not Normal. */
+  status: ApproachStatus | null;
+  /** 116 lateral (ft, positive right of the course) and 117 vertical (ft, positive above the path); null unless Normal. */
+  lateralFt: number | null;
+  verticalFt: number | null;
+  /** 201, NM to the threshold, and the deviation scaling; null unless Normal. */
+  toThresholdNm: number | null;
+  scale: DeviationScale | null;
+};
+
+/** The approach words of a receiver's bus, each used only when Normal (GPS phase 3b). */
+export function approachWords(bus: GpsBus | null): GpsApproachWords {
+  if (!bus) return { level: "NONE", status: null, lateralFt: null, verticalFt: null, toThresholdNm: null, scale: null };
+  return {
+    level: bus["305"].ssm === "NORMAL" ? bus["305"].value?.level ?? "NONE" : "NONE",
+    status: bus["156"].ssm === "NORMAL" ? bus["156"].value : null,
+    lateralFt: normal(bus["116"]), verticalFt: normal(bus["117"]),
+    toThresholdNm: normal(bus["201"]), scale: bus.scale.ssm === "NORMAL" ? bus.scale.value : null,
+  };
+}
+
+/** The approach levels with vertical guidance: the laboratory approach contract captures only on these (and an ILS). */
+export const VERTICAL_LEVELS: readonly ApproachLevel[] = ["LPV", "LNAV/VNAV"];
