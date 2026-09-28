@@ -1,7 +1,8 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import {
-  ScenarioRecorder, ScenarioRunner, linePattern, parseScenario, procedureText, reportMarkdown, runHeadless, type Scenario,
+  ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, linePattern, parseScenario, procedureText, reportMarkdown, runHeadless,
+  scenarioDigest, type Scenario,
 } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
@@ -32,7 +33,7 @@ test('GPS lost 2 NM before the FAF: the loss is injected at the distance, and th
 
   // The checks prove the actions: without TOGA the aircraft reaches UL501 too late, and unarmed the FMS asks for it.
   const scenario = library('gps-lost-before-faf')
-  const without = (kind: string) => runHeadless({ ...scenario, steps: scenario.steps.map(step => (step.action.kind === kind ? { ...step, action: { kind: 'keys' as const, keys: [] } } : step)) }).runner.results
+  const without = (kind: string) => runHeadless({ ...scenario, steps: scenario.steps.map(step => (step.action.kind === kind ? { ...step, action: { kind: 'keys' as const, keys: ['PROG' as const] } } : step)) }).runner.results
   expect(without('goAround')[9]).toMatchObject({ status: 'fail' })
   expect(without('armApproach')[10]).toMatchObject({ status: 'fail', actual: 'ARM APPROACH' })
 })
@@ -84,7 +85,9 @@ test('steps the run never reaches by maxSeconds fail as not reached', () => {
   }
   const { runner } = runHeadless(scenario)
   expect(runner.results).toEqual([{ status: 'not reached' }, { status: 'not reached' }])
-  expect(runner.elapsed).toBe(20)
+  // The run ends at the first tick past its limit.
+  expect(runner.endedAfter).toBe(20 + TICK_SECONDS)
+  expect(runner.outcome).toBe('timed out')
   expect(runner.passed).toBe(false)
 })
 
@@ -105,7 +108,8 @@ test('a recording of keys, conditions and a screen check plays back and passes; 
   // Keys pressed within a second are one step.
   expect(scenario.steps.map(step => step.action.kind)).toEqual(['keys', 'condition', 'expectLine'])
   expect(scenario.steps[0]).toEqual({ when: { kind: 'start' }, action: { kind: 'keys', keys: ['PROG', 'CHAR_1'] } })
-  expect(scenario.steps[1].when).toEqual({ kind: 'time', seconds: 2.3 })
+  // Recorded times land on the tick grid, at the tick where playback will run them.
+  expect(scenario.steps[1].when).toEqual({ kind: 'time', seconds: 2.5 })
   expect(scenario.steps[2].within).toBe(5)
   expect(scenario.maxSeconds).toBe(60)
 
@@ -153,19 +157,127 @@ test('a scenario becomes test procedure text, and its run a Markdown report mark
   expect(text.steps).toMatch(/^8\. Then check that the alert CHECK ANP has been raised within 120 s\.$/m)
   expect(text.expectedResult).toMatch(/^- the RNP annunciator is lit\.$/m)
 
-  const { runner } = runHeadless(scenario)
-  const context = { startedAt: new Date(START), cycle: 'DEMO-2609', variant: 'A' }
-  const report = reportMarkdown(scenario, runner.results, context)
+  const { runner } = runHeadless(scenario, START, { variant: 'A', cycle: 'DEMO-2609' })
+  const report = reportMarkdown(runner)
   expect(report).toMatch(/^\*\*Result: PASS\*\*$/m)
   expect(report).toMatch(/not flight-qualified evidence/)
+  expect(report).toMatch(/^- Hardware variation: A$/m)
+  expect(report).toMatch(new RegExp(`^- Scenario: manual-rnp, ${scenarioDigest(scenario)}$`, 'm'))
   expect(report).toMatch(/^\| 4 \| Then check that screen line 10 matches \/MANUAL\/\. \| 0 s \| PASS \| RNP\/ANP MANUAL \|$/m)
-  const failed = reportMarkdown(scenario, runner.results.map((result, i) => (i === 5 ? { status: 'fail' as const, at: 0, actual: 'out' } : result)), context)
-  expect(failed).toMatch(/^\*\*Result: FAIL\*\*$/m)
 })
 
 test('a file that is not a scenario is refused', () => {
-  expect(() => parseScenario('{"title":"x"}')).toThrow(/needs a title, maxSeconds and steps/)
-  expect(() => parseScenario('{"title":"x","maxSeconds":5,"steps":[{"when":{"kind":"start"}}]}')).toThrow(/trigger \(when\) and an action/)
+  expect(() => parseScenario('{"title":"x"}')).toThrow(/needs maxSeconds.*needs steps/)
+  expect(() => parseScenario('{"title":"x","maxSeconds":5,"steps":[{"when":{"kind":"start"}}]}')).toThrow(/step 1: an action is required/)
   expect(() => parseScenario('not json')).toThrow()
   expect(parseScenario('{"title":"x","maxSeconds":5,"steps":[]}')).toMatchObject({ id: 'imported-x', objective: '' })
+})
+
+// The run contract (review observations N01 to N08, 28 September): a run passes only when every check it makes holds,
+// and it cannot report success for something it did not evaluate, or evaluate something after its deadline.
+const scenarioOf = (steps: unknown[], maxSeconds = 30): Scenario => ({ id: 'contract', title: 'Contract', objective: '', maxSeconds, steps: steps as Scenario['steps'] })
+
+test('an unsupported step or payload is refused at import and never runs as a pass (N01, N02, N07, N08)', () => {
+  const refused: [unknown, RegExp][] = [
+    [{ when: { kind: 'start' }, action: { kind: 'unsupportedCommand' } }, /unsupported action "unsupportedCommand"/],
+    [{ when: { kind: 'start' }, action: { kind: 'expectUnsupported' } }, /unsupported action "expectUnsupported"/],
+    [{ when: { kind: 'sometime' }, action: { kind: 'goAround' } }, /unsupported trigger "sometime"/],
+    [{ when: { kind: 'start' }, action: { kind: 'expectLine', line: 2, pattern: '[' } }, /not a valid regular expression/],
+    [{ when: { kind: 'start' }, action: { kind: 'expectLine', line: 40, pattern: 'X' } }, /line from 0 to 13/],
+    [{ when: { kind: 'start' }, action: { kind: 'keys', keys: ['LAUNCH'] } }, /list of CDU functions/],
+    [{ when: { kind: 'start' }, action: { kind: 'condition', condition: 'meteor', on: true } }, /known condition/],
+    [{ when: { kind: 'time', seconds: Number.NaN }, action: { kind: 'goAround' } }, /seconds between 0 and 86400/],
+    [{ when: { kind: 'start' }, action: { kind: 'expectNoAlert', text: 'CHECK ANP' }, within: 5 }, /checked at one moment/],
+    [{ when: { kind: 'start' }, action: { kind: 'goAround' }, within: 5 }, /within applies only to a check/],
+  ]
+  for (const [step, reason] of refused) {
+    expect(() => parseScenario(JSON.stringify(scenarioOf([step]))), JSON.stringify(step)).toThrow(reason)
+    // Handed to the runner directly, it is not run at all.
+    const { runner } = runHeadless(scenarioOf([step]))
+    expect(runner.outcome, JSON.stringify(step)).toBe('invalid')
+    expect(runner.results[0].status).toBe('pending')
+    expect(reportMarkdown(runner)).toMatch(/^\*\*Result: INVALID SCENARIO \(not run\)\*\*$/m)
+  }
+})
+
+test('a run with no checks is "no checks", not a pass, and its procedure text promises nothing (N03, N06)', () => {
+  const empty = runHeadless(scenarioOf([])).runner
+  expect(empty.outcome).toBe('no checks')
+  expect(empty.passed).toBe(false)
+  expect(reportMarkdown(empty)).toMatch(/^\*\*Result: NO CHECKS/m)
+  const actionsOnly = scenarioOf([{ when: { kind: 'start' }, action: { kind: 'alert', text: 'SURPRISE' } }])
+  expect(runHeadless(actionsOnly).runner.outcome).toBe('no checks')
+  expect(procedureText(actionsOnly).expectedResult).toBe('None: this scenario has no checks. It plays back its actions and verifies no outcome.')
+})
+
+test('nothing runs after the time limit; a step due at the limit still runs (N04)', () => {
+  const late = runHeadless(scenarioOf([
+    { when: { kind: 'time', seconds: 1 }, action: { kind: 'alert', text: 'ON TIME' } },
+    { when: { kind: 'time', seconds: 2 }, action: { kind: 'alert', text: 'AT THE LIMIT' } },
+    { when: { kind: 'time', seconds: 3 }, action: { kind: 'alert', text: 'TOO LATE' } },
+  ], 2))
+  expect(late.runner.results.map(result => [result.status, result.at])).toEqual([['done', 1], ['done', 2], ['not reached', undefined]])
+  expect(late.fms.recallList.map(message => message.text)).toEqual(expect.arrayContaining(['ON TIME', 'AT THE LIMIT']))
+  expect(late.fms.recallList.some(message => message.text === 'TOO LATE')).toBe(false)
+  expect(late.runner.outcome).toBe('timed out')
+})
+
+test('a condition first met after its window does not satisfy the check (N05)', () => {
+  const { runner } = runHeadless(scenarioOf([
+    { when: { kind: 'start' }, action: { kind: 'expectAlert', text: 'LATE' }, within: 1 },
+    { when: { kind: 'time', seconds: 2 }, action: { kind: 'alert', text: 'LATE' } },
+  ]))
+  // The check fails at its one-second deadline; the alert that comes at 2 s is too late for it.
+  expect(runner.results[0]).toEqual({ status: 'fail', at: 1, actual: 'no alerts' })
+  expect(runner.outcome).toBe('failed')
+  // Met inside the window, it passes when met.
+  const inTime = runHeadless(scenarioOf([
+    { when: { kind: 'start' }, action: { kind: 'condition', condition: 'gpsLost', on: true } },
+    { when: { kind: 'start' }, action: { kind: 'expectLamp', lamp: 'MSG', lit: true }, within: 1 },
+  ])).runner
+  expect(inTime.results[1].status).toBe('pass')
+  expect(inTime.results[1].at).toBeLessThanOrEqual(1)
+})
+
+test('a step that throws ends the run as an execution error, not a pass or a failed check', () => {
+  let now = START
+  const fms = new ScriptedFms(() => new Date(now))
+  const sim = new FlightSimulator(fms)
+  fms.press = () => { throw new Error('panel disconnected') }
+  const runner = new ScenarioRunner(scenarioOf([
+    { when: { kind: 'start' }, action: { kind: 'keys', keys: ['PROG'] } },
+    { when: { kind: 'start' }, action: { kind: 'expectLamp', lamp: 'MSG', lit: false } },
+  ]), fms)
+  advanceTicks(4, ms => { now += ms }, sim, runner)
+  expect(runner.results).toEqual([{ status: 'error', at: 0, actual: 'panel disconnected' }, { status: 'not reached' }])
+  expect(runner.outcome).toBe('error')
+})
+
+test('stopping a run is its own outcome', () => {
+  let now = START
+  const fms = new ScriptedFms(() => new Date(now))
+  const runner = new ScenarioRunner(library('dead-reckoning'), fms)
+  runner.abandon()
+  expect(runner.outcome).toBe('stopped')
+})
+
+test('the same scenario gives the same timeline however the ticks are grouped, as the bench groups them by rate', () => {
+  const scenario = library('gps-lost-before-faf')
+  const run = (chunk: number) => {
+    let now = START
+    const fms = new ScriptedFms(() => new Date(now))
+    const sim = new FlightSimulator(fms)
+    const runner = new ScenarioRunner(scenario, fms)
+    while (!runner.finished) advanceTicks(chunk, ms => { now += ms }, sim, runner)
+    return { results: runner.results, position: fms.truePosition, altitude: fms.altitude, elapsed: runner.elapsed }
+  }
+  const oneAtATime = run(1)
+  expect(oneAtATime.results.every(result => result.status === 'done' || result.status === 'pass')).toBe(true)
+  // At 64 times real time the bench runs 64 ticks per callback; an uneven grouping stands for a throttled browser.
+  for (const chunk of [7, 64]) {
+    const grouped = run(chunk)
+    expect(grouped.results).toEqual(oneAtATime.results)
+    expect(grouped.position).toEqual(oneAtATime.position)
+    expect(grouped.altitude).toBe(oneAtATime.altitude)
+  }
 })

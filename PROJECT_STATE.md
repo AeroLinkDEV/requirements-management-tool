@@ -463,7 +463,11 @@ display unit for engineers.
   select procedures, arm the approach or go around, and check screen lines, the scratchpad, alerts, annunciators and
   the active waypoint (optionally waiting a number of seconds). Built-in scenarios cover GPS lost before the final
   approach fix, GPS integrity lost on the approach, dead reckoning, and a crew RNP the navigation cannot meet. A run
-  restarts the simulation and shows each step's result live. The bench records a scenario from keys, conditions,
+  restarts the simulation and shows each step's result live. Time moves in 0.25 s ticks (clock, flight, then the
+  scenario's observation), the same in the bench at any rate as in headless tests; a step due between ticks runs at
+  the next one, nothing runs after the time limit, and a check met after its `within` window fails. A scenario is
+  validated before it runs, and a run ends passed, failed, no checks, timed out, stopped, invalid or execution
+  error: only a run whose checks all held is a pass. Pausing during a run stops its clock. The bench records a scenario from keys, conditions,
   alerts, APPR, TOGA and screen-line checks, and saves or loads scenarios as JSON. A scenario is written out as the
   fields of an AeroLink test procedure proposal to copy into a procedure change, and a run as a Markdown report
   marked as simulation evidence; the bench does not change controlled procedures or record evidence itself.

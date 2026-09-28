@@ -2,6 +2,8 @@
 
 *27 September 2026. Written for the CMA-9000 simulator roadmap.*
 
+> **Read this first.** Everything above "Current capability register" is the 27 September research baseline: what airline practice and the cited sources suggest, measured against the simulator as it was then. It is not a statement of current bench behaviour, and it is not CMA-9000 authority; generic airline practice (Boeing, Airbus) informs questions, not CMA behaviour. The current state of each capability, with its open review findings, is in the register near the end.
+
 ## Sources I used
 
 - **ICAO Doc 9613, Performance-based Navigation (PBN) Manual, 5th edition.** The unedited version is on the PBN Portal. I used the RNAV 1/2, RNP 4, RNP 1 and Advanced RNP functional requirements, and the crew knowledge and procedures that go with them. These are per navigation specification: a capability inventory to check against, not one universal requirement list for every installation.
@@ -18,7 +20,7 @@ The FAA advisory circulars AC 20-138D and AC 90-105A would not download at the t
 ## What airlines look for, in short
 
 1. **Predictability over cleverness.** Pilots ask "what is it doing now, and what will it do next?" Published research and incident reports identify vertical-guidance understanding and mode awareness as recurring concerns. A good FMS makes every mode, transition and target visible before it happens.
-2. **Error-tolerant data entry with verification.** Airlines lean on the MOD → review → EXEC pattern, on route discontinuities as deliberate stops, and on cross-checking the map against the CDU. Accidents show the dangers: a direct-to silently removes intermediate reporting points, and a duplicate or chart-mismatched identifier can pick the wrong fix. Good FMSs show nearest-first SELECT DESIRED WPT lists with facility type and position, and offer abeam points on a direct-to.
+2. **Error-tolerant data entry with verification.** Airlines lean on the MOD → review → EXEC pattern, on route discontinuities as deliberate stops, and on cross-checking the map against the CDU. Accidents show the dangers: a direct-to silently removes intermediate reporting points, and a duplicate or chart-mismatched identifier can pick the wrong fix. Good FMSs show SELECT DESIRED WPT lists with facility type and position, so the crew chooses the intended entry deliberately, and offer abeam points on a direct-to.
 3. **Certified navigation behaviour (PBN).** This means:
    - automatic leg sequencing;
    - direct-to and intercept course;
@@ -106,7 +108,7 @@ Status vocabulary: **Demonstrated** (works on the bench and has a behavioural te
 | CA, FA, VA, VI, VM, FM conditional legs | Partial | Altitude termination is climb-oriented |
 | Holds | Partial | Entries and racetrack flown; HA/HF/HM termination is a one-turn exit only |
 | Leg bypass | Not implemented | Only a direct-to's bypassed points are kept (for ABEAM PTS) |
-| DIRECT TO, INTC CRS, ABEAM PTS, offset | Demonstrated | Pending direct-to leak (R01) |
+| DIRECT TO, INTC CRS, ABEAM PTS, offset | Partial | The pending direct-to leaked into active guidance (R01; fix in progress) |
 | HDG SEL and LNAV arm/capture | Partial | The flight mode strip is inferred from motion, not a mode state (R10) |
 | Discontinuities | Partial | Jump crosses them silently (R15); predictions bridge them as zero distance (R08) |
 | Sensor selection and reversion | Demonstrated | Priority selection with synthetic errors, not blending or estimation; ANP is derived from simulated truth |
@@ -122,11 +124,11 @@ Status vocabulary: **Demonstrated** (works on the bench and has a behavioural te
 | FMS failure | Partial | Blanks the CDU but guidance continues, and Pause is disabled (R02) |
 | MSG and message recall | Partial | MSG can stay lit after recovery with nothing to acknowledge (R13) |
 | ATC / FMC COMM datalink | Placeholder | Representative workflow; STANDBY clears the pending indication (R14) |
-| Rendezvous, moving waypoints, tactical descent | Demonstrated | Rendezvous uses the route predictions, so it inherits R08 and R09 |
-| Database cycles, DATABASE OUT OF DATE | Demonstrated | A loaded file still merges into the active database (R06) |
+| Rendezvous, moving waypoints, tactical descent | Partial | Rendezvous uses the route predictions, so it inherits R08 and R09; moving waypoints have no data age or expiry |
+| Database cycles, DATABASE OUT OF DATE | Partial | A metadata swap over one shared demonstration data set, not two datasets; a loaded file merges into the active database and is given invented effective dates (R06, R16, N09) |
 | MAINT self test and fault log | Placeholder | A demonstration of the page, not equipment built-in test |
 | Dual FMS, independent operation | Placeholder | One model with a copy of the route; not a dual-channel protocol |
-| Scenarios, recording, procedure text, run report | Demonstrated | In-process against the built-in model only; no external software-under-test adapter, run manifest or controlled evidence import (R21–R23, R25) |
+| Scenarios, recording, procedure text, run report | Partial | A 0.25 s tick contract shared by the bench and headless runs; validated admission; distinct outcomes (passed, failed, no checks, timed out, stopped, invalid, error); the report's context is fixed at run start (N01–N08). In-process against the built-in model only: no external software-under-test adapter, run manifest or controlled evidence import (R21–R23, R25) |
 
 The review's order is adopted: repair active-plan authority, guidance validity and prediction validity (R01–R09) before adding breadth.
 

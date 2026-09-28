@@ -1,8 +1,20 @@
 import { useState } from "react";
-import { describeStep, parseScenario, procedureText, reportMarkdown, type Scenario, type ScenarioRunner } from "./scenario";
+import { describeStep, parseScenario, procedureText, reportMarkdown, type RunOutcome, type Scenario, type ScenarioRunner } from "./scenario";
 import { SCENARIO_LIBRARY } from "./scenarioLibrary";
 
-const STATUS_LABEL = { pending: "Pending", done: "Done", pass: "Pass", fail: "Fail", "not reached": "Not reached" } as const;
+const STATUS_LABEL = { pending: "Pending", done: "Done", pass: "Pass", fail: "Fail", "not reached": "Not reached", error: "Error" } as const;
+
+/** The run's outcome in words: only a run whose checks all held is a pass. */
+const OUTCOME_LABEL: Record<RunOutcome, string> = {
+  running: "RUNNING",
+  passed: "PASS",
+  failed: "FAIL",
+  "no checks": "NO CHECKS: actions played back, nothing verified",
+  "timed out": "TIMED OUT: steps not reached by the time limit",
+  stopped: "STOPPED by the operator",
+  invalid: "INVALID SCENARIO: not run",
+  error: "EXECUTION ERROR",
+};
 
 /** Offers text as a file the user saves; nothing leaves the browser. */
 const download = (name: string, text: string, type: string) => {
@@ -22,12 +34,11 @@ const fileName = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, "
  * as a report. The bench owns the simulation; this card asks it to run or record.
  */
 export default function FmsScenarioCard({
-  runner, recording, screenLines, context, onRun, onStop, onRecord, onFinishRecording, onCheckLine,
+  runner, recording, screenLines, onRun, onStop, onRecord, onFinishRecording, onCheckLine,
 }: {
   runner: ScenarioRunner | null;
   recording: boolean;
   screenLines: readonly string[];
-  context: { startedAt: Date; cycle: string; variant: string };
   onRun: (scenario: Scenario) => void;
   onStop: () => void;
   onRecord: () => void;
@@ -95,7 +106,8 @@ export default function FmsScenarioCard({
 
       <ol className="fmsScenarioSteps" aria-label="Scenario steps">
         {shown.steps.map((step, i) => {
-          const result = runner?.scenario === shown ? runner.results[i] : undefined;
+          // While there is a run, the steps shown are its own copy of the scenario, with its results.
+          const result = runner?.results[i];
           const status = result?.status ?? "pending";
           return (
             <li key={i} data-status={status} aria-current={runner?.current === i ? "step" : undefined}>
@@ -108,14 +120,14 @@ export default function FmsScenarioCard({
       </ol>
       {runner?.finished ? (
         <p className={`fmsScenarioResult ${runner.passed ? "pass" : "fail"}`} role="status">
-          {runner.passed ? "PASS" : "FAIL"}: {runner.results.filter(result => result.status === "pass").length} checks passed,{" "}
-          {runner.results.filter(result => result.status === "fail" || result.status === "not reached").length} failed or not reached.
+          {OUTCOME_LABEL[runner.outcome]}: {runner.results.filter(result => result.status === "pass").length} checks passed,{" "}
+          {runner.results.filter(result => result.status === "fail" || result.status === "not reached" || result.status === "error").length} failed, not reached or in error.
         </p>
       ) : null}
 
       <div className="fmsBenchActions">
         <button type="button" disabled={!runner?.finished}
-          onClick={() => runner && download(`${fileName(runner.scenario.title)}-run.md`, reportMarkdown(runner.scenario, runner.results, context), "text/markdown")}>
+          onClick={() => runner && download(`${fileName(runner.scenario.title)}-run.md`, reportMarkdown(runner), "text/markdown")}>
           Download run report
         </button>
         <button type="button" aria-expanded={showProcedure} onClick={() => setShowProcedure(value => !value)}>Test procedure text</button>

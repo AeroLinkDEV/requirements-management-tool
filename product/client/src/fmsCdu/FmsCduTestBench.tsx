@@ -9,7 +9,7 @@ import FmsScenarioCard from "./FmsScenarioCard";
 import { conditionalLabel } from "./fmsModel";
 import { useCduLayout, type CduKeyEvent } from "./layout";
 import { LIGHTING_MODES, displayLuminance, type Lighting, type LightingMode } from "./lighting";
-import { ScenarioRecorder, ScenarioRunner, type Scenario } from "./scenario";
+import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, type Scenario } from "./scenario";
 import { ScriptedFms } from "./scriptedFms";
 import { screenText } from "./screen";
 import { CDU_VARIANTS, DEFAULT_VARIANT_ID, variantById } from "./variants";
@@ -43,7 +43,11 @@ export default function FmsCduTestBench() {
   const { backend, sim, runner, recorder } = useMemo(() => {
     simTime.current = Date.now();
     const fms = new ScriptedFms(() => new Date(simTime.current));
-    const runner = pendingScenario.current ? new ScenarioRunner(pendingScenario.current, fms) : null;
+    // The run's context is fixed as it starts, so its report describes the run and not the controls afterwards.
+    const chosen = variantById(variantId);
+    const runner = pendingScenario.current
+      ? new ScenarioRunner(pendingScenario.current, fms, { variant: `${chosen.id} (${chosen.label})`, cycle: fms.activeCycle.id })
+      : null;
     const recorder = pendingRecording.current ? new ScenarioRecorder(() => new Date(simTime.current)) : null;
     pendingScenario.current = null;
     pendingRecording.current = false;
@@ -65,20 +69,16 @@ export default function FmsCduTestBench() {
   const [headingInput, setHeadingInput] = useState("090");
   const variant = variantById(variantId);
 
-  // A quarter-second loop flies the aircraft while playing. Paused is a position freeze: the aircraft stands still but
-  // the clock runs in real time, as a cockpit clock does, so timers and a self test still complete.
+  // Time moves in ticks (scenario.ts): while flying, each callback runs `rate` ticks, each advancing the clock, the
+  // flight and then the scenario, so a run sees the same timeline at any rate or callback pacing. Paused with no run
+  // is an aircraft freeze: the aircraft stands still but the clock runs, so timers and a self test complete. Paused
+  // during a run pauses the run: its clock stops, so no deadline or delayed step is consumed.
   useEffect(() => {
-    const interval = 250;
+    const interval = TICK_SECONDS * 1000;
     const timer = window.setInterval(() => {
-      if (playing) {
-        const dt = (interval / 1000) * rate;
-        simTime.current += dt * 1000;
-        sim.step(dt);
-      } else {
-        simTime.current += interval;
-        backend.tick();
-      }
-      runner?.poll();
+      const running = runner !== null && !runner.finished;
+      if (playing) advanceTicks(rate, ms => { simTime.current += ms; }, sim, runner);
+      else if (!running) { simTime.current += interval; backend.tick(); }
       // A finished scenario pauses the flight once; flying on afterwards is the engineer's choice.
       if (runner?.finished && pausedFor.current !== runner) { pausedFor.current = runner; setPlaying(false); }
     }, interval);
@@ -210,6 +210,7 @@ export default function FmsCduTestBench() {
               <button type="button" onClick={() => setPlaying(value => !value)} disabled={failedFms} aria-pressed={playing}>
                 {playing ? "Pause" : "Fly"}
               </button>
+              {!playing ? <span className="fmsBenchHint">{runner && !runner.finished ? "Run paused: its clock is stopped." : "Aircraft frozen: the clock runs."}</span> : null}
               <label className="fmsBenchRate">
                 <span>Rate</span>
                 <select value={rate} onChange={event => setRate(Number(event.target.value))} aria-label="Simulation rate">
@@ -254,7 +255,6 @@ export default function FmsCduTestBench() {
             runner={runner}
             recording={recording}
             screenLines={screenText(backend.screen())}
-            context={{ startedAt: runner?.startedAt ?? backend.now, cycle: backend.activeCycle.id, variant: `${variant.id} (${variant.label})` }}
             onRun={runScenario}
             onStop={() => runner?.abandon()}
             onRecord={startRecording}
