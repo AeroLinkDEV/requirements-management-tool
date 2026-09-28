@@ -75,6 +75,39 @@ test('the physical keyboard drives the focused panel', async ({ page }) => {
   await expectLine(page, 13, /^CYOW/)
 })
 
+// R18: a press the panel loses (focus moves away, the pointer is cancelled) is abandoned; its CLR hold never fires later.
+test('a CLR hold interrupted by leaving the panel or a cancelled pointer never clears the scratchpad later (R18)', async ({ page }) => {
+  await open(page)
+  const panel = page.locator('.fmsCdu')
+  const clrEvents = () => page.locator('.fmsBenchLog li', { hasText: 'CLR' }).count()
+  await panel.focus()
+  await page.keyboard.type('abc')
+  await expectLine(page, 13, /^ABC\s*$/)
+  const before = await clrEvents()
+
+  // Hold Backspace (CLR), move focus to the heading field before the one-second hold completes, release it there.
+  await page.keyboard.down('Backspace')
+  await page.waitForTimeout(150)
+  await page.getByLabel('Selected heading').focus()
+  await page.keyboard.up('Backspace')
+  await page.waitForTimeout(1300)
+  expect((await screenLines(page))[13]).toMatch(/^ABC\s*$/)
+  expect(await clrEvents()).toBe(before)
+  await expect(key(page, 'CLR')).not.toHaveClass(/\bpressed\b/)
+
+  // A pointer press on CLR that the browser cancels neither completes as a short press nor as a hold.
+  const clr = key(page, 'CLR')
+  const box = (await clr.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await clr.dispatchEvent('pointercancel', { pointerId: 1, bubbles: true })
+  await page.waitForTimeout(1300)
+  await page.mouse.up()
+  expect((await screenLines(page))[13]).toMatch(/^ABC\s*$/)
+  expect(await clrEvents()).toBe(before)
+  await expect(clr).not.toHaveClass(/\bpressed\b/)
+})
+
 test('an alert raised from the bench lights MSG until CLR on the panel acknowledges it', async ({ page }) => {
   await open(page)
   const msg = page.locator('.fmsCduLamp[data-lamp="MSG"]')
