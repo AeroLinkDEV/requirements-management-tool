@@ -9,6 +9,9 @@ import {
   type Hold, type HoldEntry, type LatLon, type Leg, type LskResult, type Message, type Offset, type Page, type PageId, type Route, type Sar,
   type SarPattern, type Uplink,
 } from "./fmsModel";
+import { Constellation } from "./gnss";
+import { GpsReceiver, residualShares, type GpsInput } from "./gps";
+import { ANP_FLOOR_NM, GPS_DISAGREE_NM, HAL_NM, assessReceiver, candidates, type GpsAssessment, type GpsChoice } from "./gpsSensors";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
 import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
 import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
@@ -115,7 +118,24 @@ export class ScriptedFms implements CduBackend {
   private nav = {
     mode: "GPS" as NavMode, anp: 0.05, dmes: [] as string[], vor: null as string | null, rnpManual: null as number | null,
     unableSince: null as number | null, unableAlerted: false, integrityAlerted: false, approachIntegrityAlerted: false, armAlerted: false,
+    /** The receiver navigating in GPS mode (1 or 2), null otherwise; and whether GPS DISAGREE has been raised. */
+    gpsSource: null as 1 | 2 | null, disagreeAlerted: false,
   };
+  /**
+   * The two simulated CMA-5024 receivers (GPS phase 3a), one sky, different seeds: independent noise and faults. The
+   * FMS reads only their buses (gpsSensors.ts); the bench may inject faults and overrides into them directly.
+   */
+  private readonly constellation = new Constellation(1);
+  private readonly receivers: readonly [GpsReceiver, GpsReceiver] = [
+    new GpsReceiver({ constellation: this.constellation, seed: 101 }),
+    new GpsReceiver({ constellation: this.constellation, seed: 202 }),
+  ];
+  private gpsChoice: GpsChoice = "AUTO";
+  private gpsAssessment: GpsAssessment = { assessed: [], chosen: null };
+  /** The satellite the GPS integrity condition faults, so a change of PRN clears the old one. */
+  private integrityFaultPrn: number | null = null;
+  /** Every change of navigation source: GPS1, GPS2, DME/DME, VOR/DME or DR, when it changed. */
+  private sourceLog: { at: Date; source: string }[] = [];
   private armedApproach = false;
   /** Waypoints that move (a ship, a formation lead): position advanced by track and speed as time passes. */
   private moving: Record<string, { track: number; speed: number }> = {};
@@ -215,6 +235,9 @@ export class ScriptedFms implements CduBackend {
   constructor(clock: () => Date = () => new Date()) {
     this.clock = clock;
     this.pinActive();
+    // The receivers start warm: powered a minute before the session, past self-test, first fix and SBAS acquisition.
+    const start = this.now.getTime();
+    for (const offset of [60_000, 40_000]) for (const receiver of this.receivers) receiver.step(this.gpsInput(start - offset));
     this.updateNavigation(0);
   }
 
@@ -312,6 +335,10 @@ export class ScriptedFms implements CduBackend {
           this.alert(alert("CHECK ANP"));
           this.nav = { ...this.nav, unableSince: this.now.getTime(), unableAlerted: true };
         }
+        // GPS lost is a shortcut for an RF input fault (antenna or cable) on both receivers (3a.5).
+        if (id === "gpsLost") for (const receiver of this.receivers) receiver.injectFault("RF_INPUT", on);
+        // GPS integrity is applied every step while on (applyGpsIntegrityCondition); off clears what it set.
+        if (id === "gpsIntegrity" && !on) this.clearGpsIntegrityCondition();
         if (id === "gpsLost" || id === "gpsIntegrity" || id === "dmeOutage") this.updateNavigation(0);
         if (on && id === "independent") this.alert(alert("INDEPENDENT OP"));
         // The FMS restarts on its IDENT page when it comes back.
@@ -448,33 +475,52 @@ export class ScriptedFms implements CduBackend {
    * which the FMS reports as a POSITION SHIFT.
    */
   updateNavigation(dt: number) {
+    const gps = this.updateGps();
+    const chosen = gps.chosen === null ? null : gps.assessed[gps.chosen];
     const inputs = {
-      gpsAvailable: !this.injected.has("gpsLost") && this.gpsSelected,
-      gpsIntegrity: !this.injected.has("gpsIntegrity"),
+      gpsAvailable: chosen !== null,
+      gpsIntegrity: true,
       dmeAvailable: !this.injected.has("dmeOutage"),
       inhibited: this.inhibited,
     };
-    const previous = this.nav.mode;
+    const previous = this.nav.mode, previousSource = this.nav.gpsSource;
     const selection = selectSources(this.db.nearby(this.truth, 160), this.truth, this.altitude, inputs);
+    const next = (target: { nm: number; bearing: number }) =>
+      ({ x: target.nm * Math.sin((target.bearing * Math.PI) / 180), y: target.nm * Math.cos((target.bearing * Math.PI) / 180) });
     if (selection.mode === "DR") {
       const drift = sourceError("DR");
       const grow = (IRS_DRIFT_NM_PER_HOUR * dt) / 3600;
       this.error = { x: this.error.x + grow * Math.sin((drift.bearing * Math.PI) / 180), y: this.error.y + grow * Math.cos((drift.bearing * Math.PI) / 180) };
+      this.here = this.withError(this.truth);
     } else {
-      const target = sourceError(selection.mode);
-      const next = { x: target.nm * Math.sin((target.bearing * Math.PI) / 180), y: target.nm * Math.cos((target.bearing * Math.PI) / 180) };
-      if (Math.hypot(next.x - this.error.x, next.y - this.error.y) > 0.5) this.alert(alert("POSITION SHIFT"));
-      this.error = next;
+      // In GPS mode the position is the chosen receiver's fix (110/120, 111/121); the error is kept from it, so dead
+      // reckoning continues from where GPS left the FMS (3a.3). Radio updating keeps its synthetic error.
+      const fix = selection.mode === "GPS" && chosen?.fix ? chosen.fix : null;
+      const target = fix ? next({ nm: distanceNm(this.truth, fix), bearing: bearingDeg(this.truth, fix) }) : next(sourceError(selection.mode));
+      if (Math.hypot(target.x - this.error.x, target.y - this.error.y) > 0.5) this.alert(alert("POSITION SHIFT"));
+      this.error = target;
+      this.here = fix ? { ...fix } : this.withError(this.truth);
     }
-    this.here = this.withError(this.truth);
     const errorNm = Math.hypot(this.error.x, this.error.y);
+    const gpsSource = selection.mode === "GPS" && gps.chosen !== null ? (gps.chosen + 1) as 1 | 2 : null;
     this.nav = {
-      ...this.nav, mode: selection.mode, dmes: selection.dmes.map(d => d.ident), vor: selection.vor?.ident ?? null,
-      anp: selection.mode === "DR" ? Math.max(0.1, errorNm * 1.3 + 0.05) : selection.baseAnp,
+      ...this.nav, mode: selection.mode, dmes: selection.dmes.map(d => d.ident), vor: selection.vor?.ident ?? null, gpsSource,
+      // ANP from the receiver's HFOM (247), floored; its HIL when HFOM is not valid (3a.3).
+      anp: selection.mode === "DR" ? Math.max(0.1, errorNm * 1.3 + 0.05)
+        : gpsSource !== null ? Math.max(ANP_FLOOR_NM, chosen?.hfom ?? chosen?.hil ?? 0.3) : selection.baseAnp,
     };
+    if (selection.mode !== previous || gpsSource !== previousSource) {
+      this.sourceLog = [{ at: this.now, source: gpsSource !== null ? `GPS${gpsSource}` : selection.mode }, ...this.sourceLog].slice(0, 50);
+    }
     if (previous === "GPS" && selection.mode !== "GPS") this.alert(alert("GPS NAV LOST"));
-    if (selection.mode === "GPS" && !inputs.gpsIntegrity && !this.nav.integrityAlerted) { this.nav.integrityAlerted = true; this.alert(alert("GPS POS UNCERTAIN")); }
-    if (inputs.gpsIntegrity) this.nav.integrityAlerted = false;
+    // A receiver the FMS may use has a fix but not the integrity for the phase: GPS POS UNCERTAIN, once per episode.
+    if (gps.integrityLost && !this.nav.integrityAlerted) { this.nav.integrityAlerted = true; this.alert(alert("GPS POS UNCERTAIN")); }
+    if (!gps.integrityLost) this.nav.integrityAlerted = false;
+    // GPS1 and GPS2 both give a fix, whatever their integrity (a spoof passes it), and they differ: GPS DISAGREE.
+    const [one, two] = gps.assessed.map(a => a.fix);
+    const disagree = one !== null && two !== null && distanceNm(one, two) > GPS_DISAGREE_NM;
+    if (disagree && !this.nav.disagreeAlerted) { this.nav.disagreeAlerted = true; this.alert(alert("GPS DISAGREE")); }
+    if (!disagree) this.nav.disagreeAlerted = false;
 
     // ANP above RNP for longer than the time to alert of the phase: CHECK ANP, once per episode. It reads the same
     // effective values as the pages and the lamp (R11).
@@ -497,10 +543,81 @@ export class ScriptedFms implements CduBackend {
     // On an RNAV approach, a position without GPS integrity is not good enough to continue.
     const approach = findProcedure(this.db, this.active, "APPROACH");
     const rnavApproach = approach?.approachType === "RNAV" && this.flightPhase === "APPROACH";
-    if (rnavApproach && (selection.mode !== "GPS" || !inputs.gpsIntegrity)) {
+    // In 3a the approach needs a receiver reporting some approach level (305 not NONE); 3b asks for LPV itself.
+    if (rnavApproach && (selection.mode !== "GPS" || chosen?.level === "NONE")) {
       if (!this.nav.approachIntegrityAlerted) { this.nav.approachIntegrityAlerted = true; this.alert(alert("NO APPR INTEGRITY")); }
     } else this.nav.approachIntegrityAlerted = false;
   }
+
+  // ------------------------------------------------------------------ GPS receivers (GPS phase 3a)
+
+  /** What the receivers are given: the aircraft's true state. The antenna is level (bank not fed in yet; a known limit). */
+  private gpsInput(time: number): GpsInput {
+    return {
+      time, position: this.truth, altitude: this.altitude, baroAltitude: this.altitude, track: this.track,
+      groundSpeed: this.groundSpeed, verticalSpeed: this.verticalSpeed, attitude: { bank: 0, pitch: 0, heading: this.track },
+    };
+  }
+
+  /** Steps both receivers and judges each bus against the phase's alert limit; chooses the one to navigate on. */
+  private updateGps() {
+    const input = this.gpsInput(this.now.getTime());
+    if (this.injected.has("gpsIntegrity")) this.applyGpsIntegrityCondition(input);
+    for (const receiver of this.receivers) receiver.step(input);
+    const hal = HAL_NM[this.flightPhase];
+    const assessed = this.receivers.map(receiver => assessReceiver(receiver.bus(), hal));
+    const order = candidates(this.gpsChoice, this.gpsSelected);
+    const chosen = order.find(index => assessed[index].usable) ?? null;
+    this.gpsAssessment = { assessed, chosen };
+    return { assessed, chosen, integrityLost: order.some(index => assessed[index].reason === "INTEGRITY") };
+  }
+
+  /**
+   * The GPS integrity condition as a satellite fault (3a.5): each receiver keeps only the five highest satellites it
+   * can track, and the one RAIM sees best has a 200 m range step. With one degree of freedom that satellite's residual
+   * share is at least 1/5 (residualShares), so the step shows as at least 89 m against a threshold of a few metres: always
+   * detected, and too little redundancy to exclude, so HIL is a failure warning on both receivers. (A fault on a satellite
+   * with a near-zero share, as the lowest has in some geometries, goes undetected: that is the undetected-bias case, not
+   * this condition.) Re-chosen each step as the sky moves.
+   */
+  private applyGpsIntegrityCondition(input: GpsInput) {
+    const sky = this.constellation.sky(input.time, input.position, input.altitude, input.attitude, 5)
+      .filter(s => s.visible && s.cn0 >= 30).sort((a, b) => b.elevation - a.elevation);
+    const kept = sky.slice(0, 5), shares = kept.length === 5 ? residualShares(kept.map(s => s.los)) : [];
+    const faulty = shares.length ? kept[shares.indexOf(Math.max(...shares))].prn : null;
+    for (const receiver of this.receivers) {
+      receiver.deselect(sky.slice(5).map(s => s.prn));
+      if (this.integrityFaultPrn !== null && this.integrityFaultPrn !== faulty) receiver.satelliteFault(this.integrityFaultPrn, null);
+      if (faulty !== null && faulty !== this.integrityFaultPrn) receiver.satelliteFault(faulty, { kind: "STEP", metres: 200 });
+    }
+    this.integrityFaultPrn = faulty;
+  }
+
+  private clearGpsIntegrityCondition() {
+    for (const receiver of this.receivers) {
+      receiver.deselect([]);
+      if (this.integrityFaultPrn !== null) receiver.satelliteFault(this.integrityFaultPrn, null);
+    }
+    this.integrityFaultPrn = null;
+  }
+
+  /** GPS1 and GPS2, for the bench to read and to inject faults into; call gpsUpdated after changing one. */
+  get gps(): readonly GpsReceiver[] { return this.receivers; }
+  /** How the FMS judged each receiver at the last navigation update, and which it navigates on (index), if any. */
+  get gpsStatus(): GpsAssessment { return this.gpsAssessment; }
+  get gpsReceiverChoice(): GpsChoice { return this.gpsChoice; }
+  get navSourceLog(): readonly { at: Date; source: string }[] { return this.sourceLog; }
+
+  /** GPS NAV (NAV OPTIONS): AUTO, one receiver chosen by hand (no fallback to the other), or GPS deselected. */
+  selectGpsReceiver(choice: GpsChoice | "OFF") {
+    if (choice === "OFF") this.gpsSelected = false;
+    else { this.gpsSelected = true; this.gpsChoice = choice; }
+    this.updateNavigation(0);
+    this.emit();
+  }
+
+  /** Re-reads the receivers after the bench changed one (a fault, an override), without advancing time. */
+  gpsUpdated() { this.updateNavigation(0); this.emit(); }
 
   /** The phase that sets the default RNP: approach on an approach leg, terminal within 30 NM of either airport. */
   get flightPhase(): FlightPhase {
@@ -804,13 +921,15 @@ export class ScriptedFms implements CduBackend {
 
   /**
    * The approach the crew is flying, as the FMA and VNAV page name it: an ILS; an RNAV approach to LPV minima on
-   * GPS with integrity (SBAS is assumed available); and no approach guidance without GPS integrity.
+   * GPS with integrity (the receiver reports an approach level, 305; LPV itself from 305 is GPS phase 3b); and no
+   * approach guidance without it.
    */
   get approachType(): "ILS" | "LPV" | "NO APPR" | null {
     const approach = findProcedure(this.db, this.active, "APPROACH");
     if (!approach) return null;
     if (approach.approachType === "ILS") return "ILS";
-    return this.nav.mode !== "GPS" || this.injected.has("gpsIntegrity") ? "NO APPR" : "LPV";
+    const { assessed, chosen } = this.gpsAssessment;
+    return this.nav.mode !== "GPS" || chosen === null || assessed[chosen].level === "NONE" ? "NO APPR" : "LPV";
   }
 
   get approachArmed() { return this.armedApproach; }
@@ -901,7 +1020,6 @@ export class ScriptedFms implements CduBackend {
 
   /** NAV OPTIONS: navaids excluded from position updating, and GPS selected in or out. */
   setInhibited(idents: string[]) { this.inhibited = idents.slice(0, 3); this.updateNavigation(0); }
-  selectGps(on: boolean) { this.gpsSelected = on; this.updateNavigation(0); }
 
   /** Advances time-driven state: the timer alarms, the call duration and the clocks on the display. */
   tick() {

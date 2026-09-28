@@ -32,7 +32,8 @@
     "fms-efis.spec.ts",
     "fms-coherence.spec.ts",
     "fms-gps.spec.ts",
-    "fms-gps-sbas.spec.ts"
+    "fms-gps-sbas.spec.ts",
+    "fms-gps-fms.spec.ts"
   ],
   "rendered": [
     "review-workflow-rendered.spec.ts",
