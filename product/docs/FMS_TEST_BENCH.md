@@ -116,7 +116,7 @@ Status vocabulary: **Demonstrated** (works on the bench and has a behavioural te
 | RAIM / SBAS | Placeholder | Condition-driven flags, no satellite or protection-level model |
 | Approach type, ARM APPROACH, go-around | Partial | The type is a GPS-integrity classifier; arming and integrity do not govern the final path (R03) |
 | Altitude and speed constraints | Partial | Upper bounds are not checked, so a violated constraint reads as met (R04) |
-| T/D, E/D, VNAV path, DES NOW | Partial | Simplified geometric path; no VNAV mode state (R10) |
+| T/D, E/D, VNAV path, DES NOW | Partial | Simplified geometric path. The VNAV phase (CLIMB, CRUISE, DESCENT) is latched and recorded: past the T/D or on DES NOW the descent holds through level segments at its constraints and never climbs back, and only a cruise altitude entered above the aircraft or the missed approach leaves it. DES NOW descends at 1000 fpm to the active fix's planned altitude |
 | VNAV SPD | Not implemented | |
 | RTA | Not implemented | |
 | ETA and fuel predictions | Partial | Destination can be the missed-approach end (R07); gaps (R08); future speed constraints ignored (R09) |

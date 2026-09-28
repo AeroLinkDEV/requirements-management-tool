@@ -1,5 +1,6 @@
 import { bearingDeg, courseDeg, distanceNm, offset, type Hold, type HoldEntry, type LatLon, type Leg, type Sar, type SarPattern } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
+import type { VerticalPhase } from "./vnav";
 
 /**
  * A simple flight model for the test bench: an aircraft that flies what the scripted FMS asks for, the way an
@@ -217,6 +218,8 @@ export class FlightSimulator {
   /** The approach mode: off, armed, or captured on the final leg (the only mode that descends beyond the FAF). */
   private approach: "OFF" | "ARMED" | "CAPTURED" = "OFF";
   private events: ModeEvent[] = [];
+  /** The FMS's latched VNAV phase at the last step, to record each change as a mode event. */
+  private phase: VerticalPhase;
   private path: VerticalPath | null = null;
   private holdPlan: { segments: Segment[]; index: number; elapsed: number; loop: Segment[] } | null = null;
   private sarPlan: { points: LatLon[]; index: number } | null = null;
@@ -224,6 +227,7 @@ export class FlightSimulator {
 
   constructor(fms: ScriptedFms) {
     this.fms = fms;
+    this.phase = fms.verticalPhase;
     this.last = this.guide();
   }
 
@@ -381,8 +385,14 @@ export class FlightSimulator {
       : descentPath !== null ? { altitude: descentPath, source: "VNAV", coupled: this.vertical === "VNAV PTH" && this.altitudeHold === null } : null;
     fms.updateNavigation(dt);
     fms.updatePerformance(dt);
-    // DES NOW ends once the aircraft is on the descent path.
-    if (fms.vnav.desNow && fms.profile().descending) fms.vnav.desNow = false;
+    if (fms.verticalPhase !== this.phase) { this.phase = fms.verticalPhase; this.record(`VNAV ${this.phase}`, fms.verticalPhaseReason); }
+    // DES NOW ends once the aircraft is on the descent path: the path, rising behind the active fix, has come down to it.
+    if (fms.vnav.desNow) {
+      const first = fms.profile().points[0];
+      const onPath = first?.distance != null && first.altitude !== null
+        && first.altitude + first.distance * 6076.12 * Math.tan(rad(fms.vnav.pathAngle)) <= fms.altitude + 50;
+      if (onPath) fms.vnav.desNow = false;
+    }
   }
 
   /**
@@ -397,9 +407,11 @@ export class FlightSimulator {
     if (this.onFinal && this.approach !== "CAPTURED") return null;
     if (!first || first.distance === null || first.altitude === null || !profile.endOfDescent || (!profile.descending && !fms.vnav.desNow)) return null;
     const tan = Math.tan(rad(fms.vnav.pathAngle));
-    const pathAltitude = profile.descending ? Math.min(fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * tan) : -Infinity;
+    // DES NOW: 1000 fpm down to the planned altitude at the active fix, levelling there, until the path comes down to
+    // the aircraft (integrate ends DES NOW there). Never upward.
+    if (fms.vnav.desNow) return clamp((first.altitude - fms.altitude) * 2, -MAX_VS, 0);
+    const pathAltitude = Math.min(fms.vnav.cruiseAltitude, first.altitude + first.distance * 6076.12 * tan);
     const above = fms.altitude - pathAltitude;
-    if (fms.vnav.desNow && above > 300) return -MAX_VS;
     if (above < -50) return 0;
     return -groundSpeed * 101.27 * tan + clamp(-above * 2, -300, 300);
   }
@@ -432,7 +444,7 @@ export class FlightSimulator {
     // On final without a captured approach, nothing authorizes a descent below the FAF altitude.
     if (this.onFinal && this.approach !== "CAPTURED") return Math.max(this.fms.fafAltitudeCorrected, Math.min(this.fms.altitude, this.fms.vnav.cruiseAltitude));
     // VNAV: in the climb, the cruise altitude or the lowest restriction ahead; in the descent, the planned altitude at
-    // the active waypoint.
+    // the active waypoint (in the latched descent phase never above the aircraft: computeProfile plans no climb there).
     const profile = this.fms.profile();
     if (profile.descending) return profile.points[0]?.altitude ?? this.fms.altitude;
     return Math.max(profile.climbCap, Math.min(this.fms.altitude, this.fms.vnav.cruiseAltitude));

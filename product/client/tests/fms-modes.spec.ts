@@ -74,7 +74,9 @@ test('the vertical mode is the commanding branch: level in path mode and moving 
   // A failure while descending: altitude hold captures its latched altitude with a transient, still ALT HOLD.
   const descending = setup()
   descending.unit.press('LEGS')
-  descending.fly(1)
+  // DES NOW descends at 1000 fpm to the planned altitude at the active fix, so it needs one below the aircraft: the
+  // leg, at cruise, into the first descent constraint.
+  descending.fly(3 * 3600, () => descending.unit.altitude > 4490 && descending.unit.profile().points[0].altitude! < 4000)
   descending.unit.vnav.desNow = true
   descending.fly(60, () => descending.unit.verticalSpeed <= -990)
   expect(descending.unit.verticalSpeed).toBeLessThanOrEqual(-990)

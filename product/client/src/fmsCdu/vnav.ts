@@ -75,6 +75,12 @@ export function applyConstraint(altitude: number, c: AltitudeConstraint | null) 
  */
 export type PredictionBasis = "known" | "estimated" | "unknown";
 
+/**
+ * The latched VNAV phase (ScriptedFms keeps it). In CLIMB and CRUISE the profile tells climb from descent by where
+ * the climb reaches cruise; in DESCENT there is no climb segment: every constraint ahead is a descent constraint.
+ */
+export type VerticalPhase = "CLIMB" | "CRUISE" | "DESCENT";
+
 export type ProfileInput = {
   /**
    * One entry per waypoint ahead, in order: the distance of the leg into it (null when that leg's path is not
@@ -91,6 +97,8 @@ export type ProfileInput = {
   fuel: number;
   fuelFlow: number;
   now: number;
+  /** The latched VNAV phase; CLIMB when not given. */
+  phase?: VerticalPhase;
 };
 
 export type ProfilePoint = {
@@ -119,6 +127,8 @@ const FT_PER_NM = 6076.12;
 
 export function computeProfile(input: ProfileInput): Profile {
   const { waypoints, cruiseAltitude, pathAngle } = input;
+  // Past the top of descent the phase is latched: nothing ahead is a climb, however far below cruise the aircraft is.
+  const inDescent = input.phase === "DESCENT";
   const tan = Math.tan((pathAngle * Math.PI) / 180);
   const cumulative: number[] = [];
   let total = 0;
@@ -141,7 +151,7 @@ export function computeProfile(input: ProfileInput): Profile {
   let topOfClimb = -1;
   {
     let altitude = input.altitude;
-    if (altitude < cruiseAltitude - 1) {
+    if (!inDescent && altitude < cruiseAltitude - 1) {
       topOfClimb = waypoints.length;
       for (let i = 0; i < waypoints.length; i += 1) {
         const cap = Math.min(cruiseAltitude, capOf(waypoints[i].constraint));
@@ -170,7 +180,7 @@ export function computeProfile(input: ProfileInput): Profile {
 
   // Top of descent: where the backward path, rising at the path angle, reaches the cruise altitude.
   let topOfDescent: number | null = null;
-  if (edIndex >= 0) {
+  if (edIndex >= 0 && !inDescent) {
     const firstBelow = descent.findIndex((alt, i) => i <= edIndex && alt < cruiseAltitude - 1);
     if (firstBelow >= 0 && basis[firstBelow] !== "unknown") {
       const back = (cruiseAltitude - descent[firstBelow]) / (FT_PER_NM * tan);
@@ -180,7 +190,8 @@ export function computeProfile(input: ProfileInput): Profile {
   }
 
   // The climb levels at the lowest "at" or "at or below" constraint ahead in the climb, until passing it.
-  let climbCap = cruiseAltitude;
+  // In the descent there is no climb: the cap is where the aircraft is, so nothing pulls it back up toward cruise.
+  let climbCap = inDescent ? Math.min(cruiseAltitude, input.altitude) : cruiseAltitude;
   // Only constraints on the known part of the route cap the climb: nothing behind a gap commands the connected segment.
   for (let i = 0; i < waypoints.length && descent[i] === Infinity && basis[i] !== "unknown"; i += 1) climbCap = Math.min(climbCap, capOf(waypoints[i].constraint));
 
@@ -200,7 +211,9 @@ export function computeProfile(input: ProfileInput): Profile {
     time += hours * 3_600_000;
     fuel -= hours * input.fuelFlow;
     const cap = Math.min(cruiseAltitude, capOf(w.constraint), aheadCap[i]);
-    const climbed = altitude < cap ? Math.min(cap, altitude + input.climbRate * hours * 60) : altitude;
+    // In the descent nothing up to the E/D climbs; after it (the missed approach) the go-around may.
+    const climbs = !inDescent || (edIndex >= 0 && i > edIndex);
+    const climbed = climbs && altitude < cap ? Math.min(cap, altitude + input.climbRate * hours * 60) : altitude;
     const predicted = Math.min(climbed, descent[i]);
     // Both bounds count: a restriction the plan stays above is missed just as one it cannot climb to.
     const lower = w.constraint?.kind === "A" || w.constraint?.kind === "AT" ? w.constraint.altitude : w.constraint?.kind === "WINDOW" ? w.constraint.lower : -Infinity;
@@ -218,7 +231,7 @@ export function computeProfile(input: ProfileInput): Profile {
   const landing = edIndex >= 0 ? edIndex : waypoints.findLastIndex(w => !w.missed);
   return {
     points, topOfDescent, endOfDescent: edIndex >= 0 ? waypoints[edIndex].ident : null, unableNext, climbCap,
-    descending: edIndex >= 0 && topOfDescent === null && descent[0] !== Infinity,
+    descending: inDescent || (edIndex >= 0 && topOfDescent === null && descent[0] !== Infinity),
     destination: landing >= 0 ? points[landing] : null,
   };
 }
