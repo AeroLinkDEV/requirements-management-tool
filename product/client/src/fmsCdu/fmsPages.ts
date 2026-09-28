@@ -13,7 +13,7 @@ const back = (target: string): Line["left"] => prompt(`<${target}`);
 
 /** The final approach fix is the leg before the runway; the vertical path runs from it to the threshold. */
 function approach(fms: ScriptedFms) {
-  const legs = fms.route.legs;
+  const legs = fms.activeRoute.legs;
   const runwayAt = legs.findIndex(leg => leg.kind === "wpt" && /^RW\d{2}/.test(leg.ident));
   const runway = legs[runwayAt];
   const before = legs[runwayAt - 1];
@@ -263,7 +263,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     pages: fms => Math.max(1, Math.ceil(fms.route.legs.length / 5)),
     render: (fms, index) => {
       const route = fms.route;
-      const geometry = fms.legGeometry();
+      const geometry = fms.legGeometry(route);
       const count = Math.max(1, Math.ceil(route.legs.length / 5));
       const lines: (Line | undefined)[] = [title("RTE 1 LEGS", `${index + 1}/${count}`, fms.routeStatus)];
       route.legs.slice(index * 5, index * 5 + 5).forEach((leg, i) => {
@@ -308,7 +308,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       if (fms.directModification && index === 0 && side === "R") {
         if (row === 5 && fms.bypassedByDirect.length) { fms.abeamPoints(); return; }
         if (row === 6) {
-          const course = scratch ? numberIn(scratch, 0, 360, /^\d{1,3}$/) : fms.legGeometry()[0]?.course ?? null;
+          const course = scratch ? numberIn(scratch, 0, 360, /^\d{1,3}$/) : fms.legGeometry(fms.route)[0]?.course ?? null;
           if (course === null) return "invalid";
           fms.interceptCourse(course === 0 ? 360 : course);
           fms.setScratch("");
@@ -370,8 +370,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         const place = legs.findIndex(next => next.kind === "wpt" && next.ident === alongTrack[1]);
         const distance = Number(alongTrack[2]);
         const neighbour = legs[distance < 0 ? place - 1 : place + 1];
-        const from = fms.coordinates(alongTrack[1]);
-        const toward = neighbour?.kind === "wpt" ? fms.coordinates(neighbour.ident) : place === 0 && distance < 0 ? fms.position : undefined;
+        const from = fms.coordinates(alongTrack[1], fms.route);
+        const toward = neighbour?.kind === "wpt" ? fms.coordinates(neighbour.ident, fms.route) : place === 0 && distance < 0 ? fms.position : undefined;
         if (place < 0 || !from) return "not-in-database";
         if (!toward || distance === 0 || Math.abs(distance) >= distanceNm(from, toward)) return "invalid";
         const ident = fms.createPilot(alongTrack[1].slice(0, 3), offset(from, courseDeg(from, toward), Math.abs(distance)), scratch);
@@ -402,8 +402,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
   PROG: {
     pages: () => 4,
     render: (fms, index) => {
-      const legs = fms.route.legs;
-      const geometry = fms.legGeometry();
+      const legs = fms.activeRoute.legs;
+      const geometry = fms.legGeometry(fms.activeRoute);
       const [to, next] = legs;
       const toLeg = geometry[0], nextLeg = geometry[1];
       const now = fms.now.getTime();
@@ -438,7 +438,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           caption(" FUEL QTY", "FUEL FLOW "),
           { left: medium(`${fms.fuelState.quantity}KG`), right: medium(`${fms.fuelState.flow}KG/H`) },
           caption(" DEST", "EFOB "),
-          { left: { text: fms.route.dest, color: "green" }, right: medium(`${Math.max(0, Math.round(fms.profile().points.at(-1)?.fuel ?? fms.fuelState.quantity))}KG`) },
+          { left: { text: fms.activeRoute.dest, color: "green" }, right: medium(`${Math.max(0, Math.round(fms.profile().points.at(-1)?.fuel ?? fms.fuelState.quantity))}KG`) },
         ];
       if (index === 2)
         return [
@@ -576,9 +576,9 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         return [title("HOLD", "1/1", status), undefined, { center: medium("NO HOLD IN ROUTE") }, undefined, undefined, undefined, undefined,
           undefined, undefined, undefined, undefined, { left: dashes(24) }, footer];
       const at = fms.route.legs.findIndex(leg => leg.kind === "wpt" && leg.ident === hold.fix);
-      const toFix = fms.legGeometry().slice(0, at + 1).reduce((sum, leg) => sum + (leg?.distance ?? 0), 0);
+      const toFix = fms.legGeometry(fms.route).slice(0, at + 1).reduce((sum, leg) => sum + (leg?.distance ?? 0), 0);
       const eta = hhmm(new Date(fms.now.getTime() + (toFix / fms.groundSpeed) * 3_600_000));
-      const entry = fms.holdEntryFor();
+      const entry = fms.holdEntryFor(fms.route);
       const exitPrompt = hold.status === "IN PROGRESS" ? prompt("EXIT HOLD>") : hold.status === "EXIT ARMED" ? prompt("RESUME HOLD>") : undefined;
       return [
         title("HOLD", "1/1", status),
@@ -703,8 +703,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       if (!path)
         return [title("VNAV", "1/3"), undefined, { center: medium("NO APPROACH IN ROUTE") }, undefined, undefined, undefined, undefined,
           undefined, undefined, undefined, undefined, undefined, { left: back("INDEX") }];
-      const geometry = fms.legGeometry();
-      const legs = fms.route.legs;
+      const geometry = fms.legGeometry(fms.activeRoute);
+      const legs = fms.activeRoute.legs;
       const ident = (i: number) => { const leg = legs[i]; return leg?.kind === "wpt" ? leg.ident : leg?.kind === "cond" ? conditionalLabel(leg) : "-----"; };
       const crsDist = (i: number) => { const leg = geometry[i]; return leg ? `${three(leg.course)}°/${fixed(leg.distance, 1).padStart(5)}NM` : "---°/--.-NM"; };
       const tan = Math.tan((path.vpa * Math.PI) / 180);
