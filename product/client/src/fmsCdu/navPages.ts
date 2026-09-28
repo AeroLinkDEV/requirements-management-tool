@@ -1,4 +1,5 @@
 import { WAYPOINT, caption, dashes, fixed, medium, prompt, small, title, type NavPageId, type Page } from "./fmsModel";
+import type { FlightPhase } from "./navigation";
 import type { Line } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
 
@@ -12,17 +13,22 @@ const frequency = (fms: ScriptedFms, ident: string | null | undefined) => {
   return entry?.kind === "navaid" ? entry.frequency : "";
 };
 
+/** Flight phases short enough for a caption beside NAV MODE. */
+const PHASE_ABBREVIATION: Record<FlightPhase, string> = { "EN ROUTE": "ENRT", TERMINAL: "TERM", APPROACH: "APPR" };
+
 export const NAV_PAGES: Record<NavPageId, Page> = {
   NAV_STATUS: {
     pages: () => 1,
     render: fms => {
-      const nav = fms.navState;
+      const nav = fms.navState, performance = fms.navPerformance;
       const [dme1, dme2] = nav.dmes;
       const gps = !fms.gpsNavSelected ? "DESELECTED" : fms.hasCondition("gpsLost") ? "NO SIGNAL" : fms.hasCondition("gpsIntegrity") ? "9 SAT NO RAIM" : "9 SAT RAIM";
       const lines: (Line | undefined)[] = [
         title("NAV STATUS", "1/1"),
-        caption(" NAV MODE", `ANP/RNP ${fms.flightPhase} `),
-        { left: { text: nav.mode, color: nav.mode === "DR" ? "amber" : "green" }, right: medium(`${fixed(nav.anp, 2)}/${fixed(fms.requiredRnp, 2)}`, nav.anp > fms.requiredRnp ? "amber" : "white") },
+        // The phase is abbreviated so the caption fits beside NAV MODE on one 24-column row (R19); the values are the same
+        // effective RNP and ANP as PROGRESS, and a bench-forced value is labelled TEST (R11).
+        caption(" NAV MODE", `ANP/RNP ${performance.forced ? "TEST" : performance.rnpSource === "MANUAL" ? "MAN" : PHASE_ABBREVIATION[fms.flightPhase]} `),
+        { left: { text: nav.mode, color: nav.mode === "DR" ? "amber" : "green" }, right: medium(`${fixed(performance.anp, 2)}/${fixed(performance.rnp, 2)}`, performance.anp > performance.rnp ? "amber" : "white") },
         caption(" DME 1", "DME 2 "),
         { left: dme1 ? medium(`${dme1} ${frequency(fms, dme1)}`) : dashes(4), right: dme2 ? medium(`${dme2} ${frequency(fms, dme2)}`) : dashes(4) },
         caption(" VOR", "GPS "),
@@ -55,7 +61,7 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
         caption(" GPS NAV"),
         { left: [{ text: "<", color: "cyan" }, { text: "ON", color: fms.gpsNavSelected ? "green" : "white", size: fms.gpsNavSelected ? "large" : "small" }, { text: "/", color: "white" }, { text: "OFF", color: fms.gpsNavSelected ? "white" : "green", size: fms.gpsNavSelected ? "small" : "large" }] },
         undefined, undefined, undefined,
-        { center: small("DELETE A NAVAID TO RESTORE IT", "green") },
+        { center: small("DELETE NAVAID TO RESTORE", "green") },
         { left: dashes(24) },
         { left: prompt("<NAV STATUS") },
       ];

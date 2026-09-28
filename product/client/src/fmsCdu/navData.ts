@@ -1,4 +1,4 @@
-import { distanceNm, offset, type ConditionalPath, type FixPath, type LatLon } from "./fmsModel";
+import { distanceNm, longitudeDelta, offset, type ConditionalPath, type FixPath, type LatLon } from "./fmsModel";
 
 /**
  * The navigation database: airports with runways, navaids, fixes, airways and terminal procedures (SIDs, STARs and
@@ -206,7 +206,7 @@ export class NavDatabase {
 
   /** Entries within a distance of a position, nearest first. */
   nearby(at: LatLon, nm: number): NavEntry[] {
-    const close = (p: LatLon) => Math.abs(p.lat - at.lat) * 60 < nm && Math.abs(p.lon - at.lon) * 60 * Math.cos((at.lat * Math.PI) / 180) < nm;
+    const close = (p: LatLon) => Math.abs(p.lat - at.lat) * 60 < nm && Math.abs(longitudeDelta(at.lon, p.lon)) * 60 * Math.cos((at.lat * Math.PI) / 180) < nm;
     return [...this.byIdent.values()].flat().filter(e => close(e.position))
       .sort((a, b) => distanceNm(at, a.position) - distanceNm(at, b.position));
   }

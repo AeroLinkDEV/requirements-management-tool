@@ -1,4 +1,4 @@
-import { bearingDeg, courseDeg, distanceNm, offset, type Hold, type HoldEntry, type LatLon, type Leg, type Sar, type SarPattern } from "./fmsModel";
+import { bearingDeg, courseDeg, distanceNm, longitudeDelta, offset, type Hold, type HoldEntry, type LatLon, type Leg, type Sar, type SarPattern } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
 import type { ProfilePoint, VerticalPhase } from "./vnav";
 
@@ -45,7 +45,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 /** East/north nautical miles from an origin; accurate enough over the tens of miles a leg spans. */
 function toLocal(origin: LatLon, p: LatLon): Local {
-  return { x: (p.lon - origin.lon) * 60 * Math.cos(rad(origin.lat)), y: (p.lat - origin.lat) * 60 };
+  return { x: longitudeDelta(origin.lon, p.lon) * 60 * Math.cos(rad(origin.lat)), y: (p.lat - origin.lat) * 60 };
 }
 
 /** Along-track, cross-track and distance to go on the line from `from` to `to`. */
