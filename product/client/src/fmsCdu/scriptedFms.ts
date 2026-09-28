@@ -63,7 +63,11 @@ const samePlace = (a: LatLon | undefined, b: LatLon | undefined) => a !== undefi
 /** The legs of a route as text (DISC for a gap), for the engineering record. */
 const legText = (legs: Route["legs"]) => legs.map(leg => (leg.kind === "wpt" ? leg.ident : leg.kind === "cond" ? leg.path : "DISC")).join(" ");
 
-/** A short fingerprint of a route's legs (FNV-1a), so a record identifies the exact plan it changed. */
+/**
+ * A short fingerprint (FNV-1a) of a route's leg sequence as text (legText: idents, conditional paths, DISC). With the
+ * local plan revision it identifies which plan a record changed within this session; it does not cover coordinates,
+ * constraints, database provenance or aircraft state, so it does not prove two plans from different runs equal.
+ */
 function planFingerprint(legs: Route["legs"]) {
   let hash = 0x811c9dc5;
   for (const char of legText(legs)) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193) >>> 0;

@@ -364,6 +364,14 @@ export class FlightSimulator {
   private watchGoAround() {
     if (this.fms.goArounds === this.goArounds) return;
     this.goArounds = this.fms.goArounds;
+    // A failure that arrived after TOGA was accepted, before this step, has the authority: the missed approach is the
+    // active route, but the failure reversion's basic modes stay until LNAV and VNAV are selected after recovery.
+    if (this.fms.hasCondition("fmsFail")) {
+      this.approach = "OFF";
+      this.previousCrossTrack = null;
+      this.record("GO AROUND", `missed approach active; not flown: FMS failed, ALT HOLD ${this.altitudeHold} FT kept`);
+      return;
+    }
     const released = this.altitudeHold;
     this.altitudeHold = null;
     this.approach = "OFF";
@@ -398,8 +406,11 @@ export class FlightSimulator {
     const fms = this.fms;
     this.watchFailure();
     this.watchGoAround();
-    const guidance = this.guide(dt);
-    this.updateApproach(guidance.crossTrack);
+    const computed = this.guide(dt);
+    this.updateApproach(computed.crossTrack);
+    // An approach that ended this step (cancelled or lost) latched a hold after the guidance was built: publish the
+    // target the hold flies from this first step, not the approach's.
+    const guidance = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;
     this.last = guidance;
     // Bank toward the command at the roll-rate limit, then turn at the rate that bank gives.
     this.bank += clamp(guidance.bankCommand - this.bank, -ROLL_RATE * dt, ROLL_RATE * dt);
