@@ -4,6 +4,7 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { bearingDeg, distanceNm } from '../src/fmsCdu/fmsModel'
 import type { GpsBus, GpsReceiver } from '../src/fmsCdu/gps'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { screenText } from '../src/fmsCdu/screen'
 
 // GPS phase 3b: GPS-driven approach guidance. The FMS builds the FAS data block of the selected RNAV approach and sends
 // it to both receivers; the level the selected receiver reports (305) is the approach annunciated; once captured on
@@ -28,6 +29,10 @@ const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; re
 const onFinal = (unit: ScriptedFms) => active(unit) === 'RW24R'
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
 const threshold = { lat: 45.4790, lon: -73.7180 }
+// The FAS path by hand: the runway at 118 ft, a 50 ft TCH (the RW24R leg's 168 ft), and the angle through FERDI at 1500 ft.
+const ferdi = { lat: 45.5200, lon: -73.6313 }
+const gpa = Math.atan((1500 - 168) / (distanceNm(threshold, ferdi) * 6076.12))
+const pathAt = (toThresholdNm: number) => 168 + toThresholdNm * 6076.12 * Math.tan(gpa)
 
 test('the FMS sends the selected RNAV approach\'s FAS block to both receivers, and none for an ILS (3b.1)', () => {
   const { unit, fly } = setup()
@@ -57,6 +62,14 @@ test('outside the approach region the GPS reports LNAV/VNAV, and that is the app
   expect(unit.approachType).toBe('LPV')
   expect(fmsOutputs(unit, sim).verticalArmed).toEqual(['LPV'])
   expect(fmsOutputs(unit, sim).approach).toEqual({ type: 'LPV', state: 'ARMED' })
+})
+
+test('the VNAV page names the level, LNAV/VNAV shortened to L/VNAV so it fits beside the page number (3b.2, R19)', () => {
+  const { unit, fly } = setup()
+  fly(1)
+  expect(unit.approachType).toBe('LNAV/VNAV')
+  unit.press('VNAV')
+  expect(screenText(unit.screen())[0]).toMatch(/^ACT VNAV 24R L\/VNAV\s+1\/3$/)
 })
 
 test('captured on final, the guidance and the deviations shown are the selected GPS\'s 116 and 117, on its scaling (3b.3)', () => {
@@ -92,6 +105,10 @@ test('flying the GPS deviations, the aircraft stays on the FAS path down to the 
     if (toGo !== null && toGo < 2) worstLateral = Math.max(worstLateral, Math.abs(b['116'].value ?? Infinity))
   })
   expect(sim.approachMode).toBe('CAPTURED')
+  // The path the GPS measures from is the hand-derived one: the aircraft less its 117 deviation, within the GPS's own
+  // vertical error, at the TCH-plus-angle height for the distance it reports (201).
+  const b = selected(unit)
+  expect(Math.abs(unit.altitude - b['117'].value! - pathAt(b['201'].value!))).toBeLessThan(20)
   // Established: within 100 ft laterally (the full scale there is a few hundred feet) and 30 ft of the path.
   expect(worstLateral).toBeLessThan(100)
   expect(worstVertical).toBeLessThan(30)
@@ -129,6 +146,18 @@ test('an ionospheric storm after capture drops LPV to LNAV: APPR LOST to altitud
   expect(Math.abs(unit.altitude - held)).toBeLessThan(40)
 })
 
+test('117 withdrawn after capture, the level still LPV, is loss of vertical guidance: APPR LOST and the vertical flagged (3b.4)', () => {
+  const { unit, sim, fly } = setup()
+  unit.armApproach(true)
+  fly(3 * 3600, () => sim.approachMode === 'CAPTURED' && unit.verticalSpeed < -300)
+  for (const receiver of receivers(unit)) receiver.override('117', { kind: 'FORCE', ssm: 'FW' })
+  fly(2)
+  expect(selected(unit)['305'].value?.level).toBe('LPV')
+  expect(sim.approachMode).toBe('OFF')
+  expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'APPR LOST' })
+  expect(fmsOutputs(unit, sim).verticalDeviation.status).toBe('FAIL')
+})
+
 test('with SBAS set do-not-use the level is LNAV: armed, nothing is annunciated vertically and the approach does not descend (3b.2, 3b.4)', () => {
   const { unit, sim, fly } = setup()
   for (const receiver of receivers(unit)) receiver.setSbas({ doNotUse: true })
@@ -137,6 +166,9 @@ test('with SBAS set do-not-use the level is LNAV: armed, nothing is annunciated 
   expect(onFinal(unit)).toBe(true)
   expect(selected(unit)['273'].value?.mode).toBe('NAV')
   expect(unit.approachType).toBe('LNAV')
+  // LNAV has no vertical guidance: nothing is armed in the vertical column, though the approach is armed.
+  expect(sim.approachMode).toBe('ARMED')
+  expect(fmsOutputs(unit, sim).verticalArmed).toEqual([])
   const faf = unit.fafAltitudeCorrected
   let lowest = Infinity
   fly(300, () => { lowest = Math.min(lowest, unit.altitude); expect(sim.approachMode).not.toBe('CAPTURED'); return !onFinal(unit) })
