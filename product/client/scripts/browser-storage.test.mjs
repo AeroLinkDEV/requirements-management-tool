@@ -12,22 +12,29 @@ import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from '
 // An OS handle, not a mocked remover: Windows refuses deletion until the holder releases it.
 test('a Windows deletion failure retains ownership and can be retried after the handle closes', {
   skip: process.platform !== 'win32' && 'Windows file sharing contract', timeout: 30_000,
-}, async () => {
+}, async t => {
   const runId = randomUUID(); const state = createBrowserStorage(runId)
   writeFileSync(state.database, 'owned database')
   const holder = spawn('powershell.exe', ['-NoProfile', '-Command',
-    '$f=[IO.File]::Open($env:LOCKED_FILE,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite); try { [Console]::WriteLine("locked"); [Console]::ReadLine() | Out-Null } finally { $f.Dispose() }'],
-  { windowsHide: true, env: { ...process.env, LOCKED_FILE: state.database }, stdio: ['pipe', 'pipe', 'pipe'] })
-  const closed = once(holder, 'exit')
+    '$f=[IO.File]::Open($env:LOCKED_FILE,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite); try { [Console]::WriteLine("locked"); Start-Sleep -Seconds 20 } finally { $f.Dispose() }'],
+  { windowsHide: true, env: { ...process.env, LOCKED_FILE: state.database }, stdio: ['ignore', 'pipe', 'pipe'] })
+  let stderr = ''; holder.stderr.on('data', chunk => { stderr += chunk })
+  const closed = once(holder, 'exit', { signal: AbortSignal.timeout(25_000) })
+  // Observe early spawn failures even while waiting for the readiness message.
+  void closed.catch(() => {})
   try {
     const [ready] = await once(holder.stdout, 'data', { signal: AbortSignal.timeout(10_000) })
     assert.match(ready.toString(), /locked/)
+    t.diagnostic('exclusive-delete handle acquired')
     assert.throws(() => removeBrowserStorage(runId), { code: 'EPERM' })
     assert.equal(readFileSync(join(state.root, '.owner'), 'utf8'), runId)
     assert.equal(readFileSync(state.database, 'utf8'), 'owned database')
   } finally {
-    holder.stdin.end('\n')
+    // Terminating this one owned helper releases its native handle. Do not rely on
+    // Console.ReadLine accepting redirected stdin on a headless Windows runner.
+    holder.kill()
     await closed
+    t.diagnostic(`handle holder exited${stderr ? `: ${stderr}` : ''}`)
     // Restore only this fixture's marker after exercising the pre-fix regression.
     if (!existsSync(join(state.root, '.owner'))) writeFileSync(join(state.root, '.owner'), runId, { flag: 'wx' })
     removeBrowserStorage(runId)
