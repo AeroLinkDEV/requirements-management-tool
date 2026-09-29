@@ -176,14 +176,15 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           <text x="326" y={cy - 92} textAnchor="middle" fontSize="12" fill={WHITE}>{bus.verticalSource === "APPR" ? "GP" : "VPTH"}</text>
         </g>
       ) : bus.verticalDeviation.status === "FAIL" ? <text x="326" y={cy} textAnchor="middle" fontSize="12" fill={AMBER}>V</text> : null}
-      {/* Lateral deviation (label 116), full scale for the phase, and the navigation source annunciation. */}
+      {/* Lateral deviation (label 116), full scale for the phase, and the navigation source annunciation: GPS while the
+          lateral steers the selected receiver's 116 on an RNAV final (lateralSource), so a reversion to the route shows. */}
       <g>
         {[-1, -0.5, 0.5, 1].map(d => <circle key={d} cx={cx + d * 90} cy="318" r="3" fill="none" stroke={WHITE} />)}
         <line x1={cx} y1="311" x2={cx} y2="325" stroke={WHITE} />
         {lateralDots !== null ? (
           <polygon data-testid="ldev" points={`${cx + lateralDots * 90 - 8},318 ${cx + lateralDots * 90},311 ${cx + lateralDots * 90 + 8},318 ${cx + lateralDots * 90},325`} fill={MAGENTA} />
         ) : null}
-        <text x="104" y="308" fontSize="12" fill={bus.failed ? AMBER : GREEN} data-testid="nav-source">{bus.failed ? "FMS" : `${bus.source} ${bus.phase === "EN ROUTE" ? "ENR" : bus.phase === "TERMINAL" ? "TERM" : "APPR"}`}</text>
+        <text x="104" y="308" fontSize="12" fill={bus.failed ? AMBER : GREEN} data-testid="nav-source">{bus.failed ? "FMS" : `${bus.source} ${bus.phase === "EN ROUTE" ? "ENR" : bus.phase === "TERMINAL" ? "TERM" : "APPR"}${bus.lateralSource === "GPS" ? " GPS" : ""}`}</text>
         <text x="316" y="308" fontSize="12" fill={WHITE} textAnchor="end">{lateralDots !== null ? `${Number(bus.lateralFullScaleNm.toFixed(2))}NM` : ""}</text>
       </g>
       {/* Heading: current heading, the desired track (magenta) and a crew-selected heading (cyan). */}

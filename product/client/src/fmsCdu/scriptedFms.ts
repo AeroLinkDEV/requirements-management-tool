@@ -12,7 +12,8 @@ import {
 import { Constellation } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput } from "./gps";
 import {
-  ANP_FLOOR_NM, GPS_DISAGREE_NM, HAL_NM, VERTICAL_LEVELS, approachWords, assessReceiver, buildFas, candidates, type GpsApproachWords, type GpsAssessment, type GpsChoice,
+  ANP_FLOOR_NM, GPS_DISAGREE_NM, HAL_NM, approachAuthority, approachWords, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
+  type GpsChoice,
 } from "./gpsSensors";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
 import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
@@ -568,12 +569,13 @@ export class ScriptedFms implements CduBackend {
     // On an RNAV approach, a position without GPS integrity is not good enough to continue.
     const approach = findProcedure(this.db, this.active, "APPROACH");
     const rnavApproach = approach?.approachType === "RNAV" && this.flightPhase === "APPROACH";
-    // The approach needs a receiver reporting an approach level (305 not NONE), and once it has had vertical guidance
-    // (LPV or LNAV/VNAV with 117 valid) in the approach phase, losing it is a loss of approach integrity too (3b).
-    const vertical = this.gpsApproachVertical;
+    // The approach needs the selected receiver's words to permit it (gpsApproachAuthority: a usable receiver, a valid
+    // selected approach, a level, 116), and once it has had vertical guidance (LPV or LNAV/VNAV with 117 valid) in the
+    // approach phase, losing it is a loss of approach integrity too (3b, the GPS review's GPS-01 and GPS-06).
+    const authority = this.gpsApproachAuthority, vertical = authority.vertical;
     if (rnavApproach && vertical) this.nav.approachVerticalSeen = true;
     if (!rnavApproach) this.nav.approachVerticalSeen = false;
-    if (rnavApproach && (selection.mode !== "GPS" || chosen?.level === "NONE" || (this.nav.approachVerticalSeen && !vertical))) {
+    if (rnavApproach && (selection.mode !== "GPS" || authority.annunciation === "NO APPR" || (this.nav.approachVerticalSeen && !vertical))) {
       if (!this.nav.approachIntegrityAlerted) { this.nav.approachIntegrityAlerted = true; this.alert(alert("NO APPR INTEGRITY")); }
     } else this.nav.approachIntegrityAlerted = false;
   }
@@ -991,16 +993,27 @@ export class ScriptedFms implements CduBackend {
   }
 
   /**
-   * The approach the crew is flying, as the FMA, the EFIS bus and the VNAV page name it: an ILS; for an RNAV approach the
-   * level the selected GPS reports it can support (305: LPV inside the approach region with the FAS block's limits met,
-   * LNAV/VNAV with SBAS, LNAV); and no approach guidance without GPS navigation or a level (GPS phase 3b).
+   * The approach the crew is flying, as the FMA, the EFIS bus and the VNAV page name it: an ILS; for an RNAV approach what
+   * the selected GPS's words permit (gpsApproachAuthority): its level (305: LPV inside the approach region with the FAS
+   * block's limits met, LNAV/VNAV with SBAS, LNAV), LNAV once only lateral guidance remains, and NO APPR when the approach
+   * may not be flown (GPS phase 3b, the GPS review's GPS-01 and GPS-06).
    */
   get approachType(): "ILS" | "LPV" | "LNAV/VNAV" | "LNAV" | "NO APPR" | null {
     const approach = findProcedure(this.db, this.active, "APPROACH");
     if (!approach) return null;
     if (approach.approachType === "ILS") return "ILS";
-    const level = this.gpsApproach?.level ?? "NONE";
-    return this.nav.mode !== "GPS" || level === "NONE" ? "NO APPR" : level;
+    return this.gpsApproachAuthority.annunciation;
+  }
+
+  /**
+   * What the selected receiver's words permit on the RNAV approach, and the first veto (gpsSensors approachAuthority):
+   * lateral guidance on its 116, descent on its 117. Not GPS navigation, or no RNAV approach, permits nothing.
+   */
+  get gpsApproachAuthority(): ApproachAuthority {
+    const rnav = findProcedure(this.db, this.active, "APPROACH")?.approachType === "RNAV";
+    if (!rnav || this.nav.mode !== "GPS") return { annunciation: "NO APPR", lateral: false, vertical: false, reason: rnav ? "NO GPS NAVIGATION" : "NO RNAV APPROACH" };
+    const chosen = this.gpsAssessment.chosen;
+    return approachAuthority(chosen === null ? null : this.receivers[chosen].bus(), chosen === null ? null : this.gpsAssessment.assessed[chosen]);
   }
 
   /**
@@ -1019,11 +1032,11 @@ export class ScriptedFms implements CduBackend {
     return fas ? bearingDeg(fas.ltp, { lat: fas.ltp.lat + fas.fpapDelta.lat, lon: fas.ltp.lon + fas.fpapDelta.lon }) : null;
   }
 
-  /** The GPS gives vertical guidance for the RNAV approach: a vertical level (LPV, LNAV/VNAV) with 117 Normal. */
-  get gpsApproachVertical() {
-    const words = this.gpsApproach;
-    return words !== null && VERTICAL_LEVELS.includes(words.level) && words.verticalFt !== null;
-  }
+  /** The GPS gives vertical guidance for the RNAV approach: lateral, a vertical level (LPV, LNAV/VNAV) and 117 valid. */
+  get gpsApproachVertical() { return this.gpsApproachAuthority.vertical; }
+
+  /** The GPS gives lateral guidance for the RNAV approach: the approach may be flown and its 116 is valid. */
+  get gpsApproachLateral() { return this.gpsApproachAuthority.lateral; }
 
   /** The approach can be captured and flown down its path: an ILS, or an RNAV approach with GPS vertical guidance. */
   get approachVertical() {

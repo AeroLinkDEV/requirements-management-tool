@@ -316,6 +316,36 @@ export class FlightSimulator {
    * and VNAV or TOGA must be selected to go on. TOGA leaves the approach with a climb (watchGoAround).
    */
   private previousCrossTrack: number | null = null;
+  /**
+   * GPS lateral authority on an RNAV final (the GPS review's GPS-01): set at capture, the lateral steers the selected
+   * receiver's 116, and keeps steering it after a vertical loss (annunciated LNAV). It ends when 116 may no longer be used
+   * (watchGpsLateral), when the approach is cancelled, on TOGA, or off the final leg.
+   */
+  private gpsLateral = false;
+
+  /** The lateral is steering the selected GPS's 116 deviation, not the route geometry. */
+  get gpsLateralActive() { return this.gpsLateral; }
+
+  /**
+   * The lateral half of the GPS-01 contract, checked before the guidance is built each step. When the selected receiver's
+   * 116 may no longer steer the approach (withdrawn, invalid, or the approach vetoed: gpsApproachAuthority), the approach
+   * is lost if it is still captured, to the latched altitude hold, and LNAV reverts to the route. Both are recorded, and
+   * the EFIS names the new source (lateralSource): never a silent substitute for the GPS deviation.
+   */
+  private watchGpsLateral() {
+    if (!this.gpsLateral) return;
+    const fms = this.fms;
+    if (!this.onFinal || fms.hasCondition("fmsFail") || this.lateral !== "LNAV") { this.gpsLateral = false; return; }
+    if (fms.gpsApproachLateral) return;
+    this.gpsLateral = false;
+    const reason = fms.gpsApproachAuthority.reason;
+    if (this.approach === "CAPTURED") {
+      this.approach = "OFF";
+      fms.armApproach(false);
+      this.altitudeHold = Math.round(fms.altitude);
+      this.record("APPR LOST", `GPS lateral guidance lost (${reason}); ALT HOLD ${this.altitudeHold} FT; LNAV ON ROUTE`);
+    } else this.record("GPS LATERAL LOST", `${reason}; LNAV ON ROUTE`);
+  }
 
   private updateApproach(crossTrack: number) {
     const converging = this.previousCrossTrack === null || Math.abs(crossTrack) <= Math.abs(this.previousCrossTrack) + 1e-6;
@@ -327,21 +357,25 @@ export class FlightSimulator {
       const cancel = !fms.approachArmed ? "APPR pressed off" : this.lateral !== "LNAV" ? "HDG SEL" : null;
       if (cancel) {
         this.approach = "OFF";
+        this.gpsLateral = false;
         fms.armApproach(false);
         this.altitudeHold = Math.round(fms.altitude);
         this.record("APPR CANCELLED", `${cancel}; ALT HOLD ${this.altitudeHold} FT`);
         return;
       }
       if (!capable) {
+        // Vertical lost: the latched hold. Laterally the GPS's 116 keeps steering while it may (GPS-01).
         this.approach = "OFF";
         fms.armApproach(false);
         this.altitudeHold = Math.round(fms.altitude);
-        this.record("APPR LOST", `approach capability lost (${fms.approachType ?? "none"}); ALT HOLD ${this.altitudeHold} FT`);
+        const lateral = this.gpsLateral ? `; LNAV ON GPS (${fms.gpsApproachAuthority.reason})` : "";
+        this.record("APPR LOST", `approach capability lost (${fms.approachType ?? "none"}); ALT HOLD ${this.altitudeHold} FT${lateral}`);
       }
       return;
     }
     if (fms.approachArmed && capable && this.onFinal && this.lateral === "LNAV" && Math.abs(crossTrack) < 1 && converging && this.altitudeHold === null) {
       this.approach = "CAPTURED";
+      this.gpsLateral = this.rnavApproach;
       this.record("APPR CAPTURED", `${fms.approachType} final approach path`);
       return;
     }
@@ -382,6 +416,7 @@ export class FlightSimulator {
   private watchGoAround() {
     if (this.fms.goArounds === this.goArounds) return;
     this.goArounds = this.fms.goArounds;
+    this.gpsLateral = false;
     // A failure that arrived after TOGA was accepted, before this step, has the authority: the missed approach is the
     // active route, but the failure reversion's basic modes stay until LNAV and VNAV are selected after recovery.
     if (this.fms.hasCondition("fmsFail")) {
@@ -424,6 +459,7 @@ export class FlightSimulator {
     const fms = this.fms;
     this.watchFailure();
     this.watchGoAround();
+    this.watchGpsLateral();
     const computed = this.guide(dt);
     this.updateApproach(computed.crossTrack);
     // An approach that ended this step (cancelled or lost) latched a hold after the guidance was built: publish the
@@ -613,8 +649,9 @@ export class FlightSimulator {
     const g = leg.path === "RF" && leg.arc ? arcGeometry(leg.arc, to, fms.position) : legGeometry(from, to, fms.position);
     // A lateral offset shifts the path flown; the aircraft intercepts the offset track as it would the route.
     const shift = this.offsetApplies(leg) ? route.offset!.nm : 0;
-    // Captured on an RNAV final, the cross-track is the selected GPS's 116 deviation from the FAS course (GPS phase 3b).
-    const gpsLateral = this.approach === "CAPTURED" && this.onFinal && this.rnavApproach ? fms.gpsApproach?.lateralFt ?? null : null;
+    // With GPS lateral authority on an RNAV final, the cross-track is the selected GPS's 116 deviation from the FAS course
+    // (GPS phase 3b), captured or after a vertical loss (GPS-01); watchGpsLateral ends it, announced, when 116 goes.
+    const gpsLateral = this.gpsLateral && fms.gpsApproachLateral ? fms.gpsApproach?.lateralFt ?? null : null;
     const crossTrack = gpsLateral !== null ? gpsLateral / 6076.12 : g.crossTrack - shift;
     // Along the FAS course, from which 116 is measured, not the leg from the FAF.
     const desiredTrack = gpsLateral !== null ? fms.finalApproachCourse ?? g.track : g.track;
