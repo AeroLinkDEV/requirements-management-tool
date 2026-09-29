@@ -399,6 +399,14 @@ See [FMS Live Showcase Dataset](docs/showcase/FMS_LIVE_SHOWCASE_DATASET.md) and 
 Every project has an **FMS Test Bench** (`…/fms-test-bench`): a photorealistic, touchable CMA-9000 FMS control
 display unit for engineers.
 
+- **Target aircraft ([DEC-146](DECISIONS_AND_OPEN_QUESTIONS.md#dec-146---the-fms-test-bench-targets-the-helicopter-cma-9000-first)).**
+  The bench simulates a rotorcraft CMA-9000, with the helicopter operational program S/W 169-614876-300 as its
+  behavioural baseline. The aircraft profile is versioned data (`product/client/src/fmsCdu/profile.ts`, named with a
+  fingerprint in every run report), and which source governs each behaviour is recorded in
+  [`product/docs/FMS_APPLICABILITY.md`](product/docs/FMS_APPLICABILITY.md). The profile is declared ahead of the
+  behaviour: parameters the simulation does not yet fly are marked for later stages, and the flight model below is
+  still the point-mass model until the rotorcraft foundation lands.
+
 - The faceplate is rendered in Blender from `product/tools/AeroLink.FmsCduModel`, which uses the public CMC
   datasheet dimensions and the Operator's Manual front-panel figures. No manufacturer logo is shown.
 - The user selects one of nine hardware variations. Each variation relabels the seven annunciators and the second

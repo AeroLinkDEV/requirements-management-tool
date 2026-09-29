@@ -4,6 +4,7 @@ import {
   ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, linePattern, parseScenario, procedureText, reportMarkdown, runHeadless,
   scenarioDigest, type Scenario,
 } from '../src/fmsCdu/scenario'
+import { HELICOPTER_PROFILE, profileFingerprint } from '../src/fmsCdu/profile'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
@@ -162,6 +163,8 @@ test('a scenario becomes test procedure text, and its run a Markdown report mark
   expect(report).toMatch(/^\*\*Result: PASS\*\*$/m)
   expect(report).toMatch(/not flight-qualified evidence/)
   expect(report).toMatch(/^- Hardware variation: A$/m)
+  // The run names the aircraft profile it flew, with a fingerprint that changes with any profile value (plan A2).
+  expect(report).toMatch(/^- Aircraft profile: cma9000-s300-heli-civil v1 \(fnv1a-[0-9a-f]{8}\): CMA-9000 helicopter, civil navigation \(S\/W -300 baseline\); \d+ of \d+ parameters in force, the rest declared for later stages$/m)
   expect(report).toMatch(new RegExp(`^- Scenario: manual-rnp, ${scenarioDigest(scenario)}$`, 'm'))
   expect(report).toMatch(/^\| 4 \| Then check that screen line 10 matches \/MANUAL\/\. \| 0 s \| PASS \| RNP\/ANP MANUAL \|$/m)
 })
@@ -326,4 +329,16 @@ test('APPR pressed off is recorded and replayed, and a non-boolean on is refused
   const armedOnly = runHeadless(parseScenario(JSON.stringify({ ...scenario, steps: scenario.steps.slice(0, 1) }))).fms
   expect(armedOnly.approachArmed).toBe(true)
   expect(() => parseScenario(JSON.stringify({ ...scenario, steps: [{ when: { kind: 'start' }, action: { kind: 'armApproach', on: 'no' } }] }))).toThrow(/armApproach on must be true or false/)
+})
+
+test('the profile fingerprint changes when any profile value changes, so evidence names the exact profile (plan A2)', () => {
+  const base = profileFingerprint(HELICOPTER_PROFILE)
+  expect(base).toMatch(/^fnv1a-[0-9a-f]{8}$/)
+  expect(profileFingerprint(structuredClone(HELICOPTER_PROFILE))).toBe(base)
+  const faster = structuredClone(HELICOPTER_PROFILE)
+  faster.parameters.gateSpeed.value = 81
+  expect(profileFingerprint(faster)).not.toBe(base)
+  const forced = structuredClone(HELICOPTER_PROFILE)
+  forced.parameters.rollRate.inForce = true
+  expect(profileFingerprint(forced)).not.toBe(base)
 })

@@ -3,6 +3,7 @@ import { FlightSimulator } from "./flight";
 import { distanceNm } from "./fmsModel";
 import { START_STATES, type StartStateId } from "./kbtvDemo";
 import { GPS_MODEL_VERSION, type GpsMode } from "./gps";
+import { ACTIVE_PROFILE, profileSummary } from "./profile";
 import { describeGpsOp, gpsOpProblem, stimulusFor, type GpsOp } from "./gpsStimulus";
 import { ScriptedFms } from "./scriptedFms";
 import { SCRATCHPAD_LINE, screenText, type Lamp } from "./screen";
@@ -92,8 +93,9 @@ export type RunOutcome = "running" | "passed" | "failed" | "no checks" | "timed 
 /**
  * What the run describes, fixed when it starts, so the report cannot change after it finishes. `data` says what the
  * navigation data is (the active cycle's source); a start state can change the cycle, so both are read after it.
+ * `profile` names the aircraft profile (profile.ts) the run flew.
  */
-export type RunContext = { variant: string; cycle: string; data?: string };
+export type RunContext = { variant: string; cycle: string; data?: string; profile?: string };
 
 const isExpectation = (action: Action) => action.kind.startsWith("expect");
 
@@ -280,7 +282,7 @@ export class ScenarioRunner {
       if ("refused" in set) problems.push(`start state ${this.scenario.start}: ${set.refused}`);
     }
     this.problems = problems;
-    this.context = { ...context, cycle: fms.activeCycle.id, data: context.data ?? fms.activeCycle.source };
+    this.context = { ...context, cycle: fms.activeCycle.id, data: context.data ?? fms.activeCycle.source, profile: profileSummary(ACTIVE_PROFILE) };
     this.start = fms.now.getTime();
     this.results = this.scenario.steps.map(() => ({ status: "pending" }));
     if (this.problems.length) { this.next = this.results.length; this.endedAt = 0; return; }
@@ -553,6 +555,7 @@ export function reportMarkdown(runner: ScenarioRunner) {
     `- Scenario: ${scenario.id}, ${scenarioDigest(scenario)}`,
     `- Started: ${runner.startedAt.toISOString()}${runner.endedAfter === null ? "" : `; ended after ${formatSeconds(runner.endedAfter)} of simulated time`}`,
     `- Hardware variation: ${context.variant}`,
+    `- Aircraft profile: ${context.profile ?? "not recorded"}`,
     `- Navigation data: ${context.cycle} (${!context.data || context.data === "demonstration data" ? "invented demonstration data" : context.data})`,
     `- Time: ${TICK_SECONDS} s ticks; a step due between ticks runs at the next one.`,
     "- Driven by the scripted CMA-9000 simulation, not the operational program. This is not flight-qualified evidence.",
