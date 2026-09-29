@@ -23,6 +23,7 @@ import { NAV_PAGES } from "./navPages";
 import { PLANNING_PAGES } from "./planningPages";
 import { composeRoute, enrouteLegs, findProcedure } from "./procedures";
 import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line } from "./screen";
+import { NO_SURFACE, radioHeight, surfaceById, type Surface } from "./surface";
 import { TACTICAL_PAGES } from "./tacticalPages";
 import type { CduFunction } from "./variants";
 
@@ -236,6 +237,22 @@ export class ScriptedFms implements CduBackend {
   get groundSpeed() { return this.aircraft.groundSpeed; }
   get altitude() { return this.aircraft.altitude; }
   get track() { return this.aircraft.track; }
+  /** The surface the radio altimeter measures against (surface.ts): none unless a scenario or the bench declares one. */
+  private declaredSurface: Surface = NO_SURFACE;
+  get surface() { return this.declaredSurface; }
+  /** Declares the surface under the flight by its id (surface.ts); false for an unknown id, which changes nothing. */
+  declareSurface(id: string) {
+    const surface = surfaceById(id);
+    if (!surface) return false;
+    this.declaredSurface = surface;
+    this.emit();
+    return true;
+  }
+  /**
+   * The radio altimeter: the aircraft's physical height above the declared surface, NCD off it or above its range,
+   * FAIL when failed. Independent of the barometric altitude setting.
+   */
+  get radioHeight() { return radioHeight(this.declaredSurface, this.truth, this.altitude, this.hasCondition("raFail")); }
   /**
    * The heading the aircraft flies (degrees true). With wind it differs from the track by the crab angle (kinematics.ts);
    * before the flight simulation first reports it, the track stands in.

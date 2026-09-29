@@ -60,7 +60,7 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
   operationalProgram: "169-614876-300 (M300, Pub. 9000-GEN-0150 Rev 2)",
   navigationOption: "CIVIL",
   errorLimit: "RNP",
-  equipment: ["2 × CMA-5024 GPS/SBAS", "1 radio altimeter (declared; Stage B)", "representative rotorcraft AFCS (declared; Stage B)"],
+  equipment: ["2 × CMA-5024 GPS/SBAS", "1 radio altimeter (height above a declared flat surface)", "representative rotorcraft AFCS (declared; Stage B)"],
   missionFunctions: ["HOVER", "MARK ON TOP", "SAR SQUARE, LADDER, SECTOR", "moving waypoints", "rendezvous"],
   verticalGuidance: {
     enRoute: "no airline-style en-route VNAV; constraints advisory, flown with AFCS ALT/VS (Stage B)",
@@ -110,7 +110,7 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     minimumUseHeight: p(30, "ft RA", "lab", "derived from the TD/H window", false, "B"),
     lowHeightCruise: p(75, "ft RA", "borrowed", "AAIB-27585 (AW189 low-height protection, cruise)", false, "B"),
     lowHeightHover: p(17, "ft RA", "borrowed", "AAIB-27585 (AW189 low-height protection, hover)", false, "B"),
-    radioAltimeterRange: p(2500, "ft", "lab", "NCD above", false, "B"),
+    radioAltimeterRange: p(2500, "ft", "lab", "NCD above", true),
     // Holding (M300 Table 10-1, helicopter rows; the rows overlap at 6,000 ft and the bench gives 6,000 to the lower)
     holdingSpeedLow: p(100, "KIAS", "sourced", "M300 10-8 Table 10-1, helicopter, at or below 6,000 ft", false, "D"),
     holdingSpeedHigh: p(170, "KIAS", "sourced", "M300 10-8 Table 10-1, helicopter, above 6,000 to 14,000 ft", false, "D"),

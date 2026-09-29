@@ -443,7 +443,8 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         caption(" MARK ON TOP POS", mark ? `${mark.ident} ` : undefined),
         { left: mark ? medium(formatPosition(mark.position), "green") : dashes(15) },
         caption(" RAD ALT", "TRUE WIND "),
-        { left: medium("50FT"), right: medium(`${three(fms.wind.direction)}°/${fms.wind.speed}KT`) },
+        // The radio altimeter's height above the declared surface; dashes when it has none (NCD) or has failed.
+        { left: medium(fms.radioHeight.status === "NORMAL" ? `${Math.round(fms.radioHeight.value!)}FT` : "----FT"), right: medium(`${three(fms.wind.direction)}°/${fms.wind.speed}KT`) },
         caption(" PRESENT POS"),
         { left: medium(formatPosition(fms.position)) },
         undefined,
