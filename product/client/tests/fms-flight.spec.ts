@@ -757,6 +757,18 @@ test('a new mark over an active procedure offers ACTIVATE; its EXEC replaces the
   expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED')).toBe(true)
 })
 
+test('a hover modification edited until TDN is gone executes as a plain route change and leaves no pending TDN or MRK behind (Stage D)', () => {
+  const { unit } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.modify(route => { route.legs = route.legs.filter(leg => !(leg.kind === 'wpt' && leg.ident === 'TDN')) })
+  unit.press('EXEC')
+  expect(unit.hover.status).toBe('NONE')
+  expect(unit.hover.active).toBeNull()
+  // A later modification resolves TDN from nothing: no stale pending point.
+  unit.modify(() => {})
+  expect(unit.coordinates('TDN', unit.route)).toBeUndefined()
+})
+
 test('CANCEL of a new mark over an active procedure keeps the active one flying (Stage D, A-76)', () => {
   const { unit, sim, fly } = hoverProcedure()
   unit.press('LSK6R')

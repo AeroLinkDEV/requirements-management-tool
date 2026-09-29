@@ -1923,7 +1923,12 @@ export class ScriptedFms implements CduBackend {
       h.active = { id: ++h.procedures, mark: h.mark!, finalTrack: h.finalTrack!, dtra: h.dtra! };
       Object.assign(h, { status: "ACT", requestData: null, refused: null, refusedReason: null, functionLost: false });
       this.alert(alert("TRANSITION DOWN"));
+    } else if (this.hover.status === "MOD") {
+      // The hover modification edited until it no longer holds TDN: executed as an ordinary route change, the procedure
+      // it would have started is dropped, and the active one (if any) goes on.
+      this.discardHoverModification();
     }
+    this.pendingHoverPoints = null;
     if (route.hold?.status === "INACTIVE") route.hold.status = "ARMED";
     if (this.sar.pending) { this.sar.active = this.sar.pending; this.sar.status = "ARMED"; this.sar.pending = null; }
     // A new active waypoint, or a direct-to, starts the active leg at present position.
