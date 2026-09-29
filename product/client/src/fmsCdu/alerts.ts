@@ -7,6 +7,9 @@ export type AlertDefinition = { text: string; meaning: string };
 
 export const ALERTS: readonly AlertDefinition[] = [
   { text: "AIR DATA LOST", meaning: "Air data input is no longer valid" },
+  // Not in the CMA-9000 list: laboratory alerts for the bench's approach-aware AUTO receiver transfer (gpsSensors.ts).
+  { text: "APPR ON GPS1", meaning: "(Laboratory) The approach continues on GPS 1 after a qualified receiver transfer" },
+  { text: "APPR ON GPS2", meaning: "(Laboratory) The approach continues on GPS 2 after a qualified receiver transfer" },
   { text: "ARM APPROACH", meaning: "Approach mode should be armed for the approach" },
   { text: "CHECK ANP", meaning: "Actual navigation performance exceeds the required value" },
   { text: "COURSE CHANGE>125 AHEAD", meaning: "A course change of more than 125 degrees is coming up" },
@@ -17,6 +20,9 @@ export const ALERTS: readonly AlertDefinition[] = [
   { text: "ENTER POS/DATE/TIME", meaning: "Position, date and time must be initialised" },
   { text: "FMS DEGRADED", meaning: "The FMS is operating with reduced capability" },
   { text: "FUEL RESERVE", meaning: "Fuel on board has reached the reserve quantity" },
+  // Not in the CMA-9000 list: one receiver may no longer be navigated on, whatever the FMS does about it (lost redundancy).
+  { text: "GPS1 NOT USABLE", meaning: "(Laboratory) GPS 1 may no longer be navigated on; GPS redundancy is lost" },
+  { text: "GPS2 NOT USABLE", meaning: "(Laboratory) GPS 2 may no longer be navigated on; GPS redundancy is lost" },
   { text: "GPS NAV LOST", meaning: "GPS can no longer be used for navigation; the FMS dead reckons" },
   { text: "GPS POS UNCERTAIN", meaning: "GPS position integrity cannot be assured" },
   // Not in the CMA-9000 list: a laboratory alert for the bench's GPS1/GPS2 compare (gpsSensors.ts GPS_DISAGREE_NM).

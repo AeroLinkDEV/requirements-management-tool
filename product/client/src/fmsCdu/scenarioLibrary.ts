@@ -116,8 +116,9 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
     start: "kbtv-rnav15",
     steps: [
       { when: { kind: "active", waypoint: "JUNEL" }, action: { kind: "expectApproach", type: "LPV", state: "CAPTURED" }, within: 5 },
-      { when: { kind: "distance", waypoint: "RW15", nm: 3 }, action: { kind: "gps", receiver: 1, stimulus: { op: "sbas", doNotUse: true } } },
-      { when: { kind: "start" }, action: { kind: "gps", receiver: 2, stimulus: { op: "sbas", doNotUse: true } } },
+      // Both in the same tick, GPS 2 first: at no moment is the other receiver still eligible to take the approach over.
+      { when: { kind: "distance", waypoint: "RW15", nm: 3 }, action: { kind: "gps", receiver: 2, stimulus: { op: "sbas", doNotUse: true } } },
+      { when: { kind: "start" }, action: { kind: "gps", receiver: 1, stimulus: { op: "sbas", doNotUse: true } } },
       { when: { kind: "start" }, action: { kind: "expectApproachLevel", level: "LNAV" }, within: 5 },
       { when: { kind: "start" }, action: { kind: "expectAlert", text: "NO APPR INTEGRITY" }, within: 5 },
       { when: { kind: "start" }, action: { kind: "expectApproach", type: "LNAV", state: "OFF", verticalMode: "ALT HOLD" }, within: 5 },
@@ -125,6 +126,25 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
       { when: { kind: "start" }, action: { kind: "expectGpsSource", source: "GPS1" } },
       { when: { kind: "start" }, action: { kind: "goAround" } },
       { when: { kind: "start" }, action: { kind: "expectApproach", verticalMode: "VNAV CLB" }, within: 10 },
+    ],
+  },
+  {
+    id: "kbtv-rnav15-sbas-lost-gps1",
+    title: "KBTV RNAV (GPS) RWY 15, SBAS lost on GPS 1 on final, LPV continues on GPS 2",
+    objective: "On the real KBTV LPV approach, show the approach-aware AUTO selection (the AeroLink simulator policy): SBAS marked do not use on GPS 1 only after capture transfers the approach to GPS 2, annunciated APPR ON GPS2, with LPV, the capture and the path kept and no NO APPR INTEGRITY; GPS 1 recovering does not take it back.",
+    maxSeconds: 900,
+    start: "kbtv-rnav15",
+    steps: [
+      { when: { kind: "active", waypoint: "JUNEL" }, action: { kind: "expectApproach", type: "LPV", state: "CAPTURED" }, within: 5 },
+      { when: { kind: "distance", waypoint: "RW15", nm: 3 }, action: { kind: "gps", receiver: 1, stimulus: { op: "sbas", doNotUse: true } } },
+      { when: { kind: "start" }, action: { kind: "expectGpsSource", source: "GPS2" } },
+      { when: { kind: "start" }, action: { kind: "expectAlert", text: "APPR ON GPS2" } },
+      { when: { kind: "start" }, action: { kind: "expectApproach", type: "LPV", state: "CAPTURED", verticalMode: "APPR" } },
+      { when: { kind: "distance", waypoint: "RW15", nm: 1.5 }, action: { kind: "gps", receiver: 1, stimulus: { op: "sbas", doNotUse: false } } },
+      { when: { kind: "distance", waypoint: "RW15", nm: 0.5 }, action: { kind: "expectApproach", type: "LPV", state: "CAPTURED", maxVerticalFt: 30 } },
+      { when: { kind: "start" }, action: { kind: "expectGpsSource", source: "GPS2" } },
+      { when: { kind: "start" }, action: { kind: "expectNoAlert", text: "NO APPR INTEGRITY" } },
+      { when: { kind: "start" }, action: { kind: "expectNoAlert", text: "APPR ON GPS1" } },
     ],
   },
   {

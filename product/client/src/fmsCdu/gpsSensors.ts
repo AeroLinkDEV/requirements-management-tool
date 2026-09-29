@@ -269,3 +269,217 @@ export function approachAuthority(bus: GpsBus | null, receiver: ReceiverAssessme
   if (deviation(bus["117"]) === null) return lateralOnly(`117 ${shown(bus["117"].value!)} INVALID`);
   return { annunciation: level, lateral: true, vertical: true, reason: "" };
 }
+
+// ------------------------------------------------------------------ approach-aware AUTO selection
+
+/**
+ * AUTO receiver selection, approach-aware: the AeroLink simulator policy, not CMC's. These are proposed engineering
+ * requirements for the bench (decided 29 September), not a reproduction of the CMA-9000 or CMA-5024 installation logic,
+ * whose transfer behaviour is not verified. Sources: FAA AC 20-138D Change 2 §21-2.2(g) (evaluate switching to an
+ * alternate source, annunciate it clearly, and let the switch give no inaccurate guidance); FAA AC 90-107 §8(e)
+ * (fail-down behaviour varies by installation); the CMC CMA-5024 brochure (dual and triple receiver interfaces, LPV).
+ *
+ * In every flight phase AUTO retains the current receiver while it remains suitable for the required operation; recovery
+ * of the other does not by itself move it, and GPS1 is only the initial tie-break when there is no current eligible
+ * receiver (Astra, option A: an engineering choice, not a regulatory requirement; FMS_TEST_BENCH.md has the sources).
+ * "Equally suitable" is validity, freshness, integrity and capability, never HPL or HFOM compared.
+ *
+ * A receiver can be usable for position and still not usable for the approach being flown, so AUTO judges both:
+ *   1. both receivers support the selected approach: the current one is kept (no needless switching);
+ *   2. before capture, the current one offers less than the approach needs and the other supports it: the other is
+ *      selected once its eligibility has held for ELIGIBILITY_DWELL_S;
+ *   3. during the approach, the current one loses what the approach needs and the other is still eligible: a qualified
+ *      transfer, which keeps the guidance going without an unacceptable jump;
+ *   4. the other merely reports the level, with stale, invalid, mismatched or inconsistent data: no transfer;
+ *   5. neither can continue: the current receiver is kept, and the existing downgrade or disengagement follows;
+ *   6. a receiver chosen by hand (GPS1 or GPS2): the manual contract of `candidates`, never overridden.
+ * A receiver the approach may be transferred to (eligibleForApproach, then transferRefusal) must have: the same accepted
+ * approach (the FAS the FMS sent is the executed one, and 156 shows it selected, valid, available, not parked and inside
+ * the approach region); the LPV level (305); valid 116 and 117 and its deviation scaling; fresh words (116, 117 and 201
+ * each changed once the aircraft has moved FRESH_MOVE_NM); eligibility held for ELIGIBILITY_DWELL_S; no GPS1/GPS2
+ * disagreement; a scaling within TRANSFER_SCALE_TOLERANCE of the one flown; and deviations within TRANSFER_JUMP_FRACTION
+ * of full scale of the ones flown (at the KBTV threshold about 5 ft vertically and 40 ft laterally, where two healthy
+ * receivers differ by under 3 ft). When the source has to change during the approach without those checks (the current
+ * receiver became unusable and no other qualifies), the change is not qualified and the approach may not be flown on
+ * it: the existing loss of approach integrity follows. Transfers happen only while the approach is armed (and so while
+ * captured); the flight disarms a lost approach, so recovery of the first receiver does not switch back (1), and a lost
+ * approach is not recaptured: the flight's latched hold (D03) stays. The jump check compares with the last full guidance
+ * flown (an eligible receiver's, within TRANSFER_REFERENCE_MS): a degraded receiver's words are never the reference. "Highest level wins" is deliberately not the
+ * rule: below the approach's need there is no ranking.
+ */
+export const ELIGIBILITY_DWELL_S = 2;
+export const FRESH_MOVE_NM = 0.01;
+export const TRANSFER_JUMP_FRACTION = 0.1;
+export const TRANSFER_SCALE_TOLERANCE = 0.05;
+/** How old the guidance flown may be for a transfer to count as continuing it, ms. */
+export const TRANSFER_REFERENCE_MS = 1000;
+/** The level the selected approach needs: a FAS data block is flown to LPV. */
+export const REQUIRED_APPROACH_LEVEL: ApproachLevel = "LPV";
+
+export type SelectionInput = {
+  choice: GpsChoice;
+  selected: boolean;
+  assessed: readonly ReceiverAssessment[];
+  buses: readonly (GpsBus | null)[];
+  /** ms, and the aircraft's true position (the FMS's own motion, for the freshness of the receivers' words). */
+  time: number;
+  position: LatLon;
+  /** The CRC of the executed approach's FAS (pinned with the plan), and of the FAS the FMS last sent; null for none. */
+  executedCrc: number | null;
+  sentCrc: number | null;
+  /** The approach is armed (and so captured, if it is): the flight disarms it when the approach is lost or cancelled. */
+  approachArmed: boolean;
+};
+
+export type SelectionResult = {
+  chosen: number | null;
+  /** A qualified approach transfer happened at this update (cases 2 and 3), to `chosen`. */
+  transferred: boolean;
+  /** The approach may be flown on `chosen`: false after an unqualified source change during the approach. */
+  qualified: boolean;
+  /** Why the other receiver was not taken, when a transfer was wanted and refused (case 4); "" otherwise. */
+  refused: string;
+};
+
+type Guidance = { at: number; lateralFt: number; verticalFt: number; scale: DeviationScale };
+type Snapshot = { at: LatLon; words: (number | null)[] };
+
+export class AutoSelection {
+  private current: number | null = null;
+  private eligibleSince: (number | null)[] = [null, null];
+  private snapshots: (Snapshot | null)[] = [null, null];
+  private fresh = [false, false];
+  /** The last full approach guidance flown (an eligible receiver's 116, 117 and scaling, and when), for the jump check. */
+  private flown: Guidance | null = null;
+  private approach: number | null = null;
+  private approachQualified = true;
+
+  choose(input: SelectionInput): SelectionResult {
+    const { assessed, time } = input;
+    if (input.executedCrc !== this.approach) { this.approach = input.executedCrc; this.approachQualified = true; this.flown = null; }
+    const words = input.buses.map(approachWords);
+    [0, 1].forEach(i => this.judgeFreshness(i, input.position, words[i]));
+    const eligible = [0, 1].map(i => this.eligibleForApproach(i, input, words[i]));
+    eligible.forEach((ok, i) => { this.eligibleSince[i] = ok ? this.eligibleSince[i] ?? time : null; });
+    // Case 6: a receiver chosen by hand, or GPS deselected: the manual contract, unchanged.
+    const result: SelectionResult = input.choice !== "AUTO" || !input.selected
+      ? { chosen: candidates(input.choice, input.selected).find(i => assessed[i].usable) ?? null, transferred: false, qualified: true, refused: "" }
+      : this.auto(input, words, eligible);
+    if (!result.qualified) this.approachQualified = false;
+    this.current = result.chosen;
+    const flown = result.chosen === null ? null : words[result.chosen];
+    // Only full guidance is a reference: a degraded receiver's words (LNAV, no 117) would let a jump through unchecked.
+    if (result.chosen !== null && eligible[result.chosen] && flown) this.flown = { at: time, lateralFt: flown.lateralFt!, verticalFt: flown.verticalFt!, scale: flown.scale! };
+    return { ...result, qualified: this.approachQualified };
+  }
+
+  private auto(input: SelectionInput, words: GpsApproachWords[], eligible: boolean[]): SelectionResult {
+    const usable = [0, 1].filter(i => input.assessed[i].usable);
+    const current = this.current !== null && usable.includes(this.current) ? this.current : null;
+    const keep = (chosen: number | null, refused = ""): SelectionResult => ({ chosen, transferred: false, qualified: true, refused });
+    // No approach being flown (none, not armed, or lost, which disarms it): the current receiver while usable (no
+    // needless switching, and no switching back after a loss), else GPS1, else GPS2.
+    if (input.executedCrc === null || !input.approachArmed) return keep(current ?? usable[0] ?? null);
+    if (current !== null && eligible[current]) return keep(current);
+    const others = usable.filter(i => i !== current && eligible[i]);
+    const refusals = others.map(i => this.transferRefusal(i, input, words));
+    const to = others.find((_, n) => refusals[n] === "");
+    // Annunciated only as a transfer from a source; the first choice, with none before it, is not one.
+    if (to !== undefined) return { chosen: to, transferred: this.current !== null, qualified: true, refused: "" };
+    const refused = refusals.find(reason => reason !== "") ?? "";
+    if (current !== null) return keep(current, refused);
+    // The current receiver cannot be navigated on and no receiver qualifies: navigate on what is usable, but if the
+    // approach was being guided the change is not qualified, and the approach may not be flown on it.
+    const chosen = usable[0] ?? null;
+    return { chosen, transferred: false, qualified: !(chosen !== null && this.guiding(input.time)), refused };
+  }
+
+  /** Full approach guidance was being flown just now (within TRANSFER_REFERENCE_MS). */
+  private guiding(time: number) { return this.flown !== null && time - this.flown.at <= TRANSFER_REFERENCE_MS;
+  }
+
+  /** Why receiver i may not take the approach over now (case 4), or "" when it may. */
+  private transferRefusal(i: number, input: SelectionInput, words: GpsApproachWords[]): string {
+    const since = this.eligibleSince[i];
+    if (since === null || input.time - since < ELIGIBILITY_DWELL_S * 1000) return `GPS${i + 1} NOT YET ESTABLISHED`;
+    const [one, two] = input.assessed.map(a => a.fix);
+    if (one && two && distanceNm(one, two) > GPS_DISAGREE_NM) return "GPS1/GPS2 DISAGREE";
+    // Guidance being flown is continued only without a jump; before any is flown (or long after) there is none to jump from.
+    const flown = this.flown, next = words[i];
+    if (!flown || !this.guiding(input.time) || next.lateralFt === null || next.verticalFt === null || next.scale === null) return "";
+    const off = (a: number, b: number) => Math.abs(a - b) > TRANSFER_SCALE_TOLERANCE * Math.max(a, b);
+    if (off(flown.scale.lateralFullScaleFt, next.scale.lateralFullScaleFt) || off(flown.scale.verticalFullScaleFt, next.scale.verticalFullScaleFt)) return `GPS${i + 1} SCALING DIFFERS`;
+    if (Math.abs(next.lateralFt - flown.lateralFt) > TRANSFER_JUMP_FRACTION * next.scale.lateralFullScaleFt) return `GPS${i + 1} LATERAL JUMP`;
+    if (Math.abs(next.verticalFt - flown.verticalFt) > TRANSFER_JUMP_FRACTION * next.scale.verticalFullScaleFt) return `GPS${i + 1} VERTICAL JUMP`;
+    return "";
+  }
+
+  /** May receiver i fly the selected approach: usable, the executed approach accepted, LPV, and fresh valid guidance. */
+  private eligibleForApproach(i: number, input: SelectionInput, words: GpsApproachWords): boolean {
+    if (!input.buses[i] || !input.assessed[i].usable || input.executedCrc === null || input.sentCrc !== input.executedCrc) return false;
+    const status = words.status;
+    if (!status || !status.selected || !status.available || status.crcInvalid || status.mismatch || status.incomplete || status.parked || status.armed) return false;
+    if (words.level !== REQUIRED_APPROACH_LEVEL) return false;
+    if (words.lateralFt === null || words.verticalFt === null || words.scale === null) return false;
+    return this.fresh[i];
+  }
+
+  /** A receiver's guidance is fresh when 116, 117 and 201 have each changed since the aircraft last moved FRESH_MOVE_NM. */
+  private judgeFreshness(i: number, position: LatLon, words: GpsApproachWords) {
+    const now = [words.lateralFt, words.verticalFt, words.toThresholdNm];
+    if (now.some(value => value === null)) { this.snapshots[i] = null; this.fresh[i] = false; return; }
+    const before = this.snapshots[i];
+    if (!before) { this.snapshots[i] = { at: position, words: now }; return; }
+    if (distanceNm(before.at, position) < FRESH_MOVE_NM) return;
+    this.fresh[i] = now.every((value, n) => value !== before.words[n]);
+    this.snapshots[i] = { at: position, words: now };
+  }
+}
+
+/**
+ * What happened to the receivers and the FMS's choice of source, one entry per event, newest first: a receiver lost
+ * (it may no longer be navigated on, with the veto) or recovered (usable again, which by itself changes nothing), and
+ * each actual transfer of the FMS's source with the previous and the new source and why. A recovery is its own entry,
+ * never a transfer.
+ */
+export type SelectionEvent =
+  | { at: Date; kind: "LOST" | "RECOVERED"; receiver: "GPS1" | "GPS2"; reason: string }
+  | { at: Date; kind: "TRANSFER"; from: string; to: string; reason: string };
+
+export class SelectionLog {
+  private usable: boolean[] | null = null;
+  private chosen: number | null = null;
+  private choice: string | null = null;
+  private log: SelectionEvent[] = [];
+
+  get entries(): readonly SelectionEvent[] { return this.log; }
+
+  /**
+   * Records this update against the last; returns the receivers just lost, whose failure is annunciated whatever the
+   * FMS does about it (a transfer never suppresses it). `approach` is true when the change was an approach transfer.
+   */
+  update(at: Date, assessed: readonly ReceiverAssessment[], chosen: number | null, choice: string, approach: boolean): number[] {
+    const usable = assessed.map(a => a.usable);
+    const first = this.usable === null;
+    const lost: number[] = [];
+    const add = (event: SelectionEvent) => { this.log = [event, ...this.log].slice(0, 50); };
+    if (!first) usable.forEach((now, i) => {
+      if (now === this.usable![i]) return;
+      add({ at, kind: now ? "RECOVERED" : "LOST", receiver: `GPS${i + 1}` as "GPS1" | "GPS2", reason: now ? "USABLE AGAIN" : assessed[i].detail });
+      if (!now) lost.push(i);
+    });
+    if (!first && chosen !== this.chosen) {
+      const name = (index: number | null) => (index === null ? "NONE" : `GPS${index + 1}`);
+      const previous = this.chosen;
+      const reason = choice !== this.choice ? `GPS NAV ${choice}`
+        : previous !== null && !usable[previous] ? `${name(previous)} NOT USABLE: ${assessed[previous].detail}`
+          : approach ? `${name(previous)} CANNOT CONTINUE THE APPROACH`
+            : chosen === null ? "NO USABLE RECEIVER" : "NO CURRENT RECEIVER";
+      add({ at, kind: "TRANSFER", from: name(previous), to: name(chosen), reason });
+    }
+    this.usable = usable;
+    this.chosen = chosen;
+    this.choice = choice;
+    return lost;
+  }
+}
