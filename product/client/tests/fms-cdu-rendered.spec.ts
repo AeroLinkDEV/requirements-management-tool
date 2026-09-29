@@ -440,6 +440,10 @@ test('the FMS GPS selection is set from the routing strip, and the integrity con
   await expect(page.getByTestId('route-gps1')).not.toContainText('standby')
   await expect(page.getByTestId('route-gps2')).toContainText('in use')
   await hil.getByRole('button', { name: 'Clear' }).click()
+  // GPS 1 usable again: AUTO keeps GPS 2 (no needless switching back, the approach-aware AUTO policy), GPS 1 on standby.
+  await expect(page.getByTestId('route-gps1')).toContainText('standby')
+  await expect(routing).toHaveAttribute('aria-label', /FMS on GPS2$/)
+  await page.getByLabel('FMS GPS selection').selectOption('GPS1')
   await expect(routing).toHaveAttribute('aria-label', /FMS on GPS1$/)
   await page.getByLabel('FMS GPS selection').selectOption('GPS2')
   await expect(routing).toHaveAttribute('aria-label', /FMS on GPS2$/)
