@@ -1,7 +1,8 @@
 import { distanceNm } from "./fmsModel";
-import type { ApproachLevel, GpsBus, GpsLabel, GpsMode, GpsReceiver, Override, Ssm } from "./gps";
+import type { ApproachLevel, GpsLabel, GpsMode, GpsReceiver, Override, Ssm } from "./gps";
 import { busFix, type GpsChoice } from "./gpsSensors";
 import { stimulusFor, type GpsStimulus } from "./gpsStimulus";
+export { lowSatellites } from "./gpsStimulus";
 import type { FlightPhase } from "./navigation";
 import type { ScriptedFms } from "./scriptedFms";
 
@@ -65,11 +66,6 @@ export function overrideFor(kind: Override["kind"], amount: number, ssm?: Ssm): 
     case "BIAS": return { kind, amount };
     case "RAMP": return { kind, perSecond: amount };
   }
-}
-
-/** The GPS satellites in view below an elevation (terrain masking on the bench): the geostationary ones are left alone. */
-export function lowSatellites(bus: GpsBus, belowDeg = 15): number[] {
-  return bus["060"].map(word => word.value!).filter(s => !s.sbas && s.elevation < belowDeg).map(s => s.prn);
 }
 
 /** A mode as the manual names it. */

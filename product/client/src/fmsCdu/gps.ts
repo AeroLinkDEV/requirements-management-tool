@@ -83,7 +83,7 @@ export type ApproachLevel = "LPV" | "LNAV/VNAV" | "LNAV" | "NONE";
 export type SbasStatus = { paActive: boolean; provider: string | null; level: ApproachLevel };
 /** The bench's SBAS conditions: a "do not use" broadcast, geostationary satellites out, and an ionospheric storm factor. */
 export type SbasState = { doNotUse: boolean; outage: number[]; ionoStorm: number };
-type NumberLabel = "110" | "120" | "111" | "121" | "076" | "370" | "103" | "112" | "165" | "166" | "174" | "101" | "102" | "130" | "133" | "247" | "136" | "116" | "117" | "201";
+export type NumberLabel = "110" | "120" | "111" | "121" | "076" | "370" | "103" | "112" | "165" | "166" | "174" | "101" | "102" | "130" | "133" | "247" | "136" | "116" | "117" | "201";
 /**
  * The output bus. Units (engineering values; the bit layouts are not modelled):
  * 110/120 latitude and 111/121 longitude in degrees, coarse (to 180/2^20) and the fine remainder; 076 altitude MSL
@@ -145,7 +145,7 @@ export const DEFAULT_GEOID_SEPARATION_M = -32;
 const K_MISSED = 3.09;
 const M_PER_DEG_LAT = 111_120;
 const LAT_RESOLUTION = 180 / 2 ** 20;
-const NUMBER_LABELS: NumberLabel[] = ["110", "120", "111", "121", "076", "370", "103", "112", "165", "166", "174", "101", "102", "130", "133", "247", "136", "116", "117", "201"];
+export const NUMBER_LABELS: NumberLabel[] = ["110", "120", "111", "121", "076", "370", "103", "112", "165", "166", "174", "101", "102", "130", "133", "247", "136", "116", "117", "201"];
 
 type Satellite = SkySatellite & { tracked: boolean; used: boolean; excluded: boolean; sbas: boolean };
 type Solution = { enu: [number, number, number]; hdop: number; vdop: number; hpl: number | null; vpl: number | null; detected: boolean; sigma: number };
@@ -169,7 +169,7 @@ export const STATUS_FIELDS: Record<StatusLabel, { [field: string]: FieldType }> 
   "156": { armed: "boolean", selected: "boolean", available: "boolean", crcInvalid: "boolean", mismatch: "boolean", incomplete: "boolean", parked: "boolean" },
   "305": { paActive: "boolean", provider: "string?", level: ["LPV", "LNAV/VNAV", "LNAV", "NONE"] },
 };
-function validPatch(fields: { [field: string]: FieldType }, patch: object): boolean {
+export function validPatch(fields: { [field: string]: FieldType }, patch: object): boolean {
   return Object.entries(patch).every(([field, value]) => {
     const type = fields[field];
     if (type === undefined) return false;
@@ -187,6 +187,12 @@ function merge(value: Record<string, unknown>, patch: Record<string, unknown>): 
   return out;
 }
 const PROVIDERS = ["WAAS", "EGNOS", "MSAS", "GAGAN", "SDCM"];
+
+/**
+ * The simulation model's version, named in a run report with the seeds and the start time: together they fix what the
+ * receivers compute. Change it whenever the model's numbers change for the same inputs.
+ */
+export const GPS_MODEL_VERSION = "aerolink-cma5024-sim/1";
 
 export class GpsReceiver {
   private readonly o: Required<GpsOptions>;
@@ -221,6 +227,9 @@ export class GpsReceiver {
   }
 
   get mode() { return this.currentMode; }
+  /** The error seed, and the seed of the constellation it sees: with the start time, they fix the run. */
+  get seed() { return this.o.seed; }
+  get constellationSeed() { return this.o.constellation.seed; }
   /** The 28 V fault discrete: active in Fault mode. */
   get faultDiscrete() { return this.currentMode === "FAULT"; }
 
