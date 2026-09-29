@@ -1,6 +1,9 @@
-import { useRef } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { AircraftData, FmsOutputs, RoutePoint } from "./efis";
 import { toLocal, type LatLon } from "./fmsModel";
+import { SyntheticVisionLayer } from "./FmsSyntheticVision";
+import { SVS_ZOOM } from "./syntheticVision";
+import type { TerrainTiles } from "./terrainTiles";
 import "./FmsEfis.css";
 
 // A generic EFIS for the bench: a primary flight display and a navigation display, drawn only from the FMS output bus
@@ -31,7 +34,16 @@ function useModeChangeBoxes(modes: Record<string, string>, now: number) {
 }
 
 /** The primary flight display. The bench places it and the navigation display beside the CDU. */
-export function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now: number }) {
+export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: AircraftData; now: number; svs?: TerrainTiles | null }) {
+  // Synthetic vision replaces the sky and ground only while terrain is arriving; chosen but without terrain, the PFD
+  // keeps its conventional attitude and flags SVS in amber, as a real SVS is removed and flagged when it loses its data.
+  const subscribe = useCallback((listener: () => void) => (svs ? svs.subscribe(listener) : () => undefined), [svs]);
+  const terrain = useSyncExternalStore(subscribe, () => svs?.status ?? null);
+  const synthetic = terrain === "live";
+  const svsFlag = terrain === "off" || terrain === "unreachable";
+  // Chosen before any terrain has come, ask for the ground under the aircraft: its answer decides picture or flag.
+  const { lat, lon } = air.position;
+  useEffect(() => { if (svs && terrain === "waiting") svs.heightAt(lat, lon, SVS_ZOOM); }, [svs, terrain, lat, lon]);
   const boxed = useModeChangeBoxes({ lateral: bus.lateralMode, vertical: bus.verticalMode ?? "" }, now);
   const pitchPx = 6; // pixels per degree of pitch
   const cx = 210, cy = 196;
@@ -68,9 +80,18 @@ export function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now
         <clipPath id="efisAtt"><rect x="100" y="60" width="220" height="240" rx="18" /></clipPath>
       </defs>
       <g clipPath="url(#efisAtt)">
+        {synthetic ? (
+          <g transform={`rotate(${-air.bank} ${cx} ${cy})`}>
+            <SyntheticVisionLayer air={air} tiles={svs!} cx={cx} cy={cy} pitchPx={pitchPx} />
+          </g>
+        ) : null}
         <g transform={`rotate(${-air.bank} ${cx} ${cy}) translate(0 ${air.pitch * pitchPx})`}>
-          <rect x="-200" y={cy - 600} width="820" height="600" fill="#1f6fbf" />
-          <rect x="-200" y={cy} width="820" height="600" fill="#7a4a1f" />
+          {synthetic ? null : (
+            <>
+              <rect x="-200" y={cy - 600} width="820" height="600" fill="#1f6fbf" />
+              <rect x="-200" y={cy} width="820" height="600" fill="#7a4a1f" />
+            </>
+          )}
           <line x1="-200" y1={cy} x2="620" y2={cy} stroke={WHITE} strokeWidth="2" />
           {[-20, -10, -5, 5, 10, 20].map(p => (
             <g key={p}>
@@ -97,6 +118,7 @@ export function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now
         <polyline points={`${cx + 60},${cy} ${cx + 20},${cy} ${cx + 12},${cy + 8}`} />
         <rect x={cx - 3} y={cy - 3} width="6" height="6" fill="#ffd23a" />
       </g>
+      {svsFlag ? <text x="308" y="80" fontSize="14" fill={AMBER} textAnchor="end" data-testid="pfd-svs-flag">SVS</text> : null}
       {approachLabel ? <text x="112" y="80" fontSize="14" fill={bus.approach.state === "CAPTURED" ? GREEN : WHITE} data-testid="pfd-approach">{approachLabel}</text> : null}
       {/* Speed tape with the FMS target speed bug (magenta). */}
       <g>

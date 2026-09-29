@@ -13,7 +13,7 @@ import { apiLogin, login, selectProgram } from '../auth'
 // The view draws with WebGL; headless Chromium has no GPU here and only uses its software renderer when told to.
 test.use({ launchOptions: { args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader'] } })
 
-test('the out-the-window view starts under the production policy, from this server only, with terrain off', async ({ page, request, baseURL }) => {
+test('the out-the-window view and synthetic vision start under the production policy, from this server only, with terrain off', async ({ page, request, baseURL }) => {
   test.setTimeout(180_000)
   const origin = new URL(baseURL!).origin
   const offOrigin: string[] = [], missing: string[] = [], problems: string[] = []
@@ -50,6 +50,11 @@ test('the out-the-window view starts under the production policy, from this serv
   // Workers build the terrain meshes, so a mesh on screen means the workers ran.
   await expect.poll(() => page.evaluate(() => performance.getEntriesByType('resource')
     .some(entry => /\/cesium\/Workers\/.+\.js$/.test(new URL(entry.name).pathname))), { timeout: 30_000 }).toBe(true)
+
+  // Synthetic vision shares the terrain: chosen with the relay off, the PFD keeps its attitude and flags SVS.
+  await page.getByRole('checkbox', { name: 'Synthetic vision' }).check()
+  await expect(page.locator('svg.efisPfd').getByTestId('pfd-svs-flag')).toHaveText('SVS')
+  await expect(page.locator('svg.efisPfd').getByTestId('pfd-svs')).toHaveCount(0)
 
   const violations = await page.evaluate(() => (window as unknown as { violations?: string[] }).violations ?? [])
   expect(violations, 'content security policy violations').toEqual([])

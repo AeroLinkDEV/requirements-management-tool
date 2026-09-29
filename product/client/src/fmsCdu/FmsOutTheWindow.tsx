@@ -1,28 +1,19 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { API_ORIGIN } from "../apiOrigin";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { AircraftData, RoutePoint } from "./efis";
 import { constraintAltitude } from "./flight";
 import {
-  FT, MESH_MAX_ZOOM, TERRAIN_MAX_ZOOM, TILE_PIXELS, ancestorOf, blendAircraft, cameraPose, decodeTerrarium, pixelMetres,
+  AIRCRAFT_PARTS, FT, MESH_MAX_ZOOM, TERRAIN_MAX_ZOOM, TILE_PIXELS, ancestorOf, blendAircraft, cameraPose, pixelMetres,
   routeHeights, sampleHeights, shadeTile, tileLatitude, type AircraftSample, type Layout, type View,
 } from "./outTheWindow";
+import type { TerrainTiles } from "./terrainTiles";
 import "./FmsOutTheWindow.css";
 
 /** The modes on the flight mode annunciator, as the bench's Flight card shows them. */
 export type HudModes = { lateral: string; vertical: string; armed: string[] };
 
-/** Where height tiles come from: a Terrarium PNG, a 404 for a tile that does not exist, or a failure. */
-export type TerrainSource = (z: number, x: number, y: number) => Promise<Response>;
-
-/** This server's relay (FmsBenchTerrainEndpoints.cs): the only place the browser may fetch terrain from. */
-const relayTerrain: TerrainSource = (z, x, y) =>
-  fetch(`${API_ORIGIN}/api/fms-bench/terrain/${z}/${x}/${y}`, { credentials: "include" });
-
-type Props = { air: AircraftData; route: RoutePoint[]; modes: HudModes; layout: Layout; view: View; terrain?: TerrainSource };
+type Props = { air: AircraftData; route: RoutePoint[]; modes: HudModes; layout: Layout; view: View; tiles: TerrainTiles };
 
 type Status = "loading" | "ready" | "no-webgl" | "failed";
-/** What the terrain relay last said: tiles arriving, turned off on this installation, or not answering. */
-type Terrain = "waiting" | "live" | "off" | "unreachable";
 
 /** Heights per side of a terrain mesh tile. */
 const MESH_SAMPLES = 33;
@@ -44,14 +35,14 @@ type SceneHandle = { setRoute: (route: RoutePoint[], altitude: number) => void; 
  * seated pilot sees it, with the bench's CDU, PFD and ND below it standing in for the instrument panel. The engine is
  * loaded only when this is first shown.
  */
-export default function FmsOutTheWindow({ air, route, modes, layout, view, terrain: source = relayTerrain }: Props) {
+export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const credits = useRef<HTMLDivElement>(null);
   const pathMarker = useRef<HTMLDivElement>(null);
   const scene = useRef<SceneHandle | null>(null);
   const [status, setStatus] = useState<Status>("loading");
   const [failure, setFailure] = useState("");
-  const [terrain, setTerrain] = useState<Terrain>("waiting");
+  const terrain = useSyncExternalStore(listener => tiles.subscribe(listener), () => tiles.status);
 
   // The scene reads this every frame; renders only move its target.
   const live = useRef<Live | null>(null);
@@ -71,7 +62,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, terra
   useEffect(() => {
     let disposed = false;
     let handle: SceneHandle | null = null;
-    startScene(host.current!, credits.current!, pathMarker.current!, live, source, outcome => { if (!disposed) setTerrain(current => (current === "off" ? current : outcome)); })
+    startScene(host.current!, credits.current!, pathMarker.current!, live, tiles)
       .then(created => {
         if (disposed) { created.destroy(); return; }
         handle = created;
@@ -83,7 +74,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, terra
         setStatus(/webgl/i.test(String(error)) ? "no-webgl" : "failed");
       });
     return () => { disposed = true; handle?.destroy(); scene.current = null; };
-  }, [source]);
+  }, [tiles]);
 
   const routeKey = route.map(point => `${point.ident}:${point.position.lat},${point.position.lon}:${point.constraint ?? ""}:${point.active}`).join("|");
   useEffect(() => {
@@ -155,43 +146,14 @@ const canvas = (size = TILE_PIXELS) => Object.assign(document.createElement("can
 
 async function startScene(
   container: HTMLElement, creditContainer: HTMLElement, pathMarker: HTMLElement, live: { current: Live | null },
-  source: TerrainSource, onTerrain: (outcome: Terrain) => void,
+  tiles: TerrainTiles,
 ): Promise<SceneHandle> {
   (window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL = CESIUM_BASE;
   // The engine alone: the `cesium` package's widgets evaluate a string as script, which the policy refuses.
   const Cesium = await import("@cesium/engine");
 
-  // Each height tile is fetched once, however many mesh and imagery tiles are cut from it.
-  const tiles = new Map<string, Promise<Float32Array | null>>();
-  const scratch = canvas().getContext("2d", { willReadFrequently: true })!;
-  const load = async (z: number, x: number, y: number) => {
-    let response: Response;
-    try {
-      response = await source(z, x, y);
-    } catch {
-      onTerrain("unreachable");
-      return null;
-    }
-    if (!response.ok) {
-      const body = response.status === 404 ? await response.json().catch(() => null) as { code?: string } | null : null;
-      // A tile the source does not publish is ocean or nothing: flat, and not a failure.
-      if (body?.code === "terrain_relay_disabled") onTerrain("off");
-      else if (response.status !== 404) onTerrain("unreachable");
-      return null;
-    }
-    const bitmap = await createImageBitmap(await response.blob(), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
-    scratch.clearRect(0, 0, TILE_PIXELS, TILE_PIXELS);
-    scratch.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    onTerrain("live");
-    return decodeTerrarium(scratch.getImageData(0, 0, TILE_PIXELS, TILE_PIXELS).data);
-  };
-  const heights = (z: number, x: number, y: number) => {
-    const key = `${z}/${x}/${y}`;
-    let tile = tiles.get(key);
-    if (!tile) tiles.set(key, tile = load(z, x, y).catch(() => null));
-    return tile;
-  };
+  // Each height tile is fetched once (terrainTiles.ts), however many mesh and imagery tiles are cut from it.
+  const heights = (z: number, x: number, y: number) => tiles.load(z, x, y);
 
   const tilingScheme = new Cesium.WebMercatorTilingScheme();
   const terrainProvider = new Cesium.CustomHeightmapTerrainProvider({
@@ -239,7 +201,23 @@ async function startScene(
   const labels = scene.primitives.add(new Cesium.LabelCollection());
   const magenta = Cesium.Color.fromCssColorString(ROUTE_MAGENTA);
 
-  // The aircraft seen from outside: a plan-view symbol for now, the same in chase and map.
+  // The aircraft seen from outside. Behind it (chase), a model from boxes and ellipsoids (outTheWindow.ts), placed and
+  // oriented every frame; from 30,000 ft above (map), where a 16 m model would be a dot, a plan-view symbol.
+  const vertexFormat = Cesium.PerInstanceColorAppearance.VERTEX_FORMAT;
+  const model = scene.primitives.add(new Cesium.Primitive({
+    geometryInstances: AIRCRAFT_PARTS.map(part => new Cesium.GeometryInstance({
+      geometry: part.shape === "box"
+        ? Cesium.BoxGeometry.fromDimensions({ dimensions: new Cesium.Cartesian3(...part.size), vertexFormat })
+        : new Cesium.EllipsoidGeometry({ radii: new Cesium.Cartesian3(...part.size), vertexFormat }),
+      modelMatrix: Cesium.Matrix4.fromTranslation(new Cesium.Cartesian3(...part.offset)),
+      attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(Cesium.Color.fromBytes(...part.colour)) },
+      id: part.name,
+    })),
+    appearance: new Cesium.PerInstanceColorAppearance({ closed: true, translucent: false }),
+    asynchronous: false,
+    show: false,
+  }));
+  const orientation = new Cesium.HeadingPitchRoll();
   const symbol = canvas(48);
   const pen = symbol.getContext("2d")!;
   pen.translate(24, 24);
@@ -256,7 +234,7 @@ async function startScene(
   const onFrame = () => {
     const state = live.current;
     if (!state) return;
-    const air =blendAircraft(state.from, state.to, (performance.now() - state.at) / state.interval);
+    const air = blendAircraft(state.from, state.to, (performance.now() - state.at) / state.interval);
     const pose = cameraPose(air, state.view, state.layout);
     // The simulation knows nothing of terrain; the eye is kept above the ground it would otherwise fly through.
     const ground = scene.globe.getHeight(Cesium.Cartographic.fromDegrees(pose.longitude, pose.latitude));
@@ -265,9 +243,18 @@ async function startScene(
       destination: Cesium.Cartesian3.fromDegrees(pose.longitude, pose.latitude, height),
       orientation: { heading: pose.heading, pitch: pose.pitch, roll: pose.roll },
     });
-    ownship.show = state.view !== "cockpit";
-    ownship.position = Cesium.Cartesian3.fromDegrees(air.position.lon, air.position.lat, air.altitude * FT);
+    const at = Cesium.Cartesian3.fromDegrees(air.position.lon, air.position.lat, air.altitude * FT);
+    ownship.show = state.view === "map";
+    ownship.position = at;
     ownship.rotation = -Cesium.Math.toRadians(air.heading);
+    model.show = state.view === "chase";
+    if (model.show) {
+      // The model's +x is forward; Cesium's heading turns +x from east, so north-up heading is a quarter turn less.
+      orientation.heading = Cesium.Math.toRadians(air.heading - 90);
+      orientation.pitch = Cesium.Math.toRadians(air.pitch);
+      orientation.roll = Cesium.Math.toRadians(air.bank);
+      model.modelMatrix = Cesium.Transforms.headingPitchRollToFixedFrame(at, orientation);
+    }
 
     // The flight path marker sits where the aircraft is going: a point 2 NM along the flight path, projected.
     if (state.view === "cockpit" && state.layout === "hud") {

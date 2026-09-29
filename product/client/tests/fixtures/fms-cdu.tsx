@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import '../../src/index.css'
 import FmsCduTestBench from '../../src/fmsCdu/FmsCduTestBench'
-import type { TerrainSource } from '../../src/fmsCdu/FmsOutTheWindow'
+import type { TerrainSource } from '../../src/fmsCdu/terrainTiles'
 
 // The out-the-window view's terrain, made here instead of fetched: every tile is one smooth 900 m hill, Terrarium
 // encoded (height = R × 256 + G + B / 256 − 32768). `?terrain=off` answers as an installation with the relay off.
