@@ -35,7 +35,8 @@
     "fms-gps-sbas.spec.ts",
     "fms-gps-fms.spec.ts",
     "fms-gps-bench.spec.ts",
-    "fms-gps-approach.spec.ts"
+    "fms-gps-approach.spec.ts",
+    "fms-out-the-window.spec.ts"
   ],
   "rendered": [
     "review-workflow-rendered.spec.ts",
@@ -44,6 +45,7 @@
     "code-workspace-rendered.spec.ts",
     "artifact-thread-rendered.spec.ts",
     "recorded-code-reference-surfaces.spec.ts",
-    "fms-cdu-rendered.spec.ts"
+    "fms-cdu-rendered.spec.ts",
+    "fms-out-the-window-rendered.spec.ts"
   ]
 }
