@@ -52,10 +52,21 @@ const cycleDates = (cycle: { from: number | null; to: number | null }) => {
   return `${day(cycle.from)}-${day(cycle.to)}`;
 };
 
-/** EFOB at the landing, or dashes when the route has no prediction to it. */
+/** EFOB at the prediction endpoint (the MAP, or over the landing site), or dashes when it is not computed. */
 const efobText = (fms: ScriptedFms) => {
   const fuel = fms.profile().destination?.fuel ?? null;
   return fuel === null ? "-----KG" : `${Math.max(0, Math.round(fuel))}KG`;
+};
+
+/**
+ * The endpoint's basis as the pages state it (plan C.11, R3-03): the endpoint kind (INSTR END, the MAP; SITE ARR, over
+ * the landing site) and the status (KNOWN; COND with its assumption; UNKNOWN with the reason). Never a landing.
+ */
+const basisText = (fms: ScriptedFms) => {
+  const endpoint = fms.profile().endpoint;
+  if (!endpoint) return { kind: "NO ENDPOINT", status: "UNKNOWN", reason: "NO MAP OR LANDING SITE" };
+  const { status, reason } = endpoint.point;
+  return { kind: endpoint.kind === "INSTRUMENT END" ? "INSTR END" : "SITE ARR", status: status === "CONDITIONAL" ? "COND" : status, reason };
 };
 
 /** VNAV CRZ: the planned cruise, path angle and wind, with the top and end of descent the profile works out. */
@@ -116,18 +127,23 @@ function vnavCruiseLsk(fms: ScriptedFms, side: "L" | "R", row: number, scratch: 
 }
 
 /**
- * The landing ETA and fuel on board there, from the profile predictions; amber below the reserve. Past a gap in the
- * route there is no prediction, and the page says so rather than showing a number.
+ * The prediction at the endpoint (plan C.11, R3-03): the MAP ("CRANN (MAP)") or arrival over the landing site ("RW15
+ * (THR)", "87N"), its ETA and fuel on board there (amber below the reserve), and its basis: the endpoint kind and the
+ * status, with the assumption of a CONDITIONAL prediction or why an UNKNOWN one is not computed. No landing is modelled,
+ * so the landing reserve is never shown as met: LANDING NOT MODELLED.
  */
 function destinationPrediction(fms: ScriptedFms): (Line | undefined)[] {
-  const dest = fms.profile().destination;
-  if (!dest) return [];
-  if (dest.eta === null || dest.fuel === null)
-    return [caption(` DEST ${fms.activeRoute.dest}`, "EFOB "), { left: medium("-----"), right: medium("-----KG") }];
-  const short = dest.fuel < fms.fuelState.reserve;
+  const profile = fms.profile(), endpoint = profile.endpoint, point = endpoint?.point;
+  const basis = basisText(fms);
+  const timed = point && point.eta !== null && point.fuel !== null ? point : null;
+  const short = timed !== null && timed.fuel! < fms.fuelState.reserve;
   return [
-    caption(` DEST ${fms.activeRoute.dest}`, "EFOB "),
-    { left: medium(eta(dest.eta)), right: medium(`${Math.max(0, Math.round(dest.fuel))}KG`, short ? "amber" : "white") },
+    caption(` ${endpoint ? endpoint.label : fms.activeRoute.dest}`, "EFOB "),
+    { left: medium(timed ? eta(timed.eta!) : "-----"), right: medium(timed ? `${Math.max(0, Math.round(timed.fuel!))}KG` : "-----KG", short ? "amber" : "white") },
+    caption(` ${basis.kind}`, `${basis.status} `),
+    basis.reason ? { left: small(basis.reason, basis.status === "UNKNOWN" ? "amber" : "white") } : undefined,
+    caption(" LDG RESERVE"),
+    { left: medium(profile.reserve.reason.toUpperCase()) },
   ];
 }
 
@@ -193,7 +209,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         undefined,
         { left: prompt("<HOLD"), right: prompt("TIMER>") },
         undefined,
-        { left: prompt("<MAINT") },
+        // M300 reaches PLAN DATA from INIT/REF 2/2 at 4L, where the bench has FIX INFO; here it is the free 6R.
+        { left: prompt("<MAINT"), right: prompt("PLAN DATA>") },
       ]
       : [
         title("INIT/REF INDEX", "2/2"),
@@ -212,7 +229,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       ],
     lsk: (fms, side, row, _scratch, index) => {
       const target: Record<string, PageId> = index === 0
-        ? { L1: "IDENT", L2: "POS", L3: "FUEL", L4: "RTE", L5: "HOLD", R1: "NAV_DATA", R2: "PREDEF", R3: "MSG_RECALL", R4: "RADIO", R5: "TIMER", L6: "MAINT" }
+        ? { L1: "IDENT", L2: "POS", L3: "FUEL", L4: "RTE", L5: "HOLD", R1: "NAV_DATA", R2: "PREDEF", R3: "MSG_RECALL", R4: "RADIO", R5: "TIMER", L6: "MAINT", R6: "PLAN_DATA" }
         : { L1: "TACT", L2: "TACT_APPR", L3: "HOVER", L4: "FIX", L5: "SEC_FPLN", R1: "VNAV", R2: "ATC", R3: "FMC_COMM", R4: "ANS", R5: "NAV_STATUS", L6: "MOVING_WPT", R6: "RNDZ" };
       const page = target[`${side}${row}`];
       if (page === "HOLD" && !fms.route.hold) { fms.open("LEGS"); fms.setScratch("/H"); return; }
@@ -463,8 +480,11 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           title("PROGRESS", "2/4", "ACT"),
           caption(" FUEL QTY", "FUEL FLOW "),
           { left: medium(`${fms.fuelState.quantity}KG`), right: medium(`${fms.fuelState.flow}KG/H`) },
-          caption(" DEST", "EFOB "),
-          { left: { text: fms.activeRoute.dest, color: "green" }, right: medium(efobText(fms)) },
+          // The endpoint of the predictions (the MAP, or over the landing site), its EFOB and its basis (plan C.11, R3-03).
+          caption(` ${basisText(fms).kind}`, "EFOB "),
+          { left: { text: fms.profile().endpoint?.label ?? fms.activeRoute.dest, color: "green" }, right: medium(efobText(fms)) },
+          caption(" BASIS"),
+          { left: medium(basisText(fms).status), right: basisText(fms).reason ? small(basisText(fms).reason!) : undefined },
         ];
       if (index === 2) {
         // The receiver navigated on (or the one chosen, or GPS1) as its bus reports it: mode, satellites used, HIL (3a.6).
@@ -577,6 +597,47 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       if (!shape.test(scratch) || !range(scratch)) return "invalid";
       const text = key.startsWith("com") ? Number(scratch).toFixed(3) : key.startsWith("nav") ? Number(scratch).toFixed(2) : scratch;
       fms.setRadio(key, text);
+      fms.setScratch("");
+    },
+  },
+
+  // PLAN DATA (M300 3-19): TRANS ALT and TRANS LVL, CRZ WIND and CRZ TAS (130 kt for ROTOR). Planning data only.
+  PLAN_DATA: {
+    pages: () => 1,
+    render: fms => {
+      const plan = fms.planData;
+      return [
+        title("PLAN DATA", "1/1"),
+        caption(" TRANS ALT", "CRZ WIND "),
+        { left: medium(`${plan.transAlt}FT`), right: medium(`${three(plan.cruiseWind.direction)}T/${String(plan.cruiseWind.speed).padStart(3)}KT`) },
+        caption(" TRANS LVL", "CRZ TAS "),
+        { left: medium(`FL${String(plan.transLevel).padStart(3, "0")}`), right: medium(`${plan.cruiseTas}KT`) },
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        { left: dashes(24) },
+        { left: prompt("<INIT/REF") },
+      ];
+    },
+    lsk: (fms, side, row, scratch) => {
+      const plan = fms.planData;
+      if (side === "L" && row === 6) { fms.open("INIT_REF"); return; }
+      if (!scratch) return;
+      if (side === "L" && row === 1) {
+        // Feet (18000), or a flight level (180) that is multiplied by 100.
+        const value = /^\d{3}$/.test(scratch) ? Number(scratch) * 100 : /^\d{4,5}$/.test(scratch) ? Number(scratch) : NaN;
+        if (!(value >= 1000 && value <= 60000)) return "invalid";
+        plan.transAlt = value;
+      } else if (side === "L" && row === 2) {
+        const match = /^(?:FL)?(\d{2,3})$/.exec(scratch);
+        if (!match || Number(match[1]) < 10 || Number(match[1]) > 600) return "invalid";
+        plan.transLevel = Number(match[1]);
+      } else if (side === "R" && row === 1) {
+        const match = /^(\d{3})\/(\d{1,3})$/.exec(scratch);
+        if (!match || Number(match[1]) > 360 || Number(match[2]) > 250) return "invalid";
+        plan.cruiseWind = { direction: Number(match[1]) % 360, speed: Number(match[2]) };
+      } else if (side === "R" && row === 2) {
+        if (!/^\d{2,3}$/.test(scratch) || Number(scratch) < 40 || Number(scratch) > 400) return "invalid";
+        plan.cruiseTas = Number(scratch);
+      } else return;
       fms.setScratch("");
     },
   },

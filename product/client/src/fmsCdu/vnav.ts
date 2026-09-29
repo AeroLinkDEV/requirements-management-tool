@@ -76,6 +76,20 @@ export function applyConstraint(altitude: number, c: AltitudeConstraint | null) 
 export type PredictionBasis = "known" | "estimated" | "unknown";
 
 /**
+ * How known a prediction is (plan R3-03), carried separately from where it ends: KNOWN, computed; CONDITIONAL, computed
+ * under a labelled assumption (an estimated leg, or a MANUAL hold exited at its next crossing); UNKNOWN, not computed
+ * (a discontinuity, NO PROGRESS, or a planned ground speed of zero or less). It only gets worse along the route.
+ */
+export type PredictionStatus = "KNOWN" | "CONDITIONAL" | "UNKNOWN";
+
+/**
+ * Where a destination-type prediction ends (plan R3-03): INSTRUMENT END, the missed approach point; SITE ARRIVAL, over
+ * the landing site (a heliport, or a runway threshold). There is no LANDING endpoint in v1: no landing allowance or
+ * landing model is declared, so nothing is predicted after arrival and the landing reserve is unavailable.
+ */
+export type EndpointKind = "INSTRUMENT END" | "SITE ARRIVAL";
+
+/**
  * The latched VNAV phase (ScriptedFms keeps it). In CLIMB and CRUISE the profile tells climb from descent by where
  * the climb reaches cruise; in DESCENT there is no climb segment: every constraint ahead is a descent constraint.
  */
@@ -91,7 +105,13 @@ export type ProfileInput = {
     /** Predicted ground speed on the leg into it, or null where the leg cannot be flown with progress (kinematics.ts). */
     groundSpeed: number | null; constraint: AltitudeConstraint | null; endOfDescent: boolean;
     basis?: PredictionBasis; missed?: boolean;
+    /** From this waypoint on the prediction rests on this labelled assumption (CONDITIONAL). */
+    assumption?: string;
+    /** This waypoint is the prediction endpoint, of this kind and shown with this label ("CRANN (MAP)"). */
+    endpoint?: { kind: EndpointKind; label: string };
   }[];
+  /** The aircraft is making no measurable progress (held stationary off-plan): nothing ahead has an ETA or EFOB. */
+  noProgress?: boolean;
   altitude: number;
   cruiseAltitude: number;
   climbRate: number;
@@ -105,6 +125,13 @@ export type ProfileInput = {
 
 export type ProfilePoint = {
   ident: string; distance: number | null; eta: number | null; fuel: number | null; basis: PredictionBasis;
+  status: PredictionStatus;
+  /**
+   * The assumption a CONDITIONAL prediction rests on, or why an UNKNOWN one is not computed, as the CDU shows it (at most
+   * 24 characters): LEG ESTIMATED, HOLD EXIT NEXT CROSSING; NO PROGRESS, PATH NOT DEFINED, NO PROGRESS ON A LEG, AFTER
+   * UNKNOWN SEGMENT. Null when KNOWN.
+   */
+  reason: string | null;
   /** The predicted altitude; null past an unknown segment, where it cannot be predicted. */
   altitude: number | null;
   /** Whether the plan meets the constraint here; null where it is not evaluated (past an unknown segment). */
@@ -117,8 +144,14 @@ export type Profile = {
   endOfDescent: string | null;
   /** The first constraint the plan does not meet: a climb it cannot make, or a restriction it stays above. */
   unableNext: string | null;
-  /** The landing: the end of descent (the runway), or the last point before the missed approach. */
+  /**
+   * The prediction endpoint (INSTRUMENT END or SITE ARRIVAL) and its point, as the caller identified it; null when the
+   * route has none. `destination` is its point.
+   */
+  endpoint: { kind: EndpointKind; label: string; point: ProfilePoint } | null;
   destination: ProfilePoint | null;
+  /** The landing reserve: never available in v1 (no landing is modelled, R3-03), with the reason. */
+  reserve: { available: false; reason: string };
   /** The altitude the climb may go to now: cruise, or the lowest "at" or "at or below" constraint ahead in the climb. */
   climbCap: number;
   /** Past the top of descent: the active waypoint is on the descent path. */
@@ -149,6 +182,18 @@ export function computeProfile(input: ProfileInput): Profile {
     const own: PredictionBasis = w.legDistance === null || w.groundSpeed === null ? "unknown" : w.basis ?? "known";
     const before = i > 0 ? basis[i - 1] : "known";
     basis.push(rank[own] > rank[before] ? own : before);
+  });
+  // The status follows the basis, an assumption (CONDITIONAL) carried on from where it starts, and no progress at all.
+  const status: { status: PredictionStatus; reason: string | null }[] = [];
+  waypoints.forEach((w, i) => {
+    const before = i > 0 ? status[i - 1] : { status: "KNOWN" as PredictionStatus, reason: null };
+    const own = input.noProgress ? { status: "UNKNOWN" as const, reason: "NO PROGRESS" }
+      : basis[i] === "unknown" ? { status: "UNKNOWN" as const, reason: w.legDistance === null ? "PATH NOT DEFINED" : w.groundSpeed === null ? "NO PROGRESS ON A LEG" : "AFTER UNKNOWN SEGMENT" }
+        : w.assumption ? { status: "CONDITIONAL" as const, reason: w.assumption }
+          : basis[i] === "estimated" ? { status: "CONDITIONAL" as const, reason: "LEG ESTIMATED" }
+            : { status: "KNOWN" as const, reason: null };
+    const order = { KNOWN: 0, CONDITIONAL: 1, UNKNOWN: 2 } as const;
+    status.push(order[own.status] > order[before.status] ? own : before);
   });
 
   // The capping constraints of the climb: cruise, or an "at" or "at or below" constraint.
@@ -228,20 +273,24 @@ export function computeProfile(input: ProfileInput): Profile {
     const lower = w.constraint?.kind === "A" || w.constraint?.kind === "AT" ? w.constraint.altitude : w.constraint?.kind === "WINDOW" ? w.constraint.lower : -Infinity;
     const upper = w.constraint?.kind === "B" || w.constraint?.kind === "AT" ? w.constraint.altitude : w.constraint?.kind === "WINDOW" ? w.constraint.upper : Infinity;
     const known = basis[i] !== "unknown";
+    const timed = known && !input.noProgress;
     // Past an unknown segment a constraint is not evaluated: neither met nor missed, and it raises no UNABLE.
     const met = known ? predicted >= lower - 50 && predicted <= upper + 50 : null;
     if (met === false && unableNext === null) unableNext = w.ident;
     altitude = predicted;
     points.push({
-      ident: w.ident, distance: known ? cumulative[i] : null, altitude: known ? predicted : null, eta: known ? time : null, fuel: known ? fuel : null,
-      constraintMet: met, basis: basis[i],
+      ident: w.ident, distance: known ? cumulative[i] : null, altitude: known ? predicted : null, eta: timed ? time : null, fuel: timed ? fuel : null,
+      constraintMet: met, basis: basis[i], status: status[i].status, reason: status[i].reason,
     });
   });
-  const landing = edIndex >= 0 ? edIndex : waypoints.findLastIndex(w => !w.missed);
+  // The endpoint is the one the caller identified (the approach's MAP, the landing site's threshold or heliport): never
+  // merely the last point before the missed approach, which would present a MAP prediction as a landing (plan C.11).
+  const at = waypoints.findIndex(w => w.endpoint);
+  const endpoint = at >= 0 ? { ...waypoints[at].endpoint!, point: points[at] } : null;
   return {
     points, topOfDescent, endOfDescent: edIndex >= 0 ? waypoints[edIndex].ident : null, unableNext, climbCap,
     descending: inDescent || (edIndex >= 0 && topOfDescent === null && descent[0] !== Infinity),
-    destination: landing >= 0 ? points[landing] : null,
+    endpoint, destination: endpoint?.point ?? null, reserve: { available: false, reason: "landing not modelled" },
   };
 }
 
