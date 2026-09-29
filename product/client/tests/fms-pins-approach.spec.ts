@@ -55,6 +55,16 @@ test('the point-in-space final ends at its MAP: CRANN is the instrument end, flo
   expect(unit.onFinalSegment).toBe(false)
 })
 
+test('the instrument end is the approach leg: the same fix earlier in the route does not start the final', () => {
+  const unit = flying(PINS, '87N', 'R190', 'HTO')
+  unit.sequence()
+  // The crew puts CRANN ahead of the route as an ordinary waypoint: it is not the approach's MAP.
+  unit.modify(route => { route.legs.unshift({ kind: 'wpt', ident: 'CRANN' }) })
+  unit.press('EXEC')
+  expect(active(unit)).toBe('CRANN')
+  expect(unit.onFinalSegment).toBe(false)
+})
+
 test('a runway approach keeps the runway as its instrument end and final runway', () => {
   const unit = flying(KBTV, 'KBTV', 'R15', 'STAEV')
   expect(unit.instrumentEnd).toBe('RW15')
@@ -75,8 +85,9 @@ test('C.5: a coded limit applies from its fix onward; 70 kt from TIDUE through t
   // The missed approach: the CA from the MAP, then DF BEADS, still 70.
   expect(limit({ kind: 'cond', path: 'CA', course: 176, altitude: 439, source: 'MISSED' })).toMatchObject({ kt: 70, source: 'R190 CRANN' })
   expect(limit(wpt('BEADS', 'MISSED'), 1500)).toMatchObject({ kt: 70 })
-  // A leg that is not part of the approach has no procedure limit.
+  // A leg that is not part of the approach has no procedure limit, even at one of its fixes.
   expect(limit({ kind: 'wpt', ident: 'HTO' })).toBeNull()
+  expect(limit({ kind: 'wpt', ident: 'CRANN' })).toBeNull()
   expect(procedureSpeedLimit(undefined, undefined, wpt('STAYS'), 1700)).toBeNull()
 })
 
@@ -91,6 +102,19 @@ test('R3-04: the 90 kt release is valid baro altitude at or above 2,000 ft, not 
   expect(procedureSpeedLimit(approach, 'HTO', beads, null)).toMatchObject({ kt: 70 })
   // The release is for the missed approach only: 2,000 ft on the final does not lift the final's limit.
   expect(procedureSpeedLimit(approach, 'HTO', { kind: 'wpt', ident: 'CRANN', source: 'APPR' }, 2500)).toMatchObject({ kt: 70 })
+})
+
+test('a limit coded on a conditional leg applies from the start of that leg', () => {
+  const approach = r190()
+  // Only the missed approach CA codes a limit (60 kt): it is in force while the CA is flown, not before.
+  const bare = {
+    ...approach,
+    legs: approach.legs.map(leg => ({ ...leg, speedLimit: undefined })),
+    missed: [{ ...approach.missed![0], speedLimit: { kt: 60, descriptor: 'AT' as const } }, ...approach.missed!.slice(1)],
+  }
+  const ca: Leg = { kind: 'cond', path: 'CA', course: 176, altitude: 439, source: 'MISSED' }
+  expect(procedureSpeedLimit(bare, undefined, { kind: 'wpt', ident: 'CRANN', source: 'APPR' }, 600)).toBeNull()
+  expect(procedureSpeedLimit(bare, undefined, ca, 600)).toMatchObject({ kt: 60, source: 'R190 CA' })
 })
 
 test('an at-or-above value is a minimum, not a limit', () => {
