@@ -7,7 +7,7 @@ import { COPTER_PINS_CIFP_2609, COPTER_PINS_CIFP_2609_SHA256 } from '../src/fmsC
 import {
   COPTER_PINS_SOURCE, FINAL_START_BEFORE_STAYS_NM, MISSION_87N_OFFSHORE_SAR, MISSION_87N_VARIANTS, MISSION_START_SOUTH_NM, setUp87nOffshoreSar, setUp87nRnav190Final,
 } from '../src/fmsCdu/heliDemo'
-import { runHeadless, scenarioProblems } from '../src/fmsCdu/scenario'
+import { ScenarioRunner, advanceTicks, runHeadless, scenarioProblems } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
@@ -131,3 +131,27 @@ for (const variant of MISSION_87N_VARIANTS) {
     expect(runner.outcome).toBe('passed')
   })
 }
+
+test('MA-GRAD: the missed approach at CRANN climbs at least 400 ft/NM over the ground, ramp included, measured on the flown trace (AIM 5-4-21)', () => {
+  // The nominal run, observed tick by tick. The declared interval: from the tick TOGA is pressed at CRANN over the first
+  // nautical mile flown over the ground (or to the 2,000 ft capture, if sooner). The GA vertical-acceleration ramp is
+  // inside the interval, not excused (rev 3.1 addendum).
+  let now = START
+  const fms = new ScriptedFms(() => new Date(now))
+  const sim = new FlightSimulator(fms)
+  const runner = new ScenarioRunner(MISSION_87N_OFFSHORE_SAR, fms, undefined, sim)
+  let from: number | null = null, flownNm = 0, climbed = 0
+  while (!runner.finished) {
+    const before = fms.altitude
+    advanceTicks(1, ms => { now += ms }, sim, runner)
+    if (from === null && sim.modeEvents.some(e => e.event === 'GO AROUND')) from = before
+    if (from !== null && flownNm < 1 && fms.altitude < 1990) {
+      flownNm += (fms.groundSpeed * 0.25) / 3600
+      climbed = fms.altitude - from
+    }
+  }
+  expect(from).not.toBeNull()
+  expect(flownNm).toBeGreaterThan(0.3)
+  const gradient = climbed / flownNm
+  expect(gradient).toBeGreaterThanOrEqual(400)
+})
