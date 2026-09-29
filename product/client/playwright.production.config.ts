@@ -98,6 +98,9 @@ export default defineConfig({
         // terminates TLS at its proxy and leaves this at its default of true.
         Identity__CookieSecure: 'false',
         Identity__LoginRateLimitPerMinute: '500',
+        // The FMS bench's terrain relay fetches from AWS; a gate must not depend on the internet (DEC-047), and
+        // the out-the-window journey proves the view with the relay off, as an installation that never enabled it.
+        FmsBench__TerrainRelay: 'false',
         ConnectionStrings__AeroLink: `Data Source=${database}`,
       },
       url: `${origin}/health/ready`,

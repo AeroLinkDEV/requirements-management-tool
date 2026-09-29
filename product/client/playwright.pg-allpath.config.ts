@@ -92,6 +92,8 @@ export default defineConfig({
         Evidence__Root: storage.evidence,
         ConnectionStrings__AeroLink: database,
         DemoData__Enabled: "false",
+        // The FMS bench's terrain relay fetches from AWS; no journey may depend on the internet (DEC-047).
+        FmsBench__TerrainRelay: "false",
         Identity__SeedDemoAccounts: "true",
         Identity__AllowDemoAccounts: "true",
         Identity__CookieSecure: "false",

@@ -7,6 +7,8 @@ import { aircraftData, fmsOutputs } from "./efis";
 import { Nd, Pfd } from "./FmsEfis";
 import FmsMap from "./FmsMap";
 import FmsGpsTab from "./FmsGpsTab";
+import FmsOutTheWindow, { type HudModes, type TerrainSource } from "./FmsOutTheWindow";
+import type { Layout, View } from "./outTheWindow";
 import FmsScenarioCard from "./FmsScenarioCard";
 import { conditionalLabel } from "./fmsModel";
 import { fmsGpsView } from "./gpsBench";
@@ -35,6 +37,24 @@ const storedTab = (): TabId => {
   try { const id = window.localStorage.getItem(TAB_KEY); return TABS.find(tab => tab.id === id)?.id ?? "scenarios"; } catch { return "scenarios"; }
 };
 
+// The out-the-window view: whether it is shown, and how, is remembered. It starts hidden because showing it loads a
+// 3D engine and the terrain around the aircraft.
+const WINDOW_KEY = "aerolink.fmsCdu.window";
+type WindowChoice = { shown: boolean; layout: Layout; view: View };
+const WINDOW_LAYOUTS = [["hud", "HUD"], ["panel", "Panel"]] as const;
+const WINDOW_VIEWS = [["cockpit", "Cockpit"], ["chase", "Chase"], ["map", "Map"]] as const;
+const storedWindow = (): WindowChoice => {
+  const fallback: WindowChoice = { shown: false, layout: "hud", view: "cockpit" };
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(WINDOW_KEY) ?? "null") as Partial<WindowChoice> | null;
+    return {
+      shown: stored?.shown === true,
+      layout: WINDOW_LAYOUTS.find(([id]) => id === stored?.layout)?.[0] ?? fallback.layout,
+      view: WINDOW_VIEWS.find(([id]) => id === stored?.view)?.[0] ?? fallback.view,
+    };
+  } catch { return fallback; }
+};
+
 type LogEntry = CduKeyEvent & { title: string };
 
 const formatLuminance = (fl: number) => (fl < 10 ? fl.toFixed(1) : String(Math.round(fl)));
@@ -45,7 +65,7 @@ const formatLuminance = (fl: number) => (fl < 10 ? fl.toFixed(1) : String(Math.r
  * aircraft along its route, and sets the cockpit lighting. Scenarios run scripted steps against a restarted
  * simulation and check the screen, can be recorded from the bench, and are written out as test procedure text.
  */
-export default function FmsCduTestBench() {
+export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource } = {}) {
   const { layout, failed } = useCduLayout();
   const [variantId, setVariantId] = useState(storedVariant);
   const [session, setSession] = useState(0);
@@ -85,6 +105,7 @@ export default function FmsCduTestBench() {
   const [headingInput, setHeadingInput] = useState("090");
   const [jumpNote, setJumpNote] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(storedTab);
+  const [outside, setOutside] = useState<WindowChoice>(storedWindow);
   const variant = variantById(variantId);
 
   // Time moves in ticks (scenario.ts): while flying, each callback runs `rate` ticks, each advancing the clock, the
@@ -111,6 +132,12 @@ export default function FmsCduTestBench() {
   const chooseTab = (id: TabId) => {
     setTab(id);
     try { window.localStorage.setItem(TAB_KEY, id); } catch { /* a remembered choice is a convenience only */ }
+  };
+
+  const chooseWindow = (change: Partial<WindowChoice>) => {
+    const chosen = { ...outside, ...change };
+    setOutside(chosen);
+    try { window.localStorage.setItem(WINDOW_KEY, JSON.stringify(chosen)); } catch { /* a remembered choice is a convenience only */ }
   };
 
   const chooseLighting = (mode: LightingMode) => {
@@ -151,6 +178,13 @@ export default function FmsCduTestBench() {
   // The approach as the controller has it: the capability (ILS, or the GPS level: LPV, LNAV/VNAV, LNAV) is annunciated
   // armed until captured, engaged after.
   const approachLabel = backend.approachType && backend.approachType !== "NO APPR" ? backend.approachType : "APPR";
+  // The flight mode annunciator shows the modes the controller is in (flight.ts), not a reading of the motion: engaged
+  // modes, then armed ones. The Flight card and the head-up display both show it.
+  const modes: HudModes = {
+    lateral: sim.lateralMode === "LNAV" ? (sim.approachMode === "CAPTURED" ? approachLabel : guidance.mode) : sim.headingHeld ? "HDG HOLD" : "HDG SEL",
+    vertical: sim.verticalMode,
+    armed: [...(sim.lnavIsArmed ? ["LNAV"] : []), ...(sim.approachMode === "ARMED" ? [approachLabel] : [])],
+  };
   const failedFms = backend.hasCondition("fmsFail");
   const lampNote = (lamp: string | undefined) =>
     lamp === undefined ? "sensor" : lamp === "MENU" ? "MENU light" : variant.annunciators.some(code => code === lamp) ? `${lamp} lamp` : "no lamp on this variation";
@@ -177,6 +211,40 @@ export default function FmsCduTestBench() {
           </select>
         </label>
       </header>
+
+      <section className="fmsBenchCard fmsBenchWindow" aria-label="Out-the-window view">
+        <div className="fmsBenchMapHead">
+          <h2>Out the window</h2>
+          <div className="fmsBenchDisplayControls">
+            {outside.shown ? (
+              <>
+                <div className="fmsBenchModes" role="radiogroup" aria-label="Window layout">
+                  {WINDOW_LAYOUTS.map(([id, label]) => (
+                    <label key={id} className={outside.layout === id ? "selected" : undefined}>
+                      <input type="radio" name="fmsBenchWindowLayout" value={id} checked={outside.layout === id} onChange={() => chooseWindow({ layout: id })} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div className="fmsBenchModes" role="radiogroup" aria-label="Window view">
+                  {WINDOW_VIEWS.map(([id, label]) => (
+                    <label key={id} className={outside.view === id ? "selected" : undefined}>
+                      <input type="radio" name="fmsBenchWindowView" value={id} checked={outside.view === id} onChange={() => chooseWindow({ view: id })} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </>
+            ) : null}
+            <button type="button" aria-expanded={outside.shown} onClick={() => chooseWindow({ shown: !outside.shown })}>
+              {outside.shown ? "Hide the view" : "Show the view"}
+            </button>
+          </div>
+        </div>
+        {outside.shown
+          ? <FmsOutTheWindow air={air} route={bus.activeRoute} modes={modes} layout={outside.layout} view={outside.view} terrain={terrain} />
+          : <p className="fmsBenchHint">A 3D view from the simulated aircraft over open elevation data, with the active route in magenta: head-up or over a glareshield, from the cockpit, behind the aircraft, or above it.</p>}
+      </section>
 
       <div className="fmsBenchCockpit">
         <div className={`fmsBenchPanel mode-${lighting.mode}`}>
@@ -246,12 +314,10 @@ export default function FmsCduTestBench() {
           </div>
           {/* The flight mode annunciator: engaged modes in green, armed ones in white, as on the PFD. */}
           {jumpNote ? <p className="fmsBenchHint" role="status">{jumpNote}</p> : null}
-          {/* The flight mode annunciator shows the modes the controller is in (flight.ts), not a reading of the motion. */}
           <div className="fmsBenchFma" role="status" aria-label="Flight modes">
-            <span className="engaged">{sim.lateralMode === "LNAV" ? (sim.approachMode === "CAPTURED" ? approachLabel : guidance.mode) : sim.headingHeld ? "HDG HOLD" : "HDG SEL"}</span>
-            {sim.lnavIsArmed ? <span className="armed">LNAV</span> : null}
-            {sim.approachMode === "ARMED" ? <span className="armed">{approachLabel}</span> : null}
-            <span className="engaged">{sim.verticalMode}</span>
+            <span className="engaged">{modes.lateral}</span>
+            {modes.armed.map(mode => <span key={mode} className="armed">{mode}</span>)}
+            <span className="engaged">{modes.vertical}</span>
           </div>
           {sim.modeEvents.length ? <p className="fmsBenchHint">Last mode change: {sim.modeEvents.at(-1)!.event}, {sim.modeEvents.at(-1)!.detail}</p> : null}
           <form className="fmsBenchAutopilot" onSubmit={event => { event.preventDefault(); sim.selectHeading(Number(headingInput) || 0); }}>

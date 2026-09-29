@@ -292,6 +292,21 @@
   text-transform: uppercase;
 }
 
+/* The out-the-window view sits above the cockpit, so in its Panel layout the CDU and displays read as the panel. */
+.fmsBenchWindow .fmsBenchModes {
+  margin-bottom: 0;
+}
+
+.fmsBenchWindow .fmsBenchMapHead {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fmsBenchWindow > .fmsBenchHint {
+  margin: 0;
+}
+
+.fmsBenchWindow button,
 .fmsBenchAlert button,
 .fmsBenchActions button {
   padding: 7px 12px;

@@ -1,9 +1,62 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { cpSync, createReadStream, statSync } from 'node:fs'
+import { extname, join, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+/**
+ * The CesiumJS engine (the FMS Test Bench's out-the-window view) loads its web workers and some data files at run
+ * time from CESIUM_BASE_URL, `/cesium/`, rather than through the bundle. A build copies them to dist/cesium so the
+ * server that serves the client serves them too: nothing comes from a CDN (DEC-047), and the document's
+ * `worker-src 'self'` admits them. The development server answers the same paths from node_modules.
+ *
+ * The bench imports `@cesium/engine`, not the `cesium` package: that one also brings Cesium's widgets, whose
+ * Knockout evaluates a string as script when it loads, which the document's `script-src 'self'` refuses.
+ */
+const cesiumEngine = fileURLToPath(new URL('./node_modules/@cesium/engine/', import.meta.url))
+const cesiumFolders: Record<string, string> = {
+  Workers: join(cesiumEngine, 'Build', 'Workers'),
+  ThirdParty: join(cesiumEngine, 'Build', 'ThirdParty'),
+  Assets: join(cesiumEngine, 'Source', 'Assets'),
+}
+const cesiumTypes: Record<string, string> = {
+  '.js': 'text/javascript', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.wasm': 'application/wasm',
+  '.xml': 'application/xml', '.ktx2': 'image/ktx2',
+}
+
+function cesiumRuntimeFiles(): Plugin {
+  let outDir = 'dist', building = false
+  return {
+    name: 'aerolink-cesium-runtime-files',
+    configResolved(config) { outDir = resolve(config.root, config.build.outDir); building = config.command === 'build' },
+    configureServer(server) {
+      server.middlewares.use('/cesium', (request, response, next) => {
+        const [folder, ...rest] = decodeURIComponent((request.url ?? '').split('?')[0]).replace(/^\/+/, '').split('/')
+        const root = cesiumFolders[folder]
+        const file = root ? resolve(root, ...rest) : ''
+        if (!root || !file.startsWith(root + sep) || !statSync(file, { throwIfNoEntry: false })?.isFile()) return next()
+        response.setHeader('Content-Type', cesiumTypes[extname(file)] ?? 'application/octet-stream')
+        createReadStream(file).pipe(response)
+      })
+    },
+    // The development server also calls this as it closes; only a build has a dist to copy into.
+    closeBundle() {
+      if (!building) return
+      for (const [folder, source] of Object.entries(cesiumFolders)) {
+        cpSync(source, join(outDir, 'cesium', folder), { recursive: true })
+      }
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), cesiumRuntimeFiles()],
+  resolve: {
+    // Only the Cesium engine imports meshoptimizer, and its WebAssembly cannot compile under the document's policy
+    // (see the stub for why the view does not need it).
+    alias: [{ find: /^meshoptimizer$/, replacement: fileURLToPath(new URL('./src/fmsCdu/meshoptUnavailable.ts', import.meta.url)) }],
+  },
   server: {
     watch: {
       // Playwright writes traces, screenshots, videos and reports into test-results/ and

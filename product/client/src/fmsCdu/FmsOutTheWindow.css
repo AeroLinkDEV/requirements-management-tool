@@ -1,0 +1,192 @@
+/* The out-the-window view. The scene fills the frame; everything else is laid over it. */
+.fmsOtw {
+  position: relative;
+  height: clamp(320px, 58vh, 620px);
+  overflow: hidden;
+  border-radius: 10px;
+  background: #0b1a26;
+  color: #d8e3ea;
+  font-family: var(--font-body);
+}
+
+/* Panel: a shorter window over the glareshield; the bench's CDU and displays sit directly below as the panel. */
+.fmsOtw.layout-panel {
+  height: clamp(240px, 36vh, 400px);
+}
+
+.fmsOtwScene,
+.fmsOtwScene .cesium-widget,
+.fmsOtwScene canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.fmsOtwGlareshield {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -2px;
+  height: 34px;
+  background: linear-gradient(#10151a, #1d242b);
+  border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+  box-shadow: 0 -2px 10px #0008;
+  pointer-events: none;
+}
+
+.fmsOtwNote {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  max-width: min(560px, calc(100% - 32px));
+  margin: 0;
+  padding: 8px 12px;
+  transform: translateX(-50%);
+  border-radius: 8px;
+  background: #0b1117d9;
+  color: #f2d49b;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.layout-hud.view-cockpit .fmsOtwNote {
+  top: auto;
+  bottom: 44px;
+}
+
+.fmsOtwCredits {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  left: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px 10px;
+  color: #c3d0d9;
+  font-size: 12px;
+  text-shadow: 0 1px 2px #000;
+  pointer-events: none;
+}
+
+.layout-panel.view-cockpit .fmsOtwCredits {
+  bottom: 36px;
+}
+
+.fmsOtwCredits img {
+  max-height: 18px;
+  vertical-align: middle;
+}
+
+/* Head-up symbology: collimated green, drawn over the scene. */
+.fmsOtwHud {
+  position: absolute;
+  inset: 0;
+  color: #5dff9b;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  text-shadow: 0 0 3px #000;
+  pointer-events: none;
+}
+
+.fmsOtwHud svg,
+.fmsOtwPathMarker svg {
+  fill: none;
+  stroke: #5dff9b;
+  stroke-width: 1.6;
+  overflow: visible;
+  filter: drop-shadow(0 0 1px #000);
+}
+
+.fmsOtwFma {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  display: flex;
+  gap: 18px;
+  transform: translateX(-50%);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.fmsOtwFma .armed {
+  color: #e8f1f5;
+  font-weight: 500;
+}
+
+.fmsOtwBank {
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  width: 180px;
+  transform: translateX(-50%);
+}
+
+.fmsOtwBank .pointer {
+  fill: #5dff9b;
+  stroke: none;
+}
+
+.fmsOtwTape {
+  position: absolute;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 76px;
+  padding: 4px 8px;
+  transform: translateY(-50%);
+  border: 1.5px solid #5dff9b;
+}
+
+.fmsOtwTape.speed { left: 12%; }
+.fmsOtwTape.altitude { right: 12%; }
+
+.fmsOtwTape strong {
+  font-size: 22px;
+}
+
+.fmsOtwTape small {
+  font-size: 12px;
+}
+
+.fmsOtwHeading {
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(300px, 60%);
+  transform: translateX(-50%);
+}
+
+.fmsOtwHeading svg {
+  width: 100%;
+  height: 12px;
+}
+
+.fmsOtwHeading strong {
+  padding: 0 6px;
+  border: 1.5px solid #5dff9b;
+  font-size: 15px;
+}
+
+.fmsOtwPathMarker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 64px;
+  pointer-events: none;
+}
+
+.fmsOtwPathMarker[hidden] {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .fmsOtwTape.speed { left: 12px; }
+  .fmsOtwTape.altitude { right: 12px; }
+}

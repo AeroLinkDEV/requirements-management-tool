@@ -130,6 +130,8 @@ export default defineConfig({
         Identity__AllowDemoAccounts: 'true',
         Identity__CookieSecure: 'false',
         Identity__LoginRateLimitPerMinute: '500',
+        // The FMS bench's terrain relay fetches from AWS; no journey may depend on the internet (DEC-047).
+        FmsBench__TerrainRelay: 'false',
         Cors__AllowedOrigins__0: `http://127.0.0.1:${e2eClientPort}`,
         ConnectionStrings__AeroLink: `Data Source=${e2eDatabase}`,
       },
