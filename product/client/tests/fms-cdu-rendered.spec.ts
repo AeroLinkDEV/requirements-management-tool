@@ -433,8 +433,11 @@ test('a status word is overridden field by field from the bus monitor: what is t
   // The card shows the receiver itself, still navigating; the scaling word has no approach to scale.
   await expect(gps1.getByTestId('gps-mode')).toHaveText(/^(NAV|SBAS NAV)$/)
   await expect(monitor.locator('tr[data-label="scale"] .fmsGpsSsm')).toHaveText('NCD')
+  // The FMS reads the transmitted word: GPS 1 declares a fault, so it is not usable, and the routing strip names the word.
+  await expect(page.getByTestId('route-gps1')).toContainText('not usable · receiver fault (273 mode fault)')
   await row.getByRole('button', { name: 'Clear' }).click()
   await expect(row.locator('td.value')).not.toContainText('mode FAULT')
+  await expect(page.getByTestId('route-gps1')).not.toContainText('not usable')
 })
 
 test('GPS faults and overrides survive leaving the tab: shown, cleared one at a time, and an unrelated change leaves them alone', async ({ page }) => {

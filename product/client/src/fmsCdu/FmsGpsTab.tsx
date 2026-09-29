@@ -30,8 +30,12 @@ export default function FmsGpsTab({ view, fms }: { view: GpsView; fms: ScriptedF
 const modeText = (rx: GpsReceiver) => { const bus = rx.bus(); return bus ? modeLabel(bus["273"].value!.mode) : "NO DATA"; };
 
 /** Why the FMS will not use a receiver, from its own assessment (gpsSensors.assessReceiver). */
-const REJECTION: Record<ReceiverAssessment["reason"], string> = { OK: "", SILENT: "silent", "NO FIX": "no fix", INTEGRITY: "HIL over limit" };
-const rejection = (a: ReceiverAssessment) => (a.reason === "INTEGRITY" && a.hil === null ? "no HIL" : REJECTION[a.reason]);
+const REJECTION: Record<ReceiverAssessment["reason"], string> = {
+  OK: "", SILENT: "silent", "RECEIVER FAULT": "receiver fault", "NO FIX": "no fix", "BAD DATA": "bad data", INTEGRITY: "HIL over limit",
+};
+// A receiver fault or bad data names the word that vetoed it (the precedence table's detail, e.g. "273 MODE FAULT").
+const rejection = (a: ReceiverAssessment) => (a.reason === "INTEGRITY" && a.hil === null ? "no HIL"
+  : a.reason === "RECEIVER FAULT" || a.reason === "BAD DATA" ? `${REJECTION[a.reason]} (${a.detail.toLowerCase()})` : REJECTION[a.reason]);
 
 /**
  * GPS 1 and GPS 2 into the FMS navigation solution, and on to the EFIS: the link of the receiver the FMS navigates on is
