@@ -66,17 +66,36 @@ test('airports limits a load to those airports and the fixes their procedures us
   const other = (line: string) => line.replace(/KBTV/g, 'KPBG').replace(/K6/g, 'K6')
   const foreignAirport = FIXTURE.split('\n').filter(line => line[4] === 'P' && line[12] === 'A').map(other).join('\n')
   const unusedFix = 'SUSAEAENRT   ZZZZZ K60    W     N44000000W073000000                                                       0000000000'
-  const text = `${FIXTURE}${foreignAirport}\n${unusedFix}\n`
+  // An airway (ER) nothing asks for: a limited load reads no airways at all.
+  const airway = (sequence: string, fix: string) => `SUSAER       J999        ${sequence}${fix.padEnd(5)}    0`.padEnd(132)
+  const text = `${FIXTURE}${foreignAirport}\n${unusedFix}\n${airway('0010', 'BTV')}\n${airway('0020', 'YUNUD')}\n`
   const limited = parseArinc424(text, { airports: ['KBTV'] })
   const idents = limited.data.entries.map(e => e.ident)
   expect(idents).toContain('KBTV')
   expect(idents).not.toContain('KPBG')
   expect(idents).not.toContain('ZZZZZ')
   expect(idents).toContain('YUNUD')
+  expect(limited.data.airways).toEqual([])
   expect(limited.data.procedures.map(p => p.ident)).toContain('R15')
-  // Unlimited, the foreign airport and the unused fix are read.
-  const all = parseArinc424(text).data.entries.map(e => e.ident)
-  expect(all).toEqual(expect.arrayContaining(['KPBG', 'ZZZZZ']))
+  // Unlimited, the foreign airport, the unused fix and the airway are read.
+  const unlimited = parseArinc424(text)
+  expect(unlimited.data.entries.map(e => e.ident)).toEqual(expect.arrayContaining(['KPBG', 'ZZZZZ']))
+  expect(unlimited.data.airways.map(a => a.ident)).toContain('J999')
+})
+
+test('CIFP altitude descriptions become the constraints the simulation flies', () => {
+  // A synthetic approach on KBTV's records: the same fixes, each leg with a different altitude description.
+  const leg = (sequence: string, fix: string, description: string, path: string, altitude: string) =>
+    `SUSAP KBTVK6FR99   R      ${sequence}${fix.padEnd(5)}K6PC0E  ${description}    ${path}`.padEnd(82) + altitude
+  const text = [
+    leg('010', 'STAEV', 'I', 'IF', '+ 03200     '),
+    leg('020', 'FOVES', 'F', 'TF', '  02000     '),
+    leg('021', 'JUNEL', ' ', 'TF', '- 01500     '),
+    leg('025', 'CESAL', ' ', 'TF', 'B 0180001200'),
+    leg('030', 'RW15 ', 'M', 'TF', '  00357     '),
+  ].map(line => line.padEnd(132)).join('\n')
+  const r99 = parseArinc424(`${FIXTURE}${text}\n`).data.procedures.find(p => p.ident === 'R99')!
+  expect(r99.legs.map(l => ('ident' in l ? `${l.ident} ${l.altitude}` : ''))).toEqual(['STAEV 3200A', 'FOVES 2000', 'JUNEL 1500B', 'CESAL 1800B1200A', 'RW15 357'])
 })
 
 test('the FMS flies a CIFP RNAV approach with its published FAS: executed, sent to both receivers and accepted', () => {
@@ -140,6 +159,8 @@ test('the aircraft flies the published KBTV RNAV RWY 15 LPV: captured on final, 
   for (let t = 0; t < 1800; t += 1) {
     now += 1000
     sim.step(1)
+    // Captured on the final approach segment, which starts at the FAF: still flying to JUNEL, the step-down fix inside it.
+    if (sim.approachMode === 'CAPTURED' && !captured) expect(active()).toBe('JUNEL')
     if (sim.approachMode === 'CAPTURED') captured = true
     if (captured && active() === 'RW15' && toThresholdFt() < 3 * 6076 && toThresholdFt() > 0.3 * 6076) {
       const path = fas.tchFt + toThresholdFt() * Math.tan((fas.gpaDeg * Math.PI) / 180)
