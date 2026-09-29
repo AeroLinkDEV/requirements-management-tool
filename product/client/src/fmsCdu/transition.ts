@@ -19,7 +19,7 @@ import { ACTIVE_PROFILE } from "./profile";
 
 const P = ACTIVE_PROFILE.parameters;
 const VS_RATE = P.verticalAccel.value; // fpm per second
-const STEP_S = 0.05;
+const STEP_S = 0.01;
 
 export type TransitionStart = {
   /** Indicated airspeed at TDN, KIAS. */
@@ -49,13 +49,18 @@ export type TransitionPlan = {
   dtraNm: number;
 };
 
-/** One vertical step toward a height at a rate, as the autopilot flies it (rate to the stopping distance, then hold). */
+/**
+ * One vertical step of the command profile toward a height: the commanded rate, or less where the aircraft must begin
+ * braking to rest on the target (v = sqrt(2·a·distance), at the vertical acceleration limit), with every change of
+ * vertical speed limited to that acceleration. A move that starts too fast, or away from the target, brakes, overshoots
+ * and comes back. The plan follows this command profile: its arrival, not the later capture or completion, ends the
+ * axis (R3-01), so the autopilot's capture tail is not counted in the distances.
+ */
 function verticalStep(height: number, vs: number, target: number, rate: number, dt: number) {
   const toGo = target - height;
-  const stopping = ((Math.abs(rate) / 60) ** 2) / (2 * (VS_RATE / 60)) + 0.5;
-  const command = Math.sign(toGo) === Math.sign(rate) && Math.abs(toGo) > stopping ? rate : Math.max(-1000, Math.min(1000, toGo * 10));
+  const command = Math.sign(toGo) * Math.min(Math.abs(rate), Math.sqrt(2 * VS_RATE * 60 * Math.abs(toGo)));
   const next = vs + Math.max(-VS_RATE * dt, Math.min(VS_RATE * dt, command - vs));
-  return { height: height + (next * dt) / 60, vs: next };
+  return { height: height + ((vs + next) / 2) * dt / 60, vs: next };
 }
 
 /**
@@ -75,7 +80,8 @@ export function planTransition(start: TransitionStart): TransitionPlan | Transit
   if (tasFromIas(P.gateSpeed.value, elevation + gateHeight) - start.headwind <= 0) return { refused: true, reason: "no closure" };
   // TD: integrate both axes until each has arrived.
   let t = 0, height = start.radioHeight, vs = start.verticalSpeed, ias = start.ias, distance = 0;
-  const arrived = () => Math.abs(height - gateHeight) < 0.05 && Math.abs(vs) < 1 && ias <= P.gateSpeed.value + 1e-9;
+  // Arrival within one step of the vertical-acceleration limit: the command profile is at rest on the target.
+  const arrived = () => Math.abs(height - gateHeight) < 0.3 && Math.abs(vs) <= VS_RATE * STEP_S && ias <= P.gateSpeed.value + 1e-9;
   while (!arrived() && t < 3600) {
     const ground = tasFromIas(ias, elevation + height) - start.headwind;
     distance += (ground * STEP_S) / 3600;
