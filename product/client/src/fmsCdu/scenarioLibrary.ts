@@ -2,8 +2,9 @@ import type { Scenario } from "./scenario";
 
 // Built-in scenarios for the situations airline and certification test programmes exercise most (see the research in
 // product/docs/FMS_TEST_BENCH.md): losing GPS on an RNAV approach, losing integrity, dead reckoning when every sensor
-// is gone, and a crew RNP entry the navigation cannot meet. Each is plain data, like a recorded scenario. The KBTV ones
-// fly a real approach from the FAA CIFP (kbtvDemo.ts), from a start state 8 NM before its intermediate fix.
+// is gone, a crew RNP entry the navigation cannot meet, and faults scripted on one GPS receiver (FDE, then the FMS
+// moving to the other receiver; a spoofer only GPS DISAGREE catches). Each is plain data, like a recorded scenario. The
+// KBTV ones fly a real approach from the FAA CIFP (kbtvDemo.ts), from a start state 8 NM before its intermediate fix.
 export const SCENARIO_LIBRARY: readonly Scenario[] = [
   {
     id: "gps-lost-before-faf",
@@ -105,6 +106,72 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
       // TOGA from the latched hold: the missed approach becomes active and VNAV climbs on it (D02).
       { when: { kind: "start" }, action: { kind: "goAround" } },
       { when: { kind: "start" }, action: { kind: "expectApproach", verticalMode: "VNAV CLB" }, within: 10 },
+    ],
+  },
+  {
+    id: "kbtv-rnav15-sbas-lost",
+    title: "KBTV RNAV (GPS) RWY 15, SBAS lost on final",
+    objective: "On the real KBTV LPV approach, show that SBAS marked do not use after capture (on both receivers, as a GEO broadcast does) drops the level to LNAV: NO APPR INTEGRITY and the approach lost to a latched altitude hold, while GPS integrity holds (no GPS POS UNCERTAIN) and the FMS stays on GPS 1; TOGA then climbs on the missed approach.",
+    maxSeconds: 900,
+    start: "kbtv-rnav15",
+    steps: [
+      { when: { kind: "active", waypoint: "JUNEL" }, action: { kind: "expectApproach", type: "LPV", state: "CAPTURED" }, within: 5 },
+      { when: { kind: "distance", waypoint: "RW15", nm: 3 }, action: { kind: "gps", receiver: 1, stimulus: { op: "sbas", doNotUse: true } } },
+      { when: { kind: "start" }, action: { kind: "gps", receiver: 2, stimulus: { op: "sbas", doNotUse: true } } },
+      { when: { kind: "start" }, action: { kind: "expectApproachLevel", level: "LNAV" }, within: 5 },
+      { when: { kind: "start" }, action: { kind: "expectAlert", text: "NO APPR INTEGRITY" }, within: 5 },
+      { when: { kind: "start" }, action: { kind: "expectApproach", type: "LNAV", state: "OFF", verticalMode: "ALT HOLD" }, within: 5 },
+      { when: { kind: "start" }, action: { kind: "expectNoAlert", text: "GPS POS UNCERTAIN" } },
+      { when: { kind: "start" }, action: { kind: "expectGpsSource", source: "GPS1" } },
+      { when: { kind: "start" }, action: { kind: "goAround" } },
+      { when: { kind: "start" }, action: { kind: "expectApproach", verticalMode: "VNAV CLB" }, within: 10 },
+    ],
+  },
+  {
+    id: "gps1-fde-then-gps2",
+    title: "GPS 1 satellite ramp on the RNAV approach, then GPS 1 fails",
+    objective: "Show that GPS 1 excludes a satellite with a growing range error (FDE) and keeps LPV, and that when a second fault then makes GPS 1 unusable the FMS moves to GPS 2 and keeps the approach without GPS NAV LOST.",
+    maxSeconds: 3600,
+    // The GPS sky moves with the clock: PRN 24 is in use by GPS 1 at 37° when the ramp starts from this start time.
+    startTime: "2026-09-27T14:00:00.000Z",
+    steps: [
+      { when: { kind: "start" }, action: { kind: "procedure", procedure: "APPROACH", ident: "R24R" } },
+      { when: { kind: "start" }, action: { kind: "keys", keys: ["EXEC"] } },
+      { when: { kind: "start" }, action: { kind: "armApproach" } },
+      { when: { kind: "distance", waypoint: "FERDI", nm: 12 }, action: { kind: "expectApproachLevel", level: "LPV" } },
+      { when: { kind: "start" }, action: { kind: "gps", receiver: 1, stimulus: { op: "satelliteFault", prn: 24, fault: "RAMP", value: 5 } } },
+      // By 8 NM the range error is several hundred metres: GPS 1 is still navigating on the approach only because it excluded PRN 24.
+      { when: { kind: "distance", waypoint: "FERDI", nm: 8 }, action: { kind: "expectReceiverMode", receiver: 1, mode: "SBAS_PA" } },
+      { when: { kind: "start" }, action: { kind: "expectGpsSource", source: "GPS1" } },
+      { when: { kind: "start" }, action: { kind: "expectApproachLevel", level: "LPV" } },
+      { when: { kind: "distance", waypoint: "FERDI", nm: 5 }, action: { kind: "gps", receiver: 1, stimulus: { op: "fault", fault: "RECEIVER", on: true } } },
+      { when: { kind: "start" }, action: { kind: "expectReceiverMode", receiver: 1, mode: "FAULT" }, within: 2 },
+      { when: { kind: "start" }, action: { kind: "expectGpsSource", source: "GPS2" }, within: 5 },
+      { when: { kind: "start" }, action: { kind: "expectApproachLevel", level: "LPV" }, within: 5 },
+      { when: { kind: "start" }, action: { kind: "expectNoAlert", text: "GPS NAV LOST" } },
+      { when: { kind: "active", waypoint: "RW24R" }, action: { kind: "expectGpsSource", source: "GPS2" } },
+    ],
+  },
+  {
+    id: "gps1-spoof-walks-off",
+    title: "A spoofed GPS 1 walks off; only GPS DISAGREE catches it",
+    objective: "Show that a spoofer walking GPS 1 away at 2 m/s passes the receiver's own integrity (it stays in SBAS PA, the FMS keeps navigating on it and keeps LPV, with no GPS POS UNCERTAIN), and that only the comparison with GPS 2 raises GPS DISAGREE.",
+    maxSeconds: 3600,
+    startTime: "2026-09-27T14:00:00.000Z",
+    steps: [
+      { when: { kind: "start" }, action: { kind: "procedure", procedure: "APPROACH", ident: "R24R" } },
+      { when: { kind: "start" }, action: { kind: "keys", keys: ["EXEC"] } },
+      { when: { kind: "start" }, action: { kind: "armApproach" } },
+      { when: { kind: "distance", waypoint: "FERDI", nm: 12 }, action: { kind: "gps", receiver: 1, stimulus: { op: "spoof", northM: 0, driftEastMps: 2 } } },
+      // 0.1 NM apart after about 93 s.
+      { when: { kind: "start" }, action: { kind: "expectAlert", text: "GPS DISAGREE" }, within: 120 },
+      { when: { kind: "start" }, action: { kind: "expectGpsSource", source: "GPS1" } },
+      { when: { kind: "start" }, action: { kind: "expectReceiverMode", receiver: 1, mode: "SBAS_PA" } },
+      { when: { kind: "start" }, action: { kind: "expectApproachLevel", level: "LPV" } },
+      { when: { kind: "start" }, action: { kind: "expectNoAlert", text: "GPS POS UNCERTAIN" } },
+      { when: { kind: "start" }, action: { kind: "expectNoAlert", text: "GPS NAV LOST" } },
+      { when: { kind: "distance", waypoint: "FERDI", nm: 5 }, action: { kind: "gps", receiver: 1, stimulus: { op: "clearSpoof" } } },
+      { when: { kind: "start" }, action: { kind: "expectGpsSource", source: "GPS1" }, within: 5 },
     ],
   },
 ];

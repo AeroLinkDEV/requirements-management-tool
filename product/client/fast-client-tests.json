@@ -41,7 +41,8 @@
     "fms-terrain-tiles.spec.ts",
     "fms-gps-authority.spec.ts",
     "fms-cifp.spec.ts",
-    "fms-kbtv-demo.spec.ts"
+    "fms-kbtv-demo.spec.ts",
+    "fms-gps-scenario.spec.ts"
   ],
   "rendered": [
     "review-workflow-rendered.spec.ts",

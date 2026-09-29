@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { STATUS_FIELDS, type FieldType, type GpsBus, type GpsLabel, type GpsReceiver, type Override, type SatelliteStatus, type Ssm, type StatusLabel, type StatusPatch, type Word } from "./gps";
-import { MONITOR_LABELS, alertLimits, lowSatellites, modeLabel, overrideFor, type GpsView } from "./gpsBench";
+import { STATUS_FIELDS, type FieldType, type GpsBus, type GpsLabel, type GpsReceiver, type NumberLabel, type Override, type SatelliteStatus, type Ssm, type StatusLabel, type StatusPatch, type Word } from "./gps";
+import { MONITOR_LABELS, alertLimits, modeLabel, type GpsView } from "./gpsBench";
 import type { ReceiverAssessment } from "./gpsSensors";
 import type { GpsStimulus, ReceiverStimulus } from "./gpsStimulus";
 import type { ScriptedFms } from "./scriptedFms";
@@ -259,7 +259,7 @@ function FaultControls({ name, raw, faults, stimulus, index, held }: {
         </p>
       ) : null}
       <div className="fmsGpsFaultRow">
-        <button type="button" disabled={held} aria-pressed={faults.lowPrns.length > 0} onClick={() => stimulus.setMaskLow(index, faults.lowPrns.length ? [] : lowSatellites(raw))}>Mask low satellites (below 15°)</button>
+        <button type="button" disabled={held} aria-pressed={faults.lowPrns.length > 0} onClick={() => stimulus.setMaskLow(index, faults.lowPrns.length === 0)}>Mask low satellites (below 15°)</button>
       </div>
       <div className="fmsGpsPrns" role="group" aria-label={`${name} mask satellites`}>
         {gps.map(s => {
@@ -331,7 +331,7 @@ const valueText = (word: Word<unknown>) => {
 function BusMonitor({ name, rx, stimulus, index }: { name: string; rx: GpsReceiver; stimulus: GpsStimulus; index: number }) {
   const active = stimulus.state(index).overrides;
   const bus = rx.bus();
-  const set = (label: GpsLabel, override: Override | null, text: string) => stimulus.setOverride(index, label, override, text);
+  const set = (label: GpsLabel, override: OverrideChoice | null) => stimulus.setOverride(index, label as NumberLabel, override);
   return (
     <details className="fmsBenchCard fmsGpsMonitor">
       <summary>{name} bus monitor {bus ? "" : "(not transmitting)"}</summary>
@@ -346,7 +346,7 @@ function BusMonitor({ name, rx, stimulus, index }: { name: string; rx: GpsReceiv
                 <td>{title}</td>
                 <td className="value">{word ? valueText(word) : "—"}</td>
                 <td>{word ? <span className={`fmsGpsSsm ${word.ssm}`}>{word.ssm}</span> : <span className="fmsGpsSsm FW">SILENT</span>}</td>
-                <td>{numeric ? <OverrideForm label={label} active={active[label]?.text} onSet={(o, text) => set(label, o, text)} />
+                <td>{numeric ? <OverrideForm label={label} active={active[label]?.text} onSet={o => set(label, o)} />
                   : label in STATUS_FIELDS ? <StatusOverrideForm label={label as StatusLabel} stimulus={stimulus} index={index} /> : <small>{label === "scale" ? "model output" : "read only"}</small>}</td>
               </tr>
             );
@@ -357,17 +357,19 @@ function BusMonitor({ name, rx, stimulus, index }: { name: string; rx: GpsReceiv
   );
 }
 
-function OverrideForm({ label, active, onSet }: { label: GpsLabel; active: string | undefined; onSet: (o: Override | null, text: string) => void }) {
+type OverrideChoice = { kind: Override["kind"]; amount?: number; ssm?: Ssm };
+
+function OverrideForm({ label, active, onSet }: { label: GpsLabel; active: string | undefined; onSet: (o: OverrideChoice | null) => void }) {
   const [kind, setKind] = useState<Override["kind"]>("BIAS");
   const [amount, setAmount] = useState(0);
   // FORCE can set the word's status too (NORMAL, NCD, FT, FW); left unset, the receiver's own status stays.
   const [ssm, setSsm] = useState<Ssm | "">("");
-  if (active) return <span className="fmsGpsOverride"><b>{active}</b> <button type="button" onClick={() => onSet(null, "")}>Clear</button></span>;
+  if (active) return <span className="fmsGpsOverride"><b>{active}</b> <button type="button" onClick={() => onSet(null)}>Clear</button></span>;
   const status = kind === "FORCE" && ssm ? ssm : undefined;
   return (
     <form className="fmsGpsOverride" onSubmit={event => {
       event.preventDefault();
-      onSet(overrideFor(kind, amount, status), kind === "FREEZE" ? "FREEZE" : `${kind} ${amount}${status ? ` ${status}` : ""}`);
+      onSet(kind === "FREEZE" ? { kind } : status ? { kind, amount, ssm: status } : { kind, amount });
     }}>
       <select value={kind} aria-label={`Override ${label}`} onChange={event => setKind(event.target.value as Override["kind"])}>
         {(["FORCE", "FREEZE", "BIAS", "RAMP"] as const).map(option => <option key={option}>{option}</option>)}
