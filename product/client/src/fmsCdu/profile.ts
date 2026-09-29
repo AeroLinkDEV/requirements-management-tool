@@ -78,10 +78,10 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
   parameters: {
     // Speeds and regimes
     cruiseSpeed: p(120, "kt", "lab", "the bench's existing cruise speed (TAS today; IAS from Stage B)", true),
-    planningCruiseTas: p(130, "kt TAS", "sourced", "M300 3-19 PLAN DATA CRZ TAS default for ROTOR", false, "E"),
-    maximumSpeed: p(150, "KIAS", "lab", "RTA feasibility upper bound", false, "E"),
+    planningCruiseTas: p(130, "kt TAS", "sourced", "M300 3-19 PLAN DATA CRZ TAS default for ROTOR (planning data; v1 predicts only in the air)", true),
+    maximumSpeed: p(150, "KIAS", "lab", "RTA feasibility upper bound (the required TAS in IAS at each leg, R3-04)", true),
     climbSpeed: p(80, "KIAS", "borrowed", "AAIB-27532 (AW189 TU target)", false, "B"),
-    vmini: p(50, "KIAS", "lab", "procedure limits below it refuse coupled IFR activation", false, "C"),
+    vmini: p(50, "KIAS", "lab", "the RTA feasibility lower bound (R3-04); procedure limits below it refuse coupled IFR activation (Stage C, not yet)", true),
     unreliableIasBelow: p(30, "KIAS", "lab", "airspeed shown as dashes below it", false, "B"),
     reliableIasAgainAt: p(33, "KIAS", "lab", "3 kt hysteresis", false, "B"),
     coordinatedEnterAt: p(45, "KIAS", "lab", "coordinated-flight regime entry", false, "B"),

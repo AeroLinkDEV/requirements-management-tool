@@ -289,13 +289,19 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         title("RENDEZVOUS", "1/1", r.active ? "ACT" : undefined),
         caption(" WPT", "TIME "),
         { left: r.wpt ? { text: r.wpt, color: "green" } : boxes(5), right: r.time === null ? boxes(4) : { text: utc(r.time) } },
-        caption(" DIST", "REQ SPD "),
-        { left: medium(plan ? `${fixed(plan.distance, 1)}NM` : "-----"), right: medium(plan ? (Number.isFinite(plan.required) ? `${Math.round(plan.required)}KT` : "---KT") : "-----", plan && !plan.achievable ? "amber" : "white") },
-        caption(" MIN SPD", "MAX SPD "),
+        // The required true airspeed from the wind triangle over the legs to the fix, and that speed in IAS now (plan E4,
+        // R3-04); none when the time has passed or the path to the fix is unknown, with the reason instead.
+        caption(" DIST", "REQ TAS/IAS "),
+        {
+          left: medium(plan?.distance != null ? `${fixed(plan.distance, 1)}NM` : "-----"),
+          right: medium(!plan ? "-----" : plan.required === null ? "---/---KT" : `${Math.round(plan.required)}/${Math.round(plan.requiredIas!)}KT`, plan && !plan.achievable ? "amber" : "white"),
+        },
+        caption(" MIN IAS", "MAX IAS "),
         { left: { text: `${r.minSpeed}KT` }, right: { text: `${r.maxSpeed}KT` } },
-        caption(" STATUS"),
-        { left: medium(!plan ? "-----" : plan.achievable ? "ON TIME" : "UNACHIEVABLE", plan && !plan.achievable ? "amber" : "green") },
-        undefined, undefined,
+        caption(" STATUS", plan?.status === "CONDITIONAL" ? "COND " : undefined),
+        { left: medium(!plan ? "-----" : plan.achievable ? "ON TIME" : plan.reason ?? "UNACHIEVABLE", plan && !plan.achievable ? "amber" : "green") },
+        // A CONDITIONAL prediction to the fix names its assumption (a MANUAL hold exited at its next crossing).
+        plan?.status === "CONDITIONAL" && plan.reason ? { left: small(plan.reason) } : undefined, undefined,
         { left: dashes(24) },
         { left: prompt("<INDEX"), right: plan ? prompt(r.active ? "CANCEL>" : "ACTIVATE>") : undefined },
       ];

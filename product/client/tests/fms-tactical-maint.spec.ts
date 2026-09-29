@@ -1,6 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm } from '../src/fmsCdu/fmsModel'
+import { iasFromTas } from '../src/fmsCdu/kinematics'
 import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
@@ -40,9 +41,10 @@ test('a rendezvous flies the speed that arrives on time, within the speed limits
   press(unit, 'INIT_REF', 'NEXT', 'LSK6R')
   expect(lines(unit)[0]).toMatch(/^RENDEZVOUS/)
   enter(unit, 'RDG', 'LSK1L')
-  // RDG is about 35 NM away: 1420Z is 20 minutes, about 106 kt.
+  // RDG is about 35 NM away: 1420Z is 20 minutes, about 106 kt over the ground. With the 270/12 wind mostly behind the
+  // aircraft on these legs the required true airspeed is lower (the wind triangle, R3-04), shown with its IAS.
   enter(unit, '1420', 'LSK1R')
-  expect(lines(unit)[4]).toMatch(/^3\d\.\dNM\s+1\d\dKT$/)
+  expect(lines(unit)[4]).toMatch(/^3\d\.\dNM\s+9\d\/9\dKT$/)
   expect(lines(unit)[8]).toMatch(/^ON TIME/)
   unit.press('LSK6R')
   expect(lines(unit)[0]).toMatch(/^ACT RENDEZVOUS/)
@@ -58,15 +60,18 @@ test('a rendezvous that needs more than the maximum speed is RENDEZVOUS UNACHIEV
   press(unit, 'INIT_REF', 'NEXT', 'LSK6R')
   enter(unit, 'RDG', 'LSK1L')
   enter(unit, '1410', 'LSK1R')
-  expect(lines(unit)[8]).toMatch(/^UNACHIEVABLE/)
+  expect(lines(unit)[8]).toMatch(/^ABOVE MAX SPEED/)
   unit.press('LSK6R')
   fly(1)
   expect(recalled(unit, 'RENDEZVOUS UNACHIEVABLE')).toBe(true)
-  // Flown at the maximum speed meanwhile.
-  expect(unit.targetSpeed).toBe(160)
+  // Flown at the maximum meanwhile: the profile's 150 KIAS (below the crew's 160), in true airspeed at this altitude.
+  expect(iasFromTas(unit.targetSpeed, unit.altitude)).toBeCloseTo(150, 6)
+  // A crew maximum above the profile's does not raise it; one below it lowers it.
   enter(unit, '200', 'LSK3R')
   expect(unit.rndz.maxSpeed).toBe(200)
-  expect(unit.targetSpeed).toBeGreaterThan(180)
+  expect(iasFromTas(unit.targetSpeed, unit.altitude)).toBeCloseTo(150, 6)
+  enter(unit, '140', 'LSK3R')
+  expect(iasFromTas(unit.targetSpeed, unit.altitude)).toBeCloseTo(140, 6)
 })
 
 test('a moving waypoint advances on its track and the aircraft closes on it', () => {

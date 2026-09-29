@@ -11,7 +11,7 @@ import {
 } from "./fmsModel";
 import { Constellation } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput } from "./gps";
-import { holdTrack, predictedGroundSpeed } from "./kinematics";
+import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas } from "./kinematics";
 import {
   ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
   type GpsChoice,
@@ -20,6 +20,20 @@ import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type Nav
 import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
 import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
 import { NAV_PAGES } from "./navPages";
+import { predictionEndpoint } from "./predictions";
+import type { PredictionStatus } from "./vnav";
+
+/**
+ * The RTA (RENDEZVOUS, M300 5-17, A-141; plan E4, R3-03, R3-04): the distance to the fix, the required true airspeed
+ * from the wind triangle over the legs to it (and that speed in IAS now), the speed flown, whether it is within the
+ * limits in IAS at each leg's planned altitude, the ETA, and the status of the prediction to the fix (KNOWN, or
+ * CONDITIONAL with its assumption). `required` is null when there is no computed speed, with the reason: OVERDUE, an
+ * UNKNOWN path to the fix, or no airspeed that reaches it.
+ */
+export type Rendezvous = {
+  distance: number | null; required: number | null; requiredIas: number | null; speed: number; achievable: boolean; eta: number | null;
+  status: PredictionStatus; reason: string | null;
+};
 import { PLANNING_PAGES } from "./planningPages";
 import { composeRoute, enrouteLegs, findProcedure } from "./procedures";
 import { ACTIVE_PROFILE, type AircraftProfile } from "./profile";
@@ -317,6 +331,14 @@ export class ScriptedFms implements CduBackend {
 
   readonly wind = { direction: 270, speed: 12 };
   /** Entries on the VNAV approach page. The FAF altitude sets the vertical path angle to the threshold. */
+  /**
+   * PLAN DATA (M300 3-19): the transition altitude and level, and the cruise wind and cruise true airspeed used for
+   * planning on the ground. CRZ TAS defaults to 130 kt for a ROTOR installation (the profile's planningCruiseTas); it is
+   * planning data only, separate from any speed the aircraft is commanded to fly (plan E1, R3-04). v1 predicts only in
+   * the air, where the system wind is used, so the cruise wind and TAS are not yet read by the predictions.
+   */
+  readonly planData = { transAlt: 18000, transLevel: 180, cruiseWind: { direction: 0, speed: 0 }, cruiseTas: 0 };
+
   readonly vnav = {
     mda: 560, fafAltitude: 1500, runwayElevation: 118, destTemp: null as number | null, qnh: null as string | null,
     /** The planned cruise, the descent path angle, and DES NOW (an early descent to capture the path). */
@@ -342,6 +364,7 @@ export class ScriptedFms implements CduBackend {
   constructor(clock: () => Date = () => new Date(), options: { profile?: AircraftProfile } = {}) {
     this.clock = clock;
     this.aircraftProfile = options.profile ?? ACTIVE_PROFILE;
+    this.planData.cruiseTas = this.aircraftProfile.parameters.planningCruiseTas.value;
     this.pinActive();
     // The receivers start warm: powered a minute before the session, past self-test, first fix and SBAS acquisition.
     const start = this.now.getTime();
@@ -841,8 +864,9 @@ export class ScriptedFms implements CduBackend {
 
   /** The true airspeed flown: the planned speed, or during an active rendezvous the speed that arrives on time. */
   get targetSpeed() {
-    const rendezvous = this.rndz.active ? this.rendezvous()?.speed : undefined;
-    return rendezvous === undefined ? this.plannedSpeed : Math.min(rendezvous, this.speedLimit);
+    const rendezvous = this.rndz.active ? this.rendezvous() : null;
+    // An RTA with no computed speed (overdue, or an unknown path) carries the planned speed: it commands nothing.
+    return rendezvous === null ? this.plannedSpeed : Math.min(rendezvous.speed, this.speedLimit);
   }
 
   /**
@@ -850,12 +874,28 @@ export class ScriptedFms implements CduBackend {
    * the top and end of descent, and the first climb constraint that cannot be met. The E/D is the runway.
    */
   profile(route: Route = this.active): Profile {
+    return computeProfile({
+      waypoints: this.predictionLegs(route).waypoints, altitude: this.altitude, cruiseAltitude: this.vnav.cruiseAltitude, climbRate: 1000,
+      pathAngle: this.vnav.pathAngle, phase: this.vphase.phase, fuel: this.fuel.quantity, fuelFlow: this.fuel.flow, now: this.now.getTime(),
+      // Held stationary off the plan (the ground speed below measurable progress): no ETA or EFOB ahead (plan B1.7).
+      noProgress: !makingProgress(this.groundSpeed),
+    });
+  }
+
+  /** The legs the predictions fly, as computeProfile takes them, with the course of each (for the RTA's wind triangle). */
+  private predictionLegs(route: Route) {
     const geometry = this.legGeometry(route);
     // The descent meets the approach: the final approach fix is crossed at its (temperature-corrected) altitude.
     const runwayAt = route.legs.findIndex(leg => leg.kind === "wpt" && /^RW\d{2}/.test(leg.ident));
+    // Where the destination-type predictions end (predictions.ts): the MAP, or arrival over the landing site.
+    const end = predictionEndpoint(route, this.db);
+    // A MANUAL hold with no exit armed: from its fix on, the predictions assume the exit at its next crossing (HOLD-ETA,
+    // inferred; M300 5-17), so they are CONDITIONAL (plan R3-03).
+    const hold = route.hold && route.hold.exit === "MANUAL" && route.hold.status !== "EXIT ARMED" ? route.hold : null;
     let basis: PredictionBasis = "known";
     let lastFix: LatLon | null = this.here;
     const waypoints: ProfileInput["waypoints"] = [];
+    const courses: (number | null)[] = [];
     route.legs.forEach((leg, i) => {
       // Past a discontinuity or a manually terminated leg the path is not defined; after a course or heading leg that
       // ends on an event, the leg into the next fix is estimated from the last fixed point.
@@ -878,13 +918,13 @@ export class ScriptedFms implements CduBackend {
       waypoints.push({
         ident: leg.ident, legDistance, groundSpeed: this.groundSpeedOn(course ?? this.track, tas),
         constraint, endOfDescent: i === runwayAt, basis, missed: leg.source === "MISSED",
+        ...(hold && leg.ident === hold.fix ? { assumption: "HOLD EXIT NEXT CROSSING" } : {}),
+        ...(end && i === end.legIndex ? { endpoint: { kind: end.kind, label: end.label } } : {}),
       });
+      courses.push(legDistance === null ? null : course ?? this.track);
       lastFix = to;
     });
-    return computeProfile({
-      waypoints, altitude: this.altitude, cruiseAltitude: this.vnav.cruiseAltitude, climbRate: 1000, pathAngle: this.vnav.pathAngle, phase: this.vphase.phase,
-      fuel: this.fuel.quantity, fuelFlow: this.fuel.flow, now: this.now.getTime(),
-    });
+    return { waypoints, courses };
   }
 
   /** The latched VNAV phase, and why it last changed (the flight simulation records each change as a mode event). */
@@ -930,7 +970,7 @@ export class ScriptedFms implements CduBackend {
       if (at) this.points[ident] = offset(at, motion.track, (motion.speed * dt) / 3600);
     }
     const rendezvous = this.rndz.active ? this.rendezvous() : null;
-    if (rendezvous && !rendezvous.achievable && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE")); }
+    if (rendezvous && rendezvous.required !== null && !rendezvous.achievable && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE")); }
     if (rendezvous?.achievable) this.rndz.alerted = false;
     // At the target altitude the descent ends and the aircraft levels there until the crew cancels it.
     if (this.tdn.active && this.altitude <= this.tdn.targetAltitude + 20) { this.tdn.active = false; this.tdn.level = true; }
@@ -949,19 +989,57 @@ export class ScriptedFms implements CduBackend {
 
   // ------------------------------------------------------------------ tactical: rendezvous, moving waypoints, TDN
 
+
   /**
    * The rendezvous: the distance along the route to the waypoint, the time left, and the speed that arrives on time.
    * Achievable when that speed is within the limits; the flown speed is then held within them.
    */
-  rendezvous(): { distance: number; required: number; speed: number; achievable: boolean; eta: number } | null {
+  rendezvous(): Rendezvous | null {
     const { wpt, time } = this.rndz;
     if (!wpt || time === null) return null;
-    const point = this.profile().points.find(p => p.ident === wpt);
-    if (!point || point.distance === null || point.eta === null) return null;
+    const profile = this.profile();
+    const at = profile.points.findIndex(p => p.ident === wpt);
+    if (at < 0) return null;
+    const point = profile.points[at];
+    // The speed limits in indicated airspeed (plan R3-04): the profile's VMINI and maximum, narrowed by the crew's.
+    const minIas = Math.max(ACTIVE_PROFILE.parameters.vmini.value, this.rndz.minSpeed), maxIas = Math.min(ACTIVE_PROFILE.parameters.maximumSpeed.value, this.rndz.maxSpeed);
+    const none = (reason: string): Rendezvous => ({ distance: point.distance, required: null, requiredIas: null, speed: this.plannedSpeed, achievable: false, eta: point.eta, status: "UNKNOWN", reason });
+    // Scoped to the path to its fix (R3-03): a later unknown segment does not matter; an unknown one before it does.
+    if (point.status === "UNKNOWN" || point.distance === null) return none(point.reason ?? "UNKNOWN");
     const hours = (time - this.now.getTime()) / 3_600_000;
-    const required = hours > 0 ? point.distance / hours : Infinity;
-    const speed = Math.min(this.rndz.maxSpeed, Math.max(this.rndz.minSpeed, required));
-    return { distance: point.distance, required, speed, achievable: required >= this.rndz.minSpeed && required <= this.rndz.maxSpeed, eta: point.eta };
+    if (hours <= 0) return none("OVERDUE");
+    const required = this.requiredTas(at, hours);
+    if (required === null) return none("NO TAS REACHES IT");
+    // Converted to IAS at each leg's planned altitude (ISA) and compared with the limits in IAS.
+    const legs = profile.points.slice(0, at + 1);
+    const ias = legs.map(p => iasFromTas(required, p.altitude ?? this.altitude));
+    const [low, high] = [Math.min(...ias), Math.max(...ias)];
+    const achievable = low >= minIas - 1e-9 && high <= maxIas + 1e-9;
+    // Flown now: the required true airspeed, held within the limits at the present altitude.
+    const speed = Math.min(tasFromIas(maxIas, this.altitude), Math.max(tasFromIas(minIas, this.altitude), required));
+    return {
+      distance: point.distance, required, requiredIas: iasFromTas(required, this.altitude), speed, achievable, eta: point.eta,
+      status: point.status, reason: !achievable ? (high > maxIas ? "ABOVE MAX SPEED" : "BELOW VMINI") : point.reason,
+    };
+  }
+
+  /**
+   * The true airspeed that flies the legs to the rendezvous fix (prediction legs 0 to `at`) in the time left, through
+   * the wind on each leg (the wind triangle, kinematics.ts): the time along the path falls as the airspeed rises, so it
+   * is found by bisection. Null when no airspeed up to 400 kt reaches the fix in time.
+   */
+  private requiredTas(at: number, hours: number): number | null {
+    const { waypoints, courses } = this.predictionLegs(this.active);
+    const legs = waypoints.slice(0, at + 1).map((w, i) => ({ distance: w.legDistance ?? 0, course: courses[i] ?? this.track }));
+    const time = (tas: number) => legs.reduce((sum, leg) => {
+      if (leg.distance === 0) return sum;
+      const gs = predictedGroundSpeed(tas, leg.course, this.wind);
+      return gs === null ? Infinity : sum + leg.distance / gs;
+    }, 0);
+    let low = 1, high = 400;
+    if (time(high) > hours) return null;
+    for (let i = 0; i < 60; i += 1) { const mid = (low + high) / 2; if (time(mid) > hours) low = mid; else high = mid; }
+    return high;
   }
 
   /** Defines a moving waypoint at a position, moving on a track at a speed. */
