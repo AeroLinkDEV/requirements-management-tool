@@ -1276,7 +1276,8 @@ export class ScriptedFms implements CduBackend {
     if (!rnav || this.nav.mode !== "GPS") return { annunciation: "NO APPR", lateral: false, vertical: false, reason: rnav ? "NO GPS NAVIGATION" : "NO RNAV APPROACH" };
     const chosen = this.gpsAssessment.chosen;
     if (!this.gpsSelection.qualified) return { annunciation: "NO APPR", lateral: false, vertical: false, reason: "GPS SOURCE CHANGE NOT QUALIFIED" };
-    return approachAuthority(chosen === null ? null : this.receivers[chosen].bus(), chosen === null ? null : this.gpsAssessment.assessed[chosen]);
+    // An executed RNAV approach with no FAS data block is LNAV only (approachAuthority).
+    return approachAuthority(chosen === null ? null : this.receivers[chosen].bus(), chosen === null ? null : this.gpsAssessment.assessed[chosen], this.pinnedFas !== null);
   }
 
   /**

@@ -28,6 +28,11 @@ import type { FlightPhase } from "./navigation";
  *   6. vertical: a level with vertical guidance (LPV, LNAV/VNAV) and 117 Normal and finite, or it is flown laterally
  *      only, annunciated LNAV (the LPV-to-LNAV downgrade).
  * The ability to navigate laterally (a usable receiver) is separate from permission to descend on an approach.
+ *
+ * An RNAV approach with no FAS data block (LNAV only, such as the 87N COPTER RNAV 190 point-in-space approach, whose only
+ * minimum is LNAV) selects nothing in the receiver: 156, 116 and 117 belong to FAS approaches. It is flown on the FMS's
+ * lateral guidance, annunciated LNAV (lateral, no vertical), with only step 1: the selected receiver usable in the
+ * approach phase, which judges its HIL against the approach HAL of 0.3 NM (AC 20-138, TSO-C146 practice).
  */
 
 /**
@@ -246,9 +251,11 @@ export type ApproachAuthority = {
  * May the approach be flown on the selected receiver: the approach half of the precedence table at the top of this file.
  * `receiver` is that receiver's assessment (null when none is selected).
  */
-export function approachAuthority(bus: GpsBus | null, receiver: ReceiverAssessment | null): ApproachAuthority {
+export function approachAuthority(bus: GpsBus | null, receiver: ReceiverAssessment | null, fasApproach = true): ApproachAuthority {
   const none = (reason: string): ApproachAuthority => ({ annunciation: "NO APPR", lateral: false, vertical: false, reason });
   if (!bus || !receiver?.usable) return none(receiver ? `GPS ${receiver.detail}` : "NO GPS SELECTED");
+  // LNAV only: the FMS steers the approach laterally; the receiver's 116 is not used, and nothing is descended on.
+  if (!fasApproach) return { annunciation: "LNAV", lateral: false, vertical: false, reason: "NO FAS: LNAV ONLY" };
   if (bus["156"].ssm !== "NORMAL") return none(`156 ${bus["156"].ssm}`);
   const approach = bus["156"].value!;
   if (!approach.selected) return none("156 NOT SELECTED");

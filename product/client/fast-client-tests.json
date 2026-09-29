@@ -47,6 +47,7 @@
     "fms-heliport-procedures.spec.ts",
     "fms-gps-scenario.spec.ts",
     "fms-gps-approach-auto.spec.ts",
+    "fms-gps-lnav-only.spec.ts",
     "fms-prediction-endpoints.spec.ts"
   ],
   "rendered": [
