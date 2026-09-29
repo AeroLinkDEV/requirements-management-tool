@@ -223,3 +223,35 @@ test('an ILS approach keeps its own capability and path: no FAS, ILS annunciated
   expect(sim.approachMode).toBe('CAPTURED')
   expect(fmsOutputs(unit, sim).verticalDeviation.status).toBe('NORMAL')
 })
+
+test('activating a cycle that redefines the runway does not change the executed approach the GPS flies; EXEC accepts it (Astra GPS-02)', () => {
+  const { unit, fly } = setup()
+  fly(1)
+  const course = () => Math.round(unit.finalApproachCourse ?? NaN)
+  const executed = unit.executedFas!
+  expect(course()).toBe(237)
+  // A cycle whose RW24R has the same threshold, elevation and length but a 247 degree course (Astra's record, verbatim).
+  const record = (fields: [number, string][]) => {
+    const chars = Array.from({ length: 132 }, () => ' ')
+    for (const [column, text] of fields) [...text].forEach((ch, i) => { chars[column - 1 + i] = ch })
+    return chars.join('')
+  }
+  const file = record([[1, 'SCAN'], [5, 'P'], [7, 'CYUL'], [13, 'G'], [14, 'RW24R'], [22, '0'], [23, '11000'], [28, '2470'], [33, 'N45284440'], [42, 'W073430480'], [67, '00118']])
+  expect(unit.loadArinc424(file, 'runway-course-change.pc')).toMatchObject({ skipped: 0 })
+  unit.gpsUpdated()
+  expect(course()).toBe(237)
+  unit.swapCycles()
+  unit.gpsUpdated()
+  fly(1)
+  // Activation alone: the receivers keep the executed FAS, and the record says the approach is defined differently.
+  expect(course()).toBe(237)
+  expect(unit.executedFas).toEqual(executed)
+  expect(unit.datasetLog.at(-1)!.detail).toMatch(/approach R24R defined differently in \S+ \(course 237 to 247\): flown as executed until EXEC/)
+  // A modification executed in the new cycle is the crew accepting its geometry: the FAS is re-derived and recorded.
+  unit.selectProcedure('APPROACH', 'R24R')
+  unit.press('EXEC')
+  fly(1)
+  expect(course()).toBe(247)
+  expect(unit.executedFas).toMatchObject({ cycle: unit.activeCycle.id })
+  expect(unit.datasetLog.at(-1)).toMatchObject({ action: 'ROUTE RE-RESOLVED', detail: expect.stringContaining('approach R24R FAS re-resolved: course 237 to 247') })
+})
