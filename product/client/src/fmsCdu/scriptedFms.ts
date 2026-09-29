@@ -542,7 +542,7 @@ export class ScriptedFms implements CduBackend {
    * to exit (the hold is entered, or another circuit begins) or the start of the active search pattern. Returns what
    * the aircraft flies next; the flight simulation calls this at each waypoint passage.
    */
-  arrive(): "route" | "hold" | "sar" | "end" {
+  arrive(completedCircuit = false): "route" | "hold" | "sar" | "end" {
     const route = this.active;
     const leg = route.legs[0];
     if (!leg || leg.kind === "disco") { this.alert(alert("END OF ROUTE")); return "end"; }
@@ -552,6 +552,8 @@ export class ScriptedFms implements CduBackend {
     // already holds there (the armed missed-approach hold).
     if (leg.hold && route.hold?.fix !== leg.ident) route.hold = this.holdFromProcedure(leg.ident, leg.hold, "ARMED");
     const hold = route.hold;
+    // A fix crossing in the hold: at the end of the entry (the first crossing after it), or after a whole racetrack.
+    if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && completedCircuit) hold.circuits = (hold.circuits ?? 0) + 1;
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExitReached(hold)) hold.status = "EXIT ARMED";
     if (hold && hold.fix === leg.ident && hold.status !== "EXIT ARMED") {
       if (hold.status === "ARMED") {
@@ -857,7 +859,8 @@ export class ScriptedFms implements CduBackend {
   private get speedLimit() {
     const leg = this.active.legs[0];
     const constraint = leg?.kind === "wpt" ? leg.speed : undefined;
-    const hold = this.active.hold?.status === "IN PROGRESS" ? this.active.hold.speed : undefined;
+    // The holding speed is an indicated airspeed (table and chart), flown as the true airspeed at the present altitude.
+    const hold = this.active.hold?.status === "IN PROGRESS" ? tasFromIas(this.active.hold.speed, this.altitude) : undefined;
     return Math.min(constraint ?? Infinity, hold ?? Infinity);
   }
 
@@ -1959,15 +1962,18 @@ export class ScriptedFms implements CduBackend {
   }
 
   /**
-   * At a fix crossing in the hold: whether it leaves now. ONCE and the missed-approach hold leave at the first crossing
-   * after the entry (one racetrack); AT TGT ALT at the first crossing with the target altitude reached (within 100 ft,
-   * or on the right side of an at-or-above / at-or-below target); MANUAL only when the crew arms EXIT HOLD.
+   * At a fix crossing in the hold: whether it leaves now. ONCE leaves at the first crossing after the entry (with a
+   * direct entry, after one racetrack; after a teardrop or parallel entry, where the entry ends); the missed-approach
+   * hold once a whole racetrack has been flown after the entry (MISSED-HOLD); AT TGT ALT at the first crossing with the
+   * target altitude reached (within 100 ft, or on the right side of an at-or-above / at-or-below target; never without
+   * a target); MANUAL only when the crew arms EXIT HOLD.
    */
   private holdExitReached(hold: Hold) {
-    if (hold.missed || hold.exit === "ONCE") return true;
+    if (hold.missed) return (hold.circuits ?? 0) >= 1;
+    if (hold.exit === "ONCE") return true;
     if (hold.exit !== "AT TGT ALT") return false;
     const target = /^(\d+)([AB]?)$/.exec(hold.altitude);
-    if (!target) return true;
+    if (!target) return false;
     const feet = Number(target[1]);
     if (target[2] === "A") return this.altitude >= feet - 100;
     if (target[2] === "B") return this.altitude <= feet + 100;

@@ -749,7 +749,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       }
       if (row === 5) {
         if (hold.status === "IN PROGRESS") fms.changeHold(h => { h.status = "EXIT ARMED"; });
-        else if (hold.status === "EXIT ARMED") fms.changeHold(h => { h.status = "IN PROGRESS"; });
+        // RESUME HOLD converts any exit to MANUAL: held until the crew exits it again (missed-approach holds too).
+        else if (hold.status === "EXIT ARMED") fms.changeHold(h => { h.status = "IN PROGRESS"; h.exit = "MANUAL"; h.missed = false; });
       }
     },
   },

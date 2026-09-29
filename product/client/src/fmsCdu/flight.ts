@@ -223,7 +223,8 @@ export class FlightSimulator {
   /** The planned path altitude at the fix the active leg began from, and the fix it leads to (see descentPath). */
   private legStartPath: { to: string; altitude: number } | null = null;
   private path: VerticalPath | null = null;
-  private holdPlan: { segments: HoldSegment[]; index: number; legNm: number } | null = null;
+  /** The hold being flown: its segments, the one being flown, the straight-leg length, and where the entry ends (-1: none). */
+  private holdPlan: { segments: HoldSegment[]; index: number; legNm: number; entryEnd: number } | null = null;
   /** The straight-leg length of the hold being flown, NM (null when none). */
   get holdLegNm() { return this.holdPlan?.legNm ?? null; }
   private sarPlan: { points: LatLon[]; index: number } | null = null;
@@ -1280,12 +1281,17 @@ export class FlightSimulator {
     return !(offset.start && ahead);
   }
 
-  /** The racetrack for the active hold from the present airspeed and wind (holds.ts), or null when it cannot be flown. */
+  /**
+   * The racetrack for the active hold (holds.ts), or null when it cannot be flown. The holding speed is an indicated
+   * airspeed (table or chart), taken as the true airspeed at the present altitude; the pattern is sized for that or the
+   * true airspeed flown, whichever is faster, so its turns stay within the bank limit either way.
+   */
   private holdGeometryNow(hold: Hold) {
     const fix = this.fms.coordinates(hold.fix);
     if (!fix) return null;
-    const legNm = hold.legDistance ?? ((hold.legTime ?? defaultLegMinutes(this.fms.altitude)) * this.tas) / 60;
-    return holdGeometry(fix, hold.inbound, hold.turn, this.tas, this.fms.wind.speed, legNm, MAX_BANK);
+    const tas = Math.max(this.tas, tasFromIas(hold.speed, this.fms.altitude));
+    const legNm = hold.legDistance ?? ((hold.legTime ?? defaultLegMinutes(this.fms.altitude)) * tas) / 60;
+    return holdGeometry(fix, hold.inbound, hold.turn, tas, this.fms.wind.speed, legNm, MAX_BANK);
   }
 
   /**
@@ -1298,7 +1304,7 @@ export class FlightSimulator {
     if (!geometry) { this.unableHold(); return; }
     const fix = this.fms.coordinates(hold.fix)!;
     const entry = entrySegments(this.fms.holdEntryFlown ?? "DIRECT", fix, hold.inbound, hold.turn, geometry);
-    this.holdPlan = { segments: [...entry, ...geometry.racetrack], index: 0, legNm: geometry.legNm };
+    this.holdPlan = { segments: [...entry, ...geometry.racetrack], index: 0, legNm: geometry.legNm, entryEnd: entry.length - 1 };
   }
 
   private unableHold() {
@@ -1315,8 +1321,8 @@ export class FlightSimulator {
 
   /**
    * Flies the hold's ground path: straight legs by cross-track steering, the half circles with the bank their radius
-   * needs at the present ground speed plus the cross-track correction. The inbound leg ends at the fix passage, where
-   * the FMS decides whether the hold goes on (the racetrack rebuilt) or exits.
+   * needs at the present ground speed plus the cross-track correction. The entry's intercept and each racetrack's
+   * inbound leg end at a fix passage, where the FMS decides whether the hold goes on (the racetrack rebuilt) or exits.
    */
   private flyHold(hold: Hold, dt: number): Omit<Guidance, "targetAltitude" | "mode"> {
     const plan = this.holdPlan!;
@@ -1336,14 +1342,19 @@ export class FlightSimulator {
     }
     const g = legGeometry(segment.from, segment.to, fms.position);
     if (dt > 0 && g.toGo <= 0.02) {
-      if (last) {
-        // The fix passage: the hold goes on (rebuilt from the present airspeed and wind) or exits.
-        const result = fms.arrive();
+      if (last || plan.index === plan.entryEnd) {
+        // A fix passage, at the end of the entry or of a racetrack: the hold goes on (rebuilt from the present airspeed
+        // and wind) or exits.
+        const result = fms.arrive(last);
         if (result === "hold") {
           const geometry = this.holdGeometryNow(hold);
           if (!geometry) this.unableHold();
-          else Object.assign(plan, { segments: geometry.racetrack, index: 0, legNm: geometry.legNm });
-        } else this.holdPlan = null;
+          else Object.assign(plan, { segments: geometry.racetrack, index: 0, legNm: geometry.legNm, entryEnd: -1 });
+        } else {
+          this.holdPlan = null;
+          const circuits = hold.circuits ?? 0;
+          this.record("HOLD EXITED", `${hold.fix}: ${circuits} whole racetrack${circuits === 1 ? "" : "s"} after the entry (EXIT TYPE ${hold.exit}${hold.missed ? ", missed approach" : ""})`);
+        }
       } else plan.index += 1;
     }
     return { legFrom: segment.from, legTo: segment.to, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: this.steer(g.track, g.crossTrack) };

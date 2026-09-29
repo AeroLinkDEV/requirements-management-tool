@@ -161,6 +161,8 @@ export type HoldExit = "MANUAL" | "ONCE" | "AT TGT ALT";
 export type Hold = {
   fix: string; turn: "RIGHT" | "LEFT"; inbound: number; legTime: number | null; legDistance: number | null;
   exit: HoldExit; speed: number; altitude: string; status: HoldStatus; missed?: boolean;
+  /** Whole racetracks flown since the entry: the missed-approach hold leaves after one. */
+  circuits?: number;
 };
 
 /**
