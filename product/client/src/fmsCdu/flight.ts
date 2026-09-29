@@ -1,5 +1,5 @@
 import { bearingDeg, courseDeg, distanceNm, longitudeDelta, offset, type Hold, type HoldEntry, type LatLon, type Leg, type Sar, type SarPattern } from "./fmsModel";
-import { groundVelocity } from "./kinematics";
+import { groundVelocity, iasFromTas, tasFromIas } from "./kinematics";
 import { ACTIVE_PROFILE } from "./profile";
 import type { ScriptedFms } from "./scriptedFms";
 import type { ProfilePoint, VerticalPhase } from "./vnav";
@@ -34,6 +34,9 @@ const PROFILE = ACTIVE_PROFILE.parameters;
 const YAW_RATE = PROFILE.lowSpeedYawRate.value;
 const TDH_RATE = PROFILE.tdhDeceleration.value, TDH_MIN = 0.5, TDH_MAX = 1.25;
 const DEPARTURE_RATE = PROFILE.departureAccel.value;
+const LATERAL_RATE = PROFILE.lateralAccel.value;
+/** The radio-height datum hold, fpm per foot of error (a firm hold; the vertical-acceleration limit shapes it). */
+const RHT_GAIN = 10;
 const TD_SPEED_RATE = PROFILE.tdDeceleration.value;
 /** A receiver change keeps HOV only within these (laboratory limits, Astra rev 3.1): one tick, 10 m, 1 kt. */
 const TRANSFER_TICK_S = PROFILE.hoverTransferTick.value, TRANSFER_POSITION_M = PROFILE.hoverTransferPosition.value, TRANSFER_VELOCITY_KT = PROFILE.hoverTransferVelocity.value;
@@ -267,7 +270,7 @@ export class FlightSimulator {
     this.selectedAlt = Math.round(fms.altitude);
     this.selectedTas = fms.vnav.cruiseSpeed;
     // Under the ADVISORY policy the aircraft starts level in altitude hold at its altitude.
-    if (fms.aircraftProfile.verticalPolicy === "ADVISORY") this.altitudeHold = Math.round(fms.altitude);
+    if (fms.aircraftProfile.verticalPolicy === "ADVISORY") { this.altitudeHold = Math.round(fms.altitude); this.vertical = "ALT HOLD"; }
     this.goArounds = fms.goArounds;
     this.phase = fms.verticalPhase;
     this.last = this.guide();
@@ -431,11 +434,17 @@ export class FlightSimulator {
       this.lnavArmed = false;
       this.heading = Math.round(norm360(this.fms.heading));
       this.held = true;
-      // The autopilot's own radio-height modes do not depend on the FMS: they fly on through its failure.
-      this.altitudeHold = this.lowCollective ? null : Math.round(this.fms.altitude);
-      this.vsTarget = null;
-      this.goingAround = false;
-      this.record("FMS FAILURE", `managed guidance invalid; HDG HOLD ${String(this.heading).padStart(3, "0")}°T, ALT HOLD ${this.altitudeHold} FT`);
+      // Under the ADVISORY policy the vertical modes are the autopilot's own (ALT, VS, GA, the radio-height modes): they
+      // fly on through an FMS failure. The laboratory airline-style VNAV reverts to a latched altitude hold.
+      if (!this.advisory) {
+        this.altitudeHold = Math.round(this.fms.altitude);
+        this.vsTarget = null;
+        this.goingAround = false;
+      }
+      // F9: the distance to a target is FMS data. TD/H goes on to a stop at its nominal rate and holds there.
+      if (this.lowHorizontal?.mode === "TDH") this.lowHorizontal.target = null;
+      const vertical = this.altitudeHold !== null ? `ALT HOLD ${this.altitudeHold} FT` : `${this.axisModes.collective} kept (the autopilot's own)`;
+      this.record("FMS FAILURE", `managed guidance invalid; HDG HOLD ${String(this.heading).padStart(3, "0")}°T, ${vertical}`);
     } else if (!failed && this.fmsFailed) {
       this.record("FMS RECOVERED", "basic modes kept; select LNAV and VNAV to resume managed guidance");
     }
@@ -464,22 +473,38 @@ export class FlightSimulator {
     this.altitudeHold = null;
     this.approach = "OFF";
     this.previousCrossTrack = null;
-    if (this.advisory) {
-      // The laboratory go-around under the ADVISORY policy: a climb at the go-around rate to the preselected altitude,
-      // or, when that is not above the aircraft, to the missed approach hold altitude or 1,000 ft up (a labelled
-      // assumption; the crew normally preselects the missed approach altitude).
-      const missed = constraintAltitude(this.fms.activeRoute.hold?.altitude) ?? null;
-      if (this.selectedAlt <= this.fms.altitude + 100) this.selectedAlt = Math.round(missed !== null && missed > this.fms.altitude + 100 ? missed : this.fms.altitude + 1000);
-      this.goingAround = true;
-      this.vsTarget = null;
-      this.lowCollective = null;
-      this.tdSpeed = false;
-      // From the low-speed regime the station lock is released and the departure acceleration runs with the GA climb.
-      if (this.lowHorizontal) this.startDeparture();
-      this.record("GO AROUND", `missed approach active; GA climbs at ${GA_RATE} FPM to ${this.selectedAlt} FT`);
-      return;
-    }
+    // Under the ADVISORY policy TOGA is also the autopilot's GA (engageGoAround): taken once, whichever came first.
+    if (this.advisory) { if (!this.goingAround) this.startGoAround("missed approach active"); return; }
     this.record("GO AROUND", `missed approach active; VNAV climbs on the missed approach altitudes${released === null ? "" : `; ALT HOLD ${released} FT released`}`);
+  }
+
+  /**
+   * GA on the autopilot (ADVISORY policy): the vertical and speed axes only, whatever the FMS can do (it may have
+   * failed, or have no missed approach, as over the sea). The bench TOGA control does this and the FMS missed-approach
+   * request together; it never changes the route or the lateral mode by itself.
+   */
+  engageGoAround() {
+    if (!this.advisory || this.goingAround) return false;
+    this.altitudeHold = null;
+    this.startGoAround("autopilot GA");
+    return true;
+  }
+
+  /**
+   * The laboratory go-around under the ADVISORY policy: a climb at the go-around rate to the preselected altitude, or,
+   * when that is not above the aircraft, to the missed approach hold altitude or 1,000 ft up (a labelled assumption; the
+   * crew normally preselects the missed approach altitude). From the low-speed regime the station lock is released and
+   * the departure acceleration runs with the climb.
+   */
+  private startGoAround(cause: string) {
+    const missed = constraintAltitude(this.fms.activeRoute.hold?.altitude) ?? null;
+    if (this.selectedAlt <= this.fms.altitude + 100) this.selectedAlt = Math.round(missed !== null && missed > this.fms.altitude + 100 ? missed : this.fms.altitude + 1000);
+    this.goingAround = true;
+    this.vsTarget = null;
+    this.lowCollective = null;
+    this.tdSpeed = false;
+    if (this.lowHorizontal) this.startDeparture();
+    this.record("GO AROUND", `${cause}; GA climbs at ${GA_RATE} FPM to ${this.selectedAlt} FT`);
   }
 
   /** VNAV: managed vertical guidance again, after an altitude hold. Refused while the FMS has failed. */
@@ -573,7 +598,8 @@ export class FlightSimulator {
       ({ heading, track, groundSpeed, position } = this.integrateLowSpeed(dt));
       this.bank += clamp(-this.bank, -ROLL_RATE * dt, ROLL_RATE * dt);
     } else {
-      const speedTarget = this.advisory ? this.selectedTas : fms.targetSpeed;
+      // The crew selects indicated airspeed (the helicopter profile); the aircraft flies the true airspeed it means here.
+      const speedTarget = this.advisory ? tasFromIas(this.selectedTas, fms.altitude) : fms.targetSpeed;
       // TD brings the speed back to the gate speed at its own rate.
       const rate = this.tdSpeed ? TD_SPEED_RATE : SPEED_RATE;
       this.airspeed += clamp(speedTarget - this.airspeed, -rate * dt, rate * dt);
@@ -628,6 +654,11 @@ export class FlightSimulator {
       : descentPath !== null ? { altitude: descentPath, source: "VNAV", coupled: this.vertical === "VNAV PTH" && this.altitudeHold === null } : null;
     fms.updateNavigation(dt);
     fms.updatePerformance(dt);
+    // The airspeed indication and what the autopilot publishes to the FMS.
+    const ias = this.indicatedAirspeed;
+    if (this.iasOk && ias < PROFILE.unreliableIasBelow.value) this.iasOk = false;
+    else if (!this.iasOk && ias >= PROFILE.reliableIasAgainAt.value) this.iasOk = true;
+    fms.afcs = { hoverHeight: this.hoverHeightFt, ...this.groundVelocityAxes };
     if (fms.verticalPhase !== this.phase && !this.advisory) { this.phase = fms.verticalPhase; this.record(`VNAV ${this.phase}`, fms.verticalPhaseReason); }
     // DES NOW ends once the aircraft is on the descent path: the path, rising behind the active fix, has come down to it.
     if (fms.vnav.desNow && !this.advisory) {
@@ -744,7 +775,10 @@ export class FlightSimulator {
    * Sensor validity is required throughout the modes that consume it (radio height for the collective modes, the
    * hover feedback for HOV, TD/H and LVL); entry windows apply only when a mode is engaged.
    */
-  private lowCollective: { mode: "RHT" | "TD" | "TDH" | "TU"; datum: number } | null = null;
+  /** `rate`: the transition's constant rate (fpm) while it is still flying it toward the datum; null once held. */
+  private lowCollective: { mode: "RHT" | "TD" | "TDH" | "TU"; datum: number; rate: number | null } | null = null;
+  /** The departure's lateral hold lost its feedback: it stays lost until TU or GA is engaged again. */
+  private lvlLost = false;
   private lowHorizontal: { mode: "HOV" | "TDH" | "TU" | "ATT"; target: LatLon | null; speed: number; track: number } | null = null;
   /** In the low-speed regime the air velocity is its own vector (knots north, east), not tied to the heading. */
   private airVelocity: { north: number; east: number } | null = null;
@@ -758,6 +792,20 @@ export class FlightSimulator {
   private lowHeight: "ACTIVE" | "OFF" | null = null;
 
   get hoverHeight() { return this.hoverHeightFt; }
+  /** Whether the indicated airspeed is reliable: below 30 kt it is not, and it is again from 33 kt (the profile's). */
+  private iasOk = true;
+  /** Indicated airspeed: from the air velocity along the heading (a pitot reads forward, not sideways), ISA. */
+  get indicatedAirspeed() {
+    const air = this.airVelocity, heading = rad(this.fms.heading);
+    const forward = air ? Math.max(0, air.north * Math.cos(heading) + air.east * Math.sin(heading)) : this.airspeed;
+    return iasFromTas(forward, this.fms.altitude);
+  }
+  get iasReliable() { return this.iasOk; }
+  /** The ground velocity in aircraft axes: VX along the heading, VY to its right (knots). */
+  get groundVelocityAxes() {
+    const fms = this.fms, off = ((fms.track - fms.heading) * Math.PI) / 180;
+    return { vx: fms.groundSpeed * Math.cos(off), vy: fms.groundSpeed * Math.sin(off) };
+  }
   /** LOW HT when the protection is raising the collective; LOW HT OFF when it cannot work (no valid radio height). */
   get lowHeightCaption() { return this.lowHeight === "ACTIVE" ? "LOW HT" : this.lowHeight === "OFF" ? "LOW HT OFF" : null; }
   get inLowSpeedRegime() { return this.lowHorizontal !== null; }
@@ -767,7 +815,9 @@ export class FlightSimulator {
     const c = this.lowCollective, h = this.lowHorizontal;
     const collective = c ? (c.mode === "TDH" ? "TD/H" : c.mode) : this.vertical === "ALT HOLD" ? "ALT" : this.vertical;
     const pitch = h ? (h.mode === "TDH" ? "TD/H" : h.mode === "TU" ? (this.goingAround ? "GA" : "TU") : h.mode) : this.tdSpeed ? "TD" : this.advisory ? "IAS" : "SPD";
-    const roll = h ? (h.mode === "TU" ? (this.lastFeedback ? "LVL" : "ATT") : h.mode === "TDH" ? "TD/H" : h.mode) : this.lateral === "LNAV" ? "NAV" : "HDG";
+    // TU: heading hold shows on the roll axis from 40 kt (the low-speed controller flies it until 45 kt).
+    const tuRoll = this.indicatedAirspeed >= PROFILE.coordinatedLeaveBelow.value ? "HDG" : this.lvlLost ? "ATT" : "LVL";
+    const roll = h ? (h.mode === "TU" ? tuRoll : h.mode === "TDH" ? "TD/H" : h.mode) : this.lateral === "LNAV" ? "NAV" : "HDG";
     return { collective, pitch, roll };
   }
 
@@ -777,7 +827,7 @@ export class FlightSimulator {
   engageRadioHeight() {
     const ra = this.radio;
     if (!this.advisory || ra.status !== "NORMAL" || ra.value! < PROFILE.minimumUseHeight.value) return false;
-    this.lowCollective = { mode: "RHT", datum: Math.round(ra.value!) };
+    this.lowCollective = { mode: "RHT", datum: Math.round(ra.value!), rate: null };
     this.altitudeHold = null; this.vsTarget = null; this.goingAround = false;
     this.record("RHT", `${this.lowCollective.datum} FT RA`);
     return true;
@@ -794,7 +844,7 @@ export class FlightSimulator {
   /** HOV: holds the present position (entry below the coordinated-flight speed, with eligible hover feedback). */
   engageHover() {
     const feedback = this.fms.hoverFeedback;
-    if (!this.advisory || !feedback || this.airspeed >= PROFILE.coordinatedLeaveBelow.value) return false;
+    if (!this.advisory || !feedback || this.indicatedAirspeed >= PROFILE.coordinatedLeaveBelow.value) return false;
     this.enterLowSpeed();
     this.lowHorizontal = { mode: "HOV", target: feedback.position, speed: 0, track: this.fms.track };
     this.noteFeedback(feedback);
@@ -807,7 +857,7 @@ export class FlightSimulator {
   engageTransitionDown() {
     const ra = this.radio;
     if (!this.advisory || ra.status !== "NORMAL" || ra.value! < PROFILE.minimumUseHeight.value || this.lowHorizontal) return false;
-    this.lowCollective = { mode: "TD", datum: Math.min(PROFILE.gateHeight.value, Math.round(ra.value!)) };
+    this.lowCollective = { mode: "TD", datum: Math.min(PROFILE.gateHeight.value, Math.round(ra.value!)), rate: -PROFILE.tdDescentRate.value };
     this.altitudeHold = null; this.vsTarget = null; this.goingAround = false;
     this.selectedTas = PROFILE.gateSpeed.value;
     this.tdSpeed = true;
@@ -823,11 +873,11 @@ export class FlightSimulator {
   engageTransitionDownToHover(target: LatLon | null = null) {
     const ra = this.radio, feedback = this.fms.hoverFeedback;
     if (!this.advisory || ra.status !== "NORMAL" || !feedback) return false;
-    if (ra.value! < PROFILE.tdhMinHeight.value || ra.value! > PROFILE.tdhMaxHeight.value || this.airspeed >= PROFILE.tdhMaxSpeedBelow.value) return false;
+    if (ra.value! < PROFILE.tdhMinHeight.value || ra.value! > PROFILE.tdhMaxHeight.value || this.indicatedAirspeed >= PROFILE.tdhMaxSpeedBelow.value) return false;
     const groundSpeed = Math.hypot(feedback.north, feedback.east);
     this.enterLowSpeed();
     this.lowHorizontal = { mode: "TDH", target, speed: groundSpeed, track: this.fms.track };
-    this.lowCollective = { mode: "TDH", datum: Math.min(this.hoverHeightFt, Math.round(ra.value!)) };
+    this.lowCollective = { mode: "TDH", datum: Math.min(this.hoverHeightFt, Math.round(ra.value!)), rate: -PROFILE.tdhDescentRate.value };
     this.altitudeHold = null; this.vsTarget = null; this.goingAround = false; this.tdSpeed = false;
     this.noteFeedback(feedback);
     this.record("TD/H", `to ${this.lowCollective.datum} FT RA and 0 KT${target ? " at the target" : ""}`);
@@ -842,17 +892,24 @@ export class FlightSimulator {
   engageTransitionUp() {
     const ra = this.radio;
     const from = this.lowHorizontal?.mode === "HOV" || this.lowHorizontal?.mode === "TDH" || this.lowCollective?.mode === "RHT";
-    if (!this.advisory || !from || this.airspeed >= PROFILE.coordinatedLeaveBelow.value || ra.status !== "NORMAL" || ra.value! < PROFILE.minimumUseHeight.value) return false;
+    if (!this.advisory || !from || this.indicatedAirspeed >= PROFILE.coordinatedLeaveBelow.value || ra.status !== "NORMAL" || ra.value! < PROFILE.minimumUseHeight.value) return false;
     this.startDeparture();
-    this.lowCollective = { mode: "TU", datum: PROFILE.gateHeight.value };
-    this.record("TU", `to ${PROFILE.gateHeight.value} FT RA and ${PROFILE.climbSpeed.value} KT`);
+    // Above the gate height already, TU climbs no further and never descends: it holds the height it has.
+    const datum = Math.max(PROFILE.gateHeight.value, Math.round(ra.value!));
+    this.lowCollective = { mode: "TU", datum, rate: datum > ra.value! ? PROFILE.departureClimbRate.value : null };
+    this.record("TU", `to ${datum} FT RA and ${PROFILE.climbSpeed.value} KT`);
     return true;
   }
 
   private startDeparture() {
     this.enterLowSpeed();
+    this.lvlLost = false;
     this.lowHorizontal = { mode: "TU", target: null, speed: 0, track: this.fms.track };
     this.selectedTas = PROFILE.climbSpeed.value;
+    // The departure starts from the aircraft's feedback as it is: no stale sample carried over.
+    const feedback = this.fms.hoverFeedback;
+    this.lastFeedback = feedback ? { at: this.fms.now.getTime(), ...feedback } : null;
+    if (!feedback) this.lvlLost = true;
   }
 
   private enterLowSpeed() {
@@ -903,11 +960,13 @@ export class FlightSimulator {
    */
   private integrateLowSpeed(dt: number) {
     const fms = this.fms, air = this.airVelocity!;
+    // The true wind moves the aircraft (the plant); the controller never sees it (below).
     const windNorth = -fms.wind.speed * Math.cos(rad(fms.wind.direction)), windEast = -fms.wind.speed * Math.sin(rad(fms.wind.direction));
     const h = this.lowHorizontal!;
     // Feedback: HOV, TD/H and LVL consume it; losing it, or a receiver change that is not continuous, leaves HOV and
-    // TD/H for ATT on the latched command (the controller gets no new measurement; the aircraft may drift).
-    if (h.mode !== "ATT") {
+    // TD/H for ATT on the latched command (the controller gets no new measurement; the aircraft may drift). LVL, once
+    // lost, stays lost until the departure is engaged again: it does not resume by itself when feedback returns.
+    if (h.mode !== "ATT" && !(h.mode === "TU" && this.lvlLost)) {
       const { feedback, reason } = this.continuousFeedback(dt);
       if (feedback) this.noteFeedback(feedback);
       else {
@@ -915,6 +974,9 @@ export class FlightSimulator {
         if (h.mode === "HOV" || h.mode === "TDH") {
           this.lowHorizontal = { ...h, mode: "ATT" };
           this.record("HOV LOST", `${reason}; ATT holds the last air-velocity command`);
+        } else if (h.mode === "TU") {
+          this.lvlLost = true;
+          this.record("LVL LOST", `${reason}; the lateral air velocity is held (ATT); the departure acceleration and climb go on`);
         }
       }
     }
@@ -923,9 +985,12 @@ export class FlightSimulator {
     const heading = norm360(fms.heading + clamp(angleDiff(fms.heading, this.hoverHeading), -YAW_RATE * dt, YAW_RATE * dt));
     const hx = Math.cos(rad(heading)), hy = Math.sin(rad(heading));
     let command = { north: air.north, east: air.east };
-    const fb = this.lastFeedback;
+    const fb = this.lvlLost && this.lowHorizontal!.mode === "TU" ? null : this.lastFeedback;
     const now = this.lowHorizontal!;
-    if ((now.mode === "HOV" || now.mode === "TDH") && fb) {
+    // The controller's wind: the measured ground velocity (the feedback's 166/174) less the aircraft's own air velocity
+    // (its air data). A velocity sensor error therefore steers the aircraft, as it would a real one; truth never does.
+    const windEstimate = fb ? { north: fb.north - air.north, east: fb.east - air.east } : null;
+    if ((now.mode === "HOV" || now.mode === "TDH") && fb && windEstimate) {
       let ground: { north: number; east: number };
       if (now.mode === "HOV") {
         const e = toLocal(fb.position, now.target!);
@@ -938,33 +1003,46 @@ export class FlightSimulator {
         const remaining = along ? along.x * Math.sin(rad(now.track)) + along.y * Math.cos(rad(now.track)) : null;
         // Closed loop on the remaining distance to a target (kt/s = GS^2 / (2 d 3600), d in NM), bounded; at or past
         // the target, the upper bound; without a target, the nominal rate.
-        const rate = remaining === null ? TDH_RATE : remaining <= 0 ? TDH_MAX : clamp((now.speed * now.speed) / (2 * remaining * 3600), TDH_MIN, TDH_MAX);
+        // With a target further than the nominal stopping distance, the speed is held (the gate segment) until the
+        // stopping distance is reached; then the closed loop.
+        const nominalStop = (now.speed * now.speed) / (2 * TDH_RATE * 3600);
+        const rate = remaining === null ? TDH_RATE : remaining <= 0 ? TDH_MAX : remaining > nominalStop ? 0 : clamp((now.speed * now.speed) / (2 * remaining * 3600), TDH_MIN, TDH_MAX);
         now.speed = Math.max(0, now.speed - rate * dt);
-        ground = { north: now.speed * Math.cos(rad(now.track)), east: now.speed * Math.sin(rad(now.track)) };
+        // Toward a target, a cross-track correction onto the line through it along the track (closed over about 20 s,
+        // at up to 5 kt): the stop is at the target, not beside it.
+        const across = along ? along.x * Math.cos(rad(now.track)) - along.y * Math.sin(rad(now.track)) : 0;
+        const lateral = clamp((across * 3600) / 20, -5, 5);
+        ground = {
+          north: now.speed * Math.cos(rad(now.track)) - lateral * Math.sin(rad(now.track)),
+          east: now.speed * Math.sin(rad(now.track)) + lateral * Math.cos(rad(now.track)),
+        };
         if (now.speed <= 1) {
+          const miss = now.target ? distanceNm(fb.position, now.target) * 1852 : 0;
           this.lowHorizontal = { mode: "HOV", target: now.target ?? fb.position, speed: 0, track: now.track };
-          this.record("HOV", now.target ? "holding the target" : "holding where it stopped");
+          // HOV holds the target; stopped more than 50 m from it, it is a recovery to the target, not an arrival.
+          this.record("HOV", !now.target ? "holding where it stopped" : miss <= 50 ? "holding the target" : `recovering to the target, stopped ${miss.toFixed(0)} m from it`);
         }
       }
-      command = { north: ground.north - windNorth, east: ground.east - windEast };
+      command = { north: ground.north - windEstimate.north, east: ground.east - windEstimate.east };
     } else if (now.mode === "TU") {
-      // Along the heading: the airspeed toward the climb speed at the departure rate. Across it: the lateral ground
-      // velocity held at zero (LVL) while there is feedback; without it, the lateral air velocity is held (ATT).
+      // Along the heading: the airspeed toward the climb speed at the departure rate. Across it: the measured lateral
+      // ground velocity driven to zero (LVL) while there is feedback; without it, the lateral air velocity is held (ATT).
       const alongAir = air.north * hx + air.east * hy;
       const crossAir = -air.north * hy + air.east * hx;
-      const alongCmd = Math.min(PROFILE.climbSpeed.value, alongAir + DEPARTURE_RATE * dt);
-      const crossCmd = fb ? -(-windNorth * hy + windEast * hx) : crossAir;
+      const climbTas = tasFromIas(PROFILE.climbSpeed.value, fms.altitude);
+      const alongCmd = Math.min(climbTas, alongAir + DEPARTURE_RATE * dt);
+      const crossCmd = fb ? crossAir - (-fb.north * hy + fb.east * hx) : crossAir;
       command = { north: alongCmd * hx - crossCmd * hy, east: alongCmd * hy + crossCmd * hx };
     }
-    // Sideways and rearward limits in the heading frame, then the acceleration limit on the change.
+    // Sideways and rearward limits in the heading frame, then the acceleration limits per axis (along the heading, and
+    // across it at the profile's lateral limit).
     let along = command.north * hx + command.east * hy, cross = -command.north * hy + command.east * hx;
     along = Math.max(along, -PROFILE.rearwardLimit.value);
     cross = clamp(cross, -PROFILE.sidewaysLimit.value, PROFILE.sidewaysLimit.value);
-    command = { north: along * hx - cross * hy, east: along * hy + cross * hx };
-    const dn = command.north - air.north, de = command.east - air.east;
-    const change = Math.hypot(dn, de), limit = SPEED_RATE * dt;
-    const k = change > limit ? limit / change : 1;
-    air.north += dn * k; air.east += de * k;
+    const airAlong = air.north * hx + air.east * hy, airCross = -air.north * hy + air.east * hx;
+    const newAlong = airAlong + clamp(along - airAlong, -SPEED_RATE * dt, SPEED_RATE * dt);
+    const newCross = airCross + clamp(cross - airCross, -LATERAL_RATE * dt, LATERAL_RATE * dt);
+    air.north = newAlong * hx - newCross * hy; air.east = newAlong * hy + newCross * hx;
     this.airspeed = Math.hypot(air.north, air.east);
     const groundNorth = air.north + windNorth, groundEast = air.east + windEast;
     const groundSpeed = Math.hypot(groundNorth, groundEast);
@@ -972,7 +1050,7 @@ export class FlightSimulator {
     const position = offset(fms.truePosition, track, (groundSpeed * dt) / 3600);
     // TU: heading hold captures on the roll axis through 40 kt, but the low-speed heading controller keeps the aircraft
     // until the coordinated regime at 45 kt (the profile's hysteresis); from there IAS flies on to 80.
-    if (this.lowHorizontal?.mode === "TU" && this.airspeed >= PROFILE.coordinatedEnterAt.value) this.leaveLowSpeed("coordinated flight on the departure");
+    if (this.lowHorizontal?.mode === "TU" && this.indicatedAirspeed >= PROFILE.coordinatedEnterAt.value) this.leaveLowSpeed("coordinated flight on the departure");
     return { position, track, groundSpeed, heading };
   }
 
@@ -995,16 +1073,18 @@ export class FlightSimulator {
       return 0;
     }
     const height = ra.value!;
+    const toGo = c.datum - height;
     let vs: number;
-    if (c.mode === "RHT") vs = clamp((c.datum - height) * 2, -MAX_VS, MAX_VS);
-    else {
-      const rate = c.mode === "TD" ? -PROFILE.tdDescentRate.value : c.mode === "TDH" ? -PROFILE.tdhDescentRate.value : PROFILE.departureClimbRate.value;
-      const toGo = c.datum - height;
-      if (Math.abs(toGo) <= ALT_CAPTURE_FT || Math.sign(toGo) !== Math.sign(rate)) {
-        this.lowCollective = { mode: "RHT", datum: c.datum };
-        this.record("RHT", `${c.datum} FT RA`);
-        vs = clamp(toGo * 2, -MAX_VS, MAX_VS);
-      } else vs = Math.abs(toGo) < Math.abs(rate) / 4 ? toGo * 4 : rate;
+    // A transition flies its constant rate all the way (the vertical-acceleration limit in integrate() makes the ramps)
+    // until the stopping distance at that limit, then the datum is held firmly. The mode shows RHT once the height is in
+    // its capture band (20 ft, 200 fpm); that is an annunciation, it does not change the command (plan R3-01).
+    const rate = c.rate ?? 0;
+    const stopping = ((rate / 60) ** 2) / (2 * (VS_RATE / 60)) + 0.5;
+    if (rate !== 0 && Math.sign(toGo) === Math.sign(rate) && Math.abs(toGo) > stopping) vs = rate;
+    else { vs = clamp(toGo * RHT_GAIN, -MAX_VS, MAX_VS); if (c.rate) this.lowCollective = { ...c, rate: null }; }
+    if (c.mode !== "RHT" && Math.abs(toGo) <= ALT_CAPTURE_FT && Math.abs(this.fms.verticalSpeed) <= 200) {
+      this.lowCollective = { mode: "RHT", datum: c.datum, rate: this.lowCollective!.rate };
+      this.record("RHT", `${c.datum} FT RA`);
     }
     const floor = this.lowHorizontal !== null ? PROFILE.lowHeightHover.value : PROFILE.lowHeightCruise.value;
     if (height < floor) { this.lowHeight = "ACTIVE"; vs = Math.max(vs, (floor - height) * 2 + 100); }
@@ -1017,6 +1097,14 @@ export class FlightSimulator {
 
   /** HDG SEL: fly a selected heading. LNAV stays armed if it was, and captures the route when the aircraft nears it. */
   selectHeading(heading: number) {
+    // A crew heading selection cancels a retained TD/H plan (R3-02): the stop becomes a hover where the aircraft is, or
+    // ATT without feedback. In HOV it only turns the hover heading.
+    const tdh = this.lowHorizontal;
+    if (tdh?.mode === "TDH") {
+      const feedback = this.fms.hoverFeedback;
+      this.lowHorizontal = { ...tdh, mode: feedback ? "HOV" : "ATT", target: feedback?.position ?? null };
+      this.record("TD/H CANCELLED", `heading selected; ${feedback ? "HOV where it is" : "ATT"}`);
+    }
     this.lateral = "HDG";
     this.heading = norm360(heading);
     this.held = false;

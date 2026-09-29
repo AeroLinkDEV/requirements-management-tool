@@ -264,6 +264,13 @@ export class ScriptedFms implements CduBackend {
    * ground velocity's component toward it. Progress, for a time to go, is this, not the ground speed's magnitude:
    * drifting away or across is no progress. The ground speed where there is no active waypoint.
    */
+  /**
+   * What the autopilot publishes to the FMS (plan B3.4): the hover height it has selected, and its longitudinal and
+   * lateral ground velocities (VX forward, VY right, knots). The CMA HOVER page shows them (M300 A-75). Null until the
+   * flight simulation reports them.
+   */
+  afcs: { hoverHeight: number; vx: number; vy: number } | null = null;
+
   get closureSpeed() {
     const leg = this.active.legs[0];
     const to = leg?.kind === "wpt" ? this.coordinates(leg.ident) : undefined;

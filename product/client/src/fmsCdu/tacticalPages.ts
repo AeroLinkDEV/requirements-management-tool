@@ -28,6 +28,9 @@ function tactApprFafAltitude(fms: ScriptedFms) {
   return Math.round((a.runwayElevation + (a.fafDistance - a.mapDistance) * 6076.12 * Math.tan((Math.abs(a.vpa) * Math.PI) / 180)) / 10) * 10;
 }
 
+/** A velocity as the HOVER page shows it: signed, one decimal. */
+const signed = (kt: number) => `${kt < 0 ? "-" : "+"}${Math.abs(kt).toFixed(1)}`;
+
 export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
   TACT: {
     pages: () => 1,
@@ -442,12 +445,13 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         title("HOVER", "1/1"),
         caption(" MARK ON TOP POS", mark ? `${mark.ident} ` : undefined),
         { left: mark ? medium(formatPosition(mark.position), "green") : dashes(15) },
-        caption(" RAD ALT", "TRUE WIND "),
+        // M300 A-74/A-75: RADALT and the hover height the AFCS selected; the true wind and the AFCS's X/Y velocities.
+        caption(" RAD ALT", "HOVER HEIGHT "),
         // The radio altimeter's height above the declared surface; dashes when it has none (NCD) or has failed.
-        { left: medium(fms.radioHeight.status === "NORMAL" ? `${Math.round(fms.radioHeight.value!)}FT` : "----FT"), right: medium(`${three(fms.wind.direction)}°/${fms.wind.speed}KT`) },
-        caption(" PRESENT POS"),
-        { left: medium(formatPosition(fms.position)) },
-        undefined,
+        { left: medium(fms.radioHeight.status === "NORMAL" ? `${Math.round(fms.radioHeight.value!)}FT` : "----FT"), right: medium(fms.afcs ? `${fms.afcs.hoverHeight}FT` : "----FT") },
+        caption(" TRUE WIND", "VELOCITIES "),
+        { left: medium(`${three(fms.wind.direction)}T/${fms.wind.speed}KT`), right: medium(fms.afcs ? `VX ${signed(fms.afcs.vx)}KT` : "VX ---.-KT") },
+        { right: medium(fms.afcs ? `VY ${signed(fms.afcs.vy)}KT` : "VY ---.-KT") },
         { left: prompt("<MARK ON TOP") },
         undefined, undefined,
         { left: dashes(24) },

@@ -56,5 +56,14 @@ export function predictedGroundSpeed(tas: number, track: number, wind: Wind): nu
   return solution.groundSpeed < ACTIVE_PROFILE.parameters.noProgressBelow.value ? null : solution.groundSpeed;
 }
 
+/** The ISA density ratio at a pressure altitude (feet), for converting true and indicated airspeed. */
+export const isaDensityRatio = (altitudeFt: number) => Math.pow(1 - 6.8756e-6 * altitudeFt, 4.2559);
+
+/** Indicated airspeed from true airspeed at an altitude, ISA (equivalent airspeed; compressibility is negligible here). */
+export const iasFromTas = (tas: number, altitudeFt: number) => tas * Math.sqrt(isaDensityRatio(altitudeFt));
+
+/** True airspeed from indicated airspeed at an altitude, ISA. */
+export const tasFromIas = (ias: number, altitudeFt: number) => ias / Math.sqrt(isaDensityRatio(altitudeFt));
+
 /** Whether a ground speed is measurable progress (at or above the profile's no-progress threshold). */
 export const makingProgress = (groundSpeed: number) => groundSpeed >= ACTIVE_PROFILE.parameters.noProgressBelow.value;
