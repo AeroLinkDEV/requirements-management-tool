@@ -20,7 +20,7 @@ import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type Nav
 import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
 import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
 import { NAV_PAGES } from "./navPages";
-import { predictionEndpoint } from "./predictions";
+import { holdAllowance, predictionEndpoint } from "./predictions";
 import type { PredictionStatus } from "./vnav";
 
 /**
@@ -911,7 +911,8 @@ export class ScriptedFms implements CduBackend {
     const end = predictionEndpoint(route, this.db);
     // A MANUAL hold with no exit armed: from its fix on, the predictions assume the exit at its next crossing (HOLD-ETA,
     // inferred; M300 5-17), so they are CONDITIONAL (plan R3-03).
-    const hold = route.hold && route.hold.exit === "MANUAL" && route.hold.status !== "EXIT ARMED" ? route.hold : null;
+    // The missed-approach hold leaves by itself after one racetrack (MISSED-HOLD), so it is timed instead (below).
+    const hold = route.hold && route.hold.exit === "MANUAL" && !route.hold.missed && route.hold.status !== "EXIT ARMED" ? route.hold : null;
     let basis: PredictionBasis = "known";
     let lastFix: LatLon | null = this.here;
     const waypoints: ProfileInput["waypoints"] = [];
@@ -940,11 +941,27 @@ export class ScriptedFms implements CduBackend {
         constraint, endOfDescent: i === runwayAt, basis, missed: leg.source === "MISSED",
         ...(hold && leg.ident === hold.fix ? { assumption: "HOLD EXIT NEXT CROSSING" } : {}),
         ...(end && i === end.legIndex ? { endpoint: { kind: end.kind, label: end.label } } : {}),
+        ...this.predictedHold(route, leg, to, course ?? this.track, tas),
       });
       courses.push(legDistance === null ? null : course ?? this.track);
       lastFix = to;
     });
     return { waypoints, courses };
+  }
+
+  /**
+   * A hold at a waypoint ahead that leaves by itself, as the predictions time it (predictions.ts holdAllowance): the
+   * route's hold at its fix, else a procedure hold coded on the leg (HF, HA) as it will be armed there.
+   */
+  private predictedHold(route: Route, leg: Extract<Leg, { kind: "wpt" }>, fix: LatLon | null, arrivalTrack: number, tas: number): { hold?: NonNullable<ProfileInput["waypoints"][number]["hold"]> } {
+    const hold = route.hold?.fix === leg.ident ? route.hold : leg.hold ? this.holdFromProcedure(leg.ident, leg.hold, "ARMED") : null;
+    if (!hold || !fix) return {};
+    // Sized at the hold altitude (its target), or the present altitude when it has none.
+    const target = parseConstraint(hold.altitude);
+    const altitude = target === null ? this.altitude : target.kind === "WINDOW" ? target.lower : target.altitude;
+    const allowance = holdAllowance(hold, fix, arrivalTrack, tas, this.wind.speed, altitude);
+    if (!allowance) return {};
+    return { hold: { hours: allowance.hours, ...(hold.exit === "AT TGT ALT" && !hold.missed ? { target } : {}) } };
   }
 
   /** The latched VNAV phase, and why it last changed (the flight simulation records each change as a mode event). */
@@ -1051,7 +1068,9 @@ export class ScriptedFms implements CduBackend {
   private requiredTas(at: number, hours: number): number | null {
     const { waypoints, courses } = this.predictionLegs(this.active);
     const legs = waypoints.slice(0, at + 1).map((w, i) => ({ distance: w.legDistance ?? 0, course: courses[i] ?? this.track }));
-    const time = (tas: number) => legs.reduce((sum, leg) => {
+    // A hold before the fix that leaves by itself takes its time whatever the speed on the legs (holdAllowance).
+    const held = waypoints.slice(0, at).reduce((sum, w) => sum + (w.hold?.hours ?? 0), 0);
+    const time = (tas: number) => held + legs.reduce((sum, leg) => {
       if (leg.distance === 0) return sum;
       const gs = predictedGroundSpeed(tas, leg.course, this.wind);
       return gs === null ? Infinity : sum + leg.distance / gs;
