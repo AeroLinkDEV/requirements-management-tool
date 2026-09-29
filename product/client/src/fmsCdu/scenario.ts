@@ -1,6 +1,8 @@
 import { CONDITIONS, type ConditionId } from "./conditions";
 import { FlightSimulator } from "./flight";
 import { distanceNm } from "./fmsModel";
+import { GPS_MODEL_VERSION, type GpsMode } from "./gps";
+import { describeGpsOp, gpsOpProblem, stimulusFor, type GpsOp } from "./gpsStimulus";
 import { ScriptedFms } from "./scriptedFms";
 import { SCRATCHPAD_LINE, screenText, type Lamp } from "./screen";
 import type { CduFunction } from "./variants";
@@ -45,7 +47,15 @@ export type Action =
   | { kind: "expectAlert"; text: string }
   | { kind: "expectNoAlert"; text: string }
   | { kind: "expectLamp"; lamp: Lamp; lit: boolean }
-  | { kind: "expectActive"; waypoint: string };
+  | { kind: "expectActive"; waypoint: string }
+  /** A stimulus on GPS receiver 1 or 2, as the GPS sensors tab applies it (gpsStimulus.ts). */
+  | { kind: "gps"; receiver: 1 | 2; stimulus: GpsOp }
+  /** The FMS's navigation source: a receiver, or NONE when it navigates on something else. */
+  | { kind: "expectGpsSource"; source: "GPS1" | "GPS2" | "NONE" }
+  /** The approach annunciated (FMS approachType). */
+  | { kind: "expectApproachLevel"; level: "LPV" | "LNAV/VNAV" | "LNAV" | "NO APPR" }
+  /** A receiver's own operating mode (its 273). */
+  | { kind: "expectReceiverMode"; receiver: 1 | 2; mode: GpsMode };
 
 /** One step. An expectation not yet met waits up to `within` seconds for it before failing. */
 export type ScenarioStep = { when: Trigger; action: Action; within?: number };
@@ -56,6 +66,11 @@ export type Scenario = {
   objective: string;
   /** The run ends then: any step not finished is not reached. */
   maxSeconds: number;
+  /**
+   * When the simulated clock starts (ISO 8601), for scenarios whose outcome depends on the GPS sky, which moves with the
+   * clock. Without it, the bench starts at the wall clock and a headless run at its own default.
+   */
+  startTime?: string;
   steps: ScenarioStep[];
 };
 
@@ -99,6 +114,10 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "expectNoAlert": return `check that the alert ${a.text} has not been raised at that moment`;
       case "expectLamp": return `check that the ${a.lamp} annunciator is ${a.lit ? "lit" : "out"}${within}`;
       case "expectActive": return `check that ${a.waypoint} is the active waypoint${within}`;
+      case "gps": return `on GPS ${a.receiver}, ${describeGpsOp(a.stimulus)}`;
+      case "expectGpsSource": return a.source === "NONE" ? `check that the FMS is not navigating on GPS${within}` : `check that the FMS navigates on ${a.source}${within}`;
+      case "expectApproachLevel": return `check that the approach annunciated is ${a.level}${within}`;
+      case "expectReceiverMode": return `check that GPS ${a.receiver} is in ${a.mode} mode${within}`;
     }
   })();
   return when === "Then" ? `Then ${what}.` : `${when}, ${what}.`;
@@ -116,6 +135,9 @@ const KEY = /^(LSK[1-6][LR]|MENU|PREV|NEXT|INIT_REF|RTE|DEP_ARR|LEGS|PROG|EXEC|R
 const LAMPS = new Set(["FAIL", "MSG", "POS", "OFST", "NPA", "GSM", "SMS", "TX1", "TX2", "RNP", "IND", "ATC", "V/UHF", "HF", "MENU", "EXEC"]);
 const CONDITION_IDS = new Set(CONDITIONS.map(condition => condition.id as string));
 const IDENT = /^[A-Z0-9]{1,7}$/;
+const GPS_MODES = new Set(["SELF_TEST", "INITIALIZATION", "ACQUISITION", "NAV", "SBAS_NAV", "SBAS_PA", "ALT_AIDING", "FAULT"]);
+const APPROACH_LEVELS = new Set(["LPV", "LNAV/VNAV", "LNAV", "NO APPR"]);
+const receiver = (value: unknown) => value === 1 || value === 2;
 const MAX_RUN_SECONDS = 24 * 3600;
 
 const finite = (value: unknown, min: number, max: number) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
@@ -158,6 +180,14 @@ function actionProblem(action: unknown): string | null {
     }
     case "expectLamp": return typeof a.lamp === "string" && LAMPS.has(a.lamp) && typeof a.lit === "boolean" ? null : "expectLamp needs a known annunciator and lit true or false";
     case "expectActive": return text(a.waypoint, IDENT) ? null : "expectActive needs a waypoint ident";
+    case "gps": {
+      if (!receiver(a.receiver)) return `gps needs receiver 1 or 2, not ${JSON.stringify(a.receiver)}`;
+      const problem = gpsOpProblem(a.stimulus);
+      return problem ? `gps: ${problem}` : null;
+    }
+    case "expectGpsSource": return a.source === "GPS1" || a.source === "GPS2" || a.source === "NONE" ? null : "expectGpsSource needs GPS1, GPS2 or NONE";
+    case "expectApproachLevel": return typeof a.level === "string" && APPROACH_LEVELS.has(a.level) ? null : "expectApproachLevel needs LPV, LNAV/VNAV, LNAV or NO APPR";
+    case "expectReceiverMode": return receiver(a.receiver) && typeof a.mode === "string" && GPS_MODES.has(a.mode) ? null : `expectReceiverMode needs receiver 1 or 2 and a mode (${[...GPS_MODES].join(", ")})`;
     default: return `unsupported action "${String(a.kind)}"`;
   }
 }
@@ -169,6 +199,7 @@ export function scenarioProblems(value: unknown): string[] {
   if (!s || typeof s !== "object") return ["not a scenario"];
   if (typeof s.title !== "string" || !s.title.trim()) problems.push("it needs a title");
   if (!finite(s.maxSeconds, TICK_SECONDS, MAX_RUN_SECONDS)) problems.push("it needs maxSeconds between 0.25 and 86400");
+  if (s.startTime !== undefined && !(typeof s.startTime === "string" && /^\d{4}-\d\d-\d\dT/.test(s.startTime) && Number.isFinite(Date.parse(s.startTime)))) problems.push("startTime must be an ISO 8601 date and time");
   if (!Array.isArray(s.steps)) return [...problems, "it needs steps"];
   s.steps.forEach((step, i) => {
     const where = `step ${i + 1}`;
@@ -218,6 +249,8 @@ export class ScenarioRunner {
   }
 
   get startedAt() { return new Date(this.start); }
+  /** The GPS inputs that, with the start time and the steps, fix the GPS timeline. */
+  get gpsSeeds() { return { constellation: this.fms.gps[0].constellationSeed, receivers: this.fms.gps.map(receiver => receiver.seed) }; }
   get elapsed() { return (this.fms.now.getTime() - this.start) / 1000; }
   /** Simulated seconds from the start to the end of the run, once it has ended. */
   get endedAfter() { return this.endedAt; }
@@ -320,6 +353,11 @@ export class ScenarioRunner {
       case "procedure": fms.selectProcedure(action.procedure, action.ident); return;
       case "armApproach": fms.armApproach(action.on !== false); return;
       case "goAround": fms.goAround(); return;
+      case "gps": {
+        // Through the same stimulus record as the GPS sensors tab, so the tab shows what the scenario applied.
+        if (!stimulusFor(fms).apply(action.receiver - 1, action.stimulus)) throw new Error(`GPS ${action.receiver} refused: ${describeGpsOp(action.stimulus)}.`);
+        return;
+      }
       default: throw new Error(`Unsupported action "${action.kind}".`);
     }
   }
@@ -352,6 +390,19 @@ export class ScenarioRunner {
         const active = this.activeWaypoint() ?? "none";
         return { ok: active === action.waypoint, actual: active };
       }
+      case "expectGpsSource": {
+        const nav = fms.navState;
+        const source = nav.gpsSource !== null ? `GPS${nav.gpsSource}` : "NONE";
+        return { ok: source === action.source, actual: nav.gpsSource !== null ? source : `NONE (${nav.mode})` };
+      }
+      case "expectApproachLevel": {
+        const level = fms.approachType;
+        return { ok: level === action.level, actual: level ?? "none annunciated" };
+      }
+      case "expectReceiverMode": {
+        const mode = fms.gps[action.receiver - 1].mode;
+        return { ok: mode === action.mode, actual: mode };
+      }
       default: throw new Error(`Unsupported check "${action.kind}".`);
     }
   }
@@ -372,8 +423,11 @@ export function advanceTicks(ticks: number, moveClock: (ms: number) => void, sim
   }
 }
 
+/** The scenario's planned start (epoch ms), when it names one. */
+export const scenarioStart = (scenario: Scenario) => (scenario.startTime && Number.isFinite(Date.parse(scenario.startTime)) ? Date.parse(scenario.startTime) : null);
+
 /** Runs a scenario to its end on a fresh simulation, tick by tick, as the tests do. */
-export function runHeadless(scenario: Scenario, start = Date.UTC(2026, 8, 27, 14, 0, 0), context?: RunContext) {
+export function runHeadless(scenario: Scenario, start = scenarioStart(scenario) ?? Date.UTC(2026, 8, 27, 14, 0, 0), context?: RunContext) {
   let now = start;
   const fms = new ScriptedFms(() => new Date(now));
   const sim = new FlightSimulator(fms);
@@ -396,6 +450,8 @@ export function procedureText(scenario: Scenario) {
       "The AeroLink FMS Test Bench is open with the scripted CMA-9000 simulation (not a navigation computer).",
       "The simulation is restarted, with the demonstration route and navigation database loaded.",
       `The flight is flown at any rate; the scenario allows ${formatSeconds(scenario.maxSeconds)} of simulated time.`,
+      ...(scenario.startTime ? [`The simulated clock starts at ${scenario.startTime}, which fixes the GPS sky the receivers see.`] : []),
+      ...(usesGps(scenario) ? [`The GPS model is ${GPS_MODEL_VERSION}, with the bench's constellation seed and receiver seeds (named in the run report).`] : []),
     ].join("\n"),
     steps: scenario.steps.map((step, i) => `${i + 1}. ${describeStep(step, i)}`).join("\n"),
     // Only the checks the scenario actually makes; a scenario without checks verifies nothing and says so.
@@ -404,6 +460,8 @@ export function procedureText(scenario: Scenario) {
       : "None: this scenario has no checks. It plays back its actions and verifies no outcome.",
   };
 }
+
+const usesGps = (scenario: Scenario) => scenario.steps.some(step => step.action.kind === "gps");
 
 const OUTCOME_TEXT: Record<RunOutcome, string> = {
   running: "RUNNING",
@@ -447,13 +505,29 @@ export function reportMarkdown(runner: ScenarioRunner) {
     `- Navigation data: ${context.cycle} (invented demonstration data)`,
     `- Time: ${TICK_SECONDS} s ticks; a step due between ticks runs at the next one.`,
     "- Driven by the scripted CMA-9000 simulation, not the operational program. This is not flight-qualified evidence.",
+    `- GPS: model ${GPS_MODEL_VERSION}; constellation seed ${runner.gpsSeeds.constellation}; receiver seeds ${runner.gpsSeeds.receivers.join(" and ")}; the sky is the one at the start time above. With the steps, these fix the GPS timeline.`,
     ...(runner.problems.length ? ["", "Not run, because:", ...runner.problems.map(problem => `- ${problem}`)] : []),
     "",
     "| # | Step | At | Result | Actual |",
     "|---|---|---|---|---|",
     ...rows,
+    ...gpsRows(runner),
     "",
   ].join("\n");
+}
+
+/** The GPS stimuli the run applied, one row each (a clear is a row too), with its receiver, time and values. */
+function gpsRows(runner: ScenarioRunner) {
+  const cell = (value: string) => value.replace(/\|/g, "\\|");
+  const rows = runner.scenario.steps.flatMap((step, i) => {
+    const action = step.action, result = runner.results[i];
+    if (action.kind !== "gps") return [];
+    const { op, ...fields } = action.stimulus;
+    const values = Object.entries(fields).map(([key, value]) => `${key} ${Array.isArray(value) ? `[${value.join(", ")}]` : typeof value === "object" ? JSON.stringify(value) : String(value)}`).join("; ") || "—";
+    const at = result.at === undefined ? "not applied" : formatSeconds(result.at);
+    return [`| ${i + 1} | GPS ${action.receiver} | ${at} | ${op} | ${cell(values)} | ${cell(describeGpsOp(action.stimulus))} |`];
+  });
+  return rows.length ? ["", "GPS stimuli:", "", "| Step | Receiver | At | Operation | Fields | In words |", "|---|---|---|---|---|---|", ...rows] : [];
 }
 
 // ------------------------------------------------------------------ recording and import
@@ -493,6 +567,8 @@ export class ScenarioRecorder {
   alert(text: string) { this.add({ kind: "alert", text }); }
   armApproach(on = true) { this.add(on ? { kind: "armApproach" } : { kind: "armApproach", on: false }); }
   goAround() { this.add({ kind: "goAround" }); }
+  /** A stimulus applied on the GPS sensors tab. */
+  gps(receiver: 1 | 2, stimulus: GpsOp) { this.add({ kind: "gps", receiver, stimulus: structuredClone(stimulus) }); }
   /** Checks a screen line as it is shown now; a few seconds' grace lets playback at another rate catch up. */
   checkLine(line: number, text: string) { this.add({ kind: "expectLine", line, pattern: linePattern(text) }); this.steps.at(-1)!.within = 5; }
 
@@ -504,6 +580,8 @@ export class ScenarioRecorder {
       title,
       objective: "Replay a sequence recorded on the FMS Test Bench and check the screen lines captured during it.",
       maxSeconds: Math.max(60, Math.ceil(end + 30)),
+      // The GPS sky moves with the clock: replay starts where the recording did.
+      startTime: new Date(this.start).toISOString(),
       steps: structuredClone(this.steps),
     };
   }

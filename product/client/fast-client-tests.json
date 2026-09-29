@@ -35,7 +35,8 @@
     "fms-gps-sbas.spec.ts",
     "fms-gps-fms.spec.ts",
     "fms-gps-bench.spec.ts",
-    "fms-gps-approach.spec.ts"
+    "fms-gps-approach.spec.ts",
+    "fms-gps-scenario.spec.ts"
   ],
   "rendered": [
     "review-workflow-rendered.spec.ts",

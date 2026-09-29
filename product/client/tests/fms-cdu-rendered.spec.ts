@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { expect, renderedTest as test, type Page } from './isolated-client-test'
 
 // The FMS test bench is self-contained: the scripted CMA-9000 runs in the page, so this needs no backend.
@@ -269,6 +270,47 @@ test('a recording of panel keys and a screen check plays back as a scenario and 
   await expect(card.getByLabel('Scenario', { exact: true })).toHaveValue(/^recorded-/)
   await card.getByRole('button', { name: 'Run the scenario' }).click()
   await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible({ timeout: 15_000 })
+})
+
+test('while recording, the GPS sensors tab records its stimuli and clears; replayed, the tab shows what the scenario applied', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-27T14:00:00Z'))
+  await open(page)
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  await card.getByRole('button', { name: 'Record' }).click()
+  await card.getByLabel('Recording name').fill('GPS stimuli')
+  await tab(page, 'GPS sensors')
+  const stopped = page.getByLabel('GPS 1 Stop transmitting')
+  await stopped.check()
+  await page.getByText('GPS 2 bus monitor').click()
+  const hil = page.getByRole('table', { name: 'GPS 2 bus monitor' }).locator('tr[data-label="130"]')
+  await hil.getByLabel('Override 130', { exact: true }).selectOption('FORCE')
+  await hil.getByLabel('Override 130 amount').fill('99')
+  await hil.getByRole('button', { name: 'Set' }).click()
+  await expect(hil.locator('td.value')).toHaveText('99')
+  await stopped.uncheck()
+  await tab(page, 'Scenarios')
+  await card.getByRole('button', { name: 'Stop recording' }).click()
+  await expect(card.getByRole('status').filter({ hasText: 'Recorded 3 steps as “GPS stimuli”.' })).toBeVisible()
+  await card.getByRole('button', { name: 'Test procedure text' }).click()
+  const procedure = card.getByLabel('Test procedure text')
+  await expect(procedure).toHaveValue(/The simulated clock starts at 2026-09-27T14:00:00\.000Z, which fixes the GPS sky the receivers see\./)
+  await expect(procedure).toHaveValue(/\n1\. (At the start|At [\d.]+ s), on GPS 1, set the stop-transmitting fault\.\n2\. (At [\d.]+ s|Then), on GPS 2, override 130: FORCE 99\.\n3\. (At [\d.]+ s|Then), on GPS 1, clear the stop-transmitting fault\./)
+
+  // Played back on a restarted bench, a day later by the wall clock: it starts at the recorded time (the same GPS sky),
+  // and the tab shows the scripted override as its own, and the cleared fault as clear.
+  await page.clock.setFixedTime(new Date('2026-09-28T09:30:00Z'))
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await expect(card.getByRole('status').filter({ hasText: /^NO CHECKS/ })).toBeVisible({ timeout: 15_000 })
+  const [download] = await Promise.all([page.waitForEvent('download'), card.getByRole('button', { name: 'Download run report' }).click()])
+  const report = await readFile(await download.path(), 'utf8')
+  expect(report).toContain('- Started: 2026-09-27T14:00:00.000Z')
+  expect(report).toMatch(/\| 2 \| GPS 2 \| [\d.]+ s \| override \| label 130; kind FORCE; amount 99 \| override 130: FORCE 99 \|/)
+  expect(report).toMatch(/\| 3 \| GPS 1 \| [\d.]+ s \| fault \| fault STOP_TRANSMITTING; on false \| clear the stop-transmitting fault \|/)
+  await tab(page, 'GPS sensors')
+  await page.getByText('GPS 2 bus monitor').click()
+  await expect(hil.locator('td.value')).toHaveText('99')
+  await expect(hil).toContainText('FORCE 99')
+  await expect(page.getByLabel('GPS 1 Stop transmitting')).not.toBeChecked()
 })
 
 test('an FMS failure in flight reverts the flight modes, and Pause still works (R02)', async ({ page }) => {
