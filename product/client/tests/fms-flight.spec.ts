@@ -773,3 +773,28 @@ test('CANCEL of a new mark over an active procedure keeps the active one flying 
   expect(sim.hoverCaptured).toBe(true)
   expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED')).toBe(false)
 })
+
+test('a new procedure pending over an active one leaves the active TDN and MRK where they are, through CANCEL; EXEC moves them (Stage D)', () => {
+  const { unit, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(20)
+  const active = unit.activeRoute
+  const tdn = unit.coordinates('TDN', active)!, mrk = unit.coordinates('MRK', active)!
+  const second = offset(unit.truePosition, 180, 3)
+  unit.designateHoverMark({ ident: 'WPT', position: second, label: null })
+  unit.press('LSK6R')
+  expect(unit.routeStatus).toBe('MOD')
+  expect(unit.coordinates('TDN', unit.activeRoute)).toEqual(tdn)
+  expect(unit.coordinates('MRK', unit.activeRoute)).toEqual(mrk)
+  // The modified route shows the new pair.
+  expect(unit.coordinates('MRK', unit.route)).toEqual(second)
+  unit.press('LSK6L')
+  expect(unit.coordinates('TDN', unit.activeRoute)).toEqual(tdn)
+  expect(unit.coordinates('MRK', unit.activeRoute)).toEqual(mrk)
+  unit.designateHoverMark({ ident: 'WPT', position: second, label: null })
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  expect(unit.coordinates('MRK', unit.activeRoute)).toEqual(second)
+  expect(distanceNm(unit.coordinates('TDN', unit.activeRoute)!, second)).toBeCloseTo(unit.hover.active!.dtra, 6)
+})

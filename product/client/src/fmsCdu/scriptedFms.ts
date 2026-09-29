@@ -125,6 +125,11 @@ export class ScriptedFms implements CduBackend {
   private fuel = { quantity: 1850, flow: 540, reserve: 400 };
   private marks: { ident: string; position: LatLon }[] = [];
   private points: Record<string, LatLon> = {};
+  /**
+   * TDN and MRK of a hover procedure being modified: the modified route resolves them from here, the active route
+   * from `points`, so a pending ACTIVATE never moves the active procedure (written to `points` at EXEC).
+   */
+  private pendingHoverPoints: { TDN: LatLon; MRK: LatLon } | null = null;
   private level = 6;
   private readonly maxLevel = 10;
   private brighten = true;
@@ -1349,6 +1354,8 @@ export class ScriptedFms implements CduBackend {
    * an airport, so it resolves in the context of a route: the active route unless a page asks about the modification.
    */
   coordinates(ident: string, route: Route = this.active): LatLon | undefined {
+    const pending = this.pendingHoverPoints;
+    if (pending && route !== this.active && (ident === "TDN" || ident === "MRK")) return pending[ident];
     const own = this.ownPoint(ident);
     if (own) return own;
     // The active plan flies its fixes as they were resolved when it became active (pinActive): a fix it was executed
@@ -1596,6 +1603,7 @@ export class ScriptedFms implements CduBackend {
   /** The ERASE prompt: discards the modification; navigation never left the active route. */
   eraseModification() {
     this.modified = null;
+    this.discardHoverModification();
     this.sar.pending = null;
     this.directPending = false;
     this.directBypassed = [];
@@ -1680,8 +1688,7 @@ export class ScriptedFms implements CduBackend {
       hoverHeight: this.afcs?.hoverHeight ?? 50, elevation: this.altitude - ra.value!,
     });
     if (plan.refused) return plan.reason.toUpperCase();
-    this.points.TDN = offset(mark.position, finalTrack + 180, plan.dtraNm);
-    this.points.MRK = mark.position;
+    this.pendingHoverPoints = { TDN: offset(mark.position, finalTrack + 180, plan.dtraNm), MRK: mark.position };
     this.modify(route => {
       const rest = route.legs.filter(leg => !(leg.kind === "wpt" && (leg.ident === "TDN" || leg.ident === "MRK")));
       route.legs = [
@@ -1709,9 +1716,15 @@ export class ScriptedFms implements CduBackend {
   cancelHover() {
     if (this.hover.status !== "MOD") return false;
     this.eraseModification();
+    return true;
+  }
+
+  /** A hover modification erased (CANCEL, or the whole modification): the active procedure, if any, as it was. */
+  private discardHoverModification() {
+    this.pendingHoverPoints = null;
+    if (this.hover.status !== "MOD") return;
     const active = this.hover.active;
     Object.assign(this.hover, active ? { status: "ACT", mark: active.mark, finalTrack: active.finalTrack, dtra: active.dtra } : { status: "NONE" });
-    return true;
   }
 
   /**
@@ -1900,6 +1913,8 @@ export class ScriptedFms implements CduBackend {
     if (hover && this.radioHeight.status !== "NORMAL") { this.alert(alert("RALT FAILED")); return; }
     if (hover) {
       const h = this.hover;
+      Object.assign(this.points, this.pendingHoverPoints);
+      this.pendingHoverPoints = null;
       h.active = { id: ++h.procedures, mark: h.mark!, finalTrack: h.finalTrack!, dtra: h.dtra! };
       Object.assign(h, { status: "ACT", requestData: null, refused: null, refusedReason: null, functionLost: false });
       this.alert(alert("TRANSITION DOWN"));
