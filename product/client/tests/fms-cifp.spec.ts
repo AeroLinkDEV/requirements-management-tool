@@ -148,6 +148,10 @@ test('the aircraft flies the published KBTV RNAV RWY 15 LPV: captured on final, 
   // The FMS path agrees with the published one: the CIFP gives the glide path altitude at the JUNEL step-down fix as
   // 1025 ft (the second altitude on its record), and the VNAV profile, with FOVES as the FAF at 2000 ft, predicts it.
   expect(unit.profile().points.find(p => p.ident === 'JUNEL')!.altitude!).toBeCloseTo(1025, -1)
+  // APPROACH REF takes the executed approach's FAF altitude (FOVES, 2000 ft), not the demonstration's 1500, and the FAF is
+  // crossed at it.
+  expect(unit.vnav.fafAltitude).toBe(2000)
+  expect(unit.profile().points.find(p => p.ident === 'FOVES')!.altitude!).toBeCloseTo(2000, 0)
   const fas = approach('R15')!.publishedFas!
   // The published path: TCH above the LTP, rising at the glide path angle (heights above the ellipsoid, as the FAS gives them).
   const toThresholdFt = () => {
