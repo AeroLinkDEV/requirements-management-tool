@@ -248,3 +248,14 @@ test('the spoofed GPS 1 is caught only by GPS DISAGREE (library)', () => {
   const without = runHeadless({ ...unspoofed, steps: unspoofed.steps.map(step => (step.action.kind === 'gps' ? { ...step, action: { kind: 'keys' as const, keys: ['PROG' as const] } } : step)) }).runner
   expect(without.results[4]).toMatchObject({ status: 'fail' })
 })
+
+test('KBTV, SBAS lost on final: the gps steps drop LPV to LNAV and end the approach without an integrity alert (library)', () => {
+  const scenario = library('kbtv-rnav15-sbas-lost')
+  const { runner, fms } = runHeadless(scenario)
+  expect(runner.outcome).toBe('passed')
+  expect(fms.gps.map(receiver => receiver.mode)).toEqual(['NAV', 'NAV'])
+  expect(fms.recallList.map(message => message.text)).not.toContain('GPS POS UNCERTAIN')
+  // Without the SBAS steps the approach stays LPV: the level check fails, so the outcome is the stimulus's doing.
+  const without = runHeadless({ ...scenario, steps: scenario.steps.map(step => (step.action.kind === 'gps' ? { ...step, action: { kind: 'keys' as const, keys: ['PROG' as const] } } : step)) }).runner
+  expect(without.results[3]).toMatchObject({ status: 'fail', actual: 'LPV' })
+})
