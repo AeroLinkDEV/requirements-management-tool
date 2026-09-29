@@ -3,6 +3,7 @@ import { aircraftData, fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
 // The FMS output bus the EFIS draws from (efis.ts): what the FMS publishes, each word with a status, so the displays
@@ -160,4 +161,26 @@ test('under the helicopter profile the FMS commands no altitude or speed: the bu
   for (let t = 0; t < 5; t += 1) { now += 1000; labSim.step(1) }
   expect(fmsOutputs(lab, labSim).targetSpeed.status).toBe('NORMAL')
   expect(aircraftData(lab, labSim)).toMatchObject({ selectedAltitude: null, selectedSpeed: null })
+})
+
+test('moving away from the active waypoint, or stopped over the ground, is no progress: no ETA anywhere, never NaN (review of B1)', () => {
+  const { unit, sim, fly } = setup()
+  fly(5)
+  // Stopped: the helicopter's speed selected to zero in calm air.
+  unit.wind.speed = 0
+  sim.selectSpeed(0)
+  fly(90)
+  expect(unit.groundSpeed).toBeLessThan(1)
+  expect(fmsOutputs(unit, sim).eta.status).toBe('NCD')
+  unit.press('PROG')
+  expect(screenText(unit.screen()).join('\n')).not.toMatch(/NaN/)
+  // Drifting away: a 40 kt wind from ahead of the leg carries the stopped aircraft backwards; the ground speed is 40 kt,
+  // but the aircraft is not closing on the waypoint.
+  unit.wind.direction = unit.track
+  unit.wind.speed = 40
+  fly(30)
+  expect(unit.groundSpeed).toBeGreaterThan(30)
+  expect(unit.closureSpeed).toBeLessThan(0)
+  expect(fmsOutputs(unit, sim).eta.status).toBe('NCD')
+  expect(screenText(unit.screen()).join('\n')).not.toMatch(/NaN|\d{4}\.\dZ/)
 })

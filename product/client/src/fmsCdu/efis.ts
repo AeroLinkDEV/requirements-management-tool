@@ -186,7 +186,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     distanceToGo: distanceToGo !== null && toIdent ? normal(distanceToGo) : ncd(),
     toWaypoint: toIdent ? normal(toIdent) : ncd(),
     // No ETA without measurable progress: a time from an invented speed would be a plausible falsehood.
-    eta: distanceToGo !== null && makingProgress(fms.groundSpeed) ? normal(fms.now.getTime() + (distanceToGo / fms.groundSpeed) * 3_600_000) : ncd(),
+    eta: distanceToGo !== null && makingProgress(fms.closureSpeed) ? normal(fms.now.getTime() + (distanceToGo / fms.closureSpeed) * 3_600_000) : ncd(),
     // Under the ADVISORY policy the FMS commands no speed or altitude: the crew selects them (aircraftData).
     targetSpeed: sim.advisory ? ncd() : normal(fms.targetSpeed),
     targetAltitude: sim.advisory || sim.altitudeHoldReference !== null ? ncd() : normal(g.targetAltitude),

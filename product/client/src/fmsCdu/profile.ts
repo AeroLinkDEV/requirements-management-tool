@@ -122,6 +122,9 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     holdingSpeedLow: p(100, "KIAS", "sourced", "M300 10-8 Table 10-1, helicopter, at or below 6,000 ft", false, "D"),
     holdingSpeedHigh: p(170, "KIAS", "sourced", "M300 10-8 Table 10-1, helicopter, above 6,000 to 14,000 ft", false, "D"),
     // Timing and display
+    hoverTransferTick: p(0.25, "s", "lab", "a receiver change keeps HOV only within one tick of the last sample (Astra rev 3.1)", true),
+    hoverTransferPosition: p(10, "m", "lab", "a receiver change keeps HOV only within this of the last sample propagated", true),
+    hoverTransferVelocity: p(1, "kt", "lab", "a receiver change keeps HOV only within this velocity step", true),
     fmaCaptureBox: p(10, "s", "lab", "existing boxed-mode time", true),
     settlingTime: p(20, "s", "lab", "before hover tolerances apply", false, "B"),
     noProgressBelow: p(1, "kt", "lab", "ground speed below which there is no measurable progress", true),

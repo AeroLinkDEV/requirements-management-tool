@@ -405,20 +405,20 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
               <label>
                 <span>ALT SEL</span>
                 <input inputMode="numeric" value={altInput} placeholder={String(sim.selectedAltitude)} maxLength={5} aria-label="Preselected altitude"
-                  onChange={event => setAltInput(event.target.value.replace(/D/g, ""))} />
+                  onChange={event => setAltInput(event.target.value.replace(/\D/g, ""))} />
               </label>
               <button type="button" disabled={!altInput} onClick={() => { const altitude = Number(altInput); recordTo?.autopilot({ altitude }); sim.selectAltitude(altitude); setAltInput(""); }}>SET</button>
               <label>
                 <span>VS</span>
                 <input inputMode="numeric" value={vsInput} maxLength={5} aria-label="Vertical speed"
-                  onChange={event => setVsInput(event.target.value.replace(/[^d-]/g, ""))} />
+                  onChange={event => setVsInput(event.target.value.replace(/[^\d-]/g, ""))} />
               </label>
               <button type="button" aria-pressed={sim.verticalSpeedTarget !== null} onClick={() => { const verticalSpeed = Number(vsInput) || 0; recordTo?.autopilot({ verticalSpeed }); sim.engageVerticalSpeed(verticalSpeed); }}>VS</button>
               <button type="button" aria-pressed={sim.verticalMode === "ALT HOLD"} onClick={() => { recordTo?.autopilot({ hold: true }); sim.engageAltitudeHold(); }}>ALT</button>
               <label>
                 <span>SPD</span>
                 <input inputMode="numeric" value={spdInput} placeholder={String(sim.selectedSpeed)} maxLength={3} aria-label="Selected speed"
-                  onChange={event => setSpdInput(event.target.value.replace(/D/g, ""))} />
+                  onChange={event => setSpdInput(event.target.value.replace(/\D/g, ""))} />
               </label>
               <button type="button" disabled={!spdInput} onClick={() => { const speed = Number(spdInput); recordTo?.autopilot({ speed }); sim.selectSpeed(speed); setSpdInput(""); }}>SET SPD</button>
             </form>

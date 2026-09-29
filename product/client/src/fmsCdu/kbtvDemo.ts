@@ -57,6 +57,8 @@ export function setUpKbtvRnav15(fms: ScriptedFms, sim?: FlightSimulator): { read
   fms.directTo("STAEV");
   fms.press("EXEC");
   if (fms.aircraftProfile.verticalPolicy === "ADVISORY") {
+    // The crew descends it; without the flight simulation there is no autopilot to set, so the start state is refused.
+    if (!sim) return { refused: "the helicopter profile start state needs the flight simulation (autopilot selections)" };
     // The helicopter profile: the crew preselects the FAF altitude and descends to it in VS, so the aircraft is level
     // at the FAF altitude when LPV captures there. The constraints are advisories; nothing in the FMS descends it.
     sim?.selectAltitude(fms.fafAltitudeCorrected);

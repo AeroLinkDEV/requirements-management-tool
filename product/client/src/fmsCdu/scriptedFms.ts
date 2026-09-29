@@ -259,6 +259,17 @@ export class ScriptedFms implements CduBackend {
    * before the flight simulation first reports it, the track stands in.
    */
   get heading() { return this.aircraft.heading ?? this.aircraft.track; }
+  /**
+   * The speed at which the aircraft is closing on the active waypoint (knots, signed: negative when moving away): the
+   * ground velocity's component toward it. Progress, for a time to go, is this, not the ground speed's magnitude:
+   * drifting away or across is no progress. The ground speed where there is no active waypoint.
+   */
+  get closureSpeed() {
+    const leg = this.active.legs[0];
+    const to = leg?.kind === "wpt" ? this.coordinates(leg.ident) : undefined;
+    if (!to || distanceNm(this.here, to) < 0.01) return this.groundSpeed;
+    return this.groundSpeed * Math.cos(((this.track - courseDeg(this.here, to)) * Math.PI) / 180);
+  }
   get verticalSpeed() { return this.aircraft.verticalSpeed; }
   /** Guidance deviations the flight simulation reports: cross-track NM (positive right) and track error degrees. */
   get crossTrack() { return this.aircraft.crossTrack; }
@@ -711,6 +722,22 @@ export class ScriptedFms implements CduBackend {
 
   /** GPS1 and GPS2, for the bench to read and to inject faults into; call gpsUpdated after changing one. */
   get gps(): readonly GpsReceiver[] { return this.receivers; }
+  /**
+   * The feedback a hover hold may use (plan R3-02): the receiver the preserved navigation policy has selected as usable
+   * (the #1243 assessment with #1251's AUTO or manual selection; the FMS in GPS mode), with a valid fix and both
+   * velocity words (166 north, 174 east) valid and finite. Null otherwise: never a receiver merely shown for display.
+   */
+  get hoverFeedback(): { source: 1 | 2; position: LatLon; north: number; east: number } | null {
+    const source = this.nav.gpsSource;
+    if (source === null) return null;
+    const assessed = this.gpsAssessment.assessed[source - 1];
+    if (!assessed?.usable || !assessed.fix) return null;
+    const bus = this.receivers[source - 1].bus();
+    const north = bus?.["166"], east = bus?.["174"];
+    if (!north || !east || north.ssm !== "NORMAL" || east.ssm !== "NORMAL") return null;
+    if (typeof north.value !== "number" || typeof east.value !== "number" || !Number.isFinite(north.value) || !Number.isFinite(east.value)) return null;
+    return { source, position: assessed.fix, north: north.value, east: east.value };
+  }
   /** How the FMS judged each receiver at the last navigation update, and which it navigates on (index), if any. */
   get gpsStatus(): GpsAssessment { return this.gpsAssessment; }
   get gpsReceiverChoice(): GpsChoice { return this.gpsChoice; }
