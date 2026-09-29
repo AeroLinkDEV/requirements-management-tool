@@ -107,7 +107,14 @@ const feet = (altitude: string | undefined) => { const match = /^(\d+)/.exec(alt
  * not an RNAV approach with its runway and FAF.
  */
 export function buildFas(approach: Procedure, runway: Runway | undefined, airport: string, fafPosition: LatLon | undefined): FasDataBlock | null {
-  if (approach.kind !== "APPROACH" || approach.approachType !== "RNAV" || !runway || !fafPosition || !approach.faf) return null;
+  if (approach.kind !== "APPROACH" || approach.approachType !== "RNAV") return null;
+  // A published FAS data block (ARINC 424 path point) is flown as published. Its CRC here is this model's CRC over the
+  // fields (fasCrc), because the receiver checks that one; the published CRC over the DO-229 packing stays on the record.
+  if (approach.publishedFas) {
+    const { publishedCrc: _published, ...fields } = approach.publishedFas;
+    return { ...fields, crc: fasCrc(fields) };
+  }
+  if (!runway || !fafPosition || !approach.faf) return null;
   const altitudeAt = (ident: string) => {
     const leg = approach.legs.find(entry => "ident" in entry && entry.ident === ident);
     return leg && "ident" in leg && typeof leg.altitude === "string" ? feet(leg.altitude) : null;

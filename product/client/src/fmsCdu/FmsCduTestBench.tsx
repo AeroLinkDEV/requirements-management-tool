@@ -82,6 +82,7 @@ export default function FmsCduTestBench() {
   // The lower display beside the CDU: the cockpit ND, or the engineering map with the true position.
   const [lowerDisplay, setLowerDisplay] = useState<"nd" | "map">("nd");
   const [navLoad, setNavLoad] = useState<string | null>(null);
+  const [navAirports, setNavAirports] = useState("");
   const [headingInput, setHeadingInput] = useState("090");
   const [jumpNote, setJumpNote] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(storedTab);
@@ -363,12 +364,24 @@ export default function FmsCduTestBench() {
               </p>
             ) : null}
             <label className="fmsBenchFile">
-              <span>Load ARINC 424 data (waypoints, navaids, airports, runways, airways) as the inactive cycle</span>
-              <input type="file" accept=".pc,.dat,.txt,.424,text/plain" aria-label="ARINC 424 navigation data file"
+              <span>Airports to load from a full FAA CIFP (e.g. KBTV), or blank for a small file</span>
+              <input value={navAirports} aria-label="Airports to load" placeholder="KBTV"
+                onChange={event => setNavAirports(event.target.value.toUpperCase().replace(/[^A-Z0-9 ,]/g, ""))} />
+            </label>
+            <label className="fmsBenchFile">
+              <span>Load ARINC 424 data (waypoints, navaids, airports, runways, airways, RNAV approaches with their published FAS) as the inactive cycle</span>
+              <input type="file" accept=".pc,.dat,.txt,.424,text/plain,*" aria-label="ARINC 424 navigation data file"
                 onChange={async event => {
                   const file = event.target.files?.[0];
                   if (!file) return;
-                  const outcome = backend.loadArinc424(await file.text(), file.name);
+                  const airports = navAirports.split(/[\s,]+/).filter(Boolean);
+                  // A full CIFP is some 50 MB: without airports named, it is not loaded whole into the bench.
+                  if (!airports.length && file.size > 5_000_000) {
+                    setNavLoad(`${file.name} is large (${Math.round(file.size / 1_000_000)} MB): name the airports to load, then choose it again.`);
+                    event.target.value = "";
+                    return;
+                  }
+                  const outcome = backend.loadArinc424(await file.text(), file.name, airports);
                   setNavLoad("refused" in outcome
                     ? `Refused, nothing changed. ${outcome.refused}.`
                     : `${file.name}: ${outcome.read} records read, ${outcome.skipped} skipped${outcome.errors.length ? `; ${outcome.errors[0]}` : ""}. Loaded as inactive cycle ${outcome.loaded}: activate it on IDENT or here.`);
