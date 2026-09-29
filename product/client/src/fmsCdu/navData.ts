@@ -18,15 +18,73 @@ export type Airport = {
   kind: "airport"; ident: string; name: string; position: LatLon; elevation: number; runways: Runway[];
   /** Magnetic variation, degrees, east positive, when the data gives it (ARINC 424 airport record). */
   magneticVariation?: number;
+  /**
+   * A heliport (ARINC 424 heliport section, HA record) rather than an airport. It is a landing site and a valid
+   * destination like an airport, with no runways.
+   */
+  heliport?: true;
 };
 export type NavEntry = Fix | Navaid | Airport;
 
 export type Airway = { ident: string; fixes: string[] };
 
-/** A procedure leg: a fix with its path terminator, or a conditional leg (course or heading to an event). */
+/**
+ * A minimum sector altitude (ARINC 424 PS or HS record): the sectors about a centre fix, each with its bearings (from
+ * the centre, magnetic unless `magnetic` is false), its altitude and its radius.
+ */
+export type Msa = {
+  airport: string; centre: string; magnetic: boolean;
+  sectors: { from: number; to: number; altitude: number; radiusNm: number }[];
+};
+
+/** A procedure speed limit (ARINC 424 columns 100-102 and its description at 118), knots indicated. */
+export type SpeedLimit = { kt: number; descriptor: "AT" | "AT OR ABOVE" | "AT OR BELOW" };
+
+/**
+ * A holding pattern a procedure codes at a fix: HF (a course reversal, left after one circuit), HA (left at the fix
+ * once the altitude is reached) or HM (held until the crew exits it). The inbound course is true; a coded leg distance
+ * takes the place of leg time. Kept as data: how a hold is armed and flown is the flight's business.
+ */
+export type ProcedureHold = {
+  path: "HF" | "HA" | "HM"; inbound: number; turn: "RIGHT" | "LEFT";
+  legDistanceNm: number | null; legTimeMin: number | null; exit: "ONCE" | "AT ALT" | "MANUAL";
+  altitude?: string; speedLimit?: SpeedLimit;
+};
+
+/**
+ * A procedure leg: a fix with its path terminator, or a conditional leg (course or heading to an event). Imported
+ * data may add the coded turn direction, speed limit and vertical angle, and the hold coded at the fix.
+ */
 export type ProcedureLeg =
-  | { ident: string; altitude?: string; overfly?: boolean; path?: FixPath; course?: number; arc?: { centre: LatLon; turn: "L" | "R" } }
-  | { path: ConditionalPath; course: number; altitude?: number };
+  | {
+    ident: string; altitude?: string; overfly?: boolean; path?: FixPath; course?: number; arc?: { centre: LatLon; turn: "L" | "R" };
+    turnDirection?: "LEFT" | "RIGHT"; speedLimit?: SpeedLimit; verticalAngleDeg?: number; hold?: ProcedureHold;
+  }
+  | { path: ConditionalPath; course: number; altitude?: number; turnDirection?: "LEFT" | "RIGHT"; speedLimit?: SpeedLimit };
+
+/**
+ * Where an approach ends and what follows it, as separate facts (Stage C, C.2). The instrument end is the missed
+ * approach point and its altitude (the MDA of a point-in-space approach). The landing site is the runway, heliport or
+ * airport the procedure serves. The visual segment is how the crew gets from the MAP to the site: RUNWAY when the MAP
+ * is the threshold, or a point-in-space kind with the site's bearing and distance from the MAP. Its kind comes from
+ * the chart, which the decoded fields do not carry: UNKNOWN (and unvalidated) unless a chart has been checked for
+ * it. PROCEED VISUALLY never inherits PROCEED VFR semantics. Nothing here manufactures a runway threshold or extends
+ * a descent below the MDA or past the MAP; the missed approach continuation is the procedure's `missed` legs.
+ */
+export type ProcedureEndpoint = {
+  instrumentEnd: { fix: string; altitude?: string };
+  landingSite: { kind: "RUNWAY" | "HELIPORT" | "AIRPORT"; ident: string; airport: string };
+  visualSegment: {
+    kind: "RUNWAY" | "PROCEED VFR" | "PROCEED VISUALLY" | "UNKNOWN"; validated: boolean; source?: string;
+    /** From the MAP to the landing site: magnetic bearing and distance; absent when the MAP is the runway. */
+    bearingMag?: number; distanceNm?: number;
+  };
+  /**
+   * The vertical path the data gives the final: a vertical angle, or NONE when the MAP's coded angle is zero (a
+   * point-in-space approach flown LNAV with advisory step-downs), or NOT CODED.
+   */
+  vertical: { kind: "VPA"; angleDeg: number } | { kind: "NONE"; reason: string } | { kind: "NOT CODED" };
+};
 export type ProcedureKind = "SID" | "STAR" | "APPROACH";
 export type ApproachType = "RNAV" | "ILS" | "VOR" | "NDB";
 export type Procedure = {
@@ -40,7 +98,17 @@ export type Procedure = {
   /** Approach: the leg that is the final approach fix, and the missed approach legs flown after the runway. */
   faf?: string;
   missed?: ProcedureLeg[];
-  missedHold?: { fix: string; inbound: number; turn: "RIGHT" | "LEFT"; altitude: string };
+  /** The missed approach hold; imported data adds its coded leg distance and speed limit. */
+  missedHold?: { fix: string; inbound: number; turn: "RIGHT" | "LEFT"; altitude: string; legDistanceNm?: number; speedLimit?: SpeedLimit };
+  /** Imported approaches: where the procedure ends and what follows (C.2). */
+  endpoint?: ProcedureEndpoint;
+  /**
+   * A point-in-space approach (a Copter procedure whose MAP is not a runway): flown to the MAP, then the visual
+   * segment or the missed approach. Its `runways` is empty.
+   */
+  pointInSpace?: true;
+  /** Chart notes the data does not code (restrictions, speed notes, minima), displayed and never enforced. */
+  notes?: string[];
   /**
    * An RNAV approach's published final approach segment data (ARINC 424 path point record), when the data has one:
    * the fields of the FAS data block, and the CRC as published. The simulation derives a FAS block only when this is
@@ -65,6 +133,8 @@ export type NavData = {
   entries: NavEntry[];
   airways: Airway[];
   procedures: Procedure[];
+  /** Minimum sector altitudes, when the data gives them. */
+  msa?: Msa[];
 };
 
 const fix = (ident: string, lat: number, lon: number): Fix => ({ kind: "fix", ident, position: { lat, lon } });
@@ -176,6 +246,7 @@ export class NavDatabase {
   private byIdent = new Map<string, NavEntry[]>();
   private airwayByIdent = new Map<string, Airway>();
   readonly procedures: Procedure[];
+  readonly msa: Msa[];
   readonly cycle: NavData["cycle"];
   readonly counts: { fixes: number; navaids: number; airports: number; runways: number; airways: number; procedures: number };
 
@@ -183,6 +254,7 @@ export class NavDatabase {
     for (const entry of data.entries) this.byIdent.set(entry.ident, [...(this.byIdent.get(entry.ident) ?? []), entry]);
     for (const airway of data.airways) this.airwayByIdent.set(airway.ident, airway);
     this.procedures = data.procedures;
+    this.msa = data.msa ?? [];
     this.cycle = data.cycle;
     this.counts = {
       fixes: data.entries.filter(e => e.kind === "fix").length,
@@ -237,7 +309,8 @@ export class NavDatabase {
     const replaced = new Set(other.entries.map(e => `${e.kind}:${e.ident}`));
     const entries = [...[...this.byIdent.values()].flat().filter(e => !replaced.has(`${e.kind}:${e.ident}`)), ...other.entries];
     const airways = [...[...this.airwayByIdent.values()].filter(a => !other.airways.some(o => o.ident === a.ident)), ...other.airways];
-    return new NavDatabase({ cycle: other.cycle, entries, airways, procedures: [...this.procedures, ...other.procedures] });
+    const msa = [...this.msa.filter(m => !(other.msa ?? []).some(o => o.airport === m.airport && o.centre === m.centre)), ...(other.msa ?? [])];
+    return new NavDatabase({ cycle: other.cycle, entries, airways, procedures: [...this.procedures, ...other.procedures], msa });
   }
 }
 

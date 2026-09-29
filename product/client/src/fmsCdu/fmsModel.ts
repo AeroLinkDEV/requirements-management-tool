@@ -1,5 +1,6 @@
 import { COLUMNS, type CduColor, type Line, type Segment } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
+import type { ProcedureHold, SpeedLimit } from "./navData";
 
 /**
  * Shared state shapes, geometry and screen helpers for the scripted CMA-9000. The navigation database is in
@@ -122,8 +123,13 @@ export type Leg =
     path?: FixPath; course?: number; arc?: { centre: LatLon; turn: "L" | "R" };
     /** A speed constraint at the fix, knots. */
     speed?: number;
+    /**
+     * Procedure data carried with the leg (Stage C): the coded speed limit, and the hold the procedure codes at the fix.
+     * Data only: what the flight does with them is its own business.
+     */
+    speedLimit?: SpeedLimit; hold?: ProcedureHold;
   }
-  | { kind: "cond"; path: ConditionalPath; course: number; altitude?: number; via?: string; source?: LegSource }
+  | { kind: "cond"; path: ConditionalPath; course: number; altitude?: number; via?: string; source?: LegSource; speedLimit?: SpeedLimit }
   | { kind: "disco" };
 
 /** How a conditional leg shows on LEGS: (3000) for an altitude, (INTC) for an intercept, (VECTOR) for manual. */

@@ -35,12 +35,18 @@ test('an RNAV approach is built from its CIFP legs: the final, its FAF, the miss
   expect(r15.legs).toEqual([
     { ident: 'STAEV', altitude: '3200A' },
     { ident: 'FOVES', altitude: '2000A', path: 'TF' },
-    { ident: 'JUNEL', altitude: '1020A', path: 'TF' },
-    { ident: 'RW15', altitude: '357', path: 'TF' },
+    // The step-down fix and the threshold code the vertical angle, -3.00 degrees.
+    { ident: 'JUNEL', altitude: '1020A', path: 'TF', verticalAngleDeg: -3 },
+    { ident: 'RW15', altitude: '357', path: 'TF', verticalAngleDeg: -3 },
   ])
-  // The missed approach: a climb on 145.8 degrees magnetic (130.8 true) to 1000 ft, direct YUNUD, hold on 042.0 (027 true).
-  expect(r15.missed).toEqual([{ path: 'CA', course: expect.closeTo(130.8, 6), altitude: 1000 }, { ident: 'YUNUD', altitude: '5600A', path: 'DF' }])
-  expect(r15.missedHold).toEqual({ fix: 'YUNUD', inbound: 27, turn: 'RIGHT', altitude: '5600A' })
+  // The missed approach: a climb on 145.8 degrees magnetic (130.8 true) to 1000 ft, direct YUNUD turning right, and the
+  // HM there on 042.0 (027 true) with 5 NM legs, kept on the DF leg and as the missed approach hold.
+  const hm = { path: 'HM', inbound: 27, turn: 'RIGHT', legDistanceNm: 5, legTimeMin: null, exit: 'MANUAL', altitude: '5600A' }
+  expect(r15.missed).toEqual([{ path: 'CA', course: expect.closeTo(130.8, 6), altitude: 1000 }, { ident: 'YUNUD', altitude: '5600A', path: 'DF', turnDirection: 'RIGHT', hold: hm }])
+  expect(r15.missedHold).toEqual({ fix: 'YUNUD', inbound: 27, turn: 'RIGHT', altitude: '5600A', legDistanceNm: 5 })
+  // The STAEV transition is the hold-in-lieu of a procedure turn alone (a single HF record): now kept, where it was dropped.
+  expect(r15.transitions.STAEV).toEqual([{ ident: 'STAEV', altitude: '3200A', hold: { path: 'HF', inbound: expect.closeTo(130.7, 6), turn: 'RIGHT', legDistanceNm: 4, legTimeMin: null, exit: 'ONCE', altitude: '3200A' } }])
+  expect(r15.endpoint).toMatchObject({ instrumentEnd: { fix: 'RW15', altitude: '357' }, landingSite: { kind: 'RUNWAY', ident: 'RW15' }, visualSegment: { kind: 'RUNWAY' }, vertical: { kind: 'VPA', angleDeg: 3 } })
   expect(Object.keys(r15.transitions).sort()).toEqual(['STAEV', 'WULEB', 'YUNUD'])
   // An approach whose missed approach point is not a runway is left out, with the reason.
   expect(approach('R33-Y')).toBeUndefined()

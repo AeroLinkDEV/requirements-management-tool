@@ -40,8 +40,20 @@ function continueFrom(fms: ScriptedFms) {
   return last?.kind === "wpt" ? last.ident : fms.route.origin;
 }
 
+/** An approach by its type and runway (RNAV 15), or a point-in-space approach by its final course (RNAV 190). */
 function procedureLabel(p: Procedure) {
-  return p.kind === "APPROACH" ? `${p.approachType ?? ""} ${p.runways[0]?.slice(2) ?? ""}`.trim() : p.ident;
+  if (p.kind !== "APPROACH") return p.ident;
+  const served = p.pointInSpace ? p.ident.slice(1) : p.runways[0]?.slice(2);
+  return `${p.approachType ?? ""} ${served ?? ""}`.trim();
+}
+
+/** A heliport's approaches on REF NAV DATA: each by its ident and the visual segment after its MAP (C.2). */
+function heliportApproaches(fms: ScriptedFms, heliport: string) {
+  const kind = (p: Procedure) => {
+    const visual = p.endpoint?.visualSegment;
+    return !visual || visual.kind === "UNKNOWN" ? "VIS UNKNOWN" : visual.kind === "PROCEED VFR" ? "VFR" : visual.kind === "PROCEED VISUALLY" ? "VISUALLY" : "RWY";
+  };
+  return fms.navdb.proceduresFor(heliport, "APPROACH").map(p => `${p.ident} ${kind(p)}`).join(" ");
 }
 
 /** Rows of a procedure list: the procedures, or once one is chosen, it and its transitions. */
@@ -103,7 +115,10 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
         if (!field) return;
         if (!scratch) { fms.setScratch(fms.route[field] ?? ""); return; }
         if (scratch === "DELETE") return "not-allowed";
-        if ((field === "origin" || field === "dest") && !ICAO.test(scratch)) return "invalid";
+        // An ICAO airport ident, or the ident of an airport or heliport in the data that is not ICAO-shaped (87N, 2P2): a
+        // heliport is a valid origin and destination for a rotorcraft.
+        const site = ICAO.test(scratch) || (/^[A-Z0-9]{3,4}$/.test(scratch) && fms.navdb.airport(scratch) !== undefined);
+        if ((field === "origin" || field === "dest") && !site) return "invalid";
         if ((field === "origin" || field === "dest") && !fms.navdb.airport(scratch)) return "not-in-database";
         if (field === "runway" && !/^RW\d{2}[LRC]?$/.test(scratch)) return "invalid";
         if (scratch.length > 10) return "invalid";
@@ -255,7 +270,7 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
       const entries = fms.navDataQuery ? fms.navdb.find(fms.navDataQuery) : [];
       const entry = entries[index];
       const lines: (Line | undefined)[] = [title("REF NAV DATA", `${index + 1}/${Math.max(1, entries.length)}`), caption(" IDENT", "TYPE ")];
-      lines[2] = { left: entry ? { text: entry.ident } : boxes(5), right: entry ? medium(entry.kind === "navaid" ? entry.type : entry.kind === "airport" ? "AIRPORT" : "WAYPOINT") : undefined };
+      lines[2] = { left: entry ? { text: entry.ident } : boxes(5), right: entry ? medium(entry.kind === "navaid" ? entry.type : entry.kind === "airport" ? (entry.heliport ? "HELIPORT" : "AIRPORT") : "WAYPOINT") : undefined };
       if (entry) {
         const position = formatPosition(entry.position);
         lines[3] = caption(" LATITUDE", "LONGITUDE ");
@@ -271,8 +286,13 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
           lines[6] = { left: { text: `${entry.elevation}FT` } };
           lines[7] = caption(" NAME");
           lines[8] = { left: medium(entry.name.slice(0, 24)) };
-          lines[9] = caption(" RUNWAYS");
-          lines[10] = { left: medium(entry.runways.map(r => r.ident.slice(2)).join(" ").slice(0, 24)) };
+          if (entry.heliport) {
+            lines[9] = caption(" APPROACHES");
+            lines[10] = { left: medium((heliportApproaches(fms, entry.ident) || "NONE").slice(0, 24)) };
+          } else {
+            lines[9] = caption(" RUNWAYS");
+            lines[10] = { left: medium(entry.runways.map(r => r.ident.slice(2)).join(" ").slice(0, 24)) };
+          }
         }
       }
       // An ident not in the database can be defined here, in the temporary database, by its position.

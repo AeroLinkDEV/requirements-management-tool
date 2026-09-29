@@ -1218,7 +1218,12 @@ export class ScriptedFms implements CduBackend {
   private armMissedHold(route: Route) {
     const missedHold = findProcedure(this.db, route, "APPROACH")?.missedHold;
     if (!missedHold || route.hold) return;
-    route.hold = { fix: missedHold.fix, turn: missedHold.turn, inbound: missedHold.inbound, legTime: 1, legDistance: null, exit: "MANUAL", speed: 180, altitude: missedHold.altitude, status: "ARMED" };
+    // A coded leg distance takes the place of leg time, and a coded speed limit that of the 180 kt default (C.6).
+    const legDistance = missedHold.legDistanceNm ?? null;
+    route.hold = {
+      fix: missedHold.fix, turn: missedHold.turn, inbound: missedHold.inbound, legTime: legDistance === null ? 1 : null, legDistance, exit: "MANUAL",
+      speed: missedHold.speedLimit?.kt ?? 180, altitude: missedHold.altitude, status: "ARMED",
+    };
     for (const leg of route.legs) if (leg.kind === "wpt" && leg.ident === missedHold.fix) leg.qualifier = "/H";
   }
 

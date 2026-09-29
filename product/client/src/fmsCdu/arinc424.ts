@@ -1,15 +1,19 @@
-import type { Airport, Airway, NavData, NavEntry, NavaidType, Procedure, ProcedureLeg, PublishedFas } from "./navData";
+import { bearingDeg, distanceNm } from "./fmsModel";
+import type { Airport, Airway, Msa, NavData, NavEntry, NavaidType, Procedure, ProcedureEndpoint, ProcedureHold, ProcedureLeg, PublishedFas, SpeedLimit } from "./navData";
+import { PROCEDURE_CHARTS } from "./procedureCharts";
 
 /**
  * Reads the parts of an ARINC 424 navigation data file that the simulation uses: enroute and terminal waypoints,
- * VHF and NDB navaids, airports (with their magnetic variation), runways (their magnetic bearing made true), airways,
- * RNAV approach procedures and their published FAS data blocks (path point records). Records are the 132-column
- * fixed-width lines of the specification; only primary records are read (continuation records are skipped). Field
- * positions are the ones listed beside each reader, 1-based as the specification numbers columns.
+ * VHF and NDB navaids, airports and heliports (with their magnetic variation), runways (their magnetic bearing made
+ * true), airways, minimum sector altitudes, RNAV approach procedures and their published FAS data blocks (path point
+ * records). The heliport section (HA, HC, HF, HS) is read like the airport section (PA, PC, PF, PS); heliport
+ * departures (HD) are not read. Records are the 132-column fixed-width lines of the specification; only primary
+ * records are read (continuation records are skipped). Field positions are the ones listed beside each reader, 1-based
+ * as the specification numbers columns.
  *
  * The layouts were checked against the FAA's Coded Instrument Flight Procedures (CIFP, ARINC 424-18, public domain).
- * A full CIFP holds some 400,000 records; `airports` limits a load to the named airports, their procedures and the
- * fixes those procedures use.
+ * A full CIFP holds some 400,000 records; `airports` limits a load to the named airports and heliports, their
+ * procedures and the fixes those procedures use.
  *
  * This is a subset reader for engineering use in the test bench. It has been checked against the specification's
  * field layout and the CIFP, not qualified against a supplier's data file.
@@ -74,15 +78,18 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
   const airwayFixes = new Map<string, { sequence: number; fix: string }[]>();
   const procedureRecords = new Map<string, ProcedureRecord[]>();
   const pathPoints = new Map<string, PublishedFas>();
+  const msa: Msa[] = [];
+  const departures = new Set<string>();
   const errors: string[] = [];
   const invalid: string[] = [];
   let read = 0, skipped = 0;
 
   const lines = text.split(/\r?\n/);
-  // Limited to named airports: their airport records, and only the enroute fixes and navaids their procedures use.
+  // Limited to named airports and heliports: their own records, and only the enroute fixes and navaids their
+  // procedures use.
   const wanted = options.airports?.length ? new Set(options.airports.map(ident => ident.toUpperCase())) : null;
   const used = new Set<string>();
-  if (wanted) for (const line of lines) if (line[4] === "P" && line[12] === "F" && wanted.has(line.slice(6, 10).trim())) {
+  if (wanted) for (const line of lines) if ((line[4] === "P" || line[4] === "H") && line[12] === "F" && wanted.has(line.slice(6, 10).trim())) {
     for (const [a, b] of [[30, 34], [51, 54]] as const) { const fix = col(line, a, b); if (fix) used.add(fix); }
   }
   const cycle = /^HDR01.*?(\d{4})\s+\d{2}-[A-Z]{3}-\d{4}/.exec(lines[0] ?? "")?.[1];
@@ -91,7 +98,7 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
     const section = line[4], subsection = line[5];
     const airportSubsection = line[12];
     if (wanted) {
-      if (section === "P" ? !wanted.has(line.slice(6, 10).trim()) : section === "E" && subsection === "A" ? !used.has(col(line, 14, 18))
+      if (section === "P" || section === "H" ? !wanted.has(line.slice(6, 10).trim()) : section === "E" && subsection === "A" ? !used.has(col(line, 14, 18))
         : section === "D" ? !used.has(col(line, 14, 17)) : true) return;
     }
     const fail = (what: string) => { errors.push(`line ${index + 1}: ${what}`); skipped += 1; };
@@ -161,14 +168,16 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
       read += 1;
       return;
     }
-    // Airport records (P): airport 7-10, subsection at 13. Elevations are feet, -1,500 to 30,000; blank reads as 0.
-    if (section === "P") {
+    // Airport records (P) and heliport records (H), which share their layout: airport or heliport 7-10, subsection at
+    // 13. Elevations are feet, -1,500 to 30,000; blank reads as 0.
+    if (section === "P" || section === "H") {
+      const heliport = section === "H";
       if (airportSubsection === "A") {
-        // Airport reference point: continuation 22, elevation 57-61, name 94-123.
+        // Airport or heliport reference point: continuation 22, elevation 57-61, name 94-123.
         if (!"01".includes(line[21])) { skipped += 1; return; }
-        const icao = ident(7, 10, "airport ident");
+        const icao = ident(7, 10, heliport ? "heliport ident" : "airport ident");
         if (!icao) return;
-        const at = located("airport position");
+        const at = located(heliport ? "heliport position" : "airport position");
         if (!at) return;
         const elevation = integer(57, 61, -1500, 30000, "airport elevation", 0);
         if (elevation === undefined) return;
@@ -178,12 +187,40 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
         if (variationText && !variation && variationText[0] !== "T") { impossible("magnetic variation"); return; }
         const magneticVariation = variation ? (variation[1] === "W" ? -1 : 1) * Number(variation[2]) / 10 : undefined;
         if (magneticVariation !== undefined && Math.abs(magneticVariation) > 180) { impossible("magnetic variation"); return; }
-        const airport: Airport = { kind: "airport", ident: icao, name: col(line, 94, 123), position: at, elevation, runways: existing?.runways ?? [], magneticVariation };
+        const airport: Airport = {
+          kind: "airport", ident: icao, name: col(line, 94, 123), position: at, elevation, runways: existing?.runways ?? [], magneticVariation,
+          ...(heliport ? { heliport: true as const } : {}),
+        };
         airports.set(icao, airport);
         read += 1;
         return;
       }
-      if (airportSubsection === "G") {
+      if (airportSubsection === "S") {
+        // Minimum sector altitude: centre fix 14-18, continuation 39, then up to seven sectors of 11 columns from 43
+        // (bearing from 3, bearing to 3, altitude in hundreds of feet 3, radius in NM 2), magnetic or true at 120.
+        if (!"01".includes(line[38])) { skipped += 1; return; }
+        const icao = ident(7, 10, heliport ? "heliport ident" : "airport ident"), centre = icao && ident(14, 18, "MSA centre");
+        if (!icao || !centre) return;
+        const sectors: Msa["sectors"] = [];
+        for (let start = 43; start + 10 <= 119; start += 11) {
+          const text = line.slice(start - 1, start + 10);
+          if (!text.trim()) break;
+          const m = /^(\d{3})(\d{3})(\d{3})(\d{2})$/.exec(text);
+          if (!m || Number(m[1]) > 360 || Number(m[2]) > 360) { impossible("MSA sector"); return; }
+          sectors.push({ from: Number(m[1]), to: Number(m[2]), altitude: Number(m[3]) * 100, radiusNm: Number(m[4]) });
+        }
+        if (!sectors.length) { fail("MSA without a sector"); return; }
+        msa.push({ airport: icao, centre, magnetic: line[119] !== "T", sectors });
+        read += 1;
+        return;
+      }
+      if (airportSubsection === "D" && heliport) {
+        // Heliport departures (HUDSN ONE and the like) are not read: named once each, with the reason.
+        departures.add(`${col(line, 7, 10)} ${col(line, 14, 19)}`);
+        skipped += 1;
+        return;
+      }
+      if (airportSubsection === "G" && !heliport) {
         // Runway: ident 14-18, continuation 22, length 23-27 (feet), magnetic bearing 28-31 (tenths of a degree, up to
         // 360.0), threshold elevation 67-71.
         if (!"01".includes(line[21])) { skipped += 1; return; }
@@ -204,20 +241,23 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
       if (airportSubsection === "F") {
         // Approach procedure leg: procedure 14-19, route type 20, transition 21-25, sequence 27-29, fix 30-34,
         // continuation 39 (primary 0 or 1), waypoint description 40-43, turn 44, path terminator 48-49, magnetic course
-        // 71-74 (tenths; T after is true), altitude description 83, ATC indicator 84, altitudes 85-89 and 90-94.
+        // 71-74 (tenths; T after is true), holding distance or time 75-78 (tenths of a NM, or T and tenths of a
+        // minute), altitude description 83, ATC indicator 84, altitudes 85-89 and 90-94, speed limit 100-102 (knots),
+        // vertical angle 103-106 (hundredths of a degree, signed), speed limit description 118.
         if (!"01".includes(line[38])) { skipped += 1; return; }
-        const icao = ident(7, 10, "airport ident");
+        const icao = ident(7, 10, heliport ? "heliport ident" : "airport ident");
         if (!icao) return;
         const key = `${icao} ${col(line, 14, 19)}`;
         procedureRecords.set(key, [...(procedureRecords.get(key) ?? []), {
           routeType: line[19], transition: col(line, 21, 25), sequence: Number(col(line, 27, 29)), fix: col(line, 30, 34),
           description: line.slice(39, 43), turn: line[43], path: col(line, 48, 49), course: col(line, 71, 74),
-          altitudeDescription: line[82], altitude1: col(line, 85, 89), altitude2: col(line, 90, 94),
+          distance: col(line, 75, 78), altitudeDescription: line[82], altitude1: col(line, 85, 89), altitude2: col(line, 90, 94),
+          speed: col(line, 100, 102), verticalAngle: col(line, 103, 106), speedDescription: line[117] ?? " ",
         }]);
         read += 1;
         return;
       }
-      if (airportSubsection === "P") {
+      if (airportSubsection === "P" && !heliport) {
         // Path point (FAS data block), primary record only (continuation number 27 is 1).
         if (line[26] !== "1") { skipped += 1; return; }
         const icao = ident(7, 10, "airport ident");
@@ -231,7 +271,7 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
       if (airportSubsection === "C") {
         // Terminal waypoint: ident 14-18, continuation 22.
         if (!"01".includes(line[21])) { skipped += 1; return; }
-        const name = ident(14, 18, "terminal waypoint ident");
+        const name = ident(14, 18, heliport ? "heliport terminal waypoint ident" : "terminal waypoint ident");
         if (!name) return;
         const at = located("terminal waypoint position");
         if (!at) return;
@@ -250,22 +290,44 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
     for (const runway of airport.runways) runway.course = ((runway.course + variation) % 360 + 360) % 360;
   }
   const procedures: Procedure[] = [];
+  const positions = new Map<string, { lat: number; lon: number }>();
+  for (const entry of entries) if (!positions.has(entry.ident)) positions.set(entry.ident, entry.position);
   for (const [key, records] of procedureRecords) {
     const [icao, ident] = key.split(" ");
-    const built = buildApproach(icao, ident, records, airports.get(icao)?.magneticVariation ?? 0, pathPoints.get(key));
+    const built = buildApproach(icao, ident, records, airports.get(icao), pathPoints.get(key), ident => positions.get(ident));
     if (typeof built === "string") errors.push(`${icao} ${ident}: ${built}`);
     else if (built) procedures.push(built);
   }
+  for (const departure of departures) errors.push(`${departure}: heliport departures (HD) are not read by this simulation`);
   return {
-    data: { cycle: { id: cycle ? `CIFP${cycle}` : "LOADED", from: "", to: "" }, entries: [...entries, ...airports.values()], airways, procedures },
+    data: {
+      cycle: { id: cycle ? `CIFP${cycle}` : "LOADED", from: "", to: "" }, entries: [...entries, ...airports.values()], airways, procedures,
+      ...(msa.length ? { msa } : {}),
+    },
     read, skipped, errors: errors.slice(0, 20), invalid,
   };
 }
 
 type ProcedureRecord = {
   routeType: string; transition: string; sequence: number; fix: string; description: string; turn: string; path: string;
-  course: string; altitudeDescription: string; altitude1: string; altitude2: string;
+  course: string; distance: string; altitudeDescription: string; altitude1: string; altitude2: string;
+  speed: string; verticalAngle: string; speedDescription: string;
 };
+
+/** The speed limit a record codes (columns 100-102, description 118: blank or @ at, + at or above, - at or below). */
+function speedLimit(record: ProcedureRecord): SpeedLimit | undefined {
+  if (!/^\d{3}$/.test(record.speed) || Number(record.speed) === 0) return undefined;
+  const descriptor = record.speedDescription === "+" ? "AT OR ABOVE" : record.speedDescription === "-" ? "AT OR BELOW" : "AT";
+  return { kt: Number(record.speed), descriptor };
+}
+
+/**
+ * Copter point-in-space approaches in the airport section: the FAA codes a Copter procedure by its final approach
+ * course (R027, R250) where a runway approach carries its runway (R15, R33-Y). This is the coding convention the
+ * public CIFP 2609 shows (its five Copter point-in-space approaches, and no other procedure, have such an ident), an
+ * observation and not a rule of the specification. Heliport-section approaches are point-in-space by their section.
+ */
+const COPTER_COURSE_IDENT = /^[A-Z]\d{3}$/;
 
 /** The altitude constraint as the simulation writes it: 3000 (at), 3000A (at or above), 3000B (at or below), a window. */
 function constraintText(record: ProcedureRecord): string | undefined {
@@ -283,35 +345,81 @@ function constraintText(record: ProcedureRecord): string | undefined {
 
 /**
  * An RNAV approach from its leg records: transitions (route type A) to the final (route type R), whose final approach
- * fix is the leg described F and whose missed approach is everything after the runway (described M). null for other
- * approach types; a reason when the procedure uses a leg this simulation does not fly (RF, PI and the like).
+ * fix is the leg described F and whose missed approach is everything after the missed approach point (described M).
+ * The MAP is a runway, or on a point-in-space approach (a heliport's, or a Copter procedure's) a fix. null for other
+ * approach types; a reason when the procedure uses a leg this simulation does not fly (RF, PI and the like) or its end
+ * cannot be placed.
+ *
+ * A hold (HF, HA, HM) is kept on the fix leg it holds at, with its exit and its coded leg distance or time. Each
+ * transition keeps all its legs, including the fix the final begins at: the route joins them by the records' roles
+ * (procedures.ts), never by collapsing records that share a name.
  */
-function buildApproach(icao: string, ident: string, records: ProcedureRecord[], variation: number, fas: PublishedFas | undefined): Procedure | string | null {
+function buildApproach(icao: string, ident: string, records: ProcedureRecord[], site: Airport | undefined, fas: PublishedFas | undefined,
+  place: (ident: string) => { lat: number; lon: number } | undefined): Procedure | string | null {
   const final = records.filter(r => r.routeType === "R").sort((a, b) => a.sequence - b.sequence);
   if (!final.length) return null;
+  const variation = site?.magneticVariation ?? 0;
   const trueCourse = (text: string) => {
     const m = /^(\d{4})(T?)$/.exec(text.replace(/\s/g, ""));
     return m ? ((Number(m[1]) / 10 + (m[2] ? 0 : variation)) % 360 + 360) % 360 : null;
   };
-  const leg = (r: ProcedureRecord): ProcedureLeg | string | null => {
+  const extras = (r: ProcedureRecord) => {
+    const limit = speedLimit(r);
+    const angle = /^[+-]?\d{3}$/.test(r.verticalAngle.trim()) ? Number(r.verticalAngle.trim()) / 100 : null;
+    return {
+      ...(r.turn === "L" || r.turn === "R" ? { turnDirection: r.turn === "L" ? "LEFT" as const : "RIGHT" as const } : {}),
+      ...(limit ? { speedLimit: limit } : {}),
+      ...(angle !== null ? { verticalAngleDeg: angle === 0 ? 0 : angle } : {}),
+    };
+  };
+  const holdOf = (r: ProcedureRecord): ProcedureHold | string => {
+    const inbound = trueCourse(r.course);
+    if (inbound === null) return `${r.path} hold without an inbound course`;
+    const distance = /^\d{4}$/.test(r.distance) ? Number(r.distance) / 10 : null;
+    const time = /^T\d{3}$/.test(r.distance) ? Number(r.distance.slice(1)) / 10 : null;
+    const altitude = constraintText(r), limit = speedLimit(r);
+    return {
+      path: r.path as ProcedureHold["path"], inbound: Math.round(inbound * 10) / 10, turn: r.turn === "L" ? "LEFT" : "RIGHT", legDistanceNm: distance, legTimeMin: time,
+      exit: r.path === "HF" ? "ONCE" : r.path === "HA" ? "AT ALT" : "MANUAL", ...(altitude ? { altitude } : {}), ...(limit ? { speedLimit: limit } : {}),
+    };
+  };
+  const leg = (r: ProcedureRecord): ProcedureLeg | string => {
     const altitude = constraintText(r);
+    const { turnDirection, speedLimit: limit, verticalAngleDeg } = extras(r);
+    const common = { ...(altitude ? { altitude } : {}), ...(turnDirection ? { turnDirection } : {}), ...(limit ? { speedLimit: limit } : {}) };
     switch (r.path) {
-      case "IF": case "TF": return { ident: r.fix, ...(altitude ? { altitude } : {}), ...(r.path === "TF" ? { path: "TF" as const } : {}) };
-      case "DF": return { ident: r.fix, ...(altitude ? { altitude } : {}), path: "DF" };
-      case "CF": { const course = trueCourse(r.course); return course === null ? "CF leg without a course" : { ident: r.fix, ...(altitude ? { altitude } : {}), path: "CF", course }; }
-      // A holding pattern in lieu of a procedure turn is flown as its fix; the missed approach hold is kept separately.
-      case "HF": case "HA": case "HM": return null;
+      case "IF": case "TF": return {
+        ident: r.fix, ...common, ...(r.path === "TF" ? { path: "TF" as const } : {}), ...(verticalAngleDeg !== undefined ? { verticalAngleDeg } : {}),
+      };
+      case "DF": return { ident: r.fix, ...common, path: "DF" };
+      case "CF": { const course = trueCourse(r.course); return course === null ? "CF leg without a course" : { ident: r.fix, ...common, path: "CF", course }; }
       case "CA": case "FA": case "VA": case "VI": case "VM": case "FM": {
         const course = trueCourse(r.course);
         const feet = Number(/^\d{1,5}$/.test(r.altitude1) ? r.altitude1 : NaN);
-        return course === null ? `${r.path} leg without a course` : { path: r.path, course, ...(Number.isFinite(feet) ? { altitude: feet } : {}) };
+        return course === null ? `${r.path} leg without a course` : {
+          path: r.path, course, ...(Number.isFinite(feet) ? { altitude: feet } : {}), ...(turnDirection ? { turnDirection } : {}), ...(limit ? { speedLimit: limit } : {}),
+        };
       }
       default: return `${r.path} legs are not flown by this simulation`;
     }
   };
   const legs = (list: ProcedureRecord[]) => {
     const out: ProcedureLeg[] = [];
-    for (const r of list) { const l = leg(r); if (typeof l === "string") return l; if (l) out.push(l); }
+    for (const r of list) {
+      if (r.path === "HF" || r.path === "HA" || r.path === "HM") {
+        // The hold belongs to the fix leg it holds at: the leg just flown to that fix, or a leg of its own when the
+        // hold begins the list (a hold-in-lieu transition of a single record).
+        const hold = holdOf(r);
+        if (typeof hold === "string") return hold;
+        const last = out.at(-1);
+        if (last && "ident" in last && last.ident === r.fix && !last.hold) out[out.length - 1] = { ...last, hold };
+        else out.push({ ident: r.fix, ...(hold.altitude ? { altitude: hold.altitude } : {}), hold });
+        continue;
+      }
+      const l = leg(r);
+      if (typeof l === "string") return l;
+      out.push(l);
+    }
     return out;
   };
   const mapAt = final.findIndex(r => r.description[3] === "M");
@@ -320,25 +428,52 @@ function buildApproach(icao: string, ident: string, records: ProcedureRecord[], 
   const missed = legs(final.slice(mapAt + 1));
   if (typeof approachLegs === "string") return approachLegs;
   if (typeof missed === "string") return missed;
-  const runway = final[mapAt].fix;
-  if (!/^RW\d{2}[LRC]?$/.test(runway)) return "missed approach point is not a runway";
+  const map = final[mapAt];
+  const isRunway = /^RW\d{2}[LRC]?$/.test(map.fix);
+  const pointInSpace = !isRunway && (site?.heliport === true || COPTER_COURSE_IDENT.test(ident));
+  if (!isRunway && !pointInSpace) return "missed approach point is not a runway";
+  if (pointInSpace && !site) return "point-in-space approach without its landing site record";
+  if (pointInSpace && !place(map.fix)) return `point-in-space approach whose missed approach point ${map.fix} is not in the data`;
   const transitions: Record<string, ProcedureLeg[]> = {};
   for (const name of new Set(records.filter(r => r.routeType === "A").map(r => r.transition))) {
     const built = legs(records.filter(r => r.routeType === "A" && r.transition === name).sort((a, b) => a.sequence - b.sequence));
     if (typeof built === "string") continue;
-    // The transition ends where the final begins; the shared fix is flown once.
-    const first = approachLegs[0];
-    const last = built.at(-1);
-    if (last && first && "ident" in last && "ident" in first && last.ident === first.ident) built.pop();
     transitions[name] = built;
   }
-  const hold = final.slice(mapAt + 1).find(r => r.path === "HM");
-  const holdCourse = hold ? trueCourse(hold.course) : null;
+  const missedHoldLeg = missed.find(l => "ident" in l && l.hold?.path === "HM");
+  const hold = missedHoldLeg && "ident" in missedHoldLeg ? missedHoldLeg.hold : undefined;
+  const chart = PROCEDURE_CHARTS[`${icao} ${ident}`];
+  const mapAngle = extras(map).verticalAngleDeg;
+  let visualSegment: ProcedureEndpoint["visualSegment"];
+  if (isRunway) visualSegment = { kind: "RUNWAY", validated: true, source: "the MAP is the runway threshold (coded)" };
+  else {
+    const from = place(map.fix)!, to = site!.position;
+    const bearingMag = ((bearingDeg(from, to) - variation) % 360 + 360) % 360;
+    visualSegment = chart
+      ? { kind: chart.visualSegment, validated: true, source: chart.source, bearingMag, distanceNm: distanceNm(from, to) }
+      : { kind: "UNKNOWN", validated: false, bearingMag, distanceNm: distanceNm(from, to) };
+  }
+  const endpoint: ProcedureEndpoint = {
+    instrumentEnd: { fix: map.fix, ...(constraintText(map) ? { altitude: constraintText(map) } : {}) },
+    landingSite: isRunway ? { kind: "RUNWAY", ident: map.fix, airport: icao } : { kind: site!.heliport ? "HELIPORT" : "AIRPORT", ident: icao, airport: icao },
+    visualSegment,
+    vertical: fas ? { kind: "VPA", angleDeg: fas.gpaDeg }
+      : mapAngle === 0 ? { kind: "NONE", reason: "vertical angle 000 at the MAP: flown LNAV, step-down altitudes advisory" }
+        : mapAngle !== undefined ? { kind: "VPA", angleDeg: Math.abs(mapAngle) } : { kind: "NOT CODED" },
+  };
   return {
-    kind: "APPROACH", airport: icao, ident, runways: [runway], transitions, legs: approachLegs, approachType: "RNAV",
+    kind: "APPROACH", airport: icao, ident, runways: isRunway ? [map.fix] : [], transitions, legs: approachLegs, approachType: "RNAV",
     faf: final.find(r => r.description[3] === "F")?.fix, missed,
-    ...(hold && holdCourse !== null ? { missedHold: { fix: hold.fix, inbound: Math.round(holdCourse), turn: hold.turn === "L" ? "LEFT" : "RIGHT", altitude: constraintText(hold) ?? "" } } : {}),
+    ...(hold ? {
+      missedHold: {
+        fix: (missedHoldLeg as { ident: string }).ident, inbound: Math.round(hold.inbound), turn: hold.turn, altitude: hold.altitude ?? "",
+        ...(hold.legDistanceNm !== null ? { legDistanceNm: hold.legDistanceNm } : {}), ...(hold.speedLimit ? { speedLimit: hold.speedLimit } : {}),
+      },
+    } : {}),
     ...(fas ? { publishedFas: fas } : {}),
+    endpoint,
+    ...(pointInSpace ? { pointInSpace: true } : {}),
+    ...(chart ? { notes: chart.notes } : {}),
   } as Procedure;
 }
 
