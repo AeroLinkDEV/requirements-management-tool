@@ -600,8 +600,10 @@ export class ScriptedFms implements CduBackend {
       if (!route.legs.some(l => l.kind !== "disco")) this.alert(alert("END OF ROUTE"));
       return;
     }
-    // Passing the runway starts the missed approach; its hold is armed so the aircraft holds at the end of it.
-    if (passed?.kind === "wpt" && passed.source === "APPR" && /^RW\d{2}/.test(ident)) this.armMissedHold(route);
+    // Passing the instrument end (the runway, or a point-in-space approach's MAP) starts the missed approach; its hold
+    // is armed so the aircraft holds at the end of it.
+    const end = this.instrumentEnd;
+    if (passed?.kind === "wpt" && passed.source === "APPR" && (end ? ident === end : /^RW\d{2}/.test(ident))) this.armMissedHold(route);
     const pending = this.modified?.legs[0];
     if (pending?.kind === "wpt" && pending.ident === ident) this.modified?.legs.shift();
     if (!route.legs.some(next => next.kind === "wpt")) this.alert(alert("END OF ROUTE"));

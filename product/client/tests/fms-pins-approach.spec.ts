@@ -49,10 +49,14 @@ test('the point-in-space final ends at its MAP: CRANN is the instrument end, flo
   // Past the FAF (STAYS), with the MAP ahead: the final approach segment.
   sequenceTo(unit, 'CRANN')
   expect(unit.onFinalSegment).toBe(true)
+  // No missed approach hold before the MAP is passed.
+  expect(unit.activeRoute.hold).toBeUndefined()
   // Past the MAP: the missed approach, no longer the final.
   unit.sequence()
   expect(active(unit)).toBe('(CA)')
   expect(unit.onFinalSegment).toBe(false)
+  // Passing the MAP arms the missed approach hold at BEADS, as passing a runway does.
+  expect(unit.activeRoute.hold).toMatchObject({ fix: 'BEADS', status: 'ARMED', legDistance: 4 })
 })
 
 test('the instrument end is the approach leg: the same fix earlier in the route does not start the final', () => {
