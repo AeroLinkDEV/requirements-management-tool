@@ -39,6 +39,7 @@ const RECEIVER_STATE: [string, (rx: GpsReceiver) => void, RegExp][] = [
   ['273 integrity DETECTED', rx => rx.overrideStatus('273', { integrity: 'DETECTED' }), /273.*DETECTED/],
   ['355 unit fault', rx => rx.overrideStatus('355', { unit: true }), /355.*UNIT/],
   ['273 status word not Normal', rx => rx.override('273', { kind: 'FORCE', ssm: 'NCD' }), /273.*NCD/],
+  ['355 status word not Normal', rx => rx.override('355', { kind: 'FORCE', ssm: 'NCD' }), /355.*NCD/],
 ]
 for (const [name, stimulus, detail] of RECEIVER_STATE) {
   test(`a receiver reporting its own fault is not navigated on: ${name}, position and HIL still Normal (GPS-06)`, () => {
