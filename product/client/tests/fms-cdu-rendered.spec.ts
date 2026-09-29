@@ -335,7 +335,10 @@ test('an FMS failure in flight reverts the flight modes, and Pause still works (
 test('the EFIS shows the FMS modes, route and TO waypoint, and flags them when the FMS fails', async ({ page }) => {
   await open(page)
   const efis = page.getByRole('region', { name: 'EFIS' })
-  await expect(efis.getByTestId('fma-lateral')).toHaveText('LNAV')
+  // The helicopter profile: the autopilot's axes, collective, pitch and roll/yaw.
+  await expect(efis.getByTestId('fma-collective')).toHaveText('ALT')
+  await expect(efis.getByTestId('fma-pitch')).toHaveText('IAS')
+  await expect(efis.getByTestId('fma-roll')).toHaveText('NAV')
   await expect(efis.getByTestId('nd-to-wpt')).toContainText('MUN')
   await expect(efis.getByTestId('nd-route')).toBeVisible()
   await expect(efis.getByTestId('nav-source')).toHaveText(/^FMS1 TERM$/)
@@ -346,8 +349,8 @@ test('the EFIS shows the FMS modes, route and TO waypoint, and flags them when t
   await expect(efis.getByTestId('pfd-fms-flag')).toHaveText('FMS FAIL')
   await expect(efis.getByTestId('nd-map-flag')).toHaveText('MAP')
   await expect(efis.getByTestId('nd-route')).toHaveCount(0)
-  await expect(efis.getByTestId('fma-lateral')).toHaveText('HDG HOLD')
-  await expect(efis.getByTestId('fma-vertical')).toHaveText('ALT HOLD')
+  await expect(efis.getByTestId('fma-roll')).toHaveText('HDG')
+  await expect(efis.getByTestId('fma-collective')).toHaveText('ALT')
 })
 
 test('the bench tools are tabs under the cockpit, keyboard-navigable, and the chosen one is remembered', async ({ page }) => {

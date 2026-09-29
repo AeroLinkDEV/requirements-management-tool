@@ -184,3 +184,36 @@ test('moving away from the active waypoint, or stopped over the ground, is no pr
   expect(fmsOutputs(unit, sim).eta.status).toBe('NCD')
   expect(screenText(unit.screen()).join('\n')).not.toMatch(/NaN|\d{4}\.\dZ/)
 })
+
+test('in the hover the displays get the helicopter data: axes, radio height, hover height, VX/VY, and no IAS below 30 kt (B4)', () => {
+  let now = Date.UTC(2026, 8, 27, 14, 0, 0)
+  const unit = new ScriptedFms(() => new Date(now))
+  const sim = new FlightSimulator(unit)
+  const fly = (seconds: number, done?: () => boolean) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1); if (done?.()) return } }
+  unit.declareSurface('offshore-87n')
+  unit.wind.direction = 230
+  unit.wind.speed = 20
+  unit.placeAircraft({ position: { lat: 40.7, lon: -72.45 }, track: 230, altitude: 100 }, 'test: offshore south of 87N')
+  sim.engageAltitudeHold()
+  sim.selectHeading(230)
+  expect(aircraftData(unit, sim).ias).toBeGreaterThan(100)
+  expect(aircraftData(unit, sim).helicopter).toMatchObject({ axes: { collective: 'ALT', pitch: 'IAS', roll: 'HDG' }, hoverData: false })
+  sim.selectSpeed(25)
+  fly(120, () => sim.tas < 26)
+  expect(sim.engageHover()).toBe(true)
+  fly(40)
+  const air = aircraftData(unit, sim)
+  // 20 kt of airspeed is below the reliable range: no number, rather than a misleading one.
+  expect(air.ias).toBeNull()
+  expect(air.helicopter).toMatchObject({ axes: { collective: 'RHT', pitch: 'HOV', roll: 'HOV' }, hoverData: true, hoverHeight: 50 })
+  expect(air.helicopter!.radioHeight).toEqual({ value: expect.closeTo(100, 0), status: 'NORMAL' })
+  expect(Math.abs(air.helicopter!.vx)).toBeLessThan(1)
+  expect(Math.abs(air.helicopter!.vy)).toBeLessThan(1)
+  // The CMA HOVER page reads the same AFCS data (M300 A-75): hover height and the X/Y velocities.
+  unit.open('HOVER')
+  const page = screenText(unit.screen()).join('\n')
+  expect(page).toMatch(/RAD ALT\s+HOVER HEIGHT/)
+  expect(page).toMatch(/100FT\s+50FT/)
+  expect(page).toMatch(/230T\/20KT\s+VX [+-]0\.\dKT/)
+  expect(page).toMatch(/VY [+-]0\.\dKT/)
+})

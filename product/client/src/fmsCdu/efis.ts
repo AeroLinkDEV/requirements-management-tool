@@ -103,6 +103,23 @@ export type AircraftData = {
    */
   selectedAltitude: number | null;
   selectedSpeed: number | null;
+  /** Indicated airspeed (ISA from the true airspeed), or null where it is unreliable (below 30 kt, again from 33). */
+  ias: number | null;
+  /**
+   * The helicopter profile's autopilot and hover data (null under the laboratory airline-style VNAV profile): the modes
+   * per axis, the radio height and the selected hover height, the low-height caption, the ground velocity in aircraft
+   * axes, and whether the hover data belongs on the display (the low-speed regime or a radio-height mode).
+   */
+  helicopter: {
+    axes: { collective: string; pitch: string; roll: string };
+    radioHeight: { value: number | null; status: "NORMAL" | "NCD" | "FAIL" };
+    hoverHeight: number;
+    lowHeight: string | null;
+    /** Measured ground velocity in aircraft axes (knots), or null without eligible feedback. */
+    vx: number | null;
+    vy: number | null;
+    hoverData: boolean;
+  } | null;
 };
 
 const LATERAL_FULL_SCALE = { "EN ROUTE": 5, TERMINAL: 1, APPROACH: 0.3 } as const;
@@ -213,5 +230,11 @@ export function aircraftData(fms: ScriptedFms, sim: FlightSimulator): AircraftDa
     pitch, bank: sim.bankAngle, heading: fms.heading, track, airspeed, groundSpeed: fms.groundSpeed,
     altitude: fms.altitude, verticalSpeed: fms.verticalSpeed, wind: fms.wind, position: fms.truePosition,
     selectedAltitude: sim.advisory ? sim.selectedAltitude : null, selectedSpeed: sim.advisory ? sim.selectedSpeed : null,
+    ias: sim.iasReliable ? sim.indicatedAirspeed : null,
+    helicopter: sim.advisory ? {
+      axes: sim.axisModes, radioHeight: fms.radioHeight, hoverHeight: sim.hoverHeight, lowHeight: sim.lowHeightCaption,
+      ...sim.groundVelocityAxes,
+      hoverData: sim.inLowSpeedRegime || ["RHT", "TD", "TD/H", "TU"].includes(sim.axisModes.collective),
+    } : null,
   };
 }

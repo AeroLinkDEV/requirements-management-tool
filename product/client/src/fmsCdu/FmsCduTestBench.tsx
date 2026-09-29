@@ -396,7 +396,7 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
             <button type="button" disabled={failedFms || !backend.approachType} aria-pressed={backend.approachArmed || sim.approachMode === "CAPTURED"}
               title={sim.approachMode === "CAPTURED" ? "Approach captured: press to cancel it (the aircraft levels), or TOGA to go around" : backend.approachArmed ? "Approach armed: press to disarm" : "Arm the approach"}
               onClick={() => { const on = !backend.approachArmed; recordTo?.armApproach(on); backend.armApproach(on); }}>APPR</button>
-            <button type="button" disabled={failedFms} onClick={() => { recordTo?.goAround(); backend.goAround(); }}>TOGA</button>
+            <button type="button" disabled={failedFms && !sim.advisory} onClick={() => { recordTo?.goAround(); backend.goAround(); sim.engageGoAround(); }}>TOGA</button>
             {sim.advisory ? null : <button type="button" disabled={failedFms || sim.altitudeHoldReference === null} onClick={() => sim.engageVnav()}>VNAV</button>}
           </form>
           {sim.advisory ? (

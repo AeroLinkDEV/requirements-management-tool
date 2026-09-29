@@ -3,7 +3,10 @@ import { FlightSimulator, angleDiff, legGeometry, racetrackOutline, sarTrack } f
 import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
 import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
+import { stimulusFor, type GpsOp } from '../src/fmsCdu/gpsStimulus'
+import { checkAtTdn, planTransition } from '../src/fmsCdu/transition'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
 // The flight simulation: the aircraft flies the active route as an FMS-coupled autopilot would. These prove the
@@ -20,7 +23,15 @@ const setup = (profile?: AircraftProfile) => {
     }
     return seconds
   }
-  return { unit, sim, fly }
+  /** In the bench 0.25 s ticks, for what depends on the tick (a receiver change within one tick). */
+  const ticks = (seconds: number, each?: () => boolean | void) => {
+    for (let t = 0; t < seconds * 4; t += 1) {
+      now += 250
+      sim.step(0.25)
+      if (each?.()) return
+    }
+  }
+  return { unit, sim, fly, ticks }
 }
 const press = (unit: ScriptedFms, ...fns: CduFunction[]) => { for (const fn of fns) unit.press(fn) }
 const typeText = (unit: ScriptedFms, text: string) => {
@@ -272,14 +283,14 @@ test('the wind triangle gives the crab angle and ground speed, and refuses a tra
 })
 
 test('in a crosswind the aircraft crabs: its heading differs from its track by the wind correction, and LNAV holds the track', () => {
-  const { unit, fly } = setup()
+  const { unit, sim, fly } = setup()
   // The demonstration route's first leg runs about 115 degrees; a 30 kt wind from the north-east is a crosswind on it.
   unit.wind.direction = 25
   unit.wind.speed = 30
   fly(240)
   const leg = legGeometry(unit.activeLegStart, unit.coordinates(activeIdent(unit)!)!, unit.truePosition)
   expect(Math.abs(leg.crossTrack)).toBeLessThan(0.1)
-  const expected = holdTrack(unit.vnav.cruiseSpeed, unit.track, unit.wind)
+  const expected = holdTrack(sim.tas, unit.track, unit.wind)
   if (!expected.feasible) throw new Error('feasible')
   expect(Math.abs(expected.windCorrection)).toBeGreaterThan(10)
   expect(unit.heading).toBeCloseTo(expected.heading, 0)
@@ -287,15 +298,18 @@ test('in a crosswind the aircraft crabs: its heading differs from its track by t
 })
 
 test('the airspeed changes at the profile acceleration limit, not in one step', () => {
-  const { sim, fly } = setup()
-  fly(5)
-  expect(sim.tas).toBeCloseTo(120, 6)
+  const { unit, sim, fly } = setup()
+  fly(30)
+  // The crew selects indicated airspeed: 120 KIAS is about 125.5 kt true at 3,000 ft (ISA).
+  expect(sim.indicatedAirspeed).toBeCloseTo(120, 6)
+  const from = sim.tas
   sim.selectSpeed(80)
   fly(10)
-  // 2 kt/s: ten seconds take 20 kt off, not 40.
-  expect(sim.tas).toBeCloseTo(100, 6)
+  // 2 kt/s: ten seconds take 20 kt off, not the whole difference.
+  expect(sim.tas).toBeCloseTo(from - 20, 6)
   fly(15)
-  expect(sim.tas).toBeCloseTo(80, 6)
+  expect(sim.indicatedAirspeed).toBeCloseTo(80, 1)
+  expect(unit.altitude).toBeCloseTo(3000, -1)
 })
 
 // Stage B3b: the rotorcraft autopilot's hover and low-speed modes, over the declared sea south of Southampton (87N),
@@ -423,4 +437,364 @@ test('hover feedback lost: HOV gives way to ATT on the last command; with the wi
   fly(30)
   // The controller has no feedback, so nothing brings it back: the aircraft drifts with the extra 5 kt, about 77 m.
   expect(metres(before, unit.truePosition)).toBeGreaterThan(40)
+})
+
+// B3c: the arbitration and feedback cases of plan R3-02 and Astra's rev 3.1 clarifications, as small state-table tests.
+const gps = (unit: ScriptedFms, receiver: 1 | 2, op: GpsOp) => expect(stimulusFor(unit).apply(receiver - 1, op)).toBe(true)
+const hovering = () => {
+  const run = offshore()
+  slowToHover(run)
+  run.fly(20)
+  expect(run.sim.axisModes.pitch).toBe('HOV')
+  return run
+}
+
+test('integrity lost while the position and velocity words still read NORMAL: not hover feedback, HOV gives way to ATT (B3c)', () => {
+  const { unit, sim, ticks } = hovering()
+  unit.setCondition('gpsIntegrity', true)
+  ticks(3)
+  expect(unit.hoverFeedback).toBeNull()
+  expect(sim.axisModes.pitch).toBe('ATT')
+})
+
+test('velocity words invalid alone (166 NCD on both receivers): not hover feedback, HOV gives way to ATT (B3c)', () => {
+  const { unit, sim, ticks } = hovering()
+  for (const receiver of [1, 2] as const) gps(unit, receiver, { op: 'override', label: '166', kind: 'FORCE', amount: 0, ssm: 'NCD' })
+  ticks(2)
+  expect(unit.hoverFeedback).toBeNull()
+  expect(sim.axisModes.pitch).toBe('ATT')
+})
+
+test('a continuous receiver takeover keeps HOV and the earth-fixed target; recovery does not switch back (B3c, #1251)', () => {
+  const { unit, sim, ticks } = hovering()
+  const anchor = unit.truePosition
+  expect(unit.hoverFeedback?.source).toBe(1)
+  gps(unit, 1, { op: 'fault', fault: 'RECEIVER', on: true })
+  ticks(30)
+  expect(unit.hoverFeedback?.source).toBe(2)
+  expect(sim.axisModes.pitch).toBe('HOV')
+  expect(metres(anchor, unit.truePosition)).toBeLessThan(10)
+  gps(unit, 1, { op: 'fault', fault: 'RECEIVER', on: false })
+  ticks(60)
+  expect(unit.hoverFeedback?.source).toBe(2)
+  expect(sim.axisModes.pitch).toBe('HOV')
+})
+
+test('a takeover onto a receiver 100 m off is not continuous: HOV gives way to ATT with the reason, no correction flown (B3c)', () => {
+  const { unit, sim, ticks } = hovering()
+  gps(unit, 2, { op: 'spoof', northM: 100, driftEastMps: 0 })
+  ticks(2)
+  gps(unit, 1, { op: 'fault', fault: 'RECEIVER', on: true })
+  const anchor = unit.truePosition
+  ticks(10)
+  expect(sim.axisModes.pitch).toBe('ATT')
+  expect(sim.modeEvents.find(e => e.event === 'HOV LOST')?.detail).toMatch(/GPS2 position \d+\.\d m from the last sample/)
+  // It does not fly 100 m to null the new receiver's error.
+  expect(metres(anchor, unit.truePosition)).toBeLessThan(10)
+})
+
+test('the hover steers on the measured velocity, not the true wind: a velocity bias moves the aircraft (B3c)', () => {
+  const plain = hovering(), biased = hovering()
+  for (const receiver of [1, 2] as const) gps(biased.unit, receiver, { op: 'override', label: '174', kind: 'BIAS', amount: 5 })
+  plain.fly(60)
+  biased.fly(60)
+  expect(metres(plain.unit.truePosition, biased.unit.truePosition)).toBeGreaterThan(20)
+})
+
+test('FMS failure during TD/H drops the FMS target and hovers where it stops; either order with GPS loss ends the same (B3c, F9)', () => {
+  const outcomes: string[] = []
+  for (const order of ['fms-then-gps', 'gps-then-fms'] as const) {
+    const { unit, sim, fly } = offshore(150)
+    sim.selectSpeed(60)
+    fly(40)
+    const target = offset(unit.truePosition, unit.track, 0.35)
+    expect(sim.engageTransitionDownToHover(target)).toBe(true)
+    fly(5)
+    if (order === 'fms-then-gps') { unit.setCondition('fmsFail', true); fly(2); unit.setCondition('gpsLost', true) }
+    else { unit.setCondition('gpsLost', true); fly(2); unit.setCondition('fmsFail', true) }
+    fly(10)
+    outcomes.push(sim.axisModes.pitch)
+  }
+  expect(outcomes).toEqual(['ATT', 'ATT'])
+  // With the FMS failed alone the stop is at the nominal rate, not at the target.
+  // A target well beyond the stopping distance: the failure comes during the gate segment, so the nominal stop falls
+  // far short of it.
+  const run = offshore(150)
+  run.sim.selectSpeed(60)
+  run.fly(40)
+  const target = offset(run.unit.truePosition, run.unit.track, 1.0)
+  run.sim.engageTransitionDownToHover(target)
+  run.fly(5)
+  run.unit.setCondition('fmsFail', true)
+  run.fly(120, () => run.sim.axisModes.pitch === 'HOV')
+  expect(run.sim.modeEvents.find(e => e.event === 'HOV')?.detail).toBe('holding where it stopped')
+  expect(metres(run.unit.truePosition, target)).toBeGreaterThan(50)
+})
+
+test('TD/H toward a target stops at it, correcting the cross-track, and holds it (B3c)', () => {
+  const { unit, sim, fly } = offshore(150)
+  sim.selectSpeed(60)
+  fly(40)
+  const target = offset(offset(unit.truePosition, unit.track, 0.5), unit.track + 90, 0.02)
+  expect(sim.engageTransitionDownToHover(target)).toBe(true)
+  fly(150, () => sim.axisModes.pitch === 'HOV')
+  expect(sim.modeEvents.filter(e => e.event === 'HOV').at(-1)?.detail).toBe('holding the target')
+  fly(30)
+  expect(metres(unit.truePosition, target)).toBeLessThan(10)
+})
+
+test('a heading selection cancels a TD/H plan: HOV where the aircraft is (B3c, R3-02)', () => {
+  const run = offshore(150)
+  run.sim.selectSpeed(60)
+  run.fly(40)
+  run.sim.engageTransitionDownToHover(offset(run.unit.truePosition, run.unit.track, 0.5))
+  run.fly(5)
+  run.sim.selectHeading(200)
+  expect(run.sim.axisModes.pitch).toBe('HOV')
+  expect(run.sim.modeEvents.at(-1)?.event).toBe('TD/H CANCELLED')
+})
+
+test('TU above the gate height holds the height it has: it never descends (B3c)', () => {
+  const run = offshore(250)
+  slowToHover(run)
+  run.fly(20)
+  expect(run.sim.engageTransitionUp()).toBe(true)
+  let lowest = Infinity
+  run.fly(60, () => { lowest = Math.min(lowest, run.unit.radioHeight.value!) })
+  expect(lowest).toBeGreaterThan(240)
+})
+
+test('GA from the hover needs no FMS and no missed approach; without feedback the lateral axis is ATT and the climb goes on (B3c)', () => {
+  for (const feedback of [true, false]) {
+    const { unit, sim, fly } = hovering()
+    if (!feedback) { unit.setCondition('gpsLost', true); fly(2) }
+    unit.setCondition('fmsFail', true)
+    expect(sim.engageGoAround()).toBe(true)
+    fly(20)
+    expect(sim.axisModes.collective).toBe('GA')
+    expect(sim.axisModes.roll).toBe(feedback ? 'LVL' : 'ATT')
+    expect(unit.verticalSpeed).toBeGreaterThan(600)
+  }
+})
+
+// Stage D: the CMA transition down to hover (M300 11-18…11-22, A-74…A-76, E-16, E-17, E-27; plan D-T), over the declared
+// sea south of 87N in a steady 230/20 wind. The FMS places TDN from the shared trajectory (transition.ts), checks the
+// state at TDN, and requests the transition; the autopilot flies TD, the gate segment and TD/H to MRK.
+const hoverProcedure = (options: { height?: number; markNm?: number } = {}) => {
+  const run = offshore(options.height ?? 500)
+  const { unit, sim, fly } = run
+  sim.selectSpeed(100)
+  sim.armLnav()
+  fly(40)
+  const mark = offset(unit.truePosition, 230, options.markNm ?? 4)
+  unit.open('HOVER')
+  expect(unit.designateHoverMark({ ident: 'WPT', position: mark, label: null })).toBe(true)
+  return { ...run, mark }
+}
+const hoverText = (unit: ScriptedFms) => screenText(unit.screen()).join('\n')
+
+test('the HOVER page activates the transition: TDN and MRK fly-over at the head of the route, then EXEC and TRANSITION DOWN (Stage D)', () => {
+  const { unit, mark } = hoverProcedure()
+  expect(hoverText(unit)).toMatch(/ACTIVATE>/)
+  unit.press('LSK6R')
+  expect(unit.hover.status).toBe('MOD')
+  // Into the 230 wind: the final track is 230, TDN on its reciprocal, the planned distance before MRK.
+  expect(unit.hover.finalTrack).toBe(230)
+  expect(unit.hover.dtra!).toBeGreaterThan(1.2)
+  expect(unit.hover.dtra!).toBeLessThan(2.0)
+  expect(unit.route.legs.slice(0, 3).map(leg => (leg.kind === 'wpt' ? `${leg.ident}${leg.qualifier ?? ''}` : leg.kind))).toEqual(['TDN/O', 'MRK/O', 'disco'])
+  expect(distanceNm(unit.coordinates('TDN', unit.route)!, mark)).toBeCloseTo(unit.hover.dtra!, 6)
+  expect(hoverText(unit)).toMatch(/^.*MOD.*HOVER/m)
+  unit.press('EXEC')
+  expect(unit.hover.status).toBe('ACT')
+  expect(unit.recallList[0].text).toBe('TRANSITION DOWN')
+})
+
+test('the transition is flown to a hover at MRK: TD, the gate segment, TD/H, then RHT and HOV captured at the target (Stage D)', () => {
+  const { unit, sim, fly, mark } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(600, () => sim.hoverCaptured)
+  expect(sim.hoverCaptured).toBe(true)
+  const events = sim.modeEvents.map(e => e.event)
+  expect(events).toEqual(expect.arrayContaining(['TD', 'TD/H', 'HOV']))
+  expect(metres(unit.truePosition, mark)).toBeLessThan(50)
+  fly(30)
+  expect(metres(unit.truePosition, mark)).toBeLessThan(10)
+  expect(Math.abs(unit.radioHeight.value! - 50)).toBeLessThan(5)
+  expect(sim.axisModes).toEqual({ collective: 'RHT', pitch: 'HOV', roll: 'HOV' })
+})
+
+test('ACTIVATE needs a valid radio height; losing it between ACTIVATE and EXEC is RALT FAILED, and the modification stays (Stage D, E-27)', () => {
+  const noRa = hoverProcedure()
+  noRa.unit.setCondition('raFail', true)
+  expect(hoverText(noRa.unit)).not.toMatch(/ACTIVATE>/)
+  const { unit } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.setCondition('raFail', true)
+  unit.press('EXEC')
+  expect(unit.recallList[0].text).toBe('RALT FAILED')
+  expect(unit.hover.status).toBe('MOD')
+  expect(unit.routeStatus).toBe('MOD')
+})
+
+test('at TDN, 0.3 NM off the final track: TDN NOT POSSIBLE, roll steering withdrawn, NAV gives way to HDG (Stage D, E-17)', () => {
+  const { unit, sim, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  // Just before TDN, displaced 0.3 NM across the final track.
+  fly(600, () => distanceNm(unit.truePosition, unit.coordinates('TDN')!) < 0.25)
+  unit.placeAircraft({ position: offset(unit.truePosition, 320, 0.3), track: 230, altitude: unit.altitude }, 'test: off the final track at TDN')
+  fly(30, () => unit.hover.refused !== null)
+  expect(unit.hover.refused).toBe('TDN NOT POSSIBLE')
+  fly(2)
+  expect(sim.lateralMode).toBe('HDG')
+  expect(sim.modeEvents.some(e => e.event === 'NAV REMOVED')).toBe(true)
+})
+
+test('at TDN 400 ft higher than planned: the recomputed transition does not fit before MRK, TDN DIST SHORT (Stage D, T6)', () => {
+  const { unit, sim, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  sim.selectAltitude(900)
+  sim.engageVerticalSpeed(1000)
+  fly(600, () => unit.hover.refused !== null || unit.hover.request > 0)
+  expect(unit.hover.refused).toBe('TDN DIST SHORT')
+  expect(unit.hover.request).toBe(0)
+})
+
+test('radio height lost during TD/H: ALT on the barometric altitude, the horizontal plan to MRK goes on; TDN FUNCTION LOST (Stage D, F2)', () => {
+  const { unit, sim, fly, mark } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(600, () => sim.axisModes.pitch === 'TD/H')
+  unit.setCondition('raFail', true)
+  fly(3)
+  expect(sim.axisModes.collective).toBe('ALT')
+  expect(unit.recallList.some(m => m.text === 'TDN FUNCTION LOST')).toBe(true)
+  // The accepted horizontal plan is retained: it still stops at MRK.
+  fly(300, () => sim.hoverCaptured)
+  expect(sim.hoverCaptured).toBe(true)
+  expect(metres(unit.truePosition, mark)).toBeLessThan(50)
+})
+
+test('a direct-to during the transition ends the procedure and cancels the retained TD/H: HOV where it is (Stage D, F2)', () => {
+  const { unit, sim, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(600, () => sim.axisModes.pitch === 'TD/H')
+  unit.directTo('RDG')
+  unit.press('EXEC')
+  fly(2)
+  expect(unit.hover.status).toBe('NONE')
+  expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED')).toBe(true)
+  expect(sim.axisModes.pitch).toBe('HOV')
+})
+
+test('a refusal at TDN is one of the library messages, never a planner reason: below the gate speed is TDN NOT POSSIBLE (Stage D, E-17)', () => {
+  const { unit, sim, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  sim.selectSpeed(60)
+  expect(() => fly(600, () => unit.hover.refused !== null)).not.toThrow()
+  expect(unit.hover.refused).toBe('TDN NOT POSSIBLE')
+  expect(unit.hover.refusedReason).toBe('BELOW GATE SPEED')
+  expect(unit.hover.request).toBe(0)
+})
+
+test('no valid radio height at TDN is TDN FUNCTION LOST, and the simulation goes on (Stage D, E-16)', () => {
+  const { unit, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(600, () => distanceNm(unit.truePosition, unit.coordinates('TDN')!) < 0.1)
+  unit.setCondition('raFail', true)
+  expect(() => fly(30, () => unit.hover.refused !== null)).not.toThrow()
+  expect(unit.hover.refused).toBe('TDN FUNCTION LOST')
+  expect(unit.hover.refusedReason).toBe('RADIO HEIGHT INVALID')
+  expect(unit.hover.request).toBe(0)
+})
+
+test('a headwind at or above the gate true airspeed has no closure toward MRK: the transition is refused (Stage D)', () => {
+  const start = { ias: 100, radioHeight: 500, verticalSpeed: 0, hoverHeight: 50 }
+  expect(planTransition({ ...start, headwind: 20 }).refused).toBe(false)
+  expect(planTransition({ ...start, headwind: 90 })).toEqual({ refused: true, reason: 'no closure' })
+  expect(checkAtTdn({ ...start, headwind: 90 }, 5)).toEqual({ engage: false, reason: 'NO CLOSURE', gateNm: null })
+})
+
+test('no waypoint goes between TDN and MRK: !HOVER MRK WPT, and the route is unchanged (Stage D)', () => {
+  const { unit } = hoverProcedure()
+  unit.press('LSK6R')
+  const before = JSON.stringify(unit.route.legs)
+  unit.open('LEGS')
+  while (screenText(unit.screen()).at(-1)!.trim()) unit.press('CLR')
+  unit.setScratch('CYYZ')
+  unit.press('LSK2L')
+  expect(JSON.stringify(unit.route.legs)).toBe(before)
+  expect(screenText(unit.screen()).join('\n')).toMatch(/!HOVER MRK WPT/)
+  unit.press('CLR')
+  unit.setScratch('TDN/0.5')
+  unit.press('LSK1L')
+  expect(JSON.stringify(unit.route.legs)).toBe(before)
+})
+
+test('a new mark over an active procedure offers ACTIVATE; its EXEC replaces the procedure and cancels the TD/H toward the old MRK (Stage D, A-76)', () => {
+  const { unit, sim, fly } = hoverProcedure()
+  expect(hoverText(unit)).toMatch(/<DES\+SAR/)
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(600, () => sim.axisModes.pitch === 'TD/H')
+  expect(hoverText(unit)).not.toMatch(/ACTIVATE>/)
+  expect(unit.designateHoverMark({ ident: 'WPT', position: offset(unit.truePosition, 230, 3), label: null })).toBe(true)
+  expect(hoverText(unit)).toMatch(/ACTIVATE>/)
+  unit.press('LSK6R')
+  expect(unit.hover.status).toBe('MOD')
+  // Until EXEC the old procedure is still flown.
+  fly(2)
+  expect(sim.axisModes.pitch).toBe('TD/H')
+  unit.press('EXEC')
+  fly(2)
+  expect(unit.hover.active!.id).toBe(2)
+  expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED')).toBe(true)
+})
+
+test('CANCEL of a new mark over an active procedure keeps the active one flying (Stage D, A-76)', () => {
+  const { unit, sim, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(600, () => sim.axisModes.pitch === 'TD/H')
+  const active = unit.hover.active!
+  unit.designateHoverMark({ ident: 'WPT', position: offset(unit.truePosition, 230, 3), label: null })
+  unit.press('LSK6R')
+  unit.press('LSK6L')
+  expect(unit.hover.status).toBe('ACT')
+  expect(unit.hover.active).toBe(active)
+  expect(unit.hover.finalTrack).toBe(active.finalTrack)
+  fly(600, () => sim.hoverCaptured)
+  expect(sim.hoverCaptured).toBe(true)
+  expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED')).toBe(false)
+})
+
+test('a new procedure pending over an active one leaves the active TDN and MRK where they are, through CANCEL; EXEC moves them (Stage D)', () => {
+  const { unit, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(20)
+  const active = unit.activeRoute
+  const tdn = unit.coordinates('TDN', active)!, mrk = unit.coordinates('MRK', active)!
+  const second = offset(unit.truePosition, 180, 3)
+  unit.designateHoverMark({ ident: 'WPT', position: second, label: null })
+  unit.press('LSK6R')
+  expect(unit.routeStatus).toBe('MOD')
+  expect(unit.coordinates('TDN', unit.activeRoute)).toEqual(tdn)
+  expect(unit.coordinates('MRK', unit.activeRoute)).toEqual(mrk)
+  // The modified route shows the new pair.
+  expect(unit.coordinates('MRK', unit.route)).toEqual(second)
+  unit.press('LSK6L')
+  expect(unit.coordinates('TDN', unit.activeRoute)).toEqual(tdn)
+  expect(unit.coordinates('MRK', unit.activeRoute)).toEqual(mrk)
+  unit.designateHoverMark({ ident: 'WPT', position: second, label: null })
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  expect(unit.coordinates('MRK', unit.activeRoute)).toEqual(second)
+  expect(distanceNm(unit.coordinates('TDN', unit.activeRoute)!, second)).toBeCloseTo(unit.hover.active!.dtra, 6)
 })

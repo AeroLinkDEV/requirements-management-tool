@@ -416,7 +416,8 @@ export class ScenarioRunner {
       case "alert": fms.raiseAlert(action.text); return;
       case "procedure": fms.selectProcedure(action.procedure, action.ident); return;
       case "armApproach": fms.armApproach(action.on !== false); return;
-      case "goAround": fms.goAround(); return;
+      // TOGA: the FMS missed-approach request and, under the helicopter profile, the autopilot's GA.
+      case "goAround": fms.goAround(); this.sim?.engageGoAround(); return;
       case "autopilot": {
         const sim = this.sim;
         if (!sim) throw new Error("autopilot selections need the flight simulation");

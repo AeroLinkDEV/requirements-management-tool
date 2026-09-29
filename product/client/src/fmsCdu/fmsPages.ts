@@ -402,6 +402,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         if (place < 0 || !from) return "not-in-database";
         if (!toward || distance === 0 || Math.abs(distance) >= distanceNm(from, toward)) return "invalid";
         const ident = fms.createPilot(alongTrack[1].slice(0, 3), offset(from, courseDeg(from, toward), Math.abs(distance)), scratch);
+        if (fms.splitsHover(legs, distance < 0 ? place : place + 1)) { fms.advisory("!HOVER MRK WPT"); return; }
         fms.modify(route => { route.legs.splice(distance < 0 ? place : place + 1, 0, { kind: "wpt", ident }); });
         fms.setScratch("");
         return;
@@ -420,6 +421,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           fms.setScratch("");
           return;
         }
+        if (fms.splitsHover(legs, at)) { fms.advisory("!HOVER MRK WPT"); return; }
         fms.modify(route => { route.legs.splice(at, leg?.kind === "disco" ? 1 : 0, { kind: "wpt", ident }); });
         fms.setScratch("");
       });

@@ -232,7 +232,7 @@ test('after capture, APPR pressed off or HDG SEL cancels the approach to an alti
 test('a failure after TOGA is accepted keeps its hold, whatever the order within a step, and recovery keeps it (fourth review E01)', () => {
   // TOGA accepted, then the FMS fails before the next step: the failure's hold survives the go-around.
   {
-    const { unit, sim, fly } = capturedApproach()
+    const { unit, sim, fly } = capturedApproach(LAB_AIRLINE_VNAV_PROFILE)
     expect(unit.goAround()).toBe(true)
     unit.setCondition('fmsFail', true)
     fly(1)
@@ -251,7 +251,7 @@ test('a failure after TOGA is accepted keeps its hold, whatever the order within
   }
   // TOGA flown for a step, then the failure: the failure latches its hold as usual.
   {
-    const { unit, sim, fly } = capturedApproach()
+    const { unit, sim, fly } = capturedApproach(LAB_AIRLINE_VNAV_PROFILE)
     expect(unit.goAround()).toBe(true)
     fly(1)
     expect(sim.altitudeHoldReference).toBeNull()

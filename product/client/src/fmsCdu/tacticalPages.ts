@@ -1,6 +1,6 @@
 import {
   SAR_PATTERNS, WAYPOINT, boxes, caption, courseDeg, dashes, distanceNm, fixed, formatPosition, maxSarGroundSpeed, medium,
-  numberIn, offset, prompt, small, three, title, type Leg, type Page, type TacticalPageId,
+  numberIn, offset, parsePosition, prompt, small, three, title, type Leg, type Page, type TacticalPageId,
 } from "./fmsModel";
 import type { Line, Segment } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
@@ -27,6 +27,9 @@ function tactApprFafAltitude(fms: ScriptedFms) {
   const a = fms.tactAppr;
   return Math.round((a.runwayElevation + (a.fafDistance - a.mapDistance) * 6076.12 * Math.tan((Math.abs(a.vpa) * Math.PI) / 180)) / 10) * 10;
 }
+
+/** A velocity as the HOVER page shows it: signed, one decimal. */
+const signed = (kt: number) => `${kt < 0 ? "-" : "+"}${Math.abs(kt).toFixed(1)}`;
 
 export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
   TACT: {
@@ -436,28 +439,47 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
 
   HOVER: {
     pages: () => 1,
+    // The CMA HOVER page (M300 11-21…11-22, A-74…A-76): the mark (MRK), the radio height and the hover height the AFCS
+    // selected, the true wind and the AFCS's X/Y velocities, and ACTIVATE (only with a valid radio height) or CANCEL.
     render: fms => {
-      const mark = fms.markList.at(-1);
+      const hover = fms.hover, mark = hover.mark;
+      const status = hover.status === "NONE" ? undefined : hover.status;
+      // ACTIVATE for a mark not yet flown: none active, or a new one designated over the active procedure (A-76).
+      const canActivate = mark !== null && hover.status !== "MOD" && hover.active?.mark !== mark && fms.radioHeight.status === "NORMAL";
       return [
-        title("HOVER", "1/1"),
-        caption(" MARK ON TOP POS", mark ? `${mark.ident} ` : undefined),
-        { left: mark ? medium(formatPosition(mark.position), "green") : dashes(15) },
-        caption(" RAD ALT", "TRUE WIND "),
+        title("HOVER", "1/1", status),
+        caption(mark ? ` ${mark.ident}` : " MRK", mark?.label ? `${mark.label} ` : undefined),
+        { left: mark ? medium(mark.ident, "green") : dashes(5), right: mark ? medium(formatPosition(mark.position), "green") : dashes(15) },
+        caption(" RAD ALT", "HOVER HEIGHT "),
         // The radio altimeter's height above the declared surface; dashes when it has none (NCD) or has failed.
-        { left: medium(fms.radioHeight.status === "NORMAL" ? `${Math.round(fms.radioHeight.value!)}FT` : "----FT"), right: medium(`${three(fms.wind.direction)}°/${fms.wind.speed}KT`) },
-        caption(" PRESENT POS"),
-        { left: medium(formatPosition(fms.position)) },
+        { left: medium(fms.radioHeight.status === "NORMAL" ? `${Math.round(fms.radioHeight.value!)}FT` : "----FT"), right: medium(fms.afcs ? `${fms.afcs.hoverHeight}FT` : "----FT") },
+        caption(" TRUE WIND", "VELOCITIES "),
+        { left: medium(`${three(fms.wind.direction)}T/${fms.wind.speed}KT`), right: medium(fms.afcs?.vx != null ? `VX ${signed(fms.afcs.vx)}KT` : "VX ---.-KT") },
+        { right: medium(fms.afcs?.vy != null ? `VY ${signed(fms.afcs.vy)}KT` : "VY ---.-KT") },
+        { left: hover.status === "MOD" ? undefined : prompt("<MARK ON TOP") },
         undefined,
-        { left: prompt("<MARK ON TOP") },
-        undefined, undefined,
-        { left: dashes(24) },
         { left: prompt("<DES+SAR") },
+        { left: dashes(24) },
+        { left: hover.status === "MOD" ? prompt("<CANCEL") : undefined, right: canActivate ? prompt("ACTIVATE>") : undefined },
       ];
     },
-    lsk: (fms, side, row) => {
-      if (side !== "L") return;
-      if (row === 4) fms.addMark();
-      if (row === 6) fms.open("TACT");
+    lsk: (fms, side, row, scratch) => {
+      const hover = fms.hover;
+      if (row === 1 && hover.status !== "MOD") {
+        if (!scratch) return "invalid";
+        const position = side === "R" ? parsePosition(scratch) : null;
+        const ok = side === "L" ? fms.designateHoverMarkIdent(scratch) : position !== null && fms.designateHoverMark({ ident: "WPT", position, label: null });
+        if (!ok) return "invalid";
+        fms.setScratch("");
+        return;
+      }
+      if (side === "L" && row === 4 && hover.status !== "MOD") { fms.designateHoverMarkOnTop(); return; }
+      if (side === "L" && row === 5) { fms.open("TACT"); return; }
+      if (side === "L" && row === 6 && hover.status === "MOD") { fms.cancelHover(); return; }
+      if (side === "R" && row === 6 && hover.status !== "MOD" && hover.mark && hover.active?.mark !== hover.mark) {
+        const refused = fms.activateHover();
+        if (refused) fms.setScratch(refused);
+      }
     },
   },
 };

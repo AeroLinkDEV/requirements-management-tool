@@ -48,13 +48,17 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
   // Chosen before any terrain has come, ask for the ground under the aircraft: its answer decides picture or flag.
   const { lat, lon } = air.position;
   useEffect(() => { if (svs && terrain === "waiting") svs.heightAt(lat, lon, SVS_ZOOM); }, [svs, terrain, lat, lon]);
-  const boxed = useModeChangeBoxes({ lateral: bus.lateralMode, vertical: bus.verticalMode ?? "" }, now);
+  const heli = air.helicopter;
+  const boxed = useModeChangeBoxes({ lateral: bus.lateralMode, vertical: bus.verticalMode ?? "", collective: heli?.axes.collective ?? "", pitch: heli?.axes.pitch ?? "", roll: heli?.axes.roll ?? "" }, now);
+  // The helicopter profile shows the indicated airspeed, and none where it is unreliable (dashes, the tape at zero).
+  const shownSpeed = heli ? air.ias ?? 0 : air.airspeed;
+  const signed = (kt: number) => `${kt < 0 ? "-" : "+"}${Math.abs(kt).toFixed(1)}`;
   const pitchPx = 6; // pixels per degree of pitch
   const cx = 210, cy = 196;
   // Speed and altitude tapes.
   const speedScale = 3; // px per knot
   const altScale = 0.3; // px per foot
-  const speedTicks = Array.from({ length: 17 }, (_, i) => Math.round(air.airspeed / 10) * 10 + (i - 8) * 10).filter(v => v >= 0);
+  const speedTicks = Array.from({ length: 17 }, (_, i) => Math.round(shownSpeed / 10) * 10 + (i - 8) * 10).filter(v => v >= 0);
   const altTicks = Array.from({ length: 13 }, (_, i) => Math.round(air.altitude / 100) * 100 + (i - 6) * 100);
   const lateralDots = bus.crossTrack.status === "NORMAL" ? clamp(bus.crossTrack.value! / bus.lateralFullScaleNm, -1.1, 1.1) : null;
   const verticalDots = bus.verticalDeviation.status === "NORMAL" ? clamp(bus.verticalDeviation.value! / bus.verticalFullScaleFt, -1.1, 1.1) : null;
@@ -67,7 +71,21 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
   return (
     <svg className="efisPfd" viewBox="0 0 420 400" role="img" aria-label={`Primary flight display: ${bus.lateralMode} ${bus.verticalMode ?? ""}${bus.failed ? ", FMS failed" : ""}`}>
       <rect width="420" height="400" fill="#05070a" />
-      {/* Flight mode annunciator: speed, lateral and vertical columns; engaged green, armed white below. */}
+      {/* Flight mode annunciator. The helicopter profile: the autopilot's axes, collective, pitch and roll/yaw (AW189
+          layout, AAIB-27585); captured green, boxed when new. Otherwise: speed, lateral and vertical columns. */}
+      {heli ? (
+        <g className="efisFma" fontSize="15" fontFamily="inherit" textAnchor="middle" data-testid="fma-axes">
+          <line x1="140" y1="4" x2="140" y2="44" stroke="#3a4250" />
+          <line x1="280" y1="4" x2="280" y2="44" stroke="#3a4250" />
+          <text x="70" y="22" fill={GREEN} data-testid="fma-collective">{heli.axes.collective}</text>
+          {boxed.collective ? <rect x="20" y="7" width="100" height="20" fill="none" stroke={GREEN} /> : null}
+          <text x="210" y="22" fill={GREEN} data-testid="fma-pitch">{heli.axes.pitch}</text>
+          {boxed.pitch ? <rect x="160" y="7" width="100" height="20" fill="none" stroke={GREEN} /> : null}
+          <text x="350" y="22" fill={GREEN} data-testid="fma-roll">{heli.axes.roll}</text>
+          {boxed.roll ? <rect x="298" y="7" width="104" height="20" fill="none" stroke={GREEN} /> : null}
+          <text x="210" y="40" fill={WHITE} fontSize="12">{[...bus.lateralArmed, ...bus.verticalArmed].join(" ")}</text>
+        </g>
+      ) : (
       <g className="efisFma" fontSize="15" fontFamily="inherit" textAnchor="middle">
         <line x1="140" y1="4" x2="140" y2="44" stroke="#3a4250" />
         <line x1="280" y1="4" x2="280" y2="44" stroke="#3a4250" />
@@ -79,6 +97,7 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
         {boxed.vertical ? <rect x="298" y="7" width="104" height="20" fill="none" stroke={GREEN} /> : null}
         <text x="350" y="40" fill={WHITE} fontSize="12">{bus.verticalArmed.join(" ")}</text>
       </g>
+      )}
       {/* Attitude: sky and ground move with pitch and bank; the aircraft symbol is fixed. */}
       <defs>
         <clipPath id="efisAtt"><rect x="100" y="60" width="220" height="240" rx="18" /></clipPath>
@@ -123,6 +142,23 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
         <rect x={cx - 3} y={cy - 3} width="6" height="6" fill="#ffd23a" />
       </g>
       {svsFlag ? <text x="308" y="80" fontSize="14" fill={AMBER} textAnchor="end" data-testid="pfd-svs-flag">SVS</text> : null}
+      {heli ? (
+        <g fontSize="13" data-testid="pfd-heli">
+          {/* Radio height: the readout, or an amber flag when failed; nothing above range or off the declared surface. */}
+          {heli.radioHeight.status === "NORMAL" ? <text x={cx} y="290" textAnchor="middle" fill={WHITE} data-testid="pfd-ra">{`RA ${Math.round(heli.radioHeight.value!)}`}</text>
+            : heli.radioHeight.status === "FAIL" ? <text x={cx} y="290" textAnchor="middle" fill={AMBER} data-testid="pfd-ra">RA</text> : null}
+          {heli.hoverData ? <text x="308" y="290" textAnchor="end" fill={CYAN} data-testid="pfd-hover-height">{`HH ${heli.hoverHeight}`}</text> : null}
+          {heli.lowHeight ? <text x={cx} y="80" textAnchor="middle" fill={AMBER} data-testid="pfd-low-height">{heli.lowHeight}</text> : null}
+          {/* Hover data: ground velocity in aircraft axes and the wind, where airspeed stops meaning much. */}
+          {heli.hoverData ? (
+            <g fill={WHITE} data-testid="pfd-hover-data">
+              <text x="112" y="256">{heli.vx === null ? "VX ---.-" : `VX ${signed(heli.vx)}`}</text>
+              <text x="112" y="272">{heli.vy === null ? "VY ---.-" : `VY ${signed(heli.vy)}`}</text>
+              <text x="112" y="290">{`${three(air.wind.direction)}/${Math.round(air.wind.speed)}`}</text>
+            </g>
+          ) : null}
+        </g>
+      ) : null}
       {approachLabel ? <text x="112" y="80" fontSize="14" fill={bus.approach.state === "CAPTURED" ? GREEN : WHITE} data-testid="pfd-approach">{approachLabel}</text> : null}
       {/* Speed tape with the FMS target speed bug (magenta). */}
       <g>
@@ -131,8 +167,8 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
         <g clipPath="url(#efisSpd)" fontSize="12" fill={WHITE}>
           {speedTicks.map(v => (
             <g key={v}>
-              <line x1="72" y1={cy - (v - air.airspeed) * speedScale} x2="86" y2={cy - (v - air.airspeed) * speedScale} stroke={WHITE} />
-              <text x="66" y={cy - (v - air.airspeed) * speedScale + 4} textAnchor="end">{v}</text>
+              <line x1="72" y1={cy - (v - shownSpeed) * speedScale} x2="86" y2={cy - (v - shownSpeed) * speedScale} stroke={WHITE} />
+              <text x="66" y={cy - (v - shownSpeed) * speedScale + 4} textAnchor="end">{v}</text>
             </g>
           ))}
           {bus.targetSpeed.status === "NORMAL" ? (
@@ -140,7 +176,7 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           ) : null}
         </g>
         <rect x="18" y={cy - 14} width="62" height="28" fill="#000" stroke={WHITE} />
-        <text x="72" y={cy + 6} textAnchor="end" fontSize="17" fill={WHITE}>{Math.round(air.airspeed)}</text>
+        <text x="72" y={cy + 6} textAnchor="end" fontSize="17" fill={WHITE} data-testid="pfd-speed">{heli && air.ias === null ? "---" : Math.round(shownSpeed)}</text>
         <text x="51" y="54" textAnchor="middle" fontSize="13" fill={bus.targetSpeed.status === "NORMAL" ? MAGENTA : air.selectedSpeed !== null ? CYAN : AMBER}>{bus.targetSpeed.status === "NORMAL" ? Math.round(bus.targetSpeed.value!) : air.selectedSpeed !== null ? air.selectedSpeed : "---"}</text>
       </g>
       {/* Altitude tape: the FMS target altitude (magenta), or the latched altitude hold reference (cyan). */}
