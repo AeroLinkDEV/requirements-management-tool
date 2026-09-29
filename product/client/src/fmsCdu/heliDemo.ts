@@ -153,6 +153,9 @@ export const MISSION_87N_OFFSHORE_SAR: Scenario = {
     // After STAYS, down to the MDA and level to CRANN.
     { when: { kind: "active", waypoint: "CRANN" }, action: { kind: "autopilot", altitude: 560, verticalSpeed: -600 } },
     { when: then, action: { kind: "expectAircraft", altitude: 560, heightTolerance: 60 }, within: 240 },
+    // The RNAV 190 is LNAV-only (no FAS): flown and annunciated LNAV on a usable receiver, with no integrity alert.
+    { when: then, action: { kind: "expectApproachLevel", level: "LNAV" } },
+    { when: then, action: { kind: "expectNoAlert", text: "NO APPR INTEGRITY" } },
     // 9. TOGA at CRANN: the missed approach, climbing at the GA rate to 2,000 at 70 KIAS, then 90.
     { when: { kind: "distance", waypoint: "CRANN", nm: 0.1 }, action: { kind: "goAround" } },
     { when: then, action: { kind: "autopilot", altitude: 2000 } },
@@ -180,6 +183,7 @@ export const MISSION_87N_OFFSHORE_SAR: Scenario = {
     // Two circuits later (about 15 minutes at 90 KIAS), still in the hold under NAV.
     { when: { kind: "time", seconds: 5300 }, action: { kind: "expectLine", line: 6, pattern: "IN PROGRESS" } },
     { when: then, action: { kind: "expectAfcs", roll: "NAV" } },
+    { when: then, action: { kind: "expectNoAlert", text: "NO APPR INTEGRITY" } },
   ],
 };
 
