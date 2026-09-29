@@ -5,6 +5,7 @@ import {
   small, three, title, type CorePageId, type Leg, type LskResult, type Page, type PageId,
 } from "./fmsModel";
 import { HAL_NM, MODE_TEXT, shownReceiver } from "./gpsSensors";
+import { makingProgress } from "./kinematics";
 import { gpsSummary, navModeText, sbasSummary } from "./navPages";
 import type { Line } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
@@ -61,7 +62,7 @@ const efobText = (fms: ScriptedFms) => {
 function vnavCruise(fms: ScriptedFms): (Line | undefined)[] {
   const profile = fms.profile();
   const tod = profile.topOfDescent;
-  const todEta = tod === null ? null : fms.now.getTime() + (tod / Math.max(30, fms.groundSpeed)) * 3_600_000;
+  const todEta = tod === null || !makingProgress(fms.groundSpeed) ? null : fms.now.getTime() + (tod / fms.groundSpeed) * 3_600_000;
   const next = profile.points.find(p => { const leg = fms.activeRoute.legs.find(l => l.kind === "wpt" && l.ident === p.ident); return leg?.kind === "wpt" && leg.altitude; });
   const nextLeg = next ? fms.activeRoute.legs.find(l => l.kind === "wpt" && l.ident === next.ident) : undefined;
   return [

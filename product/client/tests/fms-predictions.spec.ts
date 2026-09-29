@@ -197,3 +197,16 @@ test('constraints beyond an unresolved gap are not evaluated and do not command 
   expect(joined.points[1]).toMatchObject({ basis: 'known', constraintMet: true })
   expect(plan('9000A', 10).unableNext).toBe('AFTER')
 })
+
+test('a leg the aircraft cannot make progress along is predicted unknown, not flown at an invented 30 kt (Stage B1)', () => {
+  const { unit } = setup()
+  // A 130 kt wind from ahead of the first leg (about 115 degrees) against the 120 kt cruise speed: no progress along it.
+  unit.wind.direction = 115
+  unit.wind.speed = 130
+  const points = unit.profile().points
+  expect(points.length).toBeGreaterThan(2)
+  for (const point of points) expect(point).toMatchObject({ eta: null, fuel: null, basis: 'unknown' })
+  // In calm air the same route is predicted normally.
+  unit.wind.speed = 0
+  expect(unit.profile().points[0]).toMatchObject({ basis: 'known', eta: expect.any(Number) })
+})

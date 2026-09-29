@@ -1,4 +1,6 @@
 import { bearingDeg, courseDeg, distanceNm, longitudeDelta, offset, type Hold, type HoldEntry, type LatLon, type Leg, type Sar, type SarPattern } from "./fmsModel";
+import { groundVelocity } from "./kinematics";
+import { ACTIVE_PROFILE } from "./profile";
 import type { ScriptedFms } from "./scriptedFms";
 import type { ProfilePoint, VerticalPhase } from "./vnav";
 
@@ -8,7 +10,9 @@ import type { ProfilePoint, VerticalPhase } from "./vnav";
  * are flown as racetracks with their standard entry, search patterns are flown with their geometry, and the
  * aircraft climbs or descends to each leg's altitude constraint and follows the vertical path on final.
  *
- * It is a point-mass model with a bank-limited turn and a roll-rate limit, not a flight dynamics model.
+ * It is a point-mass model with a bank-limited turn and a roll-rate limit, not a flight dynamics model. The aircraft
+ * flies a heading through the air at its true airspeed, which changes at the profile's acceleration limit; the wind
+ * carries the air mass, so the track and ground speed are the vector sum (kinematics.ts), with no speed floor.
  */
 
 /** Navigation map ranges in NM. */
@@ -20,6 +24,8 @@ const MAX_VS = 1000;
 /** Vertical acceleration limit, fpm per second: the vertical speed changes over seconds, not in one step. */
 const VS_RATE = 600;
 const G_TURN = 1091; // turn rate (deg/s) = 1091 * tan(bank) / TAS (kt)
+/** Longitudinal acceleration and deceleration limit, kt/s (the profile's). */
+const SPEED_RATE = ACTIVE_PROFILE.parameters.longitudinalAccel.value;
 
 export type GuidanceMode = "LNAV" | "HOLD" | "SAR" | "HDG";
 export type Guidance = {
@@ -199,8 +205,9 @@ export type VerticalPath = { altitude: number; source: "VNAV" | "APPR"; coupled:
 
 export class FlightSimulator {
   private readonly fms: ScriptedFms;
-  /** True airspeed in knots: the speed VNAV flies (cruise speed, or a speed constraint). */
-  get tas() { return this.fms.targetSpeed; }
+  /** True airspeed in knots. It approaches the FMS target speed (cruise, or a speed constraint) at SPEED_RATE. */
+  private airspeed: number;
+  get tas() { return this.airspeed; }
   private bank = 0;
   private lateral: "LNAV" | "HDG" = "LNAV";
   private lnavArmed = false;
@@ -236,6 +243,7 @@ export class FlightSimulator {
 
   constructor(fms: ScriptedFms) {
     this.fms = fms;
+    this.airspeed = fms.targetSpeed;
     this.goArounds = fms.goArounds;
     this.phase = fms.verticalPhase;
     this.last = this.guide();
@@ -395,7 +403,7 @@ export class FlightSimulator {
     if (failed && !this.fmsFailed) {
       this.lateral = "HDG";
       this.lnavArmed = false;
-      this.heading = Math.round(norm360(this.fms.track));
+      this.heading = Math.round(norm360(this.fms.heading));
       this.held = true;
       this.altitudeHold = Math.round(this.fms.altitude);
       this.record("FMS FAILURE", `managed guidance invalid; HDG HOLD ${String(this.heading).padStart(3, "0")}°T, ALT HOLD ${this.altitudeHold} FT`);
@@ -464,11 +472,15 @@ export class FlightSimulator {
     // target the hold flies from this first step, not the approach's.
     const guidance = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;
     this.last = guidance;
-    // Bank toward the command at the roll-rate limit, then turn at the rate that bank gives.
+    // The airspeed moves toward the target at the acceleration limit. Bank toward the command at the roll-rate limit,
+    // then the heading turns at the rate that bank gives through the air; the wind makes the track and ground speed.
+    this.airspeed += clamp(fms.targetSpeed - this.airspeed, -SPEED_RATE * dt, SPEED_RATE * dt);
     this.bank += clamp(guidance.bankCommand - this.bank, -ROLL_RATE * dt, ROLL_RATE * dt);
-    const track = norm360(fms.track + (G_TURN * Math.tan(rad(this.bank)) / this.tas) * dt);
-    const headwind = fms.wind.speed * Math.cos(rad(fms.wind.direction - track));
-    const groundSpeed = Math.max(30, this.tas - headwind);
+    const heading = norm360(fms.heading + (this.airspeed > 1 ? G_TURN * Math.tan(rad(this.bank)) / this.airspeed : 0) * dt);
+    const ground = groundVelocity(this.airspeed, heading, fms.wind);
+    // With no ground motion there is no track: the last one stands.
+    const track = ground.track ?? fms.track;
+    const groundSpeed = ground.speed;
     // The aircraft moves from where it really is; guidance above steered it from where the FMS believes it is.
     const position = offset(fms.truePosition, track, (groundSpeed * dt) / 3600);
     const vs = clamp((guidance.targetAltitude - fms.altitude) * 2, -MAX_VS, MAX_VS);
@@ -494,8 +506,8 @@ export class FlightSimulator {
     const altitude = fms.altitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
     // Bank and flight-path pitch too: they tilt the GPS antennas (a point-mass model has no angle of attack).
-    const pitch = (Math.atan(verticalSpeed / 60 / (groundSpeed * 1.68781)) * 180) / Math.PI;
-    fms.setAircraft({ position, track, groundSpeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError, bank: this.bank, pitch });
+    const pitch = groundSpeed < 1 ? 0 : (Math.atan(verticalSpeed / 60 / (groundSpeed * 1.68781)) * 180) / Math.PI;
+    fms.setAircraft({ position, track, heading, groundSpeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError, bank: this.bank, pitch });
     // The path for the deviation display: the final approach path on final (coupled only when captured), otherwise the
     // descent path. None while the FMS has failed: it computes nothing to show.
     const final = this.fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
@@ -602,14 +614,14 @@ export class FlightSimulator {
     if (this.fms.hasCondition("fmsFail")) {
       return {
         mode: "HDG", legFrom: null, legTo: null, desiredTrack: null, crossTrack: 0, distanceToGo: null,
-        bankCommand: clamp(angleDiff(this.fms.track, this.heading), -MAX_BANK, MAX_BANK), targetAltitude: this.altitudeHold ?? this.fms.altitude,
+        bankCommand: clamp(angleDiff(this.fms.heading, this.heading), -MAX_BANK, MAX_BANK), targetAltitude: this.altitudeHold ?? this.fms.altitude,
       };
     }
     const managed = this.managedGuidance(dt);
     // LNAV with no leg to fly (a discontinuity or the end of the route) is lost: heading hold on the current track.
     if (this.lateral === "LNAV" && managed.mode === "HDG" && managed.desiredTrack === null) {
       this.lateral = "HDG";
-      this.heading = Math.round(norm360(this.fms.track));
+      this.heading = Math.round(norm360(this.fms.heading));
       this.held = true;
       if (dt > 0) this.record("LNAV LOST", `no active leg; HDG HOLD ${String(this.heading).padStart(3, "0")}°T`);
     }
@@ -620,7 +632,7 @@ export class FlightSimulator {
       this.lnavArmed = false;
       return managed;
     }
-    return { ...managed, mode: "HDG", bankCommand: clamp(angleDiff(this.fms.track, this.heading), -MAX_BANK, MAX_BANK) };
+    return { ...managed, mode: "HDG", bankCommand: clamp(angleDiff(this.fms.heading, this.heading), -MAX_BANK, MAX_BANK) };
   }
 
   /** The guidance LNAV would fly. With dt > 0 (and LNAV engaged) it also sequences what the aircraft has reached. */
@@ -686,18 +698,16 @@ export class FlightSimulator {
   private flyConditional(leg: Extract<Leg, { kind: "cond" }>, next: Leg | undefined, sequencing: boolean): Omit<Guidance, "targetAltitude"> {
     const fms = this.fms;
     const headingLeg = leg.path[0] === "V";
-    // A heading leg drifts with the wind; a course or track leg corrects for it. Both are flown as a track here, the
-    // heading leg without wind correction: its track is the heading plus the drift the wind gives.
-    const drift = headingLeg ? deg(Math.asin(clamp((fms.wind.speed * Math.sin(rad(fms.wind.direction + 180 - leg.course))) / this.tas, -1, 1))) : 0;
-    const track = norm360(leg.course + drift);
-    const result = { mode: "LNAV" as const, legFrom: null, legTo: null, desiredTrack: track, crossTrack: 0, distanceToGo: null, bankCommand: clamp(angleDiff(fms.track, track), -MAX_BANK, MAX_BANK) };
+    // A heading leg flies its heading and drifts with the wind; a course or track leg flies its course over the ground.
+    const flown = headingLeg ? fms.heading : fms.track;
+    const result = { mode: "LNAV" as const, legFrom: null, legTo: null, desiredTrack: headingLeg ? fms.track : leg.course, crossTrack: 0, distanceToGo: null, bankCommand: clamp(angleDiff(flown, leg.course), -MAX_BANK, MAX_BANK) };
     if (!sequencing) return result;
     let done = false;
     if ((leg.path === "CA" || leg.path === "FA" || leg.path === "VA") && leg.altitude !== undefined) done = fms.altitude >= leg.altitude - 20;
     if (leg.path === "VI" && next?.kind === "wpt") {
       // Intercept: the next leg's line (its course into its fix) is reached.
       const to = fms.coordinates(next.ident);
-      const course = next.course ?? (to ? courseDeg(fms.position, to) : track);
+      const course = next.course ?? (to ? courseDeg(fms.position, to) : leg.course);
       if (to) done = Math.abs(legGeometry(offset(to, course + 180, 30), to, fms.position).crossTrack) < 0.3;
     }
     if (done) { fms.arrive(); return this.managedGuidance(0); }
@@ -722,7 +732,7 @@ export class FlightSimulator {
     const hold = this.fms.activeRoute.hold!;
     const seconds = this.legSeconds(hold);
     const loop = racetrack(hold, seconds);
-    this.holdPlan = { segments: [...entry(hold, this.fms.holdEntryFlown ?? "DIRECT", seconds, this.fms.track), ...loop], index: 0, elapsed: 0, loop };
+    this.holdPlan = { segments: [...entry(hold, this.fms.holdEntryFlown ?? "DIRECT", seconds, this.fms.heading), ...loop], index: 0, elapsed: 0, loop };
   }
 
   private flyHold(hold: Hold, dt: number): Omit<Guidance, "targetAltitude" | "mode"> {
@@ -736,14 +746,15 @@ export class FlightSimulator {
       if (plan.index >= plan.segments.length) { plan.segments = racetrack(hold, this.legSeconds(hold)); plan.index = 0; }
     };
     if (segment.kind === "turn") {
-      const error = angleDiff(fms.track, segment.heading);
+      // The racetrack's turns and legs are flown as headings, without wind correction (Stage D builds a ground path).
+      const error = angleDiff(fms.heading, segment.heading);
       if (Math.abs(error) < 3 || (Math.sign(error) !== segment.direction && Math.abs(error) < 20)) advance();
       return { legFrom: null, legTo: null, desiredTrack: segment.heading, crossTrack: 0, distanceToGo: null, bankCommand: MAX_BANK * segment.direction };
     }
     if (segment.kind === "heading") {
       plan.elapsed += dt;
       if (plan.elapsed >= segment.seconds) advance();
-      return { legFrom: null, legTo: null, desiredTrack: segment.heading, crossTrack: 0, distanceToGo: null, bankCommand: clamp(angleDiff(fms.track, segment.heading), -MAX_BANK, MAX_BANK) };
+      return { legFrom: null, legTo: null, desiredTrack: segment.heading, crossTrack: 0, distanceToGo: null, bankCommand: clamp(angleDiff(fms.heading, segment.heading), -MAX_BANK, MAX_BANK) };
     }
     // Inbound: track the inbound course to the fix; crossing it completes a circuit (or exits when armed).
     const from = offset(fix, segment.course + 180, 10);

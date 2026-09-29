@@ -78,11 +78,11 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     unreliableIasBelow: p(30, "KIAS", "lab", "airspeed shown as dashes below it", false, "B"),
     reliableIasAgainAt: p(33, "KIAS", "lab", "3 kt hysteresis", false, "B"),
     coordinatedEnterAt: p(45, "KIAS", "lab", "coordinated-flight regime entry", false, "B"),
-    coordinatedLeaveBelow: p(40, "KIAS", "lab", "5 kt hysteresis", false, "B"),
+    coordinatedLeaveBelow: p(40, "KIAS", "lab", "5 kt hysteresis; the ND turn trend is drawn only at or above it", false, "B"),
     sidewaysLimit: p(35, "kt", "lab", "low-speed air-relative sideways limit", false, "B"),
     rearwardLimit: p(30, "kt", "lab", "low-speed air-relative rearward limit", false, "B"),
     // Accelerations and rates
-    longitudinalAccel: p(2.0, "kt/s", "lab", "longitudinal acceleration and deceleration limit", false, "B"),
+    longitudinalAccel: p(2.0, "kt/s", "lab", "longitudinal acceleration and deceleration limit", true),
     lateralAccel: p(1.5, "kt/s", "lab", "low-speed lateral acceleration limit", false, "B"),
     maxVerticalSpeed: p(1000, "fpm", "lab", "existing MAX_VS", true),
     verticalAccel: p(600, "fpm/s", "lab", "existing VS_RATE", true),
@@ -117,7 +117,7 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     // Timing and display
     fmaCaptureBox: p(10, "s", "lab", "existing boxed-mode time", true),
     settlingTime: p(20, "s", "lab", "before hover tolerances apply", false, "B"),
-    noProgressBelow: p(1, "kt", "lab", "predicted along-path ground speed", false, "B"),
+    noProgressBelow: p(1, "kt", "lab", "ground speed below which there is no measurable progress", true),
   },
 };
 

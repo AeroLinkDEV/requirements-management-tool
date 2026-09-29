@@ -20,14 +20,15 @@ test('on FMS failure the aircraft flies latched heading and altitude, keeps movi
   const { unit, sim, fly } = setup()
   fly(30)
   expect(sim.lateralMode).toBe('LNAV')
-  const track = unit.track, altitude = unit.altitude, leg = active(unit), start = unit.truePosition
+  const flownHeading = unit.heading, altitude = unit.altitude, leg = active(unit), start = unit.truePosition
   unit.setCondition('fmsFail', true)
   fly(1)
   expect(sim.lateralMode).toBe('HDG')
   expect(sim.guidance.mode).toBe('HDG')
   expect(sim.guidance.desiredTrack).toBeNull()
   expect(sim.verticalMode).toBe('ALT HOLD')
-  expect(sim.selectedHeading).toBe(Math.round(track))
+  // The heading the aircraft was flying is latched (not its track, which differs by the drift).
+  expect(sim.selectedHeading).toBe(Math.round(flownHeading))
   expect(sim.altitudeHoldReference).toBe(Math.round(altitude))
   expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'FMS FAILURE', detail: expect.stringContaining(`ALT HOLD ${Math.round(altitude)} FT`) })
   // The references are latched: flying on does not re-latch them to the changing aircraft state.

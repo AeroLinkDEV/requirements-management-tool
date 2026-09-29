@@ -178,7 +178,8 @@ test('HDG SEL flies the selected heading without sequencing; LNAV armed captures
   fly(900, () => { passedAbeam ||= legGeometry(unit.activeLegStart, mun, unit.position).toGo < -1 })
   expect(passedAbeam).toBe(true)
   expect(sim.lateralMode).toBe('HDG')
-  expect(Math.abs(angleDiff(125, unit.track))).toBeLessThan(3)
+  // HDG SEL flies the heading; the track differs from it by the drift the wind gives.
+  expect(Math.abs(angleDiff(125, unit.heading))).toBeLessThan(3)
   expect(active(unit)).toBe('MUN')
   // Back toward the route on a 45-degree intercept: LNAV armed, then engaged when it captures the leg.
   sim.selectHeading(70)

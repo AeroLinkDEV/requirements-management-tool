@@ -1,6 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator, legGeometry, racetrackOutline, sarTrack } from '../src/fmsCdu/flight'
 import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
+import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
@@ -246,4 +247,52 @@ test('a direct-to starts the active leg at present position', () => {
   expect(unit.activeLegStart).toEqual(here)
   fly(3600, () => activeIdent(unit) === 'FERDI')
   expect(activeIdent(unit)).toBe('FERDI')
+})
+
+// Stage B1 of the helicopter-first plan: the aircraft flies a heading through the air, the wind carries the air mass,
+// and the ground velocity is their vector sum. Expected values are worked by hand, independently of kinematics.ts.
+test('the wind triangle gives the crab angle and ground speed, and refuses a track the airspeed cannot hold', () => {
+  // TAS 100 kt, a pure 30 kt crosswind from the right: crab asin(0.3) = 17.458 deg into it, GS 100 cos(17.458) = 95.394 kt.
+  const crosswind = holdTrack(100, 360, { direction: 90, speed: 30 })
+  expect(crosswind).toMatchObject({ feasible: true })
+  if (!crosswind.feasible) throw new Error('feasible')
+  expect(crosswind.windCorrection).toBeCloseTo(17.458, 3)
+  expect(crosswind.heading).toBeCloseTo(17.458, 3)
+  expect(crosswind.groundSpeed).toBeCloseTo(95.394, 3)
+  // 5 NM in 5 minutes (60 kt over the ground) with a pure 30 kt crosswind needs sqrt(60^2 + 30^2) = 67.082 kt TAS.
+  const rta = holdTrack(Math.hypot(60, 30), 360, { direction: 270, speed: 30 })
+  expect(rta.feasible && rta.groundSpeed).toBeCloseTo(60, 6)
+  // A crosswind stronger than the airspeed, or a headwind that stops progress: infeasible, never a floor.
+  expect(holdTrack(20, 360, { direction: 90, speed: 30 })).toMatchObject({ feasible: false })
+  expect(holdTrack(20, 360, { direction: 360, speed: 25 })).toMatchObject({ feasible: false })
+  expect(predictedGroundSpeed(20, 360, { direction: 360, speed: 25 })).toBeNull()
+  // Flying 20 kt into a 20 kt wind holds the ground position: no ground speed and no track.
+  expect(groundVelocity(20, 230, { direction: 230, speed: 20 })).toMatchObject({ speed: expect.closeTo(0, 9), track: null })
+})
+
+test('in a crosswind the aircraft crabs: its heading differs from its track by the wind correction, and LNAV holds the track', () => {
+  const { unit, fly } = setup()
+  // The demonstration route's first leg runs about 115 degrees; a 30 kt wind from the north-east is a crosswind on it.
+  unit.wind.direction = 25
+  unit.wind.speed = 30
+  fly(240)
+  const leg = legGeometry(unit.activeLegStart, unit.coordinates(activeIdent(unit)!)!, unit.truePosition)
+  expect(Math.abs(leg.crossTrack)).toBeLessThan(0.1)
+  const expected = holdTrack(unit.vnav.cruiseSpeed, unit.track, unit.wind)
+  if (!expected.feasible) throw new Error('feasible')
+  expect(Math.abs(expected.windCorrection)).toBeGreaterThan(10)
+  expect(unit.heading).toBeCloseTo(expected.heading, 0)
+  expect(unit.groundSpeed).toBeCloseTo(expected.groundSpeed, 0)
+})
+
+test('the airspeed changes at the profile acceleration limit, not in one step', () => {
+  const { unit, sim, fly } = setup()
+  fly(5)
+  expect(sim.tas).toBeCloseTo(120, 6)
+  unit.vnav.cruiseSpeed = 80
+  fly(10)
+  // 2 kt/s: ten seconds take 20 kt off, not 40.
+  expect(sim.tas).toBeCloseTo(100, 6)
+  fly(15)
+  expect(sim.tas).toBeCloseTo(80, 6)
 })

@@ -11,6 +11,7 @@ import {
 } from "./fmsModel";
 import { Constellation } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput } from "./gps";
+import { holdTrack, predictedGroundSpeed } from "./kinematics";
 import {
   ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
   type GpsChoice,
@@ -224,7 +225,7 @@ export class ScriptedFms implements CduBackend {
   /** The ident shown on REF NAV DATA, and an airway chosen on RTE 2 waiting for its TO fix. */
   navDataQuery: string | null = null;
   pendingVia: string | null = null;
-  private aircraft = { track: courseDeg(START_POSITION, { lat: 45.2150, lon: -75.3900 }), groundSpeed: 120, altitude: 3000, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0 };
+  private aircraft = { track: courseDeg(START_POSITION, { lat: 45.2150, lon: -75.3900 }), groundSpeed: 120, altitude: 3000, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0, heading: null as number | null };
   /** Whether each receiver has its baro altitude input (the bench can take it from one). */
   private gpsBaro: [boolean, boolean] = [true, true];
   /** Where the active leg starts: the last waypoint passed, or present position when a direct-to was executed. */
@@ -235,6 +236,11 @@ export class ScriptedFms implements CduBackend {
   get groundSpeed() { return this.aircraft.groundSpeed; }
   get altitude() { return this.aircraft.altitude; }
   get track() { return this.aircraft.track; }
+  /**
+   * The heading the aircraft flies (degrees true). With wind it differs from the track by the crab angle (kinematics.ts);
+   * before the flight simulation first reports it, the track stands in.
+   */
+  get heading() { return this.aircraft.heading ?? this.aircraft.track; }
   get verticalSpeed() { return this.aircraft.verticalSpeed; }
   /** Guidance deviations the flight simulation reports: cross-track NM (positive right) and track error degrees. */
   get crossTrack() { return this.aircraft.crossTrack; }
@@ -424,7 +430,9 @@ export class ScriptedFms implements CduBackend {
    * the engineering log with the reason. The demonstration start states (kbtvDemo.ts) use it.
    */
   placeAircraft(state: { position: LatLon; track: number; altitude: number }, reason: string) {
-    this.setAircraft({ ...state, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0 });
+    // Crabbed into the wind so the given track is the one flown (the heading when the track cannot be held is the track).
+    const hold = holdTrack(this.targetSpeed, state.track, this.wind);
+    this.setAircraft({ ...state, heading: hold.feasible ? hold.heading : state.track, groundSpeed: hold.feasible ? hold.groundSpeed : 0, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0 });
     this.engineering = [...this.engineering, {
       at: this.now, action: "PLACE AIRCRAFT",
       detail: `${reason}: ${formatPosition(state.position)}, track ${Math.round(state.track)}°, ${Math.round(state.altitude)} FT`,
@@ -501,7 +509,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** The flight simulation reports the aircraft's state after each step. */
-  setAircraft(state: Partial<{ position: LatLon; track: number; groundSpeed: number; altitude: number; verticalSpeed: number; crossTrack: number; trackError: number; bank: number; pitch: number }>) {
+  setAircraft(state: Partial<{ position: LatLon; track: number; heading: number; groundSpeed: number; altitude: number; verticalSpeed: number; crossTrack: number; trackError: number; bank: number; pitch: number }>) {
     // The simulation reports where the aircraft really is; the FMS position is that plus its navigation error.
     if (state.position) { this.truth = state.position; this.here = this.withError(this.truth); }
     const { position: _position, ...rest } = state;
@@ -607,7 +615,7 @@ export class ScriptedFms implements CduBackend {
   private gpsInput(time: number): GpsInput {
     return {
       time, position: this.truth, altitude: this.altitude, baroAltitude: this.altitude, track: this.track,
-      groundSpeed: this.groundSpeed, verticalSpeed: this.verticalSpeed, attitude: { bank: this.aircraft.bank, pitch: this.aircraft.pitch, heading: this.track },
+      groundSpeed: this.groundSpeed, verticalSpeed: this.verticalSpeed, attitude: { bank: this.aircraft.bank, pitch: this.aircraft.pitch, heading: this.heading },
     };
   }
 
@@ -717,9 +725,12 @@ export class ScriptedFms implements CduBackend {
 
   // ------------------------------------------------------------------ vertical profile and predictions (vnav.ts)
 
-  /** Ground speed on a course, from the true airspeed and the wind. */
+  /**
+   * Ground speed along a course, from the true airspeed and the wind by the wind triangle (kinematics.ts), or null when
+   * the course cannot be flown with progress at that airspeed: the prediction is then unknown, not given a floor.
+   */
   groundSpeedOn(course: number, tas = this.plannedSpeed) {
-    return Math.max(30, tas - this.wind.speed * Math.cos(((this.wind.direction - course) * Math.PI) / 180));
+    return predictedGroundSpeed(tas, course, this.wind);
   }
 
   /** The cold temperature correction to the FAF altitude, from the destination temperature on VNAV (0 at or above ISA). */
@@ -1479,7 +1490,12 @@ export class ScriptedFms implements CduBackend {
     if (!hold) return null;
     if (hold.status === "IN PROGRESS" || hold.status === "EXIT ARMED") return this.enteredHold;
     const at = route.legs.findIndex(leg => leg.kind === "wpt" && leg.ident === hold.fix);
-    const track = at >= 0 ? this.legGeometry(route)[at]?.course : undefined;
+    // On the active leg, the course of the leg flown into the fix (from where it began): measured from present position
+    // it would turn arbitrary as the aircraft reaches the fix, which is exactly when the entry is chosen.
+    const fix = at === 0 && route === this.active ? this.coordinates(hold.fix, route) : undefined;
+    const flown = route.legs[0];
+    const published = flown?.kind === "wpt" && flown.path === "CF" ? flown.course : undefined;
+    const track = fix ? published ?? courseDeg(this.legStart, fix) : at >= 0 ? this.legGeometry(route)[at]?.course : undefined;
     return track === undefined ? null : holdEntry(track, hold.inbound, hold.turn);
   }
 

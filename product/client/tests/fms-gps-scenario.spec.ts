@@ -69,7 +69,9 @@ test('a GPS step outside the receivers\' domain is refused at import, with the r
 
 test('a GPS step acts through the stimulus record the GPS sensors tab shows, on the receiver it names', () => {
   const { runner, fms } = runHeadless(scenarioOf([
-    gps(2, { op: 'jam', db: 10 }),
+    // 6 dB: enough to tell the receivers apart, with margin above the tracking threshold for the lowest satellite used
+    // (PRN 24 at 24 degrees), so the fault on it is detected whatever small attitude changes the flight makes.
+    gps(2, { op: 'jam', db: 6 }),
     gps(2, { op: 'satelliteFault', prn: 24, fault: 'STEP', value: 300 }),
     gps(1, { op: 'override', label: '130', kind: 'FORCE', amount: 0.9, ssm: 'NCD' }),
     gps(1, { op: 'fault', fault: 'STOP_TRANSMITTING', on: true }, { kind: 'time', seconds: 2 }),
@@ -77,14 +79,18 @@ test('a GPS step acts through the stimulus record the GPS sensors tab shows, on 
   ], 10))
   expect(runner.results.map(result => [result.status, result.at])).toEqual([['done', 0], ['done', 0], ['done', 0], ['done', 2], ['done', 4]])
   const stimulus = stimulusFor(fms)
-  expect(stimulus.state(1)).toMatchObject({ jamDb: 10, satFault: { prn: 24, kind: 'STEP', amount: 300 } })
+  expect(stimulus.state(1)).toMatchObject({ jamDb: 6, satFault: { prn: 24, kind: 'STEP', amount: 300 } })
   expect(stimulus.state(0)).toMatchObject({ jamDb: 0, satFault: null, stopped: false, overrides: { '130': { text: 'FORCE 0.9 NCD' } } })
-  // And on the receivers themselves: GPS 1's HIL (130) goes out forced and NCD; on GPS 2, PRN 24 off by 300 m is detected
-  // (its HIL a failure warning) and its signals are 10 dB down.
+  // And on the receivers themselves: GPS 1's HIL (130) goes out forced and NCD; on GPS 2, PRN 24 off by 300 m is caught
+  // (with enough satellites, fault detection and exclusion takes it out of the solution) and its signals are 6 dB down.
   expect(fms.gps[0].bus()!['130']).toMatchObject({ value: 0.9, ssm: 'NCD' })
-  expect(fms.gps[1].bus()!['130'].ssm).toBe('FW')
-  const cn0 = (index: number) => fms.gps[index].bus()!['060'].map(word => word.value!).filter(s => !s.sbas && s.tracked).map(s => s.cn0)
-  expect(Math.max(...cn0(1))).toBeLessThan(Math.min(...cn0(0)))
+  expect(fms.gps[1].bus()!['060'].map(word => word.value!).find(s => s.prn === 24)).toMatchObject({ excluded: true, used: false })
+  // Satellite by satellite, GPS 2 hears each one 6 dB weaker than GPS 1 does.
+  const cn0 = (index: number) => new Map(fms.gps[index].bus()!['060'].map(word => word.value!).filter(s => !s.sbas && s.tracked).map(s => [s.prn, s.cn0]))
+  const [one, two] = [cn0(0), cn0(1)]
+  const common = [...two.keys()].filter(prn => one.has(prn))
+  expect(common.length).toBeGreaterThan(3)
+  for (const prn of common) expect(one.get(prn)! - two.get(prn)!).toBeCloseTo(6, 0)
   // A stimulus the receiver refuses at run time is an execution error, not a silent pass.
   const accepted = new ScenarioRunner(scenarioOf([gps(1, { op: 'jam', db: 10 })]), new ScriptedFms(() => new Date(Date.parse(START))))
   expect(accepted.results[0]).toEqual({ status: 'done', at: 0 })

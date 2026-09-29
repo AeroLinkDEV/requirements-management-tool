@@ -128,3 +128,17 @@ test('the ND route stops at a fix without a position and marks only the active l
   const whole = route(wpt('MUN'), wpt('RDG'))
   expect(whole.activeRoute.map(point => [point.ident, point.active])).toEqual([['MUN', true], ['RDG', false]])
 })
+
+test('without measurable progress the bus publishes no ETA, rather than one from an invented speed (Stage B1)', () => {
+  const { unit, sim, fly } = setup()
+  fly(20)
+  expect(fmsOutputs(unit, sim).eta.status).toBe('NORMAL')
+  // A headwind equal to the airspeed holds the aircraft over the ground: the distance to go stops shrinking.
+  // Flown on a held heading straight into it, so nothing turns the aircraft out of the wind.
+  sim.selectHeading(unit.heading)
+  unit.wind.direction = unit.heading
+  unit.wind.speed = sim.tas
+  fly(30)
+  expect(unit.groundSpeed).toBeLessThan(1)
+  expect(fmsOutputs(unit, sim).eta).toEqual({ value: null, status: 'NCD' })
+})
