@@ -34,6 +34,11 @@ export type FmsOutputs = {
   desiredTrack: Word<number>;
   /** Label 116: cross-track distance, NM, positive right of the desired track. */
   crossTrack: Word<number>;
+  /**
+   * Where the lateral guidance and cross-track come from: the selected GPS's 116 on an RNAV final (GPS), or the route
+   * geometry (ROUTE); null without managed lateral guidance. A change is a change of source, shown, never substituted.
+   */
+  lateralSource: "GPS" | "ROUTE" | null;
   /** Label 117: vertical deviation, feet, positive above the path; `coupled` false for advisory information only. */
   verticalDeviation: Word<number>;
   verticalSource: "VNAV" | "APPR" | null;
@@ -130,7 +135,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
   const next = active.legs[0];
   const phase = fms.flightPhase;
   const empty: FmsOutputs = {
-    source: "FMS1", failed, desiredTrack: fail(), crossTrack: fail(), verticalDeviation: fail(), verticalSource: null, verticalCoupled: false,
+    source: "FMS1", failed, desiredTrack: fail(), crossTrack: fail(), lateralSource: null, verticalDeviation: fail(), verticalSource: null, verticalCoupled: false,
     rollCommand: fail(), distanceToGo: fail(), toWaypoint: fail(), eta: fail(), targetSpeed: fail(), targetAltitude: fail(),
     lateralMode: sim.lateralMode === "HDG" ? (sim.headingHeld ? "HDG HOLD" : "HDG SEL") : g.mode, lateralArmed: [],
     verticalMode: sim.verticalMode, verticalArmed: [], approach: { type: null, state: "OFF" },
@@ -157,12 +162,15 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
   const gpsScale = onFinal ? fms.gpsApproach?.scale ?? null : null;
   // On an RNAV final with GPS vertical guidance, the receiver's own 117 as it stands.
   const gpsVertical = onFinal && fms.gpsApproachVertical ? fms.gpsApproach!.verticalFt : null;
-  const gpsLateral = sim.approachMode === "CAPTURED" && onFinal ? fms.gpsApproach?.lateralFt ?? null : null;
+  // With GPS lateral authority (GPS-01), the receiver's own 116 as it stands, and its lateral scaling.
+  const gpsLateral = sim.gpsLateralActive && fms.gpsApproachLateral ? fms.gpsApproach?.lateralFt ?? null : null;
+  const lateralScale = gpsLateral !== null ? fms.gpsApproach?.scale ?? null : null;
   return {
     ...empty,
     desiredTrack: managed ? normal(g.desiredTrack!) : ncd(),
     // Captured on an RNAV final, the receiver's own 116 as it stands, converted to NM (GPS phase 3b).
     crossTrack: !managed ? ncd() : gpsLateral !== null ? normal(gpsLateral / 6076.12) : normal(g.crossTrack),
+    lateralSource: !managed ? null : gpsLateral !== null ? "GPS" : "ROUTE",
     // Flagged on an RNAV final without GPS vertical guidance: the receiver withdrew it, so no path is shown (3b).
     verticalDeviation: sim.verticalFlag ? fail() : gpsVertical !== null ? normal(gpsVertical) : path ? normal(fms.altitude - path.altitude) : ncd(),
     verticalSource: path?.source ?? null,
@@ -176,7 +184,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     lateralArmed: sim.lnavIsArmed ? ["LNAV"] : [],
     verticalArmed: sim.approachMode === "ARMED" && verticalLevel ? [type] : [],
     approach: { type, state: sim.approachMode },
-    lateralFullScaleNm: gpsScale ? gpsScale.lateralFullScaleFt / 6076.12 : LATERAL_FULL_SCALE[phase],
+    lateralFullScaleNm: lateralScale ? lateralScale.lateralFullScaleFt / 6076.12 : LATERAL_FULL_SCALE[phase],
     verticalFullScaleFt: gpsScale ? gpsScale.verticalFullScaleFt : path?.source === "APPR" ? 150 : 400,
     activeRoute,
     modifiedRoute: fms.routeStatus === "MOD" ? routePoints(fms, fms.route) : null,

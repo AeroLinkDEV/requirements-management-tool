@@ -5,8 +5,29 @@ import type { FlightPhase } from "./navigation";
 
 /**
  * How the FMS judges a CMA-5024 receiver (gps.ts) from its bus alone (GPS phase 3a). The FMS never reads the receiver's
- * internals: a word is used only when its SSM is NORMAL, and a receiver supports navigation only when its fix is valid
- * and its HIL (label 130) is within the horizontal alert limit of the phase.
+ * internals. One precedence table decides what it may do with what a receiver transmits (the GPS review's GPS-06, with
+ * GPS-04's numeric domain), implemented here once and used by source selection, approach capability, the alerts and the
+ * reason text the pages and the bench show. Each step vetoes; the first that applies is the reason given.
+ *
+ * May the receiver be navigated on (assessReceiver), in order:
+ *   1. transmission: the bus is silent (SILENT);
+ *   2. receiver state: 273 or 355 not Normal, 273 mode FAULT, or 355 unit fault (RECEIVER FAULT). An explicit fault
+ *      makes the receiver unusable even when its position and HIL words still look valid (conservative default);
+ *   3. position word status: 110, 120, 111 or 121 not Normal (NO FIX);
+ *   4. position domain: the assembled coarse + fine latitude and longitude finite and within ±90 and ±180 (BAD DATA);
+ *   5. integrity: 273 integrity DETECTED, or 130 not Normal (INTEGRITY);
+ *   6. integrity domain: HIL finite and not negative, HFOM (when Normal) finite and not negative (BAD DATA);
+ *   7. integrity limit: HIL within the phase's horizontal alert limit (INTEGRITY).
+ * May the approach be flown on the selected receiver (approachAuthority), in order:
+ *   1. the receiver may be navigated on (above);
+ *   2. approach identity and availability (156): Normal, selected, CRC valid, for the approach selected, complete,
+ *      available and not parked; any of these inhibits coupling (conservative default);
+ *   3. level (305): Normal and not NONE;
+ *   4. region: outside the approach region (156 armed) the approach is annunciated at its level but not yet guided;
+ *   5. lateral (116): Normal and finite, or the approach cannot be flown at all;
+ *   6. vertical: a level with vertical guidance (LPV, LNAV/VNAV) and 117 Normal and finite, or it is flown laterally
+ *      only, annunciated LNAV (the LPV-to-LNAV downgrade).
+ * The ability to navigate laterally (a usable receiver) is separate from permission to descend on an approach.
  */
 
 /**
@@ -23,11 +44,16 @@ export const ANP_FLOOR_NM = 0.02;
 
 export type GpsChoice = "AUTO" | "GPS1" | "GPS2";
 
+/** Why a receiver may not be navigated on: the class of the first veto in the precedence table. */
+export type ReceiverReason = "OK" | "SILENT" | "RECEIVER FAULT" | "NO FIX" | "BAD DATA" | "INTEGRITY";
+
 export type ReceiverAssessment = {
-  /** Supports navigation: a valid fix with HIL within the alert limit. */
+  /** May be navigated on: no veto in the precedence table applies. */
   usable: boolean;
-  /** Why not: the bus is silent, there is no valid fix, or integrity (HIL over the limit, or not computed). */
-  reason: "OK" | "SILENT" | "NO FIX" | "INTEGRITY";
+  reason: ReceiverReason;
+  /** The veto itself, as the pages and the bench show it ("273 MODE FAULT", "HIL -1.00 INVALID"); "" when usable. */
+  detail: string;
+  /** The assembled position, when its words are Normal and in range; null otherwise. */
   fix: LatLon | null;
   /** HIL (130) and HFOM (247), NM; null when the word is not NORMAL. */
   hil: number | null;
@@ -44,22 +70,61 @@ export type ReceiverAssessment = {
 
 const normal = (word: { value: number | null; ssm: string }) => (word.ssm === "NORMAL" ? word.value : null);
 
-/** The fix from the coarse and fine position words (110 + 120, 111 + 121), or null unless all four are NORMAL. */
+/** A number as a veto shows it: two decimals when finite, otherwise what it is (NaN, Infinity). */
+const shown = (value: number) => (Number.isFinite(value) ? value.toFixed(2) : String(value));
+/** A consumed quantity in its numeric domain: finite, and not negative where it cannot be. */
+const valid = (value: number, nonNegative = false) => Number.isFinite(value) && (!nonNegative || value >= 0);
+
+/**
+ * The fix from the coarse and fine position words (110 + 120, 111 + 121): null unless all four are Normal, and null when
+ * the assembled position is not finite or out of range (a Normal word is not a valid number: GPS-04).
+ */
 export function busFix(bus: GpsBus): LatLon | null {
+  const position = assembledPosition(bus);
+  return position && !positionVeto(position) ? position : null;
+}
+
+function assembledPosition(bus: GpsBus): LatLon | null {
   const parts = [normal(bus["110"]), normal(bus["120"]), normal(bus["111"]), normal(bus["121"])];
   if (parts.some(part => part === null)) return null;
   const [lat, latFine, lon, lonFine] = parts as number[];
   return { lat: lat + latFine, lon: lon + lonFine };
 }
 
+function positionVeto(position: LatLon) {
+  if (!valid(position.lat) || Math.abs(position.lat) > 90) return `LAT ${shown(position.lat)} OUT OF RANGE`;
+  if (!valid(position.lon) || Math.abs(position.lon) > 180) return `LON ${shown(position.lon)} OUT OF RANGE`;
+  return null;
+}
+
+/** May this receiver be navigated on: the first veto of the precedence table above, with its detail. */
 export function assessReceiver(bus: GpsBus | null, halNm: number): ReceiverAssessment {
-  if (!bus) return { usable: false, reason: "SILENT", fix: null, hil: null, hfom: null, mode: null, integrity: null, used: 0, visible: 0, level: "NONE", provider: null };
+  if (!bus) return { usable: false, reason: "SILENT", detail: "NOT TRANSMITTING", fix: null, hil: null, hfom: null, mode: null, integrity: null, used: 0, visible: 0, level: "NONE", provider: null };
   const status = bus["273"].ssm === "NORMAL" ? bus["273"].value : null;
+  const faults = bus["355"].ssm === "NORMAL" ? bus["355"].value : null;
   const sbas = bus["305"].ssm === "NORMAL" ? bus["305"].value : null;
-  const fix = busFix(bus), hil = normal(bus["130"]), hfom = normal(bus["247"]);
-  const reason = !fix ? "NO FIX" : hil === null || hil > halNm ? "INTEGRITY" : "OK";
+  const position = assembledPosition(bus), hil = normal(bus["130"]), hfom = normal(bus["247"]);
+  const positionBad = position ? positionVeto(position) : null;
+  const notNormal = (labels: ("110" | "120" | "111" | "121")[]) => labels.find(label => bus[label].ssm !== "NORMAL");
+  const missing = notNormal(["110", "120", "111", "121"]);
+  const veto = ((): [ReceiverReason, string] | null => {
+    if (!status) return ["RECEIVER FAULT", `273 ${bus["273"].ssm}`];
+    if (!faults) return ["RECEIVER FAULT", `355 ${bus["355"].ssm}`];
+    if (status.mode === "FAULT") return ["RECEIVER FAULT", "273 MODE FAULT"];
+    if (faults.unit) return ["RECEIVER FAULT", "355 UNIT FAULT"];
+    if (missing) return ["NO FIX", `${missing} ${bus[missing].ssm}`];
+    if (positionBad) return ["BAD DATA", positionBad];
+    if (status.integrity === "DETECTED") return ["INTEGRITY", "273 INTEGRITY DETECTED"];
+    if (hil === null) return ["INTEGRITY", `130 ${bus["130"].ssm}`];
+    if (!valid(hil, true)) return ["BAD DATA", `HIL ${shown(hil)} INVALID`];
+    if (hfom !== null && !valid(hfom, true)) return ["BAD DATA", `HFOM ${shown(hfom)} INVALID`];
+    if (hil > halNm) return ["INTEGRITY", `HIL ${shown(hil)} > HAL ${shown(halNm)}`];
+    return null;
+  })();
+  const [reason, detail] = veto ?? ["OK", ""];
   return {
-    usable: reason === "OK", reason, fix, hil, hfom, mode: status?.mode ?? null, integrity: status?.integrity ?? null, used: status?.used ?? 0, visible: status?.visible ?? 0,
+    usable: veto === null, reason, detail, fix: position && !positionBad ? position : null, hil, hfom,
+    mode: status?.mode ?? null, integrity: status?.integrity ?? null, used: status?.used ?? 0, visible: status?.visible ?? 0,
     level: sbas?.level ?? "NONE", provider: sbas?.provider ?? null,
   };
 }
@@ -142,16 +207,58 @@ export type GpsApproachWords = {
   scale: DeviationScale | null;
 };
 
-/** The approach words of a receiver's bus, each used only when Normal (GPS phase 3b). */
+/** A deviation word's value when Normal and finite; null otherwise (a Normal word is not a valid number: GPS-04). */
+const deviation = (word: { value: number | null; ssm: string }) => { const value = normal(word); return value !== null && valid(value) ? value : null; };
+
+/** The approach words of a receiver's bus, each used only when Normal and in its domain (GPS phase 3b). */
 export function approachWords(bus: GpsBus | null): GpsApproachWords {
   if (!bus) return { level: "NONE", status: null, lateralFt: null, verticalFt: null, toThresholdNm: null, scale: null };
   return {
     level: bus["305"].ssm === "NORMAL" ? bus["305"].value?.level ?? "NONE" : "NONE",
     status: bus["156"].ssm === "NORMAL" ? bus["156"].value : null,
-    lateralFt: normal(bus["116"]), verticalFt: normal(bus["117"]),
-    toThresholdNm: normal(bus["201"]), scale: bus.scale.ssm === "NORMAL" ? bus.scale.value : null,
+    lateralFt: deviation(bus["116"]), verticalFt: deviation(bus["117"]),
+    toThresholdNm: deviation(bus["201"]), scale: bus.scale.ssm === "NORMAL" ? bus.scale.value : null,
   };
 }
 
 /** The approach levels with vertical guidance: the laboratory approach contract captures only on these (and an ILS). */
 export const VERTICAL_LEVELS: readonly ApproachLevel[] = ["LPV", "LNAV/VNAV"];
+
+export type ApproachAuthority = {
+  /** What is annunciated: 305's level, LNAV when only lateral guidance remains, NO APPR when it may not be flown. */
+  annunciation: "LPV" | "LNAV/VNAV" | "LNAV" | "NO APPR";
+  /** The receiver's 116 may steer the approach now. */
+  lateral: boolean;
+  /** The approach may be descended on now: lateral, a vertical level, and 117 valid. */
+  vertical: boolean;
+  /** The first veto in the precedence table, as shown ("156 FAS CRC INVALID", "117 FW"); "" when both are available. */
+  reason: string;
+};
+
+/**
+ * May the approach be flown on the selected receiver: the approach half of the precedence table at the top of this file.
+ * `receiver` is that receiver's assessment (null when none is selected).
+ */
+export function approachAuthority(bus: GpsBus | null, receiver: ReceiverAssessment | null): ApproachAuthority {
+  const none = (reason: string): ApproachAuthority => ({ annunciation: "NO APPR", lateral: false, vertical: false, reason });
+  if (!bus || !receiver?.usable) return none(receiver ? `GPS ${receiver.detail}` : "NO GPS SELECTED");
+  if (bus["156"].ssm !== "NORMAL") return none(`156 ${bus["156"].ssm}`);
+  const approach = bus["156"].value!;
+  if (!approach.selected) return none("156 NOT SELECTED");
+  if (approach.crcInvalid) return none("156 FAS CRC INVALID");
+  if (approach.mismatch) return none("156 FAS MISMATCH");
+  if (approach.incomplete) return none("156 FAS INCOMPLETE");
+  if (!approach.available) return none("156 UNAVAILABLE");
+  if (approach.parked) return none("156 PARKED");
+  if (bus["305"].ssm !== "NORMAL") return none(`305 ${bus["305"].ssm}`);
+  const level = bus["305"].value!.level;
+  if (level === "NONE") return none("305 NO LEVEL");
+  if (approach.armed) return { annunciation: level, lateral: false, vertical: false, reason: "OUTSIDE APPROACH REGION" };
+  if (bus["116"].ssm !== "NORMAL") return none(`116 ${bus["116"].ssm}`);
+  if (deviation(bus["116"]) === null) return none(`116 ${shown(bus["116"].value!)} INVALID`);
+  const lateralOnly = (reason: string): ApproachAuthority => ({ annunciation: "LNAV", lateral: true, vertical: false, reason });
+  if (!VERTICAL_LEVELS.includes(level)) return lateralOnly(`305 ${level}`);
+  if (bus["117"].ssm !== "NORMAL") return lateralOnly(`117 ${bus["117"].ssm}`);
+  if (deviation(bus["117"]) === null) return lateralOnly(`117 ${shown(bus["117"].value!)} INVALID`);
+  return { annunciation: level, lateral: true, vertical: true, reason: "" };
+}

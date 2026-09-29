@@ -155,6 +155,10 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, larger ANP, and no RNAV approach
   const unit = new ScriptedFms()
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
+  // The receivers report the approach selected (156) once the FMS has sent its FAS block, at the next navigation update;
+  // until then it is not selected, and an unselected approach may not be flown (the GPS review's GPS-06).
+  expect(unit.approachType).toBe('NO APPR')
+  unit.updateNavigation(0)
   // The level the GPS reports (305, GPS phase 3b): outside the 30 NM approach region SBAS NAV supports LNAV/VNAV; LPV
   // comes only inside it, in SBAS PA.
   expect(unit.approachType).toBe('LNAV/VNAV')
