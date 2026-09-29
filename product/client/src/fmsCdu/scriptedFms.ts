@@ -156,6 +156,8 @@ export class ScriptedFms implements CduBackend {
   private sentFas: FasDataBlock | null = null;
   /** The FAS pinned with the executed plan (pinActive): what the receivers are sent, whatever cycle is active now. */
   private pinnedFas: { fas: FasDataBlock; cycle: string; revision: number } | null = null;
+  /** The executed approach's final approach fix and runway, pinned with the plan (pinActive); null without an approach. */
+  private executedApproach: { ident: string; faf: string | null; runway: string | null } | null = null;
   /** The satellite the GPS integrity condition faults, so a change of PRN clears the old one. */
   private integrityFaultPrn: number | null = null;
   /** Every change of navigation source: GPS1, GPS2, DME/DME, VOR/DME or DR, when it changed. */
@@ -737,7 +739,10 @@ export class ScriptedFms implements CduBackend {
       // The active leg is flown at the planned speed (its constraint, a hold); a later leg at the cruise speed or its
       // own speed constraint, which applies to the leg into its fix.
       const tas = i === 0 ? this.plannedSpeed : Math.min(this.vnav.cruiseSpeed, leg.speed ?? Infinity);
-      const constraint = i === runwayAt - 1 ? { kind: "AT" as const, altitude: this.fafAltitudeCorrected } : parseConstraint(leg.altitude);
+      // The final approach fix is crossed at its (cold-corrected) altitude: the executed approach's FAF, or on the
+      // demonstration route without an approach the fix before the runway.
+      const isFaf = this.finalApproachFix ? leg.ident === this.finalApproachFix && i < runwayAt : i === runwayAt - 1;
+      const constraint = isFaf ? { kind: "AT" as const, altitude: this.fafAltitudeCorrected } : parseConstraint(leg.altitude);
       waypoints.push({
         ident: leg.ident, legDistance, groundSpeed: this.groundSpeedOn(course ?? this.track, tas),
         constraint, endOfDescent: i === runwayAt, basis, missed: leg.source === "MISSED",
@@ -919,6 +924,7 @@ export class ScriptedFms implements CduBackend {
     // The approach geometry the GPS flies is part of the executed plan: its FAS is derived now, from this cycle, and kept.
     const fas = this.deriveFas();
     this.pinnedFas = fas ? { fas, cycle: this.activeCycle.id, revision: this.planRevision } : null;
+    this.pinApproachReference();
     if (!cycleChanged) return;
     const change = this.resolutionChange(before, ident => this.pins.get(ident) ?? undefined);
     const fasChanged = fasBefore && fas && fasBefore.fas.referencePathId === fas.referencePathId && fasBefore.fas.crc !== fas.crc;
@@ -939,6 +945,47 @@ export class ScriptedFms implements CduBackend {
     const approach = findProcedure(this.db, this.active, "APPROACH");
     const runway = approach ? this.db.airport(approach.airport)?.runways.find(entry => entry.ident === approach.runways[0]) : undefined;
     return approach ? buildFas(approach, runway, approach.airport, approach.faf ? this.coordinates(approach.faf) : undefined) : null;
+  }
+
+  /**
+   * The executed approach's final approach fix and runway, and on a newly executed approach the APPROACH REF values it
+   * implies: the FAF altitude from its leg and the runway's threshold elevation. A crew entry on the page stands until a
+   * different approach is executed.
+   */
+  private pinApproachReference() {
+    const approach = findProcedure(this.db, this.active, "APPROACH");
+    if (!approach) { this.executedApproach = null; return; }
+    const changed = this.executedApproach?.ident !== approach.ident;
+    this.executedApproach = { ident: approach.ident, faf: approach.faf ?? null, runway: approach.runways[0] ?? null };
+    if (!changed) return;
+    const fafLeg = approach.legs.find(leg => "ident" in leg && leg.ident === approach.faf);
+    const fafAltitude = fafLeg && "ident" in fafLeg ? Number(/^(\d{1,5})/.exec(fafLeg.altitude ?? "")?.[1] ?? NaN) : NaN;
+    if (Number.isFinite(fafAltitude)) this.vnav.fafAltitude = fafAltitude;
+    const runway = this.db.airport(approach.airport)?.runways.find(entry => entry.ident === approach.runways[0]);
+    if (runway) this.vnav.runwayElevation = runway.elevation;
+  }
+
+  /** The executed approach's final approach fix, or null without an approach (the demonstration route alone). */
+  get finalApproachFix() { return this.executedApproach?.faf ?? null; }
+
+  /**
+   * On the final approach segment: the final approach fix has been sequenced and the runway is still ahead. Without an
+   * executed approach, the runway being the active waypoint (the demonstration route, whose last fix is its FAF).
+   */
+  get onFinalSegment() {
+    const legs = this.active.legs, leg = legs[0];
+    if (leg?.kind !== "wpt" || this.sequenced === null) return false;
+    const runwayAt = legs.findIndex(entry => entry.kind === "wpt" && /^RW\d{2}/.test(entry.ident));
+    if (runwayAt < 0) return false;
+    const faf = this.finalApproachFix;
+    if (!faf) return runwayAt === 0;
+    return !legs.slice(0, runwayAt).some(entry => entry.kind === "wpt" && entry.ident === faf);
+  }
+
+  /** The runway the final approach segment leads to (its first runway leg ahead), or null. */
+  get finalRunway() {
+    const leg = this.active.legs.find(entry => entry.kind === "wpt" && /^RW\d{2}/.test(entry.ident));
+    return leg?.kind === "wpt" ? leg.ident : null;
   }
 
   /** The FAS the executed plan flies, the cycle it was derived from and the plan revision that accepted it. */
@@ -1231,8 +1278,9 @@ export class ScriptedFms implements CduBackend {
    * Reads an ARINC 424 file and loads it (loadNavData). A file with no usable records, or with an impossible value
    * anywhere in it, is refused whole with the reason, and nothing changes.
    */
-  loadArinc424(text: string, source: string): ({ loaded: string } & Pick<Arinc424Result, "read" | "skipped" | "errors">) | { refused: string } {
-    const result = parseArinc424(text);
+  loadArinc424(text: string, source: string, airports?: string[]): ({ loaded: string } & Pick<Arinc424Result, "read" | "skipped" | "errors">) | { refused: string } {
+    // A full CIFP is large: airports limits the load to those airports, their procedures and the fixes they use.
+    const result = parseArinc424(text, { airports });
     if (result.invalid.length) return { refused: `${source}: ${result.invalid[0]}` };
     if (result.read === 0) return { refused: `${source}: no usable ARINC 424 records${result.skipped ? ` (${result.skipped} lines not recognised)` : ""}` };
     const outcome = this.loadNavData(result.data, source);
