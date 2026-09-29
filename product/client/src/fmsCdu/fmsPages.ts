@@ -39,7 +39,9 @@ export function verticalPathAngle(fms: ScriptedFms) { return approach(fms)?.vpa 
 const altitudeText = (leg: Leg) => {
   if (leg.kind !== "wpt") return "";
   const altitude = leg.altitude ? formatConstraint(parseConstraint(leg.altitude) ?? { kind: "AT", altitude: 0 }) : "-----";
-  return leg.speed ? `${leg.speed}/${leg.altitude ? altitude : "-----"}` : altitude;
+  // A coded procedure speed limit (at, or at or below) shows like a speed constraint; the crew flies it (ADVISORY).
+  const speed = leg.speed ?? (leg.speedLimit && leg.speedLimit.descriptor !== "AT OR ABOVE" ? leg.speedLimit.kt : undefined);
+  return speed ? `${speed}/${leg.altitude ? altitude : "-----"}` : altitude;
 };
 
 const eta = (ms: number) => hhmm(new Date(ms)).slice(0, 4) + "Z";

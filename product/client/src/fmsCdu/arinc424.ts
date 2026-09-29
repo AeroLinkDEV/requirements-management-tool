@@ -425,6 +425,8 @@ function buildApproach(icao: string, ident: string, records: ProcedureRecord[], 
   const mapAt = final.findIndex(r => r.description[3] === "M");
   if (mapAt < 0) return "no missed approach point";
   const approachLegs = legs(final.slice(0, mapAt + 1));
+  // The MAP is flown over, never turned short of: the missed approach starts there.
+  if (typeof approachLegs !== "string") { const last = approachLegs.at(-1); if (last && "ident" in last) approachLegs[approachLegs.length - 1] = { ...last, overfly: true }; }
   const missed = legs(final.slice(mapAt + 1));
   if (typeof approachLegs === "string") return approachLegs;
   if (typeof missed === "string") return missed;

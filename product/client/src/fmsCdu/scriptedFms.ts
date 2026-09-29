@@ -36,6 +36,7 @@ export type Rendezvous = {
 };
 import { PLANNING_PAGES } from "./planningPages";
 import { composeRoute, enrouteLegs, findProcedure } from "./procedures";
+import { lowestProcedureLimit, procedureSpeedLimit, type ProcedureSpeed } from "./procedureSpeed";
 import { ACTIVE_PROFILE, type AircraftProfile } from "./profile";
 import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line } from "./screen";
 import { NO_SURFACE, radioHeight, surfaceById, type Surface } from "./surface";
@@ -183,7 +184,7 @@ export class ScriptedFms implements CduBackend {
   /** The FAS pinned with the executed plan (pinActive): what the receivers are sent, whatever cycle is active now. */
   private pinnedFas: { fas: FasDataBlock; cycle: string; revision: number } | null = null;
   /** The executed approach's final approach fix and runway, pinned with the plan (pinActive); null without an approach. */
-  private executedApproach: { ident: string; faf: string | null; runway: string | null } | null = null;
+  private executedApproach: { ident: string; faf: string | null; runway: string | null; instrumentEnd: string | null } | null = null;
   /** The satellite the GPS integrity condition faults, so a change of PRN clears the old one. */
   private integrityFaultPrn: number | null = null;
   /** Every change of navigation source: GPS1, GPS2, DME/DME, VOR/DME or DR, when it changed. */
@@ -599,8 +600,10 @@ export class ScriptedFms implements CduBackend {
       if (!route.legs.some(l => l.kind !== "disco")) this.alert(alert("END OF ROUTE"));
       return;
     }
-    // Passing the runway starts the missed approach; its hold is armed so the aircraft holds at the end of it.
-    if (passed?.kind === "wpt" && passed.source === "APPR" && /^RW\d{2}/.test(ident)) this.armMissedHold(route);
+    // Passing the instrument end (the runway, or a point-in-space approach's MAP) starts the missed approach; its hold
+    // is armed so the aircraft holds at the end of it.
+    const end = this.instrumentEnd;
+    if (passed?.kind === "wpt" && passed.source === "APPR" && (end ? ident === end : /^RW\d{2}/.test(ident))) this.armMissedHold(route);
     const pending = this.modified?.legs[0];
     if (pending?.kind === "wpt" && pending.ident === ident) this.modified?.legs.shift();
     if (!route.legs.some(next => next.kind === "wpt")) this.alert(alert("END OF ROUTE"));
@@ -855,13 +858,25 @@ export class ScriptedFms implements CduBackend {
 
   get fafAltitudeCorrected() { return this.vnav.fafAltitude + this.coldCorrection; }
 
-  /** The speed limit at the active fix or in the hold, if any. */
+  /**
+   * Valid barometric altitude, or null when it is not valid. No air data failure is modelled yet, so it is always the
+   * altitude; the procedure speed release reads null as invalid (R3-04).
+   */
+  get validBaroAltitude(): number | null { return this.altitude; }
+
+  /** The procedure speed limit in force on the executed approach (C.5, procedureSpeed.ts), knots indicated; or null. */
+  get procedureSpeed(): ProcedureSpeed | null {
+    return procedureSpeedLimit(findProcedure(this.db, this.active, "APPROACH"), this.active.approach?.transition, this.active.legs[0], this.validBaroAltitude);
+  }
+
+  /** The speed limit at the active fix, in the hold, or in force on the procedure (as true airspeed), if any. */
   private get speedLimit() {
     const leg = this.active.legs[0];
     const constraint = leg?.kind === "wpt" ? leg.speed : undefined;
     // The holding speed is an indicated airspeed (table and chart), flown as the true airspeed at the present altitude.
     const hold = this.active.hold?.status === "IN PROGRESS" ? tasFromIas(this.active.hold.speed, this.altitude) : undefined;
-    return Math.min(constraint ?? Infinity, hold ?? Infinity);
+    const procedure = this.procedureSpeed;
+    return Math.min(constraint ?? Infinity, hold ?? Infinity, procedure ? tasFromIas(procedure.kt, this.altitude) : Infinity);
   }
 
   /** The planned speed: cruise, within the speed limit. The predictions (and so the rendezvous) use it. */
@@ -1171,7 +1186,10 @@ export class ScriptedFms implements CduBackend {
     const approach = findProcedure(this.db, this.active, "APPROACH");
     if (!approach) { this.executedApproach = null; return; }
     const changed = this.executedApproach?.ident !== approach.ident;
-    this.executedApproach = { ident: approach.ident, faf: approach.faf ?? null, runway: approach.runways[0] ?? null };
+    this.executedApproach = {
+      ident: approach.ident, faf: approach.faf ?? null, runway: approach.runways[0] ?? null,
+      instrumentEnd: approach.endpoint?.instrumentEnd.fix ?? approach.runways[0] ?? null,
+    };
     if (!changed) return;
     const fafLeg = approach.legs.find(leg => "ident" in leg && leg.ident === approach.faf);
     const fafAltitude = fafLeg && "ident" in fafLeg ? Number(/^(\d{1,5})/.exec(fafLeg.altitude ?? "")?.[1] ?? NaN) : NaN;
@@ -1184,21 +1202,35 @@ export class ScriptedFms implements CduBackend {
   get finalApproachFix() { return this.executedApproach?.faf ?? null; }
 
   /**
-   * On the final approach segment: the final approach fix has been sequenced and the runway is still ahead. Without an
-   * executed approach, the runway being the active waypoint (the demonstration route, whose last fix is its FAF).
+   * The executed approach's instrument end, its missed approach point: the runway on a runway approach, the MAP fix on
+   * a point-in-space approach (Procedure.endpoint). Null without an executed approach.
+   */
+  get instrumentEnd() { return this.executedApproach?.instrumentEnd ?? null; }
+
+  /**
+   * On the final approach segment: the final approach fix has been sequenced and the instrument end (the runway, or a
+   * point-in-space approach's MAP) is still ahead. Without an executed approach, the runway being the active waypoint
+   * (the demonstration route, whose last fix is its FAF).
    */
   get onFinalSegment() {
     const legs = this.active.legs, leg = legs[0];
     if (leg?.kind !== "wpt" || this.sequenced === null) return false;
-    const runwayAt = legs.findIndex(entry => entry.kind === "wpt" && /^RW\d{2}/.test(entry.ident));
-    if (runwayAt < 0) return false;
+    const end = this.instrumentEnd;
+    const endAt = end ? legs.findIndex(entry => entry.kind === "wpt" && entry.ident === end && entry.source === "APPR")
+      : legs.findIndex(entry => entry.kind === "wpt" && /^RW\d{2}/.test(entry.ident));
+    if (endAt < 0) return false;
     const faf = this.finalApproachFix;
-    if (!faf) return runwayAt === 0;
-    return !legs.slice(0, runwayAt).some(entry => entry.kind === "wpt" && entry.ident === faf);
+    if (!faf) return endAt === 0;
+    return !legs.slice(0, endAt).some(entry => entry.kind === "wpt" && entry.ident === faf);
   }
 
-  /** The runway the final approach segment leads to (its first runway leg ahead), or null. */
+  /**
+   * The runway the final approach segment leads to, or null: the executed approach's runway while it is ahead (none on
+   * a point-in-space approach, whose final ends at its MAP); without an executed approach, the first runway leg ahead.
+   */
   get finalRunway() {
+    const approach = this.executedApproach;
+    if (approach) return approach.runway && this.active.legs.some(entry => entry.kind === "wpt" && entry.ident === approach.runway) ? approach.runway : null;
     const leg = this.active.legs.find(entry => entry.kind === "wpt" && /^RW\d{2}/.test(entry.ident));
     return leg?.kind === "wpt" ? leg.ident : null;
   }
@@ -1309,8 +1341,29 @@ export class ScriptedFms implements CduBackend {
 
   get approachArmed() { return this.armedApproach; }
 
-  /** APPR: arms the approach; it becomes active on the final approach. */
-  armApproach(on = true) { this.armedApproach = on; this.emit(); }
+  /**
+   * APPR: arms the approach; it becomes active on the final approach. Refused when the executed approach codes a speed
+   * limit below the profile's VMINI (C.5, Q7): the procedure can still be inspected and planned, but not flown coupled.
+   * Returns whether the approach is armed.
+   */
+  armApproach(on = true) {
+    if (on && this.approachRefusal) {
+      this.advisory("SPD LIMIT BELOW VMINI");
+      this.emit();
+      return false;
+    }
+    this.armedApproach = on;
+    this.emit();
+    return on;
+  }
+
+  /** Why the executed approach may not be flown coupled, or null: a procedure speed limit below VMINI (Q7). */
+  get approachRefusal(): string | null {
+    const approach = findProcedure(this.db, this.active, "APPROACH");
+    const lowest = approach ? lowestProcedureLimit(approach) : null;
+    const vmini = this.aircraftProfile.parameters.vmini?.value;
+    return lowest !== null && vmini !== undefined && lowest < vmini ? `procedure speed limit below profile VMINI (${lowest} < ${vmini} KIAS)` : null;
+  }
 
   /**
    * TOGA: a go-around before the runway. The rest of the approach is dropped and the missed approach becomes the

@@ -110,7 +110,7 @@ test('87N R190 imports record by record: final, speed limits, the missed approac
   expect(r190.legs).toEqual([
     { ident: 'TIDUE', altitude: '1700A', speedLimit: { kt: 70, descriptor: 'AT OR BELOW' } },
     { ident: 'STAYS', altitude: '1700A', path: 'TF' },
-    { ident: 'CRANN', altitude: '560', path: 'TF', speedLimit: { kt: 70, descriptor: 'AT OR BELOW' }, verticalAngleDeg: 0 },
+    { ident: 'CRANN', altitude: '560', path: 'TF', speedLimit: { kt: 70, descriptor: 'AT OR BELOW' }, verticalAngleDeg: 0, overfly: true },
   ])
   // C.5a: the CA on 190.0 magnetic (176 true) to 439, below the MDA; then DF BEADS with its right turn, at or above 2000,
   // speed 070; the HM at BEADS inbound 236.0 magnetic (222 true), right turns, 4 NM legs (not time), speed 090.

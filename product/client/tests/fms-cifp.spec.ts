@@ -37,7 +37,7 @@ test('an RNAV approach is built from its CIFP legs: the final, its FAF, the miss
     { ident: 'FOVES', altitude: '2000A', path: 'TF' },
     // The step-down fix and the threshold code the vertical angle, -3.00 degrees.
     { ident: 'JUNEL', altitude: '1020A', path: 'TF', verticalAngleDeg: -3 },
-    { ident: 'RW15', altitude: '357', path: 'TF', verticalAngleDeg: -3 },
+    { ident: 'RW15', altitude: '357', path: 'TF', verticalAngleDeg: -3, overfly: true },
   ])
   // The missed approach: a climb on 145.8 degrees magnetic (130.8 true) to 1000 ft, direct YUNUD turning right, and the
   // HM there on 042.0 (027 true) with 5 NM legs, kept on the DF leg and as the missed approach hold.

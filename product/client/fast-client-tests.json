@@ -45,6 +45,7 @@
     "fms-cifp.spec.ts",
     "fms-kbtv-demo.spec.ts",
     "fms-heliport-procedures.spec.ts",
+    "fms-pins-approach.spec.ts",
     "fms-gps-scenario.spec.ts",
     "fms-gps-approach-auto.spec.ts",
     "fms-prediction-endpoints.spec.ts"
