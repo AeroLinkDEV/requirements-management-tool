@@ -6,7 +6,7 @@ import { CORE_PAGES } from "./fmsPages";
 import {
   START_POSITION, WAYPOINT, arcLength, bearingDeg, bearingIntersection, courseDeg, distanceNm, formatPosition, fromLocal, toLocal, holdEntry, isOutstanding,
   maxSarGroundSpeed, offset,
-  type Hold, type HoldEntry, type LatLon, type Leg, type LskResult, type Message, type Offset, type Page, type PageId, type Route, type Sar,
+  type Hold, type HoldEntry, type HoldStatus, type LatLon, type Leg, type LskResult, type Message, type Offset, type Page, type PageId, type Route, type Sar,
   type SarPattern, type Uplink,
 } from "./fmsModel";
 import { Constellation } from "./gnss";
@@ -16,7 +16,7 @@ import {
   ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
   type GpsChoice,
 } from "./gpsSensors";
-import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
+import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type ProcedureHold, type StoredRoute } from "./navData";
 import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
 import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
 import { NAV_PAGES } from "./navPages";
@@ -27,6 +27,7 @@ import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line
 import { NO_SURFACE, radioHeight, surfaceById, type Surface } from "./surface";
 import { TACTICAL_PAGES } from "./tacticalPages";
 import { checkAtTdn, planTransition } from "./transition";
+import { defaultLegMinutes, holdingSpeedLimit } from "./holds";
 import type { CduFunction } from "./variants";
 
 /**
@@ -98,8 +99,6 @@ function planFingerprint(legs: Route["legs"]) {
   return hash.toString(16).padStart(8, "0");
 }
 
-/** The ICAO maximum holding speed up to 14 000 ft. */
-const MAX_HOLDING_SPEED = 230;
 
 export type LegGeometry = { course: number; distance: number } | null;
 
@@ -526,14 +525,17 @@ export class ScriptedFms implements CduBackend {
     if (!leg || leg.kind === "disco") { this.alert(alert("END OF ROUTE")); return "end"; }
     // A conditional leg ends where its event happened: the next leg starts from here.
     if (leg.kind === "cond") { this.passLeg(null); return "route"; }
+    // A procedure hold (HF, HA, HM on the leg) is armed as the route's hold when its fix is reached, unless the route
+    // already holds there (the armed missed-approach hold).
+    if (leg.hold && route.hold?.fix !== leg.ident) route.hold = this.holdFromProcedure(leg.ident, leg.hold, "ARMED");
     const hold = route.hold;
-    // A hold with a one-turn exit (HF) leaves at the first fix crossing after its entry.
-    if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && hold.exit === "1 TURN") hold.status = "EXIT ARMED";
+    if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExitReached(hold)) hold.status = "EXIT ARMED";
     if (hold && hold.fix === leg.ident && hold.status !== "EXIT ARMED") {
       if (hold.status === "ARMED") {
         this.enteredHold = this.holdEntryFor(route);
         hold.status = "IN PROGRESS";
-        if (hold.speed > MAX_HOLDING_SPEED) this.alert(alert("HIGH HOLDING SPEED"));
+        const limit = holdingSpeedLimit(this.altitude, this.aircraftProfile);
+        if (limit !== null && hold.speed > limit) this.alert(alert("HIGH HOLDING SPEED"));
       }
       return "hold";
     }
@@ -1256,11 +1258,12 @@ export class ScriptedFms implements CduBackend {
   private armMissedHold(route: Route) {
     const missedHold = findProcedure(this.db, route, "APPROACH")?.missedHold;
     if (!missedHold || route.hold) return;
-    // A coded leg distance takes the place of leg time, and a coded speed limit that of the 180 kt default (C.6).
+    // A coded leg distance takes the place of leg time, and a coded speed limit that of the profile's holding speed
+    // (C.6, C16). The S300 flies it for one racetrack, then leaves it (MISSED-HOLD).
     const legDistance = missedHold.legDistanceNm ?? null;
     route.hold = {
-      fix: missedHold.fix, turn: missedHold.turn, inbound: missedHold.inbound, legTime: legDistance === null ? 1 : null, legDistance, exit: "MANUAL",
-      speed: missedHold.speedLimit?.kt ?? 180, altitude: missedHold.altitude, status: "ARMED",
+      fix: missedHold.fix, turn: missedHold.turn, inbound: missedHold.inbound, legTime: legDistance === null ? this.defaultHoldLegTime() : null, legDistance,
+      exit: "MANUAL", speed: missedHold.speedLimit?.kt ?? this.defaultHoldSpeed(), altitude: missedHold.altitude, status: "ARMED", missed: true,
     };
     for (const leg of route.legs) if (leg.kind === "wpt" && leg.ident === missedHold.fix) leg.qualifier = "/H";
   }
@@ -1854,8 +1857,43 @@ export class ScriptedFms implements CduBackend {
       if (leg.kind === "wpt") leg.qualifier = "/H";
       // The inbound course defaults to the course of the leg into the fix.
       const inbound = this.legGeometry(route)[at]?.course ?? 360;
-      route.hold = { fix, turn: "RIGHT", inbound, legTime: 1.0, legDistance: null, exit: "MANUAL", speed: 220, altitude: "5000A", status: "INACTIVE" };
+      route.hold = { fix, turn: "RIGHT", inbound, legTime: this.defaultHoldLegTime(), legDistance: null, exit: "MANUAL", speed: this.defaultHoldSpeed(), altitude: "5000A", status: "INACTIVE" };
     });
+  }
+
+  /** The helicopter defaults to its holding speed limit for the altitude (M300 10-8); the airline profile to 220 kt. */
+  private defaultHoldSpeed() {
+    if (this.aircraftProfile.verticalPolicy !== "ADVISORY") return 220;
+    return holdingSpeedLimit(this.altitude, this.aircraftProfile) ?? this.aircraftProfile.parameters.holdingSpeedHigh.value;
+  }
+
+  /** The helicopter's leg time for the altitude (M300 10-9); the airline profile one minute. */
+  private defaultHoldLegTime() { return this.aircraftProfile.verticalPolicy === "ADVISORY" ? defaultLegMinutes(this.altitude) : 1.0; }
+
+  /** A coded procedure hold as the route's hold: its coded exit, leg, speed limit (or the default) and altitude. */
+  private holdFromProcedure(fix: string, coded: ProcedureHold, status: HoldStatus): Hold {
+    const legDistance = coded.legDistanceNm ?? null;
+    return {
+      fix, turn: coded.turn, inbound: coded.inbound, legDistance, legTime: legDistance === null ? coded.legTimeMin ?? this.defaultHoldLegTime() : null,
+      exit: coded.exit === "ONCE" ? "ONCE" : coded.exit === "AT ALT" ? "AT TGT ALT" : "MANUAL",
+      speed: coded.speedLimit?.kt ?? this.defaultHoldSpeed(), altitude: coded.altitude ?? "", status,
+    };
+  }
+
+  /**
+   * At a fix crossing in the hold: whether it leaves now. ONCE and the missed-approach hold leave at the first crossing
+   * after the entry (one racetrack); AT TGT ALT at the first crossing with the target altitude reached (within 100 ft,
+   * or on the right side of an at-or-above / at-or-below target); MANUAL only when the crew arms EXIT HOLD.
+   */
+  private holdExitReached(hold: Hold) {
+    if (hold.missed || hold.exit === "ONCE") return true;
+    if (hold.exit !== "AT TGT ALT") return false;
+    const target = /^(\d+)([AB]?)$/.exec(hold.altitude);
+    if (!target) return true;
+    const feet = Number(target[1]);
+    if (target[2] === "A") return this.altitude >= feet - 100;
+    if (target[2] === "B") return this.altitude <= feet + 100;
+    return Math.abs(this.altitude - feet) <= 100;
   }
 
   changeHold(change: (hold: Hold) => void) {

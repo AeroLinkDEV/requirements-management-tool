@@ -56,7 +56,7 @@ export default function FmsMap({ fms, sim, range }: Props) {
 
   const hold = active.hold ?? (fms.routeStatus === "MOD" ? fms.route.hold : undefined);
   const holdFix = hold ? fms.coordinates(hold.fix) : undefined;
-  const racetrack = hold && holdFix ? racetrackOutline(holdFix, hold, fms.groundSpeed, sim.tas) : null;
+  const racetrack = hold && holdFix ? racetrackOutline(holdFix, hold, fms.groundSpeed, sim.tas, fms.wind.speed) : null;
 
   const sarStart = active.legs.find(leg => leg.kind === "wpt" && leg.qualifier === "/S");
   const sarPath = sim.sarPath

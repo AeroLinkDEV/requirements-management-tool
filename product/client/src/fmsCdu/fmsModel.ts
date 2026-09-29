@@ -151,9 +151,16 @@ export type Route = {
 /** A hold is INACTIVE while only in a modification, ARMED once executed, IN PROGRESS from the first fix crossing. */
 export type HoldStatus = "INACTIVE" | "ARMED" | "IN PROGRESS" | "EXIT ARMED";
 export type HoldEntry = "DIRECT" | "TEARDROP" | "PARALLEL";
+/**
+ * The hold's EXIT TYPE (M300 10-10): MANUAL (held until the crew arms EXIT HOLD), ONCE (a course reversal, HF: out at
+ * the first fix crossing after the entry), AT TGT ALT (HA: out at the first fix crossing with the target altitude
+ * reached). `missed` marks the missed-approach hold, which the S300 flies for one racetrack and then leaves (M300 7-16
+ * NOTE; plan MISSED-HOLD), whatever its coded exit.
+ */
+export type HoldExit = "MANUAL" | "ONCE" | "AT TGT ALT";
 export type Hold = {
   fix: string; turn: "RIGHT" | "LEFT"; inbound: number; legTime: number | null; legDistance: number | null;
-  exit: "MANUAL" | "1 TURN"; speed: number; altitude: string; status: HoldStatus;
+  exit: HoldExit; speed: number; altitude: string; status: HoldStatus; missed?: boolean;
 };
 
 /**

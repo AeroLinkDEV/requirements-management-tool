@@ -31,6 +31,8 @@ export const ALERTS: readonly AlertDefinition[] = [
   { text: "HF CONTROL LOST", meaning: "The FMS can no longer tune the HF radio" },
   { text: "HIGH GLIDEPATH ANGLE", meaning: "The computed vertical path is steeper than 3.77 degrees" },
   { text: "HIGH HOLDING SPEED", meaning: "Speed is above the maximum holding speed for the altitude" },
+  // Not in the CMA-9000 list: the bench cannot fly the racetrack when the wind is at least the airspeed (holds.ts).
+  { text: "UNABLE HOLD", meaning: "(Laboratory) The holding pattern cannot be flown: the wind is at least the true airspeed" },
   { text: "HIGH SAR SPEED", meaning: "Ground speed is above the maximum for the search pattern" },
   { text: "INDEPENDENT OP", meaning: "The FMS is no longer synchronised with the other FMS" },
   { text: "KALMAN NAV LOST", meaning: "The blended (Kalman filter) solution is no longer available" },

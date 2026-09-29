@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { parseArinc424 } from '../src/fmsCdu/arinc424'
-import { bearingDeg, distanceNm } from '../src/fmsCdu/fmsModel'
+import { FlightSimulator } from '../src/fmsCdu/flight'
+import { bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import type { Airport, Fix } from '../src/fmsCdu/navData'
 import { joinTransition } from '../src/fmsCdu/procedures'
 import { screenText } from '../src/fmsCdu/screen'
@@ -182,8 +183,8 @@ test('C.7: in the FMS the route flies TIDUE once with its HF; a direct-to TIDUE 
 test('C.6: a missed approach arms the BEADS hold with its coded 4 NM legs and 90 kt, not 1 minute at 180 kt', () => {
   const unit = flying('87N', 'R190', 'HTO')
   expect(unit.goAround()).toBe(true)
-  // The exit stays as it is today (MANUAL); how the hold is exited and flown is Stage D.
-  expect(unit.activeRoute.hold).toMatchObject({ fix: 'BEADS', turn: 'RIGHT', inbound: 222, legDistance: 4, legTime: null, speed: 90, exit: 'MANUAL', altitude: '2000A' })
+  // The coded exit (HM: MANUAL) is kept; the S300 still leaves it after one racetrack (missed, MISSED-HOLD).
+  expect(unit.activeRoute.hold).toMatchObject({ fix: 'BEADS', turn: 'RIGHT', inbound: 222, legDistance: 4, legTime: null, speed: 90, exit: 'MANUAL', altitude: '2000A', missed: true })
 })
 
 test('C.5: procedure speed limits are imported from columns 100-102 with their descriptor, on fix and conditional legs', () => {
@@ -246,4 +247,62 @@ test('the CDU: a heliport is a destination, REF NAV DATA shows it and its approa
   unit.press('DEP_ARR')
   unit.press('LSK1R')
   expect(lines(unit).join('\n')).toContain('RNAV 190')
+})
+
+test('MISSED-HOLD: the BEADS hold is flown for one racetrack and left at the fix; the route ends, and NAV gives way to HDG (D-H, M300 7-16)', () => {
+  const unit = flying('87N', 'R190', 'HTO')
+  const sim = new FlightSimulator(unit)
+  expect(unit.goAround()).toBe(true)
+  const beads = unit.coordinates('BEADS')!
+  // Established on the inbound course 3 NM before BEADS at 2000 ft: a direct entry.
+  expect(unit.directTo('BEADS')).toBeUndefined()
+  unit.press('EXEC')
+  unit.placeAircraft({ position: offset(beads, 222 + 180, 3), track: 222, altitude: 2000 }, 'test: inbound to BEADS')
+  const fly = (seconds: number, until: () => boolean) => { for (let t = 0; t < seconds; t++) { sim.step(1); if (until()) return t } return seconds }
+  expect(fly(600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')).toBeLessThan(600)
+  expect(unit.holdEntryFlown).toBe('DIRECT')
+  // One racetrack: two 4 NM legs and two half turns at about 90 kt is roughly seven minutes; then out at the fix.
+  const circuit = fly(1200, () => unit.activeRoute.hold === undefined)
+  expect(circuit).toBeGreaterThan(300)
+  expect(circuit).toBeLessThan(720)
+  expect(distanceNm(unit.position, beads)).toBeLessThan(0.3)
+  fly(10, () => false)
+  expect(unit.recallList.some(m => m.text === 'END OF ROUTE')).toBe(true)
+  expect(sim.lateralMode).toBe('HDG')
+})
+
+test('an AT TGT ALT hold (HA) is left at the first fix crossing once the target altitude is reached (D-H, M300 10-10)', () => {
+  const unit = flying('87N', 'R190', 'HTO')
+  const sim = new FlightSimulator(unit)
+  const tidue = unit.coordinates('TIDUE')!
+  expect(unit.directTo('TIDUE')).toBeUndefined()
+  unit.press('EXEC')
+  unit.placeAircraft({ position: offset(tidue, 300, 3), track: 120, altitude: 1500 }, 'test: toward TIDUE below the target')
+  const fly = (seconds: number, until: () => boolean) => { for (let t = 0; t < seconds; t++) { sim.step(1); if (until()) return t } return seconds }
+  fly(600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')
+  expect(unit.activeRoute.hold!.fix).toBe('TIDUE')
+  unit.changeHold(h => { h.exit = 'AT TGT ALT'; h.altitude = '5000A' })
+  unit.press('EXEC')
+  // A crossing is a return to within 0.2 NM of TIDUE after being more than a mile away.
+  let crossings = 0, away = false, belowAtFirst = 0
+  const crossed = () => {
+    const d = distanceNm(unit.position, tidue)
+    if (d > 1) away = true
+    if (away && d < 0.2) { away = false; crossings++; return true }
+    return false
+  }
+  // The first crossing below 5000 ft: the hold goes on.
+  fly(1800, () => crossed())
+  expect(crossings).toBe(1)
+  belowAtFirst = unit.altitude
+  expect(belowAtFirst).toBeLessThan(4900)
+  fly(30, () => false)
+  expect(unit.activeRoute.hold?.status).toBe('IN PROGRESS')
+  // Climbing to 5000: out at the next crossing.
+  sim.selectAltitude(5000)
+  sim.engageVerticalSpeed(800)
+  const t = fly(1800, () => { crossed(); return unit.activeRoute.hold === undefined })
+  expect(t).toBeLessThan(1800)
+  expect(crossings).toBe(2)
+  expect(unit.altitude).toBeGreaterThan(4900)
 })

@@ -202,6 +202,71 @@ test('EXIT HOLD, once executed, leaves the hold at the next fix crossing and con
   expect(unit.activeRoute.hold).toBeUndefined()
 })
 
+test('the hold is a ground racetrack in any wind, either turn: the inbound leg is held after the entry, and every circuit crosses the fix (D-H)', () => {
+  for (const turn of ['RIGHT', 'LEFT'] as const) {
+    for (const from of [0, 90, 180, 270]) {
+      const { unit, sim, fly } = setup()
+      unit.wind.direction = from
+      unit.wind.speed = 25
+      holdAtRdg(unit, ...(turn === 'LEFT' ? [['', 'LSK2L'] as [string, CduFunction]] : []))
+      const label = `${turn} turns, wind ${from}/25`
+      const rdg = unit.coordinates('RDG')!
+      expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS'), label).toBeLessThan(3600)
+      const hold = unit.activeRoute.hold!
+      expect(hold.turn, label).toBe(turn)
+      // Let the entry finish: two fix crossings after the hold begins.
+      const passes: number[] = []
+      // A fix crossing is a local minimum of the distance to the fix within a mile of it.
+      let before = Infinity, last = Infinity
+      const watchFix = () => {
+        const d = distanceNm(rdg, unit.position)
+        if (last < before && last <= d && last < 1) passes.push(last)
+        before = last
+        last = d
+      }
+      fly(1800, () => { watchFix(); return passes.length >= 2 })
+      passes.length = 0
+      // Then two full circuits: the inbound leg (its last two thirds, before the fix) within 0.1 NM, the fix crossed
+      // within 0.1 NM, and the whole pattern on the holding side, bar the fix crossing.
+      let inboundWorst = 0, wrongSide = 0
+      const s = turn === 'RIGHT' ? 1 : -1
+      fly(1800, () => {
+        watchFix()
+        const g = legGeometry(offset(rdg, hold.inbound + 180, 10), rdg, unit.position)
+        if (Math.abs(g.crossTrack) < 0.5 && g.toGo > 0.2 && g.toGo < 0.6 * sim.holdLegNm! && angleDiff(unit.track, hold.inbound) < 30)
+          inboundWorst = Math.max(inboundWorst, Math.abs(g.crossTrack))
+        wrongSide = Math.min(wrongSide, s * g.crossTrack)
+        return passes.length >= 2
+      })
+      expect(passes.length, label).toBe(2)
+      for (const pass of passes) expect(pass, label).toBeLessThan(0.1)
+      expect(inboundWorst, label).toBeLessThan(0.1)
+      expect(wrongSide, label).toBeGreaterThan(-0.3)
+    }
+  }
+})
+
+test('a wind at or above the true airspeed cannot be held: UNABLE HOLD (D-H, laboratory)', () => {
+  const { unit, sim, fly } = setup()
+  holdAtRdg(unit)
+  fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')
+  unit.wind.speed = Math.ceil(sim.tas) + 5
+  fly(10)
+  expect(unit.recallList.some(m => m.text === 'UNABLE HOLD')).toBe(true)
+})
+
+test('the helicopter hold defaults to its holding speed limit and leg time for the altitude, and warns above the limit (D-H, M300 10-8, 10-9)', () => {
+  const { unit, fly } = setup()
+  press(unit, 'HOLD', 'LSK2L')
+  const hold = unit.route.hold!
+  expect(hold.speed).toBe(unit.altitude <= 6000 ? 100 : 170)
+  expect(hold.legTime).toBe(unit.altitude <= 14000 ? 1 : 1.5)
+  unit.changeHold(h => { h.speed = unit.altitude <= 6000 ? 120 : 190 })
+  unit.press('EXEC')
+  fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')
+  expect(unit.recallList.some(m => m.text === 'HIGH HOLDING SPEED')).toBe(true)
+})
+
 test('a search pattern is flown along its geometry from the start point, then the route continues', () => {
   const { unit, sim, fly } = setup()
   press(unit, 'TACT', 'LSK2L', 'LSK6R', 'EXEC')
@@ -757,6 +822,31 @@ test('a new mark over an active procedure offers ACTIVATE; its EXEC replaces the
   expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED')).toBe(true)
 })
 
+test('a new procedure pending over an active one leaves the active TDN and MRK where they are, through CANCEL; EXEC moves them (Stage D)', () => {
+  const { unit, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(20)
+  const active = unit.activeRoute
+  const tdn = unit.coordinates('TDN', active)!, mrk = unit.coordinates('MRK', active)!
+  const second = offset(unit.truePosition, 180, 3)
+  unit.designateHoverMark({ ident: 'WPT', position: second, label: null })
+  unit.press('LSK6R')
+  expect(unit.routeStatus).toBe('MOD')
+  expect(unit.coordinates('TDN', unit.activeRoute)).toEqual(tdn)
+  expect(unit.coordinates('MRK', unit.activeRoute)).toEqual(mrk)
+  // The modified route shows the new pair.
+  expect(unit.coordinates('MRK', unit.route)).toEqual(second)
+  unit.press('LSK6L')
+  expect(unit.coordinates('TDN', unit.activeRoute)).toEqual(tdn)
+  expect(unit.coordinates('MRK', unit.activeRoute)).toEqual(mrk)
+  unit.designateHoverMark({ ident: 'WPT', position: second, label: null })
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  expect(unit.coordinates('MRK', unit.activeRoute)).toEqual(second)
+  expect(distanceNm(unit.coordinates('TDN', unit.activeRoute)!, second)).toBeCloseTo(unit.hover.active!.dtra, 6)
+})
+
 test('a hover modification edited until TDN is gone executes as a plain route change and leaves no pending TDN or MRK behind (Stage D)', () => {
   const { unit } = hoverProcedure()
   unit.press('LSK6R')
@@ -784,29 +874,4 @@ test('CANCEL of a new mark over an active procedure keeps the active one flying 
   fly(600, () => sim.hoverCaptured)
   expect(sim.hoverCaptured).toBe(true)
   expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED')).toBe(false)
-})
-
-test('a new procedure pending over an active one leaves the active TDN and MRK where they are, through CANCEL; EXEC moves them (Stage D)', () => {
-  const { unit, fly } = hoverProcedure()
-  unit.press('LSK6R')
-  unit.press('EXEC')
-  fly(20)
-  const active = unit.activeRoute
-  const tdn = unit.coordinates('TDN', active)!, mrk = unit.coordinates('MRK', active)!
-  const second = offset(unit.truePosition, 180, 3)
-  unit.designateHoverMark({ ident: 'WPT', position: second, label: null })
-  unit.press('LSK6R')
-  expect(unit.routeStatus).toBe('MOD')
-  expect(unit.coordinates('TDN', unit.activeRoute)).toEqual(tdn)
-  expect(unit.coordinates('MRK', unit.activeRoute)).toEqual(mrk)
-  // The modified route shows the new pair.
-  expect(unit.coordinates('MRK', unit.route)).toEqual(second)
-  unit.press('LSK6L')
-  expect(unit.coordinates('TDN', unit.activeRoute)).toEqual(tdn)
-  expect(unit.coordinates('MRK', unit.activeRoute)).toEqual(mrk)
-  unit.designateHoverMark({ ident: 'WPT', position: second, label: null })
-  unit.press('LSK6R')
-  unit.press('EXEC')
-  expect(unit.coordinates('MRK', unit.activeRoute)).toEqual(second)
-  expect(distanceNm(unit.coordinates('TDN', unit.activeRoute)!, second)).toBeCloseTo(unit.hover.active!.dtra, 6)
 })
