@@ -88,6 +88,20 @@ test('the KBTV integrity scenario passes: integrity lost after capture ends the 
   expect(runner.results[4]).toMatchObject({ status: 'pass', actual: expect.stringMatching(/^NO APPR OFF, ALT HOLD/) })
 })
 
+test('the approach check fails on each field that differs: the type, the approach mode, and the deviation from the path', () => {
+  // At the start state the approach is LPV and armed, 1300 ft below the VNAV path (capped at the demonstration's cruise
+  // altitude until DES NOW brings the path down): each failing check below names one wrong field.
+  const check = (action: Record<string, unknown>) => {
+    const { runner } = runHeadless({ id: 'c', title: 'C', objective: '', maxSeconds: 1, start: 'kbtv-rnav15', steps: [{ when: { kind: 'start' }, action: { kind: 'expectApproach', ...action }, within: 0.5 }] } as unknown as Scenario)
+    return runner.results[0]
+  }
+  expect(check({ type: 'LPV', state: 'ARMED' })).toMatchObject({ status: 'pass' })
+  expect(check({ type: 'LNAV', state: 'ARMED' })).toMatchObject({ status: 'fail', actual: expect.stringMatching(/^LPV ARMED/) })
+  expect(check({ type: 'LPV', state: 'CAPTURED' })).toMatchObject({ status: 'fail', actual: expect.stringMatching(/^LPV ARMED/) })
+  expect(check({ maxVerticalFt: 2000 })).toMatchObject({ status: 'pass' })
+  expect(check({ maxVerticalFt: 30 })).toMatchObject({ status: 'fail', actual: expect.stringMatching(/-1300 ft from the path$/) })
+})
+
 test('a scenario start state and the approach check are validated, and the check needs the flight simulation', () => {
   const base = { id: 't', title: 'T', objective: '', maxSeconds: 10, steps: [{ when: { kind: 'start' }, action: { kind: 'expectApproach', state: 'OFF' } }] } as unknown as Scenario
   expect(scenarioProblems(base)).toEqual([])
