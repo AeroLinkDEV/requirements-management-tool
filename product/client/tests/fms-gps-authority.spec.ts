@@ -147,13 +147,14 @@ test('a vetoed approach in the approach phase raises NO APPR INTEGRITY before an
 // ------------------------------------------------------------------ GPS-01: lateral and vertical authority in flight
 
 // Lateral lost (116 not Normal): the approach is lost, to the latched hold, and LNAV reverts to the route, recorded and
-// shown as a change of source. Checked on the first step after the stimulus and on a following stable step.
+// shown as a change of source. Checked on the first step after the stimulus and on a following stable step. The 116 is
+// withdrawn on both receivers: with the other still eligible, AUTO would transfer the approach to it (approach-aware
+// selection, case 3, in fms-gps-approach-auto.spec.ts), which is annunciated and qualified, not a silent substitute.
 for (const ssm of ['FW', 'NCD', 'FT'] as Ssm[]) {
   test(`116 withdrawn (${ssm}) after capture: APPR LOST, an announced reversion to route LNAV, never a silent substitute (GPS-01)`, () => {
     const { unit, sim, fly } = captured()
     expect(fmsOutputs(unit, sim).lateralSource).toBe('GPS')
-    const selected = unit.gpsStatus.chosen!
-    receivers(unit)[selected].override('116', { kind: 'FORCE', ssm })
+    for (const rx of receivers(unit)) rx.override('116', { kind: 'FORCE', ssm })
     unit.gpsUpdated()
     for (const step of ['first', 'stable']) {
       fly(1)
