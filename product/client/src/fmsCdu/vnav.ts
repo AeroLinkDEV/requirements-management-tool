@@ -87,7 +87,9 @@ export type ProfileInput = {
    * defined), its constraint, how its prediction is based, and whether it belongs to the missed approach.
    */
   waypoints: {
-    ident: string; legDistance: number | null; groundSpeed: number; constraint: AltitudeConstraint | null; endOfDescent: boolean;
+    ident: string; legDistance: number | null;
+    /** Predicted ground speed on the leg into it, or null where the leg cannot be flown with progress (kinematics.ts). */
+    groundSpeed: number | null; constraint: AltitudeConstraint | null; endOfDescent: boolean;
     basis?: PredictionBasis; missed?: boolean;
   }[];
   altitude: number;
@@ -125,6 +127,12 @@ export type Profile = {
 
 const FT_PER_NM = 6076.12;
 
+/**
+ * The time to fly a leg, hours. A leg without a known length or ground speed contributes none: its point, and every point
+ * after it, is already unknown (the basis), so no time or fuel is ever computed across it from an invented speed.
+ */
+const legHours = (w: ProfileInput["waypoints"][number]) => (w.legDistance === null || w.groundSpeed === null ? 0 : w.legDistance / w.groundSpeed);
+
 export function computeProfile(input: ProfileInput): Profile {
   const { waypoints, cruiseAltitude, pathAngle } = input;
   // Past the top of descent the phase is latched: nothing ahead is a climb, however far below cruise the aircraft is.
@@ -137,7 +145,8 @@ export function computeProfile(input: ProfileInput): Profile {
   const basis: PredictionBasis[] = [];
   const rank = { known: 0, estimated: 1, unknown: 2 } as const;
   waypoints.forEach((w, i) => {
-    const own: PredictionBasis = w.legDistance === null ? "unknown" : w.basis ?? "known";
+    // A leg with no length, or none the aircraft can make progress along, leaves the prediction unknown from there.
+    const own: PredictionBasis = w.legDistance === null || w.groundSpeed === null ? "unknown" : w.basis ?? "known";
     const before = i > 0 ? basis[i - 1] : "known";
     basis.push(rank[own] > rank[before] ? own : before);
   });
@@ -155,7 +164,7 @@ export function computeProfile(input: ProfileInput): Profile {
       topOfClimb = waypoints.length;
       for (let i = 0; i < waypoints.length; i += 1) {
         const cap = Math.min(cruiseAltitude, capOf(waypoints[i].constraint));
-        altitude = Math.min(Math.max(cap, altitude), altitude + input.climbRate * ((waypoints[i].legDistance ?? 0) / Math.max(30, waypoints[i].groundSpeed)) * 60);
+        altitude = Math.min(Math.max(cap, altitude), altitude + input.climbRate * legHours(waypoints[i]) * 60);
         if (altitude >= cruiseAltitude - 1) { topOfClimb = i; break; }
       }
     }
@@ -207,7 +216,7 @@ export function computeProfile(input: ProfileInput): Profile {
   const points: ProfilePoint[] = [];
   let altitude = input.altitude, time = input.now, fuel = input.fuel, unableNext: string | null = null;
   waypoints.forEach((w, i) => {
-    const hours = (w.legDistance ?? 0) / Math.max(30, w.groundSpeed);
+    const hours = legHours(w);
     time += hours * 3_600_000;
     fuel -= hours * input.fuelFlow;
     const cap = Math.min(cruiseAltitude, capOf(w.constraint), aheadCap[i]);

@@ -458,7 +458,9 @@ display unit for engineers.
   - The earlier pages: HOLD, the SQUARE, LADDER and SECTOR search patterns, the tactical approach, HOVER and
     TIMER. The ATC, FMC COMM and GSM/SMS pages are representative only (no datalink) and say so on screen.
 - A **flight simulation** (`flight.ts`) flies the active route as an FMS-coupled autopilot would, in real or
-  accelerated time. It is a point-mass model with a bank-limited turn, not a flight dynamics model. Pause is a
+  accelerated time. It is a point-mass model with a bank-limited turn, not a flight dynamics model: the aircraft flies a heading
+  through the air, the wind carries the air mass, and the track and ground speed are the vector sum (no speed floor;
+  predictions without measurable progress are unknown). Pause is a
   position freeze: the clock keeps running, so timers and the self test still complete. A north-up engineering
   **navigation map** (route, holds, patterns, offset track, navaids and airports, and the true position when the
   FMS has drifted) can replace the ND beside the CDU. The flight controls, flight mode annunciator and guidance

@@ -1,5 +1,6 @@
 import type { FlightSimulator, VerticalMode } from "./flight";
 import { courseDeg, distanceNm, offset, type LatLon, type Route } from "./fmsModel";
+import { makingProgress } from "./kinematics";
 import type { ScriptedFms } from "./scriptedFms";
 
 // The FMS output bus and the aircraft data an EFIS draws from.
@@ -178,7 +179,8 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     rollCommand: managed ? normal(g.bankCommand) : ncd(),
     distanceToGo: distanceToGo !== null && toIdent ? normal(distanceToGo) : ncd(),
     toWaypoint: toIdent ? normal(toIdent) : ncd(),
-    eta: distanceToGo !== null && fms.groundSpeed > 30 ? normal(fms.now.getTime() + (distanceToGo / fms.groundSpeed) * 3_600_000) : ncd(),
+    // No ETA without measurable progress: a time from an invented speed would be a plausible falsehood.
+    eta: distanceToGo !== null && makingProgress(fms.groundSpeed) ? normal(fms.now.getTime() + (distanceToGo / fms.groundSpeed) * 3_600_000) : ncd(),
     targetSpeed: normal(fms.targetSpeed),
     targetAltitude: sim.altitudeHoldReference === null ? normal(g.targetAltitude) : ncd(),
     lateralArmed: sim.lnavIsArmed ? ["LNAV"] : [],
@@ -198,13 +200,10 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
 export function aircraftData(fms: ScriptedFms, sim: FlightSimulator): AircraftData {
   const track = fms.track;
   const airspeed = sim.tas;
-  // Heading is the track corrected for the drift the wind causes (the crab angle).
-  const crossWind = fms.wind.speed * Math.sin(((fms.wind.direction - track) * Math.PI) / 180);
-  const drift = airspeed > 1 ? (Math.asin(Math.max(-1, Math.min(1, crossWind / airspeed))) * 180) / Math.PI : 0;
   // Pitch approximated from the flight path angle, for display: a point-mass model has no attitude of its own.
   const pitch = fms.groundSpeed > 1 ? (Math.atan(fms.verticalSpeed / (fms.groundSpeed * 101.27)) * 180) / Math.PI : 0;
   return {
-    pitch, bank: sim.bankAngle, heading: (track + drift + 360) % 360, track, airspeed, groundSpeed: fms.groundSpeed,
+    pitch, bank: sim.bankAngle, heading: fms.heading, track, airspeed, groundSpeed: fms.groundSpeed,
     altitude: fms.altitude, verticalSpeed: fms.verticalSpeed, wind: fms.wind, position: fms.truePosition,
   };
 }
