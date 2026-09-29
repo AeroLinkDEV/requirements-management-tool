@@ -185,6 +185,13 @@
   gap: 8px;
 }
 
+/* The real-data demonstration on the Nav data tab: its note, its two actions, and the set-up's outcome. */
+.fmsBenchDemo {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
 .fmsBenchModes {
   display: inline-flex;
   margin-bottom: 12px;

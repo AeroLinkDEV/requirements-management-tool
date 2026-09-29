@@ -4,7 +4,7 @@ import type { ConditionId } from "./conditions";
 import { DATALINK_PAGES, DEMO_SMS, DEMO_UPLINKS } from "./datalinkPages";
 import { CORE_PAGES } from "./fmsPages";
 import {
-  START_POSITION, WAYPOINT, arcLength, bearingDeg, bearingIntersection, courseDeg, distanceNm, fromLocal, toLocal, holdEntry, isOutstanding,
+  START_POSITION, WAYPOINT, arcLength, bearingDeg, bearingIntersection, courseDeg, distanceNm, formatPosition, fromLocal, toLocal, holdEntry, isOutstanding,
   maxSarGroundSpeed, offset,
   type Hold, type HoldEntry, type LatLon, type Leg, type LskResult, type Message, type Offset, type Page, type PageId, type Route, type Sar,
   type SarPattern, type Uplink,
@@ -411,6 +411,21 @@ export class ScriptedFms implements CduBackend {
     }];
     this.emit();
     return true;
+  }
+
+  /**
+   * Places the aircraft (an engineering control, like Jump): where it really is, its track and its altitude, level and
+   * wings level. The FMS position follows through its sensors as usual, from its current navigation error. Recorded in
+   * the engineering log with the reason. The demonstration start states (kbtvDemo.ts) use it.
+   */
+  placeAircraft(state: { position: LatLon; track: number; altitude: number }, reason: string) {
+    this.setAircraft({ ...state, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0 });
+    this.engineering = [...this.engineering, {
+      at: this.now, action: "PLACE AIRCRAFT",
+      detail: `${reason}: ${formatPosition(state.position)}, track ${Math.round(state.track)}°, ${Math.round(state.altitude)} FT`,
+    }];
+    this.updateNavigation(0);
+    this.emit();
   }
 
   /** Engineering interventions made in this session, oldest first: they are not crew actions. */

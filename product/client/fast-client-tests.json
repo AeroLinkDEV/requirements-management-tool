@@ -36,7 +36,8 @@
     "fms-gps-fms.spec.ts",
     "fms-gps-bench.spec.ts",
     "fms-gps-approach.spec.ts",
-    "fms-cifp.spec.ts"
+    "fms-cifp.spec.ts",
+    "fms-kbtv-demo.spec.ts"
   ],
   "rendered": [
     "review-workflow-rendered.spec.ts",
