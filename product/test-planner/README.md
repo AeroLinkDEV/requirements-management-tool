@@ -15,6 +15,17 @@ broad unless its candidate changes only documentation against the queue base; th
 documentation topology (#1152 A3). The merge binder never trusts the run's own classification for this: it
 re-derives the candidate's status from the protected default-branch classifier and GitHub's queue record.
 
+A change confined to the FMS Test Bench (`FMS_PATHS` in `lib/classify.mjs`: the bench's client code, public
+assets, tests, fixtures and the Fast manifest, plus documentation) is **FMS-only**, on a pull request and in the
+merge queue alike (Sean, 29 September 2026). It runs the client gate, the production-build journeys and the four
+browser journey shards restricted to the FMS journeys (`isFmsJourneySpec`: the bench's own specs and the specs
+outside them that observe it), and skips the .NET, PostgreSQL and operator suites and the requirements-management
+journeys. The aggregate reports the skipped gates as not run, and in the merge queue the binder accepts the
+reduced gate set only after re-deriving FMS-only status itself, exactly as for documentation. Anything outside
+the set keeps the existing classification. Two guards in `classify.test.mjs` keep the set honest: every file
+outside the bench that names a bench path must be accounted for, and every spec that observes the bench must be
+an FMS journey.
+
 A file under a documentation root that a product suite reads (for example the requirement-hierarchy policy
 matrix the Domain suite parses) is listed in `TEST_READ_DOCUMENTATION` and classifies as backend, never
 documentation. A guard in `classify.test.mjs` scans every test source for documentation references and

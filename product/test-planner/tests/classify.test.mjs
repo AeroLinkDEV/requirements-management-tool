@@ -1,10 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { classify, explain, localPlan, selectJobs, AREA_PATTERNS, BROAD_EVENTS, normalizePath, isDocumentationOnlyChange, TEST_READ_DOCUMENTATION } from '../lib/classify.mjs'
+import { classify, explain, localPlan, selectJobs, AREA_PATTERNS, BROAD_EVENTS, normalizePath, isDocumentationOnlyChange, TEST_READ_DOCUMENTATION, isFmsOnlyChange, isFmsPath, isFmsJourneySpec, FMS_OBSERVING_SPECS } from '../lib/classify.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 
@@ -71,7 +72,7 @@ const DOCUMENTATION_REFERENCES = {
   'product/scripts/Test-RepositoryLayout.Tests.ps1': { reads: false, why: 'always runs', refs: ['directory', 'CURRENT_PRODUCT_HANDOFF_2026-07-29.md', 'DECISIONS_AND_OPEN_QUESTIONS.md', 'FEATURE_CATALOG.md', 'PROJECT_STATE.md', 'README.md', 'docs/REMOTE_DEMO_OPERATOR.md'] },
   // Mentions.
   'product/ci-metrics/tests/maintenance-approval.test.mjs': { reads: false, why: 'reads product/ci-metrics/README.md, which is product', refs: ['README.md'] },
-  'product/ci-metrics/tests/merge-authority-github.test.mjs': { reads: false, why: `${FIXTURE}; reads product/ci-metrics/README.md`, refs: ['directory', 'README.md', 'product/docs/MERGING.md'] },
+  'product/ci-metrics/tests/merge-authority-github.test.mjs': { reads: false, why: `${FIXTURE}; reads product/ci-metrics/README.md`, refs: ['directory', 'README.md', 'product/docs/FMS_TEST_BENCH.md', 'product/docs/MERGING.md'] },
   'product/ci-metrics/tests/merge-authority.test.mjs': { reads: false, why: FIXTURE, refs: ['directory', 'README.md'] },
   'product/ci-metrics/tests/provenance.test.mjs': { reads: false, why: FIXTURE, refs: ['directory', 'README.md'] },
   'product/client/tests/capture-overview.spec.ts': { reads: false, why: 'writes captures into docs/overview-video/shots; reads nothing there', refs: ['directory', 'docs/overview-video/slides.js'] },
@@ -622,4 +623,139 @@ test('no operator script reads a path the classifier says the operator contracts
   // Start-AeroLinkProduction without building client source (#1179 review).
   assert.match(readFileSync(join(repoRoot, 'product/scripts/Test-ProjectSetupPostgres.Tests.ps1'), 'utf8'), /^function dotnet \{/m)
   assert.match(readFileSync(join(repoRoot, 'product/scripts/AeroLinkProductionTransition.Tests.ps1'), 'utf8'), /^function npm\.cmd \{/m)
+})
+
+// The FMS Test Bench topology (Sean, 29 September 2026): a change confined to the bench runs the client gate, the
+// production-build journeys and the FMS browser journeys, on pull requests and in the merge queue alike.
+const BENCH_CHANGE = [
+  'product/client/src/fmsCdu/flight.ts',
+  'product/client/public/fms-cdu/layout.json',
+  'product/client/tests/fms-flight.spec.ts',
+  'product/client/tests/fms-out-the-window-rendered.spec.ts',
+  'product/client/tests/production/fms-out-the-window-built.spec.ts',
+  'product/client/tests/fixtures/fms-cdu.tsx',
+  'product/client/tests/fixtures/cifp/FAACIFP18-kbtv.txt',
+  'product/client/tests/support/tdnOracle.ts',
+  'product/client/fast-client-tests.json',
+  'product/docs/FMS_TEST_BENCH.md',
+]
+
+test('a change confined to the FMS Test Bench runs the client, production and FMS journey gates only', () => {
+  for (const event of ['pull_request', 'merge_group']) {
+    const result = of(BENCH_CHANGE, event)
+    assert.equal(result.fmsOnly, true, event)
+    assert.deepEqual(
+      { docsOnly: result.docsOnly, backend: result.backend, client: result.client, browser: result.browser, postgresql: result.postgresql, operator: result.operator },
+      { docsOnly: false, backend: false, client: true, browser: true, postgresql: false, operator: false }, event)
+    // The forecast comes from the conditions ci.yml actually carries.
+    const jobs = selectJobs(workflow(), result, { event })
+    const selected = new Set(jobs.selected.map((job) => job.id))
+    for (const id of ['changes', 'client', 'browser-pr', 'browser-production', 'gate']) assert.ok(selected.has(id), `${event} runs ${id}`)
+    for (const id of ['backend-api', 'backend-core-domain', 'backend-core-infrastructure', 'script-contracts', 'postgresql-smoke']) {
+      assert.ok(jobs.skipped.some((job) => job.id === id), `${event} skips ${id}`)
+    }
+  }
+})
+
+test('anything beyond the bench keeps the existing classification, and so does a bench file renamed out of it', () => {
+  const beyond = {
+    'App.tsx imports the bench but is not in it': 'product/client/src/App.tsx',
+    'routing.ts': 'product/client/src/routing.ts',
+    'a shared test helper': 'product/client/tests/isolated-client-test.ts',
+    'a requirements journey': 'product/client/tests/zzz-post-414-picker-integrity.spec.ts',
+    'the Vite configuration': 'product/client/vite.config.ts',
+    'the terrain relay': 'product/src/AeroLink.Api/FmsBenchTerrainEndpoints.cs',
+    'a script': 'product/scripts/Start-AeroLinkProduction.ps1',
+    'the planner': 'product/test-planner/lib/classify.mjs',
+    'the package lock': 'product/client/package-lock.json',
+    'a non-FMS production journey': 'product/client/tests/production/production-build.spec.ts',
+  }
+  for (const [name, path] of Object.entries(beyond)) {
+    assert.equal(isFmsOnlyChange([...BENCH_CHANGE, path]), false, name)
+    assert.equal(of([...BENCH_CHANGE, path]).fmsOnly, false, name)
+    assert.equal(of([...BENCH_CHANGE, path], 'merge_group').backend, true, `${name} keeps the merge queue broad`)
+  }
+  // Both sides of a rename are passed; moving a file out of the bench is not a bench-only change.
+  assert.equal(isFmsOnlyChange(['product/client/src/fmsCdu/flight.ts', 'product/client/src/flight.ts']), false)
+  // Documentation alone is not FMS-only, and a document a suite reads is product, not documentation.
+  assert.equal(isFmsOnlyChange(['product/docs/FMS_TEST_BENCH.md']), false)
+  assert.equal(isFmsOnlyChange(['product/client/src/fmsCdu/flight.ts', 'product/docs/requirement_hierarchy_policy_matrix.md']), false)
+  for (const bad of [[], ['product/client/src/fmsCdu/flight.ts', ''], ['product/client/src/fmsCdu/flight.ts', null], undefined]) assert.equal(isFmsOnlyChange(bad), false)
+  // Near misses of the patterns stay outside the bench.
+  for (const path of ['product/client/src/fmsCduHelpers.ts', 'product/client/tests/fms.spec.ts', 'product/client/tests/nested/fms-flight.spec.ts', 'product/client/public/fms-cdu-extra.json']) {
+    assert.equal(isFmsPath(path), false, path)
+  }
+  // Schedule, push and a dispatch without a pull request stay broad for a bench change.
+  for (const event of ['schedule', 'push', 'workflow_dispatch']) assert.equal(of(BENCH_CHANGE, event).fmsOnly, false, event)
+})
+
+// Every non-documentation file outside the bench that names a bench path, and why an FMS-only run still covers
+// what it does with it. The guard below derives this from the tree and compares it exactly, so a new reader (a
+// backend project, a script, a journey) fails until it is accounted for here or the bench set is narrowed.
+const FMS_PATH_REFERENCES = {
+  '.github/workflows/ci.yml': 'the planner wiring; it names the bench only to filter the journey shards',
+  'product/ci-metrics/bin/verify-merge-authority.mjs': 'names the FMS topology it verifies',
+  'product/ci-metrics/lib/merge-authority-github.mjs': 'names the FMS topology it derives',
+  'product/ci-metrics/lib/merge-authority.mjs': 'names the FMS topology it accepts',
+  'product/ci-metrics/tests/merge-authority-github.test.mjs': 'test paths for the derivation',
+  'product/ci-metrics/tests/merge-authority.test.mjs': 'names the FMS topology it tests',
+  'product/client/playwright.logic.config.ts': 'reads the Fast manifest for the advisory Fast lane only',
+  'product/client/playwright.rendered.config.ts': 'reads the Fast manifest for the advisory Fast lane only',
+  'product/client/scripts/check-fast-client-routing.mjs': 'checks the Fast manifest in the advisory Fast lane only',
+  'product/client/src/App.tsx': 'imports the bench; the client gate builds it and the FMS journeys include the specs that navigate to it',
+  'product/client/src/icons.tsx': 'names the bench icon; built by the client gate',
+  'product/client/src/routing.ts': 'routes to the bench; built by the client gate and asserted by routing-contract.spec.ts, an FMS journey',
+  'product/client/tests/primary-navigation-alignment.spec.ts': 'an FMS journey (FMS_OBSERVING_SPECS)',
+  'product/client/tests/routing-contract.spec.ts': 'an FMS journey (FMS_OBSERVING_SPECS)',
+  'product/client/vite.config.ts': 'aliases meshoptimizer to a bench file; the client gate and the production journeys build with it',
+  'product/src/AeroLink.Api/FmsBenchTerrainEndpoints.cs': 'names the bench in comments only; it reads no bench path',
+  'product/ci-metrics/README.md': 'documents the FMS topology the binder accepts; tests read it for command lists, not bench paths',
+  'product/test-planner/README.md': 'documents the FMS topology; tests read it for command lists, not bench paths',
+  'product/test-planner/README_FAST_PHASE1.md': 'documents the Fast manifest; nothing reads it',
+  'product/test-planner/lib/classify.mjs': 'defines the bench set',
+  'product/test-planner/tests/classify.test.mjs': 'this guard',
+  'product/test-planner/tools/filter-fms-journeys.mjs': 'filters the journey listing to the bench set',
+  'product/tests/AeroLink.Api.Tests/FmsBenchTerrainApiTests.cs': 'names the bench in comments only; it reads no bench path',
+  'product/tools/AeroLink.FmsCduModel/README.md': 'documents the offline Blender tool that renders the bench faceplate; no gate reads it',
+}
+
+test('every file outside the FMS Test Bench that names a bench path is accounted for', () => {
+  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\0').filter(Boolean)
+  const benchReference = /fmsCdu|fms-cdu|fms-test-bench|FMS Test Bench|tdnOracle|fixtures\/cifp|fast-client-tests/
+  const actual = tracked
+    .filter((path) => !isFmsPath(path) && !isDocumentationOnlyChange([path]))
+    .filter((path) => !/\.(?:png|webp|jpe?g|ico|docx|pdf|woff2?)$/i.test(path))
+    .filter((path) => benchReference.test(readFileSync(join(repoRoot, path), 'utf8')))
+    .sort()
+  assert.deepEqual(actual, Object.keys(FMS_PATH_REFERENCES).sort(),
+    'A file outside the FMS Test Bench names a bench path. Explain how an FMS-only run still covers it in FMS_PATH_REFERENCES, add it to FMS_OBSERVING_SPECS if it is a journey, or narrow FMS_PATHS in classify.mjs.')
+})
+
+test('the FMS journeys are the bench specs and exactly the specs outside them that observe the bench', () => {
+  const tracked = execFileSync('git', ['ls-files', '-z', 'product/client/tests'], { cwd: repoRoot, encoding: 'utf8' }).split('\0').filter(Boolean)
+  const rootSpecs = tracked.filter((path) => /^product\/client\/tests\/[^/]+\.spec\.ts$/.test(path)).map((path) => path.slice('product/client/tests/'.length))
+  const observes = /fmsCdu|fms-cdu|fms-test-bench|FMS Test Bench|fmsBench/
+  const observing = rootSpecs.filter((name) => !/^fms-/.test(name) && observes.test(readFileSync(join(repoRoot, 'product/client/tests', name), 'utf8'))).sort()
+  assert.deepEqual([...FMS_OBSERVING_SPECS].sort(), observing)
+  for (const name of rootSpecs) assert.equal(isFmsJourneySpec(name), /^fms-/.test(name) || observing.includes(name), name)
+  assert.ok(rootSpecs.filter((name) => isFmsJourneySpec(name)).length >= 30, 'the FMS journeys are a real set, not a token one')
+})
+
+test('the journey filter keeps exactly the FMS journeys of a discovery listing, and refuses an empty result', () => {
+  const tool = join(repoRoot, 'product/test-planner/tools/filter-fms-journeys.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'fms-journeys-'))
+  const listing = join(dir, 'listed.txt')
+  writeFileSync(listing, [
+    'Listing tests:',
+    '  [chromium] › fms-flight.spec.ts:10:1 › the aircraft flies the route',
+    '  [chromium] › fms-efis.spec.ts:20:1 › the PFD draws the bus',
+    '  [chromium] › routing-contract.spec.ts:5:1 › the bench route resolves',
+    '  [chromium] › zzz-post-414-picker-integrity.spec.ts:7:1 › the picker keeps its selection',
+    '  [chromium] › change-requests.spec.ts:3:1 › a change request is raised',
+    'Total: 5 tests in 5 files',
+  ].join('\n'))
+  const kept = execFileSync(process.execPath, [tool, listing], { encoding: 'utf8' }).trim().split('\n')
+  assert.deepEqual(kept.map((line) => line.match(/› (\S+\.spec\.ts):/)[1]), ['fms-flight.spec.ts', 'fms-efis.spec.ts', 'routing-contract.spec.ts'])
+  writeFileSync(listing, '  [chromium] › change-requests.spec.ts:3:1 › a change request is raised\n')
+  assert.throws(() => execFileSync(process.execPath, [tool, listing], { encoding: 'utf8', stdio: 'pipe' }), /no FMS journey/)
 })

@@ -526,7 +526,7 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   )
   assert.match(
     guardText,
-    /name="\$\{pair%%:\*\}"\n\s*result="\$\{pair#\*:\}"\n\s*\[ "\$result" = "success" \] \|\| missing="\$missing \$name"/,
+    /name="\$\{pair%%:\*\}"\n\s*result="\$\{pair#\*:\}"\n\s*\[ "\$result" = "success" \] \|\| fms_may_skip "\$name" "\$result" \|\| missing="\$missing \$name"/,
     'each pair must be split into its own name and result before the success predicate populates the missing set — a stale result from an earlier loop would vacuously pass',
   )
   const initIndex = guardText.indexOf('missing=""')
@@ -538,7 +538,7 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
   )
   assert.match(
     guardText,
-    /\[ "\$result" = "success" \] \|\| missing="\$missing \$name"\n\s*done\n\s*if \[ -n "\$missing" \]; then/,
+    /\[ "\$result" = "success" \] \|\| fms_may_skip "\$name" "\$result" \|\| missing="\$missing \$name"\n\s*done\n\s*if \[ -n "\$missing" \]; then/,
     'the refusal must fire only after the collecting loop terminates — a check inside the loop tests an incomplete missing set',
   )
   assert.match(
@@ -566,4 +566,47 @@ test('the merge-group aggregate refuses a queue entry whose product gates did no
     ],
     'the guard must contain exactly the outer condition, the collecting loop, and the refusal if — no nested wrappers',
   )
+})
+
+test('the merge-group aggregate excuses exactly the four skipped gates of an FMS-only candidate, and nothing else', () => {
+  const step = stepBlocks(jobBodies(workflowLines()).gate).find((block) => block.name === 'Summarise and enforce')
+  const text = step.lines.join('\n')
+  // The excusal is pinned verbatim: FMS_ONLY exactly true, a result exactly skipped, and one of four named gates.
+  assert.match(text, /^ {12}fms_may_skip\(\) \{\n {14}\[ "\$FMS_ONLY" = "true" \] && \[ "\$2" = "skipped" \] && \[\[ " backend-api backend-core-domain backend-core-infrastructure script-contracts " == \*" \$1 "\* \]\]\n {12}\}$/m)
+  assert.equal((text.match(/^ {10}FMS_ONLY: \$\{\{ needs\.changes\.outputs\.fms_only \}\}$/gm) || []).length, 1, 'FMS_ONLY is bound once, to the classifier output')
+  const runStart = step.lines.findIndex((line) => line === '        run: |')
+  const script = step.lines.slice(runStart + 1).filter((line) => line.startsWith('          ')).map((line) => line.slice(10)).join('\n')
+  const envNames = step.lines.slice(0, runStart).flatMap((line) => /^          ([A-Z_]+):/.exec(line)?.[1] ?? [])
+  const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
+  const directory = mkdtempSync(join(tmpdir(), 'aerolink-fms-gate-'))
+  const run = (overrides) => spawnSync(bash, ['-c', script], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, ...Object.fromEntries(envNames.map((name) => [name, ''])),
+      BACKEND_API: 'skipped', BACKEND_CORE_DOMAIN: 'skipped', BACKEND_CORE_INFRASTRUCTURE: 'skipped', BACKEND: 'false',
+      CLIENT: 'success', CONTRACTS: 'skipped', BROWSER: 'success', PRODUCTION: 'success', POSTGRESQL: 'skipped', BROWSER_FULL: 'skipped',
+      METRICS_TOOLING: 'success', DOCS_ONLY: 'false', LAUNCHERS_ONLY: 'false', OPERATOR: 'false', POST_MERGE_SKIP: 'false',
+      EVENT_NAME: 'merge_group', FMS_ONLY: 'true', GITHUB_STEP_SUMMARY: join(directory, 'summary.md').replaceAll('\\', '/'),
+      ...overrides,
+    },
+  })
+  try {
+    assert.ok(script.length < 8191, `the aggregate script must stay a single local Windows bash argument (${script.length} characters)`)
+    assert.equal(run({}).status, 0, 'an FMS-only candidate with its four gates skipped passes')
+    for (const [name, overrides] of Object.entries({
+      'not FMS-only': { FMS_ONLY: 'false' },
+      'FMS_ONLY empty': { FMS_ONLY: '' },
+      'the client gate skipped': { CLIENT: 'skipped' },
+      'the browser journeys skipped': { BROWSER: 'skipped' },
+      'the production journeys skipped': { PRODUCTION: 'skipped' },
+      'a backend gate failed': { BACKEND_API: 'failure' },
+      'a backend gate cancelled': { BACKEND_CORE_DOMAIN: 'cancelled' },
+      'a backend gate with no result': { BACKEND_CORE_INFRASTRUCTURE: '' },
+      'the operator contracts with no result': { CONTRACTS: '' },
+    })) {
+      assert.equal(run(overrides).status, 1, name)
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
 })

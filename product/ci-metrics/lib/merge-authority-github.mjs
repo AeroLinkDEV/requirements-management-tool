@@ -222,18 +222,29 @@ export async function publishMergeAuthorityCheck({ request, repository, headSha,
 export const COMPARE_FILE_LIMIT = 300
 
 /**
- * Whether a queue candidate's own change is documentation only (#1152 A3), derived from GitHub's records and
- * the protected classifier in this checkout, never from the candidate's own classification.
+ * The reduced topology a queue candidate's own change earns (#1152 A3), derived from GitHub's records and the
+ * protected classifiers in this checkout, never from the candidate's own classification: `documentation`,
+ * `fms` (a change confined to the FMS Test Bench, classify.mjs isFmsOnlyChange), or `full`.
  *
  * The base is pinned to what the queue actually composed: the candidate must have exactly one parent (every
  * candidate this queue has built is a single-parent squash), and that parent must equal the queue entry's
  * `baseCommit`. The diff is then read with the compare API; both sides of renames count, a truncated or
- * missing file list is product, and so is anything the classifier does not call documentation. Every
- * uncertain answer is `false`, which keeps the full gate set.
+ * missing file list is product, and so is anything the classifiers do not recognise. Every uncertain answer is
+ * `full`, which keeps the full gate set.
  */
-export async function deriveDocumentationOnlyCandidate({ request, repository, candidateSha, queueBaseSha, isDocumentationOnlyChange }) {
-  const no = (reason) => ({ documentationOnly: false, reason })
-  if (typeof isDocumentationOnlyChange !== 'function') return no('no protected classifier was supplied')
+export async function deriveCandidateTopology({ request, repository, candidateSha, queueBaseSha, isDocumentationOnlyChange, isFmsOnlyChange }) {
+  const full = (reason) => ({ topology: 'full', reason })
+  if (typeof isDocumentationOnlyChange !== 'function' || typeof isFmsOnlyChange !== 'function') return full('no protected classifier was supplied')
+  const diff = await queueCandidatePaths({ request, repository, candidateSha, queueBaseSha })
+  if (!diff.paths) return full(diff.reason)
+  if (isDocumentationOnlyChange(diff.paths)) return { topology: 'documentation', reason: null, paths: diff.paths }
+  if (isFmsOnlyChange(diff.paths)) return { topology: 'fms', reason: null, paths: diff.paths }
+  return full('the candidate changes more than documentation or the FMS Test Bench')
+}
+
+/** The candidate's changed paths against its pinned queue base, or the reason they cannot be trusted. */
+async function queueCandidatePaths({ request, repository, candidateSha, queueBaseSha }) {
+  const no = (reason) => ({ paths: null, reason })
   if (typeof candidateSha !== 'string' || !SHA_PATTERN.test(candidateSha)) return no('candidate SHA is malformed')
   if (typeof queueBaseSha !== 'string' || !SHA_PATTERN.test(queueBaseSha)) return no('the queue entry base commit is unknown')
   const commit = await request(`/repos/${repository}/commits/${candidateSha}`)
@@ -251,7 +262,5 @@ export async function deriveDocumentationOnlyCandidate({ request, repository, ca
     paths.push(file.filename)
     if (typeof file.previous_filename === 'string' && file.previous_filename.length > 0) paths.push(file.previous_filename)
   }
-  return isDocumentationOnlyChange(paths)
-    ? { documentationOnly: true, reason: null, paths }
-    : no('the candidate changes more than documentation')
+  return { paths, reason: null }
 }

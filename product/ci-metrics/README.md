@@ -268,6 +268,13 @@ which every required job appears exactly once and concludes `skipped`, with no e
 unexpanded template per sharded group. Run identity, classifier and aggregate success, and the trusted-surface
 comparison are unchanged.
 
+An FMS Test Bench-only candidate is derived the same way (the same pinned base and diff, with the protected
+`isFmsOnlyChange`) and binds on either the complete gate set or the FMS topology: `Client lint, type-check, and
+build` and `Browser journeys on the production build` conclude `success`, the four `Browser journeys (i/4)` shards
+all succeed (they ran the FMS journeys), and every other required job concludes exactly `skipped`, with only the
+unexpanded API template. A successful, failed or missing skipped gate refuses, as does anything else the full
+set would refuse.
+
 The App private key is an environment secret, and the environment deployment policy admits only the
 default branch. The active ruleset requires this check **with the AeroLink Merge Authority App's integration
 id**, together with GitHub Actions' `Full Product evidence aggregate`. A workflow-dispatched Product check

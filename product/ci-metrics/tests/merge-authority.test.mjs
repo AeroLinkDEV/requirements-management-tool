@@ -639,3 +639,57 @@ test('a documentation candidate queued behind a protected change is judged at th
   assert.deepEqual(behind.reasons.map((reason) => reason.split(':')[0]), ['trusted-surface-modified'])
   assert.deepEqual(evaluateMergeGroupCandidate({ ...docs, changedPaths: [] }), { decision: 'PASS', reasons: [] })
 })
+
+// The FMS Test Bench topology (Sean, 29 September 2026), selectable only by the protected verifier.
+function fmsTopologyJobs(runId = RUN_ID, runAttempt = RUN_ATTEMPT) {
+  const runs = new Set(['Client lint, type-check, and build', 'Browser journeys on the production build'])
+  return [
+    { name: CLASSIFIER_JOB_NAME, conclusion: 'success', runId, runAttempt },
+    ...REQUIRED_JOBS.map((name) => ({ name, conclusion: runs.has(name) ? 'success' : 'skipped', runId, runAttempt })),
+    { name: unexpandedShardJobName(SHARDED_JOB_GROUPS.find((group) => group.name === 'API test suite')), conclusion: 'skipped', runId, runAttempt },
+    ...[1, 2, 3, 4].map((shard) => ({ name: `Browser journeys (${shard}/4)`, conclusion: 'success', runId, runAttempt })),
+    { name: 'Full browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})', conclusion: 'skipped', runId, runAttempt },
+    { name: AGGREGATE_JOB_NAME, conclusion: 'success', runId, runAttempt },
+  ]
+}
+
+test('an FMS-only candidate binds on the FMS topology, and only when the verifier derived it', () => {
+  const fms = { ...legitimateCandidate(), jobs: fmsTopologyJobs() }
+  assert.deepEqual(evaluateMergeGroupCandidate({ ...fms, fmsOnlyCandidate: true }), { decision: 'PASS', reasons: [] })
+  // Without the verifier's own derivation (or anything but exactly true), the skipped backend refuses it.
+  for (const flag of [undefined, false, 'true', 1]) {
+    const result = evaluateMergeGroupCandidate({ ...fms, fmsOnlyCandidate: flag })
+    assert.equal(result.decision, 'REFUSE', String(flag))
+    assert.ok(result.reasons.some((reason) => reason.startsWith('job-not-success: Domain test suite')), String(flag))
+  }
+  // The documentation derivation does not admit the FMS topology: its client and browser gates ran.
+  assert.equal(evaluateMergeGroupCandidate({ ...fms, documentationOnlyCandidate: true }).decision, 'REFUSE')
+  // A derived FMS candidate whose run was the complete gate set (composed before this change) still binds.
+  assert.deepEqual(evaluateMergeGroupCandidate({ ...legitimateCandidate(), fmsOnlyCandidate: true }), { decision: 'PASS', reasons: [] })
+})
+
+test('the FMS topology requires its three gates to pass and every other gate to be exactly skipped', () => {
+  const variants = {
+    'the client gate failed': (jobs) => jobs.map((job) => (job.name === 'Client lint, type-check, and build' ? { ...job, conclusion: 'failure' } : job)),
+    'the client gate was skipped': (jobs) => jobs.map((job) => (job.name === 'Client lint, type-check, and build' ? { ...job, conclusion: 'skipped' } : job)),
+    'the production journeys were skipped': (jobs) => jobs.map((job) => (job.name === 'Browser journeys on the production build' ? { ...job, conclusion: 'skipped' } : job)),
+    'a browser shard failed': (jobs) => jobs.map((job) => (job.name === 'Browser journeys (3/4)' ? { ...job, conclusion: 'failure' } : job)),
+    'a browser shard is missing': (jobs) => jobs.filter((job) => job.name !== 'Browser journeys (4/4)'),
+    'the browser group was skipped': (jobs) => [...jobs.filter((job) => !/^Browser journeys \(\d\/4\)$/.test(job.name)),
+      { name: unexpandedShardJobName(SHARDED_JOB_GROUPS.find((group) => group.name === 'Browser journeys')), conclusion: 'skipped', runId: RUN_ID, runAttempt: RUN_ATTEMPT }],
+    'a backend job succeeded': (jobs) => jobs.map((job) => (job.name === 'Domain test suite' ? { ...job, conclusion: 'success' } : job)),
+    'a backend job failed': (jobs) => jobs.map((job) => (job.name === 'Infrastructure test suite' ? { ...job, conclusion: 'failure' } : job)),
+    'PostgreSQL was cancelled': (jobs) => jobs.map((job) => (job.name === 'PostgreSQL migrations and secure bootstrap' ? { ...job, conclusion: 'cancelled' } : job)),
+    'the operator contracts are missing': (jobs) => jobs.filter((job) => job.name !== 'Operator and recovery script contracts'),
+    'an API shard ran': (jobs) => [...jobs, { name: 'API test suite (1/3)', conclusion: 'success', runId: RUN_ID, runAttempt: RUN_ATTEMPT }],
+    'the API template is missing': (jobs) => jobs.filter((job) => !job.name.startsWith('API test suite')),
+    'the aggregate failed': (jobs) => jobs.map((job) => (job.name === AGGREGATE_JOB_NAME ? { ...job, conclusion: 'failure' } : job)),
+  }
+  for (const [name, mutate] of Object.entries(variants)) {
+    const result = evaluateMergeGroupCandidate({ ...legitimateCandidate(), jobs: mutate(fmsTopologyJobs()), fmsOnlyCandidate: true })
+    assert.equal(result.decision, 'REFUSE', name)
+  }
+  // Trusted machinery still refuses an FMS candidate as it refuses any other.
+  const protectedChange = evaluateMergeGroupCandidate({ ...legitimateCandidate(), jobs: fmsTopologyJobs(), fmsOnlyCandidate: true, changedPaths: ['.github/workflows/ci.yml'] })
+  assert.deepEqual(protectedChange.reasons.map((reason) => reason.split(':')[0]), ['trusted-surface-modified'])
+})

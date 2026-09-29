@@ -113,6 +113,79 @@ export function isOperatorPath(path) {
   return !isDocumentationPath(normalized) && !OPERATOR_INVISIBLE_PATHS.some((pattern) => pattern.test(normalized))
 }
 
+/**
+ * The FMS Test Bench: its client code, public assets, its own tests and fixtures, and the advisory Fast tier
+ * manifest those tests are registered in. The bench is a self-contained client feature: no backend project, script,
+ * migration or planner reads these paths (the guard in classify.test.mjs scans for readers), and the only client
+ * code outside it that imports it is App.tsx, icons.tsx and routing.ts, which are deliberately NOT in this set.
+ * The Fast manifest is read only by the advisory Fast lane (its logic, rendered and routing checks), never by a
+ * Full gate, whose journeys discover every spec under tests/ themselves.
+ *
+ * A change confined to these paths and documentation is FMS-only (Sean, 29 September 2026): it runs the client
+ * gate, the production-build journeys and the browser journey shards restricted to FMS_JOURNEY_SPECS, and skips
+ * the .NET, PostgreSQL and operator suites and the requirements-management journeys. Anything outside this set
+ * keeps today's classification. Paths are normalized (lower case).
+ */
+const FMS_PATHS = [
+  /^product\/client\/src\/fmscdu\//,
+  /^product\/client\/public\/fms-cdu\//,
+  /^product\/client\/tests\/fms-[a-z0-9-]+\.spec\.ts$/,
+  /^product\/client\/tests\/production\/fms-[a-z0-9-]+\.spec\.ts$/,
+  /^product\/client\/tests\/fixtures\/fms-[a-z0-9-]+\.(?:html|tsx?)$/,
+  /^product\/client\/tests\/fixtures\/cifp\//,
+  /^product\/client\/tests\/support\/tdnoracle\.ts$/,
+  /^product\/client\/fast-client-tests\.json$/,
+]
+
+export function isFmsPath(path) {
+  const normalized = normalizePath(path)
+  return FMS_PATHS.some((pattern) => pattern.test(normalized))
+}
+
+/**
+ * The browser journeys (spec files under product/client/tests, by name) that an FMS-only change runs: the bench's
+ * own specs, and the specs outside them that observe the bench (they navigate to it or assert its route). The
+ * guard in classify.test.mjs finds every spec that names the bench and fails on one missing here.
+ */
+export const FMS_OBSERVING_SPECS = Object.freeze(['primary-navigation-alignment.spec.ts', 'routing-contract.spec.ts'])
+
+export function isFmsJourneySpec(file) {
+  const name = String(file).replaceAll('\\', '/').replace(/^.*\/tests\//, '').replace(/^tests\//, '')
+  return /^fms-[a-z0-9-]+\.spec\.ts$/i.test(name) || FMS_OBSERVING_SPECS.includes(name)
+}
+
+/**
+ * True when at least one changed path is FMS Test Bench code and every other is documentation that no suite reads.
+ * Callers pass both sides of a rename, so moving a file out of the bench is not FMS-only. This is the single
+ * definition the classifier and the protected merge-authority verifier share, as for documentation (#1152 A3).
+ */
+export function isFmsOnlyChange(changedPaths) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return false
+  if (changedPaths.some((path) => typeof path !== 'string' || path.length === 0)) return false
+  let fms = false
+  for (const path of changedPaths) {
+    const normalized = normalizePath(path)
+    if (isDocumentationPath(normalized)) continue
+    if (!FMS_PATHS.some((pattern) => pattern.test(normalized))) return false
+    fms = true
+  }
+  return fms
+}
+
+const FMS_ONLY_CLASSIFICATION = Object.freeze({
+  docsOnly: false,
+  backend: false,
+  client: true,
+  browser: true,
+  postgresql: false,
+  unclassified: false,
+  broad: false,
+  launchersOnly: false,
+  operator: false,
+  fastFullInfrastructure: false,
+  fmsOnly: true,
+})
+
 // The normal Fast lane defers the synthetic showcase seeder/upgrade/scenario maintenance tests to
 // authoritative Full/CI. Direct edits to those tests, their shared fixture, or the seeder they prove must
 // restore the complete Infrastructure suite locally rather than filtering the most relevant coverage.
@@ -190,6 +263,15 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       launchersOnly: false,
       operator: false,
       fastFullInfrastructure: false,
+      fmsOnly: false,
+    }
+  }
+  // As for documentation: the protected verifier re-derives FMS-only status from the candidate's own diff before
+  // it accepts the reduced gate set, so a candidate cannot claim it alone.
+  if (event === 'merge_group' && isFmsOnlyChange(changedPaths)) {
+    return {
+      ...FMS_ONLY_CLASSIFICATION,
+      reason: 'The merge-group candidate changes only the FMS Test Bench (and documentation): the client gate, the production-build journeys and the FMS browser journeys run; the protected verifier re-derives this from the candidate\'s own diff before accepting the FMS topology.',
     }
   }
   if (BROAD_EVENTS.has(event)) {
@@ -205,6 +287,7 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       launchersOnly: false,
       operator: true,
       fastFullInfrastructure: true,
+      fmsOnly: false,
     }
   }
 
@@ -227,6 +310,7 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       launchersOnly: false,
       operator: true,
       fastFullInfrastructure: true,
+      fmsOnly: false,
     }
   }
 
@@ -246,6 +330,16 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
       launchersOnly: true,
       operator: true,
       fastFullInfrastructure: false,
+      fmsOnly: false,
+    }
+  }
+
+  // A change confined to the FMS Test Bench (and documentation) runs the client gate, the production-build
+  // journeys and the FMS browser journeys; nothing else can observe it (FMS_PATHS).
+  if (!docsOnly && isFmsOnlyChange(paths)) {
+    return {
+      ...FMS_ONLY_CLASSIFICATION,
+      reason: 'FMS Test Bench-only change: the client gate, the production-build journeys and the FMS browser journeys run; the .NET, PostgreSQL and operator suites and the requirements-management journeys cannot observe these paths.',
     }
   }
 
@@ -261,6 +355,7 @@ export function classify(changedPaths, { event = 'pull_request' } = {}) {
     launchersOnly: false,
     operator: normalizedPaths.some((path) => isOperatorPath(path)),
     fastFullInfrastructure: needsFullFastInfrastructure(paths),
+    fmsOnly: false,
   }
 
   // A change that is neither documentation nor recognised product code used to select nothing: the gate

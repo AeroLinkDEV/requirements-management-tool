@@ -118,6 +118,48 @@ function collectDocumentationTopologyReasons(jobs, reasons) {
   }
 }
 
+/** The gates an FMS Test Bench-only candidate runs; every other required job and group it skips. */
+export const FMS_TOPOLOGY_RUN_JOBS = ['Client lint, type-check, and build', 'Browser journeys on the production build']
+export const FMS_TOPOLOGY_RUN_GROUPS = ['Browser journeys']
+
+/**
+ * FMS Test Bench-only topology. Like the documentation topology, only the verifier can select it, after deriving
+ * from the candidate's own diff, with the protected classifier, that the change is confined to the bench. The
+ * client gate, the production-build journeys and the complete browser journey shard set (run on the FMS journeys)
+ * must succeed; every other gate job must be present and exactly `skipped`, and the API group must show only its
+ * skipped template. A successful backend job is refused too: then the run was not the topology it claims.
+ */
+function collectFmsTopologyReasons(jobs, reasons) {
+  for (const name of REQUIRED_JOBS) {
+    const matched = jobs.filter((job) => job?.name === name)
+    const runs = FMS_TOPOLOGY_RUN_JOBS.includes(name)
+    if (matched.length !== 1) {
+      reasons.push(`fms-topology-job-count: expected exactly one '${name}' job, found ${matched.length}`)
+    } else if (runs && matched[0].conclusion !== JOB_CONCLUSION_SUCCESS) {
+      reasons.push(`fms-topology-not-success: '${name}' concluded '${matched[0].conclusion ?? 'unknown'}', but an FMS-only candidate must pass it`)
+    } else if (!runs && matched[0].conclusion !== JOB_CONCLUSION_SKIPPED) {
+      reasons.push(`fms-topology-not-skipped: '${name}' concluded '${matched[0].conclusion ?? 'unknown'}', but an FMS-only candidate skips it`)
+    }
+  }
+  for (const group of SHARDED_JOB_GROUPS) {
+    if (FMS_TOPOLOGY_RUN_GROUPS.includes(group.name)) {
+      collectShardReasons(jobs, reasons, [group])
+      continue
+    }
+    const template = unexpandedShardJobName(group)
+    const expanded = jobs.filter((job) => typeof job?.name === 'string' && group.pattern.test(job.name))
+    const skipped = jobs.filter((job) => job?.name === template)
+    if (expanded.length > 0) {
+      reasons.push(`fms-topology-shards-ran: ${expanded.length} ${group.name} shard(s) ran, but an FMS-only candidate skips the group`)
+    }
+    if (skipped.length !== 1) {
+      reasons.push(`fms-topology-job-count: expected exactly one skipped '${template}' job, found ${skipped.length}`)
+    } else if (skipped[0].conclusion !== JOB_CONCLUSION_SKIPPED) {
+      reasons.push(`fms-topology-not-skipped: '${template}' concluded '${skipped[0].conclusion ?? 'unknown'}'`)
+    }
+  }
+}
+
 function duplicateNames(jobs, names) {
   const duplicates = []
   for (const name of names) {
@@ -126,8 +168,8 @@ function duplicateNames(jobs, names) {
   return duplicates
 }
 
-function collectShardReasons(jobs, reasons) {
-  for (const group of SHARDED_JOB_GROUPS) {
+function collectShardReasons(jobs, reasons, groups = SHARDED_JOB_GROUPS) {
+  for (const group of groups) {
     const matched = jobs.filter((job) => typeof job?.name === 'string' && group.pattern.test(job.name))
     if (matched.length === 0) {
       reasons.push(`missing-job: no ${group.name} shards ran`)
@@ -179,12 +221,16 @@ function collectShardReasons(jobs, reasons) {
  *   from the candidate's own diff against its queue base, that the change is documentation (#1152 A3).
  *   It then accepts the documentation topology as well as the full gate set. Anything but exactly `true`
  *   keeps the full requirements alone.
+ * @param {boolean} [input.fmsOnlyCandidate] true only when the protected verifier itself derived, the same way,
+ *   that the change is confined to the FMS Test Bench (classify.mjs isFmsOnlyChange). It then accepts the FMS
+ *   topology as well as the full gate set. Anything but exactly `true` keeps the full requirements alone.
  * @returns {{decision: 'PASS'|'REFUSE', reasons: string[]}}
  */
 export function evaluateMergeGroupCandidate(input) {
   const reasons = []
   const { run, jobs, changedPaths, expected } = input ?? {}
   const documentationOnly = input?.documentationOnlyCandidate === true
+  const fmsOnly = input?.fmsOnlyCandidate === true
 
   if (!run || typeof run !== 'object') {
     return { decision: 'REFUSE', reasons: ['run-metadata-missing: no triggering-run metadata was supplied'] }
@@ -305,6 +351,11 @@ export function evaluateMergeGroupCandidate(input) {
     const documentationReasons = []
     collectDocumentationTopologyReasons(jobs, documentationReasons)
     if (documentationReasons.length > 0) reasons.push(...documentationReasons, ...fullGateReasons)
+  } else if (fmsOnly && fullGateReasons.length > 0) {
+    // The same relaxation for an FMS-only candidate the verifier derived: the FMS topology or the full set.
+    const fmsReasons = []
+    collectFmsTopologyReasons(jobs, fmsReasons)
+    if (fmsReasons.length > 0) reasons.push(...fmsReasons, ...fullGateReasons)
   } else {
     reasons.push(...fullGateReasons)
   }
