@@ -2,6 +2,7 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm } from '../src/fmsCdu/fmsModel'
 import { RNP_DEFAULTS, radioRange, selectSources } from '../src/fmsCdu/navigation'
+import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
@@ -235,8 +236,26 @@ test('ARM APPROACH is asked for within 2 NM of the final approach fix when the a
   expect(recalled(armed.unit, 'ARM APPROACH')).toBe(false)
 })
 
-test('TOGA on the approach drops the rest of it and flies the missed approach, its hold armed', () => {
+test('TOGA before the MAP (helicopter): guidance continues to the MAP, which then sequences the missed approach; its hold armed (M300 7-16, R2-03)', () => {
   const unit = new ScriptedFms()
+  unit.selectProcedure('APPROACH', 'R24R')
+  unit.press('EXEC')
+  for (let i = 0; i < 6; i += 1) unit.sequence()
+  expect(active(unit)).toBe('FERDI')
+  unit.armApproach(true)
+  expect(unit.goAround()).toBe(true)
+  // The lateral path is kept: still to FERDI, then the runway (the MAP); the approach is disarmed.
+  expect(active(unit)).toBe('FERDI')
+  expect(unit.approachArmed).toBe(false)
+  expect(unit.activeRoute.hold).toMatchObject({ fix: 'UL502', status: 'ARMED' })
+  while (active(unit) !== 'RW24R') unit.sequence()
+  unit.sequence()
+  expect(active(unit)).toBe('(CA)')
+  expect(unit.goAround()).toBe(false)
+})
+
+test('TOGA on the approach (laboratory airline profile) drops the rest of it and flies the missed approach, its hold armed', () => {
+  const unit = new ScriptedFms(undefined, { profile: LAB_AIRLINE_VNAV_PROFILE })
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
   for (let i = 0; i < 6; i += 1) unit.sequence()

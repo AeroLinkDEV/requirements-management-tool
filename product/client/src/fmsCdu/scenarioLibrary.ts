@@ -1,3 +1,4 @@
+import { MISSION_87N_OFFSHORE_SAR, MISSION_87N_VARIANTS } from "./heliDemo";
 import type { Scenario } from "./scenario";
 
 // Built-in scenarios for the situations airline and certification test programmes exercise most (see the research in
@@ -9,8 +10,9 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
   {
     id: "gps-lost-before-faf",
     title: "GPS lost 2 NM before the final approach fix",
-    objective: "Show that losing GPS on the RNAV (GNSS) approach removes approach capability (the approach does not capture), alerts the crew, and that the missed approach is flown after TOGA. On DME/DME the navigation still meets RNP 0.3 here, so no CHECK ANP is expected.",
+    objective: "Show that losing GPS on the RNAV (GNSS) approach removes approach capability (the approach does not capture), alerts the crew, and that the missed approach is flown after TOGA. On DME/DME the navigation still meets RNP 0.3 here, so no CHECK ANP is expected. Flown in the laboratory airline profile: a fixed-wing runway approach whose TOGA drops the rest of the approach at once (the helicopter profile flies on to the MAP first, M300 7-16).",
     maxSeconds: 3600,
+    profile: "lab-airline-vnav",
     steps: [
       { when: { kind: "start" }, action: { kind: "procedure", procedure: "APPROACH", ident: "R24R" } },
       { when: { kind: "start" }, action: { kind: "keys", keys: ["EXEC"] } },
@@ -195,4 +197,6 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
       { when: { kind: "start" }, action: { kind: "expectGpsSource", source: "GPS1" }, within: 5 },
     ],
   },
+  MISSION_87N_OFFSHORE_SAR,
+  ...MISSION_87N_VARIANTS,
 ];

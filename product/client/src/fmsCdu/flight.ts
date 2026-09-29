@@ -24,6 +24,9 @@ const ROLL_RATE = 5;
 const MAX_VS = 1000;
 /** Vertical acceleration limit, fpm per second: the vertical speed changes over seconds, not in one step. */
 const VS_RATE = 600;
+/** The modelled pitch (the air-relative flight-path angle) is taken over at least this airspeed, kt, and held within this many degrees. */
+const PITCH_SPEED_FLOOR = 30;
+const PITCH_LIMIT = 20;
 const G_TURN = 1091; // turn rate (deg/s) = 1091 * tan(bank) / TAS (kt)
 /** Longitudinal acceleration and deceleration limit, kt/s (the profile's). */
 const SPEED_RATE = ACTIVE_PROFILE.parameters.longitudinalAccel.value;
@@ -610,8 +613,11 @@ export class FlightSimulator {
     verticalSpeed = fms.verticalSpeed + clamp(verticalSpeed - fms.verticalSpeed, -VS_RATE * dt, VS_RATE * dt);
     const altitude = fms.altitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
-    // Bank and flight-path pitch too: they tilt the GPS antennas (a point-mass model has no angle of attack).
-    const pitch = groundSpeed < 1 ? 0 : (Math.atan(verticalSpeed / 60 / (groundSpeed * 1.68781)) * 180) / Math.PI;
+    // Bank and pitch too: they tilt the GPS antennas. The point-mass model has no attitude of its own, so pitch is the
+    // air-relative flight-path angle, over at least PITCH_SPEED_FLOOR of airspeed and within PITCH_LIMIT (laboratory).
+    // Over the ground it would be meaningless at low speed: a helicopter climbing out of a hover at 1 kt of ground speed
+    // is nearly level, not pointing its antennas at the horizon.
+    const pitch = clamp(deg(Math.atan(verticalSpeed / 60 / (Math.max(this.airspeed, PITCH_SPEED_FLOOR) * 1.68781))), -PITCH_LIMIT, PITCH_LIMIT);
     fms.setAircraft({ position, track, heading, groundSpeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError, bank: this.bank, pitch });
     // The path for the deviation display: the final approach path on final (coupled only when captured), otherwise the
     // descent path. None while the FMS has failed: it computes nothing to show.

@@ -1,6 +1,7 @@
 import { KBTV_CIFP_2609 } from "./data/kbtvCifp2609";
 import type { FlightSimulator } from "./flight";
 import { courseDeg, offset } from "./fmsModel";
+import { setUp87nOffshoreSar, setUp87nRnav190Final } from "./heliDemo";
 import type { ScriptedFms } from "./scriptedFms";
 
 /**
@@ -75,6 +76,8 @@ export function setUpKbtvRnav15(fms: ScriptedFms, sim?: FlightSimulator): { read
 /** Start states a scenario can name (scenario.ts): each sets up a fresh simulation before the first step. */
 export const START_STATES = {
   "kbtv-rnav15": { label: "KBTV RNAV (GPS) RWY 15: FAA CIFP 2609, 8 NM before STAEV at 3200 ft, approach armed", setUp: setUpKbtvRnav15 },
+  "87n-offshore-sar": { label: "87N offshore SAR (synthetic): FAA CIFP 2609 Copter PinS, 10 NM south of 87N at 500 ft, 100 KIAS, wind 230/20, SAR datum set", setUp: setUp87nOffshoreSar },
+  "87n-rnav190-final": { label: "87N COPTER RNAV 190 final (synthetic): 3 NM before STAYS at 1700 ft, 70 KIAS, NAV and approach armed", setUp: setUp87nRnav190Final },
 } as const satisfies Record<string, { label: string; setUp: (fms: ScriptedFms, sim?: FlightSimulator) => { ready: true } | { refused: string } }>;
 
 export type StartStateId = keyof typeof START_STATES;

@@ -550,8 +550,12 @@ export class ScriptedFms implements CduBackend {
     // A conditional leg ends where its event happened: the next leg starts from here.
     if (leg.kind === "cond") { this.passLeg(null); return "route"; }
     // A procedure hold (HF, HA, HM on the leg) is armed as the route's hold when its fix is reached, unless the route
-    // already holds there (the armed missed-approach hold).
-    if (leg.hold && route.hold?.fix !== leg.ident) route.hold = this.holdFromProcedure(leg.ident, leg.hold, "ARMED");
+    // already holds there (the armed missed-approach hold). A hold on a missed-approach leg is the missed-approach hold
+    // (MISSED-HOLD: one racetrack), however the route reached it.
+    if (leg.hold && route.hold?.fix !== leg.ident) {
+      route.hold = this.holdFromProcedure(leg.ident, leg.hold, "ARMED");
+      if (leg.source === "MISSED") route.hold.missed = true;
+    }
     const hold = route.hold;
     // A fix crossing in the hold: at the end of the entry (the first crossing after it), or after a whole racetrack.
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && completedCircuit) hold.circuits = (hold.circuits ?? 0) + 1;
@@ -1385,8 +1389,10 @@ export class ScriptedFms implements CduBackend {
   }
 
   /**
-   * TOGA: a go-around before the runway. The rest of the approach is dropped and the missed approach becomes the
-   * active route from present position, its hold armed.
+   * TOGA or MISSED APPR before the MAP: the missed approach is requested, but lateral guidance continues along the
+   * approach to the MAP, which then sequences the missed approach legs (M300 7-16 item 4; plan R2-03 MA-EARLY and
+   * TOGA-EARLY). The approach is disarmed (no descent on its path) and the missed-approach hold armed. The laboratory
+   * airline profile, whose VNAV climbs on the missed approach legs, drops the rest of the approach at once instead.
    */
   goAround() {
     if (this.injected.has("fmsFail")) return false;
@@ -1394,8 +1400,10 @@ export class ScriptedFms implements CduBackend {
     const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
     // Only from the approach: once the missed approach is being flown there is nothing left to go around from.
     if (missed <= 0) return false;
-    route.legs.splice(0, missed);
-    this.legStart = { ...this.here };
+    if (this.aircraftProfile.verticalPolicy !== "ADVISORY") {
+      route.legs.splice(0, missed);
+      this.legStart = { ...this.here };
+    }
     this.armedApproach = false;
     this.goArounds += 1;
     this.armMissedHold(route);
@@ -2116,6 +2124,8 @@ export class ScriptedFms implements CduBackend {
       this.pendingHoverPoints = null;
       h.active = { id: ++h.procedures, mark: h.mark!, finalTrack: h.finalTrack!, dtra: h.dtra! };
       Object.assign(h, { status: "ACT", requestData: null, refused: null, refusedReason: null, functionLost: false });
+      // The procedure takes the head of the route: a search pattern being flown is interrupted (its /S leg removed).
+      if (this.sar.active) this.interruptSar();
       this.alert(alert("TRANSITION DOWN"));
     } else if (this.hover.status === "MOD") {
       // The hover modification edited until it no longer holds TDN: executed as an ordinary route change, the procedure

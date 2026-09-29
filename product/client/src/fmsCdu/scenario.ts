@@ -34,22 +34,33 @@ export type Trigger =
   | { kind: "start" }
   | { kind: "time"; seconds: number }
   | { kind: "distance"; waypoint: string; nm: number }
-  | { kind: "active"; waypoint: string };
+  | { kind: "active"; waypoint: string }
+  /** This many seconds after the step before it finished: the timing inside a stage, wherever the stage began. */
+  | { kind: "after"; seconds: number };
 
 export type Action =
   | { kind: "keys"; keys: CduFunction[] }
   | { kind: "type"; text: string }
   | { kind: "condition"; condition: ConditionId; on: boolean }
   | { kind: "alert"; text: string }
-  | { kind: "procedure"; procedure: "SID" | "STAR" | "APPROACH"; ident: string }
+  | { kind: "procedure"; procedure: "SID" | "STAR" | "APPROACH"; ident: string; transition?: string }
   /** APPR: arms the approach, or (on false) presses it off: a disarm, or after capture a cancellation. */
   | { kind: "armApproach"; on?: boolean }
   | { kind: "goAround" }
+  /** The wind the air mass moves with, from `direction` (degrees true) at `speed` kt: a laboratory stimulus. */
+  | { kind: "wind"; direction: number; speed: number }
   /**
    * The crew's autopilot selections under the helicopter profile: preselect an altitude, engage a vertical speed (fpm)
    * toward it, hold the present altitude, or select a speed (knots). Each field given is applied, in that order.
    */
-  | { kind: "autopilot"; altitude?: number; verticalSpeed?: number; hold?: boolean; speed?: number }
+  | { kind: "autopilot"; altitude?: number; verticalSpeed?: number; hold?: boolean; speed?: number; heading?: number; lnav?: boolean; hover?: boolean; transitionUp?: boolean }
+  /** The autopilot's engaged mode on each axis (collective, pitch, roll), as the helicopter FMA shows them. */
+  | { kind: "expectAfcs"; collective?: string; pitch?: string; roll?: string }
+  /**
+   * The aircraft's state: ground speed at most `maxGroundSpeed` kt; radio height `radioHeight`, or altitude `altitude`
+   * (MSL), ± `heightTolerance` ft (10 by default); within `nearMetres` of the waypoint `near`. Each part given is checked.
+   */
+  | { kind: "expectAircraft"; maxGroundSpeed?: number; radioHeight?: number; altitude?: number; heightTolerance?: number; near?: string; nearMetres?: number }
   | { kind: "expectLine"; line: number; pattern: string }
   | { kind: "expectScratchpad"; text: string }
   | { kind: "expectAlert"; text: string }
@@ -123,7 +134,7 @@ export const linePattern = (text: string) =>
 /** The step in words, for the run log, the report and the test procedure. After the first step, "start" means "then". */
 export function describeStep(step: ScenarioStep, index = 0): string {
   const w = step.when;
-  const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : `When ${w.waypoint} is the active waypoint`;
+  const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "after" ? `${formatSeconds(w.seconds)} later` : w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : `When ${w.waypoint} is the active waypoint`;
   const a = step.action;
   const within = step.within ? ` within ${step.within} s` : "";
   const what = (() => {
@@ -132,10 +143,25 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "type": return `type ${a.text} into the scratchpad`;
       case "condition": return `${a.on ? "inject" : "remove"} the condition ${a.condition}`;
       case "alert": return `raise the alert ${a.text}`;
-      case "procedure": return `select the ${a.procedure === "APPROACH" ? "approach" : a.procedure} ${a.ident}`;
+      case "procedure": return `select the ${a.procedure === "APPROACH" ? "approach" : a.procedure} ${a.ident}${a.transition ? ` via ${a.transition}` : ""}`;
       case "armApproach": return a.on === false ? "press APPR off" : "arm the approach";
       case "goAround": return "press TOGA";
-      case "autopilot": return [a.altitude !== undefined ? `preselect ${a.altitude} ft` : null, a.verticalSpeed !== undefined ? `engage VS ${a.verticalSpeed} fpm` : null, a.hold ? "engage ALT" : null, a.speed !== undefined ? `select ${a.speed} kt` : null].filter(Boolean).join(", then ");
+      case "wind": return `set the wind to ${String(a.direction).padStart(3, "0")}°T / ${a.speed} kt`;
+      case "autopilot": return [
+        a.altitude !== undefined ? `preselect ${a.altitude} ft` : null, a.verticalSpeed !== undefined ? `engage VS ${a.verticalSpeed} fpm` : null, a.hold ? "engage ALT" : null,
+        a.speed !== undefined ? `select ${a.speed} kt` : null, a.heading !== undefined ? `select heading ${a.heading}°` : null, a.lnav ? "arm NAV" : null,
+        a.hover ? "engage HOV" : null, a.transitionUp ? "engage TU" : null,
+      ].filter(Boolean).join(", then ");
+      case "expectAfcs": return `check that the autopilot modes are ${[a.collective ?? "any", a.pitch ?? "any", a.roll ?? "any"].join(" | ")}${within}`;
+      case "expectAircraft": {
+        const parts = [
+          a.maxGroundSpeed !== undefined ? `ground speed at most ${a.maxGroundSpeed} kt` : null,
+          a.radioHeight !== undefined ? `radio height ${a.radioHeight} ± ${a.heightTolerance ?? 10} ft` : null,
+          a.altitude !== undefined ? `altitude ${a.altitude} ± ${a.heightTolerance ?? 10} ft` : null,
+          a.near ? `within ${a.nearMetres ?? 50} m of ${a.near}` : null,
+        ].filter(Boolean);
+        return `check that the aircraft is at ${parts.join(", ")}${within}`;
+      }
       case "expectLine": return `check that screen line ${a.line + 1} matches /${a.pattern}/${within}`;
       case "expectScratchpad": return a.text ? `check that the scratchpad shows ${a.text}${within}` : `check that the scratchpad is blank${within}`;
       case "expectAlert": return `check that the alert ${a.text} has been raised${within}`;
@@ -189,6 +215,7 @@ function triggerProblem(when: unknown): string | null {
     case "time": return finite(w.seconds, 0, MAX_RUN_SECONDS) ? null : "a time trigger needs seconds between 0 and 86400";
     case "distance": return text(w.waypoint, IDENT) && finite(w.nm, 0.01, 1000) ? null : "a distance trigger needs a waypoint ident and nm between 0.01 and 1000";
     case "active": return text(w.waypoint, IDENT) ? null : "an active trigger needs a waypoint ident";
+    case "after": return finite(w.seconds, 0, MAX_RUN_SECONDS) ? null : "an after trigger needs seconds between 0 and 86400";
     default: return `unsupported trigger "${String(w.kind)}"`;
   }
 }
@@ -206,13 +233,31 @@ function actionProblem(action: unknown): string | null {
     case "expectNoAlert": return text(a.text, /^.{1,24}$/) ? null : `${a.kind} needs text of 1 to 24 characters`;
     // A blank scratchpad is a state worth checking: the text may be empty.
     case "expectScratchpad": return text(a.text, /^.{0,24}$/) ? null : "expectScratchpad needs text of at most 24 characters";
-    case "procedure": return (a.procedure === "SID" || a.procedure === "STAR" || a.procedure === "APPROACH") && text(a.ident, /^[A-Z0-9]{1,7}$/) ? null : "procedure needs SID, STAR or APPROACH and an ident";
+    case "procedure": return (a.procedure === "SID" || a.procedure === "STAR" || a.procedure === "APPROACH") && text(a.ident, /^[A-Z0-9]{1,7}$/) && (a.transition === undefined || text(a.transition, /^[A-Z0-9]{1,7}$/)) ? null : "procedure needs SID, STAR or APPROACH, an ident, and a transition ident when given";
     case "armApproach": return a.on === undefined || typeof a.on === "boolean" ? null : "armApproach on must be true or false when given";
     case "goAround": return null;
+    case "wind": return finite(a.direction, 0, 360) && finite(a.speed, 0, 150) ? null : "wind needs a direction from 0 to 360 and a speed from 0 to 150 kt";
     case "autopilot": {
       const finite = (v: unknown) => v === undefined || (typeof v === "number" && Number.isFinite(v));
-      if (!finite(a.altitude) || !finite(a.verticalSpeed) || !finite(a.speed) || !(a.hold === undefined || typeof a.hold === "boolean")) return "autopilot altitude, verticalSpeed and speed must be numbers, hold true or false";
-      return a.altitude === undefined && a.verticalSpeed === undefined && !a.hold && a.speed === undefined ? "autopilot needs at least one of altitude, verticalSpeed, hold and speed" : null;
+      const flag = (v: unknown) => v === undefined || typeof v === "boolean";
+      if (!finite(a.altitude) || !finite(a.verticalSpeed) || !finite(a.speed) || !finite(a.heading) || ![a.hold, a.lnav, a.hover, a.transitionUp].every(flag)) return "autopilot altitude, verticalSpeed, speed and heading must be numbers; hold, lnav, hover and transitionUp true or false";
+      return a.altitude === undefined && a.verticalSpeed === undefined && !a.hold && a.speed === undefined && a.heading === undefined && !a.lnav && !a.hover && !a.transitionUp
+        ? "autopilot needs at least one selection" : null;
+    }
+    case "expectAfcs": {
+      const mode = (v: unknown) => v === undefined || text(v, /^[A-Z/-]{2,8}$/);
+      if (a.collective === undefined && a.pitch === undefined && a.roll === undefined) return "expectAfcs needs at least one of collective, pitch and roll";
+      return mode(a.collective) && mode(a.pitch) && mode(a.roll) ? null : "expectAfcs modes must be mode names";
+    }
+    case "expectAircraft": {
+      if (a.maxGroundSpeed === undefined && a.radioHeight === undefined && a.altitude === undefined && a.near === undefined) return "expectAircraft needs at least one of maxGroundSpeed, radioHeight, altitude and near";
+      if (a.altitude !== undefined && !finite(a.altitude, -1500, 60000)) return "expectAircraft altitude must be between -1500 and 60000";
+      if (a.maxGroundSpeed !== undefined && !finite(a.maxGroundSpeed, 0, 500)) return "expectAircraft maxGroundSpeed must be between 0 and 500";
+      if (a.radioHeight !== undefined && !finite(a.radioHeight, 0, 2500)) return "expectAircraft radioHeight must be between 0 and 2500";
+      if (a.heightTolerance !== undefined && !finite(a.heightTolerance, 0, 500)) return "expectAircraft heightTolerance must be between 0 and 500";
+      if (a.near !== undefined && !text(a.near, IDENT)) return "expectAircraft near must be a waypoint ident";
+      if (a.nearMetres !== undefined && !finite(a.nearMetres, 0, 100000)) return "expectAircraft nearMetres must be between 0 and 100000";
+      return null;
     }
     case "expectLine": {
       if (!(Number.isInteger(a.line) && finite(a.line, 0, SCRATCHPAD_LINE))) return `expectLine needs a line from 0 to ${SCRATCHPAD_LINE}`;
@@ -288,6 +333,8 @@ export class ScenarioRunner {
   private next = 0;
   /** When the current step's trigger came, for an expectation that is waiting. */
   private eligibleAt: number | null = null;
+  /** When the previous step finished, for an "after" trigger. */
+  private previousAt = 0;
   private stopped = false;
   private failure: "error" | null = null;
   private endedAt: number | null = null;
@@ -385,6 +432,7 @@ export class ScenarioRunner {
 
   private finish(result: StepResult) {
     this.results[this.next] = result;
+    this.previousAt = result.at ?? this.elapsed;
     this.next += 1;
     this.eligibleAt = null;
   }
@@ -393,6 +441,7 @@ export class ScenarioRunner {
     switch (when.kind) {
       case "start": return true;
       case "time": return this.elapsed >= when.seconds - 1e-9;
+      case "after": return this.elapsed >= this.previousAt + when.seconds - 1e-9;
       case "distance": {
         const at = this.fms.coordinates(when.waypoint);
         return at !== undefined && distanceNm(this.fms.truePosition, at) <= when.nm;
@@ -414,10 +463,11 @@ export class ScenarioRunner {
       case "type": for (const key of keysFor(action.text)) fms.press(key); return;
       case "condition": fms.setCondition(action.condition, action.on); return;
       case "alert": fms.raiseAlert(action.text); return;
-      case "procedure": fms.selectProcedure(action.procedure, action.ident); return;
+      case "procedure": fms.selectProcedure(action.procedure, action.ident, action.transition); return;
       case "armApproach": fms.armApproach(action.on !== false); return;
       // TOGA: the FMS missed-approach request and, under the helicopter profile, the autopilot's GA.
       case "goAround": fms.goAround(); this.sim?.engageGoAround(); return;
+      case "wind": Object.assign(fms.wind, { direction: action.direction, speed: action.speed }); return;
       case "autopilot": {
         const sim = this.sim;
         if (!sim) throw new Error("autopilot selections need the flight simulation");
@@ -425,6 +475,10 @@ export class ScenarioRunner {
         if (action.verticalSpeed !== undefined && !sim.engageVerticalSpeed(action.verticalSpeed)) throw new Error(`VS is not available in the ${fms.aircraftProfile.id} profile`);
         if (action.hold && !sim.engageAltitudeHold()) throw new Error(`ALT is not available in the ${fms.aircraftProfile.id} profile`);
         if (action.speed !== undefined) sim.selectSpeed(action.speed);
+        if (action.heading !== undefined) sim.selectHeading(action.heading);
+        if (action.lnav) sim.armLnav();
+        if (action.hover && !sim.engageHover()) throw new Error("HOV is not available: above the coordinated-flight speed, or no eligible hover feedback");
+        if (action.transitionUp && !sim.engageTransitionUp()) throw new Error("TU is not available: not in a hover mode, too fast, or no valid radio height");
         return;
       }
       case "gps": {
@@ -474,6 +528,28 @@ export class ScenarioRunner {
           && (action.verticalMode === undefined || vertical === action.verticalMode)
           && (action.maxVerticalFt === undefined || (deviation !== null && Math.abs(deviation) <= action.maxVerticalFt));
         return { ok, actual: `${type} ${state}, ${vertical}, ${deviation === null ? "no path" : `${Math.round(deviation)} ft from the path`}` };
+      }
+      case "expectAfcs": {
+        const sim = this.sim;
+        if (!sim) throw new Error("expectAfcs needs the flight simulation, which this run was not given.");
+        const modes = sim.axisModes;
+        const ok = (action.collective === undefined || modes.collective === action.collective) && (action.pitch === undefined || modes.pitch === action.pitch)
+          && (action.roll === undefined || modes.roll === action.roll);
+        return { ok, actual: `${modes.collective} | ${modes.pitch} | ${modes.roll}` };
+      }
+      case "expectAircraft": {
+        const ra = fms.radioHeight;
+        const at = action.near ? fms.coordinates(action.near) : undefined;
+        const metres = at ? distanceNm(fms.truePosition, at) * 1852 : null;
+        const ok = (action.maxGroundSpeed === undefined || fms.groundSpeed <= action.maxGroundSpeed)
+          && (action.radioHeight === undefined || (ra.status === "NORMAL" && Math.abs(ra.value! - action.radioHeight) <= (action.heightTolerance ?? 10)))
+          && (action.altitude === undefined || Math.abs(fms.altitude - action.altitude) <= (action.heightTolerance ?? 10))
+          && (action.near === undefined || (metres !== null && metres <= (action.nearMetres ?? 50)));
+        const parts = [
+          `GS ${fms.groundSpeed.toFixed(1)} kt`, `RA ${ra.status === "NORMAL" ? `${Math.round(ra.value!)} ft` : ra.status}`, `ALT ${Math.round(fms.altitude)} ft`,
+          ...(action.near ? [metres === null ? `${action.near} unknown` : `${Math.round(metres)} m from ${action.near}`] : []),
+        ];
+        return { ok, actual: parts.join(", ") };
       }
       case "expectGpsSource": {
         const nav = fms.navState;
