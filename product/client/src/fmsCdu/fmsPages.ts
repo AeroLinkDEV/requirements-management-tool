@@ -803,6 +803,12 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       if (index === 1) return vnavCruise(fms);
       if (index === 2) return vnavDescent(fms);
       const path = approach(fms);
+      // An executed approach that does not end at a runway (a point-in-space approach, LNAV only) has no vertical path
+      // to show: it says so, with where it ends ("CRANN (MAP)"), never that there is no approach.
+      const endpoint = fms.approachType !== null ? fms.profile().endpoint : null;
+      if (!path && endpoint)
+        return [title("VNAV", "1/3"), undefined, { center: medium("NO VERTICAL PATH (LNAV)") }, undefined, { center: medium(`TO ${endpoint.label}`) },
+          undefined, undefined, undefined, undefined, undefined, undefined, undefined, { left: back("INDEX") }];
       if (!path)
         return [title("VNAV", "1/3"), undefined, { center: medium("NO APPROACH IN ROUTE") }, undefined, undefined, undefined, undefined,
           undefined, undefined, undefined, undefined, undefined, { left: back("INDEX") }];
