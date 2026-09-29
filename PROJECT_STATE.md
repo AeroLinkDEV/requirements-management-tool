@@ -440,6 +440,9 @@ display unit for engineers.
     order with automatic reversion; the FMS position drifts from the true position in dead reckoning and shifts
     back when a sensor returns (POSITION SHIFT); ANP from the sources, RNP by phase of flight or crew entry, and
     CHECK ANP after the phase's time to alert; NAV STATUS and NAV OPTIONS (navaid inhibit, GPS deselect).
+  - **Vertical guidance**: under the default helicopter profile the crew flies the vertical axis and the speed
+    through the autopilot (ALT SEL, VS, ALT, SPD, and GA on TOGA), and the FMS constraints are advisories; the
+    airline-style VNAV below is a selectable laboratory profile (`lab-airline-vnav`).
   - **Approaches and VNAV** (`vnav.ts`): the approach type (ILS, or RNAV to LPV minima with GPS integrity), ARM
     APPROACH, NO APPR INTEGRITY and go-around; speed and altitude constraints (at, at or above, at or below,
     windows, flight levels); a vertical profile with top and end of descent, climbs that level at constraints,

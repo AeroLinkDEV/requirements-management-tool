@@ -141,7 +141,7 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
         </g>
         <rect x="18" y={cy - 14} width="62" height="28" fill="#000" stroke={WHITE} />
         <text x="72" y={cy + 6} textAnchor="end" fontSize="17" fill={WHITE}>{Math.round(air.airspeed)}</text>
-        <text x="51" y="54" textAnchor="middle" fontSize="13" fill={bus.targetSpeed.status === "NORMAL" ? MAGENTA : AMBER}>{bus.targetSpeed.status === "NORMAL" ? Math.round(bus.targetSpeed.value!) : "---"}</text>
+        <text x="51" y="54" textAnchor="middle" fontSize="13" fill={bus.targetSpeed.status === "NORMAL" ? MAGENTA : air.selectedSpeed !== null ? CYAN : AMBER}>{bus.targetSpeed.status === "NORMAL" ? Math.round(bus.targetSpeed.value!) : air.selectedSpeed !== null ? air.selectedSpeed : "---"}</text>
       </g>
       {/* Altitude tape: the FMS target altitude (magenta), or the latched altitude hold reference (cyan). */}
       <g>
@@ -156,12 +156,14 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           ))}
           {bus.targetAltitude.status === "NORMAL" ? (
             <rect x="336" y={clamp(cy - (bus.targetAltitude.value! - air.altitude) * altScale - 8, 58, 286)} width="8" height="16" fill={MAGENTA} data-testid="alt-bug" />
+          ) : air.selectedAltitude !== null ? (
+            <rect x="336" y={clamp(cy - (air.selectedAltitude - air.altitude) * altScale - 8, 58, 286)} width="8" height="16" fill={CYAN} data-testid="alt-bug" />
           ) : null}
         </g>
         <rect x="338" y={cy - 14} width="64" height="28" fill="#000" stroke={WHITE} />
         <text x="398" y={cy + 6} textAnchor="end" fontSize="16" fill={WHITE}>{Math.round(air.altitude)}</text>
         <text x="369" y="54" textAnchor="middle" fontSize="13" fill={bus.targetAltitude.status === "NORMAL" ? MAGENTA : CYAN}>
-          {bus.targetAltitude.status === "NORMAL" ? Math.round(bus.targetAltitude.value!) : bus.verticalMode === "ALT HOLD" ? "HOLD" : "----"}
+          {bus.targetAltitude.status === "NORMAL" ? Math.round(bus.targetAltitude.value!) : air.selectedAltitude !== null ? air.selectedAltitude : bus.verticalMode === "ALT HOLD" ? "HOLD" : "----"}
         </text>
       </g>
       {/* Vertical speed. */}

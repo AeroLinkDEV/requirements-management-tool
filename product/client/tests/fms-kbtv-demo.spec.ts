@@ -4,6 +4,8 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { bearingDeg, distanceNm } from '../src/fmsCdu/fmsModel'
 import { ScenarioRunner, procedureText, reportMarkdown, runHeadless, scenarioProblems, type Scenario } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
+import { FlightSimulator } from '../src/fmsCdu/flight'
+import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
 // The real-data demonstration (kbtvDemo.ts): the FAA CIFP 2609 extract for Burlington, Vermont, bundled with the client,
@@ -48,7 +50,8 @@ test('the KBTV RNAV RWY 15 start state: the approach executed and armed, the air
   const kbtv = await demo()
   expect(kbtv, 'the KBTV demonstration module').not.toBeNull()
   const unit = new ScriptedFms(() => new Date(START))
-  expect(kbtv!.setUpKbtvRnav15(unit)).toEqual({ ready: true })
+  const sim = new FlightSimulator(unit)
+  expect(kbtv!.setUpKbtvRnav15(unit, sim)).toEqual({ ready: true })
   expect(unit.activeRoute.dest).toBe('KBTV')
   expect(unit.activeRoute.legs.slice(0, 4).map(leg => (leg.kind === 'wpt' ? leg.ident : leg.kind))).toEqual(['STAEV', 'FOVES', 'JUNEL', 'RW15'])
   expect(unit.approachArmed).toBe(true)
@@ -59,7 +62,14 @@ test('the KBTV RNAV RWY 15 start state: the approach executed and armed, the air
   expect(Math.abs(bearingDeg(unit.truePosition, staev) - bearingDeg(staev, foves))).toBeLessThan(0.5)
   expect(Math.abs(unit.track - bearingDeg(staev, foves))).toBeLessThan(0.5)
   expect(unit.altitude).toBe(3200)
-  expect(unit.vnav.desNow).toBe(true)
+  // The helicopter profile: the crew preselects the FAF altitude and descends to it in VS; the FMS descends nothing.
+  expect(sim.selectedAltitude).toBe(Math.round(unit.fafAltitudeCorrected))
+  expect(sim.verticalSpeedTarget).toBe(-500)
+  expect(unit.vnav.desNow).toBe(false)
+  // The laboratory airline-style VNAV profile keeps the DES NOW set-up instead.
+  const lab = new ScriptedFms(() => new Date(START), { profile: LAB_AIRLINE_VNAV_PROFILE })
+  expect(kbtv!.setUpKbtvRnav15(lab, new FlightSimulator(lab))).toEqual({ ready: true })
+  expect(lab.vnav.desNow).toBe(true)
   expect(unit.engineeringLog.at(-1)).toMatchObject({ action: 'PLACE AIRCRAFT', detail: expect.stringMatching(/^KBTV RNAV \(GPS\) RWY 15 set-up: N44\d{2}\.\dW073\d{2}\.\d, track 131°, 3200 FT$/) })
   // The approach flown is the published one, executed from the CIFP cycle.
   unit.updateNavigation(0)
@@ -89,17 +99,19 @@ test('the KBTV integrity scenario passes: integrity lost after capture ends the 
 })
 
 test('the approach check fails on each field that differs: the type, the approach mode, and the deviation from the path', () => {
-  // At the start state the approach is LPV and armed, 1300 ft below the VNAV path (capped at the demonstration's cruise
-  // altitude until DES NOW brings the path down): each failing check below names one wrong field.
-  const check = (action: Record<string, unknown>) => {
-    const { runner } = runHeadless({ id: 'c', title: 'C', objective: '', maxSeconds: 1, start: 'kbtv-rnav15', steps: [{ when: { kind: 'start' }, action: { kind: 'expectApproach', ...action }, within: 0.5 }] } as unknown as Scenario)
+  // At the start state the approach is LPV and armed. Under the laboratory airline-style VNAV profile the aircraft is
+  // 1300 ft below the VNAV path (capped at the demonstration's cruise altitude until DES NOW brings the path down); under
+  // the helicopter profile there is no en-route path at all. Each failing check below names one wrong field.
+  const check = (action: Record<string, unknown>, profile?: string) => {
+    const { runner } = runHeadless({ id: 'c', title: 'C', objective: '', maxSeconds: 1, start: 'kbtv-rnav15', profile, steps: [{ when: { kind: 'start' }, action: { kind: 'expectApproach', ...action }, within: 0.5 }] } as unknown as Scenario)
     return runner.results[0]
   }
   expect(check({ type: 'LPV', state: 'ARMED' })).toMatchObject({ status: 'pass' })
   expect(check({ type: 'LNAV', state: 'ARMED' })).toMatchObject({ status: 'fail', actual: expect.stringMatching(/^LPV ARMED/) })
   expect(check({ type: 'LPV', state: 'CAPTURED' })).toMatchObject({ status: 'fail', actual: expect.stringMatching(/^LPV ARMED/) })
-  expect(check({ maxVerticalFt: 2000 })).toMatchObject({ status: 'pass' })
-  expect(check({ maxVerticalFt: 30 })).toMatchObject({ status: 'fail', actual: expect.stringMatching(/-1300 ft from the path$/) })
+  expect(check({ maxVerticalFt: 2000 }, 'lab-airline-vnav')).toMatchObject({ status: 'pass' })
+  expect(check({ maxVerticalFt: 30 }, 'lab-airline-vnav')).toMatchObject({ status: 'fail', actual: expect.stringMatching(/-1300 ft from the path$/) })
+  expect(check({ maxVerticalFt: 2000 })).toMatchObject({ status: 'fail', actual: expect.stringMatching(/no path$/) })
 })
 
 test('a scenario start state and the approach check are validated, and the check needs the flight simulation', () => {

@@ -1,6 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm } from '../src/fmsCdu/fmsModel'
+import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import { NO_SURFACE, OFFSHORE_87N, radioHeight } from '../src/fmsCdu/surface'
@@ -10,9 +11,9 @@ import type { CduFunction } from '../src/fmsCdu/variants'
 // rendezvous with RENDEZVOUS UNACHIEVABLE, moving waypoints, the tactical descent with TDN NOT POSSIBLE, the active
 // and inactive navigation database cycles with DATABASE OUT OF DATE, self test and the fault log, and cross-side sync.
 const START = Date.UTC(2026, 8, 27, 14, 0, 0)
-const setup = (start = START) => {
+const setup = (start = START, profile?: AircraftProfile) => {
   let now = start
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile })
   const sim = new FlightSimulator(unit)
   const fly = (seconds: number, each?: () => boolean | void) => {
     for (let t = 0; t < seconds; t += 1) {
@@ -35,7 +36,7 @@ const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(messa
 const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : null }
 
 test('a rendezvous flies the speed that arrives on time, within the speed limits', () => {
-  const { unit, fly } = setup()
+  const { unit, fly } = setup(START, LAB_AIRLINE_VNAV_PROFILE)
   press(unit, 'INIT_REF', 'NEXT', 'LSK6R')
   expect(lines(unit)[0]).toMatch(/^RENDEZVOUS/)
   enter(unit, 'RDG', 'LSK1L')
@@ -91,7 +92,7 @@ test('a moving waypoint advances on its track and the aircraft closes on it', ()
 })
 
 test('a tactical descent flies its angle down to its altitude; too steep is TDN NOT POSSIBLE', () => {
-  const { unit, fly } = setup()
+  const { unit, fly } = setup(START, LAB_AIRLINE_VNAV_PROFILE)
   press(unit, 'TACT', 'LSK5R')
   expect(lines(unit)[0]).toMatch(/^TACTICAL DESCENT/)
   enter(unit, '1000', 'LSK1L')

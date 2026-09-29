@@ -22,6 +22,7 @@ import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type F
 import { NAV_PAGES } from "./navPages";
 import { PLANNING_PAGES } from "./planningPages";
 import { composeRoute, enrouteLegs, findProcedure } from "./procedures";
+import { ACTIVE_PROFILE, type AircraftProfile } from "./profile";
 import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line } from "./screen";
 import { NO_SURFACE, radioHeight, surfaceById, type Surface } from "./surface";
 import { TACTICAL_PAGES } from "./tacticalPages";
@@ -287,8 +288,12 @@ export class ScriptedFms implements CduBackend {
 
   private readonly clock: () => Date;
 
-  constructor(clock: () => Date = () => new Date()) {
+  /** The aircraft profile this FMS and its flight simulation fly (profile.ts); the helicopter profile unless given. */
+  readonly aircraftProfile: AircraftProfile;
+
+  constructor(clock: () => Date = () => new Date(), options: { profile?: AircraftProfile } = {}) {
     this.clock = clock;
+    this.aircraftProfile = options.profile ?? ACTIVE_PROFILE;
     this.pinActive();
     // The receivers start warm: powered a minute before the session, past self-test, first fix and SBAS acquisition.
     const start = this.now.getTime();

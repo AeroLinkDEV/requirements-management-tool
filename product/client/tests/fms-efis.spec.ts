@@ -1,6 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { fmsOutputs } from '../src/fmsCdu/efis'
+import { aircraftData, fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
+import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
@@ -141,4 +142,22 @@ test('without measurable progress the bus publishes no ETA, rather than one from
   fly(30)
   expect(unit.groundSpeed).toBeLessThan(1)
   expect(fmsOutputs(unit, sim).eta).toEqual({ value: null, status: 'NCD' })
+})
+
+test('under the helicopter profile the FMS commands no altitude or speed: the bus says so, and the crew selections are aircraft data (Stage B3)', () => {
+  const { unit, sim, fly } = setup()
+  fly(5)
+  const bus = fmsOutputs(unit, sim)
+  expect(bus.targetAltitude).toEqual({ value: null, status: 'NCD' })
+  expect(bus.targetSpeed).toEqual({ value: null, status: 'NCD' })
+  sim.selectAltitude(5000)
+  sim.selectSpeed(90)
+  expect(aircraftData(unit, sim)).toMatchObject({ selectedAltitude: 5000, selectedSpeed: 90 })
+  // The laboratory airline-style VNAV profile keeps the FMS targets, and has no crew selections to show.
+  let now = Date.UTC(2026, 8, 27, 14, 0, 0)
+  const lab = new ScriptedFms(() => new Date(now), { profile: LAB_AIRLINE_VNAV_PROFILE })
+  const labSim = new FlightSimulator(lab)
+  for (let t = 0; t < 5; t += 1) { now += 1000; labSim.step(1) }
+  expect(fmsOutputs(lab, labSim).targetSpeed.status).toBe('NORMAL')
+  expect(aircraftData(lab, labSim)).toMatchObject({ selectedAltitude: null, selectedSpeed: null })
 })

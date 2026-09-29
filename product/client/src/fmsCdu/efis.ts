@@ -97,6 +97,12 @@ export type AircraftData = {
   verticalSpeed: number;
   wind: { direction: number; speed: number };
   position: LatLon;
+  /**
+   * The crew's autopilot selections (drawn cyan): the preselected altitude and the selected speed. Null where the
+   * profile's FMS commands them instead (the laboratory airline-style VNAV).
+   */
+  selectedAltitude: number | null;
+  selectedSpeed: number | null;
 };
 
 const LATERAL_FULL_SCALE = { "EN ROUTE": 5, TERMINAL: 1, APPROACH: 0.3 } as const;
@@ -181,8 +187,9 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     toWaypoint: toIdent ? normal(toIdent) : ncd(),
     // No ETA without measurable progress: a time from an invented speed would be a plausible falsehood.
     eta: distanceToGo !== null && makingProgress(fms.groundSpeed) ? normal(fms.now.getTime() + (distanceToGo / fms.groundSpeed) * 3_600_000) : ncd(),
-    targetSpeed: normal(fms.targetSpeed),
-    targetAltitude: sim.altitudeHoldReference === null ? normal(g.targetAltitude) : ncd(),
+    // Under the ADVISORY policy the FMS commands no speed or altitude: the crew selects them (aircraftData).
+    targetSpeed: sim.advisory ? ncd() : normal(fms.targetSpeed),
+    targetAltitude: sim.advisory || sim.altitudeHoldReference !== null ? ncd() : normal(g.targetAltitude),
     lateralArmed: sim.lnavIsArmed ? ["LNAV"] : [],
     verticalArmed: sim.approachMode === "ARMED" && verticalLevel ? [type] : [],
     approach: { type, state: sim.approachMode },
@@ -205,5 +212,6 @@ export function aircraftData(fms: ScriptedFms, sim: FlightSimulator): AircraftDa
   return {
     pitch, bank: sim.bankAngle, heading: fms.heading, track, airspeed, groundSpeed: fms.groundSpeed,
     altitude: fms.altitude, verticalSpeed: fms.verticalSpeed, wind: fms.wind, position: fms.truePosition,
+    selectedAltitude: sim.advisory ? sim.selectedAltitude : null, selectedSpeed: sim.advisory ? sim.selectedSpeed : null,
   };
 }

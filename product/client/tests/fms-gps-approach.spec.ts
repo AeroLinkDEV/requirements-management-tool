@@ -3,6 +3,7 @@ import { fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { bearingDeg, distanceNm } from '../src/fmsCdu/fmsModel'
 import type { GpsBus, GpsReceiver } from '../src/fmsCdu/gps'
+import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
 
@@ -13,9 +14,9 @@ import { screenText } from '../src/fmsCdu/screen'
 // vertical deviation flagged, and NO APPR INTEGRITY. The receiver side (FAS CRC, 156, SBAS PA only inside the approach
 // region, the deviations and scaling) is proved in fms-gps-sbas.spec.ts.
 const START = Date.UTC(2026, 8, 27, 14, 0, 0)
-const setup = (procedure = 'R24R') => {
+const setup = (procedure = 'R24R', profile?: AircraftProfile) => {
   let now = START
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile })
   const sim = new FlightSimulator(unit)
   const fly = (seconds: number, each?: () => boolean | void) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1); if (each?.()) return } }
   unit.selectProcedure('APPROACH', procedure)
@@ -105,7 +106,7 @@ test('the demonstration final is straight in: ULIDA and FERDI lie on the RW24R e
 })
 
 test('flying the GPS deviations, the aircraft stays on the FAS path down to the threshold (3b.3)', () => {
-  const { unit, sim, fly } = setup()
+  const { unit, sim, fly } = setup('R24R', LAB_AIRLINE_VNAV_PROFILE)
   unit.armApproach(true)
   fly(3 * 3600, () => sim.approachMode === 'CAPTURED')
   // ULIDA and FERDI are on the RW24R extended centreline, so the route's final is the FAS course: the aircraft is

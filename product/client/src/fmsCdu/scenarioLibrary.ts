@@ -103,9 +103,10 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
       { when: { kind: "start" }, action: { kind: "expectAlert", text: "GPS POS UNCERTAIN" }, within: 5 },
       { when: { kind: "start" }, action: { kind: "expectAlert", text: "NO APPR INTEGRITY" }, within: 5 },
       { when: { kind: "start" }, action: { kind: "expectApproach", type: "NO APPR", state: "OFF", verticalMode: "ALT HOLD" }, within: 5 },
-      // TOGA from the latched hold: the missed approach becomes active and VNAV climbs on it (D02).
+      // TOGA from the latched hold: the missed approach becomes active and the go-around climbs (D02; GA under the
+      // helicopter profile, where the crew's preselected altitude is the target).
       { when: { kind: "start" }, action: { kind: "goAround" } },
-      { when: { kind: "start" }, action: { kind: "expectApproach", verticalMode: "VNAV CLB" }, within: 10 },
+      { when: { kind: "start" }, action: { kind: "expectApproach", verticalMode: "GA" }, within: 10 },
     ],
   },
   {
@@ -125,7 +126,7 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
       { when: { kind: "start" }, action: { kind: "expectNoAlert", text: "GPS POS UNCERTAIN" } },
       { when: { kind: "start" }, action: { kind: "expectGpsSource", source: "GPS1" } },
       { when: { kind: "start" }, action: { kind: "goAround" } },
-      { when: { kind: "start" }, action: { kind: "expectApproach", verticalMode: "VNAV CLB" }, within: 10 },
+      { when: { kind: "start" }, action: { kind: "expectApproach", verticalMode: "GA" }, within: 10 },
     ],
   },
   {

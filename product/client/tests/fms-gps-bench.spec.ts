@@ -28,7 +28,9 @@ test('the FMS feeds its receivers the aircraft attitude: a steep bank hides sate
 
 test('the flight simulation reports its bank and flight-path pitch to the FMS', () => {
   const { fms, sim, fly } = setup()
-  // Fly until the aircraft is banked in a turn and climbing or descending.
+  // Climbing in VS (the crew's vertical mode under the helicopter profile), fly until also banked in a turn.
+  sim.selectAltitude(9000)
+  sim.engageVerticalSpeed(500)
   fly(3 * 3600, () => Math.abs(sim.bankAngle) > 5 && Math.abs(fms.verticalSpeed) > 100)
   expect(Math.abs(sim.bankAngle)).toBeGreaterThan(5)
   expect(fms.attitude.bank).toBe(sim.bankAngle)
