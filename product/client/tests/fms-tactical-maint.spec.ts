@@ -1,17 +1,19 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm } from '../src/fmsCdu/fmsModel'
+import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
+import { NO_SURFACE, OFFSHORE_87N, radioHeight } from '../src/fmsCdu/surface'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
 // Tactical functions, database cycles, maintenance and dual operation (the FMS test bench research roadmap, step 7):
 // rendezvous with RENDEZVOUS UNACHIEVABLE, moving waypoints, the tactical descent with TDN NOT POSSIBLE, the active
 // and inactive navigation database cycles with DATABASE OUT OF DATE, self test and the fault log, and cross-side sync.
 const START = Date.UTC(2026, 8, 27, 14, 0, 0)
-const setup = (start = START) => {
+const setup = (start = START, profile?: AircraftProfile) => {
   let now = start
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile })
   const sim = new FlightSimulator(unit)
   const fly = (seconds: number, each?: () => boolean | void) => {
     for (let t = 0; t < seconds; t += 1) {
@@ -34,7 +36,7 @@ const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(messa
 const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : null }
 
 test('a rendezvous flies the speed that arrives on time, within the speed limits', () => {
-  const { unit, fly } = setup()
+  const { unit, fly } = setup(START, LAB_AIRLINE_VNAV_PROFILE)
   press(unit, 'INIT_REF', 'NEXT', 'LSK6R')
   expect(lines(unit)[0]).toMatch(/^RENDEZVOUS/)
   enter(unit, 'RDG', 'LSK1L')
@@ -90,7 +92,7 @@ test('a moving waypoint advances on its track and the aircraft closes on it', ()
 })
 
 test('a tactical descent flies its angle down to its altitude; too steep is TDN NOT POSSIBLE', () => {
-  const { unit, fly } = setup()
+  const { unit, fly } = setup(START, LAB_AIRLINE_VNAV_PROFILE)
   press(unit, 'TACT', 'LSK5R')
   expect(lines(unit)[0]).toMatch(/^TACTICAL DESCENT/)
   enter(unit, '1000', 'LSK1L')
@@ -186,4 +188,33 @@ test('in dual operation the executed route is cross-loaded; independent, the sid
   unit.setCondition('independent', false)
   expect(unit.crossSideInSync).toBe(true)
   expect(lines(unit)[6]).toMatch(/^DUAL SYNC\s+RTE MATCH$/)
+})
+
+// Stage B2 of the helicopter-first plan: the radio altimeter measures the aircraft's physical height above a declared
+// flat surface, and has no height (NCD) where none is declared. Nothing shows a fixed or invented radio height.
+test('the radio altimeter reads height above the declared surface, NCD off it or above its range, FAIL when failed', () => {
+  const offshore = { lat: 40.7, lon: -72.45 }, heliport = { lat: 40.8463, lon: -72.4664 }
+  expect(radioHeight(OFFSHORE_87N, offshore, 1500, false)).toEqual({ value: 1500, status: 'NORMAL' })
+  expect(radioHeight(OFFSHORE_87N, offshore, 2500, false)).toEqual({ value: 2500, status: 'NORMAL' })
+  expect(radioHeight(OFFSHORE_87N, offshore, 2501, false)).toEqual({ value: null, status: 'NCD' })
+  // Southampton heliport is on land, north of the declared sea: no surface there, so no radio height.
+  expect(radioHeight(OFFSHORE_87N, heliport, 500, false)).toEqual({ value: null, status: 'NCD' })
+  expect(radioHeight(NO_SURFACE, offshore, 500, false)).toEqual({ value: null, status: 'NCD' })
+  expect(radioHeight(OFFSHORE_87N, offshore, 500, true)).toEqual({ value: null, status: 'FAIL' })
+})
+
+test('the HOVER page shows the radio altimeter, dashes without a surface or with the altimeter failed, never a fixed value', () => {
+  const { unit } = setup()
+  unit.open('HOVER')
+  // The line under the RAD ALT caption.
+  const radAlt = () => { const lines = screenText(unit.screen()); return lines[lines.findIndex(line => /RAD ALT/.test(line)) + 1] }
+  // The demonstration route is over land with no declared surface.
+  expect(radAlt()).toMatch(/^\s*----FT/)
+  expect(unit.declareSurface('offshore-87n')).toBe(true)
+  unit.placeAircraft({ position: { lat: 40.7, lon: -72.45 }, track: 230, altitude: 1500 }, 'test: offshore south of 87N')
+  expect(unit.radioHeight).toEqual({ value: 1500, status: 'NORMAL' })
+  expect(radAlt()).toMatch(/^\s*1500FT/)
+  unit.setCondition('raFail', true)
+  expect(radAlt()).toMatch(/^\s*----FT/)
+  expect(unit.declareSurface('nowhere')).toBe(false)
 })

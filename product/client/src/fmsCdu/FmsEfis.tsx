@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { AircraftData, FmsOutputs, RoutePoint } from "./efis";
 import { toLocal, type LatLon } from "./fmsModel";
+import { ACTIVE_PROFILE } from "./profile";
 import { SyntheticVisionLayer } from "./FmsSyntheticVision";
 import { SVS_ZOOM } from "./syntheticVision";
 import type { TerrainTiles } from "./terrainTiles";
 import "./FmsEfis.css";
+
+/** The coordinated-flight speed (knots): below it a bank does not give the coordinated turn rate. */
+const COORDINATED_BELOW = ACTIVE_PROFILE.parameters.coordinatedLeaveBelow.value;
 
 // A generic EFIS for the bench: a primary flight display and a navigation display, drawn only from the FMS output bus
 // and the aircraft data (efis.ts). Colour conventions follow common airline and FAA practice (FAA-H-8083-6; Boeing
@@ -137,7 +141,7 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
         </g>
         <rect x="18" y={cy - 14} width="62" height="28" fill="#000" stroke={WHITE} />
         <text x="72" y={cy + 6} textAnchor="end" fontSize="17" fill={WHITE}>{Math.round(air.airspeed)}</text>
-        <text x="51" y="54" textAnchor="middle" fontSize="13" fill={bus.targetSpeed.status === "NORMAL" ? MAGENTA : AMBER}>{bus.targetSpeed.status === "NORMAL" ? Math.round(bus.targetSpeed.value!) : "---"}</text>
+        <text x="51" y="54" textAnchor="middle" fontSize="13" fill={bus.targetSpeed.status === "NORMAL" ? MAGENTA : air.selectedSpeed !== null ? CYAN : AMBER}>{bus.targetSpeed.status === "NORMAL" ? Math.round(bus.targetSpeed.value!) : air.selectedSpeed !== null ? air.selectedSpeed : "---"}</text>
       </g>
       {/* Altitude tape: the FMS target altitude (magenta), or the latched altitude hold reference (cyan). */}
       <g>
@@ -152,12 +156,14 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           ))}
           {bus.targetAltitude.status === "NORMAL" ? (
             <rect x="336" y={clamp(cy - (bus.targetAltitude.value! - air.altitude) * altScale - 8, 58, 286)} width="8" height="16" fill={MAGENTA} data-testid="alt-bug" />
+          ) : air.selectedAltitude !== null ? (
+            <rect x="336" y={clamp(cy - (air.selectedAltitude - air.altitude) * altScale - 8, 58, 286)} width="8" height="16" fill={CYAN} data-testid="alt-bug" />
           ) : null}
         </g>
         <rect x="338" y={cy - 14} width="64" height="28" fill="#000" stroke={WHITE} />
         <text x="398" y={cy + 6} textAnchor="end" fontSize="16" fill={WHITE}>{Math.round(air.altitude)}</text>
         <text x="369" y="54" textAnchor="middle" fontSize="13" fill={bus.targetAltitude.status === "NORMAL" ? MAGENTA : CYAN}>
-          {bus.targetAltitude.status === "NORMAL" ? Math.round(bus.targetAltitude.value!) : bus.verticalMode === "ALT HOLD" ? "HOLD" : "----"}
+          {bus.targetAltitude.status === "NORMAL" ? Math.round(bus.targetAltitude.value!) : air.selectedAltitude !== null ? air.selectedAltitude : bus.verticalMode === "ALT HOLD" ? "HOLD" : "----"}
         </text>
       </g>
       {/* Vertical speed. */}
@@ -228,7 +234,9 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
   const polyline = (points: LatLon[]) => points.map(p => { const q = project(p); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(" ");
   const route = (points: RoutePoint[]) => [air.position, ...points.map(point => point.position)];
   // Position trend vector: where the present bank takes the aircraft in 30, 60 and 90 seconds.
-  const turnRate = (1091 * Math.tan((air.bank * Math.PI) / 180)) / Math.max(air.airspeed, 30); // degrees per second
+  // Degrees per second from the bank, in coordinated flight only: below its speed a bank does not give this turn rate
+  // (the low-speed velocity vector replaces the trend, Stage B4).
+  const turnRate = air.airspeed >= COORDINATED_BELOW ? (1091 * Math.tan((air.bank * Math.PI) / 180)) / air.airspeed : 0;
   const trend: { x: number; y: number }[] = [];
   let heading = 0, x = cx, y = cy;
   for (let t = 0; t < 90; t += 5) {

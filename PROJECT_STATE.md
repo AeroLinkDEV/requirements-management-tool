@@ -440,6 +440,9 @@ display unit for engineers.
     order with automatic reversion; the FMS position drifts from the true position in dead reckoning and shifts
     back when a sensor returns (POSITION SHIFT); ANP from the sources, RNP by phase of flight or crew entry, and
     CHECK ANP after the phase's time to alert; NAV STATUS and NAV OPTIONS (navaid inhibit, GPS deselect).
+  - **Vertical guidance**: under the default helicopter profile the crew flies the vertical axis and the speed
+    through the autopilot (ALT SEL, VS, ALT, SPD, and GA on TOGA), and the FMS constraints are advisories; the
+    airline-style VNAV below is a selectable laboratory profile (`lab-airline-vnav`).
   - **Approaches and VNAV** (`vnav.ts`): the approach type (ILS, or RNAV to LPV minima with GPS integrity), ARM
     APPROACH, NO APPR INTEGRITY and go-around; speed and altitude constraints (at, at or above, at or below,
     windows, flight levels); a vertical profile with top and end of descent, climbs that level at constraints,
@@ -458,7 +461,9 @@ display unit for engineers.
   - The earlier pages: HOLD, the SQUARE, LADDER and SECTOR search patterns, the tactical approach, HOVER and
     TIMER. The ATC, FMC COMM and GSM/SMS pages are representative only (no datalink) and say so on screen.
 - A **flight simulation** (`flight.ts`) flies the active route as an FMS-coupled autopilot would, in real or
-  accelerated time. It is a point-mass model with a bank-limited turn, not a flight dynamics model. Pause is a
+  accelerated time. It is a point-mass model with a bank-limited turn, not a flight dynamics model: the aircraft flies a heading
+  through the air, the wind carries the air mass, and the track and ground speed are the vector sum (no speed floor;
+  predictions without measurable progress are unknown). Pause is a
   position freeze: the clock keeps running, so timers and the self test still complete. A north-up engineering
   **navigation map** (route, holds, patterns, offset track, navaids and airports, and the true position when the
   FMS has drifted) can replace the ND beside the CDU. The flight controls, flight mode annunciator and guidance

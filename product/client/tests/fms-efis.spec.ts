@@ -1,7 +1,9 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { fmsOutputs } from '../src/fmsCdu/efis'
+import { aircraftData, fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
+import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
 // The FMS output bus the EFIS draws from (efis.ts): what the FMS publishes, each word with a status, so the displays
@@ -127,4 +129,58 @@ test('the ND route stops at a fix without a position and marks only the active l
   // And a fully resolved route is drawn whole, its first fix active.
   const whole = route(wpt('MUN'), wpt('RDG'))
   expect(whole.activeRoute.map(point => [point.ident, point.active])).toEqual([['MUN', true], ['RDG', false]])
+})
+
+test('without measurable progress the bus publishes no ETA, rather than one from an invented speed (Stage B1)', () => {
+  const { unit, sim, fly } = setup()
+  fly(20)
+  expect(fmsOutputs(unit, sim).eta.status).toBe('NORMAL')
+  // A headwind equal to the airspeed holds the aircraft over the ground: the distance to go stops shrinking.
+  // Flown on a held heading straight into it, so nothing turns the aircraft out of the wind.
+  sim.selectHeading(unit.heading)
+  unit.wind.direction = unit.heading
+  unit.wind.speed = sim.tas
+  fly(30)
+  expect(unit.groundSpeed).toBeLessThan(1)
+  expect(fmsOutputs(unit, sim).eta).toEqual({ value: null, status: 'NCD' })
+})
+
+test('under the helicopter profile the FMS commands no altitude or speed: the bus says so, and the crew selections are aircraft data (Stage B3)', () => {
+  const { unit, sim, fly } = setup()
+  fly(5)
+  const bus = fmsOutputs(unit, sim)
+  expect(bus.targetAltitude).toEqual({ value: null, status: 'NCD' })
+  expect(bus.targetSpeed).toEqual({ value: null, status: 'NCD' })
+  sim.selectAltitude(5000)
+  sim.selectSpeed(90)
+  expect(aircraftData(unit, sim)).toMatchObject({ selectedAltitude: 5000, selectedSpeed: 90 })
+  // The laboratory airline-style VNAV profile keeps the FMS targets, and has no crew selections to show.
+  let now = Date.UTC(2026, 8, 27, 14, 0, 0)
+  const lab = new ScriptedFms(() => new Date(now), { profile: LAB_AIRLINE_VNAV_PROFILE })
+  const labSim = new FlightSimulator(lab)
+  for (let t = 0; t < 5; t += 1) { now += 1000; labSim.step(1) }
+  expect(fmsOutputs(lab, labSim).targetSpeed.status).toBe('NORMAL')
+  expect(aircraftData(lab, labSim)).toMatchObject({ selectedAltitude: null, selectedSpeed: null })
+})
+
+test('moving away from the active waypoint, or stopped over the ground, is no progress: no ETA anywhere, never NaN (review of B1)', () => {
+  const { unit, sim, fly } = setup()
+  fly(5)
+  // Stopped: the helicopter's speed selected to zero in calm air.
+  unit.wind.speed = 0
+  sim.selectSpeed(0)
+  fly(90)
+  expect(unit.groundSpeed).toBeLessThan(1)
+  expect(fmsOutputs(unit, sim).eta.status).toBe('NCD')
+  unit.press('PROG')
+  expect(screenText(unit.screen()).join('\n')).not.toMatch(/NaN/)
+  // Drifting away: a 40 kt wind from ahead of the leg carries the stopped aircraft backwards; the ground speed is 40 kt,
+  // but the aircraft is not closing on the waypoint.
+  unit.wind.direction = unit.track
+  unit.wind.speed = 40
+  fly(30)
+  expect(unit.groundSpeed).toBeGreaterThan(30)
+  expect(unit.closureSpeed).toBeLessThan(0)
+  expect(fmsOutputs(unit, sim).eta.status).toBe('NCD')
+  expect(screenText(unit.screen()).join('\n')).not.toMatch(/NaN|\d{4}\.\dZ/)
 })

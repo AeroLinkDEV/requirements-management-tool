@@ -5,6 +5,7 @@ import {
   small, three, title, type CorePageId, type Leg, type LskResult, type Page, type PageId,
 } from "./fmsModel";
 import { HAL_NM, MODE_TEXT, shownReceiver } from "./gpsSensors";
+import { makingProgress } from "./kinematics";
 import { gpsSummary, navModeText, sbasSummary } from "./navPages";
 import type { Line } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
@@ -61,7 +62,7 @@ const efobText = (fms: ScriptedFms) => {
 function vnavCruise(fms: ScriptedFms): (Line | undefined)[] {
   const profile = fms.profile();
   const tod = profile.topOfDescent;
-  const todEta = tod === null ? null : fms.now.getTime() + (tod / Math.max(30, fms.groundSpeed)) * 3_600_000;
+  const todEta = tod === null || !makingProgress(fms.closureSpeed) ? null : fms.now.getTime() + (tod / fms.closureSpeed) * 3_600_000;
   const next = profile.points.find(p => { const leg = fms.activeRoute.legs.find(l => l.kind === "wpt" && l.ident === p.ident); return leg?.kind === "wpt" && leg.altitude; });
   const nextLeg = next ? fms.activeRoute.legs.find(l => l.kind === "wpt" && l.ident === next.ident) : undefined;
   return [
@@ -433,7 +434,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const [to, next] = legs;
       const toLeg = geometry[0], nextLeg = geometry[1];
       const now = fms.now.getTime();
-      const eta = (miles: number) => hhmm(new Date(now + (miles / fms.groundSpeed) * 3_600_000));
+      // No time without progress toward the active waypoint: dashes, never a time from an invented or wrong speed.
+      const eta = (miles: number) => (makingProgress(fms.closureSpeed) ? hhmm(new Date(now + (miles / fms.closureSpeed) * 3_600_000)) : "----.-");
       const ident = (leg: Leg | undefined) => (leg?.kind === "wpt" ? leg.ident : leg?.kind === "cond" ? conditionalLabel(leg) : "-----");
       const nav = fms.navState;
       if (index === 0) {
@@ -610,7 +612,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           undefined, undefined, undefined, undefined, { left: dashes(24) }, footer];
       const at = fms.route.legs.findIndex(leg => leg.kind === "wpt" && leg.ident === hold.fix);
       const toFix = fms.legGeometry(fms.route).slice(0, at + 1).reduce((sum, leg) => sum + (leg?.distance ?? 0), 0);
-      const eta = hhmm(new Date(fms.now.getTime() + (toFix / fms.groundSpeed) * 3_600_000));
+      const eta = makingProgress(fms.closureSpeed) ? hhmm(new Date(fms.now.getTime() + (toFix / fms.closureSpeed) * 3_600_000)) : "----.-";
       const entry = fms.holdEntryFor(fms.route);
       const exitPrompt = hold.status === "IN PROGRESS" ? prompt("EXIT HOLD>") : hold.status === "EXIT ARMED" ? prompt("RESUME HOLD>") : undefined;
       return [

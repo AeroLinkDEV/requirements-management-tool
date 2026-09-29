@@ -592,3 +592,13 @@ test('the KBTV demonstration loads real FAA data from the Nav data tab, sets up 
   await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible({ timeout: 45_000 })
   await expect(card.getByRole('list', { name: 'Scenario steps' }).locator('li[data-status="pass"]')).toHaveCount(5)
 })
+
+test('the helicopter autopilot fields keep only what they accept: digits, and a sign for the vertical speed (review of B3a)', async ({ page }) => {
+  await open(page)
+  await page.getByLabel('Preselected altitude').fill('12a3')
+  await expect(page.getByLabel('Preselected altitude')).toHaveValue('123')
+  await page.getByLabel('Vertical speed').fill('-8x00')
+  await expect(page.getByLabel('Vertical speed')).toHaveValue('-800')
+  await page.getByLabel('Selected speed').fill('9z0')
+  await expect(page.getByLabel('Selected speed')).toHaveValue('90')
+})

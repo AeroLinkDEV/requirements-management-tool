@@ -21,7 +21,7 @@ const setup = () => {
   let now = START
   const fms = new ScriptedFms(() => new Date(now))
   const sim = new FlightSimulator(fms)
-  expect(setUpKbtvRnav15(fms)).toEqual({ ready: true })
+  expect(setUpKbtvRnav15(fms, sim)).toEqual({ ready: true })
   const tick = () => { now += 250; sim.step(0.25) }
   const fly = (seconds: number) => { for (let i = 0; i < seconds * 4; i += 1) tick() }
   const until = (what: string, done: () => boolean, seconds = 900) => {

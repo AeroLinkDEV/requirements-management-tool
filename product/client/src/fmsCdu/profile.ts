@@ -38,6 +38,12 @@ export type AircraftProfile = {
   errorLimit: "RNP" | "PHASE";
   equipment: readonly string[];
   missionFunctions: readonly string[];
+  /**
+   * Who commands the vertical axis and the speed en route. ADVISORY: the crew, through the autopilot's altitude,
+   * vertical-speed and speed selections; the FMS constraints are advisories (the helicopter CMA, plan A4). AIRLINE_VNAV:
+   * the laboratory airline-style VNAV (top of descent, VNAV PTH, DES NOW, the FMS speed schedule).
+   */
+  verticalPolicy: "ADVISORY" | "AIRLINE_VNAV";
   /** The vertical-guidance policy (plan A4). */
   verticalGuidance: {
     enRoute: string;
@@ -60,7 +66,8 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
   operationalProgram: "169-614876-300 (M300, Pub. 9000-GEN-0150 Rev 2)",
   navigationOption: "CIVIL",
   errorLimit: "RNP",
-  equipment: ["2 × CMA-5024 GPS/SBAS", "1 radio altimeter (declared; Stage B)", "representative rotorcraft AFCS (declared; Stage B)"],
+  verticalPolicy: "ADVISORY",
+  equipment: ["2 × CMA-5024 GPS/SBAS", "1 radio altimeter (height above a declared flat surface)", "representative rotorcraft AFCS (declared; Stage B)"],
   missionFunctions: ["HOVER", "MARK ON TOP", "SAR SQUARE, LADDER, SECTOR", "moving waypoints", "rendezvous"],
   verticalGuidance: {
     enRoute: "no airline-style en-route VNAV; constraints advisory, flown with AFCS ALT/VS (Stage B)",
@@ -78,11 +85,11 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     unreliableIasBelow: p(30, "KIAS", "lab", "airspeed shown as dashes below it", false, "B"),
     reliableIasAgainAt: p(33, "KIAS", "lab", "3 kt hysteresis", false, "B"),
     coordinatedEnterAt: p(45, "KIAS", "lab", "coordinated-flight regime entry", false, "B"),
-    coordinatedLeaveBelow: p(40, "KIAS", "lab", "5 kt hysteresis", false, "B"),
+    coordinatedLeaveBelow: p(40, "KIAS", "lab", "5 kt hysteresis; the ND turn trend is drawn only at or above it", false, "B"),
     sidewaysLimit: p(35, "kt", "lab", "low-speed air-relative sideways limit", false, "B"),
     rearwardLimit: p(30, "kt", "lab", "low-speed air-relative rearward limit", false, "B"),
     // Accelerations and rates
-    longitudinalAccel: p(2.0, "kt/s", "lab", "longitudinal acceleration and deceleration limit", false, "B"),
+    longitudinalAccel: p(2.0, "kt/s", "lab", "longitudinal acceleration and deceleration limit", true),
     lateralAccel: p(1.5, "kt/s", "lab", "low-speed lateral acceleration limit", false, "B"),
     maxVerticalSpeed: p(1000, "fpm", "lab", "existing MAX_VS", true),
     verticalAccel: p(600, "fpm/s", "lab", "existing VS_RATE", true),
@@ -110,19 +117,41 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     minimumUseHeight: p(30, "ft RA", "lab", "derived from the TD/H window", false, "B"),
     lowHeightCruise: p(75, "ft RA", "borrowed", "AAIB-27585 (AW189 low-height protection, cruise)", false, "B"),
     lowHeightHover: p(17, "ft RA", "borrowed", "AAIB-27585 (AW189 low-height protection, hover)", false, "B"),
-    radioAltimeterRange: p(2500, "ft", "lab", "NCD above", false, "B"),
+    radioAltimeterRange: p(2500, "ft", "lab", "NCD above", true),
     // Holding (M300 Table 10-1, helicopter rows; the rows overlap at 6,000 ft and the bench gives 6,000 to the lower)
     holdingSpeedLow: p(100, "KIAS", "sourced", "M300 10-8 Table 10-1, helicopter, at or below 6,000 ft", false, "D"),
     holdingSpeedHigh: p(170, "KIAS", "sourced", "M300 10-8 Table 10-1, helicopter, above 6,000 to 14,000 ft", false, "D"),
     // Timing and display
+    hoverTransferTick: p(0.25, "s", "lab", "a receiver change keeps HOV only within one tick of the last sample (Astra rev 3.1)", true),
+    hoverTransferPosition: p(10, "m", "lab", "a receiver change keeps HOV only within this of the last sample propagated", true),
+    hoverTransferVelocity: p(1, "kt", "lab", "a receiver change keeps HOV only within this velocity step", true),
     fmaCaptureBox: p(10, "s", "lab", "existing boxed-mode time", true),
     settlingTime: p(20, "s", "lab", "before hover tolerances apply", false, "B"),
-    noProgressBelow: p(1, "kt", "lab", "predicted along-path ground speed", false, "B"),
+    noProgressBelow: p(1, "kt", "lab", "ground speed below which there is no measurable progress", true),
   },
 };
 
-/** The profile the bench flies. One default for now; a fixed-wing profile is later work. */
+/** The profile the bench flies by default. */
 export const ACTIVE_PROFILE = HELICOPTER_PROFILE;
+
+/**
+ * A laboratory profile: the helicopter profile with the generic airline-style VNAV in place of crew-selected vertical
+ * modes. Not a CMA installation; kept as an intentional, selectable profile (the seed of a later fixed-wing profile).
+ */
+export const LAB_AIRLINE_VNAV_PROFILE: AircraftProfile = {
+  ...HELICOPTER_PROFILE,
+  id: "lab-airline-vnav",
+  title: "Laboratory: generic airline-style VNAV (not a CMA installation)",
+  verticalPolicy: "AIRLINE_VNAV",
+  verticalGuidance: {
+    ...HELICOPTER_PROFILE.verticalGuidance,
+    enRoute: "generic airline-style VNAV: top of descent, VNAV PTH, DES NOW and the FMS speed schedule (laboratory)",
+  },
+};
+
+export const PROFILES: readonly AircraftProfile[] = [HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE];
+
+export const profileById = (id: string | null | undefined) => PROFILES.find(profile => profile.id === id);
 
 /** A short, stable fingerprint of the whole profile (FNV-1a over its JSON): any changed value changes it. */
 export function profileFingerprint(profile: AircraftProfile) {

@@ -8,7 +8,7 @@ import type { Lamp } from "./screen";
  */
 export type ConditionId =
   | "fmsFail" | "gpsLost" | "gpsIntegrity" | "dmeOutage" | "rnpExceeded" | "npa" | "offset" | "independent"
-  | "gsmCall" | "sms" | "atcUplink" | "tx1" | "tx2" | "vuhf" | "hf" | "menuRequest";
+  | "gsmCall" | "sms" | "atcUplink" | "tx1" | "tx2" | "vuhf" | "hf" | "menuRequest" | "raFail";
 
 export type Condition = { id: ConditionId; label: string; description: string; lamp?: Lamp };
 
@@ -29,4 +29,5 @@ export const CONDITIONS: readonly Condition[] = [
   { id: "vuhf", label: "V/UHF radio active", lamp: "V/UHF", description: "Lights the V/UHF annunciator." },
   { id: "hf", label: "HF radio active", lamp: "HF", description: "Lights the HF annunciator." },
   { id: "menuRequest", label: "Subsystem request", lamp: "MENU", description: "A subsystem asks for attention on MCDU MENU." },
+  { id: "raFail", label: "Radio altimeter failed", description: "The radio height is a failure warning: no RADALT, and no hover procedure." },
 ];

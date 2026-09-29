@@ -30,7 +30,7 @@ One default profile, not a matrix of every CMA option: aircraft type ROTOR, civi
 
 | Phase | Default profile | Status |
 |---|---|---|
-| En route | **No airline-style en-route VNAV** (no top of descent, no VNAV PTH or DES NOW coupling). Altitude constraints are advisories, flown with autopilot altitude and vertical-speed modes | Declared; implemented with the Stage B autopilot. Until then the existing airline-style VNAV still flies |
+| En route | **No airline-style en-route VNAV** (no top of descent, no VNAV PTH or DES NOW coupling). Altitude constraints are advisories, flown with autopilot altitude and vertical-speed modes | Built (Stage B3): ALT SEL, VS, ALT HOLD, SPD and GA; the airline-style VNAV is the selectable `lab-airline-vnav` profile |
 | Approach | The S300 advisory approach VNAV (M300 7-22…7-27) where it can be constructed: a database vertical path angle, or a threshold to build one from | Declared |
 | Point-in-space approaches without a published vertical path | No advisory path is built; flown LNAV with advisory step-downs | Declared (Stage C) |
 | SBAS finals | Coupled LPV and LNAV/VNAV finals under the existing receiver and approach-authority checks | **Deliberate deviation**: a bench capability for a modern CMA-5024 SBAS installation, not S300 behaviour |

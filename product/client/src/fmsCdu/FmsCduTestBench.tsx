@@ -18,7 +18,7 @@ import { stimulusFor } from "./gpsStimulus";
 import { useCduLayout, type CduKeyEvent } from "./layout";
 import { LIGHTING_MODES, displayLuminance, type Lighting, type LightingMode } from "./lighting";
 import { KBTV_SOURCE, START_STATES, loadKbtvDemonstration, type StartStateId } from "./kbtvDemo";
-import { ACTIVE_PROFILE, profileFingerprint } from "./profile";
+import { ACTIVE_PROFILE, PROFILES, profileById, profileFingerprint } from "./profile";
 import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, scenarioStart, type Scenario } from "./scenario";
 import { ScriptedFms } from "./scriptedFms";
 import { screenText } from "./screen";
@@ -77,6 +77,8 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
   const { layout, failed } = useCduLayout();
   const [variantId, setVariantId] = useState(storedVariant);
   const [session, setSession] = useState(0);
+  // The aircraft profile the next session flies (profile.ts); a scenario that names one flies that one.
+  const profileChoice = useRef(ACTIVE_PROFILE.id);
   // Simulated time: it starts at the wall clock (or a scenario's planned start, which fixes the GPS sky) and runs at the chosen rate while the flight is playing.
   const simTime = useRef(Date.now());
   // A scenario run or a recording starts on the next session, so it always begins from a restarted simulation.
@@ -86,10 +88,11 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
   const pendingStart = useRef<StartStateId | null>(null);
   const { backend, sim, runner, recorder, started } = useMemo(() => {
     simTime.current = (pendingScenario.current && scenarioStart(pendingScenario.current)) ?? Date.now();
-    const fms = new ScriptedFms(() => new Date(simTime.current));
+    const profile = profileById(pendingScenario.current?.profile) ?? profileById(profileChoice.current) ?? ACTIVE_PROFILE;
+    const fms = new ScriptedFms(() => new Date(simTime.current), { profile });
     const flight = new FlightSimulator(fms);
     const start = pendingStart.current;
-    const started = start ? START_STATES[start].setUp(fms) : null;
+    const started = start ? START_STATES[start].setUp(fms, flight) : null;
     // The run's context is fixed as it starts, so its report describes the run and not the controls afterwards.
     const chosen = variantById(variantId);
     const runner = pendingScenario.current
@@ -124,6 +127,10 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
   const [navLoad, setNavLoad] = useState<string | null>(null);
   const [navAirports, setNavAirports] = useState("");
   const [headingInput, setHeadingInput] = useState("090");
+  // The crew's autopilot selections under the helicopter profile: preselected altitude, vertical speed and speed.
+  const [altInput, setAltInput] = useState("");
+  const [vsInput, setVsInput] = useState("-500");
+  const [spdInput, setSpdInput] = useState("");
   const [jumpNote, setJumpNote] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(storedTab);
   // One set of height tiles for the out-the-window view and the PFD's synthetic vision.
@@ -151,6 +158,12 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
     }, interval);
     return () => window.clearInterval(timer);
   }, [backend, sim, runner, playing, rate]);
+
+  /** A different aircraft profile restarts the simulation in it. */
+  const chooseProfile = (id: string) => {
+    profileChoice.current = id;
+    setSession(s => s + 1);
+  };
 
   const chooseVariant = (id: string) => {
     setVariantId(id);
@@ -240,10 +253,16 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
             later.
           </p>
           <p className="fmsBenchProfile" data-testid="fms-bench-profile">
-            Aircraft profile: <strong>{ACTIVE_PROFILE.title}</strong> ({ACTIVE_PROFILE.id} v{ACTIVE_PROFILE.version}, {profileFingerprint(ACTIVE_PROFILE)}).
+            Aircraft profile: <strong>{backend.aircraftProfile.title}</strong> ({backend.aircraftProfile.id} v{backend.aircraftProfile.version}, {profileFingerprint(backend.aircraftProfile)}).
             Declared as data; parameters not yet flown by the simulation are marked for later stages.
           </p>
         </div>
+        <label className="fmsBenchVariant">
+          <span>Aircraft profile</span>
+          <select value={backend.aircraftProfile.id} onChange={event => chooseProfile(event.target.value)}>
+            {PROFILES.map(option => <option key={option.id} value={option.id}>{option.title}</option>)}
+          </select>
+        </label>
         <label className="fmsBenchVariant">
           <span>Hardware variation</span>
           <select value={variant.id} onChange={event => chooseVariant(event.target.value)}>
@@ -378,8 +397,32 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
               title={sim.approachMode === "CAPTURED" ? "Approach captured: press to cancel it (the aircraft levels), or TOGA to go around" : backend.approachArmed ? "Approach armed: press to disarm" : "Arm the approach"}
               onClick={() => { const on = !backend.approachArmed; recordTo?.armApproach(on); backend.armApproach(on); }}>APPR</button>
             <button type="button" disabled={failedFms} onClick={() => { recordTo?.goAround(); backend.goAround(); }}>TOGA</button>
-            <button type="button" disabled={failedFms || sim.altitudeHoldReference === null} onClick={() => sim.engageVnav()}>VNAV</button>
+            {sim.advisory ? null : <button type="button" disabled={failedFms || sim.altitudeHoldReference === null} onClick={() => sim.engageVnav()}>VNAV</button>}
           </form>
+          {sim.advisory ? (
+            // The helicopter profile: the crew flies the vertical axis and the speed; the FMS constraints are advisories.
+            <form className="fmsBenchAutopilot" aria-label="Vertical and speed selections" onSubmit={event => event.preventDefault()}>
+              <label>
+                <span>ALT SEL</span>
+                <input inputMode="numeric" value={altInput} placeholder={String(sim.selectedAltitude)} maxLength={5} aria-label="Preselected altitude"
+                  onChange={event => setAltInput(event.target.value.replace(/\D/g, ""))} />
+              </label>
+              <button type="button" disabled={!altInput} onClick={() => { const altitude = Number(altInput); recordTo?.autopilot({ altitude }); sim.selectAltitude(altitude); setAltInput(""); }}>SET</button>
+              <label>
+                <span>VS</span>
+                <input inputMode="numeric" value={vsInput} maxLength={5} aria-label="Vertical speed"
+                  onChange={event => setVsInput(event.target.value.replace(/[^\d-]/g, ""))} />
+              </label>
+              <button type="button" aria-pressed={sim.verticalSpeedTarget !== null} onClick={() => { const verticalSpeed = Number(vsInput) || 0; recordTo?.autopilot({ verticalSpeed }); sim.engageVerticalSpeed(verticalSpeed); }}>VS</button>
+              <button type="button" aria-pressed={sim.verticalMode === "ALT HOLD"} onClick={() => { recordTo?.autopilot({ hold: true }); sim.engageAltitudeHold(); }}>ALT</button>
+              <label>
+                <span>SPD</span>
+                <input inputMode="numeric" value={spdInput} placeholder={String(sim.selectedSpeed)} maxLength={3} aria-label="Selected speed"
+                  onChange={event => setSpdInput(event.target.value.replace(/\D/g, ""))} />
+              </label>
+              <button type="button" disabled={!spdInput} onClick={() => { const speed = Number(spdInput); recordTo?.autopilot({ speed }); sim.selectSpeed(speed); setSpdInput(""); }}>SET SPD</button>
+            </form>
+          ) : null}
           <dl className="fmsBenchGuidance" aria-label="Guidance">
             <dt>Mode</dt><dd>{guidance.mode}</dd>
             <dt>DTK</dt><dd>{guidance.desiredTrack === null ? "---" : `${String(Math.round(guidance.desiredTrack) || 360).padStart(3, "0")}°`}</dd>

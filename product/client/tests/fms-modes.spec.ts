@@ -1,15 +1,16 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm } from '../src/fmsCdu/fmsModel'
+import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
 // Guidance validity and mode authority (independent review findings R02 and R10, with the laboratory reversion
 // agreed as Q-A2): on FMS failure managed guidance stops being flown, basic heading and altitude hold fly references
 // latched at the failure, the aircraft keeps moving under its own dynamics, recovery resumes nothing by itself, and
 // the vertical mode is the controller branch that commands the aircraft, not a reading of its vertical speed.
-const setup = () => {
+const setup = (profile?: AircraftProfile) => {
   let now = Date.UTC(2026, 8, 27, 14, 0, 0)
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile })
   const sim = new FlightSimulator(unit)
   const fly = (seconds: number, each?: () => boolean | void) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1); if (each?.()) return } }
   return { unit, sim, fly }
@@ -20,14 +21,15 @@ test('on FMS failure the aircraft flies latched heading and altitude, keeps movi
   const { unit, sim, fly } = setup()
   fly(30)
   expect(sim.lateralMode).toBe('LNAV')
-  const track = unit.track, altitude = unit.altitude, leg = active(unit), start = unit.truePosition
+  const flownHeading = unit.heading, altitude = unit.altitude, leg = active(unit), start = unit.truePosition
   unit.setCondition('fmsFail', true)
   fly(1)
   expect(sim.lateralMode).toBe('HDG')
   expect(sim.guidance.mode).toBe('HDG')
   expect(sim.guidance.desiredTrack).toBeNull()
   expect(sim.verticalMode).toBe('ALT HOLD')
-  expect(sim.selectedHeading).toBe(Math.round(track))
+  // The heading the aircraft was flying is latched (not its track, which differs by the drift).
+  expect(sim.selectedHeading).toBe(Math.round(flownHeading))
   expect(sim.altitudeHoldReference).toBe(Math.round(altitude))
   expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'FMS FAILURE', detail: expect.stringContaining(`ALT HOLD ${Math.round(altitude)} FT`) })
   // The references are latched: flying on does not re-latch them to the changing aircraft state.
@@ -42,7 +44,7 @@ test('on FMS failure the aircraft flies latched heading and altitude, keeps movi
 })
 
 test('recovery resumes nothing by itself; LNAV and VNAV must be selected again (R02)', () => {
-  const { unit, sim, fly } = setup()
+  const { unit, sim, fly } = setup(LAB_AIRLINE_VNAV_PROFILE)
   fly(30)
   unit.setCondition('fmsFail', true)
   fly(5)
@@ -64,7 +66,7 @@ test('recovery resumes nothing by itself; LNAV and VNAV must be selected again (
 
 test('the vertical mode is the commanding branch: level in path mode and moving in altitude hold both occur (R10)', () => {
   // Below the descent path the aircraft holds its altitude in VNAV PTH: level, in a path mode.
-  const { unit, sim, fly } = setup()
+  const { unit, sim, fly } = setup(LAB_AIRLINE_VNAV_PROFILE)
   fly(3 * 3600, () => unit.profile().descending)
   fly(30)
   unit.setAircraft({ altitude: unit.altitude - 800 })
@@ -72,7 +74,7 @@ test('the vertical mode is the commanding branch: level in path mode and moving 
   expect(sim.verticalMode).toBe('VNAV PTH')
   expect(Math.abs(unit.verticalSpeed)).toBeLessThan(10)
   // A failure while descending: altitude hold captures its latched altitude with a transient, still ALT HOLD.
-  const descending = setup()
+  const descending = setup(LAB_AIRLINE_VNAV_PROFILE)
   descending.unit.press('LEGS')
   // DES NOW descends at 1000 fpm to the planned altitude at the active fix, so it needs one below the aircraft: the
   // leg, at cruise, into the first descent constraint.
@@ -104,8 +106,8 @@ test('LNAV with no leg to fly is lost to heading hold, and the loss is recorded 
 // LNAV engaged and the aircraft established on the final leg. Loss of integrity after capture drops the approach mode
 // to a latched altitude hold, and restoring integrity does not re-capture by itself.
 const onFinal = (unit: ScriptedFms) => active(unit) === 'RW24R'
-const approachSetup = (arm: boolean) => {
-  const run = setup()
+const approachSetup = (arm: boolean, profile?: AircraftProfile) => {
+  const run = setup(profile)
   run.unit.selectProcedure('APPROACH', 'R24R')
   run.unit.press('EXEC')
   if (arm) run.unit.armApproach(true)
@@ -166,8 +168,8 @@ test('integrity lost after capture drops to altitude hold; restoring it does not
 
 // The laboratory go-around and the approach exits (third review D02 and D03): an accepted TOGA leaves the approach the
 // same way however the approach ended, and the commanded target is always the one the controlling authority flies.
-const capturedApproach = () => {
-  const run = approachSetup(true)
+const capturedApproach = (profile?: AircraftProfile) => {
+  const run = approachSetup(true, profile)
   run.fly(600, () => run.sim.approachMode === 'CAPTURED' && run.unit.verticalSpeed < -300)
   expect(run.sim.approachMode).toBe('CAPTURED')
   return run
@@ -176,7 +178,7 @@ const capturedApproach = () => {
 test('TOGA climbs on the missed approach whether the approach was captured or had lost its integrity (third review D02)', () => {
   // The degraded case first: it is the one that went wrong (the normal go-around already climbed).
   for (const lostIntegrity of [true, false]) {
-    const { unit, sim, fly } = capturedApproach()
+    const { unit, sim, fly } = capturedApproach(LAB_AIRLINE_VNAV_PROFILE)
     if (lostIntegrity) {
       unit.setCondition('gpsIntegrity', true)
       fly(2)
@@ -275,4 +277,28 @@ test('on the first step after an approach ends, the published target is the hold
     fly(1)
     expect(sim.guidance.targetAltitude, how).toBe(held)
   }
+})
+
+test('under the helicopter profile TOGA climbs in GA to the preselected altitude and captures it; VS and ALT are the crew modes (Stage B3)', () => {
+  const { unit, sim, fly } = capturedApproach()
+  // The approach captures at about 3,000 ft here: preselect the missed approach altitude above it.
+  sim.selectAltitude(4000)
+  const from = unit.altitude
+  expect(unit.goAround()).toBe(true)
+  fly(5)
+  expect(sim.verticalMode).toBe('GA')
+  expect(unit.verticalSpeed).toBeGreaterThan(700)
+  fly(240, () => sim.verticalMode === 'ALT HOLD')
+  expect(sim.verticalMode).toBe('ALT HOLD')
+  expect(Math.abs(unit.altitude - 4000)).toBeLessThan(30)
+  expect(unit.altitude).toBeGreaterThan(from)
+  expect(sim.modeEvents.map(e => e.event)).toEqual(expect.arrayContaining(['GO AROUND', 'ALT CAPTURED']))
+  // VS toward a lower preselection, then capture there; VNAV is not a helicopter mode.
+  sim.selectAltitude(3500)
+  expect(sim.engageVerticalSpeed(-500)).toBe(true)
+  fly(3)
+  expect(sim.verticalMode).toBe('VS')
+  fly(200, () => sim.verticalMode === 'ALT HOLD')
+  expect(Math.abs(unit.altitude - 3500)).toBeLessThan(30)
+  expect(sim.engageVnav()).toBe(false)
 })

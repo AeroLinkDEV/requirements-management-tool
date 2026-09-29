@@ -1,14 +1,16 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { FlightSimulator, legGeometry, racetrackOutline, sarTrack } from '../src/fmsCdu/flight'
+import { FlightSimulator, angleDiff, legGeometry, racetrackOutline, sarTrack } from '../src/fmsCdu/flight'
 import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
+import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
+import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
 // The flight simulation: the aircraft flies the active route as an FMS-coupled autopilot would. These prove the
 // guidance geometry (fly-by, holds with their entries, search patterns, the final approach path), not the pages.
-const setup = () => {
+const setup = (profile?: AircraftProfile) => {
   let now = Date.UTC(2026, 8, 27, 14, 0, 0)
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile })
   const sim = new FlightSimulator(unit)
   const fly = (seconds: number, each?: () => boolean | void) => {
     for (let t = 0; t < seconds; t += 1) {
@@ -62,7 +64,7 @@ test('a fly-by waypoint is sequenced before the aircraft reaches it, by the turn
 })
 
 test('the aircraft climbs to each leg constraint and descends on the VNAV path from the FAF to the runway', () => {
-  const { unit, fly } = setup()
+  const { unit, fly } = setup(LAB_AIRLINE_VNAV_PROFILE)
   // Beyond the FAF only a captured approach descends (review finding R03): the approach is loaded and armed. The
   // runway alone, reached without an approach procedure, no longer brings the aircraft down.
   unit.selectProcedure('APPROACH', 'R24R')
@@ -94,7 +96,7 @@ test('the aircraft climbs to each leg constraint and descends on the VNAV path f
 })
 
 test('VNAV holds cruise until the top of descent, then descends on the planned path to the first descent constraint', () => {
-  const { unit, fly } = setup()
+  const { unit, fly } = setup(LAB_AIRLINE_VNAV_PROFILE)
   const profile = unit.profile()
   expect(profile.endOfDescent).toBe('RW24R')
   // The first constraint below cruise is DEMEL at 3000, joining the downwind. Descending 1500 ft at three degrees
@@ -246,4 +248,179 @@ test('a direct-to starts the active leg at present position', () => {
   expect(unit.activeLegStart).toEqual(here)
   fly(3600, () => activeIdent(unit) === 'FERDI')
   expect(activeIdent(unit)).toBe('FERDI')
+})
+
+// Stage B1 of the helicopter-first plan: the aircraft flies a heading through the air, the wind carries the air mass,
+// and the ground velocity is their vector sum. Expected values are worked by hand, independently of kinematics.ts.
+test('the wind triangle gives the crab angle and ground speed, and refuses a track the airspeed cannot hold', () => {
+  // TAS 100 kt, a pure 30 kt crosswind from the right: crab asin(0.3) = 17.458 deg into it, GS 100 cos(17.458) = 95.394 kt.
+  const crosswind = holdTrack(100, 360, { direction: 90, speed: 30 })
+  expect(crosswind).toMatchObject({ feasible: true })
+  if (!crosswind.feasible) throw new Error('feasible')
+  expect(crosswind.windCorrection).toBeCloseTo(17.458, 3)
+  expect(crosswind.heading).toBeCloseTo(17.458, 3)
+  expect(crosswind.groundSpeed).toBeCloseTo(95.394, 3)
+  // 5 NM in 5 minutes (60 kt over the ground) with a pure 30 kt crosswind needs sqrt(60^2 + 30^2) = 67.082 kt TAS.
+  const rta = holdTrack(Math.hypot(60, 30), 360, { direction: 270, speed: 30 })
+  expect(rta.feasible && rta.groundSpeed).toBeCloseTo(60, 6)
+  // A crosswind stronger than the airspeed, or a headwind that stops progress: infeasible, never a floor.
+  expect(holdTrack(20, 360, { direction: 90, speed: 30 })).toMatchObject({ feasible: false })
+  expect(holdTrack(20, 360, { direction: 360, speed: 25 })).toMatchObject({ feasible: false })
+  expect(predictedGroundSpeed(20, 360, { direction: 360, speed: 25 })).toBeNull()
+  // Flying 20 kt into a 20 kt wind holds the ground position: no ground speed and no track.
+  expect(groundVelocity(20, 230, { direction: 230, speed: 20 })).toMatchObject({ speed: expect.closeTo(0, 9), track: null })
+})
+
+test('in a crosswind the aircraft crabs: its heading differs from its track by the wind correction, and LNAV holds the track', () => {
+  const { unit, fly } = setup()
+  // The demonstration route's first leg runs about 115 degrees; a 30 kt wind from the north-east is a crosswind on it.
+  unit.wind.direction = 25
+  unit.wind.speed = 30
+  fly(240)
+  const leg = legGeometry(unit.activeLegStart, unit.coordinates(activeIdent(unit)!)!, unit.truePosition)
+  expect(Math.abs(leg.crossTrack)).toBeLessThan(0.1)
+  const expected = holdTrack(unit.vnav.cruiseSpeed, unit.track, unit.wind)
+  if (!expected.feasible) throw new Error('feasible')
+  expect(Math.abs(expected.windCorrection)).toBeGreaterThan(10)
+  expect(unit.heading).toBeCloseTo(expected.heading, 0)
+  expect(unit.groundSpeed).toBeCloseTo(expected.groundSpeed, 0)
+})
+
+test('the airspeed changes at the profile acceleration limit, not in one step', () => {
+  const { sim, fly } = setup()
+  fly(5)
+  expect(sim.tas).toBeCloseTo(120, 6)
+  sim.selectSpeed(80)
+  fly(10)
+  // 2 kt/s: ten seconds take 20 kt off, not 40.
+  expect(sim.tas).toBeCloseTo(100, 6)
+  fly(15)
+  expect(sim.tas).toBeCloseTo(80, 6)
+})
+
+// Stage B3b: the rotorcraft autopilot's hover and low-speed modes, over the declared sea south of Southampton (87N),
+// in a steady 230/20 wind (a laboratory test condition). Tolerances are the profile's (plan section 3a).
+const offshore = (height = 100) => {
+  const run = setup()
+  const { unit, sim } = run
+  unit.declareSurface('offshore-87n')
+  unit.wind.direction = 230
+  unit.wind.speed = 20
+  unit.placeAircraft({ position: { lat: 40.7, lon: -72.45 }, track: 230, altitude: height }, 'test: offshore south of 87N')
+  sim.engageAltitudeHold()
+  sim.selectHeading(230)
+  return run
+}
+const metres = (a: LatLon, b: LatLon) => distanceNm(a, b) * 1852
+const slowToHover = (run: ReturnType<typeof offshore>) => {
+  run.sim.selectSpeed(25)
+  run.fly(120, () => run.sim.tas < 26)
+  expect(run.sim.engageHover()).toBe(true)
+}
+
+test('HOV holds position in a 20 kt wind: ground speed about zero, airspeed about the wind, heading into it (B3b)', () => {
+  const run = offshore()
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(20)
+  const anchor = unit.truePosition
+  let worst = 0, worstHeight = 0
+  fly(120, () => { worst = Math.max(worst, metres(anchor, unit.truePosition)); worstHeight = Math.max(worstHeight, Math.abs(unit.radioHeight.value! - 100)) })
+  expect(worst).toBeLessThan(10)
+  expect(worstHeight).toBeLessThan(5)
+  expect(unit.groundSpeed).toBeLessThan(1)
+  expect(sim.tas).toBeCloseTo(20, 0)
+  expect(Math.abs(angleDiff(230, unit.heading))).toBeLessThan(2)
+  expect(sim.axisModes).toEqual({ collective: 'RHT', pitch: 'HOV', roll: 'HOV' })
+})
+
+test('in HOV a heading selection yaws the aircraft through 360 degrees at the yaw rate while the position holds (B3b)', () => {
+  const run = offshore()
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(20)
+  const anchor = unit.truePosition
+  let worst = 0
+  for (const heading of [350, 110, 230]) {
+    sim.selectHeading(heading)
+    fly(12, () => { worst = Math.max(worst, metres(anchor, unit.truePosition)) })
+  }
+  fly(20, () => { worst = Math.max(worst, metres(anchor, unit.truePosition)) })
+  expect(Math.abs(angleDiff(230, unit.heading))).toBeLessThan(2)
+  expect(worst).toBeLessThan(10)
+})
+
+test('TD/H from its window decelerates to a stop and descends to the hover height, then RHT and HOV hold there (B3b)', () => {
+  const run = offshore(150)
+  const { unit, sim, fly } = run
+  sim.selectSpeed(60)
+  fly(40)
+  expect(sim.selectHoverHeight(50)).toBe(true)
+  // Outside the window it is refused: above 210 ft, or at 85 kt or more.
+  expect(sim.engageTransitionDownToHover()).toBe(true)
+  fly(150, () => sim.axisModes.pitch === 'HOV' && sim.axisModes.collective === 'RHT')
+  expect(sim.axisModes).toEqual({ collective: 'RHT', pitch: 'HOV', roll: 'HOV' })
+  fly(30)
+  expect(Math.abs(unit.radioHeight.value! - 50)).toBeLessThan(5)
+  expect(unit.groundSpeed).toBeLessThan(1)
+})
+
+test('the TD/H window: refused above 210 ft RA and at 85 kt, and it never climbs to a hover height above it (B3b)', () => {
+  const high = offshore(300)
+  expect(high.sim.engageTransitionDownToHover()).toBe(false)
+  const fast = offshore(150)
+  fast.sim.selectSpeed(100)
+  fast.fly(20)
+  expect(fast.sim.engageTransitionDownToHover()).toBe(false)
+})
+
+test('TU from an exact hover releases the station lock; its axes complete on their own through 40 kt to 80 kt and 200 ft (B3b)', () => {
+  const run = offshore(50)
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(40)
+  expect(unit.groundSpeed).toBeLessThan(1)
+  expect(sim.engageTransitionUp()).toBe(true)
+  let rht: number | null = null, coordinated: number | null = null
+  fly(120, () => {
+    if (rht === null && sim.axisModes.collective === 'RHT') rht = unit.radioHeight.value
+    if (coordinated === null && !sim.inLowSpeedRegime) coordinated = sim.tas
+    return sim.tas >= 79.9 && sim.axisModes.collective === 'RHT'
+  })
+  expect(rht).not.toBeNull()
+  expect(Math.abs(rht! - 200)).toBeLessThan(25)
+  // Heading hold takes the roll axis only in coordinated flight, from 45 kt (the hysteresis), not at 40.
+  expect(coordinated!).toBeGreaterThanOrEqual(45)
+  expect(sim.tas).toBeGreaterThan(79)
+  expect(sim.axisModes.roll).toBe('HDG')
+})
+
+test('radio height lost in the hover: RHT gives way to ALT HOLD on the barometric altitude, HOV holds, LOW HT OFF (B3b, F3)', () => {
+  const run = offshore()
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(20)
+  const altitude = unit.altitude
+  unit.setCondition('raFail', true)
+  fly(5)
+  expect(sim.axisModes).toEqual({ collective: 'ALT', pitch: 'HOV', roll: 'HOV' })
+  expect(sim.altitudeHoldReference).toBe(Math.round(altitude))
+  expect(sim.lowHeightCaption).toBe('LOW HT OFF')
+  expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'RA LOST' })
+})
+
+test('hover feedback lost: HOV gives way to ATT on the last command; with the wind unchanged it stays, and a wind change drifts it (B3b, F5)', () => {
+  const run = offshore()
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(20)
+  unit.setCondition('gpsLost', true)
+  fly(3)
+  expect(sim.axisModes.pitch).toBe('ATT')
+  expect(sim.modeEvents.some(e => e.event === 'HOV LOST')).toBe(true)
+  const before = unit.truePosition
+  unit.wind.speed = 25
+  fly(30)
+  // The controller has no feedback, so nothing brings it back: the aircraft drifts with the extra 5 kt, about 77 m.
+  expect(metres(before, unit.truePosition)).toBeGreaterThan(40)
 })

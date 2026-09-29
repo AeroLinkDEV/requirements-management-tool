@@ -1,4 +1,5 @@
 import { KBTV_CIFP_2609 } from "./data/kbtvCifp2609";
+import type { FlightSimulator } from "./flight";
 import { courseDeg, offset } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
 
@@ -40,7 +41,7 @@ export const KBTV_START_ALTITUDE_FT = 3200;
  * route is built with the crew's own controls (destination, approach, DIRECT-TO, EXEC), so the flight from there on is
  * flown and checked like any other: the intercept, the capture at the FAF (FOVES) and the published path.
  */
-export function setUpKbtvRnav15(fms: ScriptedFms): { ready: true } | { refused: string } {
+export function setUpKbtvRnav15(fms: ScriptedFms, sim?: FlightSimulator): { ready: true } | { refused: string } {
   const loaded = loadKbtvDemonstration(fms);
   if ("refused" in loaded) return loaded;
   fms.modify(route => { route.dest = "KBTV"; });
@@ -55,9 +56,18 @@ export function setUpKbtvRnav15(fms: ScriptedFms): { ready: true } | { refused: 
   // DIRECT-TO from where the aircraft now is, as a crew cleared direct to the IF would do.
   fms.directTo("STAEV");
   fms.press("EXEC");
-  // DES NOW (VNAV page 2), as the crew would at the IF altitude: the descent starts here, rather than a climb back to the
-  // demonstration's cruise altitude and a top of descent from there.
-  if (!fms.profile().descending) fms.vnav.desNow = true;
+  if (fms.aircraftProfile.verticalPolicy === "ADVISORY") {
+    // The crew descends it; without the flight simulation there is no autopilot to set, so the start state is refused.
+    if (!sim) return { refused: "the helicopter profile start state needs the flight simulation (autopilot selections)" };
+    // The helicopter profile: the crew preselects the FAF altitude and descends to it in VS, so the aircraft is level
+    // at the FAF altitude when LPV captures there. The constraints are advisories; nothing in the FMS descends it.
+    sim?.selectAltitude(fms.fafAltitudeCorrected);
+    sim?.engageVerticalSpeed(-500);
+  } else if (!fms.profile().descending) {
+    // The laboratory airline-style VNAV: DES NOW (VNAV page 2), as the crew would at the IF altitude, so the descent
+    // starts here rather than after a climb back to the demonstration's cruise altitude and a top of descent.
+    fms.vnav.desNow = true;
+  }
   fms.armApproach(true);
   return { ready: true };
 }
@@ -65,6 +75,6 @@ export function setUpKbtvRnav15(fms: ScriptedFms): { ready: true } | { refused: 
 /** Start states a scenario can name (scenario.ts): each sets up a fresh simulation before the first step. */
 export const START_STATES = {
   "kbtv-rnav15": { label: "KBTV RNAV (GPS) RWY 15: FAA CIFP 2609, 8 NM before STAEV at 3200 ft, approach armed", setUp: setUpKbtvRnav15 },
-} as const satisfies Record<string, { label: string; setUp: (fms: ScriptedFms) => { ready: true } | { refused: string } }>;
+} as const satisfies Record<string, { label: string; setUp: (fms: ScriptedFms, sim?: FlightSimulator) => { ready: true } | { refused: string } }>;
 
 export type StartStateId = keyof typeof START_STATES;

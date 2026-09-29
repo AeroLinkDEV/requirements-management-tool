@@ -3,10 +3,11 @@ import { FlightSimulator } from "./flight";
 import { distanceNm } from "./fmsModel";
 import { START_STATES, type StartStateId } from "./kbtvDemo";
 import { GPS_MODEL_VERSION, type GpsMode } from "./gps";
-import { ACTIVE_PROFILE, profileSummary } from "./profile";
+import { PROFILES, profileById, profileSummary } from "./profile";
 import { describeGpsOp, gpsOpProblem, stimulusFor, type GpsOp } from "./gpsStimulus";
 import { ScriptedFms } from "./scriptedFms";
 import { SCRATCHPAD_LINE, screenText, type Lamp } from "./screen";
+import { SURFACES, surfaceById } from "./surface";
 import type { CduFunction } from "./variants";
 
 // Scripted test scenarios for the FMS Test Bench (product/docs/FMS_TEST_BENCH.md, step 8). A scenario is an ordered
@@ -44,6 +45,11 @@ export type Action =
   /** APPR: arms the approach, or (on false) presses it off: a disarm, or after capture a cancellation. */
   | { kind: "armApproach"; on?: boolean }
   | { kind: "goAround" }
+  /**
+   * The crew's autopilot selections under the helicopter profile: preselect an altitude, engage a vertical speed (fpm)
+   * toward it, hold the present altitude, or select a speed (knots). Each field given is applied, in that order.
+   */
+  | { kind: "autopilot"; altitude?: number; verticalSpeed?: number; hold?: boolean; speed?: number }
   | { kind: "expectLine"; line: number; pattern: string }
   | { kind: "expectScratchpad"; text: string }
   | { kind: "expectAlert"; text: string }
@@ -81,6 +87,13 @@ export type Scenario = {
    * clock. Without it, the bench starts at the wall clock and a headless run at its own default.
    */
   startTime?: string;
+  /**
+   * The surface the radio altimeter measures against (surface.ts SURFACES, by id). Without it none is declared and the
+   * radio height is NCD everywhere.
+   */
+  surface?: string;
+  /** The aircraft profile the run flies (profile.ts PROFILES, by id); the helicopter profile when not named. */
+  profile?: string;
   steps: ScenarioStep[];
 };
 
@@ -93,9 +106,9 @@ export type RunOutcome = "running" | "passed" | "failed" | "no checks" | "timed 
 /**
  * What the run describes, fixed when it starts, so the report cannot change after it finishes. `data` says what the
  * navigation data is (the active cycle's source); a start state can change the cycle, so both are read after it.
- * `profile` names the aircraft profile (profile.ts) the run flew.
+ * `profile` names the aircraft profile (profile.ts) the run flew, and `surface` the radio altimeter's declared surface.
  */
-export type RunContext = { variant: string; cycle: string; data?: string; profile?: string };
+export type RunContext = { variant: string; cycle: string; data?: string; profile?: string; surface?: string };
 
 const isExpectation = (action: Action) => action.kind.startsWith("expect");
 
@@ -122,6 +135,7 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "procedure": return `select the ${a.procedure === "APPROACH" ? "approach" : a.procedure} ${a.ident}`;
       case "armApproach": return a.on === false ? "press APPR off" : "arm the approach";
       case "goAround": return "press TOGA";
+      case "autopilot": return [a.altitude !== undefined ? `preselect ${a.altitude} ft` : null, a.verticalSpeed !== undefined ? `engage VS ${a.verticalSpeed} fpm` : null, a.hold ? "engage ALT" : null, a.speed !== undefined ? `select ${a.speed} kt` : null].filter(Boolean).join(", then ");
       case "expectLine": return `check that screen line ${a.line + 1} matches /${a.pattern}/${within}`;
       case "expectScratchpad": return a.text ? `check that the scratchpad shows ${a.text}${within}` : `check that the scratchpad is blank${within}`;
       case "expectAlert": return `check that the alert ${a.text} has been raised${within}`;
@@ -195,6 +209,11 @@ function actionProblem(action: unknown): string | null {
     case "procedure": return (a.procedure === "SID" || a.procedure === "STAR" || a.procedure === "APPROACH") && text(a.ident, /^[A-Z0-9]{1,7}$/) ? null : "procedure needs SID, STAR or APPROACH and an ident";
     case "armApproach": return a.on === undefined || typeof a.on === "boolean" ? null : "armApproach on must be true or false when given";
     case "goAround": return null;
+    case "autopilot": {
+      const finite = (v: unknown) => v === undefined || (typeof v === "number" && Number.isFinite(v));
+      if (!finite(a.altitude) || !finite(a.verticalSpeed) || !finite(a.speed) || !(a.hold === undefined || typeof a.hold === "boolean")) return "autopilot altitude, verticalSpeed and speed must be numbers, hold true or false";
+      return a.altitude === undefined && a.verticalSpeed === undefined && !a.hold && a.speed === undefined ? "autopilot needs at least one of altitude, verticalSpeed, hold and speed" : null;
+    }
     case "expectLine": {
       if (!(Number.isInteger(a.line) && finite(a.line, 0, SCRATCHPAD_LINE))) return `expectLine needs a line from 0 to ${SCRATCHPAD_LINE}`;
       if (typeof a.pattern !== "string") return "expectLine needs a pattern";
@@ -231,6 +250,8 @@ export function scenarioProblems(value: unknown): string[] {
   if (typeof s.title !== "string" || !s.title.trim()) problems.push("it needs a title");
   if (!finite(s.maxSeconds, TICK_SECONDS, MAX_RUN_SECONDS)) problems.push("it needs maxSeconds between 0.25 and 86400");
   if (s.start !== undefined && !(typeof s.start === "string" && Object.hasOwn(START_STATES, s.start))) problems.push(`unknown start state "${String(s.start)}"`);
+  if (s.profile !== undefined && !(typeof s.profile === "string" && profileById(s.profile))) problems.push(`profile must be one of ${PROFILES.map(profile => profile.id).join(", ")}`);
+  if (s.surface !== undefined && !(typeof s.surface === "string" && surfaceById(s.surface))) problems.push(`surface must be one of ${SURFACES.map(surface => surface.id).join(", ")}`);
   if (s.startTime !== undefined && !(typeof s.startTime === "string" && /^\d{4}-\d\d-\d\dT/.test(s.startTime) && Number.isFinite(Date.parse(s.startTime)))) problems.push("startTime must be an ISO 8601 date and time");
   if (!Array.isArray(s.steps)) return [...problems, "it needs steps"];
   s.steps.forEach((step, i) => {
@@ -276,13 +297,15 @@ export class ScenarioRunner {
     this.fms = fms;
     this.sim = sim;
     const problems = scenarioProblems(scenario);
-    // The start state sets up the fresh simulation before the first step; the context is read after it.
+    // The surface is declared first; the start state sets up the fresh simulation before the first step; the context
+    // is read after both.
+    if (!problems.length && this.scenario.surface) fms.declareSurface(this.scenario.surface);
     if (!problems.length && this.scenario.start) {
-      const set = START_STATES[this.scenario.start].setUp(fms);
+      const set = START_STATES[this.scenario.start].setUp(fms, sim ?? undefined);
       if ("refused" in set) problems.push(`start state ${this.scenario.start}: ${set.refused}`);
     }
     this.problems = problems;
-    this.context = { ...context, cycle: fms.activeCycle.id, data: context.data ?? fms.activeCycle.source, profile: profileSummary(ACTIVE_PROFILE) };
+    this.context = { ...context, cycle: fms.activeCycle.id, data: context.data ?? fms.activeCycle.source, profile: profileSummary(fms.aircraftProfile), surface: `${fms.surface.id} (${fms.surface.basis})` };
     this.start = fms.now.getTime();
     this.results = this.scenario.steps.map(() => ({ status: "pending" }));
     if (this.problems.length) { this.next = this.results.length; this.endedAt = 0; return; }
@@ -394,6 +417,15 @@ export class ScenarioRunner {
       case "procedure": fms.selectProcedure(action.procedure, action.ident); return;
       case "armApproach": fms.armApproach(action.on !== false); return;
       case "goAround": fms.goAround(); return;
+      case "autopilot": {
+        const sim = this.sim;
+        if (!sim) throw new Error("autopilot selections need the flight simulation");
+        if (action.altitude !== undefined) sim.selectAltitude(action.altitude);
+        if (action.verticalSpeed !== undefined && !sim.engageVerticalSpeed(action.verticalSpeed)) throw new Error(`VS is not available in the ${fms.aircraftProfile.id} profile`);
+        if (action.hold && !sim.engageAltitudeHold()) throw new Error(`ALT is not available in the ${fms.aircraftProfile.id} profile`);
+        if (action.speed !== undefined) sim.selectSpeed(action.speed);
+        return;
+      }
       case "gps": {
         // Through the same stimulus record as the GPS sensors tab, so the tab shows what the scenario applied.
         if (!stimulusFor(fms).apply(action.receiver - 1, action.stimulus)) throw new Error(`GPS ${action.receiver} refused: ${describeGpsOp(action.stimulus)}.`);
@@ -481,7 +513,7 @@ export const scenarioStart = (scenario: Scenario) => (scenario.startTime && Numb
 /** Runs a scenario to its end on a fresh simulation, tick by tick, as the tests do. */
 export function runHeadless(scenario: Scenario, start = scenarioStart(scenario) ?? Date.UTC(2026, 8, 27, 14, 0, 0), context?: RunContext) {
   let now = start;
-  const fms = new ScriptedFms(() => new Date(now));
+  const fms = new ScriptedFms(() => new Date(now), { profile: profileById(scenario.profile) });
   const sim = new FlightSimulator(fms);
   const runner = new ScenarioRunner(scenario, fms, context, sim);
   // The runner ends itself at maxSeconds; the bound only keeps a broken runner from looping forever.
@@ -556,6 +588,7 @@ export function reportMarkdown(runner: ScenarioRunner) {
     `- Started: ${runner.startedAt.toISOString()}${runner.endedAfter === null ? "" : `; ended after ${formatSeconds(runner.endedAfter)} of simulated time`}`,
     `- Hardware variation: ${context.variant}`,
     `- Aircraft profile: ${context.profile ?? "not recorded"}`,
+    `- Surface for the radio altimeter: ${context.surface ?? "not recorded"}`,
     `- Navigation data: ${context.cycle} (${!context.data || context.data === "demonstration data" ? "invented demonstration data" : context.data})`,
     `- Time: ${TICK_SECONDS} s ticks; a step due between ticks runs at the next one.`,
     "- Driven by the scripted CMA-9000 simulation, not the operational program. This is not flight-qualified evidence.",
@@ -621,6 +654,8 @@ export class ScenarioRecorder {
   alert(text: string) { this.add({ kind: "alert", text }); }
   armApproach(on = true) { this.add(on ? { kind: "armApproach" } : { kind: "armApproach", on: false }); }
   goAround() { this.add({ kind: "goAround" }); }
+  /** An autopilot selection made on the bench (helicopter profile). */
+  autopilot(selection: { altitude?: number; verticalSpeed?: number; hold?: boolean; speed?: number }) { this.add({ kind: "autopilot", ...selection }); }
   /** A stimulus applied on the GPS sensors tab. */
   gps(receiver: 1 | 2, stimulus: GpsOp) { this.add({ kind: "gps", receiver, stimulus: structuredClone(stimulus) }); }
   /** Checks a screen line as it is shown now; a few seconds' grace lets playback at another rate catch up. */

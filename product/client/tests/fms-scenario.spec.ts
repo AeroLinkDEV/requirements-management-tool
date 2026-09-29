@@ -2,7 +2,7 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import {
   ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, linePattern, parseScenario, procedureText, reportMarkdown, runHeadless,
-  scenarioDigest, type Scenario,
+  scenarioDigest, scenarioProblems, type Scenario,
 } from '../src/fmsCdu/scenario'
 import { HELICOPTER_PROFILE, profileFingerprint } from '../src/fmsCdu/profile'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
@@ -341,4 +341,30 @@ test('the profile fingerprint changes when any profile value changes, so evidenc
   const forced = structuredClone(HELICOPTER_PROFILE)
   forced.parameters.rollRate.inForce = true
   expect(profileFingerprint(forced)).not.toBe(base)
+})
+
+test('a scenario declares the radio altimeter surface by id; the report names it, and an unknown surface is refused (Stage B2)', () => {
+  const declared = runHeadless({ id: 's', title: 's', objective: '', maxSeconds: 1, surface: 'offshore-87n', steps: [] }).runner
+  expect(reportMarkdown(declared)).toMatch(/^- Surface for the radio altimeter: offshore-87n \(declared flat sea at 0 ft MSL/m)
+  const none = runHeadless({ id: 'n', title: 'n', objective: '', maxSeconds: 1, steps: [] }).runner
+  expect(reportMarkdown(none)).toMatch(/^- Surface for the radio altimeter: none \(radio height NCD everywhere\)$/m)
+  const unknown = runHeadless({ id: 'u', title: 'u', objective: '', maxSeconds: 1, surface: 'moon', steps: [] }).runner
+  expect(unknown.outcome).toBe('invalid')
+  expect(unknown.problems.join(' ')).toMatch(/surface must be one of none, offshore-87n/)
+})
+
+test('a scenario names its aircraft profile and makes autopilot selections; both are validated (Stage B3)', () => {
+  const climb = runHeadless({ id: 'p', title: 'p', objective: '', maxSeconds: 60, steps: [
+    { when: { kind: 'start' }, action: { kind: 'autopilot', altitude: 3500, verticalSpeed: 500, speed: 100 } },
+  ] }).runner
+  expect(climb.results[0]).toEqual({ status: 'done', at: 0 })
+  expect(reportMarkdown(climb)).toMatch(/^- Aircraft profile: cma9000-s300-heli-civil v1 /m)
+  const lab = runHeadless({ id: 'l', title: 'l', objective: '', maxSeconds: 1, profile: 'lab-airline-vnav', steps: [
+    { when: { kind: 'start' }, action: { kind: 'autopilot', verticalSpeed: 500 } },
+  ] })
+  expect(reportMarkdown(lab.runner)).toMatch(/^- Aircraft profile: lab-airline-vnav v1 /m)
+  // VS is a helicopter-profile mode: under the laboratory VNAV profile it is an execution error, not a silent pass.
+  expect(lab.runner.outcome).toBe('error')
+  expect(scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 1, profile: 'jet', steps: [] })).toEqual([expect.stringMatching(/profile must be one of cma9000-s300-heli-civil, lab-airline-vnav/)])
+  expect(scenarioProblems({ id: 'y', title: 'y', objective: '', maxSeconds: 1, steps: [{ when: { kind: 'start' }, action: { kind: 'autopilot' } }] }).join(' ')).toMatch(/autopilot needs at least one/)
 })
