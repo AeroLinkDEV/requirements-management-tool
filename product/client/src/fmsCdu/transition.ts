@@ -36,7 +36,7 @@ export type TransitionStart = {
   elevation?: number;
 };
 
-export type TransitionRefusal = { refused: true; reason: "below gate speed" | "vertical speed limit" | "radio height invalid" | "hover height out of range" | "below minimum use height" };
+export type TransitionRefusal = { refused: true; reason: "below gate speed" | "vertical speed limit" | "radio height invalid" | "hover height out of range" | "below minimum use height" | "no closure" };
 
 export type TransitionPlan = {
   refused: false;
@@ -61,7 +61,7 @@ function verticalStep(height: number, vs: number, target: number, rate: number, 
 /**
  * The planned transition from the state at TDN, or the reason it is refused: below the 80 KIAS gate speed (TD never
  * accelerates), a vertical speed beyond the profile's limit, no valid radio height, a hover height out of its range,
- * or below the minimum use height.
+ * or below the minimum use height, or no ground speed toward MRK at the gate (no closure).
  */
 export function planTransition(start: TransitionStart): TransitionPlan | TransitionRefusal {
   const elevation = start.elevation ?? 0;
@@ -71,6 +71,8 @@ export function planTransition(start: TransitionStart): TransitionPlan | Transit
   if (start.hoverHeight < P.hoverHeightMin.value || start.hoverHeight > P.hoverHeightMax.value) return { refused: true, reason: "hover height out of range" };
   if (start.radioHeight < P.minimumUseHeight.value) return { refused: true, reason: "below minimum use height" };
   const gateHeight = Math.min(P.gateHeight.value, start.radioHeight);
+  // A headwind at or above the gate true airspeed leaves no ground speed toward MRK: the transition never closes.
+  if (tasFromIas(P.gateSpeed.value, elevation + gateHeight) - start.headwind <= 0) return { refused: true, reason: "no closure" };
   // TD: integrate both axes until each has arrived.
   let t = 0, height = start.radioHeight, vs = start.verticalSpeed, ias = start.ias, distance = 0;
   const arrived = () => Math.abs(height - gateHeight) < 0.05 && Math.abs(vs) < 1 && ias <= P.gateSpeed.value + 1e-9;

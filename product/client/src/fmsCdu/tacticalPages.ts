@@ -444,7 +444,8 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
     render: fms => {
       const hover = fms.hover, mark = hover.mark;
       const status = hover.status === "NONE" ? undefined : hover.status;
-      const canActivate = mark !== null && hover.status === "NONE" && fms.radioHeight.status === "NORMAL";
+      // ACTIVATE for a mark not yet flown: none active, or a new one designated over the active procedure (A-76).
+      const canActivate = mark !== null && hover.status !== "MOD" && hover.active?.mark !== mark && fms.radioHeight.status === "NORMAL";
       return [
         title("HOVER", "1/1", status),
         caption(mark ? ` ${mark.ident}` : " MRK", mark?.label ? `${mark.label} ` : undefined),
@@ -455,7 +456,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         caption(" TRUE WIND", "VELOCITIES "),
         { left: medium(`${three(fms.wind.direction)}T/${fms.wind.speed}KT`), right: medium(fms.afcs?.vx != null ? `VX ${signed(fms.afcs.vx)}KT` : "VX ---.-KT") },
         { right: medium(fms.afcs?.vy != null ? `VY ${signed(fms.afcs.vy)}KT` : "VY ---.-KT") },
-        { left: hover.status === "ACT" ? undefined : prompt("<MARK ON TOP") },
+        { left: hover.status === "MOD" ? undefined : prompt("<MARK ON TOP") },
         undefined,
         { left: prompt("<DES+SAR") },
         { left: dashes(24) },
@@ -464,7 +465,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
     },
     lsk: (fms, side, row, scratch) => {
       const hover = fms.hover;
-      if (row === 1 && hover.status !== "ACT") {
+      if (row === 1 && hover.status !== "MOD") {
         if (!scratch) return "invalid";
         const position = side === "R" ? parsePosition(scratch) : null;
         const ok = side === "L" ? fms.designateHoverMarkIdent(scratch) : position !== null && fms.designateHoverMark({ ident: "WPT", position, label: null });
@@ -472,10 +473,10 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         fms.setScratch("");
         return;
       }
-      if (side === "L" && row === 4 && hover.status !== "ACT") { fms.designateHoverMarkOnTop(); return; }
+      if (side === "L" && row === 4 && hover.status !== "MOD") { fms.designateHoverMarkOnTop(); return; }
       if (side === "L" && row === 5) { fms.open("TACT"); return; }
       if (side === "L" && row === 6 && hover.status === "MOD") { fms.cancelHover(); return; }
-      if (side === "R" && row === 6 && hover.status === "NONE" && hover.mark) {
+      if (side === "R" && row === 6 && hover.status !== "MOD" && hover.mark && hover.active?.mark !== hover.mark) {
         const refused = fms.activateHover();
         if (refused) fms.setScratch(refused);
       }

@@ -791,7 +791,7 @@ export class FlightSimulator {
   private pendingTdh: LatLon | null = null;
   private hoverRequest = 0;
   /** Whether the TD/H being flown (or pending) came from the FMS hover procedure, which can withdraw it. */
-  private fmsTransition = false;
+  private fmsTransition: number | null = null;
   private hoverRefusal: string | null = null;
   /** In the low-speed regime the air velocity is its own vector (knots north, east), not tied to the heading. */
   private airVelocity: { north: number; east: number } | null = null;
@@ -855,7 +855,7 @@ export class FlightSimulator {
       if (data) {
         const ra = this.radio;
         const above = ra.status === "NORMAL" && ra.value! > PROFILE.gateHeight.value + ALT_CAPTURE_FT;
-        this.fmsTransition = true;
+        this.fmsTransition = data.id;
         if (above || this.indicatedAirspeed > PROFILE.gateSpeed.value + 2) { this.engageTransitionDown(); this.pendingTdh = data.mrk; }
         else this.engageTransitionDownToHover(data.mrk);
       }
@@ -867,12 +867,12 @@ export class FlightSimulator {
       this.record("NAV REMOVED", `${hover.refused}: roll steering withdrawn; HDG HOLD ${String(this.heading).padStart(3, "0")}°T`);
     }
     this.hoverRefusal = hover.refused;
-    const retained = this.fmsTransition && (this.pendingTdh !== null || (this.lowHorizontal?.mode === "TDH" && this.lowHorizontal.target !== null));
+    const retained = this.fmsTransition !== null && (this.pendingTdh !== null || (this.lowHorizontal?.mode === "TDH" && this.lowHorizontal.target !== null));
     // F2: TDN FUNCTION LOST withdraws the request but the autopilot keeps the plan it accepted; only the procedure ending
-    // (a direct-to, a new route, CANCEL) cancels it.
-    if (retained && hover.status === "NONE") {
+    // (a direct-to, a new route) or a new procedure executed over it cancels it.
+    if (retained && hover.active?.id !== this.fmsTransition) {
       this.pendingTdh = null;
-      this.fmsTransition = false;
+      this.fmsTransition = null;
       const h = this.lowHorizontal;
       if (h?.mode === "TDH") {
         const feedback = this.fms.hoverFeedback;

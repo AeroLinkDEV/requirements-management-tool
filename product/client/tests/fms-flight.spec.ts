@@ -4,6 +4,7 @@ import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsMod
 import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
 import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { stimulusFor, type GpsOp } from '../src/fmsCdu/gpsStimulus'
+import { checkAtTdn, planTransition } from '../src/fmsCdu/transition'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
@@ -688,4 +689,87 @@ test('a direct-to during the transition ends the procedure and cancels the retai
   expect(unit.hover.status).toBe('NONE')
   expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED')).toBe(true)
   expect(sim.axisModes.pitch).toBe('HOV')
+})
+
+test('a refusal at TDN is one of the library messages, never a planner reason: below the gate speed is TDN NOT POSSIBLE (Stage D, E-17)', () => {
+  const { unit, sim, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  sim.selectSpeed(60)
+  expect(() => fly(600, () => unit.hover.refused !== null)).not.toThrow()
+  expect(unit.hover.refused).toBe('TDN NOT POSSIBLE')
+  expect(unit.hover.refusedReason).toBe('BELOW GATE SPEED')
+  expect(unit.hover.request).toBe(0)
+})
+
+test('no valid radio height at TDN is TDN FUNCTION LOST, and the simulation goes on (Stage D, E-16)', () => {
+  const { unit, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(600, () => distanceNm(unit.truePosition, unit.coordinates('TDN')!) < 0.1)
+  unit.setCondition('raFail', true)
+  expect(() => fly(30, () => unit.hover.refused !== null)).not.toThrow()
+  expect(unit.hover.refused).toBe('TDN FUNCTION LOST')
+  expect(unit.hover.refusedReason).toBe('RADIO HEIGHT INVALID')
+  expect(unit.hover.request).toBe(0)
+})
+
+test('a headwind at or above the gate true airspeed has no closure toward MRK: the transition is refused (Stage D)', () => {
+  const start = { ias: 100, radioHeight: 500, verticalSpeed: 0, hoverHeight: 50 }
+  expect(planTransition({ ...start, headwind: 20 }).refused).toBe(false)
+  expect(planTransition({ ...start, headwind: 90 })).toEqual({ refused: true, reason: 'no closure' })
+  expect(checkAtTdn({ ...start, headwind: 90 }, 5)).toEqual({ engage: false, reason: 'NO CLOSURE', gateNm: null })
+})
+
+test('no waypoint goes between TDN and MRK: !HOVER MRK WPT, and the route is unchanged (Stage D)', () => {
+  const { unit } = hoverProcedure()
+  unit.press('LSK6R')
+  const before = JSON.stringify(unit.route.legs)
+  unit.open('LEGS')
+  while (screenText(unit.screen()).at(-1)!.trim()) unit.press('CLR')
+  unit.setScratch('CYYZ')
+  unit.press('LSK2L')
+  expect(JSON.stringify(unit.route.legs)).toBe(before)
+  expect(screenText(unit.screen()).join('\n')).toMatch(/!HOVER MRK WPT/)
+  unit.press('CLR')
+  unit.setScratch('TDN/0.5')
+  unit.press('LSK1L')
+  expect(JSON.stringify(unit.route.legs)).toBe(before)
+})
+
+test('a new mark over an active procedure offers ACTIVATE; its EXEC replaces the procedure and cancels the TD/H toward the old MRK (Stage D, A-76)', () => {
+  const { unit, sim, fly } = hoverProcedure()
+  expect(hoverText(unit)).toMatch(/<DES\+SAR/)
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(600, () => sim.axisModes.pitch === 'TD/H')
+  expect(hoverText(unit)).not.toMatch(/ACTIVATE>/)
+  expect(unit.designateHoverMark({ ident: 'WPT', position: offset(unit.truePosition, 230, 3), label: null })).toBe(true)
+  expect(hoverText(unit)).toMatch(/ACTIVATE>/)
+  unit.press('LSK6R')
+  expect(unit.hover.status).toBe('MOD')
+  // Until EXEC the old procedure is still flown.
+  fly(2)
+  expect(sim.axisModes.pitch).toBe('TD/H')
+  unit.press('EXEC')
+  fly(2)
+  expect(unit.hover.active!.id).toBe(2)
+  expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED')).toBe(true)
+})
+
+test('CANCEL of a new mark over an active procedure keeps the active one flying (Stage D, A-76)', () => {
+  const { unit, sim, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(600, () => sim.axisModes.pitch === 'TD/H')
+  const active = unit.hover.active!
+  unit.designateHoverMark({ ident: 'WPT', position: offset(unit.truePosition, 230, 3), label: null })
+  unit.press('LSK6R')
+  unit.press('LSK6L')
+  expect(unit.hover.status).toBe('ACT')
+  expect(unit.hover.active).toBe(active)
+  expect(unit.hover.finalTrack).toBe(active.finalTrack)
+  fly(600, () => sim.hoverCaptured)
+  expect(sim.hoverCaptured).toBe(true)
+  expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED')).toBe(false)
 })
