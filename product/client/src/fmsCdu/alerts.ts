@@ -7,6 +7,9 @@ export type AlertDefinition = { text: string; meaning: string };
 
 export const ALERTS: readonly AlertDefinition[] = [
   { text: "AIR DATA LOST", meaning: "Air data input is no longer valid" },
+  // Not in the CMA-9000 list: laboratory alerts for the bench's approach-aware AUTO receiver transfer (gpsSensors.ts).
+  { text: "APPR ON GPS1", meaning: "(Laboratory) The approach continues on GPS 1 after a qualified receiver transfer" },
+  { text: "APPR ON GPS2", meaning: "(Laboratory) The approach continues on GPS 2 after a qualified receiver transfer" },
   { text: "ARM APPROACH", meaning: "Approach mode should be armed for the approach" },
   { text: "CHECK ANP", meaning: "Actual navigation performance exceeds the required value" },
   { text: "COURSE CHANGE>125 AHEAD", meaning: "A course change of more than 125 degrees is coming up" },

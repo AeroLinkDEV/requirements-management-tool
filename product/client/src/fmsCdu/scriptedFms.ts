@@ -12,7 +12,7 @@ import {
 import { Constellation } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput } from "./gps";
 import {
-  ANP_FLOOR_NM, GPS_DISAGREE_NM, HAL_NM, approachAuthority, approachWords, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
+  ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, HAL_NM, approachAuthority, approachWords, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
   type GpsChoice,
 } from "./gpsSensors";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
@@ -150,6 +150,9 @@ export class ScriptedFms implements CduBackend {
   ];
   private gpsChoice: GpsChoice = "AUTO";
   private gpsAssessment: GpsAssessment = { assessed: [], chosen: null };
+  /** AUTO receiver selection, approach-aware (gpsSensors.ts, the AeroLink simulator policy), and its last verdict. */
+  private autoSelection = new AutoSelection();
+  private gpsSelection = { qualified: true, refused: "" };
   /** The approach selection last sent to the receivers (its path identifier and CRC), so it is sent once per change. */
   private sentApproach: string | null = null;
   /** The FAS block last sent, for the final approach course the GPS deviations are measured from. */
@@ -616,7 +619,14 @@ export class ScriptedFms implements CduBackend {
     const hal = HAL_NM[this.flightPhase];
     const assessed = this.receivers.map(receiver => assessReceiver(receiver.bus(), hal));
     const order = candidates(this.gpsChoice, this.gpsSelected);
-    const chosen = order.find(index => assessed[index].usable) ?? null;
+    const selection = this.autoSelection.choose({
+      choice: this.gpsChoice, selected: this.gpsSelected, assessed, buses: this.receivers.map(receiver => receiver.bus()), time: input.time,
+      position: this.truth, executedCrc: this.pinnedFas?.fas.crc ?? null, sentCrc: this.sentFas?.crc ?? null, approachArmed: this.armedApproach,
+    });
+    const chosen = selection.chosen;
+    this.gpsSelection = { qualified: selection.qualified, refused: selection.refused };
+    // A qualified approach transfer is annunciated (AC 20-138D Change 2 §21-2.2(g)); the nav source log records it too.
+    if (selection.transferred && chosen !== null) this.alert(alert(`APPR ON GPS${chosen + 1}`));
     this.gpsAssessment = { assessed, chosen };
     return { assessed, chosen, integrityLost: order.some(index => assessed[index].reason === "INTEGRITY") };
   }
@@ -669,6 +679,8 @@ export class ScriptedFms implements CduBackend {
   /** How the FMS judged each receiver at the last navigation update, and which it navigates on (index), if any. */
   get gpsStatus(): GpsAssessment { return this.gpsAssessment; }
   get gpsReceiverChoice(): GpsChoice { return this.gpsChoice; }
+  /** Whether the approach may be flown on the selected receiver after the last source change, and why a transfer was refused. */
+  get gpsApproachSource() { return this.gpsSelection; }
   get navSourceLog(): readonly { at: Date; source: string }[] { return this.sourceLog; }
 
   /** GPS NAV (NAV OPTIONS): AUTO, one receiver chosen by hand (no fallback to the other), or GPS deselected. */
@@ -1075,6 +1087,7 @@ export class ScriptedFms implements CduBackend {
     const rnav = findProcedure(this.db, this.active, "APPROACH")?.approachType === "RNAV";
     if (!rnav || this.nav.mode !== "GPS") return { annunciation: "NO APPR", lateral: false, vertical: false, reason: rnav ? "NO GPS NAVIGATION" : "NO RNAV APPROACH" };
     const chosen = this.gpsAssessment.chosen;
+    if (!this.gpsSelection.qualified) return { annunciation: "NO APPR", lateral: false, vertical: false, reason: "GPS SOURCE CHANGE NOT QUALIFIED" };
     return approachAuthority(chosen === null ? null : this.receivers[chosen].bus(), chosen === null ? null : this.gpsAssessment.assessed[chosen]);
   }
 
