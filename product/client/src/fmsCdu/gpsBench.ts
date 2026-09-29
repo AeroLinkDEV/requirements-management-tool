@@ -1,6 +1,7 @@
 import { distanceNm } from "./fmsModel";
 import type { ApproachLevel, GpsBus, GpsLabel, GpsMode, GpsReceiver, Override, Ssm } from "./gps";
 import { busFix, type GpsChoice } from "./gpsSensors";
+import { stimulusFor, type GpsStimulus } from "./gpsStimulus";
 import type { FlightPhase } from "./navigation";
 import type { ScriptedFms } from "./scriptedFms";
 
@@ -21,20 +22,26 @@ export type GpsView = {
   choice: GpsChoice | "OFF";
   /** The GPS integrity condition holds the receivers' satellite selection: bench masking is replaced while it is on. */
   integrityHeld: boolean;
+  /** What the bench has injected into each receiver, kept with the bench session (gpsStimulus.ts). */
+  stimulus: GpsStimulus;
 };
 
 export function fmsGpsView(fms: ScriptedFms): GpsView {
+  const stimulus = stimulusFor(fms), integrityHeld = fms.hasCondition("gpsIntegrity");
+  // The condition replaces the bench's masking, and clears it when it ends: the record says so rather than keep it.
+  if (integrityHeld) stimulus.clearMasking();
   return {
     receivers: fms.gps,
     difference: () => {
       const [a, b] = fms.gps.map(rx => { const bus = rx.bus(); return bus ? busFix(bus) : null; });
       return a && b ? distanceNm(a, b) * 1852 : null;
     },
-    setBaroLost: (index, lost) => { fms.setGpsBaro(index, !lost); fms.gpsUpdated(); },
+    setBaroLost: (index, lost) => stimulus.setBaroLost(index, lost),
     updated: () => fms.gpsUpdated(),
     select: choice => fms.selectGpsReceiver(choice),
     choice: fms.gpsNavSelected ? fms.gpsReceiverChoice : "OFF",
-    integrityHeld: fms.hasCondition("gpsIntegrity"),
+    integrityHeld,
+    stimulus,
   };
 }
 
