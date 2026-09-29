@@ -110,7 +110,8 @@ const rad = (deg: number) => (deg * Math.PI) / 180;
  * Cockpit: the pilot's eye at the aircraft, looking along the heading, pitched by the flight-path angle (the
  * point-mass model has no attitude of its own) and down a little so the ground ahead fills most of the window, rolled
  * with the bank. The field of view spans the window's width, so the panel layout's short, wide window sees less
- * vertically and looks down less to keep the horizon in it. Chase: behind and above, level. Map: straight down from
+ * vertically and looks down less to keep the horizon in it. Chase: close behind and a little above the aircraft
+ * model, level, so the aircraft fills a good part of the view and its bank and pitch show. Map: straight down from
  * altitude, heading up.
  */
 export function cameraPose(air: AircraftSample, view: View, layout: Layout): CameraPose {
@@ -119,14 +120,40 @@ export function cameraPose(air: AircraftSample, view: View, layout: Layout): Cam
     return { longitude: lon, latitude: lat, height, heading: rad(air.heading), pitch: rad(air.pitch - (layout === "panel" ? 3 : 5)), roll: rad(air.bank) };
   }
   if (view === "chase") {
-    const back = 0.12 / 60; // 0.12 NM, in degrees of latitude
+    const back = CHASE_BEHIND / 110_540; // metres behind, in degrees of latitude
     return {
       longitude: lon - (back * Math.sin(rad(air.heading))) / Math.cos(rad(lat)), latitude: lat - back * Math.cos(rad(air.heading)),
-      height: height + 90, heading: rad(air.heading), pitch: rad(-18), roll: 0,
+      height: height + CHASE_ABOVE, heading: rad(air.heading), pitch: rad(-7), roll: 0,
     };
   }
   return { longitude: lon, latitude: lat, height: height + 30_000 * FT, heading: rad(air.heading), pitch: rad(-90), roll: 0 };
 }
+
+/** The chase camera's place: metres behind the aircraft along its heading, and above it. */
+export const CHASE_BEHIND = 55, CHASE_ABOVE = 10;
+
+export type AircraftPart = {
+  name: string;
+  shape: "box" | "ellipsoid";
+  /** A box's full dimensions or an ellipsoid's radii, metres: forward, left, up. */
+  size: [number, number, number];
+  /** The part's centre from the aircraft's reference point, metres: forward, left, up. */
+  offset: [number, number, number];
+  colour: [number, number, number];
+};
+
+/**
+ * The aircraft seen in the chase view: a generic twin-engine business jet, about 16 m long and 15.5 m in span, built
+ * from boxes and ellipsoids. It stands for "the aircraft" and is not any type the CMA-9000 is installed in.
+ */
+export const AIRCRAFT_PARTS: AircraftPart[] = [
+  { name: "fuselage", shape: "ellipsoid", size: [7.8, 0.95, 0.95], offset: [0, 0, 0], colour: [236, 238, 240] },
+  { name: "wing", shape: "box", size: [2.4, 15.5, 0.22], offset: [0.4, 0, -0.35], colour: [196, 202, 210] },
+  { name: "tailplane", shape: "box", size: [1.3, 5.6, 0.16], offset: [-6.6, 0, 2.9], colour: [196, 202, 210] },
+  { name: "fin", shape: "box", size: [2.0, 0.18, 2.6], offset: [-6.3, 0, 1.7], colour: [23, 108, 99] },
+  { name: "left engine", shape: "ellipsoid", size: [1.3, 0.45, 0.45], offset: [-4.2, 1.45, 0.55], colour: [150, 156, 164] },
+  { name: "right engine", shape: "ellipsoid", size: [1.3, 0.45, 0.45], offset: [-4.2, -1.45, 0.55], colour: [150, 156, 164] },
+];
 
 export type AircraftSample = Pick<AircraftData, "position" | "altitude" | "heading" | "pitch" | "bank">;
 

@@ -7,7 +7,9 @@ import { aircraftData, fmsOutputs } from "./efis";
 import { Nd, Pfd } from "./FmsEfis";
 import FmsMap from "./FmsMap";
 import FmsGpsTab from "./FmsGpsTab";
-import FmsOutTheWindow, { type HudModes, type TerrainSource } from "./FmsOutTheWindow";
+import FmsOutTheWindow, { type HudModes } from "./FmsOutTheWindow";
+import { relayTerrain } from "./terrainRelay";
+import { TerrainTiles, type TerrainSource } from "./terrainTiles";
 import type { Layout, View } from "./outTheWindow";
 import FmsScenarioCard from "./FmsScenarioCard";
 import { conditionalLabel } from "./fmsModel";
@@ -40,6 +42,9 @@ const storedTab = (): TabId => {
 // The out-the-window view: whether it is shown, and how, is remembered. It starts hidden because showing it loads a
 // 3D engine and the terrain around the aircraft.
 const WINDOW_KEY = "aerolink.fmsCdu.window";
+// Synthetic vision on the PFD, remembered; off until chosen, for the same reason.
+const SVS_KEY = "aerolink.fmsCdu.svs";
+const storedSvs = () => { try { return window.localStorage.getItem(SVS_KEY) === "on"; } catch { return false; } };
 type WindowChoice = { shown: boolean; layout: Layout; view: View };
 const WINDOW_LAYOUTS = [["hud", "HUD"], ["panel", "Panel"]] as const;
 const WINDOW_VIEWS = [["cockpit", "Cockpit"], ["chase", "Chase"], ["map", "Map"]] as const;
@@ -105,6 +110,13 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
   const [headingInput, setHeadingInput] = useState("090");
   const [jumpNote, setJumpNote] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(storedTab);
+  // One set of height tiles for the out-the-window view and the PFD's synthetic vision.
+  const tiles = useMemo(() => new TerrainTiles(terrain ?? relayTerrain), [terrain]);
+  const [svs, setSvs] = useState(storedSvs);
+  const chooseSvs = (on: boolean) => {
+    setSvs(on);
+    try { window.localStorage.setItem(SVS_KEY, on ? "on" : "off"); } catch { /* a remembered choice is a convenience only */ }
+  };
   const [outside, setOutside] = useState<WindowChoice>(storedWindow);
   const variant = variantById(variantId);
 
@@ -242,7 +254,7 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
           </div>
         </div>
         {outside.shown
-          ? <FmsOutTheWindow air={air} route={bus.activeRoute} modes={modes} layout={outside.layout} view={outside.view} terrain={terrain} />
+          ? <FmsOutTheWindow air={air} route={bus.activeRoute} modes={modes} layout={outside.layout} view={outside.view} tiles={tiles} />
           : <p className="fmsBenchHint">A 3D view from the simulated aircraft over open elevation data, with the active route in magenta: head-up or over a glareshield, from the cockpit, behind the aircraft, or above it.</p>}
       </section>
 
@@ -271,9 +283,13 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
                   {MAP_RANGES.map(value => <option key={value} value={value}>{value} NM</option>)}
                 </select>
               </label>
+              <label>
+                <input type="checkbox" checked={svs} onChange={event => chooseSvs(event.target.checked)} />
+                <span>Synthetic vision</span>
+              </label>
             </div>
           </div>
-          <Pfd bus={bus} air={air} now={backend.now.getTime()} />
+          <Pfd bus={bus} air={air} now={backend.now.getTime()} svs={svs ? tiles : null} />
           {lowerDisplay === "nd"
             ? <Nd bus={bus} air={air} range={range} />
             : <div className="fmsBenchMapScreen"><FmsMap fms={backend} sim={sim} range={range} /></div>}

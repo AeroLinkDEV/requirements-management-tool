@@ -1,6 +1,6 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import {
-  FT, TILE_PIXELS, WATER, ancestorOf, blendAircraft, cameraPose, decodeTerrarium, pixelMetres, rampColour, routeHeights,
+  AIRCRAFT_PARTS, CHASE_ABOVE, CHASE_BEHIND, FT, TILE_PIXELS, WATER, ancestorOf, blendAircraft, cameraPose, decodeTerrarium, pixelMetres, rampColour, routeHeights,
   sampleHeights, shadeTile, tileLatitude, type AircraftSample,
 } from '../src/fmsCdu/outTheWindow'
 
@@ -86,6 +86,10 @@ test('the chase camera is behind and above the aircraft, and the map looks strai
   expect(chase.latitude).toBeCloseTo(level.position.lat, 9)
   expect(chase.height).toBeGreaterThan(3000 * FT)
   expect(chase.roll).toBe(0)
+  // Close enough that the 15.5 m aircraft spans a good part of the view: 55 m back along the heading.
+  const metresBack = (level.position.lon - chase.longitude) * 111_320 * Math.cos((level.position.lat * Math.PI) / 180)
+  expect(Math.abs(metresBack - CHASE_BEHIND)).toBeLessThan(0.5)
+  expect(chase.height - 3000 * FT).toBeCloseTo(CHASE_ABOVE, 6)
   const map = cameraPose({ ...level, bank: 25 }, 'map', 'panel')
   expect(map.pitch).toBeCloseTo(-Math.PI / 2, 9)
   expect(map.roll).toBe(0)
@@ -111,4 +115,19 @@ test('between two ticks the aircraft is blended, the short way round the compass
 
 test('the route line is drawn at each constraint, and holds the last altitude between them', () => {
   expect(routeHeights([null, 4000, null, 2500], 1500)).toEqual([1500 * FT, 4000 * FT, 4000 * FT, 2500 * FT])
+})
+
+test('the chase aircraft is a symmetric twin with its span, fuselage length and a T-tail on top of the fin', () => {
+  const part = (name: string) => AIRCRAFT_PARTS.find(entry => entry.name === name)!
+  const wing = part('wing'), fuselage = part('fuselage'), fin = part('fin'), tailplane = part('tailplane')
+  expect(wing.size[1]).toBeCloseTo(15.5, 6)
+  expect(fuselage.size[0] * 2).toBeCloseTo(15.6, 6)
+  // Every part is centred on the aircraft's centreline, or has a mirror image across it.
+  for (const entry of AIRCRAFT_PARTS) {
+    const mirrored = AIRCRAFT_PARTS.some(other => other.offset[1] === -entry.offset[1] && other.offset[0] === entry.offset[0] && other.size.every((value, i) => value === entry.size[i]))
+    expect(entry.offset[1] === 0 || mirrored, entry.name).toBe(true)
+  }
+  // The tailplane sits at the top of the fin, aft of the wing.
+  expect(Math.abs(tailplane.offset[2] - (fin.offset[2] + fin.size[2] / 2))).toBeLessThan(0.2)
+  expect(fin.offset[0]).toBeLessThan(wing.offset[0])
 })

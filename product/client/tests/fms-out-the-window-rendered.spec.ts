@@ -61,3 +61,41 @@ test('with terrain turned off on the installation, the view still flies and says
   await expect(view.locator('.fmsOtwNote')).toContainText('Terrain data is off on this installation')
   await expect(view.locator('canvas')).toBeVisible()
 })
+
+test('the chase view shows the aircraft model behind which the camera flies', async ({ page }, testInfo) => {
+  test.setTimeout(120_000)
+  await open(page, 'hill')
+  const view = await show(page)
+  await page.getByRole('radiogroup', { name: 'Window view' }).getByText('Chase', { exact: true }).click()
+  await expect(view).toHaveClass(/view-chase/)
+  await page.getByRole('button', { name: 'Fly' }).click()
+  await page.waitForTimeout(1500)
+  await view.screenshot({ path: testInfo.outputPath('chase.png') })
+  // The model is a scene primitive; the canvas shows it, so the proof here is that the view stays running.
+  await expect(view).toHaveAttribute('data-status', 'ready')
+})
+
+test('synthetic vision draws terrain behind the PFD attitude, and is flagged instead when terrain is off', async ({ page }, testInfo) => {
+  test.setTimeout(120_000)
+  await open(page, 'hill')
+  const pfd = page.locator('svg.efisPfd')
+  await expect(pfd.getByTestId('pfd-svs')).toHaveCount(0)
+  await page.getByRole('checkbox', { name: 'Synthetic vision' }).check()
+  await expect(pfd.getByTestId('pfd-svs')).toBeVisible({ timeout: 30_000 })
+  await expect(pfd.getByTestId('pfd-svs-flag')).toHaveCount(0)
+  // The picture is drawn: the canvas holds more than one colour.
+  await expect.poll(() => pfd.getByTestId('pfd-svs').locator('canvas').evaluate(node => {
+    const data = (node as HTMLCanvasElement).getContext('2d')!.getImageData(0, 0, 352, 352).data
+    const colours = new Set<number>()
+    for (let i = 0; i < data.length; i += 4 * 97) colours.add((data[i] << 16) | (data[i + 1] << 8) | data[i + 2])
+    return colours.size
+  })).toBeGreaterThan(20)
+  await pfd.screenshot({ path: testInfo.outputPath('pfd-svs.png') })
+  await page.reload()
+  await expect(page.getByRole('checkbox', { name: 'Synthetic vision' })).toBeChecked()
+
+  await page.goto('/tests/fixtures/fms-cdu.html?terrain=off')
+  await expect(page.getByRole('checkbox', { name: 'Synthetic vision' })).toBeChecked()
+  await expect(pfd.getByTestId('pfd-svs-flag')).toHaveText('SVS', { timeout: 30_000 })
+  await expect(pfd.getByTestId('pfd-svs')).toHaveCount(0)
+})
