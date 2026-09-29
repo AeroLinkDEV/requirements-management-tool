@@ -149,7 +149,13 @@ test('the aircraft flies the published KBTV RNAV RWY 15 LPV: captured on final, 
   // The demonstration route ends at CYUL: a discontinuity separates it from the KBTV approach, crossed by the override.
   for (let i = 0; i < 20 && active() !== 'STAEV'; i += 1) if (unit.sequence() === 'discontinuity') unit.overrideDiscontinuity()
   expect(active()).toBe('STAEV')
+  // STAEV carries the hold-in-lieu of a procedure turn (HF, EXIT TYPE ONCE; D-H): the first crossing enters it, the
+  // next leaves it for the final.
   unit.sequence()
+  expect(unit.activeRoute.hold).toMatchObject({ fix: 'STAEV', exit: 'ONCE', status: 'IN PROGRESS' })
+  expect(active()).toBe('STAEV')
+  unit.sequence()
+  expect(unit.activeRoute.hold).toBeUndefined()
   expect(active()).toBe('FOVES')
   // The FMS path agrees with the published one: the CIFP gives the glide path altitude at the JUNEL step-down fix as
   // 1025 ft (the second altitude on its record), and the VNAV profile, with FOVES as the FAF at 2000 ft, predicts it.

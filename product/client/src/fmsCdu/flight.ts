@@ -1,4 +1,5 @@
-import { bearingDeg, courseDeg, distanceNm, longitudeDelta, offset, type Hold, type HoldEntry, type LatLon, type Leg, type Sar, type SarPattern } from "./fmsModel";
+import { bearingDeg, courseDeg, distanceNm, longitudeDelta, offset, type Hold, type LatLon, type Leg, type Sar, type SarPattern } from "./fmsModel";
+import { defaultLegMinutes, entrySegments, holdGeometry, type HoldSegment } from "./holds";
 import { groundVelocity, iasFromTas, tasFromIas } from "./kinematics";
 import { ACTIVE_PROFILE } from "./profile";
 import type { ScriptedFms } from "./scriptedFms";
@@ -140,60 +141,22 @@ export function sarTrack(start: LatLon, sar: Sar, pattern: SarPattern): LatLon[]
 
 // ---------------------------------------------------------------------------------------------- holds
 
-type Segment =
-  | { kind: "turn"; heading: number; direction: 1 | -1 }
-  | { kind: "heading"; heading: number; seconds: number }
-  | { kind: "toFix"; course: number };
-
-/** The racetrack a hold flies after its entry: turn outbound, outbound leg, turn inbound, inbound to the fix. */
-function racetrack(hold: Hold, legSeconds: number): Segment[] {
-  const s = hold.turn === "RIGHT" ? 1 : -1;
-  const outbound = norm360(hold.inbound + 180);
-  return [
-    { kind: "turn", heading: outbound, direction: s },
-    { kind: "heading", heading: outbound, seconds: legSeconds },
-    { kind: "turn", heading: hold.inbound, direction: s },
-    { kind: "toFix", course: hold.inbound },
-  ];
-}
-
-/** The entry procedure, flown from the fix, before the first racetrack. */
-function entry(hold: Hold, kind: HoldEntry, legSeconds: number, track: number): Segment[] {
-  const s = hold.turn === "RIGHT" ? 1 : -1;
-  const outbound = norm360(hold.inbound + 180);
-  const shortest = (heading: number) => (angleDiff(track, heading) >= 0 ? 1 : -1) as 1 | -1;
-  if (kind === "TEARDROP") {
-    // Outbound 30 degrees into the holding side, then turn in the holding direction onto the inbound course.
-    const heading = norm360(outbound - s * 30);
-    return [{ kind: "turn", heading, direction: shortest(heading) }, { kind: "heading", heading, seconds: legSeconds },
-      { kind: "turn", heading: hold.inbound, direction: s }, { kind: "toFix", course: hold.inbound }];
-  }
-  if (kind === "PARALLEL") {
-    // Outbound on the non-holding side, then turn back through the holding side to the fix.
-    return [{ kind: "turn", heading: outbound, direction: shortest(outbound) }, { kind: "heading", heading: outbound, seconds: legSeconds },
-      { kind: "turn", heading: norm360(hold.inbound - s * 45), direction: (-s) as 1 | -1 }, { kind: "toFix", course: hold.inbound }];
-  }
-  return [];
-}
-
-/** The racetrack outline for the map, starting and ending at the fix. */
-export function racetrackOutline(fix: LatLon, hold: Hold, groundSpeed: number, tas: number): LatLon[] {
-  const s = hold.turn === "RIGHT" ? 1 : -1;
-  const r = turnRadius(tas);
-  const leg = hold.legDistance ?? ((hold.legTime ?? 1) * groundSpeed) / 60;
-  const inbound = hold.inbound, outbound = norm360(inbound + 180);
+/**
+ * The racetrack outline for the map, starting and ending at the fix: the ground path the hold flies (holds.ts), at the
+ * true airspeed and wind given; still air draws the pattern the wind would stretch. Just the fix when it cannot be flown.
+ */
+export function racetrackOutline(fix: LatLon, hold: Hold, _groundSpeed: number, tas: number, windSpeed = 0): LatLon[] {
+  const legNm = hold.legDistance ?? ((hold.legTime ?? 1) * tas) / 60;
+  const geometry = holdGeometry(fix, hold.inbound, hold.turn, tas, windSpeed, legNm, MAX_BANK);
+  if (!geometry) return [fix];
   const points: LatLon[] = [fix];
-  const arc = (center: LatLon, from: number, sweep: number) => {
-    for (let i = 1; i <= 12; i += 1) points.push(offset(center, norm360(from + (sweep * i) / 12), r));
-  };
-  // Turn outbound around a centre abeam the fix on the holding side.
-  const c1 = offset(fix, inbound + s * 90, r);
-  arc(c1, inbound - s * 90, s * 180);
-  const outboundEnd = offset(points.at(-1)!, outbound, leg);
-  points.push(outboundEnd);
-  const c2 = offset(outboundEnd, outbound + s * 90, r);
-  arc(c2, outbound - s * 90, s * 180);
-  points.push(fix);
+  let at = fix;
+  for (const segment of geometry.racetrack) {
+    if (segment.kind === "line") { points.push(segment.to); at = segment.to; continue; }
+    const from = bearingDeg(segment.centre, at), sweep = segment.turn === "R" ? 180 : -180;
+    for (let i = 1; i <= 12; i += 1) points.push(offset(segment.centre, norm360(from + (sweep * i) / 12), segment.radius));
+    at = segment.to;
+  }
   return points;
 }
 
@@ -260,7 +223,9 @@ export class FlightSimulator {
   /** The planned path altitude at the fix the active leg began from, and the fix it leads to (see descentPath). */
   private legStartPath: { to: string; altitude: number } | null = null;
   private path: VerticalPath | null = null;
-  private holdPlan: { segments: Segment[]; index: number; elapsed: number; loop: Segment[] } | null = null;
+  private holdPlan: { segments: HoldSegment[]; index: number; legNm: number } | null = null;
+  /** The straight-leg length of the hold being flown, NM (null when none). */
+  get holdLegNm() { return this.holdPlan?.legNm ?? null; }
   private sarPlan: { points: LatLon[]; index: number } | null = null;
   private last: Guidance;
 
@@ -1315,49 +1280,73 @@ export class FlightSimulator {
     return !(offset.start && ahead);
   }
 
-  // A labelled leftover until Stage D builds the ground-referenced racetrack: a distance-defined leg is flown as the
-  // time it takes at the ground speed, floored at 60 kt so the time stays bounded. Not used for predictions.
-  private legSeconds(hold: Hold) {
-    return hold.legDistance !== null ? (hold.legDistance / Math.max(60, this.fms.groundSpeed)) * 3600 : (hold.legTime ?? 1) * 60;
+  /** The racetrack for the active hold from the present airspeed and wind (holds.ts), or null when it cannot be flown. */
+  private holdGeometryNow(hold: Hold) {
+    const fix = this.fms.coordinates(hold.fix);
+    if (!fix) return null;
+    const legNm = hold.legDistance ?? ((hold.legTime ?? defaultLegMinutes(this.fms.altitude)) * this.tas) / 60;
+    return holdGeometry(fix, hold.inbound, hold.turn, this.tas, this.fms.wind.speed, legNm, MAX_BANK);
   }
 
+  /**
+   * The entry and the racetrack, built at the first fix passage and rebuilt at each one (M300 10-8). Unflyable (the
+   * wind at least the airspeed): UNABLE HOLD, and no hold guidance, so LNAV gives way to heading hold (F8).
+   */
   private startHold() {
     const hold = this.fms.activeRoute.hold!;
-    const seconds = this.legSeconds(hold);
-    const loop = racetrack(hold, seconds);
-    this.holdPlan = { segments: [...entry(hold, this.fms.holdEntryFlown ?? "DIRECT", seconds, this.fms.heading), ...loop], index: 0, elapsed: 0, loop };
+    const geometry = this.holdGeometryNow(hold);
+    if (!geometry) { this.unableHold(); return; }
+    const fix = this.fms.coordinates(hold.fix)!;
+    const entry = entrySegments(this.fms.holdEntryFlown ?? "DIRECT", fix, hold.inbound, hold.turn, geometry);
+    this.holdPlan = { segments: [...entry, ...geometry.racetrack], index: 0, legNm: geometry.legNm };
   }
 
+  private unableHold() {
+    this.holdPlan = null;
+    // Hold guidance is invalid: NAV gives way to a latched heading hold (F8), never shown captured on a path it cannot fly.
+    if (this.lateral === "LNAV") {
+      this.lateral = "HDG";
+      this.heading = Math.round(norm360(this.fms.heading));
+      this.held = true;
+    }
+    this.fms.raiseAlert("UNABLE HOLD");
+    this.record("UNABLE HOLD", "the wind is at least the airspeed: no holding pattern can be flown; hold guidance withdrawn");
+  }
+
+  /**
+   * Flies the hold's ground path: straight legs by cross-track steering, the half circles with the bank their radius
+   * needs at the present ground speed plus the cross-track correction. The inbound leg ends at the fix passage, where
+   * the FMS decides whether the hold goes on (the racetrack rebuilt) or exits.
+   */
   private flyHold(hold: Hold, dt: number): Omit<Guidance, "targetAltitude" | "mode"> {
     const plan = this.holdPlan!;
     const fms = this.fms;
-    const fix = fms.coordinates(hold.fix)!;
+    // The wind rising to the airspeed mid-circuit: no pattern can be flown from here either.
+    if (fms.wind.speed >= this.tas) {
+      this.unableHold();
+      return { legFrom: null, legTo: fms.coordinates(hold.fix) ?? null, desiredTrack: fms.track, crossTrack: 0, distanceToGo: 0, bankCommand: 0 };
+    }
     const segment = plan.segments[plan.index];
-    const advance = () => {
-      plan.index += 1;
-      plan.elapsed = 0;
-      if (plan.index >= plan.segments.length) { plan.segments = racetrack(hold, this.legSeconds(hold)); plan.index = 0; }
-    };
-    if (segment.kind === "turn") {
-      // The racetrack's turns and legs are flown as headings, without wind correction (Stage D builds a ground path).
-      const error = angleDiff(fms.heading, segment.heading);
-      if (Math.abs(error) < 3 || (Math.sign(error) !== segment.direction && Math.abs(error) < 20)) advance();
-      return { legFrom: null, legTo: null, desiredTrack: segment.heading, crossTrack: 0, distanceToGo: null, bankCommand: MAX_BANK * segment.direction };
+    const last = plan.index === plan.segments.length - 1;
+    if (segment.kind === "arc") {
+      const g = arcGeometry({ centre: segment.centre, turn: segment.turn }, segment.to, fms.position);
+      if (dt > 0 && g.toGo <= 0.02) plan.index += 1;
+      const feedForward = (segment.turn === "R" ? 1 : -1) * deg(Math.atan(((fms.groundSpeed * 1.68781) ** 2) / (32.174 * segment.radius * 6076.12)));
+      return { legFrom: null, legTo: segment.to, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: clamp(feedForward + this.steer(g.track, g.crossTrack), -MAX_BANK - 5, MAX_BANK + 5) };
     }
-    if (segment.kind === "heading") {
-      plan.elapsed += dt;
-      if (plan.elapsed >= segment.seconds) advance();
-      return { legFrom: null, legTo: null, desiredTrack: segment.heading, crossTrack: 0, distanceToGo: null, bankCommand: clamp(angleDiff(fms.heading, segment.heading), -MAX_BANK, MAX_BANK) };
-    }
-    // Inbound: track the inbound course to the fix; crossing it completes a circuit (or exits when armed).
-    const from = offset(fix, segment.course + 180, 10);
-    const g = legGeometry(from, fix, fms.position);
+    const g = legGeometry(segment.from, segment.to, fms.position);
     if (dt > 0 && g.toGo <= 0.02) {
-      const result = fms.arrive();
-      if (result === "hold") advance();
-      else this.holdPlan = null;
+      if (last) {
+        // The fix passage: the hold goes on (rebuilt from the present airspeed and wind) or exits.
+        const result = fms.arrive();
+        if (result === "hold") {
+          const geometry = this.holdGeometryNow(hold);
+          if (!geometry) this.unableHold();
+          else Object.assign(plan, { segments: geometry.racetrack, index: 0, legNm: geometry.legNm });
+        } else this.holdPlan = null;
+      } else plan.index += 1;
     }
-    return { legFrom: from, legTo: fix, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: this.steer(g.track, g.crossTrack) };
+    return { legFrom: segment.from, legTo: segment.to, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: this.steer(g.track, g.crossTrack) };
   }
 
   private startSar(start: LatLon) {

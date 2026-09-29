@@ -734,7 +734,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
             return done();
           }
           case 5:
-            fms.changeHold(h => { h.exit = h.exit === "MANUAL" ? "1 TURN" : "MANUAL"; });
+            // EXIT TYPE cycles MANUAL, ONCE, AT TGT ALT (M300 10-10).
+            fms.changeHold(h => { h.exit = h.exit === "MANUAL" ? "ONCE" : h.exit === "ONCE" ? "AT TGT ALT" : "MANUAL"; });
             return;
         }
         return;

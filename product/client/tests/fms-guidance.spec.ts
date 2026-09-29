@@ -203,10 +203,10 @@ test('a direct-to-fix leg after a fly-by waypoint starts where the aircraft turn
   expect(distanceNm(unit.activeLegStart, turnedAt)).toBeLessThan(0.05)
 })
 
-test('a hold with a one-turn exit leaves after its first circuit on its own', () => {
+test('a hold with EXIT TYPE ONCE leaves after its first circuit on its own', () => {
   const { unit, fly } = setup()
   press(unit, 'HOLD', 'LSK2L', 'LSK5L', 'EXEC')
-  expect(unit.activeRoute.hold?.exit).toBe('1 TURN')
+  expect(unit.activeRoute.hold?.exit).toBe('ONCE')
   fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')
   const seconds = fly(900, () => active(unit) === 'TOLGU')
   expect(seconds).toBeLessThan(900)
