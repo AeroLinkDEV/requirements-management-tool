@@ -416,7 +416,9 @@ display unit for engineers.
     and SIDs, STARs and approaches with transitions and missed approaches. The route is built through RTE (VIA/TO
     airway entry, company routes, SAVE), DEP/ARR, pilot waypoints (latitude/longitude, place/bearing/distance,
     place-bearing/place-bearing, along-track), SELECT DESIRED WPT for duplicate idents, REF NAV DATA and a
-    secondary flight plan. The built-in data is invented demonstration data; engineers can load waypoints,
+    secondary flight plan. The built-in data is invented demonstration data (the default start); a real FAA CIFP
+    extract for KBTV (cycle 2609, public domain, for demonstration only, not for navigation) is bundled as a one-action
+    demonstration with a start state and library scenarios for its RNAV (GPS) RWY 15. Engineers can load waypoints,
     navaids, airports, runways and airways from an ARINC 424 file (`arinc424.ts`, a subset reader). A file is
     validated first (refused whole, with no change, when empty, not recognised or holding an impossible coordinate)
     and becomes the inactive database cycle. Activating it on IDENT is recorded and does not move the active plan,
