@@ -18,6 +18,7 @@ import { stimulusFor } from "./gpsStimulus";
 import { useCduLayout, type CduKeyEvent } from "./layout";
 import { LIGHTING_MODES, displayLuminance, type Lighting, type LightingMode } from "./lighting";
 import { KBTV_SOURCE, START_STATES, loadKbtvDemonstration, type StartStateId } from "./kbtvDemo";
+import { ACTIVE_PROFILE, profileFingerprint } from "./profile";
 import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, scenarioStart, type Scenario } from "./scenario";
 import { ScriptedFms } from "./scriptedFms";
 import { screenText } from "./screen";
@@ -237,6 +238,10 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
             CMA-9000 Operator's Manual, and courses and distances come from a small demonstration navigation
             database. It is not a navigation computer, and it is built so the real operational program can drive it
             later.
+          </p>
+          <p className="fmsBenchProfile" data-testid="fms-bench-profile">
+            Aircraft profile: <strong>{ACTIVE_PROFILE.title}</strong> ({ACTIVE_PROFILE.id} v{ACTIVE_PROFILE.version}, {profileFingerprint(ACTIVE_PROFILE)}).
+            Declared as data; parameters not yet flown by the simulation are marked for later stages.
           </p>
         </div>
         <label className="fmsBenchVariant">
