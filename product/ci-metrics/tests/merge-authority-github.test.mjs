@@ -7,14 +7,14 @@ import {
   compareTrustedSurfaces,
   compareTrustedSurfacePaths,
   createGitHubRequest,
-  deriveDocumentationOnlyCandidate,
+  deriveCandidateTopology,
   COMPARE_FILE_LIMIT,
   fetchDefaultBranch,
   fetchLatestRunJobs,
   fetchWorkflowRun,
   publishMergeAuthorityCheck,
 } from '../lib/merge-authority-github.mjs'
-import { isDocumentationOnlyChange } from '../../test-planner/lib/classify.mjs'
+import { isDocumentationOnlyChange, isFmsOnlyChange } from '../../test-planner/lib/classify.mjs'
 
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 const REPOSITORY = 'AeroLinkDEV/requirements-management-tool'
@@ -413,14 +413,31 @@ function documentationCandidateApi({ parents = [sha('b')], status = 'ahead', ahe
     throw new Error(`unexpected request ${path}`)
   }
 }
-const derive = (api, overrides = {}) => deriveDocumentationOnlyCandidate({
-  request: api, repository: REPOSITORY, candidateSha: sha('c'), queueBaseSha: sha('b'), isDocumentationOnlyChange, ...overrides,
+const derive = (api, overrides = {}) => deriveCandidateTopology({
+  request: api, repository: REPOSITORY, candidateSha: sha('c'), queueBaseSha: sha('b'), isDocumentationOnlyChange, isFmsOnlyChange, ...overrides,
 })
 
 test('a documentation-only candidate is derived from its own diff against the queue base', async () => {
   const result = await derive(documentationCandidateApi({ files: [{ filename: 'README.md' }, { filename: 'docs/a.md', previous_filename: 'docs/old.md' }] }))
-  assert.equal(result.documentationOnly, true)
+  assert.equal(result.topology, 'documentation')
   assert.deepEqual(result.paths, ['README.md', 'docs/a.md', 'docs/old.md'])
+})
+
+test('an FMS Test Bench-only candidate is derived the same way, with the protected FMS classifier', async () => {
+  const bench = [{ filename: 'product/client/src/fmsCdu/flight.ts' }, { filename: 'product/client/tests/fms-flight.spec.ts' }, { filename: 'product/docs/FMS_TEST_BENCH.md' }]
+  const result = await derive(documentationCandidateApi({ files: bench }))
+  assert.equal(result.topology, 'fms')
+  assert.deepEqual(result.paths, bench.map((file) => file.filename))
+  // Anything beyond the bench, a rename out of it, or a doubt about the diff keeps the full gate set.
+  const beyond = {
+    'the bench and App.tsx': [...bench, { filename: 'product/client/src/App.tsx' }],
+    'a bench file renamed out of it': [{ filename: 'product/client/src/Flight.ts', previous_filename: 'product/client/src/fmsCdu/flight.ts' }],
+    'the bench and the terrain relay': [...bench, { filename: 'product/src/AeroLink.Api/FmsBenchTerrainEndpoints.cs' }],
+    'the bench and the planner': [...bench, { filename: 'product/test-planner/lib/classify.mjs' }],
+  }
+  for (const [name, files] of Object.entries(beyond)) assert.equal((await derive(documentationCandidateApi({ files }))).topology, 'full', name)
+  assert.equal((await derive(documentationCandidateApi({ files: bench, parents: [sha('b'), sha('d')] }))).topology, 'full', 'two parents')
+  assert.equal((await derive(documentationCandidateApi({ files: bench }), { isFmsOnlyChange: undefined })).topology, 'full', 'no FMS classifier')
 })
 
 test('any doubt about the candidate keeps the full gate set', async () => {
@@ -440,8 +457,8 @@ test('any doubt about the candidate keeps the full gate set', async () => {
     'a nameless file': documentationCandidateApi({ files: [{ filename: '' }] }),
   }
   for (const [name, api] of Object.entries(cases)) {
-    assert.equal((await derive(api)).documentationOnly, false, name)
+    assert.equal((await derive(api)).topology, 'full', name)
   }
-  assert.equal((await derive(documentationCandidateApi(), { queueBaseSha: undefined })).documentationOnly, false, 'no queue base')
-  assert.equal((await derive(documentationCandidateApi(), { isDocumentationOnlyChange: undefined })).documentationOnly, false, 'no classifier')
+  assert.equal((await derive(documentationCandidateApi(), { queueBaseSha: undefined })).topology, 'full', 'no queue base')
+  assert.equal((await derive(documentationCandidateApi(), { isDocumentationOnlyChange: undefined })).topology, 'full', 'no classifier')
 })

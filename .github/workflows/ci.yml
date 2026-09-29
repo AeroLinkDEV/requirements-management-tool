@@ -67,6 +67,7 @@ jobs:
       postgresql: ${{ steps.classify.outputs.postgresql }}
       launchers_only: ${{ steps.classify.outputs.launchers_only }}
       operator: ${{ steps.classify.outputs.operator }}
+      fms_only: ${{ steps.classify.outputs.fms_only }}
       planner_version: ${{ steps.classify.outputs.planner_version }}
       planner_hash: ${{ steps.classify.outputs.planner_hash }}
       planner_unknown_paths: ${{ steps.classify.outputs.planner_unknown_paths }}
@@ -1219,9 +1220,17 @@ jobs:
           # Stamped into the API transcript header so a retained log can be tied back to the shard that
           # produced it. The artifact name already carries the shard; this survives being copied out of it.
           AEROLINK_E2E_SHARD: ${{ matrix.shard }}
+          FMS_ONLY: ${{ needs.changes.outputs.fms_only }}
         run: |
           set -euo pipefail
           npx playwright test --list > listed.txt
+          # An FMS Test Bench-only change runs the FMS journeys only: the bench's own specs and the specs that
+          # observe it (product/test-planner/lib/classify.mjs). They are packed across the same four shards, so the
+          # shard set the merge-authority verifier requires is unchanged; the filter fails on an empty result.
+          if [ "${FMS_ONLY:-false}" = "true" ]; then
+            node ../test-planner/tools/filter-fms-journeys.mjs listed.txt > listed-fms.txt
+            mv listed-fms.txt listed.txt
+          fi
           node scripts/plan-journey-shard.mjs listed.txt ${{ matrix.shard }} ${{ strategy.job-total }} > plan.txt
 
           readarray -t planned < plan.txt
@@ -1771,6 +1780,10 @@ jobs:
           echo "METRICS_FRAGMENT_PATH=${{ runner.temp }}/ci-metrics/fragment-gate.json" >> "$GITHUB_ENV"
           mkdir -p "${{ runner.temp }}/ci-metrics"
           printf '{"name":"job-start","at":%s}\n' "$(date +%s%3N)" >> "${{ runner.temp }}/ci-metrics/timing-gate.json"
+      # An FMS Test Bench-only merge-group candidate (FMS_ONLY; the protected verifier re-derives it from the
+      # candidate's own diff) may have exactly-skipped backend and operator gates (fms_may_skip); it still must
+      # execute the client gate and both browser gates. Kept out of the script: its text is near the length a
+      # local Windows bash accepts as one argument, which the aggregate shell contract tests rely on.
       - name: Summarise and enforce
         env:
           BACKEND_API: ${{ needs.backend-api.result }}
@@ -1788,6 +1801,7 @@ jobs:
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           LAUNCHERS_ONLY: ${{ needs.changes.outputs.launchers_only }}
           OPERATOR: ${{ needs.changes.outputs.operator }}
+          FMS_ONLY: ${{ needs.changes.outputs.fms_only }}
           EVENT_NAME: ${{ inputs.pull_request_number != '' && 'pull_request' || github.event_name }}
           PLANNER_VERSION: ${{ needs.changes.outputs.planner_version }}
           PLANNER_HASH: ${{ needs.changes.outputs.planner_hash }}
@@ -1840,6 +1854,8 @@ jobs:
               echo "Trusted tested-tree provenance matched this exact main tree; the redundant post-merge product retest was skipped. Cache warming and the weekly/manual validation paths remain."
             elif [ "$DOCS_ONLY" = "true" ]; then
               echo "Classified as a documentation-only change, so no product gate ran. This tick is not evidence about the product."
+            elif [ "$FMS_ONLY" = "true" ]; then
+              echo "FMS-only change: browser journeys ran the FMS specs only. Not evidence about other areas."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -1932,10 +1948,13 @@ jobs:
           # in a way that is invisible — a job gated on `pull_request` silently disappears in a queue.
           if [ "$EVENT_NAME" = "merge_group" ] && [ "$DOCS_ONLY" != "true" ]; then
             missing=""
+            fms_may_skip() {
+              [ "$FMS_ONLY" = "true" ] && [ "$2" = "skipped" ] && [[ " backend-api backend-core-domain backend-core-infrastructure script-contracts " == *" $1 "* ]]
+            }
             for pair in "backend-api:$BACKEND_API" "backend-core-domain:$BACKEND_CORE_DOMAIN" "backend-core-infrastructure:$BACKEND_CORE_INFRASTRUCTURE" "client:$CLIENT" "script-contracts:$CONTRACTS" "browser-pr:$BROWSER" "browser-production:$PRODUCTION"; do
               name="${pair%%:*}"
               result="${pair#*:}"
-              [ "$result" = "success" ] || missing="$missing $name"
+              [ "$result" = "success" ] || fms_may_skip "$name" "$result" || missing="$missing $name"
             done
             if [ -n "$missing" ]; then
               echo "::error::A merge-queue run must actually execute the product gates. These did not run:$missing"
