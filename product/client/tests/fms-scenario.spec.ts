@@ -342,3 +342,13 @@ test('the profile fingerprint changes when any profile value changes, so evidenc
   forced.parameters.rollRate.inForce = true
   expect(profileFingerprint(forced)).not.toBe(base)
 })
+
+test('a scenario declares the radio altimeter surface by id; the report names it, and an unknown surface is refused (Stage B2)', () => {
+  const declared = runHeadless({ id: 's', title: 's', objective: '', maxSeconds: 1, surface: 'offshore-87n', steps: [] }).runner
+  expect(reportMarkdown(declared)).toMatch(/^- Surface for the radio altimeter: offshore-87n \(declared flat sea at 0 ft MSL/m)
+  const none = runHeadless({ id: 'n', title: 'n', objective: '', maxSeconds: 1, steps: [] }).runner
+  expect(reportMarkdown(none)).toMatch(/^- Surface for the radio altimeter: none \(radio height NCD everywhere\)$/m)
+  const unknown = runHeadless({ id: 'u', title: 'u', objective: '', maxSeconds: 1, surface: 'moon', steps: [] }).runner
+  expect(unknown.outcome).toBe('invalid')
+  expect(unknown.problems.join(' ')).toMatch(/surface must be one of none, offshore-87n/)
+})

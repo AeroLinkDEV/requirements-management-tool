@@ -3,6 +3,7 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm } from '../src/fmsCdu/fmsModel'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
+import { NO_SURFACE, OFFSHORE_87N, radioHeight } from '../src/fmsCdu/surface'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
 // Tactical functions, database cycles, maintenance and dual operation (the FMS test bench research roadmap, step 7):
@@ -186,4 +187,33 @@ test('in dual operation the executed route is cross-loaded; independent, the sid
   unit.setCondition('independent', false)
   expect(unit.crossSideInSync).toBe(true)
   expect(lines(unit)[6]).toMatch(/^DUAL SYNC\s+RTE MATCH$/)
+})
+
+// Stage B2 of the helicopter-first plan: the radio altimeter measures the aircraft's physical height above a declared
+// flat surface, and has no height (NCD) where none is declared. Nothing shows a fixed or invented radio height.
+test('the radio altimeter reads height above the declared surface, NCD off it or above its range, FAIL when failed', () => {
+  const offshore = { lat: 40.7, lon: -72.45 }, heliport = { lat: 40.8463, lon: -72.4664 }
+  expect(radioHeight(OFFSHORE_87N, offshore, 1500, false)).toEqual({ value: 1500, status: 'NORMAL' })
+  expect(radioHeight(OFFSHORE_87N, offshore, 2500, false)).toEqual({ value: 2500, status: 'NORMAL' })
+  expect(radioHeight(OFFSHORE_87N, offshore, 2501, false)).toEqual({ value: null, status: 'NCD' })
+  // Southampton heliport is on land, north of the declared sea: no surface there, so no radio height.
+  expect(radioHeight(OFFSHORE_87N, heliport, 500, false)).toEqual({ value: null, status: 'NCD' })
+  expect(radioHeight(NO_SURFACE, offshore, 500, false)).toEqual({ value: null, status: 'NCD' })
+  expect(radioHeight(OFFSHORE_87N, offshore, 500, true)).toEqual({ value: null, status: 'FAIL' })
+})
+
+test('the HOVER page shows the radio altimeter, dashes without a surface or with the altimeter failed, never a fixed value', () => {
+  const { unit } = setup()
+  unit.open('HOVER')
+  // The line under the RAD ALT caption.
+  const radAlt = () => { const lines = screenText(unit.screen()); return lines[lines.findIndex(line => /RAD ALT/.test(line)) + 1] }
+  // The demonstration route is over land with no declared surface.
+  expect(radAlt()).toMatch(/^\s*----FT/)
+  expect(unit.declareSurface('offshore-87n')).toBe(true)
+  unit.placeAircraft({ position: { lat: 40.7, lon: -72.45 }, track: 230, altitude: 1500 }, 'test: offshore south of 87N')
+  expect(unit.radioHeight).toEqual({ value: 1500, status: 'NORMAL' })
+  expect(radAlt()).toMatch(/^\s*1500FT/)
+  unit.setCondition('raFail', true)
+  expect(radAlt()).toMatch(/^\s*----FT/)
+  expect(unit.declareSurface('nowhere')).toBe(false)
 })

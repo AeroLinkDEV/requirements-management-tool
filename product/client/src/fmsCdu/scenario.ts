@@ -7,6 +7,7 @@ import { ACTIVE_PROFILE, profileSummary } from "./profile";
 import { describeGpsOp, gpsOpProblem, stimulusFor, type GpsOp } from "./gpsStimulus";
 import { ScriptedFms } from "./scriptedFms";
 import { SCRATCHPAD_LINE, screenText, type Lamp } from "./screen";
+import { SURFACES, surfaceById } from "./surface";
 import type { CduFunction } from "./variants";
 
 // Scripted test scenarios for the FMS Test Bench (product/docs/FMS_TEST_BENCH.md, step 8). A scenario is an ordered
@@ -81,6 +82,11 @@ export type Scenario = {
    * clock. Without it, the bench starts at the wall clock and a headless run at its own default.
    */
   startTime?: string;
+  /**
+   * The surface the radio altimeter measures against (surface.ts SURFACES, by id). Without it none is declared and the
+   * radio height is NCD everywhere.
+   */
+  surface?: string;
   steps: ScenarioStep[];
 };
 
@@ -93,9 +99,9 @@ export type RunOutcome = "running" | "passed" | "failed" | "no checks" | "timed 
 /**
  * What the run describes, fixed when it starts, so the report cannot change after it finishes. `data` says what the
  * navigation data is (the active cycle's source); a start state can change the cycle, so both are read after it.
- * `profile` names the aircraft profile (profile.ts) the run flew.
+ * `profile` names the aircraft profile (profile.ts) the run flew, and `surface` the radio altimeter's declared surface.
  */
-export type RunContext = { variant: string; cycle: string; data?: string; profile?: string };
+export type RunContext = { variant: string; cycle: string; data?: string; profile?: string; surface?: string };
 
 const isExpectation = (action: Action) => action.kind.startsWith("expect");
 
@@ -231,6 +237,7 @@ export function scenarioProblems(value: unknown): string[] {
   if (typeof s.title !== "string" || !s.title.trim()) problems.push("it needs a title");
   if (!finite(s.maxSeconds, TICK_SECONDS, MAX_RUN_SECONDS)) problems.push("it needs maxSeconds between 0.25 and 86400");
   if (s.start !== undefined && !(typeof s.start === "string" && Object.hasOwn(START_STATES, s.start))) problems.push(`unknown start state "${String(s.start)}"`);
+  if (s.surface !== undefined && !(typeof s.surface === "string" && surfaceById(s.surface))) problems.push(`surface must be one of ${SURFACES.map(surface => surface.id).join(", ")}`);
   if (s.startTime !== undefined && !(typeof s.startTime === "string" && /^\d{4}-\d\d-\d\dT/.test(s.startTime) && Number.isFinite(Date.parse(s.startTime)))) problems.push("startTime must be an ISO 8601 date and time");
   if (!Array.isArray(s.steps)) return [...problems, "it needs steps"];
   s.steps.forEach((step, i) => {
@@ -276,13 +283,15 @@ export class ScenarioRunner {
     this.fms = fms;
     this.sim = sim;
     const problems = scenarioProblems(scenario);
-    // The start state sets up the fresh simulation before the first step; the context is read after it.
+    // The surface is declared first; the start state sets up the fresh simulation before the first step; the context
+    // is read after both.
+    if (!problems.length && this.scenario.surface) fms.declareSurface(this.scenario.surface);
     if (!problems.length && this.scenario.start) {
       const set = START_STATES[this.scenario.start].setUp(fms);
       if ("refused" in set) problems.push(`start state ${this.scenario.start}: ${set.refused}`);
     }
     this.problems = problems;
-    this.context = { ...context, cycle: fms.activeCycle.id, data: context.data ?? fms.activeCycle.source, profile: profileSummary(ACTIVE_PROFILE) };
+    this.context = { ...context, cycle: fms.activeCycle.id, data: context.data ?? fms.activeCycle.source, profile: profileSummary(ACTIVE_PROFILE), surface: `${fms.surface.id} (${fms.surface.basis})` };
     this.start = fms.now.getTime();
     this.results = this.scenario.steps.map(() => ({ status: "pending" }));
     if (this.problems.length) { this.next = this.results.length; this.endedAt = 0; return; }
@@ -556,6 +565,7 @@ export function reportMarkdown(runner: ScenarioRunner) {
     `- Started: ${runner.startedAt.toISOString()}${runner.endedAfter === null ? "" : `; ended after ${formatSeconds(runner.endedAfter)} of simulated time`}`,
     `- Hardware variation: ${context.variant}`,
     `- Aircraft profile: ${context.profile ?? "not recorded"}`,
+    `- Surface for the radio altimeter: ${context.surface ?? "not recorded"}`,
     `- Navigation data: ${context.cycle} (${!context.data || context.data === "demonstration data" ? "invented demonstration data" : context.data})`,
     `- Time: ${TICK_SECONDS} s ticks; a step due between ticks runs at the next one.`,
     "- Driven by the scripted CMA-9000 simulation, not the operational program. This is not flight-qualified evidence.",
