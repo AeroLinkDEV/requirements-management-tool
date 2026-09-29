@@ -261,11 +261,18 @@ export function computeProfile(input: ProfileInput): Profile {
     }
   }
 
+  // The missed approach tops out at its missed approach altitude, the highest altitude it codes (87N R190: BEADS
+  // 2000A): the climb after the MAP levels there, never on up to cruise, which belongs to the route before it.
+  const missedTop = waypoints.reduce((top, w) => (w.missed && w.constraint ? Math.max(top, w.constraint.kind === "WINDOW" ? w.constraint.upper : w.constraint.altitude) : top), -Infinity);
+  const missedCap = (i: number) => (waypoints[i]?.missed && Number.isFinite(missedTop) ? missedTop : Infinity);
+
   // The climb levels at the lowest "at" or "at or below" constraint ahead in the climb, until passing it.
   // In the descent there is no climb: the cap is where the aircraft is, so nothing pulls it back up toward cruise.
   let climbCap = inDescent ? Math.min(cruiseAltitude, input.altitude) : cruiseAltitude;
   // Only constraints on the known part of the route cap the climb: nothing behind a gap commands the connected segment.
   for (let i = 0; i < waypoints.length && descent[i] === Infinity && basis[i] !== "unknown"; i += 1) climbCap = Math.min(climbCap, capOf(waypoints[i].constraint));
+  // Flying the missed approach, VNAV climbs to its missed approach altitude.
+  climbCap = Math.min(climbCap, missedCap(0));
 
   // The climb at each point levels at the lowest at-or-below constraint at or after it on the known climb segment, as
   // guidance does (climbCap): a restriction ahead holds the climb before it, not only at its own fix.
@@ -282,7 +289,7 @@ export function computeProfile(input: ProfileInput): Profile {
     const hours = legHours(w);
     time += hours * 3_600_000;
     fuel -= hours * input.fuelFlow;
-    const cap = Math.min(cruiseAltitude, capOf(w.constraint), aheadCap[i]);
+    const cap = Math.min(cruiseAltitude, capOf(w.constraint), aheadCap[i], missedCap(i));
     // In the descent nothing up to the E/D climbs; after it (the missed approach) the go-around may.
     const climbs = !inDescent || (edIndex >= 0 && i > edIndex);
     const climbed = climbs && altitude < cap ? Math.min(cap, altitude + input.climbRate * hours * 60) : altitude;

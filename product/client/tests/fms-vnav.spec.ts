@@ -212,3 +212,22 @@ test('computeProfile: a window constraint in the descent holds the path inside i
   expect(profile.points[1].altitude).toBe(6000)
   expect(profile.points[2].altitude).toBe(1000)
 })
+
+test('after the MAP the climb levels at the missed approach altitude, the highest the missed approach codes, never at cruise', () => {
+  const at = (ident: string, legDistance: number, text?: string, missed = false) =>
+    ({ ident, legDistance, groundSpeed: 120, constraint: parseConstraint(text) ?? null, endOfDescent: false, missed })
+  const profile = computeProfile({
+    // Climbing out on the missed approach: 1500A, then 2500A (the missed approach altitude), then its hold fix.
+    waypoints: [at('M1', 10, '1500A', true), at('M2', 10, '2500A', true), at('HOLD', 10, undefined, true)],
+    altitude: 1000, cruiseAltitude: 8000, climbRate: 1000, pathAngle: 3, fuel: 1000, fuelFlow: 500, now: 0,
+  })
+  // 1,000 ft a minute for 5 minutes a leg would reach 6,000 by M1: the climb levels at 2500 (not 1500, the lowest).
+  expect(profile.points.map(p => Math.round(p.altitude!))).toEqual([2500, 2500, 2500])
+  expect(profile.climbCap).toBe(2500)
+  // The route before the MAP still climbs to cruise.
+  const enRoute = computeProfile({
+    waypoints: [at('A', 10, '1500A'), at('B', 10, '2500A'), at('C', 10)],
+    altitude: 1000, cruiseAltitude: 8000, climbRate: 1000, pathAngle: 3, fuel: 1000, fuelFlow: 500, now: 0,
+  })
+  expect(enRoute.points[2].altitude).toBe(8000)
+})

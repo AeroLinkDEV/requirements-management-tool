@@ -6,6 +6,7 @@ import { iasFromTas, tasFromIas } from '../src/fmsCdu/kinematics'
 import type { ProcedureHold } from '../src/fmsCdu/navData'
 import { holdAllowance } from '../src/fmsCdu/predictions'
 import { setUpKbtvRnav15 } from '../src/fmsCdu/kbtvDemo'
+import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
@@ -401,4 +402,74 @@ test('D-H/MISSED-HOLD: the missed-approach hold is timed for one racetrack after
   // (Its leg is estimated, after the missed approach's conditional leg: CONDITIONAL for that, not for the hold.)
   expect(point(unit, 'BEADS').reason).not.toBe('HOLD EXIT NEXT CROSSING')
   expect(point(unit, 'BEADS')).toMatchObject({ status: 'CONDITIONAL', reason: 'LEG ESTIMATED' })
+})
+
+// ---------------------------------------------------------------------------------------------- after the MAP; VNAV 1/3
+
+test('R190: after the MAP the predicted climb levels at the missed approach altitude (BEADS 2000A), not the 4,500 ft cruise', () => {
+  const unit = towardTidue(356, 8)
+  expect(unit.vnav.cruiseAltitude).toBe(4500)
+  expect(unit.activeRoute.legs.find(leg => leg.kind === 'wpt' && leg.ident === 'BEADS')).toMatchObject({ source: 'MISSED', altitude: '2000A' })
+  expect(point(unit, 'BEADS').altitude).toBe(2000)
+  expect(point(unit, 'BEADS').constraintMet).toBe(true)
+  // Before the MAP nothing changes: the approach's own points keep their predictions (at or below the aircraft).
+  expect(point(unit, 'CRANN').altitude).toBeLessThanOrEqual(2000)
+})
+
+test('the laboratory airline VNAV flying a missed approach climbs to its missed approach altitude (2000A), not to cruise', () => {
+  // R190 on the airline profile: TOGA drops the rest of the approach, so the missed approach is the active route.
+  const unit = new ScriptedFms(() => new Date(START), { profile: LAB_AIRLINE_VNAV_PROFILE })
+  expect(unit.loadArinc424(COPTER, 'copter-pins-2609.pc')).toMatchObject({ loaded: 'CIFP2609' })
+  unit.swapCycles()
+  unit.press('RTE')
+  typeText(unit, '87N')
+  unit.press('LSK1R')
+  unit.press('EXEC')
+  unit.selectProcedure('APPROACH', 'R190', 'HTO')
+  unit.press('EXEC')
+  const stays = unit.coordinates('STAYS')!
+  unit.placeAircraft({ position: offset(stays, 356, 2), track: 176, altitude: 1700 }, 'test: on the R190 final')
+  direct(unit, 'STAYS')
+  expect(unit.goAround()).toBe(true)
+  expect(unit.activeRoute.legs.every(leg => leg.kind === 'disco' || leg.source === 'MISSED')).toBe(true)
+  // Its only coded altitude is at or above (BEADS 2000A), which caps nothing by itself: VNAV used to climb to cruise.
+  expect(unit.vnav.cruiseAltitude).toBe(4500)
+  expect(unit.profile().climbCap).toBe(2000)
+  expect(point(unit, 'BEADS').altitude).toBe(2000)
+})
+
+test('VNAV 1/3 on a point-in-space approach says there is no vertical path (LNAV) and where it ends, not that there is no approach', () => {
+  const unit = towardTidue(356, 8)
+  unit.press('VNAV')
+  const screen = lines(unit)
+  expect(screen[0]).toMatch(/^\s*VNAV\s+1\/3/)
+  expect(screen[2]).toMatch(/^\s*NO VERTICAL PATH \(LNAV\)\s*$/)
+  expect(screen[4]).toMatch(/^\s*TO CRANN \(MAP\)\s*$/)
+  expect(screen.join('\n')).not.toContain('NO APPROACH IN ROUTE')
+  // With no approach in the route at all, it still says so, even flying to the heliport (a prediction endpoint, SITE
+  // ARRIVAL at 87N, but no approach).
+  const none = new ScriptedFms(() => new Date(START))
+  expect(none.loadArinc424(COPTER, 'copter-pins-2609.pc')).toMatchObject({ loaded: 'CIFP2609' })
+  none.swapCycles()
+  none.modify(route => { route.legs = []; route.dest = '87N' })
+  none.press('EXEC')
+  direct(none, '87N')
+  expect(none.profile().endpoint).toMatchObject({ kind: 'SITE ARRIVAL', label: '87N' })
+  expect(none.approachType).toBeNull()
+  none.press('VNAV')
+  expect(lines(none)[2]).toMatch(/^\s*NO APPROACH IN ROUTE\s*$/)
+})
+
+test('KBTV R15 is unchanged: VNAV 1/3 shows its runway path, and its missed approach tops out at its own altitude', () => {
+  const unit = new ScriptedFms(() => new Date(START))
+  const sim = new FlightSimulator(unit)
+  expect(setUpKbtvRnav15(unit, sim)).toEqual({ ready: true })
+  unit.press('VNAV')
+  expect(lines(unit)[0]).toMatch(/^ACT VNAV 15 LPV\s+1\/3/)
+  expect(lines(unit).join('\n')).not.toContain('NO VERTICAL PATH')
+  const missedTop = Math.max(...unit.activeRoute.legs.flatMap(leg => (leg.kind === 'wpt' && leg.source === 'MISSED' && leg.altitude ? [Number(/^(\d+)/.exec(leg.altitude)![1])] : [])))
+  expect(Number.isFinite(missedTop)).toBe(true)
+  const threshold = unit.profile().points.findIndex(p => p.ident === 'RW15')
+  expect(threshold).toBeGreaterThan(0)
+  for (const p of unit.profile().points.slice(threshold + 1)) if (p.altitude !== null) expect(p.altitude, p.ident).toBeLessThanOrEqual(missedTop)
 })
