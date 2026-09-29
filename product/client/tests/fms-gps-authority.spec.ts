@@ -57,6 +57,7 @@ for (const [name, stimulus, detail] of RECEIVER_STATE) {
 const BAD_VALUES: [string, (rx: GpsReceiver, b: GpsBus) => void, RegExp][] = [
   ['a negative HIL', rx => rx.override('130', { kind: 'FORCE', value: -1, ssm: 'NORMAL' }), /HIL/],
   ['a HIL that is not a number', rx => rx.override('130', { kind: 'FORCE', value: Number.NaN, ssm: 'NORMAL' }), /HIL/],
+  ['an infinite HIL', rx => rx.override('130', { kind: 'FORCE', value: Number.POSITIVE_INFINITY, ssm: 'NORMAL' }), /HIL/],
   ['a negative HFOM', rx => rx.override('247', { kind: 'FORCE', value: -0.5, ssm: 'NORMAL' }), /HFOM/],
   ['a latitude of 1000 degrees', rx => rx.override('110', { kind: 'FORCE', value: 1000, ssm: 'NORMAL' }), /LAT/],
   ['a longitude of 1000 degrees', rx => rx.override('111', { kind: 'FORCE', value: 1000, ssm: 'NORMAL' }), /LON/],
@@ -109,6 +110,7 @@ const APPROACH_STATUS: [string, Record<string, boolean>, RegExp][] = [
   ['FAS for another approach', { mismatch: true, available: false }, /MISMATCH/],
   ['FAS incomplete', { incomplete: true, available: false }, /INCOMPLETE/],
   ['no approach selected', { selected: false, available: false }, /NOT SELECTED/],
+  ['the approach unavailable', { available: false }, /UNAVAILABLE/],
 ]
 for (const [name, patch, reason] of APPROACH_STATUS) {
   test(`156 saying ${name} ends the captured approach, though 305 says LPV and 116/117 are Normal (GPS-06)`, () => {
@@ -124,6 +126,22 @@ for (const [name, patch, reason] of APPROACH_STATUS) {
     expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(true)
   })
 }
+
+test('a vetoed approach in the approach phase raises NO APPR INTEGRITY before any vertical guidance was had (GPS-06)', () => {
+  const { unit } = setup()
+  unit.selectProcedure('APPROACH', 'R24R')
+  unit.press('EXEC')
+  for (let i = 0; i < 3; i += 1) unit.sequence()
+  unit.updateNavigation(0)
+  expect(unit.flightPhase).toBe('APPROACH')
+  // Outside the approach region: annunciated at its level, not yet guided, and nothing wrong.
+  expect(unit.gpsApproachAuthority).toMatchObject({ lateral: false, vertical: false, reason: 'OUTSIDE APPROACH REGION' })
+  expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(false)
+  for (const rx of receivers(unit)) rx.overrideStatus('156', { crcInvalid: true, available: false })
+  unit.gpsUpdated()
+  expect(unit.approachType).toBe('NO APPR')
+  expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(true)
+})
 
 // ------------------------------------------------------------------ GPS-01: lateral and vertical authority in flight
 
