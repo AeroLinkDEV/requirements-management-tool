@@ -14,10 +14,11 @@ import type { Layout, View } from "./outTheWindow";
 import FmsScenarioCard from "./FmsScenarioCard";
 import { conditionalLabel } from "./fmsModel";
 import { fmsGpsView } from "./gpsBench";
+import { stimulusFor } from "./gpsStimulus";
 import { useCduLayout, type CduKeyEvent } from "./layout";
 import { LIGHTING_MODES, displayLuminance, type Lighting, type LightingMode } from "./lighting";
 import { KBTV_SOURCE, START_STATES, loadKbtvDemonstration, type StartStateId } from "./kbtvDemo";
-import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, type Scenario } from "./scenario";
+import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, scenarioStart, type Scenario } from "./scenario";
 import { ScriptedFms } from "./scriptedFms";
 import { screenText } from "./screen";
 import { CDU_VARIANTS, DEFAULT_VARIANT_ID, variantById } from "./variants";
@@ -75,7 +76,7 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
   const { layout, failed } = useCduLayout();
   const [variantId, setVariantId] = useState(storedVariant);
   const [session, setSession] = useState(0);
-  // Simulated time: it starts at the wall clock and runs at the chosen rate while the flight is playing.
+  // Simulated time: it starts at the wall clock (or a scenario's planned start, which fixes the GPS sky) and runs at the chosen rate while the flight is playing.
   const simTime = useRef(Date.now());
   // A scenario run or a recording starts on the next session, so it always begins from a restarted simulation.
   const pendingScenario = useRef<Scenario | null>(null);
@@ -83,7 +84,7 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
   // A demonstration start state (kbtvDemo.ts) also starts on the next session: a restarted simulation, then set up.
   const pendingStart = useRef<StartStateId | null>(null);
   const { backend, sim, runner, recorder, started } = useMemo(() => {
-    simTime.current = Date.now();
+    simTime.current = (pendingScenario.current && scenarioStart(pendingScenario.current)) ?? Date.now();
     const fms = new ScriptedFms(() => new Date(simTime.current));
     const flight = new FlightSimulator(fms);
     const start = pendingStart.current;
@@ -101,6 +102,12 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
   }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
   const [recording, setRecording] = useState(false);
   const recordTo = recording ? recorder : null;
+  // While recording, what the GPS sensors tab applies is recorded as scenario steps, when it is applied.
+  useEffect(() => {
+    const stimulus = stimulusFor(backend);
+    stimulus.listener = recordTo ? (index, op) => recordTo.gps((index + 1) as 1 | 2, op) : null;
+    return () => { stimulus.listener = null; };
+  }, [backend, recordTo]);
   const pausedFor = useRef<ScenarioRunner | null>(null);
   const subscribe = useCallback((listener: () => void) => backend.subscribe(listener), [backend]);
   useSyncExternalStore(subscribe, () => backend.revision());
