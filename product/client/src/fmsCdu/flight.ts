@@ -260,7 +260,7 @@ export class FlightSimulator {
       const vertical = fms.gpsApproachVertical ? fms.gpsApproach!.verticalFt! : null;
       return vertical === null ? null : fms.altitude - vertical;
     }
-    const fafPos = fms.coordinates(fms.lastSequenced), rwyPos = fms.coordinates(leg.ident);
+    const fafPos = fms.coordinates(fms.finalApproachFix ?? fms.lastSequenced), rwyPos = fms.finalRunway ? fms.coordinates(fms.finalRunway) : undefined;
     if (!fafPos || !rwyPos) return null;
     const tan = (fms.fafAltitudeCorrected - fms.vnav.runwayElevation) / (distanceNm(fafPos, rwyPos) * 6076.12);
     return fms.vnav.runwayElevation + distanceNm(fms.position, rwyPos) * 6076.12 * tan;
@@ -299,10 +299,8 @@ export class FlightSimulator {
   get verticalFlag() { return !this.fms.hasCondition("fmsFail") && this.onFinal && this.rnavApproach && !this.fms.gpsApproachVertical; }
 
   /** On the final leg: the FAF has been sequenced and the runway is the active waypoint. */
-  private get onFinal() {
-    const leg = this.fms.activeRoute.legs[0];
-    return leg?.kind === "wpt" && /^RW\d{2}/.test(leg.ident) && this.fms.lastSequenced !== null;
-  }
+  /** On the final approach segment: past the executed approach's FAF, with the runway ahead (ScriptedFms.onFinalSegment). */
+  private get onFinal() { return this.fms.onFinalSegment; }
 
   /**
    * The laboratory approach contract (Q-A1, a labelled engineering assumption): the approach captures on the final
@@ -543,9 +541,11 @@ export class FlightSimulator {
     const fms = this.fms;
     const leg = fms.activeRoute.legs[0];
     if (this.approach !== "CAPTURED" || leg?.kind !== "wpt" || !fms.lastSequenced) return null;
-    const fafPos = fms.coordinates(fms.lastSequenced), rwyPos = fms.coordinates(leg.ident);
+    const fafPos = fms.coordinates(fms.finalApproachFix ?? fms.lastSequenced), rwyPos = fms.finalRunway ? fms.coordinates(fms.finalRunway) : undefined;
     if (!fafPos || !rwyPos) return null;
-    const vpa = Math.atan((fms.fafAltitudeCorrected - fms.vnav.runwayElevation) / (distanceNm(fafPos, rwyPos) * 6076.12));
+    // On an RNAV approach the path is the FAS's glide path angle; otherwise the angle from the FAF to the runway.
+    const fasAngle = this.rnavApproach ? fms.executedFas?.fas.gpaDeg ?? null : null;
+    const vpa = fasAngle !== null ? (fasAngle * Math.PI) / 180 : Math.atan((fms.fafAltitudeCorrected - fms.vnav.runwayElevation) / (distanceNm(fafPos, rwyPos) * 6076.12));
     // On an RNAV approach the correction is toward the GPS's FAS path, from its 117 deviation (GPS phase 3b).
     if (this.rnavApproach && fms.gpsApproachVertical) return -groundSpeed * 101.27 * Math.tan(vpa) + clamp(-fms.gpsApproach!.verticalFt! * 2, -300, 300);
     const pathAltitude = fms.vnav.runwayElevation + distanceNm(fms.position, rwyPos) * 6076.12 * Math.tan(vpa);

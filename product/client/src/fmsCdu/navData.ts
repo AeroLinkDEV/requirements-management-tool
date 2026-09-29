@@ -14,7 +14,11 @@ export type NavaidType = "VOR" | "VORDME" | "VORTAC" | "DME" | "NDB";
 export type Fix = { kind: "fix"; ident: string; position: LatLon };
 export type Navaid = { kind: "navaid"; ident: string; type: NavaidType; position: LatLon; frequency: string; name: string };
 export type Runway = { ident: string; threshold: LatLon; course: number; elevation: number; length: number };
-export type Airport = { kind: "airport"; ident: string; name: string; position: LatLon; elevation: number; runways: Runway[] };
+export type Airport = {
+  kind: "airport"; ident: string; name: string; position: LatLon; elevation: number; runways: Runway[];
+  /** Magnetic variation, degrees, east positive, when the data gives it (ARINC 424 airport record). */
+  magneticVariation?: number;
+};
 export type NavEntry = Fix | Navaid | Airport;
 
 export type Airway = { ident: string; fixes: string[] };
@@ -37,6 +41,22 @@ export type Procedure = {
   faf?: string;
   missed?: ProcedureLeg[];
   missedHold?: { fix: string; inbound: number; turn: "RIGHT" | "LEFT"; altitude: string };
+  /**
+   * An RNAV approach's published final approach segment data (ARINC 424 path point record), when the data has one:
+   * the fields of the FAS data block, and the CRC as published. The simulation derives a FAS block only when this is
+   * absent (gpsSensors.buildFas).
+   */
+  publishedFas?: PublishedFas;
+};
+
+/** The FAS data block fields as a path point record publishes them, with the published CRC (hexadecimal). */
+export type PublishedFas = {
+  operationType: number; sbasProvider: number; airport: string; runway: number; designator: "L" | "R" | "C" | "";
+  performance: number; routeIndicator: string; referencePathSelector: number; referencePathId: string;
+  ltp: { lat: number; lon: number; heightM: number };
+  fpapDelta: { lat: number; lon: number };
+  tchFt: number; gpaDeg: number; courseWidthM: number; lengthOffsetM: number; halM: number; valM: number;
+  publishedCrc: string;
 };
 
 export type NavData = {
