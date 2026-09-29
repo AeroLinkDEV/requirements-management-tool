@@ -221,35 +221,42 @@ test('the built setup portal releases the body floor and stays contained at 900 
   }
 })
 
-test('the built workspace sidebar meets the disclosure target in both densities and both label lengths, and the opened panel stays in the column', async ({ page }, testInfo) => {
-  // Stable fixtures, defined once: the active route payload is selected from these per case. The
-  // round-3 version read from the mutable payload here, so the compact "long-label" case silently
-  // rendered Q — the observed label is now asserted and recorded per capture.
-  const LONG_FIXTURE = homeIdentity({
-    mode: 'UNKNOWN', mainCurrency: null,
-    instance: {
-      id: 'work-laptop', label: 'FLIGHT TEST LAPTOP LONG INSTALLATION NAME', classification: 'WorkLaptopLocal',
-      snapshot: { sourceLabel: 'HOME CANONICAL', sourceSha: 'd4c3b2a1d4c3b2a1d4c3b2a1d4c3b2a1d4c3b2a1', createdAtUtc: new Date(Date.now() - 5 * 86_400_000).toISOString(), activatedAtUtc: null },
-    },
-  })
-  const SHORT_FIXTURE = homeIdentity({
-    mode: 'UNKNOWN', mainCurrency: null,
-    instance: { id: 'short', label: 'Q', classification: 'WorkLaptopLocal', snapshot: null },
-  })
-  const CASES = [
-    { fixtureName: 'long-label', fixture: LONG_FIXTURE, expectedLabel: 'FLIGHT TEST LAPTOP LONG INSTALLATION NAME', hasSnapshot: true },
-    { fixtureName: 'short-label', fixture: SHORT_FIXTURE, expectedLabel: 'Q', hasSnapshot: false },
-  ] as const
-  let payload = LONG_FIXTURE
-  await page.route('**/health/identity', route =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) }))
-  await login(page, 'admin')
-  const brandBadge = page.locator('.brand').getByTestId('instance-badge')
-  await expect(brandBadge).toBeVisible()
+// Stable fixtures, defined once: each case's route payload is one of these. The round-3 version read
+// from a mutable payload, so the compact "long-label" case silently rendered Q — the observed label is
+// now asserted and recorded per capture.
+const SIDEBAR_CASES = [
+  {
+    fixtureName: 'long-label', expectedLabel: 'FLIGHT TEST LAPTOP LONG INSTALLATION NAME', hasSnapshot: true,
+    fixture: () => homeIdentity({
+      mode: 'UNKNOWN', mainCurrency: null,
+      instance: {
+        id: 'work-laptop', label: 'FLIGHT TEST LAPTOP LONG INSTALLATION NAME', classification: 'WorkLaptopLocal',
+        snapshot: { sourceLabel: 'HOME CANONICAL', sourceSha: 'd4c3b2a1d4c3b2a1d4c3b2a1d4c3b2a1d4c3b2a1', createdAtUtc: new Date(Date.now() - 5 * 86_400_000).toISOString(), activatedAtUtc: null },
+      },
+    }),
+  },
+  {
+    fixtureName: 'short-label', expectedLabel: 'Q', hasSnapshot: false,
+    fixture: () => homeIdentity({
+      mode: 'UNKNOWN', mainCurrency: null,
+      instance: { id: 'short', label: 'Q', classification: 'WorkLaptopLocal', snapshot: null },
+    }),
+  },
+] as const
 
-  for (const density of ['comfortable', 'compact'] as const) {
-    for (const { fixtureName, fixture, expectedLabel, hasSnapshot } of CASES) {
-      payload = fixture
+// One test per density and label length. These four cases were one test until 29 September: four reloads,
+// eight settles and eight captures under the one 30-second default, which took 7.5 s on an idle host and
+// timed out when the host was starved (the API took 7 s to serve a static bundle in that run). Each case now
+// has its own budget, and a failure names the case.
+for (const density of ['comfortable', 'compact'] as const) {
+  for (const { fixtureName, fixture, expectedLabel, hasSnapshot } of SIDEBAR_CASES) {
+    test(`the built workspace sidebar meets the disclosure target (${density}, ${fixtureName}), and the opened panel stays in the column`, async ({ page }, testInfo) => {
+      const payload = fixture()
+      await page.route('**/health/identity', route =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload) }))
+      await login(page, 'admin')
+      const brandBadge = page.locator('.brand').getByTestId('instance-badge')
+      await expect(brandBadge).toBeVisible()
       await page.evaluate(value => localStorage.setItem('aerolink-density', value), density)
       await page.reload()
       // Wait for the rendered density, exactly as the design-system journeys do.
@@ -286,6 +293,6 @@ test('the built workspace sidebar meets the disclosure target in both densities 
       expect(opened.scrollWidth, `built sidebar ${fixtureName} ${density} open: document overflows (scrollWidth ${opened.scrollWidth} > clientWidth ${opened.clientWidth})`).toBeLessThanOrEqual(opened.clientWidth + 1)
       expect(opened.rects.badgePanel!.right, `built sidebar ${fixtureName} ${density}: opened panel leaves the column`).toBeLessThanOrEqual(opened.rects.sidebar!.right + 1)
       await record(opened, page, testInfo, `sidebar-${fixtureName}-${density}-open`, { fixtureName, expectedLabel })
-    }
+    })
   }
-})
+}
