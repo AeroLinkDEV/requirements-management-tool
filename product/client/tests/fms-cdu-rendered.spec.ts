@@ -422,6 +422,33 @@ test('the GPS sensors tab drives the FMS receivers: a fault on GPS 1 moves the F
   expect(small).toEqual([])
 })
 
+test('AUTO keeps GPS 2 after GPS 1 recovers: the strip says so, GPS 1 shows as available, and the CDU shows the source and the note', async ({ page }) => {
+  await open(page)
+  await tab(page, 'GPS sensors')
+  const routing = page.getByRole('img', { name: /^Sensor routing/ })
+  await expect(page.getByTestId('route-current-source')).toHaveText('AUTO — FMS on GPS1')
+  await page.getByText('GPS 1 bus monitor').click()
+  const hil = page.getByRole('table', { name: 'GPS 1 bus monitor' }).locator('tr[data-label="130"]')
+  await hil.getByLabel('Override 130', { exact: true }).selectOption('FORCE')
+  await hil.getByLabel('Override 130 amount').fill('99')
+  await hil.getByRole('button', { name: 'Set' }).click()
+  await expect(routing).toHaveAttribute('aria-label', /AUTO — FMS on GPS2$/)
+  await hil.getByRole('button', { name: 'Clear' }).click()
+  await expect(page.getByTestId('route-gps1')).toContainText('available / standby')
+  await expect(page.getByTestId('route-current-source')).toHaveText('AUTO — FMS on GPS2')
+  await expect(page.getByTestId('route-source-note')).toContainText('Last transfer: GPS1 to GPS2 (GPS1 NOT USABLE: HIL 99.00 > HAL')
+  // The CDU's own presentation: NAV OPTIONS under GPS NAV, not only the bench.
+  for (const id of ['INIT_REF', 'NEXT', 'LSK5R', 'LSK6R']) await key(page, id).click()
+  await expectLine(page, 0, /NAV OPTIONS/)
+  await expectLine(page, 8, /^AUTO GPS2\s+GPS1 STBY$/)
+  await expectLine(page, 9, /^AUTO KEEPS SUITABLE RCVR$/)
+  await expectLine(page, 10, /^GPS1 INITIAL IF EQUAL$/)
+  // The product's 12 px floor holds for every cell on the screen, the note included.
+  const sizes = await page.locator('.fmsCduScreen .cduCell').evaluateAll(cells => cells.map(cell => parseFloat(getComputedStyle(cell).fontSize)))
+  expect(sizes.length).toBeGreaterThan(0)
+  expect(Math.min(...sizes)).toBeGreaterThanOrEqual(12)
+})
+
 test('the FMS GPS selection is set from the routing strip, and the integrity condition holds the satellite masking', async ({ page }) => {
   await open(page)
   await tab(page, 'GPS sensors')

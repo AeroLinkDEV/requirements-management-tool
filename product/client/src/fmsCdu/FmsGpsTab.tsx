@@ -48,7 +48,9 @@ function RoutingStrip({ view, fms }: { view: GpsView; fms: ScriptedFms }) {
   const apart = view.difference();
   const nav = fms.navState, chosen = fms.gpsStatus.chosen;
   const source = chosen === null ? nav.mode : `GPS${chosen + 1}`;
-  const lastChange = fms.navSourceLog[0];
+  // The source as selected: "AUTO — FMS on GPS2", or the receiver chosen by hand.
+  const sourceText = `${fms.gpsNavSelected && fms.gpsReceiverChoice === "AUTO" ? "AUTO — " : ""}FMS on ${source}`;
+  const lastTransfer = fms.gpsSelectionLog.find(event => event.kind === "TRANSFER");
   const box = (x: number, y: number, w: number, title: string, detail: string, tone: string, id: string) => (
     <g data-testid={id}>
       <rect x={x} y={y} width={w} height={44} rx={8} className={`fmsGpsBox ${tone}`} />
@@ -58,12 +60,12 @@ function RoutingStrip({ view, fms }: { view: GpsView; fms: ScriptedFms }) {
   );
   const assessed = fms.gpsStatus.assessed;
   const tone = (index: 0 | 1) => (chosen === index ? "ok" : assessed[index].usable ? "standby" : assessed[index].reason === "SILENT" ? "fail" : "warn");
-  const role = (index: 0 | 1) => (chosen === index ? "in use" : assessed[index].usable ? "standby" : `not usable · ${rejection(assessed[index])}`);
+  const role = (index: 0 | 1) => (chosen === index ? "in use" : assessed[index].usable ? "available / standby" : `not usable · ${rejection(assessed[index])}`);
   return (
     <section className="fmsBenchCard fmsGpsRouting" aria-label="Sensor routing">
       <h2>Sensor routing</h2>
       <svg viewBox="0 0 640 128" role="img"
-        aria-label={`Sensor routing: GPS 1 ${modeText(one)} ${role(0)}, GPS 2 ${modeText(two)} ${role(1)}, FMS on ${source}`}>
+        aria-label={`Sensor routing: GPS 1 ${modeText(one)} ${role(0)}, GPS 2 ${modeText(two)} ${role(1)}, ${sourceText}`}>
         {box(8, 8, 200, `GPS 1 · ${modeText(one)}`, role(0), tone(0), "route-gps1")}
         {box(8, 72, 200, `GPS 2 · ${modeText(two)}`, role(1), tone(1), "route-gps2")}
         {box(280, 40, 170, "FMS nav solution", `${source} · ANP ${nav.anp.toFixed(2)}/RNP ${fms.requiredRnp.toFixed(2)}`, chosen === null && nav.mode === "DR" ? "warn" : "ok", "route-fms")}
@@ -78,9 +80,12 @@ function RoutingStrip({ view, fms }: { view: GpsView; fms: ScriptedFms }) {
         <select aria-label="FMS GPS selection" value={view.choice} onChange={event => view.select(event.target.value as GpsView["choice"])}>
           {(["AUTO", "GPS1", "GPS2", "OFF"] as const).map(option => <option key={option}>{option}</option>)}
         </select>
+        <small data-testid="route-current-source">{sourceText}</small>
         <small data-testid="route-source-note">
-          AUTO navigates on GPS1, then GPS2 when GPS1 is not usable; GPS1 or GPS2 uses only that receiver; OFF deselects GPS
-          (the FMS then uses DME/DME, VOR/DME or dead reckoning). {lastChange ? `Last source change: ${lastChange.source} at ${lastChange.at.toISOString().slice(11, 19)}Z.` : ""}
+          AUTO retains the current receiver while it remains suitable; recovery of the other does not by itself move it.
+          GPS1 is the initial preference when both are equally suitable and there is no current eligible receiver. GPS1 or
+          GPS2 uses only that receiver; OFF deselects GPS (the FMS then uses DME/DME, VOR/DME or dead reckoning). AeroLink
+          simulator policy. {lastTransfer?.kind === "TRANSFER" ? `Last transfer: ${lastTransfer.from} to ${lastTransfer.to} (${lastTransfer.reason}) at ${lastTransfer.at.toISOString().slice(11, 19)}Z.` : ""}
         </small>
       </label>
     </section>

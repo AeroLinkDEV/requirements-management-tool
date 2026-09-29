@@ -38,6 +38,21 @@ export function navModeText(fms: ScriptedFms) {
   return fms.navState.mode === "GPS" && chosen !== null ? `GPS${chosen + 1}` : fms.navState.mode;
 }
 
+/**
+ * The FMS's current GPS source as NAV OPTIONS shows it under GPS NAV, and the other receiver: available (STBY) or not
+ * usable (FAIL). A manual choice that is not usable shows as failed, never replaced by the other.
+ */
+export function gpsSourceLine(fms: ScriptedFms): Line {
+  if (!fms.gpsNavSelected) return { left: medium("DESELECTED", "amber") };
+  const { assessed, chosen } = fms.gpsStatus, choice = fms.gpsReceiverChoice;
+  const own = choice === "AUTO" ? chosen : choice === "GPS1" ? 0 : 1;
+  const other = own === 0 ? 1 : 0;
+  const status = (index: number) => (assessed[index]?.usable ? `GPS${index + 1} STBY` : `GPS${index + 1} FAIL`);
+  const source = own === null ? medium("AUTO NONE", "amber")
+    : chosen === own ? medium(`${choice === "AUTO" ? "AUTO " : ""}GPS${own + 1}`, "green") : medium(`GPS${own + 1} FAIL`, "amber");
+  return { left: source, right: medium(status(other), assessed[other]?.usable ? "white" : "amber") };
+}
+
 /** GPS NAV on NAV OPTIONS steps through AUTO, GPS1, GPS2 and off. */
 const GPS_NAV_CYCLE: (GpsChoice | "OFF")[] = ["AUTO", "GPS1", "GPS2", "OFF"];
 
@@ -90,14 +105,18 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
         caption(" NAVAID INHIBIT"),
         { left: a ? { text: a } : dashes(4), center: b ? { text: b } : dashes(4), right: c ? { text: c } : dashes(4) },
         undefined,
-        undefined,
+        { center: small("DELETE NAVAID TO RESTORE", "green") },
         caption(" GPS NAV"),
         { left: [{ text: "<", color: "cyan" }, ...GPS_NAV_CYCLE.flatMap((option, i) => {
           const on = option === (fms.gpsNavSelected ? fms.gpsReceiverChoice : "OFF");
           return [...(i ? [{ text: "/", color: "white" as const }] : []), { text: option, color: on ? "green" as const : "white" as const, size: on ? "large" as const : "small" as const }];
         })] },
-        undefined, undefined, undefined,
-        { center: small("DELETE NAVAID TO RESTORE", "green") },
+        // The source the FMS navigates on now, and the note on AUTO: it keeps the current suitable receiver; GPS1 is the
+        // initial preference only when both are equally suitable and there is no current one (FMS_TEST_BENCH.md).
+        caption(" FMS SOURCE", "OTHER "),
+        gpsSourceLine(fms),
+        { left: small("AUTO KEEPS SUITABLE RCVR") },
+        { left: small("GPS1 INITIAL IF EQUAL") },
         { left: dashes(24) },
         { left: prompt("<NAV STATUS") },
       ];

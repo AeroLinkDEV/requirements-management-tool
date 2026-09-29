@@ -20,6 +20,9 @@ export const ALERTS: readonly AlertDefinition[] = [
   { text: "ENTER POS/DATE/TIME", meaning: "Position, date and time must be initialised" },
   { text: "FMS DEGRADED", meaning: "The FMS is operating with reduced capability" },
   { text: "FUEL RESERVE", meaning: "Fuel on board has reached the reserve quantity" },
+  // Not in the CMA-9000 list: one receiver may no longer be navigated on, whatever the FMS does about it (lost redundancy).
+  { text: "GPS1 NOT USABLE", meaning: "(Laboratory) GPS 1 may no longer be navigated on; GPS redundancy is lost" },
+  { text: "GPS2 NOT USABLE", meaning: "(Laboratory) GPS 2 may no longer be navigated on; GPS redundancy is lost" },
   { text: "GPS NAV LOST", meaning: "GPS can no longer be used for navigation; the FMS dead reckons" },
   { text: "GPS POS UNCERTAIN", meaning: "GPS position integrity cannot be assured" },
   // Not in the CMA-9000 list: a laboratory alert for the bench's GPS1/GPS2 compare (gpsSensors.ts GPS_DISAGREE_NM).

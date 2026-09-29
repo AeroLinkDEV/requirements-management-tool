@@ -10,6 +10,7 @@ import { setUpKbtvRnav15 } from '../src/fmsCdu/kbtvDemo'
 import { runHeadless } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { screenText } from '../src/fmsCdu/screen'
 
 // Approach-aware AUTO receiver selection (gpsSensors.ts AutoSelection): the AeroLink simulator policy decided on
 // 29 September, cases 1 to 6, no switch back, no automatic recapture, and no approach on an unqualified change of
@@ -317,4 +318,189 @@ test('eligibility needs the executed approach sent, and an unqualified change di
   expect(selection.choose(input(crc)).qualified).toBe(false)
   // A different approach executed: qualified again.
   expect(selection.choose(input(crc ^ 1)).qualified).toBe(true)
+})
+
+// ------------------------------------------------------------------ retention in every phase (Astra option A), presentation, log and alerts
+
+/** The demonstration route en route, stepped in quarter seconds, with the GPS stimulus and the CDU. */
+const enRoute = () => {
+  let now = START
+  const fms = new ScriptedFms(() => new Date(now))
+  const sim = new FlightSimulator(fms)
+  const fly = (seconds: number) => { for (let i = 0; i < seconds * 4; i += 1) { now += 250; sim.step(0.25) } }
+  const gps = (receiver: 1 | 2, op: GpsOp) => expect(stimulusFor(fms).apply(receiver - 1, op)).toBe(true)
+  const alerts = () => fms.recallList.map(message => message.text)
+  /** A receiver's fault cleared: it restarts (self test, initialization, acquisition) before it is usable again. */
+  const recover = (receiver: 1 | 2) => {
+    for (let s = 0; s < 300 && !fms.gpsStatus.assessed[receiver - 1].usable; s += 1) fly(1)
+    expect(fms.gpsStatus.assessed[receiver - 1].usable, `GPS${receiver} usable again`).toBe(true)
+  }
+  const log = () => (fms.gpsSelectionLog ?? []).map(event => (event.kind === 'TRANSFER' ? `TRANSFER ${event.from}>${event.to} ${event.reason}` : `${event.kind} ${event.receiver} ${event.reason}`))
+  fly(1)
+  return { fms, sim, fly, gps, alerts, log, recover }
+}
+type EnRoute = ReturnType<typeof enRoute>
+/** GPS 1 failed and recovered: GPS 2 is the current receiver, GPS 1 available. */
+const onGps2 = (bench: EnRoute = enRoute()) => {
+  bench.gps(1, { op: 'fault', fault: 'RECEIVER', on: true })
+  bench.fly(5)
+  bench.gps(1, { op: 'fault', fault: 'RECEIVER', on: false })
+  bench.recover(1)
+  bench.fly(5)
+  return bench
+}
+const navOptions = (fms: ScriptedFms) => {
+  for (const key of ['INIT_REF', 'NEXT', 'LSK5R', 'LSK6R'] as const) fms.press(key)
+  const lines = screenText(fms.screen())
+  expect(lines[0]).toMatch(/^NAV OPTIONS/)
+  return { lines, cells: fms.screen() }
+}
+
+test('the initial choice is GPS1, and it is neither a transfer nor annunciated', () => {
+  const { fms, alerts, log } = enRoute()
+  expect(fms.gpsStatus.chosen).toBe(0)
+  expect(log()).toEqual([])
+  expect(alerts()).toEqual([])
+})
+
+test('a recovery is logged as its own event, not a transfer, and moves nothing', () => {
+  const bench = enRoute()
+  bench.gps(1, { op: 'fault', fault: 'RECEIVER', on: true })
+  bench.fly(5)
+  bench.gps(1, { op: 'fault', fault: 'RECEIVER', on: false })
+  bench.recover(1)
+  bench.fly(5)
+  expect(bench.fms.gpsStatus.chosen).toBe(1)
+  expect(bench.log()).toEqual([
+    'RECOVERED GPS1 USABLE AGAIN',
+    'TRANSFER GPS1>GPS2 GPS1 NOT USABLE: 273 MODE FAULT',
+    'LOST GPS1 273 MODE FAULT',
+  ])
+})
+
+test('no alert for keeping a healthy GPS2 after GPS1 recovers; the failure itself was annunciated', () => {
+  const bench = enRoute()
+  bench.gps(1, { op: 'fault', fault: 'RECEIVER', on: true })
+  bench.fly(5)
+  expect(bench.alerts()).toEqual(['GPS1 NOT USABLE'])
+  bench.gps(1, { op: 'fault', fault: 'RECEIVER', on: false })
+  bench.recover(1)
+  bench.fly(30)
+  expect(bench.fms.gpsStatus.chosen).toBe(1)
+  expect(bench.alerts()).toEqual(['GPS1 NOT USABLE'])
+})
+
+test('a later GPS2 failure hands the source back to GPS1: retention is not a lock', () => {
+  const bench = onGps2()
+  bench.gps(2, { op: 'fault', fault: 'STOP_TRANSMITTING', on: true })
+  expect(bench.fms.gpsStatus.chosen).toBe(0)
+  expect(bench.log()[0]).toBe('TRANSFER GPS2>GPS1 GPS2 NOT USABLE: NOT TRANSMITTING')
+  expect(bench.alerts()).toContain('GPS2 NOT USABLE')
+  expect(bench.fms.navSourceLog[0].source).toBe('GPS1')
+})
+
+test('both lost, then GPS2 back first: GPS2 is taken (no current receiver), and GPS1 back later does not take over', () => {
+  const bench = enRoute()
+  bench.gps(1, { op: 'fault', fault: 'STOP_TRANSMITTING', on: true })
+  bench.gps(2, { op: 'fault', fault: 'STOP_TRANSMITTING', on: true })
+  expect(bench.fms.gpsStatus.chosen).toBeNull()
+  bench.gps(2, { op: 'fault', fault: 'STOP_TRANSMITTING', on: false })
+  bench.recover(2)
+  expect(bench.fms.gpsStatus.chosen).toBe(1)
+  expect(bench.log().slice(0, 2)).toEqual(['TRANSFER NONE>GPS2 NO CURRENT RECEIVER', 'RECOVERED GPS2 USABLE AGAIN'])
+  bench.gps(1, { op: 'fault', fault: 'STOP_TRANSMITTING', on: false })
+  bench.recover(1)
+  bench.fly(10)
+  expect(bench.fms.gpsStatus.chosen).toBe(1)
+})
+
+test('equally suitable is not equally accurate: a worse but adequate HFOM and HIL on GPS2 do not move the source', () => {
+  const bench = onGps2()
+  // Worse than GPS1's by far, and still within the alert limit of every phase flown here.
+  bench.gps(2, { op: 'override', label: '247', kind: 'FORCE', amount: 0.25 })
+  bench.gps(2, { op: 'override', label: '130', kind: 'FORCE', amount: 0.28 })
+  bench.fly(10)
+  expect(bench.fms.gpsStatus.assessed[1]).toMatchObject({ usable: true, hil: 0.28 })
+  expect(bench.fms.gpsStatus.assessed[1].hil!).toBeGreaterThan(5 * bench.fms.gpsStatus.assessed[0].hil!)
+  expect(bench.fms.gpsStatus.chosen).toBe(1)
+})
+
+test('a flight phase change never resets the source to GPS1, and an approach both receivers support stays on GPS2', () => {
+  const bench = onGps2()
+  const { fms } = bench
+  fms.selectProcedure('APPROACH', 'R24R')
+  fms.press('EXEC')
+  const phases = new Set([fms.flightPhase])
+  for (let s = 0; s < 3000 && fms.flightPhase !== 'APPROACH'; s += 1) {
+    bench.fly(1)
+    phases.add(fms.flightPhase)
+    expect(fms.gpsStatus.chosen, `${fms.flightPhase} at ${s} s`).toBe(1)
+  }
+  expect(phases).toEqual(new Set(['EN ROUTE', 'TERMINAL', 'APPROACH']))
+  bench.fly(30)
+  expect(fms.gpsStatus.chosen).toBe(1)
+  expect(bench.log().filter(line => line.startsWith('TRANSFER'))).toHaveLength(1)
+})
+
+test('the CDU shows the current source on NAV OPTIONS, the other receiver available or failed, and the AUTO note', () => {
+  const bench = enRoute()
+  let { lines } = navOptions(bench.fms)
+  expect(lines[7]).toMatch(/^ FMS SOURCE\s+OTHER $/)
+  expect(lines[8]).toMatch(/^AUTO GPS1\s+GPS2 STBY$/)
+  expect(lines[9].trimEnd()).toBe('AUTO KEEPS SUITABLE RCVR')
+  expect(lines[10].trimEnd()).toBe('GPS1 INITIAL IF EQUAL')
+  for (const line of lines) expect(line.length).toBeLessThanOrEqual(24)
+  bench.gps(1, { op: 'fault', fault: 'RECEIVER', on: true })
+  ;({ lines } = navOptions(bench.fms))
+  expect(lines[8]).toMatch(/^AUTO GPS2\s+GPS1 FAIL$/)
+  bench.gps(1, { op: 'fault', fault: 'RECEIVER', on: false })
+  bench.recover(1)
+  ;({ lines } = navOptions(bench.fms))
+  expect(lines[8]).toMatch(/^AUTO GPS2\s+GPS1 STBY$/)
+  // A manual choice that is not usable shows as failed, in amber, and is never replaced by the other receiver.
+  bench.fms.selectGpsReceiver('GPS1')
+  bench.gps(1, { op: 'fault', fault: 'RECEIVER', on: true })
+  const shown = navOptions(bench.fms)
+  expect(shown.lines[8]).toMatch(/^GPS1 FAIL\s+GPS2 STBY$/)
+  expect(shown.cells[8][0].color).toBe('amber')
+  expect(bench.fms.gpsStatus.chosen).toBeNull()
+  expect(bench.alerts()).toEqual(expect.arrayContaining(['GPS1 NOT USABLE', 'GPS NAV LOST']))
+  // AUTO with neither receiver usable: no source, said so in amber.
+  bench.fms.selectGpsReceiver('AUTO')
+  bench.gps(2, { op: 'fault', fault: 'RECEIVER', on: true })
+  const none = navOptions(bench.fms)
+  expect(none.lines[8]).toMatch(/^AUTO NONE\s+GPS1 FAIL$/)
+  expect(none.cells[8][0].color).toBe('amber')
+})
+
+test('a transfer never suppresses the failure: GPS1 failing on the approach is annunciated as well as the transfer', () => {
+  const bench = onFinal()
+  bench.gps(1, { op: 'fault', fault: 'RECEIVER', on: true })
+  expect(bench.fms.gpsStatus.chosen).toBe(1)
+  expect(bench.alerts()).toEqual(expect.arrayContaining(['APPR ON GPS2', 'GPS1 NOT USABLE']))
+  expect(bench.fms.gpsSelectionLog?.[0]).toMatchObject({ kind: 'TRANSFER', from: 'GPS1', to: 'GPS2', reason: 'GPS1 NOT USABLE: 273 MODE FAULT' })
+  expectApproachContinuesOn(bench, 1)
+})
+
+test('a transfer never suppresses an integrity alert: GPS1 over its alert limit raises GPS POS UNCERTAIN while GPS2 is used', () => {
+  const bench = enRoute()
+  bench.gps(1, { op: 'override', label: '130', kind: 'FORCE', amount: 9 })
+  expect(bench.fms.gpsStatus.chosen).toBe(1)
+  expect(bench.alerts()).toEqual(expect.arrayContaining(['GPS POS UNCERTAIN', 'GPS1 NOT USABLE']))
+  expect(bench.log()[0]).toBe('TRANSFER GPS1>GPS2 GPS1 NOT USABLE: HIL 9.00 > HAL 1.00')
+})
+
+test('a crew change from a failed manual receiver to AUTO is logged as the crew\'s, not annunciated as an approach transfer', () => {
+  const bench = setup()
+  bench.fms.selectGpsReceiver('GPS1')
+  bench.fly(1)
+  // Before capture, the approach armed: GPS 1, chosen by hand, fails; GPS 2 stays eligible for the approach.
+  bench.gps(1, { op: 'fault', fault: 'RECEIVER', on: true })
+  bench.fly(3)
+  expect(bench.fms.gpsStatus.chosen).toBeNull()
+  expect(bench.sim.approachMode).toBe('ARMED')
+  bench.fms.selectGpsReceiver('AUTO')
+  expect(bench.fms.gpsStatus.chosen).toBe(1)
+  expect(bench.alerts()).not.toContain('APPR ON GPS2')
+  expect(bench.fms.gpsSelectionLog[0]).toMatchObject({ kind: 'TRANSFER', from: 'NONE', to: 'GPS2', reason: 'GPS NAV AUTO' })
 })

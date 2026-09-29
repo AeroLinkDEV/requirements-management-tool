@@ -12,7 +12,7 @@ import {
 import { Constellation } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput } from "./gps";
 import {
-  ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, HAL_NM, approachAuthority, approachWords, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
+  ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
   type GpsChoice,
 } from "./gpsSensors";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type StoredRoute } from "./navData";
@@ -153,6 +153,7 @@ export class ScriptedFms implements CduBackend {
   /** AUTO receiver selection, approach-aware (gpsSensors.ts, the AeroLink simulator policy), and its last verdict. */
   private autoSelection = new AutoSelection();
   private gpsSelection = { qualified: true, refused: "" };
+  private selectionLog = new SelectionLog();
   /** The approach selection last sent to the receivers (its path identifier and CRC), so it is sent once per change. */
   private sentApproach: string | null = null;
   /** The FAS block last sent, for the final approach course the GPS deviations are measured from. */
@@ -627,6 +628,10 @@ export class ScriptedFms implements CduBackend {
     this.gpsSelection = { qualified: selection.qualified, refused: selection.refused };
     // A qualified approach transfer is annunciated (AC 20-138D Change 2 §21-2.2(g)); the nav source log records it too.
     if (selection.transferred && chosen !== null) this.alert(alert(`APPR ON GPS${chosen + 1}`));
+    // A receiver lost is annunciated whether or not the other takes over: a transfer never hides the failure or the lost
+    // redundancy. Its recovery is logged, and by itself changes nothing.
+    const choice = this.gpsSelected ? this.gpsChoice : "OFF";
+    for (const index of this.selectionLog.update(this.now, assessed, chosen, choice, selection.transferred)) if (this.gpsSelected) this.alert(alert(`GPS${index + 1} NOT USABLE`));
     this.gpsAssessment = { assessed, chosen };
     return { assessed, chosen, integrityLost: order.some(index => assessed[index].reason === "INTEGRITY") };
   }
@@ -681,6 +686,8 @@ export class ScriptedFms implements CduBackend {
   get gpsReceiverChoice(): GpsChoice { return this.gpsChoice; }
   /** Whether the approach may be flown on the selected receiver after the last source change, and why a transfer was refused. */
   get gpsApproachSource() { return this.gpsSelection; }
+  /** Receivers lost and recovered, and each transfer of the FMS's GPS source with its reason, newest first. */
+  get gpsSelectionLog() { return this.selectionLog.entries; }
   get navSourceLog(): readonly { at: Date; source: string }[] { return this.sourceLog; }
 
   /** GPS NAV (NAV OPTIONS): AUTO, one receiver chosen by hand (no fallback to the other), or GPS deselected. */
