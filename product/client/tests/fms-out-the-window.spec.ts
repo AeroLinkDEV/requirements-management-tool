@@ -1,6 +1,6 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import {
-  AIRCRAFT_PARTS, CHASE_ABOVE, CHASE_BEHIND, FT, TILE_PIXELS, WATER, ancestorOf, blendAircraft, cameraPose, decodeTerrarium, pixelMetres, rampColour, routeHeights,
+  AIRCRAFT_PARTS, CHASE_ABOVE, CHASE_BEHIND, FT, HOVER_LOOK_DOWN, TILE_PIXELS, WATER, ancestorOf, blendAircraft, cameraPose, decodeTerrarium, pixelMetres, rampColour, routeHeights,
   sampleHeights, shadeTile, tileLatitude, type AircraftSample,
 } from '../src/fmsCdu/outTheWindow'
 
@@ -117,17 +117,54 @@ test('the route line is drawn at each constraint, and holds the last altitude be
   expect(routeHeights([null, 4000, null, 2500], 1500)).toEqual([1500 * FT, 4000 * FT, 4000 * FT, 2500 * FT])
 })
 
-test('the chase aircraft is a symmetric twin with its span, fuselage length and a T-tail on top of the fin', () => {
+test('the chase aircraft is a helicopter: a 14.6 m rotor disc over the cabin, a tail rotor on the boom, skids beneath', () => {
   const part = (name: string) => AIRCRAFT_PARTS.find(entry => entry.name === name)!
-  const wing = part('wing'), fuselage = part('fuselage'), fin = part('fin'), tailplane = part('tailplane')
-  expect(wing.size[1]).toBeCloseTo(15.5, 6)
-  expect(fuselage.size[0] * 2).toBeCloseTo(15.6, 6)
-  // Every part is centred on the aircraft's centreline, or has a mirror image across it.
-  for (const entry of AIRCRAFT_PARTS) {
+  const rotor = part('main rotor'), cabin = part('cabin'), boom = part('tail boom'), tailRotor = part('tail rotor')
+  expect(rotor.size[0] * 2).toBeCloseTo(14.6, 6)
+  expect(rotor.size[1]).toBe(rotor.size[0])
+  // The main rotor turns about the reference point (the mast), clear of every part under its disc; the rotors alone are
+  // translucent. (The fin, aft of the disc, may stand higher.)
+  expect(rotor.offset.slice(0, 2)).toEqual([0, 0])
+  for (const entry of AIRCRAFT_PARTS.filter(other => other !== rotor && Math.hypot(other.offset[0], other.offset[1]) < rotor.size[0])) {
+    const top = entry.offset[2] + (entry.shape === 'box' ? entry.size[2] / 2 : entry.size[2])
+    expect(top, entry.name).toBeLessThan(rotor.offset[2])
+  }
+  expect(AIRCRAFT_PARTS.filter(entry => entry.alpha !== undefined).map(entry => entry.name).sort()).toEqual(['main rotor', 'tail rotor'])
+  // The tail rotor is at the aft end of the boom, beyond the rotor disc, turning in the vertical plane.
+  expect(tailRotor.offset[0]).toBeLessThan(boom.offset[0] - boom.size[0] + 0.5)
+  expect(-tailRotor.offset[0]).toBeGreaterThan(rotor.size[0])
+  expect(tailRotor.size[1]).toBeLessThan(tailRotor.size[2] / 10)
+  // The skids are the lowest parts, below the cabin, and every part but the tail rotor mirrors across the centreline.
+  const skids = AIRCRAFT_PARTS.filter(entry => entry.name.endsWith('skid'))
+  expect(skids).toHaveLength(2)
+  for (const skid of skids) expect(skid.offset[2]).toBeLessThan(cabin.offset[2] - cabin.size[2])
+  for (const entry of AIRCRAFT_PARTS.filter(other => other !== tailRotor)) {
     const mirrored = AIRCRAFT_PARTS.some(other => other.offset[1] === -entry.offset[1] && other.offset[0] === entry.offset[0] && other.size.every((value, i) => value === entry.size[i]))
     expect(entry.offset[1] === 0 || mirrored, entry.name).toBe(true)
   }
-  // The tailplane sits at the top of the fin, aft of the wing.
-  expect(Math.abs(tailplane.offset[2] - (fin.offset[2] + fin.size[2] / 2))).toBeLessThan(0.2)
-  expect(fin.offset[0]).toBeLessThan(wing.offset[0])
+})
+
+test('the cameras follow the heading, not the track: a crab or a sideways drift looks along the nose', () => {
+  // Heading 090 while the ground track is anything else: the air data carries no track at all here.
+  const crabbed = { ...level, heading: 60 }
+  expect(cameraPose(crabbed, 'cockpit', 'hud').heading).toBeCloseTo((60 * Math.PI) / 180, 9)
+  const chase = cameraPose(crabbed, 'chase', 'hud')
+  expect(chase.heading).toBeCloseTo((60 * Math.PI) / 180, 9)
+  // The chase camera sits behind along the heading (south-west of the aircraft for 060°).
+  expect(chase.latitude).toBeLessThan(crabbed.position.lat)
+  expect(chase.longitude).toBeLessThan(crabbed.position.lon)
+  // In the local frame (a degree of longitude is cos(latitude) of a degree of latitude), exactly back along 060°.
+  const north = crabbed.position.lat - chase.latitude
+  const east = (crabbed.position.lon - chase.longitude) * Math.cos((crabbed.position.lat * Math.PI) / 180)
+  expect((Math.atan2(east, north) * 180) / Math.PI).toBeCloseTo(60, 6)
+})
+
+test('with the hover data shown, the cockpit camera looks further down; the flag survives blending between ticks', () => {
+  const cruising = cameraPose(level, 'cockpit', 'hud'), hovering = cameraPose({ ...level, hoverData: true }, 'cockpit', 'hud')
+  expect((cruising.pitch - hovering.pitch) * (180 / Math.PI)).toBeCloseTo(HOVER_LOOK_DOWN, 9)
+  expect(hovering.pitch).toBeLessThan(cameraPose({ ...level, hoverData: true }, 'cockpit', 'panel').pitch)
+  // It changes nothing outside the cockpit.
+  expect(cameraPose({ ...level, hoverData: true }, 'chase', 'hud')).toEqual(cameraPose(level, 'chase', 'hud'))
+  expect(blendAircraft(level, { ...level, hoverData: true }, 0.4).hoverData).toBe(true)
+  expect(blendAircraft({ ...level, hoverData: true }, level, 0.4).hoverData).toBeUndefined()
 })

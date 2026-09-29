@@ -47,7 +47,9 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
   // The scene reads this every frame; renders only move its target.
   const live = useRef<Live | null>(null);
   useLayoutEffect(() => {
-    const sample: AircraftSample = { position: air.position, altitude: air.altitude, heading: air.heading, pitch: air.pitch, bank: air.bank };
+    // The helicopter profile's hover-data flag, where the aircraft data carries one.
+    const hoverData = (air as AircraftData & { helicopter?: { hoverData?: boolean } | null }).helicopter?.hoverData === true;
+    const sample: AircraftSample = { position: air.position, altitude: air.altitude, heading: air.heading, pitch: air.pitch, bank: air.bank, hoverData };
     const previous = live.current, now = performance.now();
     if (!previous) { live.current = { from: sample, to: sample, at: now, interval: 250, view, layout }; return; }
     if (!sameSample(previous.to, sample)) {
@@ -107,7 +109,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
 }
 
 const sameSample = (a: AircraftSample, b: AircraftSample) =>
-  a.position.lat === b.position.lat && a.position.lon === b.position.lon && a.altitude === b.altitude && a.heading === b.heading && a.bank === b.bank && a.pitch === b.pitch;
+  a.position.lat === b.position.lat && a.position.lon === b.position.lon && a.altitude === b.altitude && a.heading === b.heading && a.bank === b.bank && a.pitch === b.pitch && a.hoverData === b.hoverData;
 
 const three = (degrees: number) => String(Math.round(degrees) % 360 || 360).padStart(3, "0");
 
@@ -201,30 +203,35 @@ async function startScene(
   const labels = scene.primitives.add(new Cesium.LabelCollection());
   const magenta = Cesium.Color.fromCssColorString(ROUTE_MAGENTA);
 
-  // The aircraft seen from outside. Behind it (chase), a model from boxes and ellipsoids (outTheWindow.ts), placed and
-  // oriented every frame; from 30,000 ft above (map), where a 16 m model would be a dot, a plan-view symbol.
+  // The aircraft seen from outside. Behind it (chase), a helicopter from boxes and ellipsoids (outTheWindow.ts), placed
+  // and oriented every frame: the opaque body and the translucent rotor discs are two primitives, since translucency
+  // is a property of a primitive's appearance. From 30,000 ft above (map), where the model would be a dot, a plan-view
+  // symbol.
   const vertexFormat = Cesium.PerInstanceColorAppearance.VERTEX_FORMAT;
-  const model = scene.primitives.add(new Cesium.Primitive({
-    geometryInstances: AIRCRAFT_PARTS.map(part => new Cesium.GeometryInstance({
+  const modelPart = (translucent: boolean) => scene.primitives.add(new Cesium.Primitive({
+    geometryInstances: AIRCRAFT_PARTS.filter(part => (part.alpha !== undefined) === translucent).map(part => new Cesium.GeometryInstance({
       geometry: part.shape === "box"
         ? Cesium.BoxGeometry.fromDimensions({ dimensions: new Cesium.Cartesian3(...part.size), vertexFormat })
         : new Cesium.EllipsoidGeometry({ radii: new Cesium.Cartesian3(...part.size), vertexFormat }),
       modelMatrix: Cesium.Matrix4.fromTranslation(new Cesium.Cartesian3(...part.offset)),
-      attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(Cesium.Color.fromBytes(...part.colour)) },
+      attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(Cesium.Color.fromBytes(...part.colour, Math.round((part.alpha ?? 1) * 255))) },
       id: part.name,
     })),
-    appearance: new Cesium.PerInstanceColorAppearance({ closed: true, translucent: false }),
+    appearance: new Cesium.PerInstanceColorAppearance({ closed: true, translucent }),
     asynchronous: false,
     show: false,
   }));
+  const models = [modelPart(false), modelPart(true)];
   const orientation = new Cesium.HeadingPitchRoll();
+  // The plan-view symbol: the rotor disc, the fuselage and the tail boom, nose up.
   const symbol = canvas(48);
   const pen = symbol.getContext("2d")!;
-  pen.translate(24, 24);
+  pen.translate(24, 22);
   pen.fillStyle = "#3ddc84"; pen.strokeStyle = "#05080b"; pen.lineWidth = 1.5;
-  pen.beginPath(); pen.moveTo(0, -20); pen.lineTo(4, -4); pen.lineTo(20, 4); pen.lineTo(20, 8); pen.lineTo(4, 5); pen.lineTo(3, 15);
-  pen.lineTo(8, 19); pen.lineTo(-8, 19); pen.lineTo(-3, 15); pen.lineTo(-4, 5); pen.lineTo(-20, 8); pen.lineTo(-20, 4); pen.lineTo(-4, -4);
-  pen.closePath(); pen.fill(); pen.stroke();
+  pen.beginPath(); pen.arc(0, 0, 17, 0, 2 * Math.PI); pen.globalAlpha = 0.35; pen.fill(); pen.globalAlpha = 1; pen.stroke();
+  pen.beginPath(); pen.ellipse(0, -1, 4.5, 8, 0, 0, 2 * Math.PI); pen.fill(); pen.stroke();
+  pen.beginPath(); pen.rect(-1.2, 6, 2.4, 14); pen.fill(); pen.stroke();
+  pen.beginPath(); pen.rect(-5, 18, 10, 2.5); pen.fill(); pen.stroke();
   const ownship = scene.primitives.add(new Cesium.BillboardCollection()).add({
     image: symbol, width: 40, height: 40, disableDepthTestDistance: Number.POSITIVE_INFINITY, show: false,
     alignedAxis: Cesium.Cartesian3.UNIT_Z,
@@ -247,13 +254,15 @@ async function startScene(
     ownship.show = state.view === "map";
     ownship.position = at;
     ownship.rotation = -Cesium.Math.toRadians(air.heading);
-    model.show = state.view === "chase";
-    if (model.show) {
+    const chase = state.view === "chase";
+    for (const model of models) model.show = chase;
+    if (chase) {
       // The model's +x is forward; Cesium's heading turns +x from east, so north-up heading is a quarter turn less.
       orientation.heading = Cesium.Math.toRadians(air.heading - 90);
       orientation.pitch = Cesium.Math.toRadians(air.pitch);
       orientation.roll = Cesium.Math.toRadians(air.bank);
-      model.modelMatrix = Cesium.Transforms.headingPitchRollToFixedFrame(at, orientation);
+      const placed = Cesium.Transforms.headingPitchRollToFixedFrame(at, orientation);
+      for (const model of models) model.modelMatrix = placed;
     }
 
     // The flight path marker sits where the aircraft is going: a point 2 NM along the flight path, projected.

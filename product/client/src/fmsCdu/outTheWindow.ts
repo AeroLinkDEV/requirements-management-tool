@@ -107,17 +107,19 @@ const rad = (deg: number) => (deg * Math.PI) / 180;
 /**
  * Where the camera is for a view, in degrees and metres in, radians out.
  *
- * Cockpit: the pilot's eye at the aircraft, looking along the heading, pitched by the flight-path angle (the
- * point-mass model has no attitude of its own) and down a little so the ground ahead fills most of the window, rolled
- * with the bank. The field of view spans the window's width, so the panel layout's short, wide window sees less
- * vertically and looks down less to keep the horizon in it. Chase: close behind and a little above the aircraft
- * model, level, so the aircraft fills a good part of the view and its bank and pitch show. Map: straight down from
- * altitude, heading up.
+ * Cockpit: the pilot's eye at the aircraft, along the aircraft's heading (not its track, so a crab or a sideways
+ * drift shows the ground sliding past), pitched and rolled with the aircraft data's pitch and bank, and down a little
+ * so the ground ahead fills most of the window. The field of view spans the window's width, so the panel layout's
+ * short, wide window sees less vertically and looks down less to keep the horizon in it; in the hover, where the
+ * pilot watches the ground close ahead, it looks down further. Chase: close behind the aircraft along its heading
+ * and a little above, level, so the model fills a good part of the view and its attitude shows. Map: straight down
+ * from altitude, heading up.
  */
 export function cameraPose(air: AircraftSample, view: View, layout: Layout): CameraPose {
   const { lat, lon } = air.position, height = air.altitude * FT;
   if (view === "cockpit") {
-    return { longitude: lon, latitude: lat, height, heading: rad(air.heading), pitch: rad(air.pitch - (layout === "panel" ? 3 : 5)), roll: rad(air.bank) };
+    const down = (layout === "panel" ? 3 : 5) + (air.hoverData ? HOVER_LOOK_DOWN : 0);
+    return { longitude: lon, latitude: lat, height, heading: rad(air.heading), pitch: rad(air.pitch - down), roll: rad(air.bank) };
   }
   if (view === "chase") {
     const back = CHASE_BEHIND / 110_540; // metres behind, in degrees of latitude
@@ -131,31 +133,48 @@ export function cameraPose(air: AircraftSample, view: View, layout: Layout): Cam
 
 /** The chase camera's place: metres behind the aircraft along its heading, and above it. */
 export const CHASE_BEHIND = 55, CHASE_ABOVE = 10;
+/** How much further down the cockpit camera looks while the hover data is shown, degrees. */
+export const HOVER_LOOK_DOWN = 8;
 
 export type AircraftPart = {
   name: string;
   shape: "box" | "ellipsoid";
   /** A box's full dimensions or an ellipsoid's radii, metres: forward, left, up. */
   size: [number, number, number];
-  /** The part's centre from the aircraft's reference point, metres: forward, left, up. */
+  /** The part's centre from the aircraft's reference point (the rotor mast), metres: forward, left, up. */
   offset: [number, number, number];
   colour: [number, number, number];
+  /** Opacity, 0 … 1: the rotor discs are translucent, everything else opaque. */
+  alpha?: number;
 };
 
 /**
- * The aircraft seen in the chase view: a generic twin-engine business jet, about 16 m long and 15.5 m in span, built
- * from boxes and ellipsoids. It stands for "the aircraft" and is not any type the CMA-9000 is installed in.
+ * The aircraft seen in the chase view: a generic medium twin-engine helicopter built from boxes and ellipsoids, with
+ * a 14.6 m main rotor disc, a tail boom with a tail rotor on its left, and skids. The rotors are still, translucent
+ * discs. It stands for "the aircraft" and is not the AW189 or any other type the CMA-9000 is installed in.
  */
 export const AIRCRAFT_PARTS: AircraftPart[] = [
-  { name: "fuselage", shape: "ellipsoid", size: [7.8, 0.95, 0.95], offset: [0, 0, 0], colour: [236, 238, 240] },
-  { name: "wing", shape: "box", size: [2.4, 15.5, 0.22], offset: [0.4, 0, -0.35], colour: [196, 202, 210] },
-  { name: "tailplane", shape: "box", size: [1.3, 5.6, 0.16], offset: [-6.6, 0, 2.9], colour: [196, 202, 210] },
-  { name: "fin", shape: "box", size: [2.0, 0.18, 2.6], offset: [-6.3, 0, 1.7], colour: [23, 108, 99] },
-  { name: "left engine", shape: "ellipsoid", size: [1.3, 0.45, 0.45], offset: [-4.2, 1.45, 0.55], colour: [150, 156, 164] },
-  { name: "right engine", shape: "ellipsoid", size: [1.3, 0.45, 0.45], offset: [-4.2, -1.45, 0.55], colour: [150, 156, 164] },
+  { name: "cabin", shape: "ellipsoid", size: [3.3, 1.25, 1.15], offset: [0.9, 0, -0.2], colour: [236, 238, 240] },
+  { name: "engine deck", shape: "box", size: [3.0, 1.5, 0.6], offset: [0, 0, 1.0], colour: [196, 202, 210] },
+  { name: "mast", shape: "box", size: [0.3, 0.3, 0.6], offset: [0, 0, 1.55], colour: [90, 96, 104] },
+  { name: "main rotor", shape: "ellipsoid", size: [7.3, 7.3, 0.05], offset: [0, 0, 1.9], colour: [210, 214, 220], alpha: 0.3 },
+  { name: "tail boom", shape: "ellipsoid", size: [3.6, 0.35, 0.35], offset: [-5.0, 0, 0.45], colour: [236, 238, 240] },
+  { name: "stabiliser", shape: "box", size: [0.7, 2.6, 0.1], offset: [-7.3, 0, 0.55], colour: [196, 202, 210] },
+  { name: "fin", shape: "box", size: [1.1, 0.15, 1.7], offset: [-8.4, 0, 1.2], colour: [23, 108, 99] },
+  { name: "tail rotor", shape: "ellipsoid", size: [1.1, 0.04, 1.1], offset: [-8.5, 0.35, 1.45], colour: [60, 66, 72], alpha: 0.4 },
+  { name: "left skid", shape: "box", size: [4.4, 0.12, 0.12], offset: [0.4, 1.15, -1.6], colour: [70, 74, 80] },
+  { name: "right skid", shape: "box", size: [4.4, 0.12, 0.12], offset: [0.4, -1.15, -1.6], colour: [70, 74, 80] },
+  { name: "left front strut", shape: "box", size: [0.1, 0.1, 0.55], offset: [1.6, 1.05, -1.3], colour: [70, 74, 80] },
+  { name: "right front strut", shape: "box", size: [0.1, 0.1, 0.55], offset: [1.6, -1.05, -1.3], colour: [70, 74, 80] },
+  { name: "left rear strut", shape: "box", size: [0.1, 0.1, 0.55], offset: [-0.8, 1.05, -1.3], colour: [70, 74, 80] },
+  { name: "right rear strut", shape: "box", size: [0.1, 0.1, 0.55], offset: [-0.8, -1.05, -1.3], colour: [70, 74, 80] },
 ];
 
-export type AircraftSample = Pick<AircraftData, "position" | "altitude" | "heading" | "pitch" | "bank">;
+/**
+ * What the view needs of the aircraft. `hoverData` is the helicopter profile's "hover data on the display" flag
+ * (AircraftData.helicopter.hoverData), when the aircraft data carries it.
+ */
+export type AircraftSample = Pick<AircraftData, "position" | "altitude" | "heading" | "pitch" | "bank"> & { hoverData?: boolean };
 
 /**
  * The aircraft `fraction` (0 … 1) of the way from one simulation tick to the next. The simulation moves in quarter
@@ -171,6 +190,8 @@ export function blendAircraft(from: AircraftSample, to: AircraftSample, fraction
   return {
     position: { lat: mix(from.position.lat, to.position.lat), lon: ((((lon + 180) % 360) + 360) % 360) - 180 },
     altitude: mix(from.altitude, to.altitude), heading: angle(from.heading, to.heading), pitch: mix(from.pitch, to.pitch), bank: mix(from.bank, to.bank),
+    // A flag has no in-between: the newer tick's stands.
+    hoverData: to.hoverData,
   };
 }
 
