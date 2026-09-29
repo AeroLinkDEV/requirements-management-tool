@@ -47,7 +47,7 @@ test('the 87N mission is a valid library scenario on the helicopter profile', ()
 })
 
 test('the 87N offshore SAR mission, nominal run: search, mark, hover at the mark, TU-LAB, the RNAV 190 via HTO, the missed approach and the BEADS holds (plan §10)', () => {
-  const { runner, fms } = runHeadless(MISSION_87N_OFFSHORE_SAR)
+  const { runner, fms, sim } = runHeadless(MISSION_87N_OFFSHORE_SAR)
   const failures = runner.results.map((result, i) => ({ step: i + 1, ...result })).filter(result => result.status !== 'pass' && result.status !== 'done')
   expect(failures).toEqual([])
   expect(runner.outcome).toBe('passed')
@@ -55,6 +55,12 @@ test('the 87N offshore SAR mission, nominal run: search, mark, hover at the mark
   // (a climb out of the hover no longer tips the antennas to the horizon).
   expect(fms.recallList.map(message => message.text)).not.toContain('GPS NAV LOST')
   expect(fms.recallList.map(message => message.text)).toContain('END OF ROUTE')
+  // The HF at TIDUE left where its entry ended (ONCE), the go-around at CRANN, the BEADS hold left after one racetrack
+  // (MISSED-HOLD): in that order, each once.
+  const events = sim.modeEvents.filter(e => e.event === 'HOLD EXITED' || e.event === 'GO AROUND')
+  expect(events.map(e => e.event)).toEqual(['HOLD EXITED', 'GO AROUND', 'HOLD EXITED'])
+  expect(events[0].detail).toBe('TIDUE: 0 whole racetracks after the entry (EXIT TYPE ONCE)')
+  expect(events[2].detail).toBe('BEADS: 1 whole racetrack after the entry (EXIT TYPE MANUAL, missed approach)')
 })
 
 test('executing a hover procedure interrupts a search pattern in progress: the pattern stops steering (Stage D)', () => {
@@ -81,15 +87,24 @@ test('climbing out of a hover the modelled pitch stays within its limit, and bot
   setUp87nOffshoreSar(unit, sim)
   const ticks = (seconds: number, each?: () => void) => { for (let t = 0; t < seconds * 4; t++) { now += 250; sim.step(0.25); each?.() } }
   unit.placeAircraft({ position: offset(unit.truePosition, 0, 0.1), track: 230, altitude: 60 }, 'test: low over the sea')
+  // Hold 60 ft (the start state held 500), so the departure below climbs to its 200 ft.
+  expect(sim.engageAltitudeHold()).toBe(true)
   sim.selectSpeed(20)
   ticks(120)
   expect(sim.engageHover()).toBe(true)
   ticks(30)
+  expect(unit.radioHeight.value!).toBeLessThan(80)
   expect(sim.engageTransitionUp()).toBe(true)
   let steepest = 0
-  ticks(30, () => { steepest = Math.max(steepest, Math.abs(unit.attitude.pitch)) })
-  expect(steepest).toBeGreaterThan(0)
-  expect(steepest).toBeLessThanOrEqual(20)
+  ticks(30, () => {
+    steepest = Math.max(steepest, Math.abs(unit.attitude.pitch))
+    // Pitch is the air-relative flight-path angle over at least 30 kt, within 20 degrees (flight.ts).
+    const expected = Math.max(-20, Math.min(20, (Math.atan(unit.verticalSpeed / 60 / (Math.max(sim.tas, 30) * 1.68781)) * 180) / Math.PI))
+    expect(unit.attitude.pitch).toBeCloseTo(expected, 9)
+  })
+  // The climb out of the hover (about 500 fpm at 20 to 40 kt) is a few degrees nose-up, well inside the limit.
+  expect(steepest).toBeGreaterThan(3)
+  expect(steepest).toBeLessThan(15)
   expect(unit.recallList.map(message => message.text)).not.toContain('GPS1 NOT USABLE')
   expect(unit.recallList.map(message => message.text)).not.toContain('GPS2 NOT USABLE')
 })

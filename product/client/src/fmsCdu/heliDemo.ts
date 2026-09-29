@@ -221,10 +221,12 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
   variant("a3-ra-lost-in-td", "(a3) RA lost during TD at about 350 ft: ALT latched, TD pitch continues, TDN FUNCTION LOST", "(a3) RA lost during TD at about 350 ft: ALT latched, TD pitch continues, TDN FUNCTION LOST. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
     ...markAndActivate,
     { when: S, action: { kind: "expectAfcs", collective: "TD", pitch: "TD" }, within: 900 },
-    // TD descends from 500 ft at 500 fpm: about 350 ft after 18 s.
-    { when: after(18), action: { kind: "condition", condition: "raFail", on: true } },
+    // In the TD descent from 500 ft, at 350 ft (over the sea, MSL is the radio height): the window is checked, then the RA fails.
+    { when: { kind: "below", feet: 350 }, action: { kind: "expectAircraft", minAltitude: 330, maxAltitude: 350 } },
+    { when: S, action: { kind: "expectAfcs", collective: "TD", pitch: "TD" } },
+    { when: S, action: { kind: "condition", condition: "raFail", on: true } },
+    { when: S, action: { kind: "expectAlert", text: "TDN FUNCTION LOST", fresh: true }, within: 2 },
     { when: S, action: { kind: "expectAfcs", collective: "ALT", pitch: "TD" }, within: 2 },
-    { when: S, action: { kind: "expectAlert", text: "TDN FUNCTION LOST" }, within: 2 },
   ]),
   variant("a4-ra-lost-in-hover", "(a4) RA lost in the hover: ALT latched, HOV continues", "(a4) RA lost in the hover: ALT latched, HOV continues. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
     ...markAndActivate,
@@ -240,7 +242,10 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
     { when: after(35), action: { kind: "autopilot", heading: 230 } },
     // NAV armed late, within 0.6 NM of TDN while still about 0.4 NM off the final track: it captures and is still correcting.
     { when: { kind: "distance", waypoint: "TDN", nm: 0.6 }, action: { kind: "autopilot", lnav: true } },
-    { when: S, action: { kind: "expectAlert", text: "TDN NOT POSSIBLE" }, within: 60 },
+    { when: S, action: { kind: "expectAlert", text: "TDN NOT POSSIBLE", fresh: true }, within: 60 },
+    { when: S, action: { kind: "expectHover", refused: "TDN NOT POSSIBLE", reason: "OFF FINAL TRACK" } },
+    // Abeam TDN when refused: more than the 0.2 NM limit off it, and not far past it.
+    { when: S, action: { kind: "expectAircraft", near: "TDN", nearMetres: 835, minNearMetres: 371 } },
     { when: S, action: { kind: "expectAfcs", roll: "HDG" }, within: 2 },
   ]),
   variant("b2-tdn-high", "(b2) TDN reached 400 ft high: TDN DIST SHORT", "(b2) TDN reached 400 ft high: TDN DIST SHORT. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
@@ -256,15 +261,22 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
     { when: S, action: { kind: "gps", receiver: 2, stimulus: { op: "override", label: "166", kind: "FORCE", amount: 0, ssm: "FW" } } },
     { when: S, action: { kind: "expectAfcs", collective: "RHT", pitch: "ATT", roll: "ATT" }, within: 2 },
     { when: S, action: { kind: "wind", direction: 230, speed: 25 } },
-    // The truth drifts with the wind change while the modes report the loss.
+    // The truth drifts with the wind change while the modes report the loss: ATT holds the air velocity it had, so the
+    // extra 5 kt of wind carries the aircraft downwind (toward 050) at about 5 kt.
     { when: after(60), action: { kind: "expectAfcs", pitch: "ATT", roll: "ATT" } },
+    { when: S, action: { kind: "expectAircraft", minGroundSpeed: 4.5, maxGroundSpeed: 5.5, track: 50, trackTolerance: 10 } },
   ]),
   variant("d-early-toga", "(d) TOGA 1.5 NM before CRANN: the lateral path is kept to CRANN, then the missed approach", "(d) TOGA 1.5 NM before CRANN: the lateral path is kept to CRANN, then the missed approach. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
     { when: { kind: "distance", waypoint: "CRANN", nm: 1.5 }, action: { kind: "goAround" } },
     { when: S, action: { kind: "autopilot", altitude: 2000 } },
+    { when: S, action: { kind: "expectApproach", state: "OFF" }, within: 2 },
+    // 10 s later: climbing at the GA rate from 1,700 ft, still on the final course to CRANN under NAV.
     { when: after(10), action: { kind: "expectActive", waypoint: "CRANN" } },
+    { when: S, action: { kind: "expectAircraft", minAltitude: 1760, maxCrossTrack: 0.1 } },
     { when: S, action: { kind: "expectAfcs", roll: "NAV" } },
     { when: S, action: { kind: "expectActive", waypoint: "BEADS" }, within: 180 },
+    // Still climbing when the missed approach begins: the published turn comes only after the MAP.
+    { when: S, action: { kind: "expectAircraft", minAltitude: 1900 } },
   ], "87n-rnav190-final"),
   variant("e-direct-on-final", "(e) Crew direct-to during the final: immediate", "(e) Crew direct-to during the final: immediate. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
     { when: { kind: "distance", waypoint: "STAYS", nm: 1 }, action: { kind: "keys", keys: ["LEGS", "CHAR_B", "CHAR_E", "CHAR_A", "CHAR_D", "CHAR_S", "LSK1L", "EXEC"] } },
@@ -276,9 +288,14 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
     { when: S, action: { kind: "expectActive", waypoint: "87N" } },
     { when: S, action: { kind: "expectAfcs", roll: "NAV" }, within: 5 },
   ], "87n-rnav190-final"),
-  variant("g-integrity-on-final", "(g) GPS integrity lost on the final: GPS POS UNCERTAIN", "(g) GPS integrity lost on the final: GPS POS UNCERTAIN. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+  variant("g-integrity-on-final", "(g) GPS integrity lost on the final: GPS POS UNCERTAIN on GPS 1, then NO APPR INTEGRITY with GPS 2 too", "(g) GPS integrity lost on the final: GPS POS UNCERTAIN on GPS 1 with the FMS on GPS 2, then GPS NAV LOST and NO APPR INTEGRITY with GPS 2 too. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    // GPS 1 HIL beyond the approach HAL: GPS POS UNCERTAIN, and the FMS goes on on GPS 2, still LNAV.
     { when: { kind: "distance", waypoint: "STAYS", nm: 1 }, action: { kind: "gps", receiver: 1, stimulus: { op: "override", label: "130", kind: "FORCE", amount: 2 } } },
-    { when: S, action: { kind: "gps", receiver: 2, stimulus: { op: "override", label: "130", kind: "FORCE", amount: 2 } } },
-    { when: S, action: { kind: "expectAlert", text: "GPS POS UNCERTAIN" }, within: 10 },
+    { when: S, action: { kind: "expectAlert", text: "GPS POS UNCERTAIN", fresh: true }, within: 10 },
+    { when: S, action: { kind: "expectGpsSource", source: "GPS2" }, within: 10 },
+    // Then GPS 2 too: no receiver may be navigated on, GPS NAV LOST and NO APPR INTEGRITY.
+    { when: after(10), action: { kind: "gps", receiver: 2, stimulus: { op: "override", label: "130", kind: "FORCE", amount: 2 } } },
+    { when: S, action: { kind: "expectAlert", text: "GPS NAV LOST", fresh: true }, within: 10 },
+    { when: S, action: { kind: "expectAlert", text: "NO APPR INTEGRITY", fresh: true }, within: 10 },
   ], "87n-rnav190-final"),
 ]

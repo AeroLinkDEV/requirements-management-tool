@@ -368,3 +368,38 @@ test('a scenario names its aircraft profile and makes autopilot selections; both
   expect(scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 1, profile: 'jet', steps: [] })).toEqual([expect.stringMatching(/profile must be one of cma9000-s300-heli-civil, lab-airline-vnav/)])
   expect(scenarioProblems({ id: 'y', title: 'y', objective: '', maxSeconds: 1, steps: [{ when: { kind: 'start' }, action: { kind: 'autopilot' } }] }).join(' ')).toMatch(/autopilot needs at least one/)
 })
+
+test('a TOGA the FMS refuses is an error in the run, never a silent pass', () => {
+  // No approach in the demonstration route: nothing to go around onto.
+  const scenario: Scenario = {
+    id: 'toga-refused', title: 'TOGA refused', objective: '', maxSeconds: 5,
+    steps: [{ when: { kind: 'start' }, action: { kind: 'goAround' } }, { when: { kind: 'start' }, action: { kind: 'expectActive', waypoint: 'MUN' } }],
+  }
+  const { runner } = runHeadless(scenario)
+  expect(runner.outcome).toBe('error')
+  expect(runner.results[0]).toMatchObject({ status: 'error', actual: expect.stringContaining('TOGA refused') })
+})
+
+test('a fresh alert check counts only what was raised since the last action began', () => {
+  const run = (steps: Scenario['steps']) => runHeadless({ id: 'fresh', title: 'Fresh', objective: '', maxSeconds: 5, steps }).runner
+  const raise = { when: { kind: 'start' as const }, action: { kind: 'alert' as const, text: 'CHECK ANP' } }
+  const fresh = { when: { kind: 'start' as const }, action: { kind: 'expectAlert' as const, text: 'CHECK ANP', fresh: true } }
+  const other = { when: { kind: 'start' as const }, action: { kind: 'keys' as const, keys: ['PROG' as const] } }
+  expect(run([raise, fresh]).outcome).toBe('passed')
+  // Raised before a later action: not fresh any more; without fresh it still counts.
+  expect(run([raise, other, fresh]).results[2]).toMatchObject({ status: 'fail' })
+  expect(run([raise, other, { ...fresh, action: { kind: 'expectAlert', text: 'CHECK ANP' } }]).outcome).toBe('passed')
+  expect(scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 5, steps: [{ when: { kind: 'start' }, action: { kind: 'expectNoAlert', text: 'X', fresh: true } }] })).toEqual(['step 1: fresh applies only to expectAlert, true or false'])
+})
+
+test('below triggers, expectAircraft ranges and expectHover are validated', () => {
+  const problems = (action: unknown, when: unknown = { kind: 'start' }) => scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 5, steps: [{ when, action }] })
+  expect(problems({ kind: 'expectAircraft', minGroundSpeed: 4, track: 50 })).toEqual([])
+  expect(problems({ kind: 'expectAircraft' })).toEqual([expect.stringContaining('expectAircraft needs at least one of')])
+  expect(problems({ kind: 'expectAircraft', track: 400 })).toEqual(['step 1: expectAircraft track must be between 0 and 360'])
+  expect(problems({ kind: 'expectAircraft', maxCrossTrack: 0.1, nearMetres: 10 })).toEqual(['step 1: expectAircraft nearMetres and minNearMetres need near'])
+  expect(problems({ kind: 'expectHover' })).toEqual(['step 1: expectHover needs refused or reason'])
+  expect(problems({ kind: 'expectHover', reason: 'OFF FINAL TRACK' })).toEqual([])
+  expect(problems({ kind: 'expectActive', waypoint: 'MUN' }, { kind: 'below', feet: 350 })).toEqual([])
+  expect(problems({ kind: 'expectActive', waypoint: 'MUN' }, { kind: 'below' })).toEqual(['step 1: a below trigger needs feet between -1500 and 60000'])
+})

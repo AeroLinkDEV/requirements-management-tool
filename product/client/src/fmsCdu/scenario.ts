@@ -36,7 +36,9 @@ export type Trigger =
   | { kind: "distance"; waypoint: string; nm: number }
   | { kind: "active"; waypoint: string }
   /** This many seconds after the step before it finished: the timing inside a stage, wherever the stage began. */
-  | { kind: "after"; seconds: number };
+  | { kind: "after"; seconds: number }
+  /** When the aircraft is at or below this altitude, feet MSL (over the declared sea, its radio height). */
+  | { kind: "below"; feet: number };
 
 export type Action =
   | { kind: "keys"; keys: CduFunction[] }
@@ -57,13 +59,22 @@ export type Action =
   /** The autopilot's engaged mode on each axis (collective, pitch, roll), as the helicopter FMA shows them. */
   | { kind: "expectAfcs"; collective?: string; pitch?: string; roll?: string }
   /**
-   * The aircraft's state: ground speed at most `maxGroundSpeed` kt; radio height `radioHeight`, or altitude `altitude`
-   * (MSL), ± `heightTolerance` ft (10 by default); within `nearMetres` of the waypoint `near`. Each part given is checked.
+   * The aircraft's state; each part given is checked. Ground speed within [minGroundSpeed, maxGroundSpeed] kt; track
+   * within trackTolerance (5 by default) of track; radio height radioHeight, or altitude (MSL) altitude, ± heightTolerance
+   * ft (10 by default), and altitude within [minAltitude, maxAltitude]; within nearMetres (50 by default) of the waypoint
+   * near, and no nearer than minNearMetres; cross-track from the active leg at most maxCrossTrack NM.
    */
-  | { kind: "expectAircraft"; maxGroundSpeed?: number; radioHeight?: number; altitude?: number; heightTolerance?: number; near?: string; nearMetres?: number }
+  | {
+    kind: "expectAircraft"; minGroundSpeed?: number; maxGroundSpeed?: number; track?: number; trackTolerance?: number;
+    radioHeight?: number; altitude?: number; heightTolerance?: number; minAltitude?: number; maxAltitude?: number;
+    near?: string; nearMetres?: number; minNearMetres?: number; maxCrossTrack?: number;
+  }
+  /** The hover procedure's refusal at TDN, as the crew sees it (refused) and as the planner or check put it (reason). */
+  | { kind: "expectHover"; refused?: string; reason?: string }
   | { kind: "expectLine"; line: number; pattern: string }
   | { kind: "expectScratchpad"; text: string }
-  | { kind: "expectAlert"; text: string }
+  /** An alert in the recall list; with fresh, only one raised since the last action step began (its own alerts count). */
+  | { kind: "expectAlert"; text: string; fresh?: boolean }
   | { kind: "expectNoAlert"; text: string }
   | { kind: "expectLamp"; lamp: Lamp; lit: boolean }
   | { kind: "expectActive"; waypoint: string }
@@ -134,7 +145,7 @@ export const linePattern = (text: string) =>
 /** The step in words, for the run log, the report and the test procedure. After the first step, "start" means "then". */
 export function describeStep(step: ScenarioStep, index = 0): string {
   const w = step.when;
-  const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "after" ? `${formatSeconds(w.seconds)} later` : w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : `When ${w.waypoint} is the active waypoint`;
+  const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "after" ? `${formatSeconds(w.seconds)} later` : w.kind === "below" ? `At or below ${w.feet} ft` : w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : `When ${w.waypoint} is the active waypoint`;
   const a = step.action;
   const within = step.within ? ` within ${step.within} s` : "";
   const what = (() => {
@@ -155,16 +166,20 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "expectAfcs": return `check that the autopilot modes are ${[a.collective ?? "any", a.pitch ?? "any", a.roll ?? "any"].join(" | ")}${within}`;
       case "expectAircraft": {
         const parts = [
-          a.maxGroundSpeed !== undefined ? `ground speed at most ${a.maxGroundSpeed} kt` : null,
+          a.minGroundSpeed !== undefined || a.maxGroundSpeed !== undefined ? `ground speed ${a.minGroundSpeed ?? 0} to ${a.maxGroundSpeed ?? "any"} kt` : null,
+          a.track !== undefined ? `track ${a.track} ± ${a.trackTolerance ?? 5}°` : null,
           a.radioHeight !== undefined ? `radio height ${a.radioHeight} ± ${a.heightTolerance ?? 10} ft` : null,
           a.altitude !== undefined ? `altitude ${a.altitude} ± ${a.heightTolerance ?? 10} ft` : null,
-          a.near ? `within ${a.nearMetres ?? 50} m of ${a.near}` : null,
+          a.minAltitude !== undefined || a.maxAltitude !== undefined ? `altitude ${a.minAltitude ?? "any"} to ${a.maxAltitude ?? "any"} ft` : null,
+          a.near ? `within ${a.nearMetres ?? 50} m of ${a.near}${a.minNearMetres !== undefined ? ` and no nearer than ${a.minNearMetres} m` : ""}` : null,
+          a.maxCrossTrack !== undefined ? `cross-track at most ${a.maxCrossTrack} NM` : null,
         ].filter(Boolean);
         return `check that the aircraft is at ${parts.join(", ")}${within}`;
       }
       case "expectLine": return `check that screen line ${a.line + 1} matches /${a.pattern}/${within}`;
       case "expectScratchpad": return a.text ? `check that the scratchpad shows ${a.text}${within}` : `check that the scratchpad is blank${within}`;
-      case "expectAlert": return `check that the alert ${a.text} has been raised${within}`;
+      case "expectAlert": return `check that the alert ${a.text} has been raised${a.fresh ? " since the last action" : ""}${within}`;
+      case "expectHover": return `check that the hover procedure was refused${a.refused ? ` with ${a.refused}` : ""}${a.reason ? ` (${a.reason})` : ""}${within}`;
       case "expectNoAlert": return `check that the alert ${a.text} has not been raised at that moment`;
       case "expectLamp": return `check that the ${a.lamp} annunciator is ${a.lit ? "lit" : "out"}${within}`;
       case "expectActive": return `check that ${a.waypoint} is the active waypoint${within}`;
@@ -215,6 +230,7 @@ function triggerProblem(when: unknown): string | null {
     case "time": return finite(w.seconds, 0, MAX_RUN_SECONDS) ? null : "a time trigger needs seconds between 0 and 86400";
     case "distance": return text(w.waypoint, IDENT) && finite(w.nm, 0.01, 1000) ? null : "a distance trigger needs a waypoint ident and nm between 0.01 and 1000";
     case "active": return text(w.waypoint, IDENT) ? null : "an active trigger needs a waypoint ident";
+    case "below": return finite(w.feet, -1500, 60000) ? null : "a below trigger needs feet between -1500 and 60000";
     case "after": return finite(w.seconds, 0, MAX_RUN_SECONDS) ? null : "an after trigger needs seconds between 0 and 86400";
     default: return `unsupported trigger "${String(w.kind)}"`;
   }
@@ -230,7 +246,12 @@ function actionProblem(action: unknown): string | null {
     case "condition": return typeof a.condition === "string" && CONDITION_IDS.has(a.condition) && typeof a.on === "boolean" ? null : "condition needs a known condition and on true or false";
     case "alert":
     case "expectAlert":
-    case "expectNoAlert": return text(a.text, /^.{1,24}$/) ? null : `${a.kind} needs text of 1 to 24 characters`;
+    case "expectNoAlert":
+      if (a.fresh !== undefined && (a.kind !== "expectAlert" || typeof a.fresh !== "boolean")) return "fresh applies only to expectAlert, true or false";
+      return text(a.text, /^.{1,24}$/) ? null : `${a.kind} needs text of 1 to 24 characters`;
+    case "expectHover":
+      if (a.refused === undefined && a.reason === undefined) return "expectHover needs refused or reason";
+      return (a.refused === undefined || text(a.refused, /^.{1,24}$/)) && (a.reason === undefined || text(a.reason, /^.{1,32}$/)) ? null : "expectHover refused and reason must be short texts";
     // A blank scratchpad is a state worth checking: the text may be empty.
     case "expectScratchpad": return text(a.text, /^.{0,24}$/) ? null : "expectScratchpad needs text of at most 24 characters";
     case "procedure": return (a.procedure === "SID" || a.procedure === "STAR" || a.procedure === "APPROACH") && text(a.ident, /^[A-Z0-9]{1,7}$/) && (a.transition === undefined || text(a.transition, /^[A-Z0-9]{1,7}$/)) ? null : "procedure needs SID, STAR or APPROACH, an ident, and a transition ident when given";
@@ -250,13 +271,16 @@ function actionProblem(action: unknown): string | null {
       return mode(a.collective) && mode(a.pitch) && mode(a.roll) ? null : "expectAfcs modes must be mode names";
     }
     case "expectAircraft": {
-      if (a.maxGroundSpeed === undefined && a.radioHeight === undefined && a.altitude === undefined && a.near === undefined) return "expectAircraft needs at least one of maxGroundSpeed, radioHeight, altitude and near";
-      if (a.altitude !== undefined && !finite(a.altitude, -1500, 60000)) return "expectAircraft altitude must be between -1500 and 60000";
-      if (a.maxGroundSpeed !== undefined && !finite(a.maxGroundSpeed, 0, 500)) return "expectAircraft maxGroundSpeed must be between 0 and 500";
-      if (a.radioHeight !== undefined && !finite(a.radioHeight, 0, 2500)) return "expectAircraft radioHeight must be between 0 and 2500";
-      if (a.heightTolerance !== undefined && !finite(a.heightTolerance, 0, 500)) return "expectAircraft heightTolerance must be between 0 and 500";
+      const keys = ["minGroundSpeed", "maxGroundSpeed", "track", "radioHeight", "altitude", "minAltitude", "maxAltitude", "near", "maxCrossTrack"] as const;
+      if (keys.every(key => a[key] === undefined)) return `expectAircraft needs at least one of ${keys.join(", ")}`;
+      const ranges: [string, number, number][] = [
+        ["minGroundSpeed", 0, 500], ["maxGroundSpeed", 0, 500], ["track", 0, 360], ["trackTolerance", 0, 180], ["radioHeight", 0, 2500],
+        ["altitude", -1500, 60000], ["minAltitude", -1500, 60000], ["maxAltitude", -1500, 60000], ["heightTolerance", 0, 500],
+        ["nearMetres", 0, 100000], ["minNearMetres", 0, 100000], ["maxCrossTrack", 0, 100],
+      ];
+      for (const [key, min, max] of ranges) if (a[key] !== undefined && !finite(a[key], min, max)) return `expectAircraft ${key} must be between ${min} and ${max}`;
       if (a.near !== undefined && !text(a.near, IDENT)) return "expectAircraft near must be a waypoint ident";
-      if (a.nearMetres !== undefined && !finite(a.nearMetres, 0, 100000)) return "expectAircraft nearMetres must be between 0 and 100000";
+      if ((a.nearMetres !== undefined || a.minNearMetres !== undefined) && a.near === undefined) return "expectAircraft nearMetres and minNearMetres need near";
       return null;
     }
     case "expectLine": {
@@ -333,8 +357,9 @@ export class ScenarioRunner {
   private next = 0;
   /** When the current step's trigger came, for an expectation that is waiting. */
   private eligibleAt: number | null = null;
-  /** When the previous step finished, for an "after" trigger. */
+  /** When the previous step finished (an "after" trigger), and how many alerts there were as the last action began (fresh). */
   private previousAt = 0;
+  private previousAlerts = 0;
   private stopped = false;
   private failure: "error" | null = null;
   private endedAt: number | null = null;
@@ -403,6 +428,8 @@ export class ScenarioRunner {
           if (!late && waited < window - 1e-9 && now < this.scenario.maxSeconds - 1e-9) break;
           this.finish({ status: "fail", at: now, actual: check.actual });
         } else {
+          // A fresh alert check counts what the last action itself raised, so the baseline is taken just before it.
+          this.previousAlerts = this.fms.recallList.length;
           this.act(step.action);
           this.finish({ status: "done", at: now });
         }
@@ -442,6 +469,7 @@ export class ScenarioRunner {
       case "start": return true;
       case "time": return this.elapsed >= when.seconds - 1e-9;
       case "after": return this.elapsed >= this.previousAt + when.seconds - 1e-9;
+      case "below": return this.fms.altitude <= when.feet + 1e-9;
       case "distance": {
         const at = this.fms.coordinates(when.waypoint);
         return at !== undefined && distanceNm(this.fms.truePosition, at) <= when.nm;
@@ -466,7 +494,8 @@ export class ScenarioRunner {
       case "procedure": fms.selectProcedure(action.procedure, action.ident, action.transition); return;
       case "armApproach": fms.armApproach(action.on !== false); return;
       // TOGA: the FMS missed-approach request and, under the helicopter profile, the autopilot's GA.
-      case "goAround": fms.goAround(); this.sim?.engageGoAround(); return;
+      // A refused TOGA (no missed approach to go around onto, or the FMS failed) is an error in the run, never a silent pass.
+      case "goAround": if (!fms.goAround()) throw new Error("TOGA refused by the FMS: no missed approach ahead, or the FMS has failed"); this.sim?.engageGoAround(); return;
       case "wind": Object.assign(fms.wind, { direction: action.direction, speed: action.speed }); return;
       case "autopilot": {
         const sim = this.sim;
@@ -503,8 +532,15 @@ export class ScenarioRunner {
         return { ok: shown === action.text, actual: shown };
       }
       case "expectAlert": {
-        const raised = fms.recallList.some(message => message.text === action.text);
-        return { ok: raised, actual: raised ? action.text : fms.recallList.map(message => message.text).join(", ") || "no alerts" };
+        // The recall list is newest first: with fresh, only the alerts raised since the step before this one count.
+        const list = action.fresh ? fms.recallList.slice(0, Math.max(0, fms.recallList.length - this.previousAlerts)) : fms.recallList;
+        const raised = list.some(message => message.text === action.text);
+        return { ok: raised, actual: raised ? action.text : list.map(message => message.text).join(", ") || (action.fresh ? "no new alerts" : "no alerts") };
+      }
+      case "expectHover": {
+        const hover = fms.hover;
+        const ok = (action.refused === undefined || hover.refused === action.refused) && (action.reason === undefined || hover.refusedReason === action.reason);
+        return { ok, actual: hover.refused ? `${hover.refused} (${hover.refusedReason ?? "no reason"})` : "not refused" };
       }
       case "expectNoAlert": {
         const raised = fms.recallList.some(message => message.text === action.text);
@@ -541,13 +577,20 @@ export class ScenarioRunner {
         const ra = fms.radioHeight;
         const at = action.near ? fms.coordinates(action.near) : undefined;
         const metres = at ? distanceNm(fms.truePosition, at) * 1852 : null;
-        const ok = (action.maxGroundSpeed === undefined || fms.groundSpeed <= action.maxGroundSpeed)
+        const trackOff = action.track === undefined ? 0 : Math.abs(((fms.track - action.track + 540) % 360) - 180);
+        const ok = (action.minGroundSpeed === undefined || fms.groundSpeed >= action.minGroundSpeed)
+          && (action.maxGroundSpeed === undefined || fms.groundSpeed <= action.maxGroundSpeed)
+          && (action.track === undefined || trackOff <= (action.trackTolerance ?? 5))
           && (action.radioHeight === undefined || (ra.status === "NORMAL" && Math.abs(ra.value! - action.radioHeight) <= (action.heightTolerance ?? 10)))
           && (action.altitude === undefined || Math.abs(fms.altitude - action.altitude) <= (action.heightTolerance ?? 10))
-          && (action.near === undefined || (metres !== null && metres <= (action.nearMetres ?? 50)));
+          && (action.minAltitude === undefined || fms.altitude >= action.minAltitude)
+          && (action.maxAltitude === undefined || fms.altitude <= action.maxAltitude)
+          && (action.near === undefined || (metres !== null && metres <= (action.nearMetres ?? 50) && metres >= (action.minNearMetres ?? 0)))
+          && (action.maxCrossTrack === undefined || Math.abs(fms.crossTrack) <= action.maxCrossTrack);
         const parts = [
-          `GS ${fms.groundSpeed.toFixed(1)} kt`, `RA ${ra.status === "NORMAL" ? `${Math.round(ra.value!)} ft` : ra.status}`, `ALT ${Math.round(fms.altitude)} ft`,
+          `GS ${fms.groundSpeed.toFixed(1)} kt`, `TRK ${Math.round(fms.track)}°`, `RA ${ra.status === "NORMAL" ? `${Math.round(ra.value!)} ft` : ra.status}`, `ALT ${Math.round(fms.altitude)} ft`,
           ...(action.near ? [metres === null ? `${action.near} unknown` : `${Math.round(metres)} m from ${action.near}`] : []),
+          ...(action.maxCrossTrack !== undefined ? [`XTK ${fms.crossTrack.toFixed(2)} NM`] : []),
         ];
         return { ok, actual: parts.join(", ") };
       }
