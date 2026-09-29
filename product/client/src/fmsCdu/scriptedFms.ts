@@ -26,6 +26,7 @@ import { ACTIVE_PROFILE, type AircraftProfile } from "./profile";
 import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line } from "./screen";
 import { NO_SURFACE, radioHeight, surfaceById, type Surface } from "./surface";
 import { TACTICAL_PAGES } from "./tacticalPages";
+import { checkAtTdn, planTransition } from "./transition";
 import type { CduFunction } from "./variants";
 
 /**
@@ -269,7 +270,25 @@ export class ScriptedFms implements CduBackend {
    * lateral ground velocities (VX forward, VY right, knots). The CMA HOVER page shows them (M300 A-75). Null until the
    * flight simulation reports them.
    */
-  afcs: { hoverHeight: number; vx: number; vy: number } | null = null;
+  afcs: { hoverHeight: number; vx: number | null; vy: number | null; ias: number } | null = null;
+
+  /**
+   * The CMA transition down to hover (M300 11-18…11-22, A-74…A-76; plan D-T): the mark (MRK), the procedure's state
+   * (MOD after ACTIVATE, ACT after EXEC), the final track into the wind (the wind direction frozen at ACTIVATE; below
+   * 5 kt, the bearing to MRK), the planned distance from TDN to MRK, and at TDN the transition request the autopilot
+   * takes (a counter it watches) or the reason it was refused (TDN NOT POSSIBLE, TDN DIST SHORT).
+   */
+  readonly hover = {
+    mark: null as { ident: string; position: LatLon; label: string | null } | null,
+    status: "NONE" as "NONE" | "MOD" | "ACT",
+    finalTrack: null as number | null,
+    windSpeed: null as number | null,
+    dtra: null as number | null,
+    request: 0,
+    requestData: null as { mrk: LatLon; finalTrack: number } | null,
+    refused: null as string | null,
+    functionLost: false,
+  };
 
   get closureSpeed() {
     const leg = this.active.legs[0];
@@ -508,6 +527,7 @@ export class ScriptedFms implements CduBackend {
       return "hold";
     }
     if (hold && hold.fix === leg.ident) { route.hold = undefined; this.enteredHold = null; }
+    if (leg.ident === "TDN" && this.hover.status === "ACT") this.reachTdn();
     if (leg.qualifier === "/S" && this.sar.active) {
       this.sar.status = "IN PROGRESS";
       return "sar";
@@ -1285,6 +1305,7 @@ export class ScriptedFms implements CduBackend {
   /** Advances time-driven state: the timer alarms, the call duration and the clocks on the display. */
   tick() {
     const now = this.now.getTime();
+    this.watchHover();
     // A database past the end of its cycle is flagged once; swapping to the next cycle clears it.
     // A cycle whose data gives no dates is never out of date: its end is unknown, not past.
     if (this.activeCycle.to !== null && now > this.activeCycle.to && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE")); }
@@ -1610,6 +1631,120 @@ export class ScriptedFms implements CduBackend {
     return ident;
   }
 
+  // ------------------------------------------------------------------ transition down to hover (M300 11-18…11-22)
+
+  /**
+   * Designates the hover mark (HOVER page 1L/1R, M300 A-75): MARK ON TOP (present position), a waypoint by ident, or
+   * coordinates. It can be changed until a hover procedure is active. A moving waypoint is refused.
+   */
+  designateHoverMark(mark: { ident: string; position: LatLon; label: string | null }) {
+    if (this.hover.status === "ACT") return false;
+    this.hover.mark = mark;
+    return true;
+  }
+
+  designateHoverMarkOnTop() {
+    const ident = this.addMark();
+    return this.designateHoverMark({ ident, position: { ...this.here }, label: "MARK ON TOP POS" });
+  }
+
+  designateHoverMarkIdent(ident: string) {
+    if (ident in this.moving) return false;
+    const position = this.coordinates(ident);
+    return position ? this.designateHoverMark({ ident, position, label: null }) : false;
+  }
+
+  /**
+   * ACTIVATE (M300 A-76): only with a valid radio height. The final track at MRK is into the wind, its direction frozen
+   * now (below 5 kt of wind, the bearing from the aircraft to MRK, A-75 NOTE). The transition planned from the present
+   * state (transition.ts) places TDN before MRK on the reciprocal of the final track; TDN and MRK, both fly-over, go at
+   * the head of the modified route, followed by a discontinuity (M300 11-22). Returns why it was refused, or null.
+   */
+  activateHover(): string | null {
+    const mark = this.hover.mark;
+    if (!mark) return "NO MARK";
+    const ra = this.radioHeight;
+    if (ra.status !== "NORMAL") return "RALT FAILED";
+    const finalTrack = this.wind.speed >= 5 ? this.wind.direction : courseDeg(this.here, mark.position);
+    const plan = planTransition({
+      ias: this.afcs?.ias ?? 0, radioHeight: ra.value, verticalSpeed: this.verticalSpeed,
+      headwind: this.wind.speed * Math.cos(((this.wind.direction - finalTrack) * Math.PI) / 180),
+      hoverHeight: this.afcs?.hoverHeight ?? 50, elevation: this.altitude - ra.value!,
+    });
+    if (plan.refused) return plan.reason.toUpperCase();
+    this.points.TDN = offset(mark.position, finalTrack + 180, plan.dtraNm);
+    this.points.MRK = mark.position;
+    this.modify(route => {
+      const rest = route.legs.filter(leg => !(leg.kind === "wpt" && (leg.ident === "TDN" || leg.ident === "MRK")));
+      route.legs = [
+        { kind: "wpt", ident: "TDN", qualifier: "/O", path: "CF", course: finalTrack },
+        { kind: "wpt", ident: "MRK", qualifier: "/O" },
+        { kind: "disco" },
+        ...(rest[0]?.kind === "disco" ? rest.slice(1) : rest),
+      ];
+    });
+    Object.assign(this.hover, { status: "MOD", finalTrack, dtra: plan.dtraNm, windSpeed: null, refused: null, functionLost: false, requestData: null });
+    return null;
+  }
+
+  /** CANCEL (M300 A-76): the hover modification is discarded; the active route is as it was. */
+  cancelHover() {
+    if (this.hover.status !== "MOD") return false;
+    this.eraseModification();
+    this.hover.status = "NONE";
+    return true;
+  }
+
+  /**
+   * At TDN (fly-over): the checks before the transition (M300 E-17; plan T6). More than 0.2 NM off the final track, or
+   * more than 20 degrees from it: TDN NOT POSSIBLE. Otherwise the transition is recomputed from the actual state
+   * against the fixed MRK: short of it, TDN DIST SHORT (laboratory). Either refusal disables roll steering, and the
+   * procedure must be activated again. Otherwise the wind speed is frozen and the request goes to the autopilot.
+   */
+  private reachTdn() {
+    const mark = this.hover.mark!, finalTrack = this.hover.finalTrack!;
+    const e = toLocal(mark.position, this.here);
+    const crossTrack = e.x * Math.cos((finalTrack * Math.PI) / 180) - e.y * Math.sin((finalTrack * Math.PI) / 180);
+    const trackError = Math.abs(((this.track - finalTrack + 540) % 360) - 180);
+    if (Math.abs(crossTrack) > 0.2 || trackError > 20) {
+      this.hover.refused = "TDN NOT POSSIBLE";
+      this.alert(alert("TDN NOT POSSIBLE"));
+      return;
+    }
+    const ra = this.radioHeight;
+    const decision = checkAtTdn({
+      ias: this.afcs?.ias ?? 0, radioHeight: ra.status === "NORMAL" ? ra.value : null, verticalSpeed: this.verticalSpeed,
+      headwind: this.wind.speed * Math.cos(((this.wind.direction - finalTrack) * Math.PI) / 180),
+      hoverHeight: this.afcs?.hoverHeight ?? 50, elevation: ra.status === "NORMAL" ? this.altitude - ra.value! : 0,
+    }, distanceNm(this.here, mark.position));
+    if (!decision.engage) {
+      this.hover.refused = decision.reason;
+      this.alert(alert(decision.reason));
+      return;
+    }
+    this.hover.windSpeed = this.wind.speed;
+    this.hover.requestData = { mrk: mark.position, finalTrack };
+    this.hover.request += 1;
+  }
+
+  /**
+   * Keeps the hover procedure honest each step: all radio altimeters failed is TDN FUNCTION LOST (M300 E-16) and
+   * withdraws the transition request; TDN and MRK gone from the active route (a direct-to, a new route) end the
+   * procedure, which withdraws the request too (the autopilot cancels a retained TD/H toward it).
+   */
+  private watchHover() {
+    const hover = this.hover;
+    if (hover.status !== "ACT") return;
+    if (this.radioHeight.status === "FAIL" && !hover.functionLost) {
+      hover.functionLost = true;
+      hover.requestData = null;
+      this.alert(alert("TDN FUNCTION LOST"));
+    }
+    const inRoute = this.active.legs.some(leg => leg.kind === "wpt" && (leg.ident === "TDN" || leg.ident === "MRK"));
+    const atMark = this.lastSequenced === "MRK";
+    if (!inRoute && !atMark) Object.assign(hover, { status: "NONE", requestData: null });
+  }
+
   squawk() { this.squawkIdentUntil = this.clock().getTime() + 18_000; }
 
   /**
@@ -1735,6 +1870,10 @@ export class ScriptedFms implements CduBackend {
   private execute() {
     const route = this.modified;
     if (!route) return;
+    // The hover procedure executes only with a valid radio height (M300 E-27: RALT FAILED); the modification stays.
+    const hover = this.hover.status === "MOD" && route.legs.some(leg => leg.kind === "wpt" && leg.ident === "TDN");
+    if (hover && this.radioHeight.status !== "NORMAL") { this.alert(alert("RALT FAILED")); return; }
+    if (hover) { this.hover.status = "ACT"; this.alert(alert("TRANSITION DOWN")); }
     if (route.hold?.status === "INACTIVE") route.hold.status = "ARMED";
     if (this.sar.pending) { this.sar.active = this.sar.pending; this.sar.status = "ARMED"; this.sar.pending = null; }
     // A new active waypoint, or a direct-to, starts the active leg at present position.

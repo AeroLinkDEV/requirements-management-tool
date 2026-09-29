@@ -115,8 +115,9 @@ export type AircraftData = {
     radioHeight: { value: number | null; status: "NORMAL" | "NCD" | "FAIL" };
     hoverHeight: number;
     lowHeight: string | null;
-    vx: number;
-    vy: number;
+    /** Measured ground velocity in aircraft axes (knots), or null without eligible feedback. */
+    vx: number | null;
+    vy: number | null;
     hoverData: boolean;
   } | null;
 };

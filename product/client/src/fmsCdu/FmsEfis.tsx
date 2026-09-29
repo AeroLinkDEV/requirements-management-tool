@@ -152,8 +152,8 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           {/* Hover data: ground velocity in aircraft axes and the wind, where airspeed stops meaning much. */}
           {heli.hoverData ? (
             <g fill={WHITE} data-testid="pfd-hover-data">
-              <text x="112" y="256">{`VX ${signed(heli.vx)}`}</text>
-              <text x="112" y="272">{`VY ${signed(heli.vy)}`}</text>
+              <text x="112" y="256">{heli.vx === null ? "VX ---.-" : `VX ${signed(heli.vx)}`}</text>
+              <text x="112" y="272">{heli.vy === null ? "VY ---.-" : `VY ${signed(heli.vy)}`}</text>
               <text x="112" y="290">{`${three(air.wind.direction)}/${Math.round(air.wind.speed)}`}</text>
             </g>
           ) : null}

@@ -497,7 +497,8 @@ export class FlightSimulator {
    * the departure acceleration runs with the climb.
    */
   private startGoAround(cause: string) {
-    const missed = constraintAltitude(this.fms.activeRoute.hold?.altitude) ?? null;
+    // The missed approach hold altitude is FMS data: not used when the FMS has failed.
+    const missed = this.fms.hasCondition("fmsFail") ? null : constraintAltitude(this.fms.activeRoute.hold?.altitude) ?? null;
     if (this.selectedAlt <= this.fms.altitude + 100) this.selectedAlt = Math.round(missed !== null && missed > this.fms.altitude + 100 ? missed : this.fms.altitude + 1000);
     this.goingAround = true;
     this.vsTarget = null;
@@ -583,6 +584,7 @@ export class FlightSimulator {
     this.watchFailure();
     this.watchGoAround();
     this.watchGpsLateral();
+    this.watchHover();
     const computed = this.guide(dt);
     this.updateApproach(computed.crossTrack);
     // An approach that ended this step (cancelled or lost) latched a hold after the guidance was built: publish the
@@ -658,7 +660,7 @@ export class FlightSimulator {
     const ias = this.indicatedAirspeed;
     if (this.iasOk && ias < PROFILE.unreliableIasBelow.value) this.iasOk = false;
     else if (!this.iasOk && ias >= PROFILE.reliableIasAgainAt.value) this.iasOk = true;
-    fms.afcs = { hoverHeight: this.hoverHeightFt, ...this.groundVelocityAxes };
+    fms.afcs = { hoverHeight: this.hoverHeightFt, ias, ...this.groundVelocityAxes };
     if (fms.verticalPhase !== this.phase && !this.advisory) { this.phase = fms.verticalPhase; this.record(`VNAV ${this.phase}`, fms.verticalPhaseReason); }
     // DES NOW ends once the aircraft is on the descent path: the path, rising behind the active fix, has come down to it.
     if (fms.vnav.desNow && !this.advisory) {
@@ -779,7 +781,18 @@ export class FlightSimulator {
   private lowCollective: { mode: "RHT" | "TD" | "TDH" | "TU"; datum: number; rate: number | null } | null = null;
   /** The departure's lateral hold lost its feedback: it stays lost until TU or GA is engaged again. */
   private lvlLost = false;
-  private lowHorizontal: { mode: "HOV" | "TDH" | "TU" | "ATT"; target: LatLon | null; speed: number; track: number } | null = null;
+  /**
+   * `holding`: TD/H toward a target, still in the gate segment (speed and gate height held until the stopping
+   * distance). `captured`: HOV has the capture conditions (GS within 1 kt and within 50 m of its target); until then a
+   * HOV after a stop short of or past the target is a recovery, not an arrival.
+   */
+  private lowHorizontal: { mode: "HOV" | "TDH" | "TU" | "ATT"; target: LatLon | null; speed: number; track: number; holding?: boolean; captured?: boolean; hoverDatum?: number } | null = null;
+  /** The FMS transition request being flown: TD first, then TD/H to this MRK (watchHover). */
+  private pendingTdh: LatLon | null = null;
+  private hoverRequest = 0;
+  /** Whether the TD/H being flown (or pending) came from the FMS hover procedure, which can withdraw it. */
+  private fmsTransition = false;
+  private hoverRefusal: string | null = null;
   /** In the low-speed regime the air velocity is its own vector (knots north, east), not tied to the heading. */
   private airVelocity: { north: number; east: number } | null = null;
   /** The heading the low-speed regime holds, turned at the yaw-rate limit toward a selection. */
@@ -802,13 +815,19 @@ export class FlightSimulator {
   }
   get iasReliable() { return this.iasOk; }
   /** The ground velocity in aircraft axes: VX along the heading, VY to its right (knots). */
-  get groundVelocityAxes() {
-    const fms = this.fms, off = ((fms.track - fms.heading) * Math.PI) / 180;
-    return { vx: fms.groundSpeed * Math.cos(off), vy: fms.groundSpeed * Math.sin(off) };
+  get groundVelocityAxes(): { vx: number | null; vy: number | null } {
+    // As measured (the hover feedback's 166/174, rotated into aircraft axes), never the true motion: a sensor error
+    // shows. None without eligible feedback.
+    const feedback = this.fms.hoverFeedback;
+    if (!feedback) return { vx: null, vy: null };
+    const h = (this.fms.heading * Math.PI) / 180;
+    return { vx: feedback.north * Math.cos(h) + feedback.east * Math.sin(h), vy: -feedback.north * Math.sin(h) + feedback.east * Math.cos(h) };
   }
   /** LOW HT when the protection is raising the collective; LOW HT OFF when it cannot work (no valid radio height). */
   get lowHeightCaption() { return this.lowHeight === "ACTIVE" ? "LOW HT" : this.lowHeight === "OFF" ? "LOW HT OFF" : null; }
   get inLowSpeedRegime() { return this.lowHorizontal !== null; }
+  /** HOV holds its target within the capture conditions: an arrival, as distinct from a recovery toward it. */
+  get hoverCaptured() { return this.lowHorizontal?.mode === "HOV" && this.lowHorizontal.captured === true; }
 
   /** The engaged modes per axis, as the FMA shows them (collective, pitch, roll/yaw): what is actually flying each axis. */
   get axisModes() {
@@ -819,6 +838,55 @@ export class FlightSimulator {
     const tuRoll = this.indicatedAirspeed >= PROFILE.coordinatedLeaveBelow.value ? "HDG" : this.lvlLost ? "ATT" : "LVL";
     const roll = h ? (h.mode === "TU" ? tuRoll : h.mode === "TDH" ? "TD/H" : h.mode) : this.lateral === "LNAV" ? "NAV" : "HDG";
     return { collective, pitch, roll };
+  }
+
+  /**
+   * The FMS's hover procedure (ScriptedFms.hover): at TDN it requests the transition, which the autopilot flies as TD
+   * (when above the gate height or the gate speed) and then TD/H to MRK; a refusal at TDN (TDN NOT POSSIBLE, TDN DIST
+   * SHORT) withdraws roll steering, so NAV gives way to HDG (F8); the request withdrawn (TDN FUNCTION LOST, the
+   * procedure ended by a direct-to or a new route) cancels a retained TD/H toward MRK: HOV where it is, or ATT.
+   */
+  private watchHover() {
+    const hover = this.fms.hover;
+    if (!this.advisory) return;
+    if (hover.request !== this.hoverRequest) {
+      this.hoverRequest = hover.request;
+      const data = hover.requestData;
+      if (data) {
+        const ra = this.radio;
+        const above = ra.status === "NORMAL" && ra.value! > PROFILE.gateHeight.value + ALT_CAPTURE_FT;
+        this.fmsTransition = true;
+        if (above || this.indicatedAirspeed > PROFILE.gateSpeed.value + 2) { this.engageTransitionDown(); this.pendingTdh = data.mrk; }
+        else this.engageTransitionDownToHover(data.mrk);
+      }
+    }
+    if (hover.refused && hover.refused !== this.hoverRefusal && this.lateral === "LNAV") {
+      this.lateral = "HDG";
+      this.heading = Math.round(norm360(this.fms.heading));
+      this.held = true;
+      this.record("NAV REMOVED", `${hover.refused}: roll steering withdrawn; HDG HOLD ${String(this.heading).padStart(3, "0")}°T`);
+    }
+    this.hoverRefusal = hover.refused;
+    const retained = this.fmsTransition && (this.pendingTdh !== null || (this.lowHorizontal?.mode === "TDH" && this.lowHorizontal.target !== null));
+    // F2: TDN FUNCTION LOST withdraws the request but the autopilot keeps the plan it accepted; only the procedure ending
+    // (a direct-to, a new route, CANCEL) cancels it.
+    if (retained && hover.status === "NONE") {
+      this.pendingTdh = null;
+      this.fmsTransition = false;
+      const h = this.lowHorizontal;
+      if (h?.mode === "TDH") {
+        const feedback = this.fms.hoverFeedback;
+        this.lowHorizontal = { ...h, mode: feedback ? "HOV" : "ATT", target: feedback?.position ?? null, holding: false, captured: false };
+        if (this.lowCollective?.mode === "RHT" && h.hoverDatum !== undefined) this.lowCollective = { mode: "RHT", datum: this.lowCollective.datum, rate: null };
+      }
+      this.record("TD/H CANCELLED", "the FMS withdrew the transition request");
+    }
+    // TD done (both axes arrived): TD/H to MRK.
+    if (this.pendingTdh && this.lowCollective?.mode === "RHT" && this.lowCollective.rate === null && !this.tdSpeed) {
+      const mrk = this.pendingTdh;
+      this.pendingTdh = null;
+      if (!this.engageTransitionDownToHover(mrk)) this.record("TD/H REFUSED", "outside its window at the end of TD");
+    }
   }
 
   private get radio() { return this.fms.radioHeight; }
@@ -846,7 +914,7 @@ export class FlightSimulator {
     const feedback = this.fms.hoverFeedback;
     if (!this.advisory || !feedback || this.indicatedAirspeed >= PROFILE.coordinatedLeaveBelow.value) return false;
     this.enterLowSpeed();
-    this.lowHorizontal = { mode: "HOV", target: feedback.position, speed: 0, track: this.fms.track };
+    this.lowHorizontal = { mode: "HOV", target: feedback.position, speed: 0, track: this.fms.track, captured: true };
     this.noteFeedback(feedback);
     if (!this.lowCollective && this.radio.status === "NORMAL") this.engageRadioHeight();
     this.record("HOV", "position hold");
@@ -876,8 +944,10 @@ export class FlightSimulator {
     if (ra.value! < PROFILE.tdhMinHeight.value || ra.value! > PROFILE.tdhMaxHeight.value || this.indicatedAirspeed >= PROFILE.tdhMaxSpeedBelow.value) return false;
     const groundSpeed = Math.hypot(feedback.north, feedback.east);
     this.enterLowSpeed();
-    this.lowHorizontal = { mode: "TDH", target, speed: groundSpeed, track: this.fms.track };
-    this.lowCollective = { mode: "TDH", datum: Math.min(this.hoverHeightFt, Math.round(ra.value!)), rate: -PROFILE.tdhDescentRate.value };
+    const hoverDatum = Math.min(this.hoverHeightFt, Math.round(ra.value!));
+    // Toward a target the gate segment comes first: the height is held there until the deceleration starts.
+    this.lowHorizontal = { mode: "TDH", target, speed: groundSpeed, track: target ? courseDeg(feedback.position, target) : this.fms.track, holding: target !== null, hoverDatum };
+    this.lowCollective = target ? { mode: "RHT", datum: Math.round(ra.value!), rate: null } : { mode: "TDH", datum: hoverDatum, rate: -PROFILE.tdhDescentRate.value };
     this.altitudeHold = null; this.vsTarget = null; this.goingAround = false; this.tdSpeed = false;
     this.noteFeedback(feedback);
     this.record("TD/H", `to ${this.lowCollective.datum} FT RA and 0 KT${target ? " at the target" : ""}`);
@@ -994,6 +1064,8 @@ export class FlightSimulator {
       let ground: { north: number; east: number };
       if (now.mode === "HOV") {
         const e = toLocal(fb.position, now.target!);
+        // A recovery becomes a capture once within the capture conditions (50 m, 1 kt).
+        if (!now.captured && Math.hypot(e.x, e.y) * 1852 <= 50 && Math.hypot(fb.north, fb.east) <= 1) { now.captured = true; this.record("HOV", "captured at the target"); }
         // Close the measured position error over about 20 s, at up to 10 kt over the ground.
         const wanted = (Math.hypot(e.x, e.y) * 3600) / 20;
         const scale = wanted > 10 ? 10 / wanted : 1;
@@ -1006,7 +1078,13 @@ export class FlightSimulator {
         // With a target further than the nominal stopping distance, the speed is held (the gate segment) until the
         // stopping distance is reached; then the closed loop.
         const nominalStop = (now.speed * now.speed) / (2 * TDH_RATE * 3600);
-        const rate = remaining === null ? TDH_RATE : remaining <= 0 ? TDH_MAX : remaining > nominalStop ? 0 : clamp((now.speed * now.speed) / (2 * remaining * 3600), TDH_MIN, TDH_MAX);
+        const rate = remaining === null ? TDH_RATE : remaining <= 0 ? TDH_MAX : now.holding && remaining > nominalStop ? 0 : clamp((now.speed * now.speed) / (2 * remaining * 3600), TDH_MIN, TDH_MAX);
+        // The end of the gate segment: the deceleration starts, and with it the descent to the hover height.
+        if (now.holding && rate > 0) {
+          now.holding = false;
+          this.lowCollective = { mode: "TDH", datum: now.hoverDatum!, rate: -PROFILE.tdhDescentRate.value };
+          this.record("TD/H", "the gate segment ends: decelerating to MRK and descending to the hover height");
+        }
         now.speed = Math.max(0, now.speed - rate * dt);
         // Toward a target, a cross-track correction onto the line through it along the track (closed over about 20 s,
         // at up to 5 kt): the stop is at the target, not beside it.
@@ -1018,7 +1096,7 @@ export class FlightSimulator {
         };
         if (now.speed <= 1) {
           const miss = now.target ? distanceNm(fb.position, now.target) * 1852 : 0;
-          this.lowHorizontal = { mode: "HOV", target: now.target ?? fb.position, speed: 0, track: now.track };
+          this.lowHorizontal = { mode: "HOV", target: now.target ?? fb.position, speed: 0, track: now.track, captured: !now.target || miss <= 50 };
           // HOV holds the target; stopped more than 50 m from it, it is a recovery to the target, not an arrival.
           this.record("HOV", !now.target ? "holding where it stopped" : miss <= 50 ? "holding the target" : `recovering to the target, stopped ${miss.toFixed(0)} m from it`);
         }

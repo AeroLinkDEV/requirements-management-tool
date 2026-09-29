@@ -1,6 +1,6 @@
 import {
   SAR_PATTERNS, WAYPOINT, boxes, caption, courseDeg, dashes, distanceNm, fixed, formatPosition, maxSarGroundSpeed, medium,
-  numberIn, offset, prompt, small, three, title, type Leg, type Page, type TacticalPageId,
+  numberIn, offset, parsePosition, prompt, small, three, title, type Leg, type Page, type TacticalPageId,
 } from "./fmsModel";
 import type { Line, Segment } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
@@ -439,29 +439,46 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
 
   HOVER: {
     pages: () => 1,
+    // The CMA HOVER page (M300 11-21…11-22, A-74…A-76): the mark (MRK), the radio height and the hover height the AFCS
+    // selected, the true wind and the AFCS's X/Y velocities, and ACTIVATE (only with a valid radio height) or CANCEL.
     render: fms => {
-      const mark = fms.markList.at(-1);
+      const hover = fms.hover, mark = hover.mark;
+      const status = hover.status === "NONE" ? undefined : hover.status;
+      const canActivate = mark !== null && hover.status === "NONE" && fms.radioHeight.status === "NORMAL";
       return [
-        title("HOVER", "1/1"),
-        caption(" MARK ON TOP POS", mark ? `${mark.ident} ` : undefined),
-        { left: mark ? medium(formatPosition(mark.position), "green") : dashes(15) },
-        // M300 A-74/A-75: RADALT and the hover height the AFCS selected; the true wind and the AFCS's X/Y velocities.
+        title("HOVER", "1/1", status),
+        caption(mark ? ` ${mark.ident}` : " MRK", mark?.label ? `${mark.label} ` : undefined),
+        { left: mark ? medium(mark.ident, "green") : dashes(5), right: mark ? medium(formatPosition(mark.position), "green") : dashes(15) },
         caption(" RAD ALT", "HOVER HEIGHT "),
         // The radio altimeter's height above the declared surface; dashes when it has none (NCD) or has failed.
         { left: medium(fms.radioHeight.status === "NORMAL" ? `${Math.round(fms.radioHeight.value!)}FT` : "----FT"), right: medium(fms.afcs ? `${fms.afcs.hoverHeight}FT` : "----FT") },
         caption(" TRUE WIND", "VELOCITIES "),
-        { left: medium(`${three(fms.wind.direction)}T/${fms.wind.speed}KT`), right: medium(fms.afcs ? `VX ${signed(fms.afcs.vx)}KT` : "VX ---.-KT") },
-        { right: medium(fms.afcs ? `VY ${signed(fms.afcs.vy)}KT` : "VY ---.-KT") },
-        { left: prompt("<MARK ON TOP") },
-        undefined, undefined,
-        { left: dashes(24) },
+        { left: medium(`${three(fms.wind.direction)}T/${fms.wind.speed}KT`), right: medium(fms.afcs?.vx != null ? `VX ${signed(fms.afcs.vx)}KT` : "VX ---.-KT") },
+        { right: medium(fms.afcs?.vy != null ? `VY ${signed(fms.afcs.vy)}KT` : "VY ---.-KT") },
+        { left: hover.status === "ACT" ? undefined : prompt("<MARK ON TOP") },
+        undefined,
         { left: prompt("<DES+SAR") },
+        { left: dashes(24) },
+        { left: hover.status === "MOD" ? prompt("<CANCEL") : undefined, right: canActivate ? prompt("ACTIVATE>") : undefined },
       ];
     },
-    lsk: (fms, side, row) => {
-      if (side !== "L") return;
-      if (row === 4) fms.addMark();
-      if (row === 6) fms.open("TACT");
+    lsk: (fms, side, row, scratch) => {
+      const hover = fms.hover;
+      if (row === 1 && hover.status !== "ACT") {
+        if (!scratch) return "invalid";
+        const position = side === "R" ? parsePosition(scratch) : null;
+        const ok = side === "L" ? fms.designateHoverMarkIdent(scratch) : position !== null && fms.designateHoverMark({ ident: "WPT", position, label: null });
+        if (!ok) return "invalid";
+        fms.setScratch("");
+        return;
+      }
+      if (side === "L" && row === 4 && hover.status !== "ACT") { fms.designateHoverMarkOnTop(); return; }
+      if (side === "L" && row === 5) { fms.open("TACT"); return; }
+      if (side === "L" && row === 6 && hover.status === "MOD") { fms.cancelHover(); return; }
+      if (side === "R" && row === 6 && hover.status === "NONE" && hover.mark) {
+        const refused = fms.activateHover();
+        if (refused) fms.setScratch(refused);
+      }
     },
   },
 };
