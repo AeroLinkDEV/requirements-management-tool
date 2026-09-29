@@ -34,7 +34,9 @@ export type Trigger =
   | { kind: "start" }
   | { kind: "time"; seconds: number }
   | { kind: "distance"; waypoint: string; nm: number }
-  | { kind: "active"; waypoint: string };
+  | { kind: "active"; waypoint: string }
+  /** This many seconds after the step before it finished: the timing inside a stage, wherever the stage began. */
+  | { kind: "after"; seconds: number };
 
 export type Action =
   | { kind: "keys"; keys: CduFunction[] }
@@ -45,6 +47,8 @@ export type Action =
   /** APPR: arms the approach, or (on false) presses it off: a disarm, or after capture a cancellation. */
   | { kind: "armApproach"; on?: boolean }
   | { kind: "goAround" }
+  /** The wind the air mass moves with, from `direction` (degrees true) at `speed` kt: a laboratory stimulus. */
+  | { kind: "wind"; direction: number; speed: number }
   /**
    * The crew's autopilot selections under the helicopter profile: preselect an altitude, engage a vertical speed (fpm)
    * toward it, hold the present altitude, or select a speed (knots). Each field given is applied, in that order.
@@ -130,7 +134,7 @@ export const linePattern = (text: string) =>
 /** The step in words, for the run log, the report and the test procedure. After the first step, "start" means "then". */
 export function describeStep(step: ScenarioStep, index = 0): string {
   const w = step.when;
-  const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : `When ${w.waypoint} is the active waypoint`;
+  const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "after" ? `${formatSeconds(w.seconds)} later` : w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : `When ${w.waypoint} is the active waypoint`;
   const a = step.action;
   const within = step.within ? ` within ${step.within} s` : "";
   const what = (() => {
@@ -142,6 +146,7 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "procedure": return `select the ${a.procedure === "APPROACH" ? "approach" : a.procedure} ${a.ident}${a.transition ? ` via ${a.transition}` : ""}`;
       case "armApproach": return a.on === false ? "press APPR off" : "arm the approach";
       case "goAround": return "press TOGA";
+      case "wind": return `set the wind to ${String(a.direction).padStart(3, "0")}°T / ${a.speed} kt`;
       case "autopilot": return [
         a.altitude !== undefined ? `preselect ${a.altitude} ft` : null, a.verticalSpeed !== undefined ? `engage VS ${a.verticalSpeed} fpm` : null, a.hold ? "engage ALT" : null,
         a.speed !== undefined ? `select ${a.speed} kt` : null, a.heading !== undefined ? `select heading ${a.heading}°` : null, a.lnav ? "arm NAV" : null,
@@ -210,6 +215,7 @@ function triggerProblem(when: unknown): string | null {
     case "time": return finite(w.seconds, 0, MAX_RUN_SECONDS) ? null : "a time trigger needs seconds between 0 and 86400";
     case "distance": return text(w.waypoint, IDENT) && finite(w.nm, 0.01, 1000) ? null : "a distance trigger needs a waypoint ident and nm between 0.01 and 1000";
     case "active": return text(w.waypoint, IDENT) ? null : "an active trigger needs a waypoint ident";
+    case "after": return finite(w.seconds, 0, MAX_RUN_SECONDS) ? null : "an after trigger needs seconds between 0 and 86400";
     default: return `unsupported trigger "${String(w.kind)}"`;
   }
 }
@@ -230,6 +236,7 @@ function actionProblem(action: unknown): string | null {
     case "procedure": return (a.procedure === "SID" || a.procedure === "STAR" || a.procedure === "APPROACH") && text(a.ident, /^[A-Z0-9]{1,7}$/) && (a.transition === undefined || text(a.transition, /^[A-Z0-9]{1,7}$/)) ? null : "procedure needs SID, STAR or APPROACH, an ident, and a transition ident when given";
     case "armApproach": return a.on === undefined || typeof a.on === "boolean" ? null : "armApproach on must be true or false when given";
     case "goAround": return null;
+    case "wind": return finite(a.direction, 0, 360) && finite(a.speed, 0, 150) ? null : "wind needs a direction from 0 to 360 and a speed from 0 to 150 kt";
     case "autopilot": {
       const finite = (v: unknown) => v === undefined || (typeof v === "number" && Number.isFinite(v));
       const flag = (v: unknown) => v === undefined || typeof v === "boolean";
@@ -326,6 +333,8 @@ export class ScenarioRunner {
   private next = 0;
   /** When the current step's trigger came, for an expectation that is waiting. */
   private eligibleAt: number | null = null;
+  /** When the previous step finished, for an "after" trigger. */
+  private previousAt = 0;
   private stopped = false;
   private failure: "error" | null = null;
   private endedAt: number | null = null;
@@ -423,6 +432,7 @@ export class ScenarioRunner {
 
   private finish(result: StepResult) {
     this.results[this.next] = result;
+    this.previousAt = result.at ?? this.elapsed;
     this.next += 1;
     this.eligibleAt = null;
   }
@@ -431,6 +441,7 @@ export class ScenarioRunner {
     switch (when.kind) {
       case "start": return true;
       case "time": return this.elapsed >= when.seconds - 1e-9;
+      case "after": return this.elapsed >= this.previousAt + when.seconds - 1e-9;
       case "distance": {
         const at = this.fms.coordinates(when.waypoint);
         return at !== undefined && distanceNm(this.fms.truePosition, at) <= when.nm;
@@ -456,6 +467,7 @@ export class ScenarioRunner {
       case "armApproach": fms.armApproach(action.on !== false); return;
       // TOGA: the FMS missed-approach request and, under the helicopter profile, the autopilot's GA.
       case "goAround": fms.goAround(); this.sim?.engageGoAround(); return;
+      case "wind": Object.assign(fms.wind, { direction: action.direction, speed: action.speed }); return;
       case "autopilot": {
         const sim = this.sim;
         if (!sim) throw new Error("autopilot selections need the flight simulation");

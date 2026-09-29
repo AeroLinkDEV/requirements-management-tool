@@ -1,7 +1,8 @@
 import { COPTER_PINS_CIFP_2609 } from "./data/copterPinsCifp2609";
 import type { FlightSimulator } from "./flight";
-import { offset } from "./fmsModel";
-import type { Scenario } from "./scenario";
+import { courseDeg, offset } from "./fmsModel";
+import type { StartStateId } from "./kbtvDemo";
+import type { Scenario, ScenarioStep } from "./scenario";
 import type { ScriptedFms } from "./scriptedFms";
 
 /**
@@ -61,6 +62,39 @@ export function setUp87nOffshoreSar(fms: ScriptedFms, sim?: FlightSimulator): { 
   sim.selectSpeed(MISSION_START_IAS);
   sim.engageAltitudeHold();
   sim.armLnav();
+  return { ready: true };
+}
+
+/** Where the final start state places the aircraft: this far before STAYS on the final course, at 1,700 ft and 70 KIAS. */
+export const FINAL_START_BEFORE_STAYS_NM = 3;
+
+/**
+ * The start state for the mission's approach variants (plan §10, step 8), labelled synthetic: as the mission start, then
+ * the 87N COPTER RNAV (GPS) 190 via HTO executed, the aircraft placed 3 NM before STAYS on the final course (TIDUE to
+ * STAYS, extended back) at 1,700 ft, level at 70 KIAS, DIRECT STAYS executed (the HF behind it), NAV armed and the
+ * approach armed.
+ */
+export function setUp87nRnav190Final(fms: ScriptedFms, sim?: FlightSimulator): { ready: true } | { refused: string } {
+  if (!sim) return { refused: "the helicopter mission needs the flight simulation (autopilot selections)" };
+  if (fms.aircraftProfile.verticalPolicy !== "ADVISORY") return { refused: "the 87N mission flies the helicopter profile" };
+  const loaded = loadCopterPinsDemonstration(fms);
+  if ("refused" in loaded) return loaded;
+  if (!fms.declareSurface("offshore-87n")) return { refused: "the offshore-87n surface is not declared" };
+  Object.assign(fms.wind, MISSION_WIND);
+  fms.modify(route => { route.dest = "87N"; });
+  fms.press("EXEC");
+  fms.selectProcedure("APPROACH", "R190", "HTO");
+  fms.press("EXEC");
+  const tidue = fms.coordinates("TIDUE"), stays = fms.coordinates("STAYS");
+  if (!tidue || !stays) return { refused: "TIDUE or STAYS is not in the active navigation data" };
+  const course = courseDeg(tidue, stays);
+  fms.placeAircraft({ position: offset(stays, course + 180, FINAL_START_BEFORE_STAYS_NM), track: course, altitude: 1700 }, "87N RNAV 190 final set-up");
+  fms.directTo("STAYS");
+  fms.press("EXEC");
+  sim.selectSpeed(70);
+  sim.engageAltitudeHold();
+  sim.armLnav();
+  fms.armApproach(true);
   return { ready: true };
 }
 
@@ -148,3 +182,103 @@ export const MISSION_87N_OFFSHORE_SAR: Scenario = {
     { when: then, action: { kind: "expectAfcs", roll: "NAV" } },
   ],
 };
+
+// ---------------------------------------------------------------------------------------------- checkpoint variants
+
+/**
+ * The checkpoint variants of the acceptance mission (plan §10; the rev 3.1 addendum's deterministic named setups):
+ * each starts from a named synthetic start state, not a replay of the nominal run. (a1) to (c) start from the mission
+ * start and make the sighting at once; (d) to (g) start on the RNAV 190 final (87n-rnav190-final).
+ */
+const S = then;
+const after = (seconds: number) => ({ kind: "after" as const, seconds });
+// From the mission start: MARK ON TOP at once (the sighting), ACTIVATE, EXEC, downwind, then onto the final with NAV.
+const markAndActivate: ScenarioStep[] = [
+  { when: after(1), action: { kind: "keys", keys: ["TACT", "LSK1R", "LSK4L", "LSK6R", "EXEC"] } },
+  { when: S, action: { kind: "expectAlert", text: "TRANSITION DOWN" } },
+  { when: S, action: { kind: "autopilot", heading: 50 } },
+  { when: after(150), action: { kind: "autopilot", heading: 200, lnav: true } },
+]
+const variant = (id: string, title: string, objective: string, steps: ScenarioStep[], start: StartStateId = "87n-offshore-sar", maxSeconds = 1800): Scenario => ({
+  id: `87n-${id}`, title: `87N mission variant ${title}`, objective, maxSeconds, start, startTime: MISSION_87N_OFFSHORE_SAR.startTime, steps,
+})
+export const MISSION_87N_VARIANTS: readonly Scenario[] = [
+  variant("a1-ra-invalid", "(a1) RA invalid initially: no ACTIVATE", "(a1) RA invalid initially: no ACTIVATE. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    { when: S, action: { kind: "condition", condition: "raFail", on: true } },
+    { when: after(1), action: { kind: "keys", keys: ["TACT", "LSK1R", "LSK4L"] } },
+    { when: S, action: { kind: "expectLine", line: 4, pattern: "^\\s*----FT" } },
+    { when: S, action: { kind: "expectLine", line: 12, pattern: "^(?!.*ACTIVATE).*$" } },
+  ]),
+  variant("a2-ra-lost-before-exec", "(a2) RA valid at ACTIVATE, lost before EXEC: RALT FAILED, EXEC refused, MOD kept", "(a2) RA valid at ACTIVATE, lost before EXEC: RALT FAILED, EXEC refused, MOD kept. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    { when: after(1), action: { kind: "keys", keys: ["TACT", "LSK1R", "LSK4L", "LSK6R"] } },
+    { when: S, action: { kind: "expectLine", line: 0, pattern: "MOD.*HOVER" } },
+    { when: S, action: { kind: "condition", condition: "raFail", on: true } },
+    { when: S, action: { kind: "keys", keys: ["EXEC"] } },
+    { when: S, action: { kind: "expectAlert", text: "RALT FAILED" } },
+    { when: S, action: { kind: "expectNoAlert", text: "TRANSITION DOWN" } },
+    { when: S, action: { kind: "expectLine", line: 0, pattern: "MOD.*HOVER" } },
+  ]),
+  variant("a3-ra-lost-in-td", "(a3) RA lost during TD at about 350 ft: ALT latched, TD pitch continues, TDN FUNCTION LOST", "(a3) RA lost during TD at about 350 ft: ALT latched, TD pitch continues, TDN FUNCTION LOST. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    ...markAndActivate,
+    { when: S, action: { kind: "expectAfcs", collective: "TD", pitch: "TD" }, within: 900 },
+    // TD descends from 500 ft at 500 fpm: about 350 ft after 18 s.
+    { when: after(18), action: { kind: "condition", condition: "raFail", on: true } },
+    { when: S, action: { kind: "expectAfcs", collective: "ALT", pitch: "TD" }, within: 2 },
+    { when: S, action: { kind: "expectAlert", text: "TDN FUNCTION LOST" }, within: 2 },
+  ]),
+  variant("a4-ra-lost-in-hover", "(a4) RA lost in the hover: ALT latched, HOV continues", "(a4) RA lost in the hover: ALT latched, HOV continues. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    ...markAndActivate,
+    { when: S, action: { kind: "expectAfcs", collective: "RHT", pitch: "HOV", roll: "HOV" }, within: 900 },
+    { when: after(30), action: { kind: "condition", condition: "raFail", on: true } },
+    { when: S, action: { kind: "expectAfcs", collective: "ALT", pitch: "HOV", roll: "HOV" }, within: 2 },
+    { when: after(60), action: { kind: "expectAircraft", near: "MRK", nearMetres: 10, maxGroundSpeed: 1 } },
+  ]),
+  variant("b-tdn-off-track", "(b) TDN reached 0.3 NM off the final track: TDN NOT POSSIBLE, NAV gives way to HDG", "(b) TDN reached 0.3 NM off the final track: TDN NOT POSSIBLE, NAV gives way to HDG. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    { when: after(1), action: { kind: "keys", keys: ["TACT", "LSK1R", "LSK4L", "LSK6R", "EXEC"] } },
+    { when: S, action: { kind: "autopilot", heading: 50 } },
+    { when: after(120), action: { kind: "autopilot", heading: 140 } },
+    { when: after(35), action: { kind: "autopilot", heading: 230 } },
+    // NAV armed late, within 0.6 NM of TDN while still about 0.4 NM off the final track: it captures and is still correcting.
+    { when: { kind: "distance", waypoint: "TDN", nm: 0.6 }, action: { kind: "autopilot", lnav: true } },
+    { when: S, action: { kind: "expectAlert", text: "TDN NOT POSSIBLE" }, within: 60 },
+    { when: S, action: { kind: "expectAfcs", roll: "HDG" }, within: 2 },
+  ]),
+  variant("b2-tdn-high", "(b2) TDN reached 400 ft high: TDN DIST SHORT", "(b2) TDN reached 400 ft high: TDN DIST SHORT. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    ...markAndActivate,
+    { when: S, action: { kind: "autopilot", altitude: 900, verticalSpeed: 800 } },
+    { when: S, action: { kind: "expectAlert", text: "TDN DIST SHORT" }, within: 900 },
+    { when: S, action: { kind: "expectAfcs", roll: "HDG" }, within: 2 },
+  ]),
+  variant("c-hover-feedback-lost", "(c) HOV feedback lost on both receivers, then a 5 kt wind change: ATT holds the air velocity", "(c) HOV feedback lost on both receivers, then a 5 kt wind change: ATT holds the air velocity. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    ...markAndActivate,
+    { when: S, action: { kind: "expectAfcs", collective: "RHT", pitch: "HOV", roll: "HOV" }, within: 900 },
+    { when: after(30), action: { kind: "gps", receiver: 1, stimulus: { op: "override", label: "166", kind: "FORCE", amount: 0, ssm: "FW" } } },
+    { when: S, action: { kind: "gps", receiver: 2, stimulus: { op: "override", label: "166", kind: "FORCE", amount: 0, ssm: "FW" } } },
+    { when: S, action: { kind: "expectAfcs", collective: "RHT", pitch: "ATT", roll: "ATT" }, within: 2 },
+    { when: S, action: { kind: "wind", direction: 230, speed: 25 } },
+    // The truth drifts with the wind change while the modes report the loss.
+    { when: after(60), action: { kind: "expectAfcs", pitch: "ATT", roll: "ATT" } },
+  ]),
+  variant("d-early-toga", "(d) TOGA 1.5 NM before CRANN: the lateral path is kept to CRANN, then the missed approach", "(d) TOGA 1.5 NM before CRANN: the lateral path is kept to CRANN, then the missed approach. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    { when: { kind: "distance", waypoint: "CRANN", nm: 1.5 }, action: { kind: "goAround" } },
+    { when: S, action: { kind: "autopilot", altitude: 2000 } },
+    { when: after(10), action: { kind: "expectActive", waypoint: "CRANN" } },
+    { when: S, action: { kind: "expectAfcs", roll: "NAV" } },
+    { when: S, action: { kind: "expectActive", waypoint: "BEADS" }, within: 180 },
+  ], "87n-rnav190-final"),
+  variant("e-direct-on-final", "(e) Crew direct-to during the final: immediate", "(e) Crew direct-to during the final: immediate. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    { when: { kind: "distance", waypoint: "STAYS", nm: 1 }, action: { kind: "keys", keys: ["LEGS", "CHAR_B", "CHAR_E", "CHAR_A", "CHAR_D", "CHAR_S", "LSK1L", "EXEC"] } },
+    { when: S, action: { kind: "expectActive", waypoint: "BEADS" } },
+    { when: S, action: { kind: "expectAfcs", roll: "NAV" }, within: 5 },
+  ], "87n-rnav190-final"),
+  variant("f-proceed-vfr", "(f) Proceed VFR: DIRECT 87N at CRANN", "(f) Proceed VFR: DIRECT 87N at CRANN. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    { when: { kind: "distance", waypoint: "CRANN", nm: 0.2 }, action: { kind: "keys", keys: ["LEGS", "CHAR_8", "CHAR_7", "CHAR_N", "LSK1L", "EXEC"] } },
+    { when: S, action: { kind: "expectActive", waypoint: "87N" } },
+    { when: S, action: { kind: "expectAfcs", roll: "NAV" }, within: 5 },
+  ], "87n-rnav190-final"),
+  variant("g-integrity-on-final", "(g) GPS integrity lost on the final: GPS POS UNCERTAIN", "(g) GPS integrity lost on the final: GPS POS UNCERTAIN. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    { when: { kind: "distance", waypoint: "STAYS", nm: 1 }, action: { kind: "gps", receiver: 1, stimulus: { op: "override", label: "130", kind: "FORCE", amount: 2 } } },
+    { when: S, action: { kind: "gps", receiver: 2, stimulus: { op: "override", label: "130", kind: "FORCE", amount: 2 } } },
+    { when: S, action: { kind: "expectAlert", text: "GPS POS UNCERTAIN" }, within: 10 },
+  ], "87n-rnav190-final"),
+]

@@ -1317,8 +1317,10 @@ export class ScriptedFms implements CduBackend {
   armApproach(on = true) { this.armedApproach = on; this.emit(); }
 
   /**
-   * TOGA: a go-around before the runway. The rest of the approach is dropped and the missed approach becomes the
-   * active route from present position, its hold armed.
+   * TOGA or MISSED APPR before the MAP: the missed approach is requested, but lateral guidance continues along the
+   * approach to the MAP, which then sequences the missed approach legs (M300 7-16 item 4; plan R2-03 MA-EARLY and
+   * TOGA-EARLY). The approach is disarmed (no descent on its path) and the missed-approach hold armed. The laboratory
+   * airline profile, whose VNAV climbs on the missed approach legs, drops the rest of the approach at once instead.
    */
   goAround() {
     if (this.injected.has("fmsFail")) return false;
@@ -1326,8 +1328,10 @@ export class ScriptedFms implements CduBackend {
     const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
     // Only from the approach: once the missed approach is being flown there is nothing left to go around from.
     if (missed <= 0) return false;
-    route.legs.splice(0, missed);
-    this.legStart = { ...this.here };
+    if (this.aircraftProfile.verticalPolicy !== "ADVISORY") {
+      route.legs.splice(0, missed);
+      this.legStart = { ...this.here };
+    }
     this.armedApproach = false;
     this.goArounds += 1;
     this.armMissedHold(route);

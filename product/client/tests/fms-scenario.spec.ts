@@ -4,7 +4,7 @@ import {
   ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, linePattern, parseScenario, procedureText, reportMarkdown, runHeadless,
   scenarioDigest, scenarioProblems, type Scenario,
 } from '../src/fmsCdu/scenario'
-import { HELICOPTER_PROFILE, profileFingerprint } from '../src/fmsCdu/profile'
+import { HELICOPTER_PROFILE, profileById, profileFingerprint } from '../src/fmsCdu/profile'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
@@ -268,7 +268,7 @@ test('the same scenario gives the same timeline however the ticks are grouped, a
   const scenario = library('gps-lost-before-faf')
   const run = (chunk: number) => {
     let now = START
-    const fms = new ScriptedFms(() => new Date(now))
+    const fms = new ScriptedFms(() => new Date(now), { profile: profileById(scenario.profile) })
     const sim = new FlightSimulator(fms)
     const runner = new ScenarioRunner(scenario, fms)
     while (!runner.finished) advanceTicks(chunk, ms => { now += ms }, sim, runner)

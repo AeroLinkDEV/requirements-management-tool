@@ -4,7 +4,9 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import { COPTER_PINS_CIFP_2609, COPTER_PINS_CIFP_2609_SHA256 } from '../src/fmsCdu/data/copterPinsCifp2609'
-import { COPTER_PINS_SOURCE, MISSION_87N_OFFSHORE_SAR, MISSION_START_SOUTH_NM, setUp87nOffshoreSar } from '../src/fmsCdu/heliDemo'
+import {
+  COPTER_PINS_SOURCE, FINAL_START_BEFORE_STAYS_NM, MISSION_87N_OFFSHORE_SAR, MISSION_87N_VARIANTS, MISSION_START_SOUTH_NM, setUp87nOffshoreSar, setUp87nRnav190Final,
+} from '../src/fmsCdu/heliDemo'
 import { runHeadless, scenarioProblems } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
@@ -91,3 +93,26 @@ test('climbing out of a hover the modelled pitch stays within its limit, and bot
   expect(unit.recallList.map(message => message.text)).not.toContain('GPS1 NOT USABLE')
   expect(unit.recallList.map(message => message.text)).not.toContain('GPS2 NOT USABLE')
 })
+
+test('the RNAV 190 final start state: 3 NM before STAYS on the final course at 1,700 ft, DIRECT STAYS, NAV and the approach armed', () => {
+  const unit = new ScriptedFms(() => new Date(START))
+  const sim = new FlightSimulator(unit)
+  expect(setUp87nRnav190Final(unit, sim)).toEqual({ ready: true })
+  const legs = unit.activeRoute.legs.map(leg => (leg.kind === 'wpt' ? leg.ident : leg.kind === 'cond' ? `(${leg.path})` : '(disco)'))
+  expect(legs.slice(0, 4)).toEqual(['STAYS', 'CRANN', '(CA)', 'BEADS'])
+  expect(distanceNm(unit.truePosition, unit.coordinates('STAYS')!)).toBeCloseTo(FINAL_START_BEFORE_STAYS_NM, 6)
+  expect(unit.altitude).toBe(1700)
+  expect(unit.approachArmed).toBe(true)
+  expect(sim.lnavIsArmed || sim.lateralMode === 'LNAV').toBe(true)
+})
+
+for (const variant of MISSION_87N_VARIANTS) {
+  test(`the 87N mission checkpoint variant ${variant.title.replace(/^87N mission variant /, '')}`, () => {
+    expect(scenarioProblems(variant)).toEqual([])
+    expect(SCENARIO_LIBRARY).toContain(variant)
+    const { runner } = runHeadless(variant)
+    const failures = runner.results.map((result, i) => ({ step: i + 1, ...result })).filter(result => result.status !== 'pass' && result.status !== 'done')
+    expect(failures).toEqual([])
+    expect(runner.outcome).toBe('passed')
+  })
+}
