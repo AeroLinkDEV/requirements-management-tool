@@ -16,6 +16,7 @@ import { conditionalLabel } from "./fmsModel";
 import { fmsGpsView } from "./gpsBench";
 import { useCduLayout, type CduKeyEvent } from "./layout";
 import { LIGHTING_MODES, displayLuminance, type Lighting, type LightingMode } from "./lighting";
+import { KBTV_SOURCE, START_STATES, loadKbtvDemonstration, type StartStateId } from "./kbtvDemo";
 import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, type Scenario } from "./scenario";
 import { ScriptedFms } from "./scriptedFms";
 import { screenText } from "./screen";
@@ -79,18 +80,24 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
   // A scenario run or a recording starts on the next session, so it always begins from a restarted simulation.
   const pendingScenario = useRef<Scenario | null>(null);
   const pendingRecording = useRef(false);
-  const { backend, sim, runner, recorder } = useMemo(() => {
+  // A demonstration start state (kbtvDemo.ts) also starts on the next session: a restarted simulation, then set up.
+  const pendingStart = useRef<StartStateId | null>(null);
+  const { backend, sim, runner, recorder, started } = useMemo(() => {
     simTime.current = Date.now();
     const fms = new ScriptedFms(() => new Date(simTime.current));
+    const flight = new FlightSimulator(fms);
+    const start = pendingStart.current;
+    const started = start ? START_STATES[start].setUp(fms) : null;
     // The run's context is fixed as it starts, so its report describes the run and not the controls afterwards.
     const chosen = variantById(variantId);
     const runner = pendingScenario.current
-      ? new ScenarioRunner(pendingScenario.current, fms, { variant: `${chosen.id} (${chosen.label})`, cycle: fms.activeCycle.id })
+      ? new ScenarioRunner(pendingScenario.current, fms, { variant: `${chosen.id} (${chosen.label})`, cycle: fms.activeCycle.id }, flight)
       : null;
     const recorder = pendingRecording.current ? new ScenarioRecorder(() => new Date(simTime.current)) : null;
     pendingScenario.current = null;
     pendingRecording.current = false;
-    return { backend: fms, sim: new FlightSimulator(fms), runner, recorder };
+    pendingStart.current = null;
+    return { backend: fms, sim: flight, runner, recorder, started: start && started ? { id: start, outcome: started } : null };
   }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
   const [recording, setRecording] = useState(false);
   const recordTo = recording ? recorder : null;
@@ -170,6 +177,14 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
     setLog([]);
     setRecording(false);
     setPlaying(true);
+  };
+  const startDemonstration = (id: StartStateId) => {
+    pendingStart.current = id;
+    setSession(value => value + 1);
+    setLog([]);
+    setRecording(false);
+    setPlaying(false);
+    setNavLoad(null);
   };
   const startRecording = () => {
     pendingRecording.current = true;
@@ -436,9 +451,35 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
             <h2>Navigation data</h2>
             <p className="fmsBenchReadout">
               Active <strong>{backend.activeCycle.id}</strong> ({backend.activeCycle.source}): {backend.navdb.counts.airports} airports, {backend.navdb.counts.navaids} navaids,{" "}
-              {backend.navdb.counts.fixes} fixes, {backend.navdb.counts.airways} airways, {backend.navdb.counts.procedures} procedures.
-              The built-in set is invented demonstration data; its two cycles hold the same data.
+              {backend.navdb.counts.fixes} fixes, {backend.navdb.counts.airways} airways, {backend.navdb.counts.procedures} procedures.{" "}
+              {backend.activeCycle.source === "demonstration data" && backend.inactiveCycle?.source === "demonstration data"
+                ? "The built-in set is invented demonstration data; its two cycles hold the same data."
+                : "The built-in set is invented demonstration data; a loaded cycle adds to it."}
             </p>
+            <div className="fmsBenchDemo" role="group" aria-label="Real-data demonstration">
+              <p className="fmsBenchHint">
+                Real data: the FAA CIFP cycle 2609 extract for Burlington, Vermont (KBTV), bundled with the bench. It is a
+                US Government work in the public domain, for demonstration only, not for navigation: the cycle is not kept
+                current. The invented CYUL demonstration stays the default start.
+              </p>
+              <div className="fmsBenchActions">
+                <button type="button" disabled={failedFms || backend.activeCycle.source === KBTV_SOURCE}
+                  onClick={() => {
+                    const outcome = loadKbtvDemonstration(backend);
+                    setNavLoad("refused" in outcome ? `Refused, nothing changed. ${outcome.refused}.`
+                      : `KBTV demonstration loaded and active: cycle ${outcome.loaded}, FAA CIFP 2609 (public domain, not for navigation).`);
+                  }}>Load the KBTV demonstration (FAA CIFP 2609)</button>
+                <button type="button" onClick={() => startDemonstration("kbtv-rnav15")}
+                  title="Restarts the simulation, loads the KBTV data and places the aircraft 8 NM before STAEV at 3200 ft, cleared direct STAEV, approach armed">
+                  Set up KBTV RNAV RWY 15
+                </button>
+              </div>
+              {started ? (
+                <p className="fmsBenchHint" role="status">
+                  {"refused" in started.outcome ? `Set-up refused: ${started.outcome.refused}.` : `Set up: ${START_STATES[started.id].label}. Press Fly to fly the approach.`}
+                </p>
+              ) : null}
+            </div>
             {backend.inactiveCycle ? (
               <p className="fmsBenchReadout">
                 Inactive <strong>{backend.inactiveCycle.id}</strong> ({backend.inactiveCycle.source}).{" "}

@@ -1,6 +1,7 @@
 import { CONDITIONS, type ConditionId } from "./conditions";
 import { FlightSimulator } from "./flight";
 import { distanceNm } from "./fmsModel";
+import { START_STATES, type StartStateId } from "./kbtvDemo";
 import { ScriptedFms } from "./scriptedFms";
 import { SCRATCHPAD_LINE, screenText, type Lamp } from "./screen";
 import type { CduFunction } from "./variants";
@@ -45,7 +46,13 @@ export type Action =
   | { kind: "expectAlert"; text: string }
   | { kind: "expectNoAlert"; text: string }
   | { kind: "expectLamp"; lamp: Lamp; lit: boolean }
-  | { kind: "expectActive"; waypoint: string };
+  | { kind: "expectActive"; waypoint: string }
+  /**
+   * The approach as the flight simulation and the FMS have it: its type (ILS, LPV, LNAV/VNAV, LNAV, NO APPR), the
+   * approach mode (OFF, ARMED, CAPTURED), the vertical mode, and the vertical deviation within a limit, feet. Each field
+   * given is checked; the others are not.
+   */
+  | { kind: "expectApproach"; type?: string; state?: "OFF" | "ARMED" | "CAPTURED"; verticalMode?: string; maxVerticalFt?: number };
 
 /** One step. An expectation not yet met waits up to `within` seconds for it before failing. */
 export type ScenarioStep = { when: Trigger; action: Action; within?: number };
@@ -56,6 +63,8 @@ export type Scenario = {
   objective: string;
   /** The run ends then: any step not finished is not reached. */
   maxSeconds: number;
+  /** A named start state (kbtvDemo.ts START_STATES) the fresh simulation is set up in before the first step. */
+  start?: StartStateId;
   steps: ScenarioStep[];
 };
 
@@ -65,8 +74,11 @@ export type StepResult = { status: StepStatus; at?: number; actual?: string };
 /** How a run ended. Only "passed" is a pass: every check held, and there was at least one. */
 export type RunOutcome = "running" | "passed" | "failed" | "no checks" | "timed out" | "stopped" | "invalid" | "error";
 
-/** What the run describes, fixed when it starts, so the report cannot change after it finishes. */
-export type RunContext = { variant: string; cycle: string };
+/**
+ * What the run describes, fixed when it starts, so the report cannot change after it finishes. `data` says what the
+ * navigation data is (the active cycle's source); a start state can change the cycle, so both are read after it.
+ */
+export type RunContext = { variant: string; cycle: string; data?: string };
 
 const isExpectation = (action: Action) => action.kind.startsWith("expect");
 
@@ -99,6 +111,14 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "expectNoAlert": return `check that the alert ${a.text} has not been raised at that moment`;
       case "expectLamp": return `check that the ${a.lamp} annunciator is ${a.lit ? "lit" : "out"}${within}`;
       case "expectActive": return `check that ${a.waypoint} is the active waypoint${within}`;
+      case "expectApproach": {
+        const parts = [
+          a.type ? `the approach is ${a.type}` : null, a.state ? `the approach mode is ${a.state}` : null,
+          a.verticalMode ? `the vertical mode is ${a.verticalMode}` : null,
+          a.maxVerticalFt !== undefined ? `the vertical deviation is within ${a.maxVerticalFt} ft` : null,
+        ].filter(Boolean);
+        return `check that ${parts.join(", ")}${within}`;
+      }
     }
   })();
   return when === "Then" ? `Then ${what}.` : `${when}, ${what}.`;
@@ -117,6 +137,7 @@ const LAMPS = new Set(["FAIL", "MSG", "POS", "OFST", "NPA", "GSM", "SMS", "TX1",
 const CONDITION_IDS = new Set(CONDITIONS.map(condition => condition.id as string));
 const IDENT = /^[A-Z0-9]{1,7}$/;
 const MAX_RUN_SECONDS = 24 * 3600;
+const APPROACH_TYPES = new Set(["ILS", "LPV", "LNAV/VNAV", "LNAV", "NO APPR"]);
 
 const finite = (value: unknown, min: number, max: number) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 const text = (value: unknown, pattern: RegExp) => typeof value === "string" && pattern.test(value);
@@ -158,6 +179,14 @@ function actionProblem(action: unknown): string | null {
     }
     case "expectLamp": return typeof a.lamp === "string" && LAMPS.has(a.lamp) && typeof a.lit === "boolean" ? null : "expectLamp needs a known annunciator and lit true or false";
     case "expectActive": return text(a.waypoint, IDENT) ? null : "expectActive needs a waypoint ident";
+    case "expectApproach": {
+      if (a.type === undefined && a.state === undefined && a.verticalMode === undefined && a.maxVerticalFt === undefined) return "expectApproach needs at least one of type, state, verticalMode and maxVerticalFt";
+      if (a.type !== undefined && !(typeof a.type === "string" && APPROACH_TYPES.has(a.type))) return "expectApproach type must be ILS, LPV, LNAV/VNAV, LNAV or NO APPR";
+      if (a.state !== undefined && a.state !== "OFF" && a.state !== "ARMED" && a.state !== "CAPTURED") return "expectApproach state must be OFF, ARMED or CAPTURED";
+      if (a.verticalMode !== undefined && !text(a.verticalMode, /^[A-Z ]{2,12}$/)) return "expectApproach verticalMode must be a vertical mode name";
+      if (a.maxVerticalFt !== undefined && !finite(a.maxVerticalFt, 0, 10000)) return "expectApproach maxVerticalFt must be between 0 and 10000";
+      return null;
+    }
     default: return `unsupported action "${String(a.kind)}"`;
   }
 }
@@ -169,6 +198,7 @@ export function scenarioProblems(value: unknown): string[] {
   if (!s || typeof s !== "object") return ["not a scenario"];
   if (typeof s.title !== "string" || !s.title.trim()) problems.push("it needs a title");
   if (!finite(s.maxSeconds, TICK_SECONDS, MAX_RUN_SECONDS)) problems.push("it needs maxSeconds between 0.25 and 86400");
+  if (s.start !== undefined && !(typeof s.start === "string" && Object.hasOwn(START_STATES, s.start))) problems.push(`unknown start state "${String(s.start)}"`);
   if (!Array.isArray(s.steps)) return [...problems, "it needs steps"];
   s.steps.forEach((step, i) => {
     const where = `step ${i + 1}`;
@@ -198,6 +228,8 @@ export class ScenarioRunner {
   /** Why the scenario could not run, when it is invalid. */
   readonly problems: readonly string[];
   private readonly fms: ScriptedFms;
+  /** The flight simulation, for the approach checks; a run without one cannot make them. */
+  private readonly sim: FlightSimulator | null;
   private readonly start: number;
   private next = 0;
   /** When the current step's trigger came, for an expectation that is waiting. */
@@ -206,12 +238,19 @@ export class ScenarioRunner {
   private failure: "error" | null = null;
   private endedAt: number | null = null;
 
-  constructor(scenario: Scenario, fms: ScriptedFms, context: RunContext = { variant: "not recorded", cycle: fms.activeCycle.id }) {
+  constructor(scenario: Scenario, fms: ScriptedFms, context: RunContext = { variant: "not recorded", cycle: fms.activeCycle.id }, sim: FlightSimulator | null = null) {
     this.scenario = structuredClone(scenario);
-    this.context = { ...context };
     this.fms = fms;
+    this.sim = sim;
+    const problems = scenarioProblems(scenario);
+    // The start state sets up the fresh simulation before the first step; the context is read after it.
+    if (!problems.length && this.scenario.start) {
+      const set = START_STATES[this.scenario.start].setUp(fms);
+      if ("refused" in set) problems.push(`start state ${this.scenario.start}: ${set.refused}`);
+    }
+    this.problems = problems;
+    this.context = { ...context, cycle: fms.activeCycle.id, data: context.data ?? fms.activeCycle.source };
     this.start = fms.now.getTime();
-    this.problems = scenarioProblems(scenario);
     this.results = this.scenario.steps.map(() => ({ status: "pending" }));
     if (this.problems.length) { this.next = this.results.length; this.endedAt = 0; return; }
     this.poll();
@@ -352,6 +391,17 @@ export class ScenarioRunner {
         const active = this.activeWaypoint() ?? "none";
         return { ok: active === action.waypoint, actual: active };
       }
+      case "expectApproach": {
+        const sim = this.sim;
+        if (!sim) throw new Error("expectApproach needs the flight simulation, which this run was not given.");
+        const type = fms.approachType ?? "none", state = sim.approachMode, vertical = sim.verticalMode;
+        const path = sim.verticalPath;
+        const deviation = path ? fms.altitude - path.altitude : null;
+        const ok = (action.type === undefined || type === action.type) && (action.state === undefined || state === action.state)
+          && (action.verticalMode === undefined || vertical === action.verticalMode)
+          && (action.maxVerticalFt === undefined || (deviation !== null && Math.abs(deviation) <= action.maxVerticalFt));
+        return { ok, actual: `${type} ${state}, ${vertical}, ${deviation === null ? "no path" : `${Math.round(deviation)} ft from the path`}` };
+      }
       default: throw new Error(`Unsupported check "${action.kind}".`);
     }
   }
@@ -377,7 +427,7 @@ export function runHeadless(scenario: Scenario, start = Date.UTC(2026, 8, 27, 14
   let now = start;
   const fms = new ScriptedFms(() => new Date(now));
   const sim = new FlightSimulator(fms);
-  const runner = new ScenarioRunner(scenario, fms, context);
+  const runner = new ScenarioRunner(scenario, fms, context, sim);
   // The runner ends itself at maxSeconds; the bound only keeps a broken runner from looping forever.
   const limit = Math.ceil((Number.isFinite(scenario.maxSeconds) ? scenario.maxSeconds : 0) / TICK_SECONDS) + 2;
   for (let t = 0; !runner.finished && t < limit; t += 1) advanceTicks(1, ms => { now += ms; }, sim, runner);
@@ -395,6 +445,7 @@ export function procedureText(scenario: Scenario) {
     preconditions: [
       "The AeroLink FMS Test Bench is open with the scripted CMA-9000 simulation (not a navigation computer).",
       "The simulation is restarted, with the demonstration route and navigation database loaded.",
+      ...(scenario.start ? [`It is then set up in the start state ${START_STATES[scenario.start].label}.`] : []),
       `The flight is flown at any rate; the scenario allows ${formatSeconds(scenario.maxSeconds)} of simulated time.`,
     ].join("\n"),
     steps: scenario.steps.map((step, i) => `${i + 1}. ${describeStep(step, i)}`).join("\n"),
@@ -444,7 +495,7 @@ export function reportMarkdown(runner: ScenarioRunner) {
     `- Scenario: ${scenario.id}, ${scenarioDigest(scenario)}`,
     `- Started: ${runner.startedAt.toISOString()}${runner.endedAfter === null ? "" : `; ended after ${formatSeconds(runner.endedAfter)} of simulated time`}`,
     `- Hardware variation: ${context.variant}`,
-    `- Navigation data: ${context.cycle} (invented demonstration data)`,
+    `- Navigation data: ${context.cycle} (${!context.data || context.data === "demonstration data" ? "invented demonstration data" : context.data})`,
     `- Time: ${TICK_SECONDS} s ticks; a step due between ticks runs at the next one.`,
     "- Driven by the scripted CMA-9000 simulation, not the operational program. This is not flight-qualified evidence.",
     ...(runner.problems.length ? ["", "Not run, because:", ...runner.problems.map(problem => `- ${problem}`)] : []),

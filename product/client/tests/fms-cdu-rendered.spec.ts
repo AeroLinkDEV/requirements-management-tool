@@ -494,3 +494,28 @@ test('a numeric word can be forced with a status from the bus monitor, and the F
   await expect(page.getByRole('img', { name: /^Sensor routing/ })).toHaveAttribute('aria-label', /FMS on GPS2$/)
   await expect(page.getByTestId('route-gps1')).toContainText('not usable · no fix')
 })
+
+test('the KBTV demonstration loads real FAA data from the Nav data tab, sets up RNAV RWY 15, and its LPV scenario passes on the bench', async ({ page }) => {
+  await open(page)
+  await tab(page, 'Nav data')
+  const demo = page.getByRole('group', { name: 'Real-data demonstration' })
+  await expect(demo).toContainText(/public domain, for demonstration only, not for navigation/)
+  const load = demo.getByRole('button', { name: 'Load the KBTV demonstration (FAA CIFP 2609)' })
+  await load.click()
+  await expect(page.getByRole('status').filter({ hasText: /^KBTV demonstration loaded and active: cycle CIFP2609/ })).toBeVisible()
+  await expect(page.getByText(/^Active CIFP2609 \(FAA CIFP 2609, KBTV extract/)).toBeVisible()
+  await expect(load).toBeDisabled()
+  // The one-click start: a restarted simulation, KBTV loaded, the aircraft before STAEV with the approach armed.
+  await demo.getByRole('button', { name: 'Set up KBTV RNAV RWY 15' }).click()
+  await expect(demo.getByRole('status')).toHaveText(/^Set up: KBTV RNAV \(GPS\) RWY 15/)
+  await key(page, 'PROG').click()
+  await expectLine(page, 2, /^STAEV\b/)
+  // The library scenario flies it from the same start state, on a restarted simulation.
+  await tab(page, 'Scenarios')
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  await page.getByLabel('Simulation rate').selectOption('64')
+  await card.getByLabel('Scenario', { exact: true }).selectOption({ label: 'KBTV RNAV (GPS) RWY 15, LPV on the published FAS' })
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible({ timeout: 45_000 })
+  await expect(card.getByRole('list', { name: 'Scenario steps' }).locator('li[data-status="pass"]')).toHaveCount(5)
+})
