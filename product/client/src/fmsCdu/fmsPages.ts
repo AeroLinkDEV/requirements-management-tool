@@ -4,6 +4,8 @@ import {
   WAYPOINT, boxes, caption, conditionalLabel, courseDeg, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, offset, pad, parsePosition, prompt, simulated,
   small, three, title, type CorePageId, type Leg, type LskResult, type Page, type PageId,
 } from "./fmsModel";
+import { HAL_NM, MODE_TEXT, shownReceiver } from "./gpsSensors";
+import { gpsSummary, navModeText, sbasSummary } from "./navPages";
 import type { Line } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
 
@@ -150,6 +152,9 @@ function vnavDescent(fms: ScriptedFms): (Line | undefined)[] {
   ];
 }
 
+/** The fix of the GPS receiver the FMS navigates on, or null when it navigates on none. */
+const gpsFix = (fms: ScriptedFms) => (fms.gpsStatus.chosen === null ? null : fms.gpsStatus.assessed[fms.gpsStatus.chosen].fix);
+
 export const CORE_PAGES: Record<CorePageId, Page> = {
   MENU: {
     pages: () => 1,
@@ -244,7 +249,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       caption(" FMS POS"),
       { left: medium(formatPosition(fms.position)) },
       caption(" GPS POS"),
-      { left: fms.navState.mode !== "GPS" ? dashes(15) : medium(formatPosition(fms.position)) },
+      // The fix of the receiver navigated on, which in GPS mode is the FMS position (3a.3).
+      { left: gpsFix(fms) ? medium(formatPosition(gpsFix(fms)!)) : dashes(15) },
       caption(" UTC", "SET POS "),
       // The crew's last SET POS entry, or boxes until there is one (R26).
       { left: medium(hhmm(fms.now)), right: fms.positionReferenceEntry ? medium(formatPosition(fms.positionReferenceEntry.position)) : boxes(15) },
@@ -263,7 +269,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         return;
       }
       if (side === "L" && row === 1 && !scratch) fms.setScratch(formatPosition(fms.position));
-      if (side === "L" && row === 2 && !scratch && fms.navState.mode === "GPS") fms.setScratch(formatPosition(fms.position));
+      if (side === "L" && row === 2 && !scratch && gpsFix(fms)) fms.setScratch(formatPosition(gpsFix(fms)!));
     },
   },
 
@@ -430,7 +436,6 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const eta = (miles: number) => hhmm(new Date(now + (miles / fms.groundSpeed) * 3_600_000));
       const ident = (leg: Leg | undefined) => (leg?.kind === "wpt" ? leg.ident : leg?.kind === "cond" ? conditionalLabel(leg) : "-----");
       const nav = fms.navState;
-      const gpsLost = nav.mode !== "GPS";
       if (index === 0) {
         // RNP and ANP as every page, lamp and alert reads them; a bench-forced value is labelled TEST (R11).
         const { rnp, anp, forced } = fms.navPerformance;
@@ -448,7 +453,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           caption(`RNP/ANP ${forced ? "TEST" : nav.rnpManual === null ? fms.flightPhase : "MANUAL"}`),
           { left: medium(`${fixed(rnp, 2)}/${fixed(anp, 2)}NM`, anp > rnp ? "amber" : "white") },
           caption("NAV MODE"),
-          { left: { text: nav.mode, color: nav.mode === "DR" ? "amber" : "cyan" }, right: prompt("NAV STATUS>") },
+          { left: { text: navModeText(fms), color: nav.mode === "DR" ? "amber" : "cyan" }, right: prompt("NAV STATUS>") },
         ];
       }
       if (index === 1)
@@ -459,14 +464,23 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           caption(" DEST", "EFOB "),
           { left: { text: fms.activeRoute.dest, color: "green" }, right: medium(efobText(fms)) },
         ];
-      if (index === 2)
+      if (index === 2) {
+        // The receiver navigated on (or the one chosen, or GPS1) as its bus reports it: mode, satellites used, HIL (3a.6).
+        const { name, assessment } = shownReceiver(fms.gpsStatus, fms.gpsReceiverChoice);
+        const summary = fms.gpsNavSelected ? gpsSummary(assessment) : { text: "DESELECTED", ok: false };
+        const hil = fms.gpsNavSelected && assessment?.fix ? assessment.hil : null;
+        const intact = fms.gpsNavSelected && assessment?.usable === true && assessment.integrity === "OK";
         return [
           title("PROGRESS", "3/4", "ACT"),
-          caption(" GPS", "HIL "),
-          gpsLost ? { left: medium("NO SIGNAL", "amber"), right: dashes(6) } : { left: medium("NAV 9 SAT"), right: medium(fms.hasCondition("gpsIntegrity") ? "-----" : "0.03NM") },
+          caption(` ${name}`, "HIL "),
+          {
+            left: assessment?.fix && assessment.mode && fms.gpsNavSelected ? medium(`${MODE_TEXT[assessment.mode]} ${assessment.used} SAT`) : medium(summary.text, "amber"),
+            right: hil === null ? dashes(6) : medium(`${fixed(hil, 2)}NM`, hil > HAL_NM[fms.flightPhase] ? "amber" : "white"),
+          },
           caption(" SBAS", "INTEGRITY "),
-          { left: medium(gpsLost ? "----" : "WAAS"), right: gpsLost || fms.hasCondition("gpsIntegrity") ? medium("LOST", "amber") : medium("OK", "green") },
+          { left: medium(fms.gpsNavSelected ? sbasSummary(assessment) : "----"), right: intact ? medium("OK", "green") : medium("LOST", "amber") },
         ];
+      }
       const offset = fms.lateralOffset;
       return [
         title("PROGRESS", "4/4", fms.routeStatus),
@@ -735,7 +749,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const targetVs = Math.round((fms.groundSpeed * 101.27 * tan) / 10) * 10;
       const outside = path.vpa < GLIDEPATH_LIMITS.low || path.vpa > GLIDEPATH_LIMITS.high;
       return [
-        title(`VNAV ${path.runway} ${fms.approachType ?? ""}`.trim(), "1/3", "ACT"),
+        // The runway without its RW and LNAV/VNAV as L/VNAV, so the longest title (NO APPR) fits beside 1/3 (R19, 3b).
+        title(`VNAV ${path.runway.replace(/^RW/, "")} ${fms.approachType === "LNAV/VNAV" ? "L/VNAV" : fms.approachType ?? ""}`.trim(), "1/3", "ACT"),
         caption(" MDA-DA", fms.coldCorrection ? "FAF ALT TEMP COMP " : "FAF ALT "),
         { left: { text: `${fms.vnav.mda}FT` }, right: { text: `${path.faf} ${fms.fafAltitudeCorrected}A`, color: fms.coldCorrection ? "cyan" : "white" } },
         caption(" ACT WPT", "CRS/DIST "),

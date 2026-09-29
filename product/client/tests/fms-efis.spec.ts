@@ -72,7 +72,8 @@ test('on final the vertical deviation is advisory until the approach captures, t
   const bus = fmsOutputs(unit, sim)
   expect(bus.approach).toEqual({ type: 'LPV', state: 'CAPTURED' })
   expect(bus.verticalMode).toBe('APPR')
-  expect(bus.verticalFullScaleFt).toBe(150)
+  // On an RNAV final the full scale is the GPS's angular scaling beside 117 (GPS phase 3b), not a fixed 150 ft.
+  expect(bus.verticalFullScaleFt).toBeCloseTo(unit.gpsApproach!.scale!.verticalFullScaleFt, 9)
   // Integrity lost: the approach cannot be armed as available.
   unit.setCondition('gpsIntegrity', true)
   fly(2)

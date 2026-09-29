@@ -19,6 +19,8 @@ export const ALERTS: readonly AlertDefinition[] = [
   { text: "FUEL RESERVE", meaning: "Fuel on board has reached the reserve quantity" },
   { text: "GPS NAV LOST", meaning: "GPS can no longer be used for navigation; the FMS dead reckons" },
   { text: "GPS POS UNCERTAIN", meaning: "GPS position integrity cannot be assured" },
+  // Not in the CMA-9000 list: a laboratory alert for the bench's GPS1/GPS2 compare (gpsSensors.ts GPS_DISAGREE_NM).
+  { text: "GPS DISAGREE", meaning: "(Laboratory) GPS 1 and GPS 2 positions differ by more than the compare limit" },
   { text: "HEADING INPUT LOST", meaning: "The heading input is no longer valid" },
   { text: "HF CONTROL LOST", meaning: "The FMS can no longer tune the HF radio" },
   { text: "HIGH GLIDEPATH ANGLE", meaning: "The computed vertical path is steeper than 3.77 degrees" },

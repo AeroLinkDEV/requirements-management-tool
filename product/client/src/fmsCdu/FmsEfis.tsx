@@ -162,7 +162,7 @@ export function Pfd({ bus, air, now }: { bus: FmsOutputs; air: AircraftData; now
           <polygon data-testid="ldev" points={`${cx + lateralDots * 90 - 8},318 ${cx + lateralDots * 90},311 ${cx + lateralDots * 90 + 8},318 ${cx + lateralDots * 90},325`} fill={MAGENTA} />
         ) : null}
         <text x="104" y="308" fontSize="12" fill={bus.failed ? AMBER : GREEN} data-testid="nav-source">{bus.failed ? "FMS" : `${bus.source} ${bus.phase === "EN ROUTE" ? "ENR" : bus.phase === "TERMINAL" ? "TERM" : "APPR"}`}</text>
-        <text x="316" y="308" fontSize="12" fill={WHITE} textAnchor="end">{lateralDots !== null ? `${bus.lateralFullScaleNm}NM` : ""}</text>
+        <text x="316" y="308" fontSize="12" fill={WHITE} textAnchor="end">{lateralDots !== null ? `${Number(bus.lateralFullScaleNm.toFixed(2))}NM` : ""}</text>
       </g>
       {/* Heading: current heading, the desired track (magenta) and a crew-selected heading (cyan). */}
       <g>

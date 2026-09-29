@@ -247,11 +247,19 @@ export class FlightSimulator {
   /** The vertical path here, or null where there is none (climb, cruise, or no computable path). */
   get verticalPath() { return this.path; }
 
-  /** The final approach path altitude at the aircraft, from the FAF (at its corrected altitude) to the runway. */
+  /**
+   * The final approach path altitude at the aircraft. On an RNAV approach it is the selected GPS's (the aircraft less
+   * its 117 vertical deviation from the FAS path), and there is none while the GPS gives no vertical guidance
+   * (verticalFlag). Otherwise, from the FAF (at its corrected altitude) to the runway.
+   */
   private finalPathAltitude(): number | null {
     const fms = this.fms;
     const leg = fms.activeRoute.legs[0];
     if (!this.onFinal || leg?.kind !== "wpt" || !fms.lastSequenced) return null;
+    if (this.rnavApproach) {
+      const vertical = fms.gpsApproachVertical ? fms.gpsApproach!.verticalFt! : null;
+      return vertical === null ? null : fms.altitude - vertical;
+    }
     const fafPos = fms.coordinates(fms.lastSequenced), rwyPos = fms.coordinates(leg.ident);
     if (!fafPos || !rwyPos) return null;
     const tan = (fms.fafAltitudeCorrected - fms.vnav.runwayElevation) / (distanceNm(fafPos, rwyPos) * 6076.12);
@@ -281,6 +289,15 @@ export class FlightSimulator {
     return { altitude: Math.min(ceiling, raw), sloped: along > 0 && raw < ceiling };
   }
 
+  /** The active approach is an RNAV approach, guided on final by the GPS (GPS phase 3b). */
+  private get rnavApproach() { const type = this.fms.approachType; return type !== null && type !== "ILS"; }
+
+  /**
+   * The vertical deviation is flagged: on the final leg of an RNAV approach without GPS vertical guidance (a level
+   * without it, 117 withdrawn, or no GPS). The display shows the flag instead of a path (GPS phase 3b).
+   */
+  get verticalFlag() { return !this.fms.hasCondition("fmsFail") && this.onFinal && this.rnavApproach && !this.fms.gpsApproachVertical; }
+
   /** On the final leg: the FAF has been sequenced and the runway is the active waypoint. */
   private get onFinal() {
     const leg = this.fms.activeRoute.legs[0];
@@ -289,7 +306,8 @@ export class FlightSimulator {
 
   /**
    * The laboratory approach contract (Q-A1, a labelled engineering assumption): the approach captures on the final
-   * leg only when armed, with valid approach capability (ILS, or LPV with integrity), LNAV engaged and the aircraft
+   * leg only when armed, with vertical approach capability (an ILS, or an RNAV approach whose GPS reports LPV or
+   * LNAV/VNAV with its vertical deviation valid; an LNAV level has none, GPS phase 3b), LNAV engaged and the aircraft
    * within 1 NM of the final course and not moving away from it. Loss of capability after capture drops the approach to a latched altitude
    * hold; its return does not re-capture, because the approach is disarmed and must be armed again.
    *
@@ -303,7 +321,7 @@ export class FlightSimulator {
     const converging = this.previousCrossTrack === null || Math.abs(crossTrack) <= Math.abs(this.previousCrossTrack) + 1e-6;
     this.previousCrossTrack = crossTrack;
     const fms = this.fms;
-    const capable = fms.approachType === "ILS" || fms.approachType === "LPV";
+    const capable = fms.approachVertical;
     if (this.approach === "CAPTURED") {
       if (!this.onFinal || fms.hasCondition("fmsFail")) { this.approach = fms.approachArmed ? "ARMED" : "OFF"; return; }
       const cancel = !fms.approachArmed ? "APPR pressed off" : this.lateral !== "LNAV" ? "HDG SEL" : null;
@@ -441,11 +459,13 @@ export class FlightSimulator {
     verticalSpeed = fms.verticalSpeed + clamp(verticalSpeed - fms.verticalSpeed, -VS_RATE * dt, VS_RATE * dt);
     const altitude = fms.altitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
-    fms.setAircraft({ position, track, groundSpeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError });
+    // Bank and flight-path pitch too: they tilt the GPS antennas (a point-mass model has no angle of attack).
+    const pitch = (Math.atan(verticalSpeed / 60 / (groundSpeed * 1.68781)) * 180) / Math.PI;
+    fms.setAircraft({ position, track, groundSpeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError, bank: this.bank, pitch });
     // The path for the deviation display: the final approach path on final (coupled only when captured), otherwise the
     // descent path. None while the FMS has failed: it computes nothing to show.
     const final = this.fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
-    const descentPath = final === null && !this.fms.hasCondition("fmsFail") ? this.descentPathAltitude() : null;
+    const descentPath = final === null && !this.fms.hasCondition("fmsFail") && !this.verticalFlag ? this.descentPathAltitude() : null;
     this.path = final !== null ? { altitude: final, source: "APPR", coupled: this.approach === "CAPTURED" }
       : descentPath !== null ? { altitude: descentPath, source: "VNAV", coupled: this.vertical === "VNAV PTH" && this.altitudeHold === null } : null;
     fms.updateNavigation(dt);
@@ -490,6 +510,8 @@ export class FlightSimulator {
     const fafPos = fms.coordinates(fms.lastSequenced), rwyPos = fms.coordinates(leg.ident);
     if (!fafPos || !rwyPos) return null;
     const vpa = Math.atan((fms.fafAltitudeCorrected - fms.vnav.runwayElevation) / (distanceNm(fafPos, rwyPos) * 6076.12));
+    // On an RNAV approach the correction is toward the GPS's FAS path, from its 117 deviation (GPS phase 3b).
+    if (this.rnavApproach && fms.gpsApproachVertical) return -groundSpeed * 101.27 * Math.tan(vpa) + clamp(-fms.gpsApproach!.verticalFt! * 2, -300, 300);
     const pathAltitude = fms.vnav.runwayElevation + distanceNm(fms.position, rwyPos) * 6076.12 * Math.tan(vpa);
     // The path's descent rate, corrected toward the path.
     return -groundSpeed * 101.27 * Math.tan(vpa) + clamp((pathAltitude - fms.altitude) * 2, -300, 300);
@@ -591,7 +613,11 @@ export class FlightSimulator {
     const g = leg.path === "RF" && leg.arc ? arcGeometry(leg.arc, to, fms.position) : legGeometry(from, to, fms.position);
     // A lateral offset shifts the path flown; the aircraft intercepts the offset track as it would the route.
     const shift = this.offsetApplies(leg) ? route.offset!.nm : 0;
-    const crossTrack = g.crossTrack - shift;
+    // Captured on an RNAV final, the cross-track is the selected GPS's 116 deviation from the FAS course (GPS phase 3b).
+    const gpsLateral = this.approach === "CAPTURED" && this.onFinal && this.rnavApproach ? fms.gpsApproach?.lateralFt ?? null : null;
+    const crossTrack = gpsLateral !== null ? gpsLateral / 6076.12 : g.crossTrack - shift;
+    // Along the FAS course, from which 116 is measured, not the leg from the FAF.
+    const desiredTrack = gpsLateral !== null ? fms.finalApproachCourse ?? g.track : g.track;
 
     // Fly-by: start the turn onto the next leg early; fly-over for holding fixes, search starts and /O waypoints.
     const next = route.legs[1];
@@ -614,8 +640,8 @@ export class FlightSimulator {
       ? (leg.arc.turn === "R" ? 1 : -1) * deg(Math.atan((this.tas * this.tas) / (68625 * Math.max(0.5, distanceNm(leg.arc.centre, to)))))
       : 0;
     return {
-      mode: "LNAV", legFrom: leg.path === "RF" ? null : from, legTo: to, desiredTrack: g.track, crossTrack, distanceToGo: g.toGo,
-      bankCommand: clamp(feedForward + this.steer(g.track, crossTrack), -MAX_BANK - 5, MAX_BANK + 5), ...base,
+      mode: "LNAV", legFrom: leg.path === "RF" ? null : from, legTo: to, desiredTrack, crossTrack, distanceToGo: g.toGo,
+      bankCommand: clamp(feedForward + this.steer(desiredTrack, crossTrack), -MAX_BANK - 5, MAX_BANK + 5), ...base,
     };
   }
 

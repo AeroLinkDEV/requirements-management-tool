@@ -1,0 +1,167 @@
+/* The GPS sensors tab: the routing strip across, then the two receivers side by side (stacked on narrower screens). */
+/* The product design floor: no text under 12 px, <small> and SVG labels included (tests/production). */
+.fmsGps small { font-size: 12px; }
+
+.fmsGps {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.fmsGpsRouting svg {
+  display: block;
+  width: 100%;
+  max-width: 760px;
+  height: auto;
+}
+.fmsGpsBox { fill: #f5f8fb; stroke: #9fb0c2; stroke-width: 1.5; }
+.fmsGpsBox.ok { fill: #e8f5f2; stroke: #1b8a7d; }
+.fmsGpsBox.standby { fill: #f5f8fb; stroke: #7d8da0; stroke-dasharray: 5 4; }
+.fmsGpsBox.warn { fill: #fff7e6; stroke: #b7791f; }
+.fmsGpsBox.fail { fill: #fdecec; stroke: #c53030; }
+.fmsGpsBoxTitle { font: 700 12px var(--font-body); fill: #14212e; }
+.fmsGpsBoxDetail { font: 500 12px var(--font-body); fill: #4b5868; }
+.fmsGpsLink { fill: none; stroke: #1b8a7d; stroke-width: 2.5; }
+.fmsGpsLink.dashed { stroke: #9fb0c2; stroke-dasharray: 6 5; }
+
+.fmsGpsSelector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-600, #4b5868);
+}
+.fmsGpsSelector small { flex-basis: 100%; font-weight: 500; }
+
+.fmsGpsReceivers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .fmsGpsReceivers { grid-template-columns: minmax(0, 1fr); }
+}
+.fmsGpsColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.fmsGpsCardHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.fmsGpsCardHead h2 { margin: 0; flex: 1; }
+.fmsGpsCardHead h2 small { font-weight: 500; color: var(--ink-600, #4b5868); }
+
+.fmsGpsChip {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font: 700 12px var(--font-body);
+  letter-spacing: 0.04em;
+  background: #eef2f6;
+  color: #4b5868;
+}
+.fmsGpsChip.ok { background: #dff3ee; color: #0f5f55; }
+.fmsGpsChip.warn { background: #fff1d6; color: #8a5a00; }
+.fmsGpsChip.fail { background: #fde2e2; color: #9b1c1c; }
+
+.fmsGpsSky {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+@media (max-width: 520px) {
+  .fmsGpsSky { grid-template-columns: minmax(0, 1fr); }
+}
+.fmsGpsSkyPlot { width: 100%; height: auto; }
+.fmsGpsRing { fill: none; stroke: #c9d3de; stroke-width: 1; }
+.fmsGpsCompass { font: 700 12px var(--font-body); fill: #4b5868; }
+.fmsGpsSat text { font: 600 12px var(--font-body); fill: #14212e; }
+.fmsGpsSat.used circle, .fmsGpsSat.used rect { fill: #1b8a7d; }
+.fmsGpsSat.tracked circle, .fmsGpsSat.tracked rect { fill: #3b82c4; }
+.fmsGpsSat.excluded circle, .fmsGpsSat.excluded rect { fill: #c53030; }
+.fmsGpsSat.untracked circle, .fmsGpsSat.untracked rect { fill: none; stroke: #9fb0c2; stroke-width: 1.5; }
+.fmsGpsSat.untracked text { fill: #9fb0c2; }
+
+.fmsGpsCn0 {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  min-height: 80px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+}
+.fmsGpsCn0 li { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.fmsGpsCn0 .bar { display: block; width: 12px; border-radius: 3px 3px 0 0; background: #3b82c4; }
+.fmsGpsCn0 .bar.used { background: #1b8a7d; }
+.fmsGpsCn0 .bar.excluded { background: #c53030; }
+.fmsGpsCn0 small { font-size: 12px; color: #4b5868; }
+
+.fmsGpsFigures {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 12px;
+  margin: 10px 0;
+  font-size: 12px;
+}
+.fmsGpsFigures dt { color: var(--ink-600, #4b5868); }
+.fmsGpsFigures dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; color: #14212e; }
+
+.fmsGpsIntegrity { display: flex; flex-direction: column; gap: 6px; }
+.fmsGpsIntegrity > small { color: var(--ink-600, #4b5868); font-size: 12px; }
+.fmsGpsBar {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.fmsGpsBarLabel { font-weight: 700; }
+.fmsGpsBarTrack { position: relative; height: 10px; border-radius: 5px; background: #eef2f6; }
+.fmsGpsBarFill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; background: #1b8a7d; }
+.fmsGpsBarFill.over { background: #c53030; }
+.fmsGpsBarLimit { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #14212e; }
+.fmsGpsBarValue { font-variant-numeric: tabular-nums; }
+.fmsGpsBarValue small { color: var(--ink-600, #4b5868); }
+
+.fmsGpsChips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
+
+.fmsGpsFaults { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.fmsGpsFaults h2 { margin-bottom: 2px; }
+.fmsGpsFaultRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.fmsGpsFaultRow input[type="number"] { width: 72px; }
+.fmsGpsFaultRow label { display: inline-flex; align-items: center; gap: 4px; }
+.fmsGpsInline { font-weight: 700; }
+.fmsGpsCheck { display: inline-flex; align-items: center; gap: 5px; }
+.fmsGpsSlider { display: grid; grid-template-columns: 160px minmax(0, 1fr); align-items: center; gap: 8px; }
+.fmsGpsPrns { display: flex; flex-wrap: wrap; gap: 4px; }
+.fmsGpsPrns button { min-width: 32px; padding: 2px 6px; font-size: 12px; }
+.fmsGpsFaults button[aria-pressed="true"], .fmsGpsPrns button[aria-pressed="true"] { background: #fde2e2; border-color: #c53030; color: #9b1c1c; }
+
+.fmsGpsMonitor summary { cursor: pointer; font-weight: 700; font-size: 13px; }
+.fmsGpsMonitor table { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: 12px; }
+.fmsGpsMonitor th, .fmsGpsMonitor td { padding: 3px 6px; border-bottom: 1px solid #eef2f6; text-align: left; vertical-align: middle; }
+.fmsGpsMonitor td.value { font-variant-numeric: tabular-nums; max-width: 240px; overflow-wrap: anywhere; }
+.fmsGpsMonitor { overflow-x: auto; }
+.fmsGpsSsm { padding: 1px 6px; border-radius: 4px; font-weight: 700; background: #eef2f6; }
+.fmsGpsSsm.NORMAL { background: #dff3ee; color: #0f5f55; }
+.fmsGpsSsm.NCD { background: #fff1d6; color: #8a5a00; }
+.fmsGpsSsm.FT { background: #e3edf9; color: #1f4f86; }
+.fmsGpsSsm.FW { background: #fde2e2; color: #9b1c1c; }
+.fmsGpsOverride { display: inline-flex; gap: 4px; align-items: center; }
+.fmsGpsOverride input { width: 64px; }
+.fmsGpsHeld { margin: 0; padding: 6px 8px; border-radius: 6px; background: #fff1d6; color: #8a5a00; font-size: 12px; }
