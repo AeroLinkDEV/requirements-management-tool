@@ -306,3 +306,83 @@ test('an AT TGT ALT hold (HA) is left at the first fix crossing once the target 
   expect(crossings).toBe(2)
   expect(unit.altitude).toBeGreaterThan(4900)
 })
+
+/** Direct to a hold fix from `nm` NM on `bearing` (from the fix), flying toward it; counts the fix crossings. */
+function holdFrom(fix: string, bearing: number, nm: number, missed = false) {
+  const unit = flying('87N', 'R190', 'HTO')
+  const sim = new FlightSimulator(unit)
+  if (missed) expect(unit.goAround()).toBe(true)
+  const at = unit.coordinates(fix)!
+  unit.placeAircraft({ position: offset(at, bearing, nm), track: (bearing + 180) % 360, altitude: 2000 }, 'test: toward the hold fix')
+  expect(unit.directTo(fix)).toBeUndefined()
+  unit.press('EXEC')
+  let crossings = 0, away = true
+  const fly = (seconds: number, until: () => boolean) => {
+    for (let t = 0; t < seconds; t++) {
+      sim.step(1)
+      const d = distanceNm(unit.position, at)
+      if (away && d < 0.1) { crossings++; away = false }
+      if (d > 0.5) away = true
+      if (until()) return t
+    }
+    return seconds
+  }
+  // How many whole racetracks the hold flew after its entry, as the engineering record states at the exit.
+  const exited = () => sim.modeEvents.find(e => e.event === 'HOLD EXITED')?.detail ?? 'not exited'
+  return { unit, sim, fly, crossings: () => crossings, exited }
+}
+
+for (const [entry, bearing] of [['PARALLEL', 120], ['TEARDROP', 200]] as const) {
+  test(`an HF (EXIT TYPE ONCE) after a ${entry.toLowerCase()} entry is left where the entry ends, not a racetrack later (D-H)`, () => {
+    const { unit, fly, exited } = holdFrom('TIDUE', bearing, 4)
+    fly(600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')
+    expect(unit.holdEntryFlown).toBe(entry)
+    const t = fly(1800, () => unit.activeRoute.hold === undefined)
+    expect(t).toBeLessThan(1800)
+    // Out at the fix passage that ends the entry: no whole racetrack flown.
+    expect(exited()).toBe('TIDUE: 0 whole racetracks after the entry (EXIT TYPE ONCE)')
+  })
+}
+
+test('the missed-approach hold after a non-direct entry still flies one whole racetrack before it is left (MISSED-HOLD)', () => {
+  const { unit, fly, crossings, exited } = holdFrom('BEADS', 198, 4, true)
+  fly(600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')
+  expect(unit.holdEntryFlown).not.toBe('DIRECT')
+  fly(2400, () => unit.activeRoute.hold === undefined)
+  expect(unit.activeRoute.hold).toBeUndefined()
+  // The entry start, the entry end, and the crossing after one racetrack.
+  expect(crossings()).toBe(3)
+  expect(exited()).toBe('BEADS: 1 whole racetrack after the entry (EXIT TYPE MANUAL, missed approach)')
+})
+
+test('RESUME HOLD converts the exit to MANUAL: an HF resumed is held on (D-H)', () => {
+  const { unit, fly, crossings } = holdFrom('TIDUE', 176 + 180, 4)
+  fly(600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')
+  expect(unit.activeRoute.hold!.exit).toBe('ONCE')
+  unit.press('HOLD')
+  unit.press('LSK5R')
+  unit.press('EXEC')
+  expect(unit.activeRoute.hold!.status).toBe('EXIT ARMED')
+  unit.press('LSK5R')
+  unit.press('EXEC')
+  expect(unit.activeRoute.hold).toMatchObject({ status: 'IN PROGRESS', exit: 'MANUAL' })
+  fly(1500, () => false)
+  expect(unit.activeRoute.hold?.status).toBe('IN PROGRESS')
+  expect(crossings()).toBeGreaterThanOrEqual(3)
+})
+
+test('UNABLE HOLD at the first fix passage: no hold guidance, NAV gives way to a latched HDG, the fix is not sequenced (D-H, F8)', () => {
+  const { unit, sim, fly } = holdFrom('TIDUE', 176 + 180, 4)
+  fly(30, () => false)
+  expect(sim.lateralMode).toBe('LNAV')
+  unit.wind.direction = 0
+  unit.wind.speed = Math.ceil(sim.tas) + 5
+  fly(600, () => unit.recallList.some(m => m.text === 'UNABLE HOLD'))
+  expect(unit.recallList.some(m => m.text === 'UNABLE HOLD')).toBe(true)
+  fly(2, () => false)
+  expect(sim.lateralMode).toBe('HDG')
+  expect(sim.headingHeld).toBe(true)
+  expect(sim.guidance.mode).not.toBe('HOLD')
+  const leg = unit.activeRoute.legs[0]
+  expect(leg?.kind === 'wpt' && leg.ident).toBe('TIDUE')
+})

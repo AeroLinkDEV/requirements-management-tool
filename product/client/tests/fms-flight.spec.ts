@@ -207,9 +207,9 @@ test('the hold is a ground racetrack in any wind, either turn: the inbound leg i
     for (const from of [0, 90, 180, 270]) {
       const { unit, sim, fly } = setup()
       unit.wind.direction = from
-      unit.wind.speed = 25
+      unit.wind.speed = 30
       holdAtRdg(unit, ...(turn === 'LEFT' ? [['', 'LSK2L'] as [string, CduFunction]] : []))
-      const label = `${turn} turns, wind ${from}/25`
+      const label = `${turn} turns, wind ${from}/30`
       const rdg = unit.coordinates('RDG')!
       expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS'), label).toBeLessThan(3600)
       const hold = unit.activeRoute.hold!
@@ -253,6 +253,11 @@ test('a wind at or above the true airspeed cannot be held: UNABLE HOLD (D-H, lab
   unit.wind.speed = Math.ceil(sim.tas) + 5
   fly(10)
   expect(unit.recallList.some(m => m.text === 'UNABLE HOLD')).toBe(true)
+  // F8: hold guidance withdrawn and NAV gives way to a latched heading hold; the hold fix is not sequenced.
+  expect(sim.lateralMode).toBe('HDG')
+  expect(sim.headingHeld).toBe(true)
+  expect(sim.guidance.mode).not.toBe('HOLD')
+  expect(activeIdent(unit)).toBe('RDG')
 })
 
 test('the helicopter hold defaults to its holding speed limit and leg time for the altitude, and warns above the limit (D-H, M300 10-8, 10-9)', () => {
