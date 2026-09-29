@@ -28,9 +28,8 @@ const toLegs = (legs: ProcedureLeg[], source: LegSource, via: string): Leg[] =>
 export function joinTransition(transition: ProcedureLeg[], final: ProcedureLeg[]): ProcedureLeg[] {
   const last = transition.at(-1), first = final[0];
   if (!last || !first || !("ident" in last) || !("ident" in first) || last.ident !== first.ident || first.path !== undefined) return [...transition, ...final];
-  const speedLimit = last.speedLimit ?? first.speedLimit;
   const joined: ProcedureLeg = {
-    ...first, ...(last.altitude ? { altitude: last.altitude } : {}), ...(last.hold ? { hold: last.hold } : {}), ...(speedLimit ? { speedLimit } : {}),
+    ...first, ...(last.altitude ? { altitude: last.altitude } : {}), ...(last.hold ? { hold: last.hold } : {}), ...(last.speedLimit ? { speedLimit: last.speedLimit } : {}),
   };
   return [...transition.slice(0, -1), joined, ...final.slice(1)];
 }

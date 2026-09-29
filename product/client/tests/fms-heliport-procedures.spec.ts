@@ -26,6 +26,8 @@ function flying(dest: string, approach: string, transition?: string) {
   const unit = new ScriptedFms(() => new Date(Date.UTC(2026, 8, 29, 14, 0, 0)))
   expect(unit.loadArinc424(FIXTURE, 'copter-pins-2609.pc')).toMatchObject({ loaded: 'CIFP2609' })
   unit.swapCycles()
+  // The loaded cycle keeps the data's minimum sector altitudes.
+  expect(unit.navdb.msa).toContainEqual(expect.objectContaining({ airport: '87N', centre: 'CRANN' }))
   unit.press('RTE')
   typeText(unit, dest)
   unit.press('LSK1R')
@@ -124,6 +126,13 @@ test('87N R190 imports record by record: final, speed limits, the missed approac
     'RNP APCH.', 'LNAV MDA 560-1.', 'Limit final and missed approach to 70K.']))
 })
 
+test('a hold whose fix is not the leg before it becomes a leg of its own, never attached to another fix', () => {
+  // The HTO transition without its TF TIDUE record: the HF at TIDUE follows the IF at HTO.
+  const text = FIXTURE.split('\n').filter(line => !/^SUSAH 87N K6FR190  AHTO   020/.test(line)).join('\n')
+  const hto = parseArinc424(text).data.procedures.find(p => p.ident === 'R190')!.transitions.HTO
+  expect(hto).toEqual([{ ident: 'HTO' }, { ident: 'TIDUE', altitude: '1700A', hold: expect.objectContaining({ path: 'HF', exit: 'ONCE' }) }])
+})
+
 test('C.6, C.7: each transition keeps its HF course reversal at TIDUE, 4 NM legs, exit once', () => {
   const r190 = procedure('87N', 'R190')!
   // The HF at TIDUE: inbound 190.0 magnetic (176 true), left turns, 4 NM legs, at or above 1700, left after one circuit.
@@ -145,6 +154,9 @@ test('C.7: the transition joins the final by record role, TIDUE flown once with 
   const apart = joinTransition([{ ident: 'HTO' }], r190.legs)
   expect(apart.map(l => ('ident' in l ? l.ident : l.path))).toEqual(['HTO', 'TIDUE', 'STAYS', 'CRANN'])
   expect(apart[1]).not.toHaveProperty('hold')
+  // Only onto the final's IF: a final that begins with a TF to the same fix is a second leg to it, and is kept.
+  const tf = joinTransition([{ ident: 'HTO' }, { ident: 'TIDUE', path: 'TF' }], [{ ident: 'TIDUE', path: 'TF' }, { ident: 'STAYS', path: 'TF' }])
+  expect(tf.map(l => ('ident' in l ? l.ident : l.path))).toEqual(['HTO', 'TIDUE', 'TIDUE', 'STAYS'])
 })
 
 test('C.7: in the FMS the route flies TIDUE once with its HF; a direct-to TIDUE keeps the HF, a direct-to STAYS drops it', () => {
@@ -230,6 +242,7 @@ test('the CDU: a heliport is a destination, REF NAV DATA shows it and its approa
   typeText(unit, 'HTO')
   unit.press('LSK1R')
   expect(unit.route.dest).toBe('87N')
+  expect(lines(unit).join('\n')).toContain('INVALID ENTRY')
   unit.press('DEP_ARR')
   unit.press('LSK1R')
   expect(lines(unit).join('\n')).toContain('RNAV 190')
