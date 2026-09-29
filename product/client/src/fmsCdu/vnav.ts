@@ -109,6 +109,13 @@ export type ProfileInput = {
     assumption?: string;
     /** This waypoint is the prediction endpoint, of this kind and shown with this label ("CRANN (MAP)"). */
     endpoint?: { kind: EndpointKind; label: string };
+    /**
+     * A hold at this waypoint that leaves by itself (predictions.ts holdAllowance): the time it adds after the fix, or
+     * null where it cannot be flown (the path beyond is UNKNOWN, UNABLE HOLD); with an AT TGT ALT exit, the target
+     * altitude (null when none can be read), which the altitude predicted at the fix must meet or the predictions from
+     * the fix are CONDITIONAL (HOLD EXIT AT ALTITUDE).
+     */
+    hold?: { hours: number | null; target?: AltitudeConstraint | null };
   }[];
   /** The aircraft is making no measurable progress (held stationary off-plan): nothing ahead has an ETA or EFOB. */
   noProgress?: boolean;
@@ -160,6 +167,15 @@ export type Profile = {
 
 const FT_PER_NM = 6076.12;
 
+/** Whether an altitude meets a hold's target as the AT TGT ALT exit judges it: within 100 ft, or on its side of it. */
+function targetMet(target: AltitudeConstraint | null, altitude: number) {
+  if (target === null) return false;
+  if (target.kind === "A") return altitude >= target.altitude - 100;
+  if (target.kind === "B") return altitude <= target.altitude + 100;
+  if (target.kind === "AT") return Math.abs(altitude - target.altitude) <= 100;
+  return altitude >= target.lower - 100 && altitude <= target.upper + 100;
+}
+
 /**
  * The time to fly a leg, hours. A leg without a known length or ground speed contributes none: its point, and every point
  * after it, is already unknown (the basis), so no time or fuel is ever computed across it from an invented speed.
@@ -176,10 +192,12 @@ export function computeProfile(input: ProfileInput): Profile {
   for (const w of waypoints) { total += w.legDistance ?? 0; cumulative.push(total); }
   // The basis only gets worse along the route: once the path is unknown, everything after it is too.
   const basis: PredictionBasis[] = [];
+  const unableBefore = (i: number) => i > 0 && waypoints[i - 1].hold !== undefined && waypoints[i - 1].hold!.hours === null;
   const rank = { known: 0, estimated: 1, unknown: 2 } as const;
   waypoints.forEach((w, i) => {
     // A leg with no length, or none the aircraft can make progress along, leaves the prediction unknown from there.
-    const own: PredictionBasis = w.legDistance === null || w.groundSpeed === null ? "unknown" : w.basis ?? "known";
+    // So does the leg after a hold that cannot be flown.
+    const own: PredictionBasis = w.legDistance === null || w.groundSpeed === null || unableBefore(i) ? "unknown" : w.basis ?? "known";
     const before = i > 0 ? basis[i - 1] : "known";
     basis.push(rank[own] > rank[before] ? own : before);
   });
@@ -188,7 +206,7 @@ export function computeProfile(input: ProfileInput): Profile {
   waypoints.forEach((w, i) => {
     const before = i > 0 ? status[i - 1] : { status: "KNOWN" as PredictionStatus, reason: null };
     const own = input.noProgress ? { status: "UNKNOWN" as const, reason: "NO PROGRESS" }
-      : basis[i] === "unknown" ? { status: "UNKNOWN" as const, reason: w.legDistance === null ? "PATH NOT DEFINED" : w.groundSpeed === null ? "NO PROGRESS ON A LEG" : "AFTER UNKNOWN SEGMENT" }
+      : basis[i] === "unknown" ? { status: "UNKNOWN" as const, reason: w.legDistance === null ? "PATH NOT DEFINED" : w.groundSpeed === null ? "NO PROGRESS ON A LEG" : unableBefore(i) ? "UNABLE HOLD" : "AFTER UNKNOWN SEGMENT" }
         : w.assumption ? { status: "CONDITIONAL" as const, reason: w.assumption }
           : basis[i] === "estimated" ? { status: "CONDITIONAL" as const, reason: "LEG ESTIMATED" }
             : { status: "KNOWN" as const, reason: null };
@@ -278,10 +296,16 @@ export function computeProfile(input: ProfileInput): Profile {
     const met = known ? predicted >= lower - 50 && predicted <= upper + 50 : null;
     if (met === false && unableNext === null) unableNext = w.ident;
     altitude = predicted;
+    // An AT TGT ALT hold whose target the altitude predicted at its fix does not meet: from the fix on, the predictions
+    // assume the exit there (CONDITIONAL), where the aircraft may in fact hold until it gets there.
+    if (known && w.hold?.target !== undefined && !targetMet(w.hold.target, predicted) && status[i].status === "KNOWN")
+      for (let j = i; j < status.length && status[j].status === "KNOWN"; j += 1) status[j] = { status: "CONDITIONAL", reason: "HOLD EXIT AT ALTITUDE" };
     points.push({
       ident: w.ident, distance: known ? cumulative[i] : null, altitude: known ? predicted : null, eta: timed ? time : null, fuel: timed ? fuel : null,
       constraintMet: met, basis: basis[i], status: status[i].status, reason: status[i].reason,
     });
+    // The hold at the fix: its time and fuel count from the next point on (its own point is the first arrival).
+    if (w.hold?.hours) { time += w.hold.hours * 3_600_000; fuel -= w.hold.hours * input.fuelFlow; }
   });
   // The endpoint is the one the caller identified (the approach's MAP, the landing site's threshold or heliport): never
   // merely the last point before the missed approach, which would present a MAP prediction as a landing (plan C.11).
