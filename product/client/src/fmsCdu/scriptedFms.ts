@@ -66,6 +66,19 @@ const demoCycle = (id: string, from: string, to: string) => cycleOf(new NavDatab
 const onGlobe = (p: LatLon) => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
 const samePlace = (a: LatLon | undefined, b: LatLon | undefined) => a !== undefined && b !== undefined && a.lat === b.lat && a.lon === b.lon;
 
+/** How a FAS block differs from another, for the dataset record: final approach course, path angle, threshold. */
+function fasDifference(from: FasDataBlock, to: FasDataBlock | null) {
+  if (!to) return "no longer defined";
+  const course = (fas: FasDataBlock) => Math.round(bearingDeg(fas.ltp, { lat: fas.ltp.lat + fas.fpapDelta.lat, lon: fas.ltp.lon + fas.fpapDelta.lon }));
+  const parts = [
+    ...(course(from) !== course(to) ? [`course ${course(from)} to ${course(to)}`] : []),
+    ...(from.gpaDeg !== to.gpaDeg ? [`path angle ${from.gpaDeg} to ${to.gpaDeg}`] : []),
+    ...(from.ltp.lat !== to.ltp.lat || from.ltp.lon !== to.ltp.lon || from.ltp.heightM !== to.ltp.heightM ? ["threshold moved"] : []),
+    ...(from.tchFt !== to.tchFt ? [`TCH ${from.tchFt} to ${to.tchFt}`] : []),
+  ];
+  return parts.length ? parts.join(", ") : "block contents changed";
+}
+
 /** The legs of a route as text (DISC for a gap), for the engineering record. */
 const legText = (legs: Route["legs"]) => legs.map(leg => (leg.kind === "wpt" ? leg.ident : leg.kind === "cond" ? leg.path : "DISC")).join(" ");
 
@@ -140,6 +153,8 @@ export class ScriptedFms implements CduBackend {
   private sentApproach: string | null = null;
   /** The FAS block last sent, for the final approach course the GPS deviations are measured from. */
   private sentFas: FasDataBlock | null = null;
+  /** The FAS pinned with the executed plan (pinActive): what the receivers are sent, whatever cycle is active now. */
+  private pinnedFas: { fas: FasDataBlock; cycle: string; revision: number } | null = null;
   /** The satellite the GPS integrity condition faults, so a change of PRN clears the old one. */
   private integrityFaultPrn: number | null = null;
   /** Every change of navigation source: GPS1, GPS2, DME/DME, VOR/DME or DR, when it changed. */
@@ -592,9 +607,8 @@ export class ScriptedFms implements CduBackend {
    * no selection when the route has none, or an ILS.
    */
   private sendApproach() {
-    const approach = findProcedure(this.db, this.active, "APPROACH");
-    const runway = approach ? this.db.airport(approach.airport)?.runways.find(entry => entry.ident === approach.runways[0]) : undefined;
-    const fas = approach ? buildFas(approach, runway, approach.airport, approach.faf ? this.coordinates(approach.faf) : undefined) : null;
+    // The receivers fly the FAS pinned with the executed plan (pinActive), never one re-derived from a cycle activated since.
+    const fas = this.pinnedFas?.fas ?? null;
     const key = fas ? `${fas.referencePathId}:${fas.crc}` : null;
     if (key === this.sentApproach) return;
     this.sentApproach = key;
@@ -872,11 +886,14 @@ export class ScriptedFms implements CduBackend {
     this.outOfDateAlerted = false;
     const change = this.resolutionChange(this.pins, ident => this.lookup(ident, this.active));
     const id = this.activeCycle.id;
+    const pinnedFas = this.pinnedFas, candidate = pinnedFas ? this.deriveFas() : null;
+    const fasDiffers = !!pinnedFas && (!candidate || candidate.crc !== pinnedFas.fas.crc);
     this.recordDataset(`ACTIVATE ${id}`, [
       this.activeCycle.source, `${this.inactiveCycle!.id} now inactive`, "active plan kept as executed: pinned positions, unresolved fixes still unresolved",
       ...(change.moved.length ? [`placed differently in ${id}: ${change.moved.join(", ")}`] : []),
       ...(change.missing.length ? [`absent from ${id}: ${change.missing.join(", ")}`] : []),
       ...(change.resolved.length ? [`newly defined in ${id}, unresolved in the active plan until EXEC: ${change.resolved.join(", ")}`] : []),
+      ...(fasDiffers ? [`approach ${pinnedFas!.fas.referencePathId} defined differently in ${id} (${fasDifference(pinnedFas!.fas, candidate!)}): flown as executed until EXEC`] : []),
     ].join("; "));
     this.emit();
   }
@@ -889,7 +906,7 @@ export class ScriptedFms implements CduBackend {
    * recorded.
    */
   private pinActive() {
-    const before = this.pins, cycleChanged = this.pinnedIn !== this.activeCycle;
+    const before = this.pins, cycleChanged = this.pinnedIn !== this.activeCycle, fasBefore = this.pinnedFas;
     this.pins = new Map();
     this.pinnedIn = this.activeCycle;
     this.planRevision += 1;
@@ -897,15 +914,33 @@ export class ScriptedFms implements CduBackend {
       if (this.ownPoint(ident)) continue;
       this.pins.set(ident, this.lookup(ident, this.active) ?? null);
     }
+    // The approach geometry the GPS flies is part of the executed plan: its FAS is derived now, from this cycle, and kept.
+    const fas = this.deriveFas();
+    this.pinnedFas = fas ? { fas, cycle: this.activeCycle.id, revision: this.planRevision } : null;
     if (!cycleChanged) return;
     const change = this.resolutionChange(before, ident => this.pins.get(ident) ?? undefined);
+    const fasChanged = fasBefore && fas && fasBefore.fas.referencePathId === fas.referencePathId && fasBefore.fas.crc !== fas.crc;
     const parts = [
       ...(change.moved.length ? [`moved: ${change.moved.join(", ")}`] : []),
       ...(change.resolved.length ? [`newly resolved: ${change.resolved.join(", ")}`] : []),
       ...(change.missing.length ? [`newly missing: ${change.missing.join(", ")}`] : []),
+      ...(fasChanged ? [`approach ${fas.referencePathId} FAS re-resolved: ${fasDifference(fasBefore.fas, fas)}`] : []),
     ];
     if (parts.length) this.recordDataset("ROUTE RE-RESOLVED", `executed plan resolved in ${this.activeCycle.id}; ${parts.join("; ")}`);
   }
+
+  /**
+   * The FAS data block for the active route's RNAV approach as the active cycle defines it: the procedure and runway from
+   * the cycle, the FAF where the executed plan has it. Derived only when a plan becomes active (pinActive), and to compare.
+   */
+  private deriveFas(): FasDataBlock | null {
+    const approach = findProcedure(this.db, this.active, "APPROACH");
+    const runway = approach ? this.db.airport(approach.airport)?.runways.find(entry => entry.ident === approach.runways[0]) : undefined;
+    return approach ? buildFas(approach, runway, approach.airport, approach.faf ? this.coordinates(approach.faf) : undefined) : null;
+  }
+
+  /** The FAS the executed plan flies, the cycle it was derived from and the plan revision that accepted it. */
+  get executedFas() { return this.pinnedFas; }
 
   /** How the plan's pinned fixes compare with where another source places them: moved, now missing, newly defined. */
   private resolutionChange(pins: Map<string, LatLon | null>, place: (ident: string) => LatLon | undefined) {
