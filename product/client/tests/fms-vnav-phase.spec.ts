@@ -1,6 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm } from '../src/fmsCdu/fmsModel'
+import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { computeProfile } from '../src/fmsCdu/vnav'
 import type { CduFunction } from '../src/fmsCdu/variants'
@@ -10,9 +11,11 @@ import type { CduFunction } from '../src/fmsCdu/variants'
 // back into a climb. Only an explicit event leaves the descent: a cruise altitude entered above the aircraft, or the
 // missed approach becoming active.
 const START = Date.UTC(2026, 8, 27, 14, 0, 0)
+// These run the laboratory airline-style VNAV profile: VNAV is its behaviour, not the helicopter profile's, where
+// the crew flies the vertical axis.
 const setup = () => {
   let now = START
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LAB_AIRLINE_VNAV_PROFILE })
   const sim = new FlightSimulator(unit)
   const fly = (seconds: number, each?: () => boolean | void) => {
     for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1); if (each?.()) return t }

@@ -2,14 +2,15 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator, legGeometry, racetrackOutline, sarTrack } from '../src/fmsCdu/flight'
 import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
+import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
 // The flight simulation: the aircraft flies the active route as an FMS-coupled autopilot would. These prove the
 // guidance geometry (fly-by, holds with their entries, search patterns, the final approach path), not the pages.
-const setup = () => {
+const setup = (profile?: AircraftProfile) => {
   let now = Date.UTC(2026, 8, 27, 14, 0, 0)
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile })
   const sim = new FlightSimulator(unit)
   const fly = (seconds: number, each?: () => boolean | void) => {
     for (let t = 0; t < seconds; t += 1) {
@@ -63,7 +64,7 @@ test('a fly-by waypoint is sequenced before the aircraft reaches it, by the turn
 })
 
 test('the aircraft climbs to each leg constraint and descends on the VNAV path from the FAF to the runway', () => {
-  const { unit, fly } = setup()
+  const { unit, fly } = setup(LAB_AIRLINE_VNAV_PROFILE)
   // Beyond the FAF only a captured approach descends (review finding R03): the approach is loaded and armed. The
   // runway alone, reached without an approach procedure, no longer brings the aircraft down.
   unit.selectProcedure('APPROACH', 'R24R')
@@ -95,7 +96,7 @@ test('the aircraft climbs to each leg constraint and descends on the VNAV path f
 })
 
 test('VNAV holds cruise until the top of descent, then descends on the planned path to the first descent constraint', () => {
-  const { unit, fly } = setup()
+  const { unit, fly } = setup(LAB_AIRLINE_VNAV_PROFILE)
   const profile = unit.profile()
   expect(profile.endOfDescent).toBe('RW24R')
   // The first constraint below cruise is DEMEL at 3000, joining the downwind. Descending 1500 ft at three degrees
@@ -286,10 +287,10 @@ test('in a crosswind the aircraft crabs: its heading differs from its track by t
 })
 
 test('the airspeed changes at the profile acceleration limit, not in one step', () => {
-  const { unit, sim, fly } = setup()
+  const { sim, fly } = setup()
   fly(5)
   expect(sim.tas).toBeCloseTo(120, 6)
-  unit.vnav.cruiseSpeed = 80
+  sim.selectSpeed(80)
   fly(10)
   // 2 kt/s: ten seconds take 20 kt off, not 40.
   expect(sim.tas).toBeCloseTo(100, 6)

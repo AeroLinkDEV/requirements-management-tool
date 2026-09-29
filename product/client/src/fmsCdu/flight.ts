@@ -26,6 +26,9 @@ const VS_RATE = 600;
 const G_TURN = 1091; // turn rate (deg/s) = 1091 * tan(bank) / TAS (kt)
 /** Longitudinal acceleration and deceleration limit, kt/s (the profile's). */
 const SPEED_RATE = ACTIVE_PROFILE.parameters.longitudinalAccel.value;
+/** The go-around climb rate, fpm (the profile's), and the band in which a selected altitude is captured, feet. */
+const GA_RATE = ACTIVE_PROFILE.parameters.goAroundClimbRate.value;
+const ALT_CAPTURE_FT = 20;
 
 export type GuidanceMode = "LNAV" | "HOLD" | "SAR" | "HDG";
 export type Guidance = {
@@ -191,7 +194,7 @@ export function racetrackOutline(fix: LatLon, hold: Hold, groundSpeed: number, t
  * or the final approach path), DES NOW, a VNAV climb or descent to the target altitude, or level at it. Generic
  * engineering names, not CMA mode annunciations.
  */
-export type VerticalMode = "ALT HOLD" | "TDN" | "APPR" | "VNAV PTH" | "DES NOW" | "VNAV CLB" | "VNAV DES" | "VNAV ALT";
+export type VerticalMode = "ALT HOLD" | "VS" | "GA" | "TDN" | "APPR" | "VNAV PTH" | "DES NOW" | "VNAV CLB" | "VNAV DES" | "VNAV ALT";
 
 /** A recorded change of mode or authority: what happened and the references it set. */
 export type ModeEvent = { at: Date; event: string; detail: string };
@@ -227,6 +230,15 @@ export class FlightSimulator {
   /** The FMS's go-around count at the last step, to take each accepted TOGA as a transition (watchGoAround). */
   private goArounds: number;
   private events: ModeEvent[] = [];
+  /**
+   * The crew's selections on the autopilot, which command the vertical axis and the speed under the ADVISORY policy
+   * (the helicopter profile, plan A4): the preselected altitude, an engaged vertical speed (null when not in VS), a go-
+   * around climb, and the selected speed. The FMS constraints are advisories the crew flies with these.
+   */
+  private selectedAlt: number;
+  private vsTarget: number | null = null;
+  private goingAround = false;
+  private selectedTas: number;
   /** The FMS's latched VNAV phase at the last step, to record each change as a mode event. */
   private phase: VerticalPhase;
   /**
@@ -244,6 +256,10 @@ export class FlightSimulator {
   constructor(fms: ScriptedFms) {
     this.fms = fms;
     this.airspeed = fms.targetSpeed;
+    this.selectedAlt = Math.round(fms.altitude);
+    this.selectedTas = fms.vnav.cruiseSpeed;
+    // Under the ADVISORY policy the aircraft starts level in altitude hold at its altitude.
+    if (fms.aircraftProfile.verticalPolicy === "ADVISORY") this.altitudeHold = Math.round(fms.altitude);
     this.goArounds = fms.goArounds;
     this.phase = fms.verticalPhase;
     this.last = this.guide();
@@ -379,8 +395,10 @@ export class FlightSimulator {
       }
       return;
     }
-    if (fms.approachArmed && capable && this.onFinal && this.lateral === "LNAV" && Math.abs(crossTrack) < 1 && converging && this.altitudeHold === null) {
+    if (fms.approachArmed && capable && this.onFinal && this.lateral === "LNAV" && Math.abs(crossTrack) < 1 && converging && (this.altitudeHold === null || this.advisory)) {
       this.approach = "CAPTURED";
+      // Under the ADVISORY policy the approach takes the vertical axis from the crew's altitude hold or VS.
+      if (this.advisory) { this.altitudeHold = null; this.vsTarget = null; this.goingAround = false; }
       this.gpsLateral = this.rnavApproach;
       this.record("APPR CAPTURED", `${fms.approachType} final approach path`);
       return;
@@ -406,6 +424,8 @@ export class FlightSimulator {
       this.heading = Math.round(norm360(this.fms.heading));
       this.held = true;
       this.altitudeHold = Math.round(this.fms.altitude);
+      this.vsTarget = null;
+      this.goingAround = false;
       this.record("FMS FAILURE", `managed guidance invalid; HDG HOLD ${String(this.heading).padStart(3, "0")}°T, ALT HOLD ${this.altitudeHold} FT`);
     } else if (!failed && this.fmsFailed) {
       this.record("FMS RECOVERED", "basic modes kept; select LNAV and VNAV to resume managed guidance");
@@ -435,15 +455,68 @@ export class FlightSimulator {
     this.altitudeHold = null;
     this.approach = "OFF";
     this.previousCrossTrack = null;
+    if (this.advisory) {
+      // The laboratory go-around under the ADVISORY policy: a climb at the go-around rate to the preselected altitude,
+      // or, when that is not above the aircraft, to the missed approach hold altitude or 1,000 ft up (a labelled
+      // assumption; the crew normally preselects the missed approach altitude).
+      const missed = constraintAltitude(this.fms.activeRoute.hold?.altitude) ?? null;
+      if (this.selectedAlt <= this.fms.altitude + 100) this.selectedAlt = Math.round(missed !== null && missed > this.fms.altitude + 100 ? missed : this.fms.altitude + 1000);
+      this.goingAround = true;
+      this.vsTarget = null;
+      this.record("GO AROUND", `missed approach active; GA climbs at ${GA_RATE} FPM to ${this.selectedAlt} FT`);
+      return;
+    }
     this.record("GO AROUND", `missed approach active; VNAV climbs on the missed approach altitudes${released === null ? "" : `; ALT HOLD ${released} FT released`}`);
   }
 
   /** VNAV: managed vertical guidance again, after an altitude hold. Refused while the FMS has failed. */
   engageVnav() {
-    if (this.fms.hasCondition("fmsFail") || this.altitudeHold === null) return false;
+    if (this.advisory || this.fms.hasCondition("fmsFail") || this.altitudeHold === null) return false;
     this.altitudeHold = null;
     this.record("VNAV SELECTED", "managed vertical guidance");
     return true;
+  }
+
+  /** Under the ADVISORY policy the crew commands the vertical axis and the speed; the FMS constraints are advisories. */
+  get advisory() { return this.fms.aircraftProfile.verticalPolicy === "ADVISORY"; }
+  get selectedAltitude() { return this.selectedAlt; }
+  get selectedSpeed() { return this.selectedTas; }
+  get verticalSpeedTarget() { return this.vsTarget; }
+
+  /** ALT SEL: preselects the altitude a vertical-speed climb or descent, or a go-around, captures. Moves nothing by itself. */
+  selectAltitude(feet: number) {
+    this.selectedAlt = Math.round(feet);
+    this.record("ALT SELECTED", `${this.selectedAlt} FT`);
+  }
+
+  /**
+   * VS: climbs or descends at the given rate (ADVISORY policy only), capturing the preselected altitude when it reaches
+   * it; a rate away from the preselection flies on until another mode is chosen. Available with the FMS failed: it is
+   * the autopilot's own mode.
+   */
+  engageVerticalSpeed(fpm: number) {
+    if (!this.advisory) return false;
+    this.vsTarget = clamp(Math.round(fpm), -MAX_VS, MAX_VS);
+    this.altitudeHold = null;
+    this.goingAround = false;
+    this.record("VS", `${this.vsTarget} FPM to ${this.selectedAlt} FT`);
+    return true;
+  }
+
+  /** ALT: holds the present altitude (ADVISORY policy only). */
+  engageAltitudeHold() {
+    if (!this.advisory) return false;
+    this.vsTarget = null;
+    this.goingAround = false;
+    this.altitudeHold = Math.round(this.fms.altitude);
+    this.record("ALT HOLD", `${this.altitudeHold} FT`);
+    return true;
+  }
+
+  /** SPD: the speed the autopilot holds under the ADVISORY policy (knots TAS until IAS is modelled). */
+  selectSpeed(knots: number) {
+    this.selectedTas = clamp(Math.round(knots), 0, ACTIVE_PROFILE.parameters.maximumSpeed.value);
+    this.record("SPD SELECTED", `${this.selectedTas} KT`);
   }
 
   get altitudeHoldReference() { return this.altitudeHold; }
@@ -474,7 +547,9 @@ export class FlightSimulator {
     this.last = guidance;
     // The airspeed moves toward the target at the acceleration limit. Bank toward the command at the roll-rate limit,
     // then the heading turns at the rate that bank gives through the air; the wind makes the track and ground speed.
-    this.airspeed += clamp(fms.targetSpeed - this.airspeed, -SPEED_RATE * dt, SPEED_RATE * dt);
+    // Under the ADVISORY policy the crew's selected speed; otherwise the FMS speed (cruise, constraints, rendezvous).
+    const speedTarget = this.advisory ? this.selectedTas : fms.targetSpeed;
+    this.airspeed += clamp(speedTarget - this.airspeed, -SPEED_RATE * dt, SPEED_RATE * dt);
     this.bank += clamp(guidance.bankCommand - this.bank, -ROLL_RATE * dt, ROLL_RATE * dt);
     const heading = norm360(fms.heading + (this.airspeed > 1 ? G_TURN * Math.tan(rad(this.bank)) / this.airspeed : 0) * dt);
     const ground = groundVelocity(this.airspeed, heading, fms.wind);
@@ -492,8 +567,12 @@ export class FlightSimulator {
     const tdn = tdnAngle === null ? null : -groundSpeed * 101.27 * Math.tan(rad(tdnAngle));
     // Altitude hold, when latched, is the only vertical authority; otherwise the managed branches in order.
     let verticalSpeed: number;
-    if (this.altitudeHold !== null) { verticalSpeed = clamp((this.altitudeHold - fms.altitude) * 2, -MAX_VS, MAX_VS); this.vertical = "ALT HOLD"; }
+    // Under the ADVISORY policy altitude hold is the crew's ordinary mode, so the FMS's tactical descent takes the axis
+    // from it; otherwise a latched hold is the only vertical authority.
+    if (this.advisory && tdn !== null && !fms.hasCondition("fmsFail")) { verticalSpeed = tdn; this.vertical = "TDN"; this.altitudeHold = null; this.vsTarget = null; this.goingAround = false; }
+    else if (this.altitudeHold !== null) { verticalSpeed = clamp((this.altitudeHold - fms.altitude) * 2, -MAX_VS, MAX_VS); this.vertical = "ALT HOLD"; }
     else if (tdn !== null) { verticalSpeed = tdn; this.vertical = "TDN"; }
+    else if (this.advisory) verticalSpeed = this.advisoryVerticalSpeed(groundSpeed);
     else {
       const final = this.pathVerticalSpeed(groundSpeed);
       const descent = final === null && !ownAltitude ? this.descentVerticalSpeed(groundSpeed) : null;
@@ -511,19 +590,49 @@ export class FlightSimulator {
     // The path for the deviation display: the final approach path on final (coupled only when captured), otherwise the
     // descent path. None while the FMS has failed: it computes nothing to show.
     const final = this.fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
-    const descentPath = final === null && !this.fms.hasCondition("fmsFail") && !this.verticalFlag ? this.descentPathAltitude() : null;
+    // No en-route VNAV path under the ADVISORY policy: only the final approach path is shown.
+    const descentPath = final === null && !this.advisory && !this.fms.hasCondition("fmsFail") && !this.verticalFlag ? this.descentPathAltitude() : null;
     this.path = final !== null ? { altitude: final, source: "APPR", coupled: this.approach === "CAPTURED" }
       : descentPath !== null ? { altitude: descentPath, source: "VNAV", coupled: this.vertical === "VNAV PTH" && this.altitudeHold === null } : null;
     fms.updateNavigation(dt);
     fms.updatePerformance(dt);
-    if (fms.verticalPhase !== this.phase) { this.phase = fms.verticalPhase; this.record(`VNAV ${this.phase}`, fms.verticalPhaseReason); }
+    if (fms.verticalPhase !== this.phase && !this.advisory) { this.phase = fms.verticalPhase; this.record(`VNAV ${this.phase}`, fms.verticalPhaseReason); }
     // DES NOW ends once the aircraft is on the descent path: the path, rising behind the active fix, has come down to it.
-    if (fms.vnav.desNow) {
+    if (fms.vnav.desNow && !this.advisory) {
       const first = fms.profile().points[0];
       const path = first ? this.descentPath(first) : null;
       // The path, uncapped by cruise: DES NOW began below it, so it ends where the sloping path reaches the aircraft.
       if (path && path.sloped && path.altitude <= fms.altitude + 50) fms.vnav.desNow = false;
     }
+  }
+
+  /**
+   * The vertical axis under the ADVISORY policy: a captured approach flies its path; a go-around climbs at the go-around
+   * rate and VS at its rate, each capturing the preselected altitude (then altitude hold) when it reaches it.
+   */
+  private advisoryVerticalSpeed(groundSpeed: number) {
+    const final = this.pathVerticalSpeed(groundSpeed);
+    if (final !== null) { this.vertical = "APPR"; return final; }
+    const alt = this.fms.altitude;
+    const rate = this.goingAround ? GA_RATE : this.vsTarget;
+    if (rate === null) {
+      // Nothing commands the axis (a tactical descent has ended level, or nothing was selected): hold there.
+      this.altitudeHold = this.fms.tdn.level ? this.fms.tdn.targetAltitude : Math.round(alt);
+      this.vertical = "ALT HOLD";
+      return 0;
+    }
+    const toward = Math.sign(this.selectedAlt - alt);
+    if (Math.abs(this.selectedAlt - alt) <= ALT_CAPTURE_FT && (toward === 0 || Math.sign(rate) === toward || rate === 0)) {
+      this.altitudeHold = this.selectedAlt;
+      this.record("ALT CAPTURED", `${this.selectedAlt} FT`);
+      this.vsTarget = null;
+      this.goingAround = false;
+      this.vertical = "ALT HOLD";
+      return clamp((this.selectedAlt - alt) * 2, -MAX_VS, MAX_VS);
+    }
+    this.vertical = this.goingAround ? "GA" : "VS";
+    // Capture: close to the preselection in the direction of flight, the rate eases toward it.
+    return Math.sign(rate) === toward && Math.abs(this.selectedAlt - alt) < Math.abs(rate) / 4 ? (this.selectedAlt - alt) * 4 : rate;
   }
 
   /**
@@ -574,6 +683,8 @@ export class FlightSimulator {
   private targetAltitude() {
     // The commanded target is the one the controlling authority flies: a latched altitude hold, when there is one.
     if (this.altitudeHold !== null) return this.altitudeHold;
+    // Under the ADVISORY policy the crew's preselected altitude, when VS or a go-around is flying toward it.
+    if (this.advisory) return this.vsTarget !== null || this.goingAround ? this.selectedAlt : this.fms.altitude;
     const leg = this.fms.activeRoute.legs[0];
     const hold = this.fms.activeRoute.hold;
     if (this.holdPlan && hold) return constraintAltitude(hold.altitude) ?? this.fms.altitude;

@@ -38,6 +38,12 @@ export type AircraftProfile = {
   errorLimit: "RNP" | "PHASE";
   equipment: readonly string[];
   missionFunctions: readonly string[];
+  /**
+   * Who commands the vertical axis and the speed en route. ADVISORY: the crew, through the autopilot's altitude,
+   * vertical-speed and speed selections; the FMS constraints are advisories (the helicopter CMA, plan A4). AIRLINE_VNAV:
+   * the laboratory airline-style VNAV (top of descent, VNAV PTH, DES NOW, the FMS speed schedule).
+   */
+  verticalPolicy: "ADVISORY" | "AIRLINE_VNAV";
   /** The vertical-guidance policy (plan A4). */
   verticalGuidance: {
     enRoute: string;
@@ -60,6 +66,7 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
   operationalProgram: "169-614876-300 (M300, Pub. 9000-GEN-0150 Rev 2)",
   navigationOption: "CIVIL",
   errorLimit: "RNP",
+  verticalPolicy: "ADVISORY",
   equipment: ["2 × CMA-5024 GPS/SBAS", "1 radio altimeter (height above a declared flat surface)", "representative rotorcraft AFCS (declared; Stage B)"],
   missionFunctions: ["HOVER", "MARK ON TOP", "SAR SQUARE, LADDER, SECTOR", "moving waypoints", "rendezvous"],
   verticalGuidance: {
@@ -121,8 +128,27 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
   },
 };
 
-/** The profile the bench flies. One default for now; a fixed-wing profile is later work. */
+/** The profile the bench flies by default. */
 export const ACTIVE_PROFILE = HELICOPTER_PROFILE;
+
+/**
+ * A laboratory profile: the helicopter profile with the generic airline-style VNAV in place of crew-selected vertical
+ * modes. Not a CMA installation; kept as an intentional, selectable profile (the seed of a later fixed-wing profile).
+ */
+export const LAB_AIRLINE_VNAV_PROFILE: AircraftProfile = {
+  ...HELICOPTER_PROFILE,
+  id: "lab-airline-vnav",
+  title: "Laboratory: generic airline-style VNAV (not a CMA installation)",
+  verticalPolicy: "AIRLINE_VNAV",
+  verticalGuidance: {
+    ...HELICOPTER_PROFILE.verticalGuidance,
+    enRoute: "generic airline-style VNAV: top of descent, VNAV PTH, DES NOW and the FMS speed schedule (laboratory)",
+  },
+};
+
+export const PROFILES: readonly AircraftProfile[] = [HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE];
+
+export const profileById = (id: string | null | undefined) => PROFILES.find(profile => profile.id === id);
 
 /** A short, stable fingerprint of the whole profile (FNV-1a over its JSON): any changed value changes it. */
 export function profileFingerprint(profile: AircraftProfile) {

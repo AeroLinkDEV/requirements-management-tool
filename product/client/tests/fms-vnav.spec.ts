@@ -1,5 +1,6 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
+import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import { coldTemperatureCorrection, computeProfile, formatConstraint, parseAltitude, parseConstraint } from '../src/fmsCdu/vnav'
@@ -8,9 +9,11 @@ import type { CduFunction } from '../src/fmsCdu/variants'
 // VNAV and performance, per airline FMS practice (the FMS test bench research roadmap): speed and altitude constraints,
 // the planned profile with its top and end of descent, climbs that respect "at or below" constraints, DES NOW,
 // winds, ETA and fuel predictions with the fuel alerts, and cold temperature correction.
+// These run the laboratory airline-style VNAV profile: VNAV is its behaviour, not the helicopter profile's, where
+// the crew flies the vertical axis.
 const setup = () => {
   let now = Date.UTC(2026, 8, 27, 14, 0, 0)
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LAB_AIRLINE_VNAV_PROFILE })
   const sim = new FlightSimulator(unit)
   const fly = (seconds: number, each?: () => boolean | void) => {
     for (let t = 0; t < seconds; t += 1) {
@@ -47,7 +50,7 @@ test('altitude entries follow the FMS rules: three digits are hundreds as an ent
 })
 
 test('speed and altitude constraints are entered on the right of LEGS as a modification', () => {
-  const unit = new ScriptedFms()
+  const unit = new ScriptedFms(undefined, { profile: LAB_AIRLINE_VNAV_PROFILE })
   unit.press('LEGS')
   enter(unit, '100/050B', 'LSK2R')
   expect(lines(unit)[4]).toMatch(/^RDG\s+100\/5000B$/)
@@ -61,7 +64,7 @@ test('speed and altitude constraints are entered on the right of LEGS as a modif
 })
 
 test('the profile puts the top of descent where a three-degree path from the first descent constraint reaches cruise, and predicts each waypoint', () => {
-  const unit = new ScriptedFms(() => new Date(Date.UTC(2026, 8, 27, 14, 0, 0)))
+  const unit = new ScriptedFms(() => new Date(Date.UTC(2026, 8, 27, 14, 0, 0)), { profile: LAB_AIRLINE_VNAV_PROFILE })
   const profile = unit.profile()
   expect(profile.endOfDescent).toBe('RW24R')
   const [mun, rdg, , demel, alnit, ulida, ferdi, runway] = profile.points
@@ -154,7 +157,7 @@ test('a speed constraint slows the aircraft on the leg into its fix', () => {
 })
 
 test('a wind entered on VNAV CRZ changes the ground speed the predictions use', () => {
-  const unit = new ScriptedFms(() => new Date(Date.UTC(2026, 8, 27, 14, 0, 0)))
+  const unit = new ScriptedFms(() => new Date(Date.UTC(2026, 8, 27, 14, 0, 0)), { profile: LAB_AIRLINE_VNAV_PROFILE })
   const before = unit.profile().points.at(-1)!.eta
   press(unit, 'VNAV', 'NEXT')
   // A strong wind from the east: a headwind on the way to Montreal.
@@ -184,7 +187,7 @@ test('a cold destination raises the FAF altitude by the temperature correction, 
   expect(coldTemperatureCorrection(1382, 15, 118)).toBe(0)
   expect(coldTemperatureCorrection(1382, -20, 118)).toBeGreaterThan(150)
   expect(coldTemperatureCorrection(1382, -20, 118)).toBeLessThan(250)
-  const unit = new ScriptedFms()
+  const unit = new ScriptedFms(undefined, { profile: LAB_AIRLINE_VNAV_PROFILE })
   unit.press('VNAV')
   enter(unit, '-20', 'LSK4L')
   const corrected = 1500 + coldTemperatureCorrection(1382, -20, 118)
