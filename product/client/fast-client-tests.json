@@ -38,6 +38,7 @@
     "fms-gps-approach.spec.ts",
     "fms-tdn-oracle.spec.ts",
     "fms-tdn-production.spec.ts",
+    "fms-87n-mission.spec.ts",
     "fms-out-the-window.spec.ts",
     "fms-synthetic-vision.spec.ts",
     "fms-terrain-tiles.spec.ts",

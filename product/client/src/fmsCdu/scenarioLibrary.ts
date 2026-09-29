@@ -1,3 +1,4 @@
+import { MISSION_87N_OFFSHORE_SAR } from "./heliDemo";
 import type { Scenario } from "./scenario";
 
 // Built-in scenarios for the situations airline and certification test programmes exercise most (see the research in
@@ -195,4 +196,5 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
       { when: { kind: "start" }, action: { kind: "expectGpsSource", source: "GPS1" }, within: 5 },
     ],
   },
+  MISSION_87N_OFFSHORE_SAR,
 ];

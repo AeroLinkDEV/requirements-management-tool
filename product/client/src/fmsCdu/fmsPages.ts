@@ -742,7 +742,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       }
       if (row === 1) {
         const shape = /^(\d{3})?(?:\/(\d{3,5}[AB]?))?$/.exec(scratch);
-        const speed = shape?.[1] ? numberIn(shape[1], 100, 300) : undefined;
+        // From 40 kt: helicopter holds are charted as slow as 70 to 90 KIAS (87N BEADS, 90).
+        const speed = shape?.[1] ? numberIn(shape[1], 40, 300) : undefined;
         if (!scratch || !shape || (!shape[1] && !shape[2]) || speed === null) return "invalid";
         fms.changeHold(h => { if (speed !== undefined) h.speed = speed; if (shape[2]) h.altitude = shape[2]; });
         return done();

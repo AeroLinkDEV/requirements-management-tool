@@ -26,7 +26,7 @@ test('the FMS feeds its receivers the aircraft attitude: a steep bank hides sate
   expect(visible(fms, 0)).toBe(level)
 })
 
-test('the flight simulation reports its bank and flight-path pitch to the FMS', () => {
+test('the flight simulation reports its bank and pitch to the FMS: the air-relative flight-path angle', () => {
   const { fms, sim, fly } = setup()
   // Climbing in VS (the crew's vertical mode under the helicopter profile), fly until also banked in a turn.
   sim.selectAltitude(9000)
@@ -34,8 +34,9 @@ test('the flight simulation reports its bank and flight-path pitch to the FMS', 
   fly(3 * 3600, () => Math.abs(sim.bankAngle) > 5 && Math.abs(fms.verticalSpeed) > 100)
   expect(Math.abs(sim.bankAngle)).toBeGreaterThan(5)
   expect(fms.attitude.bank).toBe(sim.bankAngle)
-  // Flight-path pitch: atan of the vertical speed (ft/s) over the ground speed (1 kt = 1.68781 ft/s).
-  const pitch = (Math.atan(fms.verticalSpeed / 60 / (fms.groundSpeed * 1.68781)) * 180) / Math.PI
+  // Pitch: atan of the vertical speed (ft/s) over the true airspeed (1 kt = 1.68781 ft/s), taken over at least 30 kt
+  // and held within 20 degrees (flight.ts PITCH_SPEED_FLOOR, PITCH_LIMIT).
+  const pitch = Math.max(-20, Math.min(20, (Math.atan(fms.verticalSpeed / 60 / (Math.max(sim.tas, 30) * 1.68781)) * 180) / Math.PI))
   expect(fms.attitude.pitch).not.toBe(0)
   expect(fms.attitude.pitch).toBeCloseTo(pitch, 9)
 })
