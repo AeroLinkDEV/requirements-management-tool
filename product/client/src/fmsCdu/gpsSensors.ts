@@ -279,6 +279,11 @@ export function approachAuthority(bus: GpsBus | null, receiver: ReceiverAssessme
  * alternate source, annunciate it clearly, and let the switch give no inaccurate guidance); FAA AC 90-107 §8(e)
  * (fail-down behaviour varies by installation); the CMC CMA-5024 brochure (dual and triple receiver interfaces, LPV).
  *
+ * In every flight phase AUTO retains the current receiver while it remains suitable for the required operation; recovery
+ * of the other does not by itself move it, and GPS1 is only the initial tie-break when there is no current eligible
+ * receiver (Astra, option A: an engineering choice, not a regulatory requirement; FMS_TEST_BENCH.md has the sources).
+ * "Equally suitable" is validity, freshness, integrity and capability, never HPL or HFOM compared.
+ *
  * A receiver can be usable for position and still not usable for the approach being flown, so AUTO judges both:
  *   1. both receivers support the selected approach: the current one is kept (no needless switching);
  *   2. before capture, the current one offers less than the approach needs and the other supports it: the other is
@@ -379,7 +384,8 @@ export class AutoSelection {
     const others = usable.filter(i => i !== current && eligible[i]);
     const refusals = others.map(i => this.transferRefusal(i, input, words));
     const to = others.find((_, n) => refusals[n] === "");
-    if (to !== undefined) return { chosen: to, transferred: true, qualified: true, refused: "" };
+    // Annunciated only as a transfer from a source; the first choice, with none before it, is not one.
+    if (to !== undefined) return { chosen: to, transferred: this.current !== null, qualified: true, refused: "" };
     const refused = refusals.find(reason => reason !== "") ?? "";
     if (current !== null) return keep(current, refused);
     // The current receiver cannot be navigated on and no receiver qualifies: navigate on what is usable, but if the
@@ -427,5 +433,53 @@ export class AutoSelection {
     if (distanceNm(before.at, position) < FRESH_MOVE_NM) return;
     this.fresh[i] = now.every((value, n) => value !== before.words[n]);
     this.snapshots[i] = { at: position, words: now };
+  }
+}
+
+/**
+ * What happened to the receivers and the FMS's choice of source, one entry per event, newest first: a receiver lost
+ * (it may no longer be navigated on, with the veto) or recovered (usable again, which by itself changes nothing), and
+ * each actual transfer of the FMS's source with the previous and the new source and why. A recovery is its own entry,
+ * never a transfer.
+ */
+export type SelectionEvent =
+  | { at: Date; kind: "LOST" | "RECOVERED"; receiver: "GPS1" | "GPS2"; reason: string }
+  | { at: Date; kind: "TRANSFER"; from: string; to: string; reason: string };
+
+export class SelectionLog {
+  private usable: boolean[] | null = null;
+  private chosen: number | null = null;
+  private choice: string | null = null;
+  private log: SelectionEvent[] = [];
+
+  get entries(): readonly SelectionEvent[] { return this.log; }
+
+  /**
+   * Records this update against the last; returns the receivers just lost, whose failure is annunciated whatever the
+   * FMS does about it (a transfer never suppresses it). `approach` is true when the change was an approach transfer.
+   */
+  update(at: Date, assessed: readonly ReceiverAssessment[], chosen: number | null, choice: string, approach: boolean): number[] {
+    const usable = assessed.map(a => a.usable);
+    const first = this.usable === null;
+    const lost: number[] = [];
+    const add = (event: SelectionEvent) => { this.log = [event, ...this.log].slice(0, 50); };
+    if (!first) usable.forEach((now, i) => {
+      if (now === this.usable![i]) return;
+      add({ at, kind: now ? "RECOVERED" : "LOST", receiver: `GPS${i + 1}` as "GPS1" | "GPS2", reason: now ? "USABLE AGAIN" : assessed[i].detail });
+      if (!now) lost.push(i);
+    });
+    if (!first && chosen !== this.chosen) {
+      const name = (index: number | null) => (index === null ? "NONE" : `GPS${index + 1}`);
+      const previous = this.chosen;
+      const reason = choice !== this.choice ? `GPS NAV ${choice}`
+        : previous !== null && !usable[previous] ? `${name(previous)} NOT USABLE: ${assessed[previous].detail}`
+          : approach ? `${name(previous)} CANNOT CONTINUE THE APPROACH`
+            : chosen === null ? "NO USABLE RECEIVER" : "NO CURRENT RECEIVER";
+      add({ at, kind: "TRANSFER", from: name(previous), to: name(chosen), reason });
+    }
+    this.usable = usable;
+    this.chosen = chosen;
+    this.choice = choice;
+    return lost;
   }
 }
