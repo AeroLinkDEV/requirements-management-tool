@@ -524,6 +524,44 @@ test('the EFIS shows the FMS modes, route and TO waypoint, and flags them when t
   await expect(efis.getByTestId('fma-collective')).toHaveText('ALT')
 })
 
+// Rev 3 B1.7 (h) and D-R: the aircraft freeze. Not flying and with no run, the bench's clock runs while the aircraft and
+// its fuel stand still; a moving waypoint, placed by the simulation clock from its epoch (#1306), keeps moving.
+test('the aircraft freeze: the clock runs, the fuel and aircraft stand still, and a moving waypoint keeps moving (B1.7 h)', async ({ page }) => {
+  await open(page)
+  await expect(page.getByText('Aircraft frozen: the clock runs.')).toBeVisible()
+  const panel = page.locator('.fmsCdu')
+  const typeIn = async (text: string) => { await panel.focus(); await page.keyboard.type(text) }
+  // MOVING WPT (INIT/REF 2/2, 6L): SHIP1 at a position, moving east at 60 kt.
+  const movingPage = async () => { await key(page, 'INIT_REF').click(); await key(page, 'NEXT').click(); await key(page, 'LSK6L').click(); await expectLine(page, 0, /^MOVING WPT/) }
+  await movingPage()
+  // Each entry leaves the scratchpad empty once taken.
+  for (const [text, lsk] of [['SHIP1', 'LSK1L'], ['N4520.0W07540.0', 'LSK2L'], ['090/60', 'LSK1R']] as const) {
+    await typeIn(text)
+    await expectLine(page, 13, new RegExp(`^${text.replace('/', '\\/')}`))
+    await key(page, lsk).click()
+    await expectLine(page, 13, /^\s*$/)
+  }
+  await key(page, 'LSK6R').click()
+  await expectLine(page, 6, /^SHIP1 090°\/60KT/)
+  // Its position, on the line below, now; the motion line carries nothing over it.
+  await expectLine(page, 6, /^SHIP1 090°\/60KT\s*$/)
+  await expectLine(page, 7, /^N4520\.0W075\d\d\.\d\s*$/)
+  const start = (await screenLines(page))[7]
+  // The fuel on PROGRESS 2/4, read before and after the waypoint has moved.
+  const fuelNow = async () => {
+    await key(page, 'PROG').click()
+    await key(page, 'NEXT').click()
+    await expectLine(page, 0, /PROGRESS\s+2\/4/)
+    return (await screenLines(page))[2]
+  }
+  const fuel = await fuelNow()
+  await movingPage()
+  await expect.poll(async () => (await screenLines(page))[7], { timeout: 20_000 }).not.toBe(start)
+  expect(await fuelNow()).toBe(fuel)
+  // Still frozen: nothing started the flight.
+  await expect(page.getByText('Aircraft frozen: the clock runs.')).toBeVisible()
+})
+
 test('the bench tools are tabs under the cockpit, keyboard-navigable, and the chosen one is remembered', async ({ page }) => {
   // A fresh context starts with no remembered tab; this test keeps what it stores across the reload.
   await page.goto('/tests/fixtures/fms-cdu.html')

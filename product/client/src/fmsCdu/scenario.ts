@@ -69,7 +69,7 @@ export type Action =
    * The crew's autopilot selections under the helicopter profile: preselect an altitude, engage a vertical speed (fpm)
    * toward it, hold the present altitude, or select a speed (knots). Each field given is applied, in that order.
    */
-  | { kind: "autopilot"; altitude?: number; verticalSpeed?: number; hold?: boolean; speed?: number; heading?: number; lnav?: boolean; hover?: boolean; transitionUp?: boolean }
+  | { kind: "autopilot"; altitude?: number; verticalSpeed?: number; hold?: boolean; speed?: number; heading?: number; lnav?: boolean; hover?: boolean; transitionUp?: boolean; forceTrimRelease?: boolean }
   /**
    * The autopilot's engaged mode on each axis (collective, pitch, roll), as the helicopter FMA shows them; and the
    * low-height protection caption the PFD shows ("LOW HT", "LOW HT OFF", or "NONE" for no caption).
@@ -185,7 +185,7 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "autopilot": return [
         a.altitude !== undefined ? `preselect ${a.altitude} ft` : null, a.verticalSpeed !== undefined ? `engage VS ${a.verticalSpeed} fpm` : null, a.hold ? "engage ALT" : null,
         a.speed !== undefined ? `select ${a.speed} kt` : null, a.heading !== undefined ? `select heading ${a.heading}°` : null, a.lnav ? "arm NAV" : null,
-        a.hover ? "engage HOV" : null, a.transitionUp ? "engage TU" : null,
+        a.hover ? "engage HOV" : null, a.transitionUp ? "engage TU" : null, a.forceTrimRelease ? "release the cyclic force trim" : null,
       ].filter(Boolean).join(", then ");
       case "expectAfcs": {
         const modes = a.collective === undefined && a.pitch === undefined && a.roll === undefined ? null
@@ -304,8 +304,8 @@ function actionProblem(action: unknown): string | null {
     case "autopilot": {
       const finite = (v: unknown) => v === undefined || (typeof v === "number" && Number.isFinite(v));
       const flag = (v: unknown) => v === undefined || typeof v === "boolean";
-      if (!finite(a.altitude) || !finite(a.verticalSpeed) || !finite(a.speed) || !finite(a.heading) || ![a.hold, a.lnav, a.hover, a.transitionUp].every(flag)) return "autopilot altitude, verticalSpeed, speed and heading must be numbers; hold, lnav, hover and transitionUp true or false";
-      return a.altitude === undefined && a.verticalSpeed === undefined && !a.hold && a.speed === undefined && a.heading === undefined && !a.lnav && !a.hover && !a.transitionUp
+      if (!finite(a.altitude) || !finite(a.verticalSpeed) || !finite(a.speed) || !finite(a.heading) || ![a.hold, a.lnav, a.hover, a.transitionUp, a.forceTrimRelease].every(flag)) return "autopilot altitude, verticalSpeed, speed and heading must be numbers; hold, lnav, hover, transitionUp and forceTrimRelease true or false";
+      return a.altitude === undefined && a.verticalSpeed === undefined && !a.hold && a.speed === undefined && a.heading === undefined && !a.lnav && !a.hover && !a.transitionUp && !a.forceTrimRelease
         ? "autopilot needs at least one selection" : null;
     }
     case "expectAfcs": {
@@ -560,6 +560,7 @@ export class ScenarioRunner {
         if (action.lnav) sim.armLnav();
         if (action.hover && !sim.engageHover()) throw new Error("HOV is not available: above the coordinated-flight speed, or no eligible hover feedback");
         if (action.transitionUp && !sim.engageTransitionUp()) throw new Error("TU is not available: not in a hover mode, too fast, or no valid radio height");
+        if (action.forceTrimRelease && !sim.releaseForceTrim()) throw new Error("the force trim release is the helicopter profile's");
         return;
       }
       case "gps": {
@@ -830,7 +831,7 @@ export class ScenarioRecorder {
   goAround() { this.add({ kind: "goAround" }); }
   proceedPins(declaration: { basicVfr: boolean; landingAreaVisible: boolean; publishedVisibility: boolean }) { this.add({ kind: "proceedPins", ...declaration }); }
   /** An autopilot selection made on the bench (helicopter profile). */
-  autopilot(selection: { altitude?: number; verticalSpeed?: number; hold?: boolean; speed?: number }) { this.add({ kind: "autopilot", ...selection }); }
+  autopilot(selection: { altitude?: number; verticalSpeed?: number; hold?: boolean; speed?: number; forceTrimRelease?: boolean }) { this.add({ kind: "autopilot", ...selection }); }
   /** A stimulus applied on the GPS sensors tab. */
   gps(receiver: 1 | 2, stimulus: GpsOp) { this.add({ kind: "gps", receiver, stimulus: structuredClone(stimulus) }); }
   /** Checks a screen line as it is shown now; a few seconds' grace lets playback at another rate catch up. */
