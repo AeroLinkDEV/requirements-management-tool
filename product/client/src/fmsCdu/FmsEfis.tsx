@@ -20,6 +20,11 @@ const COORDINATED_BELOW = ACTIVE_PROFILE.parameters.coordinatedLeaveBelow.value;
 const MAGENTA = "#ff5ad9", GREEN = "#43e37c", CYAN = "#48d4ff", WHITE = "#f2f4f7", AMBER = "#ffb020";
 
 const three = (deg: number) => String(Math.round(((deg % 360) + 360) % 360) || 360).padStart(3, "0");
+// On FMS failure, independent aircraft heading remains available as explicitly TRUE. Wind is always TRUE.
+const reference = (bus: FmsOutputs) => bus.failed ? "TRUE" : bus.angleReference;
+const variation = (bus: FmsOutputs) => reference(bus) === "MAG" && bus.magneticVariation.status === "NORMAL" ? bus.magneticVariation.value! : 0;
+const angularAvailable = (bus: FmsOutputs) => reference(bus) === "TRUE" || bus.magneticVariation.status === "NORMAL";
+const angular = (bus: FmsOutputs, angle: number) => `${angularAvailable(bus) ? three(angle - variation(bus)) : "---"}${reference(bus) === "TRUE" ? "T" : "°"}`;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const utc = (ms: number) => { const d = new Date(ms); return `${String(d.getUTCHours()).padStart(2, "0")}${String(d.getUTCMinutes()).padStart(2, "0")}.${Math.floor(d.getUTCSeconds() / 6)}Z`; };
 
@@ -56,6 +61,7 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
   const signed = (kt: number) => `${kt < 0 ? "-" : "+"}${Math.abs(kt).toFixed(1)}`;
   const pitchPx = 6; // pixels per degree of pitch
   const cx = 210, cy = 196;
+  const headingReference = air.heading - variation(bus);
   // Speed and altitude tapes.
   const speedScale = 3; // px per knot
   const altScale = 0.3; // px per foot
@@ -155,7 +161,7 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
             <g fill={WHITE} data-testid="pfd-hover-data">
               <text x="112" y="256">{heli.vx === null ? "VX ---.-" : `VX ${signed(heli.vx)}`}</text>
               <text x="112" y="272">{heli.vy === null ? "VY ---.-" : `VY ${signed(heli.vy)}`}</text>
-              <text x="112" y="290">{`${three(air.wind.direction)}/${Math.round(air.wind.speed)}`}</text>
+              <text x="112" y="290">{`${three(air.wind.direction)}T/${Math.round(air.wind.speed)}`}</text>
               {heli.selectedVelocity ? (
                 <g fill={CYAN} data-testid="pfd-selected-velocity">
                   <text x="178" y="256">{signed(heli.selectedVelocity.vx)}</text>
@@ -247,12 +253,12 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
         <clipPath id="efisHdg"><rect x="100" y="334" width="220" height="60" /></clipPath>
         <rect x="100" y="334" width="220" height="60" fill="#2a2f38" />
         <g clipPath="url(#efisHdg)" fontSize="12" fill={WHITE}>
-          {Array.from({ length: 25 }, (_, i) => Math.round(air.heading / 5) * 5 + (i - 12) * 5).map(h => {
-            const x = cx + (((h - air.heading + 540) % 360) - 180) * 4;
+          {Array.from({ length: 25 }, (_, i) => Math.round(headingReference / 5) * 5 + (i - 12) * 5).map(h => {
+            const x = cx + (((h - headingReference + 540) % 360) - 180) * 4;
             return (
               <g key={h}>
                 <line x1={x} y1="334" x2={x} y2={h % 10 === 0 ? 346 : 340} stroke={WHITE} />
-                {h % 30 === 0 ? <text x={x} y="360" textAnchor="middle">{three(h)}</text> : null}
+                {h % 30 === 0 && angularAvailable(bus) ? <text x={x} y="360" textAnchor="middle">{three(h)}</text> : null}
               </g>
             );
           })}
@@ -267,8 +273,8 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
         })()}
         <polygon points={`${cx},334 ${cx - 6},326 ${cx + 6},326`} fill={WHITE} />
         <rect x={cx - 24} y="366" width="48" height="22" fill="#000" stroke={WHITE} />
-        <text x={cx} y="382" textAnchor="middle" fontSize="15" fill={WHITE}>{three(air.heading)}</text>
-        <text x="316" y="382" textAnchor="end" fontSize="12" fill={CYAN} data-testid="pfd-selected-heading-value">{`HDG ${three(air.selectedHeading)}`}</text>
+        <text x={cx} y="382" textAnchor="middle" fontSize="15" fill={WHITE}>{angular(bus, air.heading)}</text>
+        <text x="316" y="382" textAnchor="end" fontSize="12" fill={CYAN} data-testid="pfd-selected-heading-value">{`HDG ${angular(bus, air.selectedHeading)}`}</text>
       </g>
       {bus.failed ? <text x={cx} y="120" textAnchor="middle" fontSize="16" fill={AMBER} data-testid="pfd-fms-flag">FMS FAIL</text> : null}
     </svg>
@@ -278,6 +284,7 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
 /** The navigation display (MAP mode, track-up). */
 export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; range: number }) {
   const cx = 210, cy = 360, radius = 300;
+  const trackReference = air.track - variation(bus);
   const px = radius / range;
   // Track-up map: positions relative to the aircraft, rotated so the present track points up.
   const project = (p: LatLon) => {
@@ -309,21 +316,21 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
       {/* Compass arc: the present track at the top, heading pointer beside it. */}
       <g stroke={WHITE} fill={WHITE} fontSize="12">
         <path d={`M ${cx - radius * Math.sin(Math.PI / 3)} ${cy - radius * Math.cos(Math.PI / 3)} A ${radius} ${radius} 0 0 1 ${cx + radius * Math.sin(Math.PI / 3)} ${cy - radius * Math.cos(Math.PI / 3)}`} fill="none" />
-        {Array.from({ length: 25 }, (_, i) => Math.round(air.track / 5) * 5 + (i - 12) * 5).map(h => {
-          const off = ((h - air.track + 540) % 360) - 180;
+        {Array.from({ length: 25 }, (_, i) => Math.round(trackReference / 5) * 5 + (i - 12) * 5).map(h => {
+          const off = ((h - trackReference + 540) % 360) - 180;
           if (Math.abs(off) > 58) return null;
           const a = (off * Math.PI) / 180;
           const len = h % 10 === 0 ? 12 : 6;
           return (
             <g key={h}>
               <line x1={cx + radius * Math.sin(a)} y1={cy - radius * Math.cos(a)} x2={cx + (radius - len) * Math.sin(a)} y2={cy - (radius - len) * Math.cos(a)} />
-              {h % 30 === 0 ? <text x={cx + (radius - 24) * Math.sin(a)} y={cy - (radius - 24) * Math.cos(a) + 4} textAnchor="middle" stroke="none">{three(h).slice(0, 2)}</text> : null}
+              {h % 30 === 0 && angularAvailable(bus) ? <text x={cx + (radius - 24) * Math.sin(a)} y={cy - (radius - 24) * Math.cos(a) + 4} textAnchor="middle" stroke="none">{three(h).slice(0, 2)}</text> : null}
             </g>
           );
         })}
         <polygon points={`${cx + (radius + 2) * Math.sin((headingOffset * Math.PI) / 180)},${cy - (radius + 2) * Math.cos((headingOffset * Math.PI) / 180)} ${cx + (radius + 12) * Math.sin(((headingOffset - 2) * Math.PI) / 180)},${cy - (radius + 12) * Math.cos(((headingOffset - 2) * Math.PI) / 180)} ${cx + (radius + 12) * Math.sin(((headingOffset + 2) * Math.PI) / 180)},${cy - (radius + 12) * Math.cos(((headingOffset + 2) * Math.PI) / 180)}`} fill={WHITE} />
         <rect x={cx - 26} y={cy - radius - 34} width="52" height="20" fill="#000" />
-        <text x={cx} y={cy - radius - 19} textAnchor="middle" stroke="none" fontSize="14">{three(air.track)} TRK</text>
+        <text x={cx} y={cy - radius - 19} textAnchor="middle" stroke="none" fontSize="14">{angular(bus, air.track)} TRK</text>
       </g>
       {/* Half-range arc and track line. */}
       <path d={`M ${cx - radius / 2} ${cy} A ${radius / 2} ${radius / 2} 0 0 1 ${cx + radius / 2} ${cy}`} fill="none" stroke="#6a7384" strokeDasharray="3 6" />
@@ -360,7 +367,7 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
       {/* Data corners: ground speed, true airspeed and wind; the active waypoint, its distance and ETA. */}
       <g fontSize="13" fill={WHITE}>
         <text x="10" y="20">GS <tspan fontSize="16">{Math.round(air.groundSpeed)}</tspan>  TAS <tspan fontSize="16">{Math.round(air.airspeed)}</tspan></text>
-        <text x="10" y="38">{three(air.wind.direction)}°/{Math.round(air.wind.speed)}</text>
+        <text x="10" y="38">{three(air.wind.direction)}T/{Math.round(air.wind.speed)}</text>
         {bus.toWaypoint.status === "NORMAL" ? (
           <g textAnchor="end" data-testid="nd-to-wpt">
             <text x="410" y="20" fill={MAGENTA} fontSize="15">{bus.toWaypoint.value}</text>
