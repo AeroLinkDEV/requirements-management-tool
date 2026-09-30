@@ -366,10 +366,10 @@ test('a scenario names its aircraft profile and makes autopilot selections; both
   const lab = runHeadless({ id: 'l', title: 'l', objective: '', maxSeconds: 1, profile: 'lab-airline-vnav', steps: [
     { when: { kind: 'start' }, action: { kind: 'autopilot', verticalSpeed: 500 } },
   ] })
-  expect(reportMarkdown(lab.runner)).toMatch(/^- Aircraft profile: lab-airline-vnav v4 /m)
+  expect(reportMarkdown(lab.runner)).toMatch(/^- Aircraft profile: lab-airline-vnav v5 /m)
   // VS is a helicopter-profile mode: under the laboratory VNAV profile it is an execution error, not a silent pass.
   expect(lab.runner.outcome).toBe('error')
-  expect(scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 1, profile: 'jet', steps: [] })).toEqual([expect.stringMatching(/profile must be one of cma9000-s300-heli-civil, lab-airline-vnav/)])
+  expect(scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 1, profile: 'jet', steps: [] })).toEqual([expect.stringMatching(/profile must be one of cma9000-s300-heli-civil, cma9000-later-sbas-heli, lab-airline-vnav/)])
   expect(scenarioProblems({ id: 'y', title: 'y', objective: '', maxSeconds: 1, steps: [{ when: { kind: 'start' }, action: { kind: 'autopilot' } }] }).join(' ')).toMatch(/autopilot needs at least one/)
 })
 
