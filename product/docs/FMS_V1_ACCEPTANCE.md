@@ -35,7 +35,7 @@ The Open rows:
 - the ATA at a fix;
 - the aircraft freeze;
 - time-to-go asterisks;
-- F4 (RA valid again) and F10 (admission refusal);
+- F4 (RA valid again);
 - the ND ground-velocity vector;
 - PROGRESS showing TDN and MRK;
 - the D-R recompute, 500 NM rule, expiry and tactical review.
@@ -96,7 +96,7 @@ Several Partial rows are being addressed tonight by Astra/Sol under Sean's 29 Se
 | F7 | FMS roll command NCD or FAIL in NAV: HDG latched | rev3 B3.5 | flight.ts watchFailure | fms-modes: "on FMS failure the aircraft flies latched heading and altitude (R02)"; fms-cdu-rendered: "an FMS failure in flight reverts the flight modes" | Partial: FAIL only; roll command NCD alone not tested |
 | F8 | FMS withdraws roll steering (TDN NOT POSSIBLE, UNABLE HOLD, end of route): NAV to HDG latched | rev3 B3.5 | flight.ts (#1257, #1259, #1261) | fms-flight: "at TDN, 0.3 NM off the final track … HDG"; fms-heliport-procedures: "UNABLE HOLD at the first fix passage … (F8)"; "MISSED-HOLD … HDG" | Met |
 | F9 | FMS failure in TD or TD/H: HDG latched; TD/H decelerates to 0 and HOV holds where it stops | rev3 B3.5; R3-02.4 | flight.ts (#1257) | fms-flight: "FMS failure during TD/H … (F9)" | Met |
-| F10 | Baro, heading or attitude invalid: the scenario is refused at admission | rev3 B3.5 | none | none | Open: no admission check or test (no condition can inject these) |
+| F10 | Baro, heading or attitude invalid: the scenario is refused at admission | rev3 B3.5 | scenario.ts actionProblem refuses a condition step naming baroFail, headingFail or attitudeFail (conditions.ts UNMODELLED_CONDITIONS) with the reason; the Conditions tab lists them as not modelled and offers none | fms-scenario: "a scenario that injects baro, heading or attitude invalid is refused at admission, with the reason (F10)"; fms-cdu-rendered: "the Conditions tab says which sensor failures v1 does not model … (F10)" | Met |
 
 ### B4 displays
 
