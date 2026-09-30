@@ -800,7 +800,7 @@ test('E1: PROGRESS 1/4 takes a manual wind only while the FMS cannot compute one
   expect(unit.manualWindEntered).toBe(true)
   expect(unit.systemWind).toEqual({ direction: 0, speed: 60 })
   expect(unit.wind).toEqual({ direction: 180, speed: 40 })
-  expect(lines(unit)[windRow]).toMatch(/^ 000°\/ 60KT/)
+  expect(lines(unit)[windRow]).toMatch(/^ 000T\/ 60KT/)
   expect(unit.profile().points[0].eta).not.toBe(before)
   const leg = unit.profile().points[0]
   const course = unit.legGeometry(unit.activeRoute)[0]!.course
