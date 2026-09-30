@@ -996,11 +996,15 @@ export class ScriptedFms implements CduBackend {
   /**
    * Valid barometric altitude, or null without fresh connected air data. The default bench's ideal air-data generator
    * has no failure injection; the procedure speed release reads null as invalid (R3-04).
+   *
+   * As the air-data word carries it: pressure altitude at its 1 ft resolution (ARINC 429 label 203, 17-bit BNR),
+   * rounded to the nearest foot (a laboratory decision: the standard fixes the resolution, not the rounding). The
+   * truth settles onto a captured altitude without ever reaching it exactly, so the FMS must not compare the raw value.
    */
   get validBaroAltitude(): number | null {
-    if (!this.sensorPort) return this.altitude;
+    if (!this.sensorPort) return Math.round(this.altitude);
     const altitude = sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge)?.altitudeFt;
-    return altitude !== undefined && Number.isFinite(altitude) ? altitude : null;
+    return altitude !== undefined && Number.isFinite(altitude) ? Math.round(altitude) : null;
   }
 
   /** The procedure speed limit in force on the executed approach (C.5, procedureSpeed.ts), knots indicated; or null. */
