@@ -838,7 +838,9 @@ export class FlightSimulator {
    * distance). `captured`: HOV has the capture conditions (GS within 1 kt and within 50 m of its target); until then a
    * HOV after a stop short of or past the target is a recovery, not an arrival.
    */
-  private lowHorizontal: { mode: "HOV" | "TDH" | "TU" | "GSPD" | "ATT"; target: LatLon | null; speed: number; track: number; holding?: boolean; captured?: boolean; hoverDatum?: number } | null = null;
+  private lowHorizontal: { mode: "HOV" | "TDH" | "TU" | "GSPD" | "ATT"; target: LatLon | null; speed: number; track: number; holding?: boolean; captured?: boolean; hoverDatum?: number; plannedStop?: number | null } | null = null;
+  /** The TD/H distance of the trajectory the FMS planned at TDN (its transition request), until TD/H is engaged on it. */
+  private plannedTdhNm: number | null = null;
   /** The FMS transition request being flown: TD first, then TD/H to this MRK (watchHover). */
   private pendingTdh: LatLon | null = null;
   private hoverRequest = 0;
@@ -948,8 +950,12 @@ export class FlightSimulator {
         const ra = this.radio;
         const above = ra.status === "NORMAL" && ra.value! > this.profile.gateHeight.value + ALT_CAPTURE_FT;
         this.fmsTransition = data.id;
+        // The planned trajectory flown: TD, the gate segment held to the planned TD/H distance from MRK, then TD/H.
+        const plan = data.plan;
+        this.plannedTdhNm = plan.tdh.distanceNm;
+        this.record("TRANSITION REQUEST", `MRK ${data.remainingNm.toFixed(3)} NM on ${String(Math.round(data.finalTrack)).padStart(3, "0")}°T: TD ${plan.td.distanceNm.toFixed(3)} NM, gate ${data.gateNm.toFixed(3)} NM, TD/H ${plan.tdh.distanceNm.toFixed(3)} NM`);
         if (above || this.indicatedAirspeed > this.profile.gateSpeed.value + 2) { this.engageTransitionDown(); this.pendingTdh = data.mrk; }
-        else this.engageTransitionDownToHover(data.mrk);
+        else this.engageTransitionDownToHover(data.mrk, this.plannedTdhNm);
       }
     }
     if (hover.refused && hover.refused !== this.hoverRefusal && this.lateral === "LNAV") {
@@ -977,7 +983,7 @@ export class FlightSimulator {
     if (this.pendingTdh && this.lowCollective?.mode === "RHT" && this.lowCollective.rate === null && !this.tdSpeed) {
       const mrk = this.pendingTdh;
       this.pendingTdh = null;
-      if (!this.engageTransitionDownToHover(mrk)) this.record("TD/H REFUSED", "outside its window at the end of TD");
+      if (!this.engageTransitionDownToHover(mrk, this.plannedTdhNm)) this.record("TD/H REFUSED", "outside its window at the end of TD");
     }
   }
 
@@ -1064,7 +1070,7 @@ export class FlightSimulator {
    * nominal rate along the track, or to a target when one is given (closed loop), and descends to the hover height,
    * never climbing; then RHT and HOV. Needs a valid radio height and eligible hover feedback.
    */
-  engageTransitionDownToHover(target: LatLon | null = null) {
+  engageTransitionDownToHover(target: LatLon | null = null, plannedStop: number | null = null) {
     const ra = this.radio, feedback = this.fms.hoverFeedback;
     if (!this.advisory || ra.status !== "NORMAL" || !feedback) return false;
     if (ra.value! < this.profile.tdhMinHeight.value || ra.value! > this.profile.tdhMaxHeight.value || this.indicatedAirspeed >= this.profile.tdhMaxSpeedBelow.value) return false;
@@ -1072,7 +1078,7 @@ export class FlightSimulator {
     this.enterLowSpeed();
     const hoverDatum = Math.min(this.hoverHeightFt, Math.round(ra.value!));
     // Toward a target the gate segment comes first: the height is held there until the deceleration starts.
-    this.lowHorizontal = { mode: "TDH", target, speed: groundSpeed, track: target ? courseDeg(feedback.position, target) : this.fms.track, holding: target !== null, hoverDatum };
+    this.lowHorizontal = { mode: "TDH", target, speed: groundSpeed, track: target ? courseDeg(feedback.position, target) : this.fms.track, holding: target !== null, hoverDatum, plannedStop: target ? plannedStop : null };
     this.lowCollective = target ? { mode: "RHT", datum: Math.round(ra.value!), rate: null } : { mode: "TDH", datum: hoverDatum, rate: -this.profile.tdhDescentRate.value };
     this.altitudeHold = null; this.vsTarget = null; this.goingAround = false; this.tdSpeed = false;
     this.noteFeedback(feedback);
@@ -1203,7 +1209,8 @@ export class FlightSimulator {
         // the target, the upper bound; without a target, the nominal rate.
         // With a target further than the nominal stopping distance, the speed is held (the gate segment) until the
         // stopping distance is reached; then the closed loop.
-        const nominalStop = (now.speed * now.speed) / (2 * this.profile.tdhDeceleration.value * 3600);
+        // Toward MRK on the FMS's request, the planned TD/H distance (B3.3); otherwise the nominal rate from the speed now.
+        const nominalStop = now.plannedStop ?? (now.speed * now.speed) / (2 * this.profile.tdhDeceleration.value * 3600);
         const rate = remaining === null ? this.profile.tdhDeceleration.value : remaining <= 0 ? 1.25 : now.holding && remaining > nominalStop ? 0 : clamp((now.speed * now.speed) / (2 * remaining * 3600), 0.5, 1.25);
         // The end of the gate segment: the deceleration starts, and with it the descent to the hover height.
         if (now.holding && rate > 0) {

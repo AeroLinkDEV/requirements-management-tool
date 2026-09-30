@@ -52,7 +52,7 @@ import {
   userWaypointPosition, type UserDatabase, type UserDatabaseStore, type UserScope, type UserWaypoint,
 } from "./userDatabase";
 import { TACTICAL_PAGES } from "./tacticalPages";
-import { checkAtTdn, planTransition, tdnGeometry, type TdnDecision, type TransitionStart } from "./transition";
+import { checkAtTdn, planTransition, tdnGeometry, type TdnDecision, type TransitionPlan, type TransitionStart } from "./transition";
 import { defaultLegMinutes, designBank, holdGeometry, holdingSpeedLimit, radiusAt } from "./holds";
 import { JOIN_BEFORE_TDN_NM, joiningPath, type JoinPath } from "./joining";
 import type { CduFunction } from "./variants";
@@ -451,7 +451,11 @@ export class ScriptedFms implements CduBackend {
     windSpeed: null as number | null,
     dtra: null as number | null,
     request: 0,
-    requestData: null as { id: number; mrk: LatLon; finalTrack: number } | null,
+    /**
+     * The transition request at TDN (plan B3.3): MRK, the final track, the remaining distance and the planned trajectory
+     * (TD, the gate segment, TD/H: the shared T5 plan recomputed at TDN), which the autopilot flies.
+     */
+    requestData: null as { id: number; mrk: LatLon; finalTrack: number; remainingNm: number; gateNm: number; plan: TransitionPlan } | null,
     refused: null as string | null,
     /** Why the transition was refused at TDN, as the planner put it (below gate speed, no closure, …). */
     refusedReason: null as string | null,
@@ -2961,7 +2965,7 @@ export class ScriptedFms implements CduBackend {
       return;
     }
     this.hover.windSpeed = this.systemWind.speed;
-    this.hover.requestData = { id, mrk: mark.position, finalTrack };
+    this.hover.requestData = { id, mrk: mark.position, finalTrack, remainingNm: distanceNm(this.here, mark.position), gateNm: decision.gateNm, plan: decision.plan };
     this.hover.request += 1;
   }
 
