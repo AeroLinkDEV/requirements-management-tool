@@ -168,6 +168,36 @@ A destination-type prediction (the FUEL page, PROGRESS 2/4, NOT ENOUGH FUEL) say
 
 The review's order is adopted: repair active-plan authority, guidance validity and prediction validity (R01–R09) before adding breadth.
 
+### Register corrections (plan A3: C1–C16)
+
+The helicopter-first plan (rev 2 §2, rev 3 C16) corrected the register where it misstated the bench or its sources.
+Each correction is kept here with what checks it:
+- an owner test (a spec file and a fragment of the test's title);
+- a named **scan** of the source for the defect it removed;
+- the applicability-matrix row that records it (`FMS_APPLICABILITY.md`);
+- **statement**, where the correction was to the plan's own wording and there is nothing in the bench to check.
+
+`tests/fms-register-corrections.spec.ts` checks the table: every correction C1–C16 is here once, and everything it names exists or holds.
+
+| ID | Correction | Checked by |
+|---|---|---|
+| C1 | Constraint bounds are closed: both bounds of a window are evaluated, and UNABLE NEXT ALT is raised (R04). | `fms-vnav.spec.ts` "a climb constraint the aircraft cannot make shows UNABLE" |
+| C2 | R07, R08 and R09 are closed: the landing endpoint excludes the missed approach, predictions past a gap are unknown, and later speed constraints shape the time. | `fms-predictions.spec.ts` "NOT ENOUGH FUEL is judged at the landing"; `fms-predictions.spec.ts` "nothing downstream of an unresolved gap is predicted"; `fms-predictions.spec.ts` "a slower speed constraint on a later leg makes that leg take longer" |
+| C3 | "At or above" coding with immediate sequencing applies to CA, FA and VA legs only. HA is different: it exits at a fix passage once the altitude is reached. | `fms-87n-mission.spec.ts` "C.5a: the missed approach CA (190, to 439 ft) completes at once at the MAP" |
+| C4 | There is no localizer updating in the CMA-9000: that is an airline (Boeing) feature. | matrix NO-LOC-UPD |
+| C5 | The CMA-9000 states no expiry rule for moving waypoints. Deterministic time semantics are still the bench's own. | statement |
+| C6 | Appendix A is a leg-code inventory, not flight coverage. | statement |
+| C7 | Fuel is predicted from the current flow: there is no phase performance model. | matrix FUEL-FLOW |
+| C8 | The 30 kt speed floors and thresholds are gone. They had invented or hidden progress at low speed (flight ground speed, groundSpeedOn, the VNAV climb and leg times, the TOD ETA, the ETA gate, the ND turn rate); progress is now judged by the profile's `noProgressBelow`. | scan no-speed-floors |
+| C9 | Ground speed comes from the wind triangle, not TAS less the headwind component. It has no answer when the wind is at least the TAS. | `fms-flight.spec.ts` "the wind triangle gives the crab angle and ground speed, and refuses a track the airspeed cannot hold"; `fms-flight.spec.ts` "in a crosswind the aircraft crabs" |
+| C10 | The HOVER page is no longer a placeholder with a fixed 50FT radio altitude. | scan no-fixed-hover-height; `fms-tactical-maint.spec.ts` "the HOVER page shows the radio altimeter, dashes without a surface or with the altimeter failed, never a fixed value" |
+| C11 | The importer accepts point-in-space approaches, reads the heliport section and reads procedure speed limits. | `fms-heliport-procedures.spec.ts` "Q8: the five CIFP 2609 Copter point-in-space approaches stay accepted"; `fms-heliport-procedures.spec.ts` "C.1: heliport reference, terminal waypoint and MSA records are read from the heliport section"; `fms-heliport-procedures.spec.ts` "C.5: procedure speed limits are imported" |
+| C12 | There is a radio altitude now. An airborne/ground state is still not modelled, and the capability table says so. | `fms-tactical-maint.spec.ts` "the radio altimeter reads height above the declared surface" |
+| C13 | Revision 1's reading of 14 CFR 91.117 was wrong: it applies to all aircraft, subject to its exceptions. It is irrelevant inside this bench's envelope, which is a different statement. | statement |
+| C14 | The procedure-turn construction is a 60 s leg then a 45 s leg at 180 kt, not "1:45". 180 kt is a construction reference, not a speed for the helicopter to fly. | matrix PI-CONST |
+| C15 | CIFP 2609's heliport section has two heliport approaches (87N R190, KJRA R210) and one departure, HUDSN ONE. Three more Copter approaches are coded under airports. | statement |
+| C16 | The armed missed-approach hold is no longer a fixed-wing leftover (MANUAL, 180 kt, 1 minute, no leg distance). It carries its coded leg distance and speed and is flown for one racetrack. | scan no-missed-hold-180; `fms-heliport-procedures.spec.ts` "C.6: a missed approach arms the BEADS hold with its coded 4 NM legs and 90 kt, not 1 minute at 180 kt" |
+
 ### On the bench: real data
 
 The invented CYUL demonstration stays the default start. Beside it, the bench carries one real approach: the FAA CIFP cycle 2609 extract for Burlington, Vermont (KBTV), a US Government work in the public domain, bundled with the client (`src/fmsCdu/data/kbtvCifp2609.ts`, byte for byte the test fixture `tests/fixtures/cifp/kbtv-2609.pc`, SHA-256 48f1d4f9…, kept identical by a test). It is for demonstration only, not for navigation: the cycle is not kept current. The bench, the loaded cycle's source and every scenario report say so.

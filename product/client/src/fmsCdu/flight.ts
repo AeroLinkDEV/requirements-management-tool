@@ -819,6 +819,15 @@ export class FlightSimulator {
   private hoverRequest = 0;
   /** Whether the TD/H being flown (or pending) came from the FMS hover procedure, which can withdraw it. */
   private fmsTransition: number | null = null;
+  /**
+   * The FMS transition request (its id) the autopilot is flying: TD toward the gate with TD/H to follow, or TD/H to MRK;
+   * null when it is flying none (A5: the request is then advisory, outputTags.ts).
+   */
+  get transitionInProgress(): number | null {
+    const c = this.lowCollective?.mode, h = this.lowHorizontal;
+    const flying = this.pendingTdh !== null || c === "TD" || c === "TDH" || (h?.mode === "TDH" && h.target !== null);
+    return flying ? this.fmsTransition : null;
+  }
   private hoverRefusal: string | null = null;
   /** In the low-speed regime the air velocity is its own vector (knots north, east), not tied to the heading. */
   private airVelocity: { north: number; east: number } | null = null;
