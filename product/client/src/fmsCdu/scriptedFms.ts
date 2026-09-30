@@ -872,11 +872,13 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** The search pattern has been flown to its end: the route continues after the search pattern waypoint. */
+  /** The pattern flown to its 80th search waypoint: on to the next waypoint of the plan, and END OF SEARCH (M300 11-15). */
   completeSar() {
     const leg = this.active.legs[0];
     this.sar.active = null;
     this.sar.status = null;
     if (leg?.kind === "wpt" && leg.qualifier === "/S") this.passLeg(leg.ident);
+    this.advisory("END OF SEARCH");
   }
 
   /** Sequences the active leg: a waypoint (by ident) or, with null, a conditional leg that has ended. */
