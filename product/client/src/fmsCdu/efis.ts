@@ -1,6 +1,7 @@
-import type { FlightSimulator, VerticalMode } from "./flight";
+import type { AxisModeLists, FlightSimulator, VerticalMode } from "./flight";
 import { courseDeg, distanceNm, offset, type LatLon, type Route } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
+import { ACTIVE_PROFILE } from "./profile";
 import { formatConstraint } from "./vnav";
 
 // The FMS output bus and the aircraft data an EFIS draws from.
@@ -117,6 +118,11 @@ export type AircraftData = {
    */
   helicopter: {
     axes: { collective: string; pitch: string; roll: string };
+    /** Per axis, the modes armed (white beside the engaged mode) and those a failure just took away (amber) (B3.4, B4.1). */
+    armed: AxisModeLists;
+    degraded: AxisModeLists;
+    /** In the low-speed regime (below the coordinated-flight speed, with its hysteresis): the ND shows the ground velocity. */
+    lowSpeed: boolean;
     radioHeight: { value: number | null; status: "NORMAL" | "NCD" | "FAIL" };
     hoverHeight: number;
     lowHeight: string | null;
@@ -126,6 +132,9 @@ export type AircraftData = {
     hoverData: boolean;
   } | null;
 };
+
+/** The ND's low-speed ground-velocity arrow (B4.5): pixels per knot, and the speed at which it stops growing. */
+export const VELOCITY_VECTOR_PX_PER_KT = 3, VELOCITY_VECTOR_MAX_KT = 40;
 
 const LATERAL_FULL_SCALE = { "EN ROUTE": 5, TERMINAL: 1, APPROACH: 0.3 } as const;
 
@@ -239,7 +248,8 @@ export function aircraftData(fms: ScriptedFms, sim: FlightSimulator): AircraftDa
     missedAltitudeConflict: sim.missedAltitudeConflict ? formatConstraint(sim.missedAltitudeConflict.target) : null,
     ias: sim.iasReliable ? sim.indicatedAirspeed : null,
     helicopter: sim.advisory ? {
-      axes: sim.axisModes, radioHeight: fms.radioHeight, hoverHeight: sim.hoverHeight, lowHeight: sim.lowHeightCaption,
+      axes: sim.axisModes, armed: sim.axisArmed, degraded: sim.axisDegraded(ACTIVE_PROFILE.parameters.fmaCaptureBox.value), lowSpeed: sim.inLowSpeedRegime,
+      radioHeight: fms.radioHeight, hoverHeight: sim.hoverHeight, lowHeight: sim.lowHeightCaption,
       ...sim.groundVelocityAxes,
       hoverData: sim.inLowSpeedRegime || ["RHT", "TD", "TD/H", "TU"].includes(sim.axisModes.collective),
     } : null,

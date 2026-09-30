@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
-import type { AircraftData, FmsOutputs, RoutePoint } from "./efis";
+import { VELOCITY_VECTOR_MAX_KT, VELOCITY_VECTOR_PX_PER_KT, type AircraftData, type FmsOutputs, type RoutePoint } from "./efis";
 import { toLocal, type LatLon } from "./fmsModel";
 import { ACTIVE_PROFILE } from "./profile";
 import { SyntheticVisionLayer } from "./FmsSyntheticVision";
@@ -73,7 +73,8 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
     <svg className="efisPfd" viewBox="0 0 420 400" role="img" aria-label={`Primary flight display: ${bus.lateralMode} ${bus.verticalMode ?? ""}${bus.failed ? ", FMS failed" : ""}`}>
       <rect width="420" height="400" fill="#05070a" />
       {/* Flight mode annunciator. The helicopter profile: the autopilot's axes, collective, pitch and roll/yaw (AW189
-          layout, AAIB-27585); captured green, boxed when new. Otherwise: speed, lateral and vertical columns. */}
+          layout, AAIB-27585); captured green, boxed when new; below each, the modes armed on it in white and a mode a
+          failure just took away in amber (B4.1, B3.4). Otherwise: speed, lateral and vertical columns. */}
       {heli ? (
         <g className="efisFma" fontSize="15" fontFamily="inherit" textAnchor="middle" data-testid="fma-axes">
           <line x1="140" y1="4" x2="140" y2="44" stroke="#3a4250" />
@@ -84,7 +85,16 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           {boxed.pitch ? <rect x="160" y="7" width="100" height="20" fill="none" stroke={GREEN} /> : null}
           <text x="350" y="22" fill={GREEN} data-testid="fma-roll">{heli.axes.roll}</text>
           {boxed.roll ? <rect x="298" y="7" width="104" height="20" fill="none" stroke={GREEN} /> : null}
-          <text x="210" y="40" fill={WHITE} fontSize="12">{[...bus.lateralArmed, ...bus.verticalArmed].join(" ")}</text>
+          {(["collective", "pitch", "roll"] as const).map((axis, column) => {
+            // The FMS's own armed approach level (LPV, LNAV/VNAV) belongs with the collective, which flies the vertical.
+            const armed = axis === "collective" ? [...heli.armed.collective, ...bus.verticalArmed] : heli.armed[axis];
+            return (
+              <text key={axis} x={70 + column * 140} y="40" fontSize="12" data-testid={`fma-${axis}-second`}>
+                <tspan fill={WHITE} data-testid={`fma-${axis}-armed`}>{armed.join(" ")}</tspan>
+                {heli.degraded[axis].length ? <tspan fill={AMBER} dx={armed.length ? 6 : 0} data-testid={`fma-${axis}-degraded`}>{heli.degraded[axis].join(" ")}</tspan> : null}
+              </text>
+            );
+          })}
         </g>
       ) : (
       <g className="efisFma" fontSize="15" fontFamily="inherit" textAnchor="middle">
@@ -288,6 +298,12 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
     trend.push({ x, y });
   }
   const headingOffset = ((air.heading - air.track + 540) % 360) - 180;
+  // B4.5: in the helicopter's low-speed regime (below the coordinated-flight speed) a turn from bank means nothing, so
+  // the trend gives way to the ground velocity: an arrow along the track (up, the map being track-up), its length the
+  // ground speed at a fixed scale whatever the range (3 px a knot, to 40 kt). A bench design, labelled as such, since
+  // this symbology is installation-specific.
+  const lowSpeed = air.helicopter?.lowSpeed === true;
+  const velocityLength = Math.min(air.groundSpeed, VELOCITY_VECTOR_MAX_KT) * VELOCITY_VECTOR_PX_PER_KT;
   return (
     <svg className="efisNd" viewBox="0 0 420 420" role="img" aria-label={`Navigation display, ${range} NM range${bus.failed ? ", map failed" : ""}`}>
       <rect width="420" height="420" fill="#05070a" />
@@ -338,8 +354,18 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
           return <g key={label} data-testid={`nd-${label === "T/D" ? "tod" : "ed"}`}><circle cx={q.x} cy={q.y} r="5" fill="none" stroke={GREEN} strokeWidth="2" /><text x={q.x + 8} y={q.y + 14} fill={GREEN}>{label}</text></g>;
         })}
         {bus.holdFix ? (() => { const q = project(bus.holdFix); return <ellipse cx={q.x} cy={q.y - 12} rx="9" ry="16" fill="none" stroke={MAGENTA} strokeWidth="2" />; })() : null}
-        {/* Position trend vector (white): the path the present bank gives over 90 seconds. */}
-        <polyline points={[{ x: cx, y: cy }, ...trend].map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} fill="none" stroke={WHITE} strokeWidth="1.5" strokeDasharray="10 5" />
+        {/* Position trend vector (white): the path the present bank gives over 90 seconds; at low speed, the ground
+            velocity instead (B4.5). */}
+        {lowSpeed ? (
+          <g data-testid="nd-ground-velocity" stroke={GREEN} fill={GREEN}>
+            <line x1={cx} y1={cy} x2={cx} y2={cy - velocityLength} strokeWidth="2.5" />
+            {velocityLength > 6 ? <polygon points={`${cx},${cy - velocityLength - 8} ${cx - 5},${cy - velocityLength} ${cx + 5},${cy - velocityLength}`} stroke="none" /> : null}
+            <text x={cx + 10} y={cy - velocityLength - 2} stroke="none" fontSize="12">{Math.round(air.groundSpeed)} KT</text>
+            <text x={cx + 12} y={cy + 24} stroke="none" fontSize="10">GND VEL (BENCH)</text>
+          </g>
+        ) : (
+          <polyline data-testid="nd-trend" points={[{ x: cx, y: cy }, ...trend].map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")} fill="none" stroke={WHITE} strokeWidth="1.5" strokeDasharray="10 5" />
+        )}
       </g>
       {/* Aircraft symbol. */}
       <polygon points={`${cx},${cy - 12} ${cx - 9},${cy + 10} ${cx},${cy + 5} ${cx + 9},${cy + 10}`} fill="none" stroke={WHITE} strokeWidth="2" />

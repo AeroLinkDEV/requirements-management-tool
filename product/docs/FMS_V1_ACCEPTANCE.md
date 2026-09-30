@@ -27,7 +27,7 @@ Each was checked against `main` on 30 September 2026 (bab18a38). The test titles
 
 ## Summary
 
-140 rows: **74 Met, 52 Partial, 13 Open, 1 Deferred** (Stage F only).
+140 rows: **78 Met, 50 Partial, 11 Open, 1 Deferred** (Stage F only).
 
 v1 is **not complete**: the §10 completion row stays Open until the Partial and Open rows are closed or explicitly deferred by Sean.
 
@@ -36,8 +36,6 @@ The Open rows:
 - the aircraft freeze;
 - time-to-go asterisks;
 - F4 (RA valid again) and F10 (admission refusal);
-- the ND ground-velocity vector;
-- PROGRESS showing TDN and MRK;
 - the D-R recompute, 500 NM rule, restart epoch, expiry and tactical review.
 
 Several Partial rows are being addressed tonight by Astra/Sol under Sean's 29 September night decisions: the profile's in-force flags and bank limit, S300 advisory VNAV and the LPV profile split, the civil navigation core, and backtrack.
@@ -86,7 +84,7 @@ Several Partial rows are being addressed tonight by Astra/Sol under Sean's 29 Se
 | B3.1 | Axes and modes, ATT; HOV feedback from the selected receiver's words, never truth | rev3 B3.1 | flight.ts axisModes; ScriptedFms.hoverFeedback (#1254, #1257) | fms-flight: "HOV holds position"; "hover feedback lost: HOV gives way to ATT (F5)"; "the hover steers on the measured velocity, not the true wind (B3c)" | Partial: GSPD (ground-speed hold) not implemented |
 | B3.2 | TD, the TD/H window, TU-LAB, GA, low-height protection, minimum use height | rev3 B3.2 | flight.ts; transition.ts shared laws (#1254, #1257, #1272) | fms-flight: "TD/H from its window …"; "the TD/H window: refused above 210 ft RA and at 85 kt"; "TU from an exact hover …"; "GA from the hover needs no FMS"; fms-modes: "under the helicopter profile TOGA climbs in GA" | Partial: the low-height protection trip (75/17 ft) and the minimum-use-height refusal have no owner test; GA not tested from each coupled mode |
 | B3.3 | FMS to AFCS: label 121; the transition request with MRK, final track, remaining distance and planned trajectory | rev3 B3.3 | hover.requestData; transition.ts shared command laws (#1257, #1272) | fms-efis: "in LNAV the bus carries … roll command"; fms-flight: "the transition is flown to a hover at MRK"; fms-tdn-flight | Partial: the request carries MRK, final track and procedure id, not the planned trajectory (shared command laws instead) |
-| B3.4 | AFCS to FMS and displays: engaged, armed and degraded modes; datums; VX/VY | rev2 B3.4 | flight.ts axisModes; fms.afcs (#1257) | fms-efis: "in the hover the displays get the helicopter data …" | Partial: armed and degraded modes not published |
+| B3.4 | AFCS to FMS and displays: engaged, armed and degraded modes; datums; VX/VY | rev2 B3.4 | flight.ts axisModes, axisArmed, axisDegraded (each failure reversion records the modes it took); fms.afcs (#1257) | fms-efis: "in the hover the displays get the helicopter data …"; fms-heli-displays: "NAV is armed on the roll axis …", "the altitude capture is armed …", "TD/H is armed …", "hover feedback lost shows HOV degraded …", "the radio height lost in the hover shows RHT degraded …", "an FMS failure with NAV engaged shows NAV degraded …", "feedback lost in a go-around … LVL degraded …" | Met |
 | F1 | RA lost during TD: ALT latched to baro; pitch TD continues; TDN FUNCTION LOST | rev3 B3.5 | flight.ts lowCollectiveSpeed (#1257) | fms-87n-mission variant (a3) (#1267) | Partial: the first-tick VS → 0 transient and LOW HT OFF not asserted |
 | F2 | RA invalid in TD/H: ALT; horizontal plan to MRK continues; its named cancellations | rev3 B3.5; R3-02.5 | flight.ts watchHover (#1257) | fms-flight: "radio height lost during TD/H … (F2)"; "a direct-to during the transition … (F2)"; "a heading selection cancels a TD/H plan (R3-02)" | Partial: the cyclic force-trim release is not modelled (declared) |
 | F3 | RA invalid in the hover: ALT; HOV continues; LOW HT OFF | rev3 B3.5 | flight.ts (#1254) | fms-flight: "radio height lost in the hover … LOW HT OFF (B3b, F3)"; fms-87n-mission variant (a4) | Met |
@@ -102,11 +100,11 @@ Several Partial rows are being addressed tonight by Astra/Sol under Sean's 29 Se
 
 | ID | Requirement | Source | Implementation | Owner test | Status |
 |---|---|---|---|---|---|
-| B4.1 | FMA: three columns, captured green boxed, armed white, degraded amber | rev2 B4.1 | FmsEfis.tsx (#1257) | fms-efis: "in the hover the displays get the helicopter data: axes …" | Partial: armed (white) and degraded (amber) not shown |
+| B4.1 | FMA: three columns, captured green boxed, armed white, degraded amber | rev2 B4.1 | FmsEfis.tsx (#1257); efis.ts armed, degraded (degraded shown for the FMA capture-box time) | fms-efis: "in the hover the displays get the helicopter data: axes …"; fms-heli-displays (as B3.4); fms-cdu-rendered: "the helicopter FMA shows NAV armed in white … in amber (B4.1, B3.4)" | Met |
 | B4.2 | The airspeed tape shows IAS; dashes below the minimum reliable IAS | rev2 B4.2 | FmsEfis.tsx (#1257) | fms-efis: "… no IAS below 30 kt (B4)" | Met |
 | B4.3 | Height: RA readout with flags, hover height datum, LOW HT caption | rev2 B4.3 | FmsEfis.tsx (#1257) | fms-efis (as B4.1); fms-flight: "… LOW HT OFF (F3)" | Partial: the LOW HT (active) caption not owner-tested |
 | B4.4 | Low-speed data: VX/VY, wind, heading and selected heading | rev2 B4.4 | FmsEfis.tsx (#1257) | fms-efis (as B4.1) | Partial: VX/VY pinned; wind and selected heading not asserted |
-| B4.5 | ND ground-velocity vector replaces the trend vector at low speed | rev2 B4.5 | none | none | Open: not implemented |
+| B4.5 | ND ground-velocity vector replaces the trend vector at low speed | rev2 B4.5 | FmsEfis.tsx Nd (a bench design, labelled GND VEL (BENCH)); efis.ts lowSpeed | fms-heli-displays: "the low-speed flag follows the autopilot's low-speed regime …"; fms-cdu-rendered: "in the low-speed regime the ND draws the ground velocity … (B4.5)" | Met |
 | B4.6 | The CMA HOVER page fields, title states, ACTIVATE only with valid RA | rev2 B4.6 | tacticalPages.ts HOVER (#1257) | fms-tactical-maint: "the HOVER page shows the radio altimeter, dashes …"; fms-flight: "the HOVER page activates the transition"; fms-87n-mission nominal | Met (LAST JSTICK POS not applicable: joystick not configured) |
 | B4.7 | Views: cockpit camera on the modelled attitude and heading; chase follows heading; a helicopter shape | rev2 B4.7 | FmsOutTheWindow (#1255) | fms-out-the-window: "the cameras follow the heading, not the track"; "the chase aircraft is a helicopter" | Partial: the cockpit pitch uses the air-relative flight-path stand-in, not a modelled attitude |
 
@@ -144,7 +142,7 @@ Several Partial rows are being addressed tonight by Astra/Sol under Sean's 29 Se
 | T5 | One shared trajectory: TD, gate ≥ 0.20 NM, TD/H at 0.75 kt/s; DTRA | rev3 D-T T5 | transition.ts (#1257, #1272) | fms-tdn-production: the 270-state grid against the oracle; fms-tdn-flight | Met (later stage boundaries: see R3-01.7) |
 | T6 | At TDN: XTK > 0.2 NM or track error > 20° gives TDN NOT POSSIBLE; recompute against the fixed MRK; gate < 0 gives TDN DIST SHORT; no closure refused | rev3 D-T T6 | reachTdn; checkAtTdn (#1257) | fms-flight: "at TDN, 0.3 NM off the final track"; "at TDN 400 ft higher … TDN DIST SHORT"; fms-tdn-production: T6; fms-87n-mission variants (b), (b2) | Partial: the 0.19/0.21 NM and 19°/21° thresholds, the track-error branch and the 105/125 KIAS cases not owner-tested |
 | T7 | TRANSITION DOWN from execution until TDN | rev2 D-T T7 | execute (#1257) | fms-flight: "… then EXEC and TRANSITION DOWN" | Partial: raised at EXEC; not asserted to clear at TDN |
-| T8 | PROGRESS shows TDN and MRK; XTK blanked in the hover procedure | rev2 D-T T8 | none | none | Open |
+| T8 | PROGRESS shows TDN and MRK; XTK blanked in the hover procedure | rev2 D-T T8; M300 A-124, A-127, A-129 | fmsPages.ts PROGRESS 1/4 hoverLines, xtkBlank | fms-heli-displays: "with a hover procedure in the route PROGRESS shows TDN and MRK …", "in the hover procedure XTK is blanked on a CF leg only when …", "the XTK is shown whatever the errors without a hover procedure …" | Met |
 | T9 | Exits: a new hover procedure, a direct-to, a route cancel; the TU-LAB departure | rev3 D-T T9 | watchHover; flight.ts (#1257) | fms-flight: "a new mark over an active procedure …"; "a direct-to during the transition ends the procedure"; "TU from an exact hover …" | Partial: the route-cancel exit not separately tested |
 | T10 | TDN FUNCTION LOST when all radio altimeters fail | rev2 D-T T10 | watchHover, reachTdn (#1257) | fms-flight: "no valid radio height at TDN is TDN FUNCTION LOST"; "radio height lost during TD/H … (F2)" | Met |
 | T11 | Caution: a flat, obstacle-free surface; v1 over the sea | rev2 D-T T11 | surface.ts OFFSHORE_87N | fms-87n-mission: "the 87N start state: … the sea declared" | Met (declared: a flat surface only) |

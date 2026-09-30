@@ -748,6 +748,8 @@ test('at TDN, 0.3 NM off the final track: TDN NOT POSSIBLE, roll steering withdr
   fly(2)
   expect(sim.lateralMode).toBe('HDG')
   expect(sim.modeEvents.some(e => e.event === 'NAV REMOVED')).toBe(true)
+  // The FMA shows NAV lost in amber on the roll axis (B4.1).
+  expect(sim.modeEvents.find(e => e.event === 'NAV REMOVED')?.lost).toEqual([{ axis: 'roll', mode: 'NAV' }])
 })
 
 test('at TDN 400 ft higher than planned: the recomputed transition does not fit before MRK, TDN DIST SHORT (Stage D, T6)', () => {

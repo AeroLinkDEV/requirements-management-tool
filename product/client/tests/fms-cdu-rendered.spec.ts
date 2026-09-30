@@ -630,3 +630,63 @@ test('the 87N mission: after ACTIVATE and EXEC over the mark, the map draws the 
   expect(box.height).toBeGreaterThan(10)
   await page.locator('.fmsMap').screenshot({ path: test.info().outputPath('hover-join-map.png') })
 })
+
+// Plan B4.1, B3.4: below each FMA column, the modes armed on that axis in white and a mode a failure just took away in
+// amber (the logic is fms-heli-displays.spec.ts).
+const WHITE = 'rgb(242, 244, 247)', AMBER = 'rgb(255, 176, 32)', GREEN = 'rgb(67, 227, 124)'
+const fill = (locator: import('@playwright/test').Locator) => locator.evaluate(element => getComputedStyle(element).fill)
+
+test('the helicopter FMA shows NAV armed in white on the roll axis, and NAV lost to an FMS failure in amber (B4.1, B3.4)', async ({ page }) => {
+  await open(page)
+  const efis = page.getByRole('region', { name: 'EFIS' })
+  await expect(efis.getByTestId('fma-roll')).toHaveText('NAV')
+  await expect(efis.getByTestId('fma-roll-armed')).toHaveText('')
+  await expect(efis.getByTestId('fma-roll-degraded')).toHaveCount(0)
+  await page.getByLabel('Selected heading').fill('090')
+  await page.getByRole('button', { name: 'HDG SEL' }).click()
+  await expect(efis.getByTestId('fma-roll')).toHaveText('HDG')
+  await page.getByRole('button', { name: 'LNAV', exact: true }).click()
+  await expect(efis.getByTestId('fma-roll-armed')).toHaveText('NAV')
+  expect(await fill(efis.getByTestId('fma-roll-armed'))).toBe(WHITE)
+  // The collective and pitch columns carry nothing armed here.
+  await expect(efis.getByTestId('fma-pitch-armed')).toHaveText('')
+  // Captured: engaged green in the top line, the armed line empty.
+  await page.getByLabel('Simulation rate').selectOption('16')
+  await page.getByRole('button', { name: 'Fly' }).click()
+  await expect(efis.getByTestId('fma-roll')).toHaveText('NAV', { timeout: 60_000 })
+  await expect(efis.getByTestId('fma-roll-armed')).toHaveText('')
+  // The FMS fails: HDG engaged, NAV amber beside it for the capture-box time, then gone.
+  await page.getByLabel('Simulation rate').selectOption('1')
+  await tab(page, 'Conditions')
+  await page.getByLabel('FMS failure').check()
+  await expect(efis.getByTestId('fma-roll')).toHaveText('HDG')
+  await expect(efis.getByTestId('fma-roll-degraded')).toHaveText('NAV')
+  expect(await fill(efis.getByTestId('fma-roll-degraded'))).toBe(AMBER)
+  await page.getByLabel('Simulation rate').selectOption('16')
+  await expect(efis.getByTestId('fma-roll-degraded')).toHaveCount(0, { timeout: 30_000 })
+})
+
+test('in the low-speed regime the ND draws the ground velocity, not the bank trend: green, 3 px a knot (B4.5)', async ({ page }) => {
+  test.setTimeout(240_000)
+  await open(page)
+  const efis = page.getByRole('region', { name: 'EFIS' })
+  await expect(efis.getByTestId('nd-trend')).toHaveCount(1)
+  await expect(efis.getByTestId('nd-ground-velocity')).toHaveCount(0)
+  await tab(page, 'Scenarios')
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  await page.getByLabel('Simulation rate').selectOption('64')
+  await card.getByLabel('Scenario', { exact: true }).selectOption({ label: '87N offshore SAR: search, hover at the mark, the Copter RNAV 190 and its missed approach' })
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  const vector = efis.getByTestId('nd-ground-velocity')
+  await expect(vector).toBeVisible({ timeout: 180_000 })
+  await page.getByRole('button', { name: 'Pause' }).click()
+  await expect(efis.getByTestId('nd-trend')).toHaveCount(0)
+  expect(await fill(vector.locator('polygon, text').first())).toBe(GREEN)
+  await expect(vector).toContainText('GND VEL (BENCH)')
+  // The arrow's length is the labelled ground speed at 3 px a knot, up to 40 kt.
+  const knots = Number(/(\d+) KT/.exec((await vector.textContent()) ?? '')![1])
+  const line = vector.locator('line')
+  const [y1, y2] = await Promise.all([line.getAttribute('y1'), line.getAttribute('y2')])
+  expect(Number(y1) - Number(y2)).toBeCloseTo(Math.min(knots, 40) * 3, -0.5)
+  await efis.screenshot({ path: test.info().outputPath('nd-ground-velocity.png') })
+})

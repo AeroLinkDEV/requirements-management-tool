@@ -383,6 +383,8 @@ test('UNABLE HOLD at the first fix passage: no hold guidance, NAV gives way to a
   expect(sim.lateralMode).toBe('HDG')
   expect(sim.headingHeld).toBe(true)
   expect(sim.guidance.mode).not.toBe('HOLD')
+  // The FMA shows NAV lost in amber on the roll axis (B4.1).
+  expect(sim.modeEvents.find(e => e.event === 'UNABLE HOLD')?.lost).toEqual([{ axis: 'roll', mode: 'NAV' }])
   const leg = unit.activeRoute.legs[0]
   expect(leg?.kind === 'wpt' && leg.ident).toBe('TIDUE')
 })
