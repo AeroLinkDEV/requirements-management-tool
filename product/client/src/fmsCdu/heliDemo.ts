@@ -328,7 +328,7 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
     { when: S, action: { kind: "expectActive", waypoint: "87N" } },
     { when: S, action: { kind: "expectAfcs", roll: "NAV" }, within: 5 },
   ], "87n-rnav190-final"),
-  variant("g-integrity-on-final", "(g) GPS integrity lost on the final segment: GPS 1 transfers to GPS 2 with LNAV kept, then uncertain GPS2 position without approach authority", "(g) GPS integrity lost on the final segment (after STAYS): GPS POS UNCERTAIN on GPS 1 with the FMS on GPS 2 and the approach still LNAV; with GPS 2 integrity lost too, S300 1-7 retains uncertain GPS2 position and raises NO APPR INTEGRITY. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+  variant("g-integrity-on-final", "(g) GPS integrity loss on final: GPS 2 transfer, then S300 five-minute integrity delay", "After STAYS, GPS 1 integrity loss transfers navigation to GPS 2. Loss on GPS 2 retains valid uncertain position; M300 7-12 keeps LNAV and NPA for five minutes before NO APPR INTEGRITY cancels steering. This does not retain stale or invalid position, or HDOP above four. A synthetic checkpoint of the acceptance mission.", [
     // GPS 1 HIL beyond the approach HAL: GPS POS UNCERTAIN, and the FMS goes on on GPS 2, still LNAV.
     // On the final segment: STAYS (the FAF) sequenced, CRANN active, 20 s on.
     { when: { kind: "active", waypoint: "CRANN" }, action: { kind: "expectApproachLevel", level: "LNAV" } },
@@ -339,10 +339,11 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
     { when: S, action: { kind: "expectApproachLevel", level: "LNAV" } },
     { when: S, action: { kind: "expectActive", waypoint: "CRANN" } },
     { when: S, action: { kind: "expectNoAlert", text: "NO APPR INTEGRITY" } },
-    // Then GPS 2 too: a valid position remains, but neither receiver may guide an RNAV approach (S300 1-7).
+    // Both positions remain valid, with HDOP below four. M300 7-12 delays the final-segment integrity cancellation.
     { when: after(10), action: { kind: "gps", receiver: 2, stimulus: { op: "override", label: "130", kind: "FORCE", amount: 2 } } },
     { when: S, action: { kind: "expectGpsSource", source: "GPS2" } },
     { when: S, action: { kind: "expectNoAlert", text: "GPS NAV LOST" } },
-    { when: S, action: { kind: "expectAlert", text: "NO APPR INTEGRITY", fresh: true }, within: 10 },
+    { when: after(299), action: { kind: "expectNoAlert", text: "NO APPR INTEGRITY" } },
+    { when: after(1), action: { kind: "expectAlert", text: "NO APPR INTEGRITY", fresh: true }, within: 5 },
   ], "87n-rnav190-final"),
 ]

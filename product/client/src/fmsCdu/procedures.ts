@@ -14,6 +14,8 @@ const toLegs = (legs: ProcedureLeg[], source: LegSource, via: string): Leg[] =>
     // An overfly fix (a runway threshold, a missed approach point) is flown over, never turned short of.
     ? {
       kind: "wpt", ident: leg.ident, altitude: leg.altitude, source, via, path: leg.path, course: leg.course, arc: leg.arc, qualifier: leg.overfly ? "/O" : undefined,
+      ...(leg.position ? { position: leg.position } : {}), ...(leg.procedureTurn ? { procedureTurn: leg.procedureTurn } : {}),
+      ...(leg.turnDirection ? { turnDirection: leg.turnDirection } : {}),
       ...(leg.speedLimit ? { speedLimit: leg.speedLimit } : {}), ...(leg.hold ? { hold: leg.hold } : {}),
     }
     : { kind: "cond", path: leg.path, course: leg.course, altitude: leg.altitude, source, via, ...(leg.speedLimit ? { speedLimit: leg.speedLimit } : {}) }));
@@ -21,15 +23,16 @@ const toLegs = (legs: ProcedureLeg[], source: LegSource, via: string): Leg[] =>
 /**
  * An approach transition joined to the final by the records' roles, not their names (Stage C, C.7). When the
  * transition ends at the fix the final begins at (its IF), that fix is flown once: the transition's leg to it (its
- * altitude, and the hold coded there, such as an HF course reversal) and then the final from it. The final's IF adds
- * its speed limit where the transition's leg has none; its altitude applies after the hold, which carries its own.
+ * path, and the hold coded there, such as an HF course reversal) and then the final from it. M300 7-2 gives the
+ * approach's common-waypoint speed/altitude constraints precedence; the coded hold retains its own restrictions.
  * A TF, an HF and an IF at the same fix are never collapsed merely because they share a name.
  */
-export function joinTransition(transition: ProcedureLeg[], final: ProcedureLeg[]): ProcedureLeg[] {
+export function joinTransition(transition: ProcedureLeg[], final: ProcedureLeg[], approachConstraints = true): ProcedureLeg[] {
   const last = transition.at(-1), first = final[0];
   if (!last || !first || !("ident" in last) || !("ident" in first) || last.ident !== first.ident || first.path !== undefined) return [...transition, ...final];
   const joined: ProcedureLeg = {
-    ...first, ...(last.altitude ? { altitude: last.altitude } : {}), ...(last.hold ? { hold: last.hold } : {}), ...(last.speedLimit ? { speedLimit: last.speedLimit } : {}),
+    ...first, ...last,
+    ...(approachConstraints ? { altitude: first.altitude ?? last.altitude, speedLimit: first.speedLimit ?? last.speedLimit } : {}),
   };
   return [...transition.slice(0, -1), joined, ...final.slice(1)];
 }
@@ -61,7 +64,8 @@ export function findProcedure(db: NavDatabase, route: Route, kind: Procedure["ki
 
 export function composeRoute(route: Route, db: NavDatabase, enroute: Leg[] = enrouteLegs(route)): Leg[] {
   const sid = findProcedure(db, route, "SID"), star = findProcedure(db, route, "STAR"), approach = findProcedure(db, route, "APPROACH");
-  const sidLegs = sid ? toLegs([...sid.legs, ...(route.sid?.transition ? sid.transitions[route.sid.transition] ?? [] : [])], "SID", sid.ident) : [];
+  const sidLegs = sid ? toLegs(joinTransition(joinTransition(route.runway ? sid.runwayTransitions?.[route.runway] ?? [] : [], sid.legs, false),
+    route.sid?.transition ? sid.transitions[route.sid.transition] ?? [] : [], false), "SID", sid.ident) : [];
   const starLegs = star ? toLegs([...(route.star?.transition ? star.transitions[route.star.transition] ?? [] : []), ...star.legs], "STAR", star.ident) : [];
   let apprLegs = approach ? toLegs(joinTransition(route.approach?.transition ? approach.transitions[route.approach.transition] ?? [] : [], approach.legs), "APPR", approach.ident) : [];
   const missedLegs = approach?.missed ? toLegs(approach.missed, "MISSED", "MISSED") : [];

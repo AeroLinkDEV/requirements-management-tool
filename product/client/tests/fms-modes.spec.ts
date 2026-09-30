@@ -1,14 +1,14 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm } from '../src/fmsCdu/fmsModel'
-import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
+import { LAB_AIRLINE_VNAV_PROFILE, LATER_SBAS_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
 // Guidance validity and mode authority (independent review findings R02 and R10, with the laboratory reversion
 // agreed as Q-A2): on FMS failure managed guidance stops being flown, basic heading and altitude hold fly references
 // latched at the failure, the aircraft keeps moving under its own dynamics, recovery resumes nothing by itself, and
 // the vertical mode is the controller branch that commands the aircraft, not a reading of its vertical speed.
-const setup = (profile?: AircraftProfile) => {
+const setup = (profile: AircraftProfile = LATER_SBAS_PROFILE) => {
   let now = Date.UTC(2026, 8, 27, 14, 0, 0)
   const unit = new ScriptedFms(() => new Date(now), { profile })
   const sim = new FlightSimulator(unit)

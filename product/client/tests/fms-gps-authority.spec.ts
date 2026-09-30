@@ -1,7 +1,9 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
+import { offset } from '../src/fmsCdu/fmsModel'
 import type { GpsBus, GpsReceiver, Ssm } from '../src/fmsCdu/gps'
+import { LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
 // Consumer authority (the GPS review of 56ae5b31, GPS-01, GPS-04 and GPS-06): what the FMS may do with the words a
@@ -12,7 +14,7 @@ import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 const START = Date.UTC(2026, 8, 27, 14, 0, 0)
 const setup = () => {
   let now = START
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(unit)
   const fly = (seconds: number, each?: () => boolean | void) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1); if (each?.()) return } }
   return { unit, sim, fly }
@@ -128,18 +130,23 @@ for (const [name, patch, reason] of APPROACH_STATUS) {
   })
 }
 
-test('a vetoed approach in the approach phase raises NO APPR INTEGRITY before any vertical guidance was had (GPS-06)', () => {
+test('a vetoed armed approach near the FAF raises NO APPR INTEGRITY before phase or vertical authority is granted (GPS-06)', () => {
   const { unit } = setup()
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
   for (let i = 0; i < 3; i += 1) unit.sequence()
   unit.updateNavigation(0)
-  expect(unit.flightPhase).toBe('APPROACH')
+  expect(unit.flightPhase).toBe('EN ROUTE')
   // Outside the approach region: annunciated at its level, not yet guided, and nothing wrong.
   expect(unit.gpsApproachAuthority).toMatchObject({ lateral: false, vertical: false, reason: 'OUTSIDE APPROACH REGION' })
   expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(false)
   for (const rx of receivers(unit)) rx.overrideStatus('156', { crcInvalid: true, available: false })
+  unit.directTo('FERDI'); unit.press('EXEC')
+  unit.placeAircraft({ position: offset(unit.coordinates('FERDI')!, 251, 1.9), altitude: 2000, track: 71 }, 'test: approach CRC veto before FAF')
+  unit.armApproach()
   unit.gpsUpdated()
+  expect(unit.flightPhase).toBe('TERMINAL')
+  expect(unit.lamps().has('NPA')).toBe(false)
   expect(unit.approachType).toBe('NO APPR')
   expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(true)
 })
