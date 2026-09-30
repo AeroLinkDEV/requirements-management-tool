@@ -630,7 +630,7 @@ test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit lat
   await expectLine(page, 2, /^STAEV\b/)
   for (const id of ['INIT_REF', 'NEXT', 'LSK1R']) await key(page, id).click()
   await expectLine(page, 0, /^ACT VNAV R15\s+1\/1$/)
-  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-s300-heli-civil v5')
+  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-s300-heli-civil v6')
   await page.screenshot({ path: 'test-results/s300-kbtv-advisory.png', fullPage: true })
   // The library scenario flies it from the same start state, on a restarted simulation.
   await tab(page, 'Scenarios')
@@ -638,7 +638,7 @@ test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit lat
   await page.getByLabel('Simulation rate').selectOption('64')
   await card.getByLabel('Scenario', { exact: true }).selectOption({ label: 'KBTV RNAV (GPS) RWY 15, LPV on the published FAS' })
   await card.getByRole('button', { name: 'Run the scenario' }).click()
-  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-later-sbas-heli v1')
+  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-later-sbas-heli v2')
   await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible({ timeout: 45_000 })
   await expect(card.getByRole('list', { name: 'Scenario steps' }).locator('li[data-status="pass"]')).toHaveCount(5)
 })
