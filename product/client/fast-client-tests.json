@@ -56,6 +56,7 @@
     "fms-user-database.spec.ts",
     "fms-fuel-pages.spec.ts",
     "fms-route-load.spec.ts",
+    "fms-obstacles.spec.ts",
     "fms-pins-approach.spec.ts",
     "fms-gps-scenario.spec.ts",
     "fms-gps-approach-auto.spec.ts",

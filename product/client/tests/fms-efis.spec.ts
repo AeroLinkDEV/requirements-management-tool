@@ -1,6 +1,6 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { aircraftData, fmsOutputs } from '../src/fmsCdu/efis'
-import { FlightSimulator } from '../src/fmsCdu/flight'
+import { FlightSimulator, angleDiff } from '../src/fmsCdu/flight'
 import { LAB_AIRLINE_VNAV_PROFILE, LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
@@ -216,4 +216,28 @@ test('in the hover the displays get the helicopter data: axes, radio height, hov
   expect(page).toMatch(/100FT\s+50FT/)
   expect(page).toMatch(/230T\/20KT\s+VX [+-]0\.\dKT/)
   expect(page).toMatch(/VY [+-]0\.\dKT/)
+})
+
+test('the low-speed data carries the wind, the heading and the selected heading; the selected heading follows the crew and a latched HDG (B4.4)', () => {
+  let now = Date.UTC(2026, 8, 27, 14, 0, 0)
+  const unit = new ScriptedFms(() => new Date(now))
+  const sim = new FlightSimulator(unit)
+  const fly = (seconds: number, done?: () => boolean) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1); if (done?.()) return } }
+  unit.declareSurface('offshore-87n')
+  unit.wind.direction = 230
+  unit.wind.speed = 20
+  unit.placeAircraft({ position: { lat: 40.7, lon: -72.45 }, track: 230, altitude: 100 }, 'test: offshore south of 87N')
+  sim.engageAltitudeHold()
+  sim.selectHeading(230)
+  sim.selectSpeed(25)
+  fly(120, () => sim.tas < 26)
+  expect(sim.engageHover()).toBe(true)
+  fly(40)
+  expect(aircraftData(unit, sim)).toMatchObject({ wind: { direction: 230, speed: 20 }, selectedHeading: 230, helicopter: { hoverData: true } })
+  // The crew turns the hover to 260: the bug moves at once, the heading follows at the yaw rate.
+  sim.selectHeading(260)
+  expect(aircraftData(unit, sim).selectedHeading).toBe(260)
+  expect(Math.abs(angleDiff(230, aircraftData(unit, sim).heading))).toBeLessThan(2)
+  fly(20)
+  expect(Math.abs(angleDiff(260, aircraftData(unit, sim).heading))).toBeLessThan(2)
 })

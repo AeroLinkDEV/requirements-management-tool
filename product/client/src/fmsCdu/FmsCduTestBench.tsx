@@ -37,6 +37,12 @@ const storedVariant = () => {
   try { return window.localStorage.getItem(VARIANT_KEY) ?? DEFAULT_VARIANT_ID; } catch { return DEFAULT_VARIANT_ID; }
 };
 
+/** A duration in seconds as h:mm:ss. */
+const clockText = (seconds: number) => {
+  const s = Math.floor(seconds);
+  return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+};
+
 /** The bench's tools under the cockpit, one tab each; the chosen one is remembered. */
 const TABS = [
   { id: "scenarios", label: "Scenarios" }, { id: "conditions", label: "Conditions" }, { id: "gps", label: "GPS sensors" },
@@ -660,6 +666,29 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
               </p>
               <ul className="fmsBenchReadout" data-testid="fms-procedure-notes">
                 {approach.notes.map(note => <li key={note}>{note}</li>)}
+              </ul>
+            </section>
+          ) : null}
+          {Object.keys(backend.movingWaypoints).length ? (
+            <section className="fmsBenchCard" aria-label="Moving waypoints">
+              <h2>Moving waypoints</h2>
+              <p className="fmsBenchHint">
+                Bench aid: each moving waypoint's age, the simulation time since its position was entered. A moving waypoint
+                never expires (plan D-R). In the active route, the FMS's rendezvous with it (M300 11-37).
+              </p>
+              <ul className="fmsBenchReadout" data-testid="fms-moving-waypoints">
+                {Object.entries(backend.movingWaypoints).map(([ident, motion]) => {
+                  const age = backend.movingAge(ident);
+                  const index = backend.activeRoute.legs.findIndex(leg => leg.kind === "wpt" && leg.ident === ident);
+                  const rendezvous = index >= 0 ? backend.rendezvousFor(backend.activeRoute, index) : null;
+                  const toGo = rendezvous?.ttg == null ? null : rendezvous.ttg - (backend.now.getTime() - rendezvous.computedAt) / 1000;
+                  return (
+                    <li key={ident}>
+                      <strong>{ident}</strong> {String(Math.round(motion.track)).padStart(3, "0")}°/{motion.speed} kt, age {age === null ? "unknown" : clockText(age)}
+                      {rendezvous ? (rendezvous.achievable ? `; rendezvous in ${toGo === null ? "--" : clockText(Math.max(0, toGo))}, ${rendezvous.distanceNm!.toFixed(1)} NM` : "; rendezvous unachievable") : ""}
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           ) : null}
