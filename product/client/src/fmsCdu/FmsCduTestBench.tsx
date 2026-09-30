@@ -724,7 +724,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                   const toGo = rendezvous?.ttg == null ? null : rendezvous.ttg - (backend.now.getTime() - rendezvous.computedAt) / 1000;
                   return (
                     <li key={ident}>
-                      <strong>{ident}</strong> {String(Math.round(motion.track)).padStart(3, "0")}°/{motion.speed} kt, age {age === null ? "unknown" : clockText(age)}
+                      <strong>{ident}</strong> {backend.angleText(motion.track)}/{motion.speed} kt, age {age === null ? "unknown" : clockText(age)}
                       {rendezvous ? (rendezvous.achievable ? `; rendezvous in ${toGo === null ? "--" : clockText(Math.max(0, toGo))}, ${rendezvous.distanceNm!.toFixed(1)} NM` : "; rendezvous unachievable") : ""}
                     </li>
                   );

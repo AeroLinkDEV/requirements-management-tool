@@ -387,7 +387,7 @@ test('the PFD draws the selected heading: a cyan bug on the heading scale and it
   await expect(bug).toBeVisible()
   await page.getByLabel('Selected heading').fill('45')
   await page.getByRole('button', { name: 'HDG SEL' }).click()
-  await expect(efis.getByTestId('pfd-selected-heading-value')).toHaveText('HDG 045')
+  await expect(efis.getByTestId('pfd-selected-heading-value')).toHaveText('HDG 045°')
   await expect(efis.getByTestId('fma-roll')).toHaveText('HDG')
   await expect(bug).toHaveAttribute('fill', '#48d4ff')
 })
