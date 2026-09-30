@@ -2778,3 +2778,26 @@ choices are created as focused issues only when their trigger and acceptance bou
 - **Decision:** The helicopter bench has no air/ground state in v1. Scenarios start airborne, and the FMS is airborne whatever the ground speed: a hover never brings ground planning (plan revision 2 B1.6, which Astra accepted). A pad start, weight on skids, lift-off, and the FMS's ground behaviour follow v1. That behaviour includes on-ground ETEs from PLAN DATA CRZ TAS and CRZ WIND (M300 5-14, 3-19) and the FUEL page's on-ground EST condition.
 - **Ledger:** row E1's ground-ETE clause is recorded as Deferred under this decision; its airborne clauses stay Met. B1.6 stays Met as airborne whatever the ground speed.
 - **Boundaries:** No simulator result is OEM conformance or operational qualification. DEC-146 and DEC-147 remain in force.
+
+### DEC-150 - Helicopter Bench Stage F Sensor and Radio Configuration
+
+- **Date:** 2026-09-30
+- **Status:** Accepted owner decision.
+- **Authority:** Sean answered the eight functional questions in the Stage F plan (`product/docs/FMS_STAGE_F_PLAN.md`, §6) at about 4:45 PM ET on 30 September 2026. Session 1 relayed the answers.
+- **Decision:** The civil SAR helicopter profile is equipped and configured for Stage F as follows.
+  1. **TACAN on.** DME/DME may use TACAN ranges, and VOR/DME/TCN may use one TACAN. M300 1-4 admits civil TACAN "when proven accurate".
+  2. **AHRS/APIRS KALMAN mode equipped**, with a 2-minute coast after GPS loss and then dead reckoning (M300 1-5, 12-23 to 12-24). It is not RNP-applicable (15-4).
+  3. **Doppler (DVS) on**, at the lowest priority and without integrity in the civil option (M300 12-20).
+  4. **Error limits on an RNP basis** (M300 1-3's configurable choice).
+  5. **AUTO-tuned VORs are eligible for VOR/DME navigation.** This departs from M300 12-19, which navigates on manually tuned stations only. It is a named profile option (`autoVorNavigation`) carrying this decision as provenance and citing 12-19 as the manual default it overrides.
+  6. **ANP is the 95% figure**, not the "ANP/HIL = 1.0" 99.999% option (M300 15-2).
+  7. **No external radio control head.** The FMS is the only tuning source, and the M300's external-head behaviour and RADIO TUNING DISABLED (13-3, 13-20) are not configured.
+  8. **NDB approaches are in scope.** They are database NDB and NDB/DME approaches flown on FMS guidance, with the ADF bearing as raw data. M300 7-1 lists them as approved with "GPS or NDB", and the M300 has no ADF navigation mode, so no position is derived from the ADF.
+- **Consequences:**
+  - The Stage F plan's F0, F6, F7, F8, F11, F12 and the new F16 carry these choices.
+  - `configuration.ts` changes TACAN, KALMAN and DVS from off to on (and adds `autoVorNavigation`) in F0, with the M300 page for each.
+- **Boundaries:**
+  - Stage F implementation waits for Astra's review of the plan.
+  - No simulator result is OEM conformance or operational qualification.
+  - DEC-146, DEC-147 and DEC-148 remain in force.
+  - This entry is DEC-150 because open PR #1329 already claims DEC-149.
