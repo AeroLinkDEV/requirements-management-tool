@@ -921,6 +921,15 @@ export class ScriptedFms implements CduBackend {
     let lastFix: LatLon | null = this.here;
     const waypoints: ProfileInput["waypoints"] = [];
     const courses: (number | null)[] = [];
+    // The procedure speed limit in force on each leg ahead, not only the active one (Astra F2): the limit that leg is
+    // flown under (procedureSpeed.ts), as true airspeed at the altitude the leg starts from (the last constraint
+    // altitude before it, or the present altitude). The same altitude decides the missed approach release.
+    const approach = findProcedure(this.db, route, "APPROACH");
+    let planAltitude = this.altitude;
+    const procedureTas = (leg: Leg) => {
+      const limit = procedureSpeedLimit(approach, route.approach?.transition, leg, planAltitude);
+      return limit ? tasFromIas(limit.kt, planAltitude) : Infinity;
+    };
     route.legs.forEach((leg, i) => {
       // Past a discontinuity or a manually terminated leg the path is not defined; after a course or heading leg that
       // ends on an event, the leg into the next fix is estimated from the last fixed point.
@@ -928,18 +937,21 @@ export class ScriptedFms implements CduBackend {
       if (leg.kind === "cond") {
         if (leg.path === "VM" || leg.path === "FM") basis = "unknown";
         else if (basis === "known") basis = "estimated";
+        if (leg.altitude !== undefined) planAltitude = leg.altitude;
         return;
       }
       const to = this.coordinates(leg.ident, route) ?? null;
       let legDistance = geometry[i]?.distance ?? null, course = geometry[i]?.course;
       if (legDistance === null && basis === "estimated" && lastFix && to) { legDistance = distanceNm(lastFix, to); course = courseDeg(lastFix, to); }
-      // The active leg is flown at the planned speed (its constraint, a hold); a later leg at the cruise speed or its
-      // own speed constraint, which applies to the leg into its fix.
-      const tas = i === 0 ? this.plannedSpeed : Math.min(this.vnav.cruiseSpeed, leg.speed ?? Infinity);
+      // The active leg is flown at the planned speed (its constraint, a hold, the procedure limit); a later leg at the
+      // cruise speed, its own speed constraint (which applies to the leg into its fix), or the procedure limit in force
+      // on it, whichever is lowest.
+      const tas = i === 0 ? this.plannedSpeed : Math.min(this.vnav.cruiseSpeed, leg.speed ?? Infinity, procedureTas(leg));
       // The final approach fix is crossed at its (cold-corrected) altitude: the executed approach's FAF, or on the
       // demonstration route without an approach the fix before the runway.
       const isFaf = this.finalApproachFix ? leg.ident === this.finalApproachFix && i < runwayAt : i === runwayAt - 1;
       const constraint = isFaf ? { kind: "AT" as const, altitude: this.fafAltitudeCorrected } : parseConstraint(leg.altitude);
+      if (constraint) planAltitude = constraint.kind === "WINDOW" ? constraint.lower : constraint.altitude;
       waypoints.push({
         ident: leg.ident, legDistance, groundSpeed: this.groundSpeedOn(course ?? this.track, tas),
         constraint, endOfDescent: i === runwayAt, basis, missed: leg.source === "MISSED",

@@ -265,6 +265,8 @@ const heldSeconds = (unit: ScriptedFms, a: string, b: string, tas: number) => {
 // bank, inside the 25 degree limit. The HF's holding speed (100 KIAS at 1,700 ft) is below the 120 kt planned TAS.
 const TAS = 120
 const RADIUS = TAS / (60 * Math.PI)
+// The leg on from TIDUE is flown under the 70 KIAS limit in force from TIDUE (Astra F2), as TAS at TIDUE's 1,800 ft.
+const FINAL_TAS = tasFromIas(70, 1800)
 
 test('D-H/R3-03: an HF (ONCE) with a direct entry is KNOWN, and the predictions past it add one racetrack', () => {
   const unit = towardTidue(356, 8)
@@ -272,8 +274,8 @@ test('D-H/R3-03: an HF (ONCE) with a direct entry is KNOWN, and the predictions 
   expect(tasFromIas(100, 1700)).toBeLessThan(TAS)
   // The fix is predicted at its first arrival; after it, one racetrack of two 4 NM legs and two half turns, still air.
   expect(point(unit, 'TIDUE').eta).toBe(START + ((point(unit, 'TIDUE').distance! / TAS) * 3600_000))
-  expect(heldSeconds(unit, 'TIDUE', 'STAYS', TAS)).toBeCloseTo(((2 * 4 + 2 * Math.PI * RADIUS) / TAS) * 3600, 3)
-  expect(heldSeconds(unit, 'TIDUE', 'STAYS', TAS)).toBeCloseTo(360, 3)
+  expect(heldSeconds(unit, 'TIDUE', 'STAYS', FINAL_TAS)).toBeCloseTo(((2 * 4 + 2 * Math.PI * RADIUS) / TAS) * 3600, 3)
+  expect(heldSeconds(unit, 'TIDUE', 'STAYS', FINAL_TAS)).toBeCloseTo(360, 3)
   for (const ident of ['TIDUE', 'STAYS', 'CRANN']) expect(point(unit, ident)).toMatchObject({ status: 'KNOWN', reason: null })
   expect(unit.profile().endpoint!.point).toMatchObject({ ident: 'CRANN', status: 'KNOWN' })
   // A crew hold at TIDUE (MANUAL) takes the HF's place: the crew's exit, assumed at the next crossing, adds no time.
@@ -281,7 +283,7 @@ test('D-H/R3-03: an HF (ONCE) with a direct entry is KNOWN, and the predictions 
   expect(crew.defineHold('TIDUE')).toBeUndefined()
   crew.press('EXEC')
   expect(point(crew, 'STAYS')).toMatchObject({ status: 'CONDITIONAL', reason: 'HOLD EXIT NEXT CROSSING' })
-  expect(heldSeconds(crew, 'TIDUE', 'STAYS', TAS)).toBeCloseTo(0, 3)
+  expect(heldSeconds(crew, 'TIDUE', 'STAYS', FINAL_TAS)).toBeCloseTo(0, 3)
   // The fuel burned in the hold counts too.
   const burned = point(unit, 'TIDUE').fuel! - point(unit, 'STAYS').fuel!
   expect(burned).toBeCloseTo(unit.fuel.flow * ((point(unit, 'STAYS').eta! - point(unit, 'TIDUE').eta!) / 3600_000), 6)
@@ -290,11 +292,11 @@ test('D-H/R3-03: an HF (ONCE) with a direct entry is KNOWN, and the predictions 
 test('D-H/R3-03: after a teardrop or parallel entry an HF adds only the entry, as the flight leaves where the entry ends', () => {
   // Teardrop: 4 NM out at 40 degrees off the outbound course, a half turn, and back from abeam its end (4·cos 40).
   const unit = towardTidue(200, 8)
-  expect(heldSeconds(unit, 'TIDUE', 'STAYS', TAS)).toBeCloseTo(((4 + Math.PI * RADIUS + 4 * Math.cos((40 * Math.PI) / 180)) / TAS) * 3600, 3)
+  expect(heldSeconds(unit, 'TIDUE', 'STAYS', FINAL_TAS)).toBeCloseTo(((4 + Math.PI * RADIUS + 4 * Math.cos((40 * Math.PI) / 180)) / TAS) * 3600, 3)
   expect(point(unit, 'STAYS').status).toBe('KNOWN')
   // Parallel: 2.6 turn radii out on the outbound course, a half turn, and the same distance back.
   const parallel = towardTidue(120, 8)
-  expect(heldSeconds(parallel, 'TIDUE', 'STAYS', TAS)).toBeCloseTo(((2 * 2.6 * RADIUS + Math.PI * RADIUS) / TAS) * 3600, 3)
+  expect(heldSeconds(parallel, 'TIDUE', 'STAYS', FINAL_TAS)).toBeCloseTo(((2 * 2.6 * RADIUS + Math.PI * RADIUS) / TAS) * 3600, 3)
 })
 
 test('D-H/R3-03: the predicted time through the HF agrees with the time flown, for each entry (laboratory, still air)', () => {
@@ -309,6 +311,8 @@ test('D-H/R3-03: the predicted time through the HF agrees with the time flown, f
       sim.step(1)
       entered ??= unit.holdEntryFlown
       const leg = unit.activeRoute.legs[0]
+      // Past TIDUE the crew flies the procedure's 70 KIAS limit, as the predictions assume (the FMS only advises).
+      if (leg?.kind === 'wpt' && leg.ident === 'STAYS' && sim.selectedSpeed !== 70) sim.selectSpeed(70)
       if (leg?.kind === 'wpt' && leg.ident === 'CRANN') break
     }
     expect(entered, `from ${bearing}`).toBe(entry)
@@ -327,7 +331,7 @@ test('D-H/R3-03: an AT TGT ALT hold is KNOWN plus a racetrack when the altitude 
   Object.assign(hold, { path: 'HA', exit: 'AT ALT', altitude: '1700A' })
   expect(point(met, 'TIDUE').altitude).toBe(2000)
   expect(point(met, 'STAYS')).toMatchObject({ status: 'KNOWN', reason: null })
-  expect(heldSeconds(met, 'TIDUE', 'STAYS', TAS)).toBeCloseTo(360, 3)
+  expect(heldSeconds(met, 'TIDUE', 'STAYS', FINAL_TAS)).toBeCloseTo(360, 3)
   // 5,000 ft or above is not predicted at TIDUE: the exit there is an assumption, from the fix on.
   hold.altitude = '5000A'
   for (const ident of ['TIDUE', 'STAYS', 'CRANN']) expect(point(met, ident)).toMatchObject({ status: 'CONDITIONAL', reason: 'HOLD EXIT AT ALTITUDE' })
