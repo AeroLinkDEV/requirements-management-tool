@@ -27,7 +27,7 @@ Each was checked against `main` on 30 September 2026 (bab18a38). The test titles
 
 ## Summary
 
-140 rows: **75 Met, 51 Partial, 13 Open, 1 Deferred** (Stage F only).
+140 rows: **74 Met, 52 Partial, 13 Open, 1 Deferred** (Stage F only).
 
 v1 is **not complete**: the §10 completion row stays Open until the Partial and Open rows are closed or explicitly deferred by Sean.
 
