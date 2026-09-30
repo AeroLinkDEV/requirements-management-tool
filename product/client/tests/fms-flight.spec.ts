@@ -1,6 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { aircraftData } from '../src/fmsCdu/efis'
-import { FlightSimulator, SAR_SEARCH_WAYPOINTS, angleDiff, legGeometry, racetrackOutline, sarTrack } from '../src/fmsCdu/flight'
+import { FlightSimulator, SAR_SEARCH_WAYPOINTS, angleDiff, legGeometry, racetrackOutline, sarTrack, trimPitch } from '../src/fmsCdu/flight'
+import { cameraPose } from '../src/fmsCdu/outTheWindow'
 import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
 import { HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
@@ -1349,6 +1350,38 @@ test('the transition is flown to a hover at MRK: TD, the gate segment, TD/H, the
   expect(sim.axisModes).toEqual({ collective: 'RHT', pitch: 'HOV', roll: 'HOV' })
 })
 
+test('the transition request carries MRK, the final track, the remaining distance and the planned trajectory, and the autopilot flies it: TD/H starts at the planned distance even at another gate speed (B3.3)', () => {
+  const { unit, sim, fly, ticks, mark } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(900, () => unit.hover.request > 0)
+  const request = unit.hover.requestData!
+  expect(request.mrk).toEqual(mark)
+  expect(request.finalTrack).toBe(230)
+  expect(request.remainingNm).toBeCloseTo(distanceNm(unit.position, mark), 1)
+  // The shared plan, whole: TD, the gate segment and TD/H fill the remaining distance.
+  expect(request.plan.td.distanceNm + request.gateNm + request.plan.tdh.distanceNm).toBeCloseTo(request.remainingNm, 9)
+  expect(request.gateNm).toBeGreaterThanOrEqual(0)
+  // The autopilot takes the request on its next step.
+  fly(1)
+  expect(sim.modeEvents.find(e => e.event === 'TRANSITION REQUEST')?.detail).toBe(
+    `MRK ${request.remainingNm.toFixed(3)} NM on 230°T: TD ${request.plan.td.distanceNm.toFixed(3)} NM, gate ${request.gateNm.toFixed(3)} NM, TD/H ${request.plan.tdh.distanceNm.toFixed(3)} NM`)
+  // The wind drops after the request: the gate is reached faster over the ground than planned (within the gate
+  // segment's slack). The autopilot still starts decelerating where the plan put TD/H, not where its own nominal rate
+  // from the faster gate speed would (about 0.09 NM earlier), and the closed loop takes it to MRK.
+  unit.wind.speed = 16
+  // Measured as the autopilot measures it (the navigation position, which lags truth), in the bench's quarter seconds.
+  let decelAt: number | null = null
+  ticks(600, () => {
+    if (decelAt === null && sim.modeEvents.some(e => e.event === 'TD/H' && /gate segment ends/.test(e.detail))) decelAt = distanceNm(unit.position, mark)
+    return sim.hoverCaptured
+  })
+  expect(decelAt).not.toBeNull()
+  expect(Math.abs(decelAt! - request.plan.tdh.distanceNm)).toBeLessThan(0.01)
+  expect(sim.hoverCaptured).toBe(true)
+  expect(metres(unit.truePosition, mark)).toBeLessThan(50)
+})
+
 test('ACTIVATE needs a valid radio height; losing it between ACTIVATE and EXEC is RALT FAILED, and the modification stays (Stage D, E-27)', () => {
   const noRa = hoverProcedure()
   noRa.unit.setCondition('raFail', true)
@@ -1706,4 +1739,43 @@ test('D-H: a leg time or speed the crew entered is kept at the entry, whatever t
   unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 5000 }, 'test: low when the entry begins')
   expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')).toBeLessThan(3600)
   expect(unit.activeRoute.hold).toMatchObject({ legTime: 2.5, speed: 150 })
+})
+
+test('the helicopter attitude: the trim pitch for the forward airspeed, not raised by a climb, down to accelerate and up to decelerate; the PFD, the cockpit camera and the GPS antennas share it (B1.5, B4.7)', () => {
+  const deg = (a: number) => (Math.atan((a * 0.514444) / 9.80665) * 180) / Math.PI
+  const same = (unit: ScriptedFms, sim: FlightSimulator) => {
+    const air = aircraftData(unit, sim)
+    expect(air.pitch).toBe(unit.attitude.pitch)
+    expect(air.bank).toBe(unit.attitude.bank)
+    const pose = cameraPose({ position: air.position, altitude: air.altitude, heading: air.heading, pitch: air.pitch, bank: air.bank }, 'cockpit', 'panel')
+    expect(pose.roll).toBeCloseTo((unit.attitude.bank * Math.PI) / 180, 12)
+  }
+  // Level cruise at 100 KIAS: the trim for it; a 500 fpm climb at the same speed leaves the nose where it was.
+  const cruise = offshore(1000)
+  cruise.sim.selectSpeed(100)
+  cruise.fly(90)
+  expect(Math.abs(cruise.unit.attitude.pitch - trimPitch(cruise.sim.tas))).toBeLessThan(0.2)
+  const level = cruise.unit.attitude.pitch
+  cruise.sim.selectAltitude(3000)
+  expect(cruise.sim.engageVerticalSpeed(500)).toBe(true)
+  cruise.fly(30)
+  expect(cruise.unit.verticalSpeed).toBeCloseTo(500, 0)
+  expect(Math.abs(cruise.unit.attitude.pitch - level)).toBeLessThan(0.2)
+  same(cruise.unit, cruise.sim)
+  // The hover in a 20 kt headwind: the trim for 20 kt of forward airspeed.
+  const hover = offshore()
+  slowToHover(hover)
+  hover.fly(30)
+  expect(Math.abs(hover.unit.attitude.pitch - trimPitch(20))).toBeLessThan(0.3)
+  same(hover.unit, hover.sim)
+  // TD/H decelerates at 0.75 kt/s: the nose up by atan(a/g) on the trim for the airspeed.
+  const tdh = offshore(150)
+  tdh.unit.wind.speed = 0
+  tdh.sim.selectSpeed(60)
+  tdh.fly(40)
+  expect(tdh.sim.engageTransitionDownToHover()).toBe(true)
+  tdh.fly(10)
+  expect(Math.abs(tdh.unit.attitude.pitch - (trimPitch(tdh.sim.indicatedAirspeed) + deg(0.75)))).toBeLessThan(0.3)
+  expect(tdh.unit.attitude.pitch).toBeGreaterThan(trimPitch(tdh.sim.indicatedAirspeed))
+  same(tdh.unit, tdh.sim)
 })

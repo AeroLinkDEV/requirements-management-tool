@@ -2769,3 +2769,12 @@ choices are created as focused issues only when their trigger and acceptance bou
 - **Magnetic reference:** WMM2025, with model identity/epoch, integrity and age behavior, and consistent MAG/TRUE display and entry. The bench's table/checksum format is identified as its own format; it does not claim compatibility with a proprietary CMA database.
 - **Dual operation:** Two independent simulated FMS computers, each with its own CDU and state, connected by an explicit cross-talk link. Synchronized/independent operation, receiving-side MOD/EXEC crossfill, refusals, disagreement/link-loss behavior and RMS feedback are required. A copied route does not complete this decision.
 - **Boundaries:** A specific aircraft installation is not a prerequisite for the generic simulation. Fixed-wing expansion, performance without attributable tables, wider airframe/environment work and native CMA hardware loading remain later work. Preserve the persistent AeroLink database/evidence and other sessions' in-flight changes. No simulator result is OEM conformance or operational qualification.
+
+### DEC-148 - Helicopter Bench Ground Operations Follow v1
+
+- **Date:** 2026-09-30
+- **Status:** Accepted owner decision.
+- **Authority:** Sean chose "Defer to after v1" when asked whether to build ground operations for helicopter-first v1 or defer them (session 1, 30 September 2026, about 2:15 PM ET).
+- **Decision:** The helicopter bench has no air/ground state in v1. Scenarios start airborne, and the FMS is airborne whatever the ground speed: a hover never brings ground planning (plan revision 2 B1.6, which Astra accepted). A pad start, weight on skids, lift-off, and the FMS's ground behaviour follow v1. That behaviour includes on-ground ETEs from PLAN DATA CRZ TAS and CRZ WIND (M300 5-14, 3-19) and the FUEL page's on-ground EST condition.
+- **Ledger:** row E1's ground-ETE clause is recorded as Deferred under this decision; its airborne clauses stay Met. B1.6 stays Met as airborne whatever the ground speed.
+- **Boundaries:** No simulator result is OEM conformance or operational qualification. DEC-146 and DEC-147 remain in force.

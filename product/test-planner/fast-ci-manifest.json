@@ -35,7 +35,35 @@
       "npx playwright install chromium",
       "npm run test:fast:isolation",
       "npm run test:fast:rendered"
-    ]
+    ],
+    "parts": {
+      "static-logic": {
+        "commands": [
+          "npm ci",
+          "npm run lint",
+          "npm run typecheck",
+          "npm run test:fast:routes",
+          "npm run test:fast:logic"
+        ]
+      },
+      "rendered-standard": {
+        "commands": [
+          "npm ci",
+          "npx playwright install chromium",
+          "npm run test:fast:isolation",
+          "npm run test:fast:rendered"
+        ],
+        "renderedPart": "standard"
+      },
+      "rendered-3d": {
+        "commands": [
+          "npm ci",
+          "npx playwright install chromium",
+          "npm run test:fast:rendered"
+        ],
+        "renderedPart": "3d"
+      }
+    }
   },
   "contracts": {
     "suites": [
