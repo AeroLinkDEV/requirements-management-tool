@@ -4,7 +4,7 @@ import type { ProcedureHold, SpeedLimit } from "./navData";
 
 /**
  * Shared state shapes, geometry and screen helpers for the scripted CMA-9000. The navigation database is in
- * navData.ts. Bearings are true: the simulation applies no magnetic variation.
+ * navData.ts. Geometry uses true bearings; ScriptedFms converts crew entry/display through the consumed MAGVAR model.
  */
 
 export type LatLon = { lat: number; lon: number };

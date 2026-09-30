@@ -265,22 +265,30 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       { left: dashes(24) },
       { left: back("INDEX"), right: prompt("POS INIT>") },
     ],
-    lsk: (fms, side, row) => {
+    lsk: (fms, side, row, _scratch, index) => {
       if (row === 6) fms.open(side === "L" ? "INIT_REF" : "POS");
-      if (side === "R" && row === 3 && fms.inactiveCycle) fms.swapCycles();
+      if (index === 0 && side === "R" && row === 3 && fms.inactiveCycle) fms.swapCycles();
     },
   },
 
   POS: {
-    pages: () => 1,
-    render: fms => [
-      title("POS INIT", "1/1"),
+    pages: () => 2,
+    render: (fms, index) => index === 1 ? [
+      title("POS INIT", "2/2"), caption(" NAV MODE", "RNP/ANP NM "),
+      { left: medium(navModeText(fms)), right: medium(`${fixed(fms.navPerformance.rnp, 2)}/${fixed(fms.navPerformance.anp, 2)}`) },
+      caption(" TRUE WIND", "TAS "), { left: medium(`${three(fms.wind.direction)}T/${Math.round(fms.wind.speed)}KT`), right: medium(`${fms.trueAirspeed === null ? "---" : Math.round(fms.trueAirspeed)}KT`) },
+      caption(" HDG/DA", "TK/GS "), { left: medium(`${fms.angleText(fms.heading)}/${fixed(fms.track - fms.heading, 1)}°`), right: medium(`${fms.angleText(fms.track)}/${Math.round(fms.groundSpeed)}KT`) },
+      caption(" MAGVAR", "TKE/XTK "), { left: fms.magneticField ? medium(`${fms.magneticField.declination < 0 ? "W" : "E"}${fixed(Math.abs(fms.magneticField.declination), 1)}°`) : dashes(5), right: medium(`${fixed(fms.trackError, 0)}°/${fixed(fms.crossTrack, 2)}NM`) },
+      caption(fms.validBaroAltitude !== null ? " ALT (CORR)" : " ALT (STD)"), { left: (fms.validBaroAltitude ?? fms.pressureAltitude) !== null ? medium(`${Math.round((fms.validBaroAltitude ?? fms.pressureAltitude)!)}FT`) : dashes(6) },
+      caption(fms.manualQnhAvailable ? ` QNH SET ${fms.qnhUnits}` : undefined), { left: fms.manualQnhAvailable ? fms.qnhText === null ? boxes(5) : medium(`>${fms.qnhText}`) : undefined },
+    ] : [
+      title("POS INIT", "1/2"),
       caption(" FMS POS"),
       { left: medium(formatPosition(fms.position)) },
       caption(" GPS POS"),
       // The fix of the receiver navigated on, which in GPS mode is the FMS position (3a.3).
       { left: gpsFix(fms) ? medium(formatPosition(gpsFix(fms)!)) : dashes(15) },
-      caption(" GPS UTC", "SET POS "),
+      caption(fms.gpsTimeAvailable ? " GPS UTC" : " RTC UTC", "SET POS "),
       // The crew's last SET POS entry, or boxes until there is one (R26).
       { left: medium(hhmm(fms.utcTime)), right: fms.positionReferenceEntry ? medium(formatPosition(fms.positionReferenceEntry.position)) : boxes(15) },
       undefined, undefined,
@@ -289,7 +297,13 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       { left: dashes(24) },
       { left: back("SETUP"), right: prompt("RTE>") },
     ],
-    lsk: (fms, side, row, scratch) => {
+    lsk: (fms, side, row, scratch, index) => {
+      if (index === 1) {
+        if (side !== "L" || row !== 6) return;
+        const result = fms.enterQnh(scratch);
+        if (!result) fms.setScratch("");
+        return result;
+      }
       if (row === 6) { fms.open(side === "L" ? "SETUP" : "RTE"); return; }
       // SET POS: a real position-reference initialisation, or a refusal that changes nothing (R26).
       if (side === "R" && (row === 1 || row === 3)) {
@@ -1030,10 +1044,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           if (value === null && scratch !== "DELETE") return "invalid";
           fms.setApproachTemperature(value);
         } else if (side === "L" && row === 6 && !fms.baroCorrectedAvailable) {
-          const normalized = /^\d{4}$/.test(scratch) && Number(scratch) > 2000 ? (Number(scratch) / 100).toFixed(2) : scratch;
-          const hpa = numberIn(normalized, 945, 1050, /^\d{3,4}$/), inHg = numberIn(normalized, 28, 31, /^\d{2}\.\d{2}$/);
-          if (hpa === null && inHg === null) return "invalid";
-          fms.vnav.qnh = normalized;
+          const result = fms.enterQnh(scratch);
+          if (result) return result;
         } else return "not-allowed";
         fms.setScratch(""); return;
       }

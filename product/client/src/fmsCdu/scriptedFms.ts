@@ -409,6 +409,8 @@ export class ScriptedFms implements CduBackend {
     /** The planned cruise, the descent path angle, and DES NOW (an early descent to capture the path). */
     cruiseAltitude: 4500, cruiseSpeed: 120, pathAngle: 3.0, desNow: false,
   };
+  private qnhUnit: "MB" | "INHG" = "INHG";
+  private departureTerminal: { airport: string; inside: boolean } | null = null;
   readonly timer = { alarmAt: null as number | null, countdownEnd: null as number | null };
   readonly sar: Sar = {
     id: { SQUARE: "SQR01", LADDER: "LAD01", SECTOR: "SEC01" }, refId: null, relativeBearing: null, distance: null,
@@ -885,6 +887,7 @@ export class ScriptedFms implements CduBackend {
    */
   updateNavigation(dt: number) {
     this.sensorFrame = this.sampleSensors();
+    if (!this.powered) return;
     const gps = this.updateGps(this.sensorFrame);
     const previous = this.nav.mode, previousSource = this.nav.gpsSource;
     const now = this.now.getTime();
@@ -934,6 +937,13 @@ export class ScriptedFms implements CduBackend {
     // ANP above RNP for longer than the time to alert of the phase: CHECK ANP, once per episode. It reads the same
     // effective values as the pages and the lamp (R11).
     this.refreshApproachPhase();
+    // M300 A-128: cancel a manual departure QNH on crossing either departure terminal boundary.
+    // Crossing, rather than merely being far from origin, preserves a subsequently entered arrival QNH.
+    const departure = this.db.airport(this.active.origin);
+    const baro = this.validBaroAltitude;
+    const inside = !!departure && distanceNm(this.position, departure.position) <= 33 && (baro === null || baro - departure.elevation <= 16000);
+    if (this.departureTerminal?.airport === this.active.origin && this.departureTerminal.inside && !inside) this.vnav.qnh = null;
+    this.departureTerminal = { airport: this.active.origin, inside };
     const { alertSeconds } = RNP_DEFAULTS[this.flightPhase];
     const performance = this.navPerformance;
     if (performance.anp > performance.rnp) {
@@ -1178,6 +1188,27 @@ export class ScriptedFms implements CduBackend {
   get approachSteeringValid() { return !this.s300Advisory || !this.approachCancelled; }
   get baroCorrectedAvailable() {
     return !this.sensorPort || sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge)?.baroCorrected !== false;
+  }
+  get pressureAltitude() {
+    const air = sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge);
+    return air?.baroCorrected === false && Number.isFinite(air.pressureAltitudeFt) ? air.pressureAltitudeFt! : null;
+  }
+  get manualQnhAvailable() { return !this.baroCorrectedAvailable && this.pressureAltitude !== null; }
+  get qnhUnits() { return this.qnhUnit; }
+  get qnhText() {
+    if (this.vnav.qnh === null) return null;
+    const entered = Number(this.vnav.qnh), mb = entered < 100 ? entered * 33.8638866667 : entered;
+    return this.qnhUnit === "MB" ? String(Math.round(mb)) : (mb / 33.8638866667).toFixed(2);
+  }
+  /** Manual range is M300 A-128. The pressure-to-altitude conversion remains declared laboratory policy. */
+  enterQnh(entry: string) {
+    if (!this.manualQnhAvailable) return "not-allowed" as const;
+    if (!entry) { this.qnhUnit = this.qnhUnit === "MB" ? "INHG" : "MB"; return; }
+    const normalized = /^\d{4}$/.test(entry) && Number(entry) > 2000 ? (Number(entry) / 100).toFixed(2) : entry;
+    const value = Number(normalized), inches = /^\d{2}(?:\.\d{1,2})?$/.test(normalized);
+    if (!Number.isFinite(value) || !(inches ? value >= 27 && value <= 32 : /^\d{3,4}$/.test(normalized) && value >= 915 && value <= 1083)) return "invalid" as const;
+    this.vnav.qnh = inches ? value.toFixed(2) : String(value);
+    this.qnhUnit = inches ? "INHG" : "MB";
   }
   /** Corrected ADC altitude, or pressure altitude corrected with crew QNH. 27 ft/hPa is declared bench approximation. */
   get advisoryBaroAltitude() {
@@ -2024,6 +2055,7 @@ export class ScriptedFms implements CduBackend {
   /** Advances time-driven state: the timer alarms, the call duration and the clocks on the display. */
   tick() {
     const now = this.now.getTime();
+    if (!this.powered) { this.emit(); return; }
     if (this.bootUntil !== null && now >= this.bootUntil) {
       this.bootUntil = null; this.checkMagvar();
       if (this.restartNeedsLeg) this.statusAdvisory("!ENTER ACT WPT/LEG");
@@ -2226,7 +2258,7 @@ export class ScriptedFms implements CduBackend {
       const p1 = this.coordinates(pbpb[1]), p2 = this.coordinates(pbpb[3]);
       if (!p1 || !p2) return "not-in-database";
       const first = this.angleFromEntry(Number(pbpb[2]), p1), second = this.angleFromEntry(Number(pbpb[4]), p2);
-      if (first === null || second === null) return "not-allowed";
+      if (first === null || second === null) return "invalid";
       const crossing = bearingIntersection(p1, first, p2, second);
       if (!crossing) return "invalid";
       return { ident: this.createPilot(pbpb[1].slice(0, 3), crossing, `${text} ${this.angleReference}`) };

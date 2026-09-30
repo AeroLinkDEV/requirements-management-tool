@@ -179,7 +179,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
   // autopilot's (basic heading and altitude hold after the reversion).
   if (failed) return empty;
 
-  const managed = sim.lateralMode === "LNAV" && g.desiredTrack !== null;
+  const managed = !fms.needsActiveLeg && sim.lateralMode === "LNAV" && g.desiredTrack !== null;
   const path = sim.verticalPath;
   const advisory = fms.advisoryVertical;
   const profile = fms.profile();

@@ -14,6 +14,8 @@ import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
 import { readFileSync } from 'node:fs'
 import { MagvarModel } from '../src/fmsCdu/magvar'
+import { WMM2025_DATABASE } from '../src/fmsCdu/wmm2025'
+import { fmsOutputs } from '../src/fmsCdu/efis'
 
 test('WMM2025 agrees with all independent NOAA field vectors at both epochs and ellipsoid heights', () => {
   const model = new MagvarModel()
@@ -70,6 +72,22 @@ test('SETUP applies MAG/TRUE to CDU courses and angular entry, keeps true wind, 
   // NOAA's equatorial reference D=-0.16: true = magnetic + D, with wraparound.
   expect(unit.angleFromEntry(100)).toBeCloseTo(99.84, 2)
   expect(unit.angleFromEntry(0)).toBeCloseTo(359.84, 2)
+  unit.loadNavData({ cycle: { id: 'MAG-ENTRY', from: '', to: '' }, entries: [{ kind: 'fix', ident: 'REF01', position: { lat: 0, lon: 120 } }], airways: [], procedures: [] })
+  unit.swapCycles()
+  const pilot = unit.resolveWaypoint('REF01090/10')
+  expect(typeof pilot).toBe('object')
+  if (typeof pilot !== 'object') throw new Error('PBD refused')
+  const target = unit.coordinates(pilot.ident)!
+  expect(distanceNm({ lat: 0, lon: 120 }, target)).toBeCloseTo(10, 6)
+  expect(bearingDeg({ lat: 0, lon: 120 }, target)).toBeCloseTo(89.84, 2)
+  expect(unit.defineHold('REF01')).toBeUndefined()
+  unit.open('HOLD'); enter(unit, '090', 'LSK3L')
+  expect(unit.route.hold!.inbound).toBeCloseTo(89.84, 2)
+  expect(lines(unit)[6]).toContain('090°')
+  const output = fmsOutputs(unit, new FlightSimulator(unit))
+  expect(output.angleReference).toBe('MAG')
+  expect(output.magneticVariation.value).toBeCloseTo(-0.16, 2)
+  unit.open('SETUP')
   const wind = { ...unit.wind }
   press(unit, 'LSK1L')
   expect(unit.angleReference).toBe('TRUE')
@@ -87,6 +105,146 @@ test('SETUP applies MAG/TRUE to CDU courses and angular entry, keeps true wind, 
   expect(recalled(unit, 'CHECK TRUE/MAG REF')).toBe(true)
   press(unit, 'LSK1L')
   expect(unit.angleReference).toBe('MAG')
+})
+
+test('the consumed MAGVAR checksum withdraws navigation; age above five years is an advisory, and valid loading restores outputs (M300 E-20/E-26)', () => {
+  const unit = new ScriptedFms(() => new Date(Date.UTC(2026, 0, 1)))
+  const sim = new FlightSimulator(unit)
+  expect(fmsOutputs(unit, sim).failed).toBe(false)
+  unit.setCondition('magvarCrc', true)
+  expect(unit.magvar.valid).toBe(false)
+  expect(fmsOutputs(unit, sim)).toMatchObject({ failed: true, desiredTrack: { status: 'FAIL', value: null } })
+  expect(unit.lamps()).toEqual(new Set(['FAIL']))
+  expect(recalled(unit, 'MAG VAR CRC FAILED')).toBe(true)
+  expect(recalled(unit, 'SYSTEM FAILED')).toBe(true)
+  expect(unit.loadMagvar({ format: 'unsupported' })).toBe(false)
+  expect(unit.magvar.valid).toBe(false)
+  expect(unit.loadMagvar(WMM2025_DATABASE)).toBe(true)
+  expect(fmsOutputs(unit, sim).failed).toBe(false)
+  for (const [time, expired] of [[Date.UTC(2030, 0, 1), false], [Date.UTC(2030, 0, 1) + 1, true]] as const) {
+    const aged = new ScriptedFms(() => new Date(time))
+    expect(recalled(aged, 'MAG VAR OUT OF DATE')).toBe(expired)
+    expect(aged.hasCondition('fmsFail')).toBe(false)
+    expect(aged.magneticField).not.toBeNull()
+  }
+})
+
+test('cold/warm FMS power-up retains TAS/position, applies the ground wind rule, checks lamps, and requires an active leg in flight (M300 3-7/3-19/E-40)', () => {
+  let now = Date.UTC(2026, 8, 30, 14)
+  const unit = new ScriptedFms(() => new Date(now))
+  const sim = new FlightSimulator(unit)
+  const truth = { ...unit.truePosition }, gps = unit.gps
+  unit.planData.cruiseTas = 137
+  unit.planData.cruiseWind = { direction: 110, speed: 18 }
+  unit.powerOff()
+  expect(unit.lamps().size).toBe(0)
+  expect(fmsOutputs(unit, sim).failed).toBe(true)
+  unit.powerOn('WARM', true)
+  expect(unit.powerState).toBe('TEST')
+  expect(unit.lamps()).toContain('EXEC')
+  expect(unit.screen().flat().every(cell => cell.inverse && cell.color === 'white')).toBe(true)
+  now += 5000; unit.tick()
+  expect(unit.powerState).toBe('ON')
+  expect(unit.planData.cruiseTas).toBe(137)
+  expect(unit.planData.cruiseWind).toEqual({ direction: 110, speed: 18 })
+  expect(unit.truePosition).toEqual(truth)
+  expect(unit.gps).toBe(gps)
+  expect(unit.needsActiveLeg).toBe(false)
+  unit.powerOn('COLD', false); now += 5000; unit.tick()
+  expect(unit.planData.cruiseWind.speed).toBe(18)
+  expect(unit.needsActiveLeg).toBe(true)
+  expect(recalled(unit, '!ENTER ACT WPT/LEG')).toBe(true)
+  expect(fmsOutputs(unit, sim).desiredTrack).toMatchObject({ status: 'NCD', value: null })
+  sim.step(0.25)
+  expect(sim.guidance.desiredTrack).toBeNull()
+  const target = unit.activeRoute.legs.find(leg => leg.kind === 'wpt')!
+  expect(target.kind).toBe('wpt')
+  if (target.kind !== 'wpt') throw new Error('Fixture has no active waypoint')
+  expect(unit.directTo(target.ident)).toBeUndefined(); unit.press('EXEC')
+  expect(unit.needsActiveLeg).toBe(false)
+  unit.powerOn('COLD', true); now += 5000; unit.tick()
+  expect(unit.planData.cruiseWind).toEqual({ direction: 0, speed: 0 })
+  expect(unit.planData.cruiseTas).toBe(137)
+  // With no GPS/radio source, startup retains the calculated position rather than leaking plant truth.
+  unit.setCondition('gpsLost', true); unit.setCondition('dmeOutage', true)
+  expect(unit.initializePosition({ lat: 41, lon: -71 })).toBe(true)
+  unit.powerOff(); unit.powerOn('WARM', true); now += 5000; unit.tick()
+  expect(unit.position).toEqual({ lat: 41, lon: -71 })
+})
+
+test('POS INIT permits RTC date/time entries without GPS time and refuses them with GPS, while sensor timestamps remain unchanged (M300 A-111)', () => {
+  const unit = new ScriptedFms(() => new Date(Date.UTC(2026, 8, 30, 14)))
+  unit.open('POS')
+  enter(unit, '121530', 'LSK5L')
+  expect(scratch(unit)).toBe('NOT ALLOWED')
+  expect(unit.utcTime.toISOString()).toBe('2026-09-30T14:00:00.000Z')
+  unit.press('CLR', { held: true }); unit.press('CLR', { held: true })
+  unit.setCondition('gpsLost', true); unit.setCondition('dmeOutage', true)
+  enter(unit, '121530', 'LSK5L')
+  expect(unit.utcTime.toISOString()).toBe('2026-09-30T12:15:30.000Z')
+  enter(unit, 'OCT01/26', 'LSK5R')
+  expect(unit.utcTime.toISOString()).toBe('2026-10-01T12:15:30.000Z')
+  expect(unit.now.toISOString()).toBe('2026-09-30T14:00:00.000Z')
+  enter(unit, 'FEB30/26', 'LSK5R')
+  expect(scratch(unit)).toBe('INVALID ENTRY')
+  expect(unit.utcTime.toISOString()).toBe('2026-10-01T12:15:30.000Z')
+  unit.setCondition('gpsLost', false)
+  // A warm valid GPS resumes immediately in this fixture and its UTC reference supersedes the RTC entry.
+  expect(unit.navState.mode).toBe('GPS')
+  expect(unit.utcTime.toISOString()).toBe('2026-09-30T14:00:00.000Z')
+})
+
+test('manual QNH accepts the published S300 limits through VNAV and POS without a runway, and cancels only on departure terminal exit (M300 A-128)', () => {
+  let now = Date.UTC(2026, 8, 30, 14)
+  const source = new ScriptedFms(() => new Date(now))
+  const departure = source.navdb.airport('CYOW')!
+  source.placeAircraft({ position: departure.position, altitude: 1500, track: 90 }, 'QNH source fixture')
+  let frame = source.navigationInputs!
+  frame.air.value = { ...frame.air.value!, baroCorrected: false, pressureAltitudeFt: 1500 }
+  const port = new BufferedSensorPort(); expect(port.publish(frame)).toBe(true)
+  const unit = new ScriptedFms(() => new Date(now), { sensors: port })
+  unit.selectProcedure('APPROACH', 'R24R'); unit.press('EXEC'); unit.open('VNAV')
+  unit.press('CLR') // Acknowledge the external-position acquisition alert before making the crew entry.
+  // The old 945..1050 / 28..31 limits reject 915 here: retain that pre-fix failure.
+  for (const [entry, expected] of [['915', '915'], ['1083', '1083'], ['2700', '27.00'], ['3200', '32.00']]) {
+    unit.setScratch(entry); unit.press('LSK6L')
+    expect(unit.vnav.qnh, entry).toBe(expected)
+  }
+  for (const entry of ['914', '1084', '2699', '3201']) {
+    unit.setScratch(entry); unit.press('LSK6L')
+    expect(scratch(unit), entry).toBe('INVALID ENTRY')
+    expect(unit.vnav.qnh).toBe('32.00')
+    unit.press('CLR', { held: true }); unit.press('CLR', { held: true })
+  }
+  unit.modify(route => { route.approach = undefined; route.legs = [] }); unit.press('EXEC')
+  unit.open('POS'); unit.press('NEXT')
+  expect(lines(unit)[0]).toContain('2/2')
+  expect(lines(unit)[9]).toContain('ALT (CORR)')
+  unit.setScratch('1013'); unit.press('LSK6L')
+  expect(unit.advisoryBaroAltitude).toBeCloseTo(1493.25, 6) // 1500 + (1013 - 1013.25)*27; laboratory air-data policy.
+  expect(unit.qnhUnits).toBe('MB')
+  unit.press('LSK6L'); expect(unit.qnhUnits).toBe('INHG')
+  expect(lines(unit)[12]).toContain('29.91')
+  const publishAt = (distance: number, altitude: number, corrected = false) => {
+    source.placeAircraft({ position: offset(departure.position, 90, distance), altitude, track: 90 }, 'QNH departure boundary')
+    now += 1000; source.updateNavigation(0); frame = source.navigationInputs!
+    frame.air.value = { ...frame.air.value!, baroCorrected: corrected, pressureAltitudeFt: altitude }
+    expect(port.publish(frame)).toBe(true); unit.refreshSensorInput()
+  }
+  publishAt(33, 1500); expect(unit.vnav.qnh).toBe('1013')
+  publishAt(33.01, 1500); expect(unit.vnav.qnh).toBeNull()
+  unit.press('CLR') // Acknowledge POSITION SHIFT from the independent external-frame relocation.
+  unit.setScratch('2992'); unit.press('LSK6L')
+  expect(unit.vnav.qnh).toBe('29.92')
+  publishAt(34, 1500); expect(unit.vnav.qnh).toBe('29.92') // Arrival entry is not repeatedly cancelled because origin is behind.
+  publishAt(0, departure.elevation + 15990)
+  publishAt(0, departure.elevation + 16010); expect(unit.vnav.qnh).toBeNull()
+  publishAt(0, 1500, true)
+  expect(unit.manualQnhAvailable).toBe(false)
+  expect(lines(unit)[11]).not.toContain('QNH SET')
+  unit.press('CLR')
+  unit.setScratch('1013'); unit.press('LSK6L')
+  expect(scratch(unit)).toBe('NOT ALLOWED')
 })
 
 test('S300 after-FAF integrity-only cancellation waits 300 seconds, while HDOP above four cancels immediately (M300 7-12)', () => {

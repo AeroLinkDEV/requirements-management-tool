@@ -76,12 +76,14 @@ export class MagvarModel {
   private coefficients: Coefficient[] = [];
   private table: MagvarDatabase = WMM2025_DATABASE;
   private checked = false;
+  private cached: { key: string; value: MagneticField | null } | null = null;
   constructor() { this.load(WMM2025_DATABASE); }
   load(candidate: unknown): boolean {
     if (!candidate || typeof candidate !== "object") return false;
     const value = candidate as Partial<MagvarDatabase>;
     if (value.format !== "aerolink-magvar-v1" || typeof value.name !== "string" || !Number.isFinite(value.epoch) || typeof value.released !== "string" || typeof value.coefficients !== "string" || typeof value.crc !== "string") return false;
     this.table = { ...value } as MagvarDatabase;
+    this.cached = null;
     const payload = [value.format, value.name, value.epoch, value.released, value.coefficients];
     const crc = crc32q(new TextEncoder().encode(JSON.stringify(payload))).toString(16).toUpperCase().padStart(8, "0");
     const lines = value.coefficients.trim().split(/\r?\n/), header = lines.shift()!.trim().split(/\s+/);
@@ -102,5 +104,10 @@ export class MagvarModel {
   get valid() { return this.checked; }
   outOfDate(date: Date) { return date.getTime() > Date.UTC(this.table.epoch + 5, 0, 1); }
   withinEpoch(date: Date) { return date.getTime() >= Date.UTC(this.table.epoch, 0, 1) && !this.outOfDate(date); }
-  field(position: LatLon, heightAboveEllipsoidKm: number, date: Date) { return this.checked ? field(this.coefficients, this.table.epoch, position, heightAboveEllipsoidKm, date) : null; }
+  field(position: LatLon, heightAboveEllipsoidKm: number, date: Date) {
+    if (!this.checked) return null;
+    const key = `${position.lat}/${position.lon}/${heightAboveEllipsoidKm}/${date.getTime()}`;
+    if (this.cached?.key !== key) this.cached = { key, value: field(this.coefficients, this.table.epoch, position, heightAboveEllipsoidKm, date) };
+    return this.cached.value ? { ...this.cached.value } : null;
+  }
 }
