@@ -385,11 +385,18 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       { left: medium(`>${fms.setup.localTime ? "LOCAL" : "UTC"}`), right: medium(`${fms.setup.localOffsetHours >= 0 ? "+" : ""}${fms.setup.localOffsetHours.toFixed(1)}HRS`) },
       caption(" COORD", "DATUM "), { left: medium("LAT_LONG"), right: medium("WGS84") },
       caption(" MAGVAR", "AT PPOS "), { left: medium(fms.magvar.database.name), right: medium(fms.magneticField ? `${Math.abs(fms.magneticField.declination).toFixed(1)}${fms.magneticField.declination < 0 ? "W" : "E"}` : "-----") },
-      caption(" FMS OPERATION"), { left: small("DUAL FMS PENDING", "amber") },
-      { left: dashes(24) }, { left: back("POS INIT"), right: prompt("ROUTE>") },
+      caption(" FMS OPERATION"), { left: fms.dualOperation ? medium(`>${fms.dualOperation.pendingMode ?? fms.dualOperation.mode}`) : small("SINGLE FMS") },
+      { left: dashes(24) }, fms.dualOperation?.pendingMode
+        ? { left: back("CANCEL"), right: prompt("CONFIRM>") }
+        : { left: back("POS INIT"), right: prompt("ROUTE>") },
     ],
     lsk: (fms, side, row, scratch) => {
-      if (row === 6) { fms.open(side === "L" ? "POS" : "RTE"); return; }
+      if (row === 6) {
+        if (fms.dualOperation?.pendingMode) fms.dualOperation.confirmMode(side === "R");
+        else fms.open(side === "L" ? "POS" : "RTE");
+        return;
+      }
+      if (side === "L" && row === 5 && fms.dualOperation) fms.dualOperation.requestMode(fms.dualOperation.mode === "SYNC" ? "INDEPENDENT" : "SYNC");
       if (side === "L" && row === 1) { if (!fms.toggleAngleReference()) return "not-allowed"; }
       if (side === "L" && row === 2) fms.setup.localTime = !fms.setup.localTime;
       if (side === "R" && row === 2 && scratch) {
@@ -721,13 +728,17 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           { left: { text: r.com2, color: "green" }, right: { text: r.com2Stby } },
           caption(" NAV1", "NAV2 "),
           { left: { text: r.nav1 }, right: { text: r.nav2 } },
+          undefined, undefined, undefined, undefined,
+          { left: small(fms.radioRequests.find(request => request.status === "PENDING") ? "RMS TUNING PENDING" : fms.radioRequests[0]?.status === "FAILED" ? "RMS CONTROL LOST" : "RMS FEEDBACK") },
         ];
       return [
         title("RADIO", "2/2"),
-        caption(" ADF"),
-        { left: { text: r.adf } },
-        caption(" TPDR", "MODE "),
-        { left: { text: r.tpdr, color: fms.squawkIdent ? "green" : "white", inverse: fms.squawkIdent }, right: { text: "ALT", color: "green" } },
+        caption(" ADF1", "ADF2 "),
+        { left: { text: r.adf }, right: { text: r.adf2 } },
+        caption(" ATC1", "ATC2 "),
+        { left: { text: r.tpdr, color: fms.squawkIdent ? "green" : "white", inverse: fms.squawkIdent }, right: { text: r.tpdr2 } },
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        { left: small(fms.radioRequests.find(request => request.status === "PENDING") ? "RMS TUNING PENDING" : fms.radioRequests[0]?.status === "FAILED" ? "RMS CONTROL LOST" : "RMS FEEDBACK") },
       ];
     },
     lsk: (fms, side, row, scratch, index) => {
@@ -737,7 +748,9 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         "0L1": ["com1", com, inCom], "0R1": ["com1Stby", com, inCom], "0L2": ["com2", com, inCom], "0R2": ["com2Stby", com, inCom],
         "0L3": ["nav1", nav, inNav], "0R3": ["nav2", nav, inNav],
         "1L1": ["adf", /^\d{3,4}(\.\d)?$/, v => Number(v) >= 190 && Number(v) <= 1750],
+        "1R1": ["adf2", /^\d{3,4}(\.\d)?$/, v => Number(v) >= 190 && Number(v) <= 1750],
         "1L2": ["tpdr", /^[0-7]{4}$/, () => true],
+        "1R2": ["tpdr2", /^[0-7]{4}$/, () => true],
       };
       const field = fields[`${index}${side}${row}`];
       if (!field) return;
@@ -746,9 +759,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         // Pressing the standby field with an empty scratchpad swaps active and standby, as a transfer key would.
         if (key === "com1Stby" || key === "com2Stby") {
           const activeKey = key === "com1Stby" ? "com1" : "com2";
-          const standby = fms.radioState[key];
-          fms.setRadio(key, fms.radioState[activeKey]);
-          fms.setRadio(activeKey, standby);
+          fms.swapRadio(activeKey);
         } else fms.setScratch(fms.radioState[key]);
         return;
       }
@@ -1215,7 +1226,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         caption(" SELF TEST", "RESULT "),
         { left: prompt("<START"), right: medium(test.result ?? (test.startedAt === null ? "-----" : "IN PROG"), test.result === "FAIL" ? "amber" : test.result === "PASS" ? "green" : "white") },
         caption(" CROSS-SIDE"),
-        { left: medium(fms.hasCondition("independent") ? "INDEPENDENT" : "DUAL SYNC", fms.hasCondition("independent") ? "amber" : "green"), right: medium(fms.crossSideInSync ? "RTE MATCH" : "RTE DIFFER", fms.crossSideInSync ? "white" : "amber") },
+        { left: medium(fms.dualOperation ? fms.dualOperation.mode === "SYNC" ? "DUAL SYNC" : "INDEPENDENT" : "SINGLE FMS", fms.hasCondition("independent") ? "amber" : "green"), right: medium(fms.dualOperation ? fms.crossSideInSync ? "RTE MATCH" : "RTE DIFFER" : "NO LINK", fms.crossSideInSync ? "white" : "amber") },
         caption(" FAULT LOG"),
       ];
       fms.faultLog.slice(0, 3).forEach((fault, i) => { lines[8 + i] = { left: small(`${hhmm(fault.at).slice(0, 4)}Z ${fault.text}`) }; });

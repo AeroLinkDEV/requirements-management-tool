@@ -66,7 +66,7 @@ const p = (value: number, unit: string, basis: ParameterBasis, source: string, i
 
 export const HELICOPTER_PROFILE: AircraftProfile = {
   id: "cma9000-s300-heli-civil",
-  version: 6,
+  version: 7,
   defaultAngleReference: "MAG",
   title: "CMA-9000 helicopter, civil SAR target (S/W -300 baseline)",
   aircraftType: "ROTOR",
@@ -86,6 +86,11 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
   notConfigured: ["CARP/HARP", "COSPAS-SARSAT", "EGI/IRS", "DVS (Doppler)", "military navigation option", "military tactical approach"],
   configuration: CIVIL_SAR_CONFIGURATION,
   parameters: {
+    dualPhaseDisagreementTime: p(30, "s", "sourced", "M300 3-25: independent after phase difference for more than 30 seconds", true),
+    dualSensorHysteresis: p(100, "m", "sourced", "M300 3-25: civil same-type sensor improvement before switching FMS source", true),
+    dualPositionDisagreement: p(0.5, "NM", "lab", "GPS-GPS POS DISAGREE threshold; M300 3-26 does not publish the significant difference", true),
+    rmsFeedbackDelay: p(0.25, "s", "lab", "simulated radio-device burst acknowledgement latency", true),
+    rmsFeedbackTimeout: p(2, "s", "lab", "simulated radio-device no-feedback timeout", true),
     fmsPowerTestTime: p(5, "s", "lab", "FMS power-up and maintenance self-test display duration; OEM timing unpublished", true),
     sensorMaxAge: p(2, "s", "lab", "maximum sensor age for the internal simulator port", true),
     radioAcquisition: p(3, "s", "lab", "AUTO facility acquisition after tuning or signal return", true),
@@ -169,7 +174,7 @@ export const ACTIVE_PROFILE = HELICOPTER_PROFILE;
 export const LATER_SBAS_PROFILE: AircraftProfile = {
   ...HELICOPTER_PROFILE,
   id: "cma9000-later-sbas-heli",
-  version: 2,
+  version: 3,
   title: "Later CMA software + CMA-5024 SBAS helicopter (representative simulation)",
   operationalProgram: "later SBAS-capable CMA family; exact OEM software baseline unqualified",
   approachPolicy: "SBAS_COUPLED",

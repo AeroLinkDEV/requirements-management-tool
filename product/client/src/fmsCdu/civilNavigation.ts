@@ -25,6 +25,11 @@ export class CivilNavigation {
     this.solution = { position: { ...initial }, mode: "DR", anp: 1, gpsSource: null, dmes: [], vor: null, uncertain: true, airValid: false, windComputed: false };
   }
   get current(): CivilSolution { return structuredClone(this.solution); }
+  get windEstimate() { return { ...this.wind }; }
+  accept(solution: CivilSolution, wind: { north: number; east: number }) {
+    this.solution = structuredClone(solution);
+    this.wind = { ...wind };
+  }
   initialize(position: LatLon) {
     this.solution = { ...this.solution, position: { ...position }, anp: 1, uncertain: true };
   }

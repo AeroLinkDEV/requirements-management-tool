@@ -482,9 +482,12 @@ display unit for engineers.
   - **Database cycles, maintenance and dual operation**: IDENT shows the active and inactive navigation database
     cycles with their effective dates and swaps them; past the active cycle's end the FMS raises DATABASE OUT OF
     DATE; REF NAV DATA defines idents in a temporary database; a loaded ARINC 424 file becomes the active cycle.
-    The MAINT page runs a self test that fails while a fault is present and keeps a fault log. In dual operation
-    the executed route is cross-loaded to the other FMS; in independent operation the sides can differ, and they
-    resynchronise when it ends.
+    The MAINT page runs a self test that fails while a fault is present and keeps a fault log. Two actual simulator
+    computers/CDUs share one physical aircraft through modeled cross-talk. SYNC has one MOD editor and transfers
+    EXEC; independent crossfill arrives as receiving MOD/EXEC. SETUP mode confirmation, sourced refusals,
+    measured 100 m source hysteresis and more-than-30-second phase disagreement are modeled. Link/power recovery
+    requires crew synchronization. Shared civil RMS tuning uses device feedback independently of cross-talk;
+    installed radio, RF and discrete interfaces remain partial. See the two-computer section in FMS_APPLICABILITY.md.
   - The earlier pages: HOLD, the SQUARE, LADDER and SECTOR search patterns, the tactical approach, HOVER and
     TIMER. The ATC, FMC COMM and GSM/SMS pages are representative only (no datalink) and say so on screen.
 - A **flight simulation** (`flight.ts`) flies the active route as an FMS-coupled autopilot would, in real or
