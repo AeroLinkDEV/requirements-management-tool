@@ -364,6 +364,44 @@ test('the two CDU panels target separate computers and shared radio feedback rem
   await page.screenshot({ path: 'C:/Sean Project/fms-research/Astra-dual-CDUs-RMS.png', fullPage: true })
 })
 
+// Owner: common sensor-fault controls must address the physical generator even when CDU 2 is inspected.
+test('shared sensor faults from CDU 2 affect both computers actual observations', async ({ page }) => {
+  await open(page)
+  await page.getByRole('combobox', { name: 'Hardware variation' }).selectOption('050')
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  const scenario = { id: 'shared-sensors', title: 'Shared offshore inputs', objective: 'Two computers observe the same radio altimeter',
+    maxSeconds: 1, start: '87n-offshore-sar', steps: [{ when: { kind: 'start' }, action: { kind: 'expectAircraft', minAltitude: 490, maxAltitude: 510 } }] }
+  await card.getByLabel('Scenario file').setInputFiles({ name: 'shared-sensors.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scenario)) })
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('2')
+  await key(page, 'F2_2').click(); await key(page, 'LSK1R').click() // TACT on the selected 050 hardware.
+  const radAlt = async () => { const lines = await screenLines(page); return lines[lines.findIndex(line => /RAD ALT/.test(line)) + 1] }
+  await expect.poll(radAlt).toMatch(/^\s*500FT/)
+  await tab(page, 'Conditions')
+  await page.getByRole('checkbox', { name: /^Radio altimeter failed/ }).check()
+  await expect.poll(radAlt).toMatch(/^\s*----FT/)
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('1')
+  await expect(page.getByRole('checkbox', { name: /^Radio altimeter failed/ })).toBeChecked()
+  await page.getByRole('checkbox', { name: /^Radio altimeter failed/ }).uncheck()
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('2')
+  await expect.poll(radAlt).toMatch(/^\s*500FT/)
+  await page.getByRole('checkbox', { name: /^GPS integrity lost/ }).check()
+  await tab(page, 'GPS sensors')
+  const faults = page.getByRole('region', { name: 'GPS 1 faults' })
+  await expect(faults.getByRole('note')).toContainText('GPS integrity lost condition holds')
+  await expect(faults.getByRole('button', { name: /^Mask low satellites/ })).toBeDisabled()
+  await tab(page, 'Conditions')
+  await page.getByRole('checkbox', { name: /^GPS integrity lost/ }).uncheck()
+  await tab(page, 'GPS sensors')
+  await page.getByLabel('GPS 1 Baro lost').check()
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('1')
+  await expect(page.getByLabel('GPS 1 Baro lost')).toBeChecked()
+  await page.getByLabel('GPS 1 Baro lost').uncheck()
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('2')
+  await expect(page.getByLabel('GPS 1 Baro lost')).not.toBeChecked()
+})
+
 test('a built-in scenario runs on the bench with its steps checked live, and gives a report and procedure text', async ({ page }) => {
   await open(page)
   const card = page.getByRole('region', { name: 'Scenarios' })

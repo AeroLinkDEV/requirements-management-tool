@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ALERTS } from "./alerts";
-import { CONDITIONS, UNMODELLED_CONDITIONS } from "./conditions";
+import { CONDITIONS, UNMODELLED_CONDITIONS, type ConditionId } from "./conditions";
 import { MAP_RANGES } from "./flight";
 import FmsCduPanel from "./FmsCduPanel";
 import { aircraftData, fmsOutputs } from "./efis";
@@ -125,15 +125,17 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
   }, [session, userName]); // eslint-disable-line react-hooks/exhaustive-deps
   const backend = system.computers[cduSide - 1];
   const peerBackend = system.computers[2 - cduSide];
+  const sharedSensorCondition = (id: ConditionId) => ["gpsLost", "gpsIntegrity", "dmeOutage", "raFail"].includes(id);
+  const conditionBackend = (id: ConditionId) => sharedSensorCondition(id) ? system.computers[0] : backend;
   const sim = system.simulator, guidanceBackend = system.computers[system.guidanceSide - 1];
   const [recording, setRecording] = useState(false);
   const recordTo = recording ? recorder : null;
   // While recording, what the GPS sensors tab applies is recorded as scenario steps, when it is applied.
   useEffect(() => {
-    const stimulus = stimulusFor(backend);
+    const stimulus = stimulusFor(system.computers[0]);
     stimulus.listener = recordTo ? (index, op) => recordTo.gps((index + 1) as 1 | 2, op) : null;
     return () => { stimulus.listener = null; };
-  }, [backend, recordTo]);
+  }, [system, recordTo]);
   const pausedFor = useRef<ScenarioRunner | null>(null);
   const subscribe = useCallback((listener: () => void) => { const off = system.computers.map(unit => unit.subscribe(listener)); return () => off.forEach(remove => remove()); }, [system]);
   useSyncExternalStore(subscribe, () => system.computers[0].revision() + system.computers[1].revision());
@@ -405,7 +407,7 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
             onChange={event => system.selectGuidance(Number(event.target.value) as FmsSide)}>
             <option value={1}>FMS 1</option><option value={2}>FMS 2</option>
           </select></label>
-          <p className="fmsBenchHint">One physical aircraft. EFIS and AFCS use FMS {system.guidanceSide}; bench entries and fault controls address CDU {cduSide}.</p>
+          <p className="fmsBenchHint">One physical aircraft. EFIS and AFCS use FMS {system.guidanceSide}; computer entries address CDU {cduSide}. Sensor faults affect the shared aircraft inputs.</p>
           <p className="fmsBenchReadout">
             {next?.kind === "wpt"
               ? <>Active waypoint <strong>{next.ident}</strong>{guidance.distanceToGo !== null && guidance.mode === "LNAV" ? `, ${guidance.distanceToGo.toFixed(1)} NM` : ""}</>
@@ -547,9 +549,9 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
               {CONDITIONS.map(condition => (
                 <li key={condition.id}>
                   <label>
-                    <input type="checkbox" checked={condition.id === "independent" ? !system.linked : backend.hasCondition(condition.id)}
-                      disabled={failedFms && condition.id !== "fmsFail"}
-                      onChange={event => { recordTo?.condition(condition.id, event.target.checked); backend.setCondition(condition.id, event.target.checked); }} />
+                    <input type="checkbox" checked={condition.id === "independent" ? !system.linked : conditionBackend(condition.id).hasCondition(condition.id)}
+                      disabled={failedFms && condition.id !== "fmsFail" && !sharedSensorCondition(condition.id)}
+                      onChange={event => { recordTo?.condition(condition.id, event.target.checked); conditionBackend(condition.id).setCondition(condition.id, event.target.checked); }} />
                     <span>
                       <b>{condition.label}</b> <small className={lampNote(condition.lamp).startsWith("no ") ? "absent" : undefined}>{lampNote(condition.lamp)}</small>
                       {condition.id === "independent" ? <span className="fmsBenchHint">Injects a cross-talk fault. Clearing restores the link; confirm SYNC on SETUP to leave independent operation.</span> : null}
@@ -582,7 +584,7 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
           </section>
         </div>
         <div className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-gps" aria-labelledby="fms-bench-tabbutton-gps" hidden={tab !== "gps"}>
-          {tab === "gps" ? <FmsGpsTab view={fmsGpsView(backend)} fms={backend} /> : null}
+          {tab === "gps" ? <FmsGpsTab view={fmsGpsView(backend, system.computers[0])} fms={backend} /> : null}
         </div>
         <div className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-dual" aria-labelledby="fms-bench-tabbutton-dual" hidden={tab !== "dual"}>
           <section className="fmsBenchCard" aria-label="Dual computers and radio devices">
