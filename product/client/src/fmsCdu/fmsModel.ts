@@ -208,7 +208,7 @@ export const isOutstanding = (uplink: Uplink) => uplink.response === "OPEN" || u
 
 export type CorePageId =
   | "MENU" | "INIT_REF" | "IDENT" | "POS" | "MSG_RECALL" | "LEGS" | "PROG" | "RADIO" | "FUEL" | "HOLD" | "FIX" | "PREDEF"
-  | "VNAV" | "TIMER" | "MAINT" | "PLAN_DATA" | "USER_WPT";
+  | "VNAV" | "TIMER" | "MAINT" | "PLAN_DATA" | "USER_WPT" | "SETUP";
 export type PlanningPageId = "RTE" | "DEP_ARR" | "DEPARTURES" | "ARRIVALS" | "NAV_DATA" | "SELECT_WPT" | "SEC_FPLN";
 export type NavPageId = "NAV_STATUS" | "NAV_OPTIONS" | "GPS_STATUS" | "POS_SENSORS" | "PREDICT_RAIM" | "SAT_DESELECT";
 export type TacticalPageId = "TACT" | "SAR" | "TACT_APPR" | "HOVER" | "RNDZ" | "MOVING_WPT" | "TDN";

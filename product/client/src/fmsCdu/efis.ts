@@ -31,6 +31,9 @@ export type FmsOutputs = {
   /** Which FMS the displays show; the source annunciation keeps the crew from following the wrong one. */
   source: "FMS1";
   failed: boolean;
+  /** Angular display reference. Geometry and desired-track values remain true; displays convert at this boundary. */
+  angleReference: "MAG" | "TRUE";
+  magneticVariation: Word<number>;
   /** Label 114: desired track, degrees true. */
   desiredTrack: Word<number>;
   /** Label 116: cross-track distance, NM, positive right of the desired track. */
@@ -164,7 +167,8 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
   const next = active.legs[0];
   const phase = fms.flightPhase;
   const empty: FmsOutputs = {
-    source: "FMS1", failed, desiredTrack: fail(), crossTrack: fail(), lateralSource: null, verticalDeviation: fail(), verticalSource: null, verticalCoupled: false,
+    source: "FMS1", failed, angleReference: fms.angleReference, magneticVariation: failed ? fail() : fms.magneticField ? normal(fms.magneticField.declination) : ncd(),
+    desiredTrack: fail(), crossTrack: fail(), lateralSource: null, verticalDeviation: fail(), verticalSource: null, verticalCoupled: false,
     rollCommand: fail(), distanceToGo: fail(), toWaypoint: fail(), eta: fail(), targetSpeed: fail(), targetAltitude: fail(),
     lateralMode: sim.lateralMode === "HDG" ? (sim.headingHeld ? "HDG HOLD" : "HDG SEL") : g.mode, lateralArmed: [],
     verticalMode: sim.verticalMode, verticalArmed: [], approach: { type: null, state: "OFF" },

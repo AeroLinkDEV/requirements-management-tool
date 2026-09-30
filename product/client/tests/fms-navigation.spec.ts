@@ -12,6 +12,27 @@ import type { GpsReceiver } from '../src/fmsCdu/gps'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
+import { readFileSync } from 'node:fs'
+import { MagvarModel } from '../src/fmsCdu/magvar'
+
+test('WMM2025 agrees with all independent NOAA field vectors at both epochs and ellipsoid heights', () => {
+  const model = new MagvarModel()
+  expect(model.valid).toBe(true)
+  // Public-domain NOAA reference file; 0.11 nT / 0.011 deg laboratory comparison tolerance allows its rounding.
+  const vectors = readFileSync('tests/fixtures/WMM2025_TEST_VALUES.txt', 'utf8').split(/\r?\n/).filter(line => line.trim() && !line.startsWith('#'))
+  expect(vectors).toHaveLength(12)
+  for (const line of vectors) {
+    const [date, height, lat, lon, x, y, z, h, f, inclination, declination] = line.trim().split(/\s+/).map(Number)
+    const year = Math.floor(date), start = Date.UTC(year, 0, 1)
+    const clock = new Date(start + (date - year) * (Date.UTC(year + 1, 0, 1) - start))
+    const result = model.field({ lat, lon }, height, clock)!
+    for (const [actual, expected] of [[result.north, x], [result.east, y], [result.down, z], [result.horizontal, h], [result.total, f]]) expect(Math.abs(actual - expected), line).toBeLessThan(0.11)
+    expect(Math.abs(result.inclination - inclination), line).toBeLessThan(0.011)
+    expect(Math.abs(result.declination - declination), line).toBeLessThan(0.011)
+  }
+  for (const lat of [-90, 90]) expect(Object.values(model.field({ lat, lon: 0 }, 0, new Date(Date.UTC(2026, 0, 1)))!).every(Number.isFinite)).toBe(true)
+  expect(model.field({ lat: NaN, lon: 0 }, 0, new Date())).toBeNull()
+})
 
 // Civil measured navigation: S300 uncertain GPS and heading/TAS/last-computed-wind DR, measured radios, phase RNP,
 // sensor-port freshness and predictive RAIM. Radio noise, age/acquisition limits and uncertainty are bench policy.
@@ -38,6 +59,35 @@ const lines = (unit: ScriptedFms) => screenText(unit.screen())
 const scratch = (unit: ScriptedFms) => lines(unit)[SCRATCHPAD_LINE].trimEnd()
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
 const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : leg?.kind === 'cond' ? `(${leg.path})` : null }
+
+test('SETUP applies MAG/TRUE to CDU courses and angular entry, keeps true wind, and inhibits polar toggles (M300 3-9)', () => {
+  const unit = new ScriptedFms(() => new Date(Date.UTC(2025, 0, 1)))
+  unit.placeAircraft({ position: { lat: 0, lon: 120 }, altitude: 0, track: 100, heading: 100 }, 'NOAA equator reference')
+  press(unit, 'INIT_REF', 'LSK5L')
+  expect(lines(unit)[0]).toContain('SETUP')
+  expect(lines(unit)[2]).toContain('MAG')
+  expect(unit.angleText(100)).toBe('100°')
+  // NOAA's equatorial reference D=-0.16: true = magnetic + D, with wraparound.
+  expect(unit.angleFromEntry(100)).toBeCloseTo(99.84, 2)
+  expect(unit.angleFromEntry(0)).toBeCloseTo(359.84, 2)
+  const wind = { ...unit.wind }
+  press(unit, 'LSK1L')
+  expect(unit.angleReference).toBe('TRUE')
+  expect(unit.angleText(100)).toBe('100T')
+  expect(unit.angleFromEntry(100)).toBe(100)
+  expect(unit.wind).toEqual(wind)
+  press(unit, 'LSK1L')
+  unit.placeAircraft({ position: { lat: 74, lon: 0 }, altitude: 0, track: 100 }, 'north polar boundary')
+  expect(unit.angleReference).toBe('TRUE')
+  expect(recalled(unit, 'USING TRUE REF')).toBe(true)
+  press(unit, 'LSK1L')
+  expect(unit.angleReference).toBe('TRUE')
+  unit.placeAircraft({ position: { lat: 73, lon: 0 }, altitude: 0, track: 100 }, 'leave polar region')
+  expect(unit.angleReference).toBe('TRUE')
+  expect(recalled(unit, 'CHECK TRUE/MAG REF')).toBe(true)
+  press(unit, 'LSK1L')
+  expect(unit.angleReference).toBe('MAG')
+})
 
 test('S300 after-FAF integrity-only cancellation waits 300 seconds, while HDOP above four cancels immediately (M300 7-12)', () => {
   const prepared = () => {

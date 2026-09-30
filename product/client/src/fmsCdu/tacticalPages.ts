@@ -14,7 +14,7 @@ import type { ScriptedFms } from "./scriptedFms";
 function radialDistance(fms: ScriptedFms, ident: string | null): Segment {
   const ref = ident ? fms.coordinates(ident) : undefined;
   if (!ref) return medium("---°/--.-NM");
-  return medium(`${three(courseDeg(ref, fms.position))}°/${fixed(distanceNm(ref, fms.position), 1)}NM`);
+  return medium(`${fms.angleText(courseDeg(ref, fms.position), ref)}/${fixed(distanceNm(ref, fms.position), 1)}NM`);
 }
 
 /** A waypoint ident entry that must be known: a navigation database fix, a Mark On Top or a defined point. */
@@ -99,17 +99,17 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
       const sar = fms.sar;
       const status = sar.pending === pattern ? "MOD" : sar.active === pattern ? "ACT" : undefined;
       const third: Line = pattern === "LADDER"
-        ? { left: sar.relativeBearing === null ? dashes(4) : { text: `${three(sar.relativeBearing)}°` }, right: { text: `${fixed(sar.legLength, 1)}NM` } }
+        ? { left: sar.relativeBearing === null ? dashes(4) : { text: `${fms.angleText(sar.relativeBearing)}` }, right: { text: `${fixed(sar.legLength, 1)}NM` } }
         : pattern === "SECTOR"
-          ? { left: sar.relativeBearing === null ? dashes(4) : { text: `${three(sar.relativeBearing)}°` }, right: { text: `${fixed(sar.diameter, 1)}NM` } }
-          : { left: sar.relativeBearing === null ? dashes(4) : { text: `${three(sar.relativeBearing)}°` } };
+          ? { left: sar.relativeBearing === null ? dashes(4) : { text: `${fms.angleText(sar.relativeBearing)}` }, right: { text: `${fixed(sar.diameter, 1)}NM` } }
+          : { left: sar.relativeBearing === null ? dashes(4) : { text: `${fms.angleText(sar.relativeBearing)}` } };
       const active = sar.active ? `${sar.active} ${sar.status === "IN PROGRESS" ? "IN PROG" : "ARMED"}` : "NONE";
       return [
         title(`${pattern} SAR`, `${index + 1}/3`, status),
         caption(" ID", "TRK SPACING "),
         { left: { text: sar.id[pattern], color: "green" }, right: { text: `${fixed(sar.trackSpacing, 1)}NM` } },
         caption(" REF ID", "SAR BRG "),
-        { left: sar.refId ? { text: sar.refId, color: "green" } : medium("PPOS"), right: { text: `${three(sar.sarBearing)}°` } },
+        { left: sar.refId ? { text: sar.refId, color: "green" } : medium("PPOS"), right: { text: `${fms.angleText(sar.sarBearing)}` } },
         caption(" RELATIVE BRG", pattern === "LADDER" ? "LEG LENGTH " : pattern === "SECTOR" ? "DIAMETER " : undefined),
         third,
         caption(" DISTANCE", pattern === "SECTOR" ? "ANGLE " : undefined),
@@ -159,7 +159,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
           }
           case 3:
             if (scratch === "DELETE") { sar.relativeBearing = null; return done(); }
-            return numeric(0, 360, n => { sar.relativeBearing = n; });
+            return numeric(0, 360, n => { sar.relativeBearing = fms.angleFromEntry(n); });
           case 4:
             if (scratch === "DELETE") { sar.distance = null; return done(); }
             return numeric(0, 99.9, n => { sar.distance = n; });
@@ -169,7 +169,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
       switch (row) {
         // TRACK SPACING is 0.1 to 40 NM (manual, search patterns).
         case 1: return numeric(0.1, 40, n => { sar.trackSpacing = n; });
-        case 2: return numeric(1, 360, n => { sar.sarBearing = n; });
+        case 2: return numeric(1, 360, n => { const angle = fms.angleFromEntry(n); if (angle !== null) sar.sarBearing = angle; });
         case 3:
           if (pattern === "LADDER") return numeric(0.5, 99, n => { sar.legLength = n; });
           if (pattern === "SECTOR") return numeric(0.5, 40, n => { sar.diameter = n; });
@@ -189,7 +189,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         caption(" REF WPT ID", "RAD/DIS "),
         { left: a.refId ? { text: a.refId, color: "green" } : boxes(5), right: radialDistance(fms, a.refId) },
         caption(" IAF BRG/DIS", "IAF ALT "),
-        { left: { text: `${three(a.bearing)}°/${fixed(a.iafDistance, 1).padStart(4)}NM` }, right: { text: `${a.iafAltitude}FT` } },
+        { left: { text: `${fms.angleText(a.bearing)}/${fixed(a.iafDistance, 1).padStart(4)}NM` }, right: { text: `${a.iafAltitude}FT` } },
         caption(" FAF DIS", "RWY ELEV "),
         { left: { text: `${fixed(a.fafDistance, 1)}NM` }, right: { text: `${a.runwayElevation}FT` } },
         caption(" MAP DIS", "TRANS LVL "),
@@ -231,7 +231,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
             const bearing = shape?.[1] ? numberIn(shape[1], 1, 360) : undefined;
             const distance = shape?.[2] ? numberIn(shape[2], a.fafDistance + 0.1, 30) : undefined;
             if (!shape || bearing === null || distance === null || (bearing === undefined && distance === undefined)) return "invalid";
-            if (bearing !== undefined) a.bearing = bearing;
+            if (bearing !== undefined) { const angle = fms.angleFromEntry(bearing); if (angle === null) return "not-allowed"; a.bearing = angle; }
             if (distance !== undefined) a.iafDistance = distance;
             return done();
           }
@@ -347,14 +347,14 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
       const lines: (Line | undefined)[] = [
         title("MOVING WPT", "1/1"),
         caption(" IDENT", "TRK/SPD "),
-        { left: fms.movingDraft.ident ? { text: fms.movingDraft.ident } : boxes(5), right: fms.movingDraft.motion ? { text: fms.movingDraft.motion } : boxes(6) },
+        { left: fms.movingDraft.ident ? { text: fms.movingDraft.ident } : boxes(5), right: fms.movingDraft.motion ? { text: `${fms.angleText(Number(fms.movingDraft.motion.split("/")[0]))}/${fms.movingDraft.motion.split("/")[1]}` } : boxes(6) },
         caption(" POSITION"),
         { left: fms.movingDraft.position ? medium(formatPosition(fms.movingDraft.position)) : boxes(15) },
         caption(" MOVING"),
       ];
       moving.slice(0, 3).forEach(([ident, motion], i) => {
         const at = fms.coordinates(ident);
-        lines[6 + i] = { left: medium(`${ident} ${three(motion.track)}°/${motion.speed}KT`, "green"), right: at ? small(formatPosition(at)) : undefined };
+        lines[6 + i] = { left: medium(`${ident} ${fms.angleText(motion.track)}/${motion.speed}KT`, "green"), right: at ? small(formatPosition(at)) : undefined };
       });
       lines[11] = { left: dashes(24) };
       lines[12] = { left: prompt("<INDEX"), right: fms.movingDraft.ident && fms.movingDraft.position && fms.movingDraft.motion ? prompt("CREATE>") : undefined };
@@ -364,9 +364,9 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
       const draft = fms.movingDraft;
       if (row === 6) {
         if (side === "L") { fms.open("INIT_REF", 1); return; }
-        const motion = draft.motion ? /^(\d{3})\/(\d{1,3})$/.exec(draft.motion) : null;
+        const motion = draft.motion ? draft.motion.split("/").map(Number) : null;
         if (!draft.ident || !draft.position || !motion) return;
-        fms.defineMoving(draft.ident, draft.position, Number(motion[1]), Number(motion[2]));
+        fms.defineMoving(draft.ident, draft.position, motion[0], motion[1]);
         fms.movingDraft = { ident: null, position: null, motion: null };
         return;
       }
@@ -379,7 +379,9 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
       if (side === "R" && row === 1) {
         const motion = /^(\d{3})\/(\d{1,3})$/.exec(scratch);
         if (!motion || Number(motion[1]) > 360 || Number(motion[2]) > 60) return "invalid";
-        draft.motion = scratch;
+        const angle = fms.angleFromEntry(Number(motion[1]));
+        if (angle === null) return "not-allowed";
+        draft.motion = `${angle}/${Number(motion[2])}`;
         return void fms.setScratch("");
       }
       if (side === "L" && row === 2) {

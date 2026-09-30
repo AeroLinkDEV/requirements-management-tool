@@ -1,4 +1,6 @@
 import { alert } from "./alerts";
+import { MagvarModel, normalizeAngle, polarRegion, type AngleReference } from "./magvar";
+import { WMM2025_DATABASE } from "./wmm2025";
 import { parseArinc424, type Arinc424Result } from "./arinc424";
 import type { ConditionId } from "./conditions";
 import { DATALINK_PAGES, DEMO_SMS, DEMO_UPLINKS } from "./datalinkPages";
@@ -420,6 +422,15 @@ export class ScriptedFms implements CduBackend {
   readonly datalink = { routeRequest: "NONE" as "NONE" | "RECEIVED" | "LOADED", windRequest: "NONE" as "NONE" | "RECEIVED", posReport: null as Date | null };
 
   private readonly clock: () => Date;
+  readonly magvar = new MagvarModel();
+  private reference: AngleReference = "MAG";
+  private inPolarRegion = false;
+  private powered = true;
+  private bootUntil: number | null = null;
+  private utcOffsetMs = 0;
+  private restartNeedsLeg = false;
+  private groundStartup = false;
+  readonly setup = { localTime: false, localOffsetHours: 0 };
 
   /** The aircraft profile this FMS and its flight simulation fly (profile.ts); the helicopter profile unless given. */
   readonly aircraftProfile: AircraftProfile;
@@ -428,6 +439,7 @@ export class ScriptedFms implements CduBackend {
     this.clock = clock;
     this.sensorPort = options.sensors ?? null;
     this.aircraftProfile = options.profile ?? ACTIVE_PROFILE;
+    this.reference = this.aircraftProfile.defaultAngleReference;
     this.navigation = new CivilNavigation(START_POSITION, this.aircraftProfile.parameters);
     this.radioReceiver = new BenchRadioReceiver(this.aircraftProfile.parameters);
     this.userStore = options.userDatabase?.store ?? this.userStore;
@@ -451,6 +463,81 @@ export class ScriptedFms implements CduBackend {
     this.radioReceiver.tune(this.autoRadioStations(), start - 40_000);
     this.radioReceiver.sample(this.truth, this.altitude, start - 40_000);
     this.updateNavigation(0);
+    this.checkMagvar();
+  }
+
+  /** FMS RTC is separate from the monotonically sampled simulator/sensor clock. GPS supplies the UTC reference. */
+  get utcTime() { return new Date(this.now.getTime() + this.utcOffsetMs); }
+  get displayTime() { return new Date(this.utcTime.getTime() + (this.setup.localTime ? this.setup.localOffsetHours * 3600000 : 0)); }
+  get gpsTimeAvailable() { return this.nav.mode === "GPS" && this.nav.gpsSource !== null; }
+  get powerState(): "OFF" | "TEST" | "ON" { return !this.powered ? "OFF" : this.bootUntil !== null ? "TEST" : "ON"; }
+  get needsActiveLeg() { return this.restartNeedsLeg; }
+  get groundPreflight() { return this.groundStartup; }
+  get angleReference() { return polarRegion(this.position) ? "TRUE" : this.reference; }
+  get magneticField() {
+    const sample = this.sensorFrame?.gps[this.nav.gpsSource === 2 ? 1 : 0];
+    const bus = sample ? sampled(sample, this.now.getTime(), this.sensorMaxAge) : null;
+    const hae = bus?.["370"];
+    // Without valid measured HAE, use sea-level ellipsoid height, a declared bench approximation for declination.
+    const heightKm = hae?.ssm === "NORMAL" && hae.value !== null && Number.isFinite(hae.value) ? hae.value * 0.0003048 : 0;
+    return this.magvar.field(this.position, heightKm, this.utcTime);
+  }
+  displayAngle(trueAngle: number, at = this.position): number | null {
+    if (!Number.isFinite(trueAngle)) return null;
+    const variation = at === this.position ? this.magneticField?.declination : this.magvar.field(at, 0, this.utcTime)?.declination;
+    return this.angleReference === "TRUE" ? normalizeAngle(trueAngle) : variation === undefined ? null : normalizeAngle(trueAngle - variation);
+  }
+  angleFromEntry(value: number, at = this.position): number | null {
+    const variation = at === this.position ? this.magneticField?.declination : this.magvar.field(at, 0, this.utcTime)?.declination;
+    return !Number.isFinite(value) ? null : this.angleReference === "TRUE" ? normalizeAngle(value) : variation === undefined ? null : normalizeAngle(value + variation);
+  }
+  angleText(trueAngle: number | undefined, at = this.position) {
+    const angle = trueAngle === undefined ? null : this.displayAngle(trueAngle, at);
+    return `${angle === null ? "---" : String(Math.round(angle) || 360).padStart(3, "0")}${this.angleReference === "TRUE" ? "T" : "°"}`;
+  }
+  toggleAngleReference() {
+    if (polarRegion(this.position)) return false;
+    this.reference = this.reference === "MAG" ? "TRUE" : "MAG"; this.emit(); return true;
+  }
+  private updateAngleReference() {
+    const polar = polarRegion(this.position);
+    if (polar && !this.inPolarRegion) {
+      if (this.reference === "MAG") this.statusAdvisory("USING TRUE REF");
+      this.reference = "TRUE";
+    } else if (!polar && this.inPolarRegion) this.statusAdvisory("CHECK TRUE/MAG REF");
+    this.inPolarRegion = polar;
+  }
+  private statusAdvisory(text: string) {
+    const message = { text, alert: false }; this.recall.unshift(message); this.message = message;
+  }
+  private checkMagvar() {
+    if (!this.magvar.valid) { this.alert("SYSTEM FAILED"); this.alert("MAG VAR CRC FAILED"); }
+    else if (this.magvar.outOfDate(this.utcTime)) this.statusAdvisory("MAG VAR OUT OF DATE");
+  }
+  loadMagvar(candidate: unknown) {
+    if (!this.magvar.load(candidate)) return false;
+    this.checkMagvar(); this.emit(); return true;
+  }
+  setUtcTime(value: Date) {
+    if (this.gpsTimeAvailable || !Number.isFinite(value.getTime())) return false;
+    this.utcOffsetMs = value.getTime() - this.now.getTime(); this.emit(); return true;
+  }
+  powerOff() {
+    this.powered = false; this.bootUntil = null; this.emit();
+  }
+  /** Explicit weight-on-wheels input. A restart never moves the plant or resets separately powered receivers. */
+  powerOn(kind: "COLD" | "WARM", onGround: boolean) {
+    this.powered = true;
+    this.bootUntil = this.now.getTime() + this.aircraftProfile.parameters.fmsPowerTestTime.value * 1000;
+    this.groundStartup = onGround;
+    this.modified = null; this.directPending = false; this.directBypassed = []; this.pendingHoverPoints = null; this.pendingJoin = null;
+    this.pendingApproachTemperature = null; this.approachSelectionPending = false;
+    this.scratch = ""; this.message = null; this.pendingAlert = null; this.recall = [];
+    this.armedApproach = false; this.restartNeedsLeg = !onGround;
+    this.inhibited = []; this.raimExcluded.clear();
+    if (kind === "COLD" && onGround) { this.planData.cruiseWind = { direction: 0, speed: 0 }; this.reference = this.aircraftProfile.defaultAngleReference; }
+    this.navigation.initialize(this.here); this.updateNavigation(0);
+    this.open("IDENT"); this.emit();
   }
 
   // ------------------------------------------------------------------ CduBackend
@@ -466,7 +553,9 @@ export class ScriptedFms implements CduBackend {
 
   lamps(): ReadonlySet<Lamp> {
     // A failed FMS drives nothing but its FAIL annunciator.
-    if (this.injected.has("fmsFail")) return new Set<Lamp>(["FAIL"]);
+    if (this.powerState === "OFF") return new Set<Lamp>();
+    if (this.powerState === "TEST") return new Set<Lamp>(["FAIL", "MSG", "POS", "OFST", "NPA", "TX1", "TX2", "HF", "IND", "RNP", "GSM", "SMS", "EXEC"]);
+    if (this.hasCondition("fmsFail")) return new Set<Lamp>(["FAIL"]);
     const lamps = new Set<Lamp>();
     if (this.pendingAlert) lamps.add("MSG");
     if (this.modified) lamps.add("EXEC");
@@ -485,7 +574,8 @@ export class ScriptedFms implements CduBackend {
   }
 
   screen(): CduScreen {
-    if (this.injected.has("fmsFail")) return compose([]);
+    if (this.powerState === "TEST") return compose(Array.from({ length: 14 }, () => ({ left: { text: " ".repeat(24), color: "white" as const, inverse: true } })));
+    if (this.hasCondition("fmsFail")) return compose([]);
     const page = PAGES[this.page];
     const count = Math.max(1, page.pages(this));
     this.index = Math.min(this.index, count - 1);
@@ -495,7 +585,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   press(fn: CduFunction, options: { held?: boolean } = {}) {
-    if (this.injected.has("fmsFail")) return;
+    if (this.hasCondition("fmsFail")) return;
     this.handle(fn, options);
     this.emit();
   }
@@ -510,6 +600,8 @@ export class ScriptedFms implements CduBackend {
 
   hasCondition(id: ConditionId): boolean {
     switch (id) {
+      case "fmsFail": return this.powerState !== "ON" || !this.magvar.valid || this.injected.has(id);
+      case "magvarCrc": return !this.magvar.valid;
       case "offset": return this.active.offset !== undefined;
       case "gsmCall": return this.call.state !== "none";
       case "sms": return this.messages.some(message => !message.read);
@@ -521,6 +613,7 @@ export class ScriptedFms implements CduBackend {
   setCondition(id: ConditionId, on: boolean) {
     if (on === this.hasCondition(id)) return;
     switch (id) {
+      case "magvarCrc": this.loadMagvar(on ? { ...WMM2025_DATABASE, coefficients: WMM2025_DATABASE.coefficients + " " } : WMM2025_DATABASE); break;
       // Injected as an executed offset, as though the crew had entered and executed it.
       case "offset": if (on) this.active.offset = { nm: -2.0 }; else this.active.offset = undefined; break;
       case "gsmCall": this.call = on ? { state: "ringing", from: "+1 613 555 0142", since: this.now.getTime() } : { state: "none", from: "", since: 0 }; break;
@@ -567,7 +660,7 @@ export class ScriptedFms implements CduBackend {
    * overrideDiscontinuity crosses.
    */
   sequence(): "jumped" | "discontinuity" | "failed" | "end" {
-    if (this.injected.has("fmsFail")) return "failed";
+    if (this.hasCondition("fmsFail")) return "failed";
     const leg = this.active.legs[0];
     if (!leg) return "end";
     if (leg.kind === "disco") return "discontinuity";
@@ -583,7 +676,7 @@ export class ScriptedFms implements CduBackend {
    * leg becomes active, and records the override. A crew would close the gap on LEGS instead.
    */
   overrideDiscontinuity(): boolean {
-    if (this.injected.has("fmsFail") || this.active.legs[0]?.kind !== "disco") return false;
+    if (this.hasCondition("fmsFail") || this.active.legs[0]?.kind !== "disco") return false;
     const legs = this.active.legs;
     const before = { revision: this.planRevision, fingerprint: planFingerprint(legs), legs: legText(legs) };
     legs.shift();
@@ -814,11 +907,13 @@ export class ScriptedFms implements CduBackend {
       radioApproved: this.flightPhase !== "APPROACH", rnp: this.requiredRnp });
     if (selection.mode !== "DR" && distanceNm(predicted, selection.position) > 0.5) this.alert(alert("POSITION SHIFT"));
     this.here = selection.position;
+    this.updateAngleReference();
     const gpsSource = selection.gpsSource;
     this.nav = {
       ...this.nav, mode: selection.mode, dmes: selection.dmes, vor: selection.vor, gpsSource,
       anp: selection.anp, uncertain: selection.uncertain, airValid: selection.airValid,
     };
+    if (this.gpsTimeAvailable) this.utcOffsetMs = 0;
     const choice = this.gpsSelected ? this.gpsChoice : "OFF";
     for (const index of this.selectionLog.update(this.now, gps.assessed, gpsSource === null ? null : gpsSource - 1, choice, gps.transferred)) {
       if (this.gpsSelected && !(selection.uncertain && gpsSource === index + 1)) this.alert(alert(`GPS${index + 1} NOT USABLE`));
@@ -1833,7 +1928,7 @@ export class ScriptedFms implements CduBackend {
    * airline profile, whose VNAV climbs on the missed approach legs, drops the rest of the approach at once instead.
    */
   goAround() {
-    if (this.injected.has("fmsFail")) return false;
+    if (this.hasCondition("fmsFail")) return false;
     const route = this.active;
     const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
     // Only from the approach: once the missed approach is being flown there is nothing left to go around from.
@@ -1906,12 +2001,14 @@ export class ScriptedFms implements CduBackend {
    * the aircraft itself. With GPS or DME navigating, the sensors keep setting the position.
    */
   initializePosition(position: LatLon) {
+    if (this.nav.mode !== "DR" || !Number.isFinite(position.lat) || !Number.isFinite(position.lon) || Math.abs(position.lat) > 90 || Math.abs(position.lon) > 180) return false;
     this.positionReference = { position, at: this.now };
     if (this.nav.mode === "DR") {
       this.navigation.initialize(position);
       this.here = { ...position };
     }
     this.emit();
+    return true;
   }
 
   /** A manual RNP (PROGRESS), or null to return to the default for the phase. */
@@ -1927,11 +2024,15 @@ export class ScriptedFms implements CduBackend {
   /** Advances time-driven state: the timer alarms, the call duration and the clocks on the display. */
   tick() {
     const now = this.now.getTime();
+    if (this.bootUntil !== null && now >= this.bootUntil) {
+      this.bootUntil = null; this.checkMagvar();
+      if (this.restartNeedsLeg) this.statusAdvisory("!ENTER ACT WPT/LEG");
+    }
     this.watchHover();
     // A database past the end of its cycle is flagged once; swapping to the next cycle clears it.
     // A cycle whose data gives no dates is never out of date: its end is unknown, not past.
     if (this.activeCycle.to !== null && now > this.activeCycle.to && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE")); }
-    if (this.selfTest.startedAt !== null && this.selfTest.result === null && now - this.selfTest.startedAt >= 5000) {
+    if (this.selfTest.startedAt !== null && this.selfTest.result === null && now - this.selfTest.startedAt >= this.aircraftProfile.parameters.fmsPowerTestTime.value * 1000) {
       const failing = ["fmsFail", "gpsLost", "dmeOutage"].some(id => this.injected.has(id as ConditionId));
       this.selfTest = { ...this.selfTest, result: failing ? "FAIL" : "PASS" };
     }
@@ -2114,18 +2215,21 @@ export class ScriptedFms implements CduBackend {
     const pbd = /^([A-Z0-9]{2,5})(\d{3})\/(\d{1,3}(?:\.\d)?)$/.exec(text);
     if (pbd) {
       const place = this.coordinates(pbd[1]);
-      const bearing = Number(pbd[2]), distance = Number(pbd[3]);
+      const entry = Number(pbd[2]), distance = Number(pbd[3]);
+      const bearing = place ? this.angleFromEntry(entry, place) : null;
       if (!place) return "not-in-database";
-      if (bearing < 1 || bearing > 360 || distance <= 0) return "invalid";
-      return { ident: this.createPilot(pbd[1].slice(0, 3), offset(place, bearing, distance), text) };
+      if (entry < 1 || entry > 360 || distance <= 0 || bearing === null) return "invalid";
+      return { ident: this.createPilot(pbd[1].slice(0, 3), offset(place, bearing, distance), `${text} ${this.angleReference}`) };
     }
     const pbpb = /^([A-Z0-9]{2,5})(\d{3})\/([A-Z0-9]{2,5})(\d{3})$/.exec(text);
     if (pbpb) {
       const p1 = this.coordinates(pbpb[1]), p2 = this.coordinates(pbpb[3]);
       if (!p1 || !p2) return "not-in-database";
-      const crossing = bearingIntersection(p1, Number(pbpb[2]), p2, Number(pbpb[4]));
+      const first = this.angleFromEntry(Number(pbpb[2]), p1), second = this.angleFromEntry(Number(pbpb[4]), p2);
+      if (first === null || second === null) return "not-allowed";
+      const crossing = bearingIntersection(p1, first, p2, second);
       if (!crossing) return "invalid";
-      return { ident: this.createPilot(pbpb[1].slice(0, 3), crossing, text) };
+      return { ident: this.createPilot(pbpb[1].slice(0, 3), crossing, `${text} ${this.angleReference}`) };
     }
     return "invalid";
   }
@@ -2681,7 +2785,7 @@ export class ScriptedFms implements CduBackend {
     if (this.sar.pending) { this.sar.active = this.sar.pending; this.sar.status = "ARMED"; this.sar.pending = null; }
     // A new active waypoint, or a direct-to, starts the active leg at present position.
     const first = (legs: Leg[]) => { const leg = legs[0]; return leg?.kind === "wpt" ? leg.ident : null; };
-    if (this.directPending || first(route.legs) !== first(this.active.legs)) this.legStart = { ...this.here };
+    if (this.directPending || first(route.legs) !== first(this.active.legs)) { this.legStart = { ...this.here }; this.restartNeedsLeg = false; }
     this.directPending = false;
     this.directBypassed = [];
     this.active = route;
