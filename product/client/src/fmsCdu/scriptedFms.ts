@@ -664,7 +664,7 @@ export class ScriptedFms implements CduBackend {
   powerOff() {
     this.powered = false; this.bootUntil = null; this.crossTalk?.healthChanged(); this.emit();
   }
-  /** Explicit weight-on-wheels input. A restart never moves the plant or resets separately powered receivers. */
+  /** Laboratory startup ground context, separate from v1's airborne state. A restart never moves the plant or resets receivers. */
   powerOn(kind: "COLD" | "WARM", onGround: boolean) {
     this.powered = true;
     this.bootUntil = this.now.getTime() + this.aircraftProfile.parameters.fmsPowerTestTime.value * 1000;
