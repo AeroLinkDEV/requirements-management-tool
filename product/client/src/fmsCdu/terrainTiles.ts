@@ -35,18 +35,30 @@ export function tileOf(lat: number, lon: number, zoom: number) {
   return { x: ((x % scale) + scale) % scale, y: Math.min(scale - 1, Math.max(0, y)), fx: u - x, fy: v - y };
 }
 
+/**
+ * How many height tiles are kept (256 KB each: about 100 MB). The least recently used beyond it are dropped and fetched
+ * again if needed; without a bound, a long flight kept every tile it had passed over, hundreds of megabytes.
+ */
+export const TERRAIN_TILE_CAPACITY = 384;
+
 export class TerrainTiles {
+  // Both in least-recently-used order: a use moves a tile to the end, and the oldest settled tiles go first.
   private readonly tiles = new Map<string, Promise<Float32Array | null>>();
   private readonly ready = new Map<string, Float32Array | null>();
   private readonly listeners = new Set<() => void>();
   private current: TerrainStatus = "waiting";
   private readonly source: TerrainSource;
   private readonly decode: TileDecoder;
+  private readonly capacity: number;
 
-  constructor(source: TerrainSource, decode: TileDecoder = browserDecoder()) {
+  constructor(source: TerrainSource, decode: TileDecoder = browserDecoder(), capacity = TERRAIN_TILE_CAPACITY) {
     this.source = source;
     this.decode = decode;
+    this.capacity = capacity;
   }
+
+  /** How many tiles are held now (loading or loaded). */
+  get size() { return this.tiles.size; }
 
   get status(): TerrainStatus { return this.current; }
 
@@ -60,11 +72,32 @@ export class TerrainTiles {
   load(z: number, x: number, y: number): Promise<Float32Array | null> {
     const key = `${z}/${x}/${y}`;
     let tile = this.tiles.get(key);
-    if (!tile) {
-      tile = this.fetch(z, x, y).catch(() => null).then(heights => { this.ready.set(key, heights); this.changed(); return heights; });
-      this.tiles.set(key, tile);
-    }
+    if (tile) { this.touch(key); return tile; }
+    tile = this.fetch(z, x, y).catch(() => null).then(heights => {
+      // Dropped while it was loading: the caller still gets it, but it is not kept.
+      if (this.tiles.get(key) === tile) { this.ready.set(key, heights); this.evict(); }
+      this.changed();
+      return heights;
+    });
+    this.tiles.set(key, tile);
     return tile;
+  }
+
+  /** Marks a tile as just used. */
+  private touch(key: string) {
+    const tile = this.tiles.get(key);
+    if (tile) { this.tiles.delete(key); this.tiles.set(key, tile); }
+    if (this.ready.has(key)) { const heights = this.ready.get(key)!; this.ready.delete(key); this.ready.set(key, heights); }
+  }
+
+  /** Drops the least recently used loaded tiles beyond the capacity; tiles still loading are never dropped. */
+  private evict() {
+    for (const key of this.tiles.keys()) {
+      if (this.tiles.size <= this.capacity) return;
+      if (!this.ready.has(key)) continue;
+      this.tiles.delete(key);
+      this.ready.delete(key);
+    }
   }
 
   /**
@@ -76,6 +109,7 @@ export class TerrainTiles {
     const key = `${zoom}/${x}/${y}`;
     const heights = this.ready.get(key);
     if (heights === undefined) { void this.load(zoom, x, y); return null; }
+    this.touch(key);
     if (heights === null) return null;
     const last = TILE_PIXELS - 1;
     const px = Math.min(last, fx * TILE_PIXELS), py = Math.min(last, fy * TILE_PIXELS);

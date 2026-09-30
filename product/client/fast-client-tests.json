@@ -44,6 +44,7 @@
     "fms-out-the-window.spec.ts",
     "fms-synthetic-vision.spec.ts",
     "fms-terrain-tiles.spec.ts",
+    "fms-relief-shader.spec.ts",
     "fms-gps-authority.spec.ts",
     "fms-cifp.spec.ts",
     "fms-kbtv-demo.spec.ts",

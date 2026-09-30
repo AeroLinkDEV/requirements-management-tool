@@ -99,3 +99,37 @@ test('synthetic vision draws terrain behind the PFD attitude, and is flagged ins
   await expect(pfd.getByTestId('pfd-svs-flag')).toHaveText('SVS', { timeout: 30_000 })
   await expect(pfd.getByTestId('pfd-svs')).toHaveCount(0)
 })
+
+test('the scene draws only when something changes: still while the bench is paused, every frame while it flies', async ({ page }) => {
+  test.setTimeout(300_000)
+  // Flat ground (terrain off) in a small window: the globe loads in seconds even on a software renderer, where the
+  // hill's tiles took minutes. The cockpit view, where a camera re-set to the same pose each frame used to keep a
+  // paused view drawing; neither depends on the terrain.
+  await page.setViewportSize({ width: 700, height: 500 })
+  await open(page, 'off')
+  const view = await show(page)
+  const scene = view.locator('.fmsOtwScene')
+  const frames = async () => Number(await scene.getAttribute('data-frames') ?? 0)
+  // Settled: every tile the globe needs has loaded (slowly, on a software renderer; Cesium draws as each arrives) and
+  // nothing is moving, so the count stops.
+  let previous = -1
+  // Reported as text, so a wait that does not settle says which of the two it was.
+  const settled = async () => {
+    const now = await frames(), loaded = await scene.getAttribute('data-tiles-loaded') === 'true'
+    const state = `${loaded ? 'tiles loaded' : 'tiles loading'}, ${now === previous ? 'still' : 'drawing'}`
+    previous = now
+    return state
+  }
+  await expect.poll(settled, { intervals: [3000], timeout: 180_000 }).toBe('tiles loaded, still')
+  const still = await frames()
+  await page.waitForTimeout(2000)
+  expect(await frames(), 'paused: no frames drawn').toBe(still)
+  // Flying: the aircraft moves every tick (four a second), and each tick asks for frames. The software renderer here
+  // draws only a few frames a second, so the bar is that it keeps drawing, not a frame rate.
+  await page.getByRole('button', { name: 'Fly' }).click()
+  await page.waitForTimeout(2000)
+  expect(await frames() - still, 'flying: frames drawn').toBeGreaterThan(5)
+  await page.getByRole('button', { name: 'Pause' }).click()
+  previous = -1
+  await expect.poll(settled, { intervals: [3000], timeout: 60_000 }).toBe('tiles loaded, still')
+})

@@ -2,9 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import type { AircraftData, RoutePoint } from "./efis";
 import { constraintAltitude } from "./flight";
 import {
-  AIRCRAFT_PARTS, FT, MESH_MAX_ZOOM, TERRAIN_MAX_ZOOM, TILE_PIXELS, ancestorOf, blendAircraft, cameraPose, pixelMetres,
+  AIRCRAFT_PARTS, FT, MESH_MAX_ZOOM, RELIEF_MAX_ZOOM, TILE_PIXELS, ancestorOf, blendAircraft, cameraPose, pixelMetres,
   routeHeights, sampleHeights, shadeTile, tileLatitude, type AircraftSample, type Layout, type View,
 } from "./outTheWindow";
+import { workerReliefShader } from "./reliefShader";
 import type { TerrainTiles } from "./terrainTiles";
 import "./FmsOutTheWindow.css";
 
@@ -24,7 +25,7 @@ const ROUTE_MAGENTA = "#e04cd6";
 const CESIUM_BASE = `${import.meta.env.BASE_URL}cesium/`;
 
 type Live = { from: AircraftSample; to: AircraftSample; at: number; interval: number; view: View; layout: Layout };
-type SceneHandle = { setRoute: (route: RoutePoint[], altitude: number) => void; destroy: () => void };
+type SceneHandle = { setRoute: (route: RoutePoint[], altitude: number) => void; requestRender: () => void; destroy: () => void };
 
 /**
  * The view out of the aircraft, drawn with CesiumJS over open elevation data: the ground coloured by height and
@@ -58,7 +59,9 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
       live.current = { from: drawnAt, to: sample, at: now, interval: Math.min(1000, Math.max(50, now - previous.at)), view, layout };
     } else if (previous.view !== view || previous.layout !== layout) {
       live.current = { ...previous, view, layout };
-    }
+    } else return;
+    // The scene draws only when something changes (render on request): a new tick, view or layout is a change.
+    scene.current?.requestRender();
   });
 
   useEffect(() => {
@@ -167,20 +170,23 @@ async function startScene(
     },
   });
 
-  // The ground's colour is drawn from the same heights: no photographic imagery, so no imagery licence.
+  // The ground's colour is drawn from the same heights: no photographic imagery, so no imagery licence. It is shaded
+  // in a worker (reliefShader.ts), so a burst of new tiles does not freeze the page.
+  const shader = workerReliefShader();
   const flat = canvas();
   flat.getContext("2d")!.putImageData(new ImageData(shadeTile(new Float32Array(TILE_PIXELS * TILE_PIXELS), 30), TILE_PIXELS, TILE_PIXELS), 0, 0);
   const relief = {
     tilingScheme, rectangle: tilingScheme.rectangle, tileWidth: TILE_PIXELS, tileHeight: TILE_PIXELS,
-    minimumLevel: 0, maximumLevel: TERRAIN_MAX_ZOOM, hasAlphaChannel: false, ready: true,
+    minimumLevel: 0, maximumLevel: RELIEF_MAX_ZOOM, hasAlphaChannel: false, ready: true,
     errorEvent: new Cesium.Event(), credit: undefined, proxy: undefined, tileDiscardPolicy: undefined,
     getTileCredits: () => [],
     pickFeatures: () => undefined,
     requestImage: async (x: number, y: number, level: number) => {
       const tile = await heights(level, x, y);
       if (!tile) return flat;
+      const rgba = await shader.shade(tile, pixelMetres(level, tileLatitude(level, y)));
       const image = canvas();
-      image.getContext("2d")!.putImageData(new ImageData(shadeTile(tile, pixelMetres(level, tileLatitude(level, y))), TILE_PIXELS, TILE_PIXELS), 0, 0);
+      image.getContext("2d")!.putImageData(new ImageData(rgba, TILE_PIXELS, TILE_PIXELS), 0, 0);
       return image;
     },
   } as unknown as InstanceType<typeof Cesium.UrlTemplateImageryProvider>;
@@ -189,6 +195,9 @@ async function startScene(
   const widget = new Cesium.CesiumWidget(container, {
     baseLayer: new Cesium.ImageryLayer(relief), terrainProvider, creditContainer,
     skyBox: false, showRenderLoopErrors: false, targetFrameRate: 30, useBrowserRecommendedResolution: true,
+    // Draw only when something changes: a paused bench, or a view waiting for the next tick, costs nothing. Cesium
+    // itself asks for frames while tiles load and when the window is resized.
+    requestRenderMode: true, maximumRenderTimeChange: Number.POSITIVE_INFINITY,
   });
   const { scene, camera } = widget;
   scene.globe.depthTestAgainstTerrain = true;
@@ -238,18 +247,28 @@ async function startScene(
   });
 
   const ahead = new Cesium.Cartesian3();
+  let lastPose = "";
   const onFrame = () => {
     const state = live.current;
     if (!state) return;
-    const air = blendAircraft(state.from, state.to, (performance.now() - state.at) / state.interval);
+    const fraction = (performance.now() - state.at) / state.interval;
+    const air = blendAircraft(state.from, state.to, fraction);
+    // Still moving between two ticks: the next frame is needed too.
+    if (fraction < 1) scene.requestRender();
     const pose = cameraPose(air, state.view, state.layout);
     // The simulation knows nothing of terrain; the eye is kept above the ground it would otherwise fly through.
     const ground = scene.globe.getHeight(Cesium.Cartographic.fromDegrees(pose.longitude, pose.latitude));
     const height = state.view === "map" || ground === undefined ? pose.height : Math.max(pose.height, ground + 3);
-    camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(pose.longitude, pose.latitude, height),
-      orientation: { heading: pose.heading, pitch: pose.pitch, roll: pose.roll },
-    });
+    // Only a new pose moves the camera: setting the same view again leaves rounding differences that Cesium, comparing
+    // cameras to 1e-15, takes for a move, and a paused view then kept drawing several frames a second.
+    const key = `${pose.longitude} ${pose.latitude} ${height} ${pose.heading} ${pose.pitch} ${pose.roll}`;
+    if (key !== lastPose) {
+      lastPose = key;
+      camera.setView({
+        destination: Cesium.Cartesian3.fromDegrees(pose.longitude, pose.latitude, height),
+        orientation: { heading: pose.heading, pitch: pose.pitch, roll: pose.roll },
+      });
+    }
     const at = Cesium.Cartesian3.fromDegrees(air.position.lon, air.position.lat, air.altitude * FT);
     ownship.show = state.view === "map";
     ownship.position = at;
@@ -277,9 +296,16 @@ async function startScene(
     }
   };
   scene.preRender.addEventListener(onFrame);
+  // The frames drawn, on the scene element: the scene draws only on change, and this is how that can be seen (and tested),
+  let frames = 0;
+  // With whether the globe has every tile it needs: until then Cesium keeps drawing as tiles arrive.
+  const counted = () => { container.dataset.frames = String(++frames); container.dataset.tilesLoaded = String(scene.globe.tilesLoaded); };
+  scene.postRender.addEventListener(counted);
 
   return {
+    requestRender: () => scene.requestRender(),
     setRoute: (route, altitude) => {
+      scene.requestRender();
       routeLine.removeAll(); fixes.removeAll(); labels.removeAll();
       if (!route.length) return;
       const heightsAt = routeHeights(route.map(point => constraintAltitude(point.constraint ?? undefined)), altitude);
@@ -300,6 +326,8 @@ async function startScene(
     },
     destroy: () => {
       scene.preRender.removeEventListener(onFrame);
+      scene.postRender.removeEventListener(counted);
+      shader.dispose();
       if (!widget.isDestroyed()) widget.destroy();
     },
   };
