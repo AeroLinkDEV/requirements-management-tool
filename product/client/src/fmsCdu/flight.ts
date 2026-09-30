@@ -522,7 +522,7 @@ export class FlightSimulator {
     if (!this.advisory || this.fms.hasCondition("fmsFail")) return null;
     const leg = this.fms.activeRoute.legs[0];
     const onMissed = leg !== undefined && leg.kind !== "disco" && leg.source === "MISSED";
-    if (!onMissed && !this.goingAround && this.fms.flightPhase !== "APPROACH") return null;
+    if (!onMissed && !this.goingAround && !(leg && leg.kind !== "disco" && leg.source === "APPR")) return null;
     const target = this.fms.profile().missedTarget;
     return target && !altitudeMeets(target, this.selectedAlt) ? { target, selected: this.selectedAlt } : null;
   }
@@ -757,10 +757,19 @@ export class FlightSimulator {
     return -groundSpeed * 101.27 * Math.tan(vpa) + clamp((pathAltitude - fms.altitude) * 2, -300, 300);
   }
 
-  private steer(desiredTrack: number, crossTrack: number) {
+  private preferredTurnLeg: Leg | undefined;
+  private preferredTurnPending = false;
+  private steer(desiredTrack: number, crossTrack: number, leg?: Extract<Leg, { kind: "wpt" }>) {
     // Intercept at up to 45 degrees, proportional to the cross-track error, then bank toward that track.
     const commanded = desiredTrack - clamp(crossTrack * 40, -45, 45);
-    return clamp(angleDiff(this.fms.track, commanded) * 1.0, -this.steeringLimit, this.steeringLimit);
+    let error = angleDiff(this.fms.track, commanded);
+    if (leg !== this.preferredTurnLeg) { this.preferredTurnLeg = leg; this.preferredTurnPending = leg?.turnDirection !== undefined; }
+    if (this.preferredTurnPending && leg) {
+      if (Math.abs(error) < 10) this.preferredTurnPending = false;
+      else if (leg.turnDirection === "RIGHT" && error < 0) error += 360;
+      else if (leg.turnDirection === "LEFT" && error > 0) error -= 360;
+    }
+    return clamp(error, -this.steeringLimit, this.steeringLimit);
   }
 
   private targetAltitude() {
@@ -1220,6 +1229,19 @@ export class FlightSimulator {
   }
 
   get lateralMode() { return this.lateral; }
+
+  /** Crew handover at a PinS MAP is immediate, including when the bench is paused. */
+  proceedFromPins(declaration: Parameters<ScriptedFms["proceedFromPins"]>[0]) {
+    if (!this.fms.proceedFromPins(declaration)) return false;
+    this.lateral = "HDG"; this.lnavArmed = false; this.gpsLateral = false;
+    this.heading = norm360(this.fms.heading); this.held = true;
+    if (this.approach === "CAPTURED") { this.altitudeHold = Math.round(this.fms.altitude); this.vsTarget = null; }
+    this.approach = "OFF";
+    this.last = this.guide();
+    this.record("PINS CONTINUATION", "crew declared chart conditions; instrument guidance ended; HDG HOLD");
+    this.fms.tick();
+    return true;
+  }
   get lnavIsArmed() { return this.lnavArmed; }
   get selectedHeading() { return this.heading; }
   get headingHeld() { return this.held; }
@@ -1239,7 +1261,7 @@ export class FlightSimulator {
       this.lateral = "HDG";
       this.heading = Math.round(norm360(this.fms.heading));
       this.held = true;
-      if (dt > 0) this.record("LNAV LOST", `${this.fms.navState.mode === "DR" && !this.fms.navState.airValid ? "position input unavailable" : "no active leg"}; HDG HOLD ${String(this.heading).padStart(3, "0")}°T`);
+      if (dt > 0) this.record("LNAV LOST", `${this.fms.pinsContinuation?.active ? "crew flying PinS visual segment" : !this.fms.departureInstrumentReady ? "departure IDF conditions not met" : this.fms.navState.mode === "DR" && !this.fms.navState.airValid ? "position input unavailable" : "no active leg"}; HDG HOLD ${String(this.heading).padStart(3, "0")}°T`);
     }
     if (this.lateral === "LNAV") return managed;
     // Capture when the managed path is close and the aircraft is not heading away from it.
@@ -1258,7 +1280,7 @@ export class FlightSimulator {
     const leg = route.legs[0];
     const base = { targetAltitude: this.targetAltitude() };
     const none = { mode: "LNAV" as const, legFrom: null, legTo: null, desiredTrack: null, crossTrack: 0, distanceToGo: null, bankCommand: 0, ...base };
-    if (fms.navState.mode === "DR" && !fms.navState.airValid) return { ...none, mode: "HDG" };
+    if (fms.navState.mode === "DR" && !fms.navState.airValid || !fms.departureInstrumentReady || fms.pinsContinuation?.active) return { ...none, mode: "HDG" };
     const sequencing = dt > 0 && this.lateral === "LNAV";
     this.lead = 0;
 
@@ -1282,7 +1304,7 @@ export class FlightSimulator {
     if (!to) return { ...none, mode: "HDG" };
     // A course-to-fix leg is the published course line into the fix; otherwise the line from where the leg began.
     const from = leg.path === "CF" && leg.course !== undefined ? offset(to, leg.course + 180, 30) : fms.activeLegStart;
-    const g = leg.path === "RF" && leg.arc ? arcGeometry(leg.arc, to, fms.position) : legGeometry(from, to, fms.position);
+    const g = (leg.path === "RF" || leg.path === "AF") && leg.arc ? arcGeometry(leg.arc, to, fms.position) : legGeometry(from, to, fms.position);
     // A lateral offset shifts the path flown; the aircraft intercepts the offset track as it would the route.
     const shift = this.offsetApplies(leg) ? route.offset!.nm : 0;
     // With GPS lateral authority on an RNAV final, the cross-track is the selected GPS's 116 deviation from the FAS course
@@ -1295,7 +1317,7 @@ export class FlightSimulator {
     // Fly-by: start the turn onto the next leg early; fly-over for holding fixes, search starts and /O waypoints.
     const next = route.legs[1];
     const nextTo = next?.kind === "wpt" ? fms.coordinates(next.ident) : undefined;
-    const flyOver = leg.qualifier !== undefined || !nextTo || next?.kind === "wpt" && next.path === "RF";
+    const flyOver = leg.qualifier !== undefined || leg.path === "RF" || leg.path === "AF" || !nextTo || next?.kind === "wpt" && (next.path === "RF" || next.path === "AF");
     const outbound = next?.kind === "wpt" && next.path === "CF" && next.course !== undefined ? next.course : nextTo ? courseDeg(to, nextTo) : g.track;
     const lead = flyOver ? 0 : turnLead(this.tas, angleDiff(g.track, outbound), this.steeringLimit, this.profile.rollRate.value);
     this.lead = lead;
@@ -1306,15 +1328,15 @@ export class FlightSimulator {
       const result = fms.arrive();
       if (result === "hold") this.startHold();
       if (result === "sar") this.startSar(to);
-      return this.managedGuidance(0);
+      if (result !== "map") return this.managedGuidance(0);
     }
     // On an arc, bank into the turn the arc needs, and steer out the error on top of it.
-    const feedForward = leg.path === "RF" && leg.arc
+    const feedForward = (leg.path === "RF" || leg.path === "AF") && leg.arc
       ? (leg.arc.turn === "R" ? 1 : -1) * deg(Math.atan((this.tas * this.tas) / (68625 * Math.max(0.5, distanceNm(leg.arc.centre, to)))))
       : 0;
     return {
-      mode: "LNAV", legFrom: leg.path === "RF" ? null : from, legTo: to, desiredTrack, crossTrack, distanceToGo: g.toGo,
-      bankCommand: clamp(feedForward + this.steer(desiredTrack, crossTrack), -this.steeringLimit, this.steeringLimit), ...base,
+      mode: "LNAV", legFrom: (leg.path === "RF" || leg.path === "AF") ? null : from, legTo: to, desiredTrack, crossTrack, distanceToGo: g.toGo,
+      bankCommand: clamp(feedForward + this.steer(desiredTrack, crossTrack, leg), -this.steeringLimit, this.steeringLimit), ...base,
     };
   }
 
@@ -1327,7 +1349,10 @@ export class FlightSimulator {
     const result = { mode: "LNAV" as const, legFrom: null, legTo: null, desiredTrack: headingLeg ? fms.track : leg.course, crossTrack: 0, distanceToGo: null, bankCommand: clamp(angleDiff(flown, leg.course), -this.steeringLimit, this.steeringLimit) };
     if (!sequencing) return result;
     let done = false;
-    if ((leg.path === "CA" || leg.path === "FA" || leg.path === "VA") && leg.altitude !== undefined) done = fms.altitude >= leg.altitude - 20;
+    if ((leg.path === "CA" || leg.path === "FA" || leg.path === "VA") && leg.altitude !== undefined) {
+      const baro = fms.validBaroAltitude;
+      done = baro !== null && baro >= leg.altitude - 20;
+    }
     if (leg.path === "VI" && next?.kind === "wpt") {
       // Intercept: the next leg's line (its course into its fix) is reached.
       const to = fms.coordinates(next.ident);
@@ -1342,7 +1367,7 @@ export class FlightSimulator {
   private offsetApplies(leg: Extract<Leg, { kind: "wpt" }>) {
     const route = this.fms.activeRoute;
     const offset = route.offset;
-    if (!offset || leg.source === "APPR" || leg.source === "MISSED" || leg.path === "RF" || leg.qualifier) return false;
+    if (!offset || leg.source === "APPR" || leg.source === "MISSED" || (leg.path === "RF" || leg.path === "AF") || leg.qualifier) return false;
     // The offset begins on the first leg after its start waypoint: while the start is still ahead, it does not apply.
     const ahead = route.legs.some(l => l.kind === "wpt" && l.ident === offset.start);
     return !(offset.start && ahead);

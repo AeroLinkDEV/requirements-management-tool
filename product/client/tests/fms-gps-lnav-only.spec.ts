@@ -40,6 +40,7 @@ function onR190() {
   expect(unit.directTo('STAYS')).toBeUndefined()
   unit.press('EXEC')
   const sim = new FlightSimulator(unit)
+  unit.armApproach()
   const fly = (seconds: number) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1) } }
   fly(2)
   expect(unit.flightPhase).toBe('APPROACH')
@@ -150,7 +151,8 @@ test('Q4: a point-in-space approach that codes a vertical path but has no FAS da
   unit.press('EXEC')
   const sim = new FlightSimulator(unit)
   for (let t = 0; t < 2; t += 1) { now += 1000; sim.step(1) }
-  expect(unit.flightPhase).toBe('APPROACH')
+  expect(unit.flightPhase).toBe('TERMINAL')
+  expect(unit.lamps().has('NPA')).toBe(false)
   expect(unit.approachType).toBe('NO APPR')
   expect(unit.gpsApproachAuthority).toEqual({ annunciation: 'NO APPR', lateral: false, vertical: false, reason: 'FAS DATA MISSING' })
 })

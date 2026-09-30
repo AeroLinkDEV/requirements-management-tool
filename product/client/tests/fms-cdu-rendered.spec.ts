@@ -609,6 +609,29 @@ test('the helicopter autopilot fields keep only what they accept: digits, and a 
   await expect(page.getByLabel('Selected speed')).toHaveValue('90')
 })
 
+test('the PinS crew continuation requires MAP passage and the actual chart condition, then leaves instrument guidance', async ({ page }) => {
+  await open(page)
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  const scenario = { id: 'pins-ui', title: 'PinS crew controls', objective: 'UI wiring at the published MAP', maxSeconds: 1,
+    start: '87n-rnav190-final', steps: [{ when: { kind: 'start' }, action: { kind: 'expectActive', waypoint: 'STAYS' } }] }
+  await card.getByLabel('Scenario file').setInputFiles({ name: 'pins-ui.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scenario)) })
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  const continueButton = page.getByRole('button', { name: 'Continue from MAP' })
+  await expect(continueButton).toBeDisabled()
+  await expect(page.getByLabel('Landing area in sight')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Jump to next waypoint' }).click()
+  await page.getByRole('button', { name: 'Jump to next waypoint' }).click()
+  await expect(continueButton).toBeDisabled()
+  await page.getByLabel('Basic VFR conditions met').check()
+  await expect(continueButton).toBeEnabled()
+  await continueButton.locator('..').screenshot({ path: test.info().outputPath('pins-crew-conditions.png') })
+  await continueButton.click()
+  await expect(page.getByLabel('Guidance')).toContainText('crew flying the visual segment')
+  await expect(page.getByLabel('Guidance')).toContainText('HDG')
+  await page.locator('.fmsBench').screenshot({ path: test.info().outputPath('pins-crew-continuation.png') })
+})
+
 test('the 87N mission: after ACTIVATE and EXEC over the mark, the map draws the FMS joining path to JN (Phase 1)', async ({ page }) => {
   await open(page)
   // The moving map as the lower display (it draws the route, holds, search patterns and the join).

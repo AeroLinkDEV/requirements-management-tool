@@ -59,6 +59,8 @@ export type ProcedureLeg =
   | {
     ident: string; altitude?: string; overfly?: boolean; path?: FixPath; course?: number; arc?: { centre: LatLon; turn: "L" | "R" };
     turnDirection?: "LEFT" | "RIGHT"; speedLimit?: SpeedLimit; verticalAngleDeg?: number; hold?: ProcedureHold;
+    /** Generated PI outbound waypoints stay inside their procedure, never in the pilot waypoint database. */
+    position?: LatLon; procedureTurn?: { reference: string; role: "REFERENCE" | "OUTBOUND" | "INBOUND" };
   }
   | { path: ConditionalPath; course: number; altitude?: number; turnDirection?: "LEFT" | "RIGHT"; speedLimit?: SpeedLimit };
 
@@ -108,6 +110,12 @@ export type Procedure = {
   missedHold?: { fix: string; inbound: number; turn: "RIGHT" | "LEFT"; altitude: string; legDistanceNm?: number; speedLimit?: SpeedLimit };
   /** Imported approaches: where the procedure ends and what follows (C.2). */
   endpoint?: ProcedureEndpoint;
+  /** Instrument entry fixes; preceding visual/VFR portions require separate chart evidence. */
+  departure?: {
+    entries: Record<string, { fix: string; altitude?: string }>;
+    visualSegment: { kind: "PROCEED VISUALLY" | "PROCEED VFR" | "UNKNOWN"; source?: string };
+  };
+  runwayTransitions?: Record<string, ProcedureLeg[]>;
   /**
    * A point-in-space approach (a Copter procedure whose MAP is not a runway): flown to the MAP, then the visual
    * segment or the missed approach. Its `runways` is empty.

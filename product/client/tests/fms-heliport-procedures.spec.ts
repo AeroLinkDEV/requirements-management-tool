@@ -199,11 +199,37 @@ test('C.5: procedure speed limits are imported from columns 100-102 with their d
   expect(procedure('KLGA', 'R250')!.missed![1]).toMatchObject({ path: 'VA', course: expect.closeTo(58, 6), altitude: 1240, turnDirection: 'LEFT', speedLimit: { kt: 70 } })
 })
 
-test('C.8: what is not supported stays unavailable with the reason', () => {
+test('HD departure imports the FAA HUDSN ONE IDF and YOMAN instrument transition', () => {
+  const result = parseArinc424(readFileSync('tests/fixtures/cifp/copter-departure-2609.pc', 'latin1'), { airports: ['KJRA'] })
+  expect(result.errors).toEqual([])
+  const departure = result.data.procedures.find(p => p.kind === 'SID' && p.ident === 'HUDSN1')!
+  expect(departure).toBeDefined()
+  expect(departure.runways).toEqual([])
+  expect(departure.transitions.YOMAN.map(l => 'ident' in l ? l.ident : l.path)).toEqual(['HUDSN', 'RINNG', 'CHNZO', 'JOTRE', 'YOMAN'])
+  expect(departure.transitions.YOMAN[0]).toMatchObject({ ident: 'HUDSN', altitude: '920A' })
+  expect(departure.transitions.YOMAN[1]).toMatchObject({ ident: 'RINNG', altitude: '2000A', path: 'TF' })
+  // The separate reviewed chart supplies the VFR segment absent from these HD records.
+  expect(departure.departure?.visualSegment).toMatchObject({ kind: 'PROCEED VFR', source: expect.stringContaining('10972HUDSN.PDF') })
+  expect(result.data.entries.find(e => e.ident === 'HUDSN')?.position.lat).toBeCloseTo(40 + 47 / 60 + 27.73 / 3600, 8)
+  const unit = new ScriptedFms()
+  unit.loadNavData(result.data); unit.swapCycles()
+  unit.modify(route => { route.origin = 'KJRA'; route.legs = [] }); unit.press('EXEC')
+  unit.selectProcedure('SID', 'HUDSN1', 'YOMAN'); unit.press('EXEC')
+  const idf = unit.coordinates('HUDSN')!
+  unit.placeAircraft({ position: offset(idf, 217, 1), altitude: 920, track: 38 }, 'VFR segment fixture')
+  expect(unit.departureInstrumentReady).toBe(false)
+  unit.placeAircraft({ position: idf, altitude: 919, track: 38 }, 'below IDF crossing altitude fixture')
+  expect(unit.departureInstrumentReady).toBe(false)
+  unit.placeAircraft({ position: idf, altitude: 920, track: 38 }, 'IDF crossing fixture')
+  expect(unit.departureInstrumentReady).toBe(true)
+  const sim = new FlightSimulator(unit)
+  sim.armLnav(); sim.step(1)
+  expect(unit.activeRoute.legs[0]).toMatchObject({ ident: 'RINNG', source: 'SID' })
+  expect(sim.guidance.mode).toBe('LNAV')
+})
+
+test('C.8: an incomplete procedure stays unavailable with the reason', () => {
   const raw = FIXTURE.split('\n')
-  // A heliport departure (HUDSN ONE at KJRA, the real record) is not read, and says so.
-  const hd = 'SUSAH KJRAK6DHUDSN16YOMAN 010HUDSNK6EA0E       IF                                 + 00920     18000       HUDSN K6EA       771632502'
-  expect(parseArinc424(`${FIXTURE}${hd}\n`).errors).toContain('KJRA HUDSN1: heliport departures (HD) are not read by this simulation')
   // A Copter approach whose landing site record is missing cannot be placed.
   const noKjfk = raw.filter(line => !/^SUSAP KJFKK6A/.test(line)).join('\n')
   expect(parseArinc424(noKjfk).errors).toContain('KJFK R027: point-in-space approach without its landing site record')

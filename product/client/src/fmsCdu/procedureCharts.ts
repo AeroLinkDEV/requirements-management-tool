@@ -33,3 +33,9 @@ export const PROCEDURE_CHARTS: Record<string, ProcedureChart> = {
     ],
   },
 };
+
+/** Departure chart facts absent from HD/PD primary records. The IDF and altitude must still agree with the load. */
+export const DEPARTURE_CHARTS: Record<string, { transition: string; fix: string; altitude: string; source: string; visualSegment: "PROCEED VFR" | "PROCEED VISUALLY" }> = {
+  "KJRA HUDSN1": { transition: "YOMAN", fix: "HUDSN", altitude: "920A", visualSegment: "PROCEED VFR",
+    source: "FAA AL-10972 HUDSN ONE (COPTER RNAV), d-TPP 2609, https://aeronav.faa.gov/d-tpp/2609/10972HUDSN.PDF" },
+};

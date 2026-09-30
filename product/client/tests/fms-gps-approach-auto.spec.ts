@@ -430,6 +430,7 @@ test('a flight phase change never resets the source to GPS1, and an approach bot
   const { fms } = bench
   fms.selectProcedure('APPROACH', 'R24R')
   fms.press('EXEC')
+  fms.armApproach()
   const phases = new Set([fms.flightPhase])
   for (let s = 0; s < 3000 && fms.flightPhase !== 'APPROACH'; s += 1) {
     bench.fly(1)

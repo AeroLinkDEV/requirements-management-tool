@@ -259,7 +259,23 @@ test('the aircraft flies the FMS position, so in dead reckoning it really is off
   expect(offAtRdg).toBeGreaterThan(0.3)
 })
 
-test('RNP defaults by phase: terminal near the airports, en route between them, approach on the approach', () => {
+test('S300 phase boundaries use airport-relative altitude and separate arrival and departure radii', () => {
+  const unit = new ScriptedFms(() => new Date('2026-09-29T14:00:00Z'))
+  const origin = unit.navdb.airport(unit.activeRoute.origin)!
+  const dest = unit.navdb.airport(unit.activeRoute.dest)!
+  unit.placeAircraft({ position: offset(origin.position, 270, 32.9), altitude: origin.elevation + 15999, tas: 0 })
+  expect(unit.flightPhase).toBe('TERMINAL')
+  unit.placeAircraft({ position: offset(origin.position, 270, 32.9), altitude: origin.elevation + 16000, tas: 0 })
+  expect(unit.flightPhase).toBe('EN ROUTE')
+  unit.placeAircraft({ position: offset(origin.position, 270, 33.1), altitude: 2000, tas: 0 })
+  expect(unit.flightPhase).toBe('EN ROUTE')
+  unit.placeAircraft({ position: offset(dest.position, 90, 29.9), altitude: dest.elevation + 14999, tas: 0 })
+  expect(unit.flightPhase).toBe('TERMINAL')
+  unit.placeAircraft({ position: offset(dest.position, 90, 29.9), altitude: dest.elevation + 15000, tas: 0 })
+  expect(unit.flightPhase).toBe('EN ROUTE')
+})
+
+test('RNP defaults by phase: a loaded approach does not grant approach phase', () => {
   const unit = new ScriptedFms()
   expect(unit.flightPhase).toBe('TERMINAL')
   expect(unit.requiredRnp).toBe(RNP_DEFAULTS.TERMINAL.rnp)
@@ -274,8 +290,21 @@ test('RNP defaults by phase: terminal near the airports, en route between them, 
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
   unit.sequence()
+  expect(unit.flightPhase).toBe('TERMINAL')
+  expect(unit.requiredRnp).toBe(1)
+  unit.directTo('FERDI')
+  unit.press('EXEC')
+  const faf = unit.coordinates('FERDI')!
+  unit.placeAircraft({ position: offset(faf, 57, 2.1), altitude: 2000, track: 237, tas: 90 })
+  unit.armApproach(true)
+  expect(unit.flightPhase).toBe('TERMINAL')
+  unit.placeAircraft({ position: offset(faf, 57, 1.9), altitude: 2000, track: 237, tas: 90 })
   expect(unit.flightPhase).toBe('APPROACH')
   expect(unit.requiredRnp).toBe(0.3)
+  for (let prn = 1; prn <= 32; prn += 1) unit.deselectRaimSatellite(prn, true)
+  unit.updateNavigation(0)
+  expect(unit.flightPhase).toBe('TERMINAL')
+  expect(unit.lamps().has('NPA')).toBe(false)
 })
 
 test('ANP above RNP raises CHECK ANP only after the time to alert for the phase', () => {
@@ -327,8 +356,11 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, larger ANP, and no RNAV approach
   expect(unit.navState.anp).toBeGreaterThan(0.3)
   expect(unit.approachType).toBe('NO APPR')
   for (let i = 0; i < 3; i += 1) unit.sequence()
+  unit.directTo('FERDI'); unit.press('EXEC')
+  unit.placeAircraft({ position: offset(unit.coordinates('FERDI')!, 251, 1.9), altitude: 2000, track: 71 }, 'test: denied approach before FAF')
+  unit.armApproach()
   unit.updateNavigation(0)
-  expect(unit.flightPhase).toBe('APPROACH')
+  expect(unit.flightPhase).toBe('TERMINAL')
   expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(true)
   press(unit, 'INIT_REF', 'NEXT', 'LSK5R')
   // The condition leaves each receiver five satellites (one degree of freedom: detection without exclusion).
@@ -370,6 +402,8 @@ test('the NPA annunciator follows a non-precision approach, not an ILS', () => {
   // Jump through MUN, RDG, TOLGU, DEMEL, ALNIT and ULIDA to the FAF.
   for (let i = 0; i < 6; i += 1) unit.sequence()
   expect(active(unit)).toBe('FERDI')
+  unit.placeAircraft({ position: offset(unit.coordinates('FERDI')!, 251, 1.9), altitude: 2000, track: 71 }, 'test: armed non-precision approach before FAF')
+  unit.armApproach(); unit.updateNavigation(0)
   expect(unit.lamps().has('NPA')).toBe(true)
   const ils = new ScriptedFms()
   ils.selectProcedure('APPROACH', 'I24R')

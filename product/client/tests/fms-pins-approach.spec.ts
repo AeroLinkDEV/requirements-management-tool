@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { parseArinc424 } from '../src/fmsCdu/arinc424'
+import { FlightSimulator } from '../src/fmsCdu/flight'
 import { courseDeg, distanceNm, type Leg } from '../src/fmsCdu/fmsModel'
 import { tasFromIas } from '../src/fmsCdu/kinematics'
 import { procedureSpeedLimit } from '../src/fmsCdu/procedureSpeed'
@@ -51,8 +52,12 @@ test('the point-in-space final ends at its MAP: CRANN is the instrument end, flo
   expect(unit.onFinalSegment).toBe(true)
   // No missed approach hold before the MAP is passed.
   expect(unit.activeRoute.hold).toBeUndefined()
-  // Past the MAP: the missed approach, no longer the final.
+  // At the MAP the final extension stays active until the crew selects the missed approach.
   unit.sequence()
+  expect(active(unit)).toBe('CRANN')
+  expect(unit.onFinalSegment).toBe(true)
+  expect(unit.activeRoute.hold).toBeUndefined()
+  expect(unit.goAround()).toBe(true)
   expect(active(unit)).toBe('(CA)')
   expect(unit.onFinalSegment).toBe(false)
   // Passing the MAP arms the missed approach hold at BEADS, as passing a runway does.
@@ -67,6 +72,34 @@ test('the instrument end is the approach leg: the same fix earlier in the route 
   unit.press('EXEC')
   expect(active(unit)).toBe('CRANN')
   expect(unit.onFinalSegment).toBe(false)
+})
+
+test('the chart controls the MAP crew decision: VFR and visually have distinct conditions, and unknown is refused', () => {
+  const declaration = { basicVfr: false, landingAreaVisible: true, publishedVisibility: true }
+  const unit = flying(PINS, '87N', 'R190', 'HTO')
+  expect(unit.proceedFromPins({ ...declaration, basicVfr: true })).toBe(false)
+  sequenceTo(unit, 'CRANN')
+  unit.sequence()
+  // Visual reference alone cannot meet this actual chart's Proceed VFR condition.
+  expect(unit.proceedFromPins(declaration)).toBe(false)
+  expect(unit.proceedFromPins({ ...declaration, basicVfr: true })).toBe(true)
+  const sim = new FlightSimulator(unit)
+  expect(sim.guidance.mode).toBe('HDG')
+  expect(unit.approachArmed).toBe(false)
+  // A laboratory chart declaration exercises the other supported kind without claiming an actual chart says so.
+  for (const kind of ['PROCEED VISUALLY', 'UNKNOWN'] as const) {
+    const lab = new ScriptedFms()
+    const data = parseArinc424(PINS).data
+    const approach = data.procedures.find(p => p.ident === 'R190')!
+    approach.endpoint!.visualSegment = { kind, validated: kind !== 'UNKNOWN', source: 'laboratory chart declaration' }
+    lab.loadNavData(data, 'lab chart'); lab.swapCycles()
+    lab.modify(route => { route.dest = '87N' }); lab.press('EXEC')
+    lab.selectProcedure('APPROACH', 'R190', 'HTO'); lab.press('EXEC')
+    sequenceTo(lab, 'CRANN'); lab.sequence()
+    expect(lab.proceedFromPins({ basicVfr: true, landingAreaVisible: false, publishedVisibility: false })).toBe(false)
+    expect(lab.proceedFromPins({ basicVfr: false, landingAreaVisible: true, publishedVisibility: false })).toBe(false)
+    expect(lab.proceedFromPins(declaration)).toBe(kind === 'PROCEED VISUALLY')
+  }
 })
 
 test('a runway approach keeps the runway as its instrument end and final runway', () => {

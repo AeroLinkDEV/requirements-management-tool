@@ -417,6 +417,13 @@ display unit for engineers.
   and its PRN exclusions use visibly simulated sky geometry; real almanac prediction and physical avionics adapters
   remain unavailable. The applicability matrix records radio, uncertainty and freshness assumptions.
 
+- **Helicopter IFR procedures.** The subset reader imports HD/PD departures and PI, RF and AF geometry. The reviewed
+  HUDSN ONE chart separates its VFR site-to-IDF segment from instrument guidance at the coded crossing altitude.
+  S300 approach phase requires arming, the FAF path-distance gate and current/predicted integrity; loading a procedure
+  grants neither NPA nor approach RNP. A MAP holds the final-course extension until the crew requests the missed
+  approach or declares conditions for its verified Proceed VFR/Visually continuation. These declarations establish
+  no computed weather, obstacle protection or landing clearance.
+
 - The faceplate is rendered in Blender from `product/tools/AeroLink.FmsCduModel`, which uses the public CMC
   datasheet dimensions and the Operator's Manual front-panel figures. No manufacturer logo is shown.
 - The user selects one of nine hardware variations. Each variation relabels the seven annunciators and the second
@@ -442,15 +449,15 @@ display unit for engineers.
     and becomes the inactive database cycle. Activating it on IDENT is recorded and does not move the active plan,
     whose fixes are pinned when it becomes active; they re-resolve only when the crew executes a modification.
   - **Lateral guidance**: automatic leg sequencing with fly-by and fly-over turns; ARINC 424 path terminators
-    (TF, CF, DF, RF arcs, and the CA/FA/VA, VI and VM/FM conditional legs); DIRECT-TO with INTC CRS and ABEAM
+    (TF, CF, DF, RF/AF arcs, PI construction, and the CA/FA/VA, VI and VM/FM conditional legs); DIRECT-TO with INTC CRS and ABEAM
     PTS; holds with their standard entry and status (including a one-turn exit); a lateral offset flown between
     start and end waypoints; search patterns flown along their geometry; and selected heading versus LNAV with
     arm and capture.
-  - **Navigation sensors** (`navigation.ts`): GPS, DME/DME, VOR/DME and a temporary laboratory DR estimate in the existing priority
-    order with automatic reversion; the FMS position drifts from the true position in dead reckoning and shifts
+  - **Navigation sensors** (`civilNavigation.ts`): GPS, measured DME/DME and VOR/DME, and heading/TAS/wind DR in the civil priority
+    order with automatic reversion; the FMS estimate advances independently of the true position in dead reckoning and shifts
     back when a sensor returns (POSITION SHIFT); ANP from the sources, RNP by phase of flight or crew entry, and
     CHECK ANP after the phase's time to alert; NAV STATUS and NAV OPTIONS (navaid inhibit, GPS deselect). IRS is not
-    configured and is not reported as available. Measured radio navigation and heading/TAS/wind DR remain target work.
+    configured and is not reported as available. Radios acquire facilities and deliver measurements through the sensor port.
   - **Vertical guidance**: under the default helicopter profile the crew flies the vertical axis and the speed
     through the autopilot (ALT SEL, VS, ALT, SPD, and GA on TOGA), and the FMS constraints are advisories; the
     airline-style VNAV below is a selectable laboratory profile (`lab-airline-vnav`).

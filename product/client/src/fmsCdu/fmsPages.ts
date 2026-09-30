@@ -327,7 +327,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           return;
         }
         const leg3 = geometry[at];
-        const marker = leg.qualifier === "/H" ? `HOLD ${route.hold?.turn === "LEFT" ? "L" : "R"}` : leg.qualifier === "/S" ? "SAR" : undefined;
+        const marker = leg.qualifier === "/H" ? `HOLD ${route.hold?.turn === "LEFT" ? "L" : "R"}` : leg.qualifier === "/S" ? "SAR"
+          : leg.arc ? `${leg.arc.turn} ARC` : leg.procedureTurn?.role === "OUTBOUND" ? "P-T" : undefined;
         lines[1 + i * 2] = {
           left: small(leg3 ? ` ${three(leg3.course)}°` : " ---°"),
           center: small(leg3 ? `${fixed(leg3.distance, 1)}NM` : "--.-NM"),
@@ -394,10 +395,21 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const at = index * 5 + row - 1;
       const legs = fms.route.legs;
       const leg = legs[at];
-      if (!scratch) { if (leg?.kind === "wpt") fms.setScratch(leg.ident); return; }
+      if (!scratch) {
+        if (leg?.kind === "wpt" && leg.procedureTurn?.role === "OUTBOUND") return "not-allowed";
+        if (leg?.kind === "wpt") fms.setScratch(leg.ident); return;
+      }
       if (scratch === "DELETE") {
         if (!leg || at === legs.length - 1) return "not-allowed";
-        fms.modify(route => { route.legs.splice(at, 1); });
+        const turn = leg.kind === "wpt" ? leg.procedureTurn : undefined;
+        if (turn && turn.role !== "INBOUND") {
+          const firstOutbound = legs.findIndex(l => l.kind === "wpt" && l.procedureTurn?.reference === turn.reference && l.procedureTurn.role === "OUTBOUND");
+          if (turn.role === "OUTBOUND" && at !== firstOutbound) return "not-allowed";
+          fms.modify(route => {
+            route.legs = route.legs.filter(l => l.kind !== "wpt" || l.procedureTurn?.reference !== turn.reference || l.procedureTurn.role === "INBOUND");
+            for (const l of route.legs) if (l.kind === "wpt" && l.procedureTurn?.reference === turn.reference) { delete l.procedureTurn; delete l.turnDirection; }
+          });
+        } else fms.modify(route => { route.legs.splice(at, 1); });
         fms.setScratch("");
         return;
       }

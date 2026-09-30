@@ -530,8 +530,8 @@ test('F4: under the helicopter profile a selected altitude below the missed appr
   const sim = new FlightSimulator(unit)
   expect(setUpKbtvRnav15(unit, sim)).toEqual({ ready: true })
   expect(sim.advisory).toBe(true)
-  // On the approach, a selection below 5600A is shown.
-  expect(unit.flightPhase).toBe('APPROACH')
+  // On the executed approach, before the actual approach-phase gate, a selection below 5600A is already shown.
+  expect(unit.flightPhase).toBe('TERMINAL')
   sim.selectAltitude(4500)
   expect(sim.missedAltitudeConflict).toEqual({ target: { kind: 'A', altitude: 5600 }, selected: 4500 })
   expect(aircraftData(unit, sim).missedAltitudeConflict).toBe('5600A')

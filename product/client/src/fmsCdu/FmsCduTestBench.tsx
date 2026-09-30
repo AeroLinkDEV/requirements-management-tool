@@ -137,6 +137,8 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
   const [altInput, setAltInput] = useState("");
   const [vsInput, setVsInput] = useState("-500");
   const [spdInput, setSpdInput] = useState("");
+  const [pinsDeclaration, setPinsDeclaration] = useState({ session: -1, basicVfr: false, landingAreaVisible: false, publishedVisibility: false });
+  const crewConditions = pinsDeclaration.session === session ? pinsDeclaration : { session, basicVfr: false, landingAreaVisible: false, publishedVisibility: false };
   const [jumpNote, setJumpNote] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(storedTab);
   // One set of height tiles for the out-the-window view and the PFD's synthetic vision.
@@ -430,6 +432,10 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
             </form>
           ) : null}
           <dl className="fmsBenchGuidance" aria-label="Guidance">
+            {backend.pinsContinuation ? <><dt>PinS continuation</dt><dd>
+              {backend.pinsContinuation.available ? backend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? "Proceed VFR" : "Proceed visually" : "Chart continuation not verified"}
+              {backend.pinsContinuation.active ? " — crew flying the visual segment" : ""}
+            </dd></> : null}
             <dt>Mode</dt><dd>{guidance.mode}</dd>
             <dt>DTK</dt><dd>{guidance.desiredTrack === null ? "---" : `${String(Math.round(guidance.desiredTrack) || 360).padStart(3, "0")}°`}</dd>
             <dt>TRK</dt><dd>{String(Math.round(backend.track) || 360).padStart(3, "0")}°</dd>
@@ -439,6 +445,17 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
             <dt>ALT</dt><dd>{Math.round(backend.altitude)} ft → {Math.round(guidance.targetAltitude)}</dd>
             <dt>VS</dt><dd>{signed(Math.round(backend.verticalSpeed / 10) * 10)} fpm</dd>
           </dl>
+          {backend.pinsContinuation?.available && !backend.pinsContinuation.active ? <fieldset>
+            <legend>{backend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? "Proceed VFR" : "Proceed visually"} from the MAP</legend>
+            {backend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? <label><input type="checkbox" checked={crewConditions.basicVfr}
+              onChange={event => setPinsDeclaration({ ...crewConditions, basicVfr: event.target.checked })} />Basic VFR conditions met</label> : <>
+              <label><input type="checkbox" checked={crewConditions.landingAreaVisible} onChange={event => setPinsDeclaration({ ...crewConditions, landingAreaVisible: event.target.checked })} />Landing area in sight</label>
+              <label><input type="checkbox" checked={crewConditions.publishedVisibility} onChange={event => setPinsDeclaration({ ...crewConditions, publishedVisibility: event.target.checked })} />Published visibility met throughout the visual segment</label>
+            </>}
+            <p className="fmsBenchHint">Crew declaration required. Follow the published chart and fly the visual segment using heading and altitude controls.</p>
+            <button type="button" disabled={failedFms || !backend.pinsContinuation.mapPassed || (backend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? !crewConditions.basicVfr : !crewConditions.landingAreaVisible || !crewConditions.publishedVisibility)}
+              onClick={() => { if (sim.proceedFromPins(crewConditions)) recordTo?.proceedPins(crewConditions); }}>Continue from MAP</button>
+          </fieldset> : null}
         </section>
       </div>
 

@@ -115,12 +115,14 @@ export type LegSource = "SID" | "STAR" | "APPR" | "MISSED";
  * altitude; VI flies a heading until the next leg is intercepted; VM and FM fly a heading or track until the crew
  * takes over (manual termination).
  */
-export type FixPath = "TF" | "CF" | "DF" | "RF";
+export type FixPath = "TF" | "CF" | "DF" | "RF" | "AF";
 export type ConditionalPath = "CA" | "FA" | "VA" | "VI" | "VM" | "FM";
 export type Leg =
   | {
     kind: "wpt"; ident: string; altitude?: string; qualifier?: "/H" | "/S" | "/O"; via?: string; source?: LegSource;
     path?: FixPath; course?: number; arc?: { centre: LatLon; turn: "L" | "R" };
+    position?: LatLon; turnDirection?: "LEFT" | "RIGHT";
+    procedureTurn?: { reference: string; role: "REFERENCE" | "OUTBOUND" | "INBOUND" };
     /** A speed constraint at the fix, knots. */
     speed?: number;
     /**

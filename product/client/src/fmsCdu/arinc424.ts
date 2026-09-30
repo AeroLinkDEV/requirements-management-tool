@@ -1,13 +1,14 @@
 import { bearingDeg, distanceNm } from "./fmsModel";
-import type { Airport, Airway, Msa, NavData, NavEntry, NavaidType, Procedure, ProcedureEndpoint, ProcedureHold, ProcedureLeg, PublishedFas, SpeedLimit } from "./navData";
-import { PROCEDURE_CHARTS } from "./procedureCharts";
+import type { Airport, Airway, Msa, NavData, NavEntry, NavaidType, Procedure, ProcedureEndpoint, ProcedureLeg, PublishedFas } from "./navData";
+import { DEPARTURE_CHARTS, PROCEDURE_CHARTS } from "./procedureCharts";
+import { codedVerticalAngle, constraintText, decodeProcedureLegs, type ProcedureRecord } from "./procedureLegs";
 
 /**
  * Reads the parts of an ARINC 424 navigation data file that the simulation uses: enroute and terminal waypoints,
  * VHF and NDB navaids, airports and heliports (with their magnetic variation), runways (their magnetic bearing made
  * true), airways, minimum sector altitudes, RNAV approach procedures and their published FAS data blocks (path point
  * records). The heliport section (HA, HC, HF, HS) is read like the airport section (PA, PC, PF, PS); heliport
- * departures (HD) are not read. Records are the 132-column fixed-width lines of the specification; only primary
+ * departures (HD) are also read. Records are the 132-column fixed-width lines of the specification; only primary
  * records are read (continuation records are skipped). Field positions are the ones listed beside each reader, 1-based
  * as the specification numbers columns.
  *
@@ -81,7 +82,6 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
   // Path point records that were present but unreadable, by procedure: the approach they belong to has no usable FAS.
   const invalidPathPoints = new Map<string, string>();
   const msa: Msa[] = [];
-  const departures = new Set<string>();
   const errors: string[] = [];
   const invalid: string[] = [];
   let read = 0, skipped = 0;
@@ -91,8 +91,8 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
   // procedures use.
   const wanted = options.airports?.length ? new Set(options.airports.map(ident => ident.toUpperCase())) : null;
   const used = new Set<string>();
-  if (wanted) for (const line of lines) if ((line[4] === "P" || line[4] === "H") && line[12] === "F" && wanted.has(line.slice(6, 10).trim())) {
-    for (const [a, b] of [[30, 34], [51, 54]] as const) { const fix = col(line, a, b); if (fix) used.add(fix); }
+  if (wanted) for (const line of lines) if ((line[4] === "P" || line[4] === "H") && ["F", "D"].includes(line[12]) && wanted.has(line.slice(6, 10).trim())) {
+    for (const [a, b] of [[30, 34], [51, 54], [107, 111]] as const) { const fix = col(line, a, b); if (fix) used.add(fix); }
   }
   const cycle = /^HDR01.*?(\d{4})\s+\d{2}-[A-Z]{3}-\d{4}/.exec(lines[0] ?? "")?.[1];
   lines.forEach((line, index) => {
@@ -216,12 +216,6 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
         read += 1;
         return;
       }
-      if (airportSubsection === "D" && heliport) {
-        // Heliport departures (HUDSN ONE and the like) are not read: named once each, with the reason.
-        departures.add(`${col(line, 7, 10)} ${col(line, 14, 19)}`);
-        skipped += 1;
-        return;
-      }
       if (airportSubsection === "G" && !heliport) {
         // Runway: ident 14-18, continuation 22, length 23-27 (feet), magnetic bearing 28-31 (tenths of a degree, up to
         // 360.0), threshold elevation 67-71.
@@ -240,7 +234,7 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
         read += 1;
         return;
       }
-      if (airportSubsection === "F") {
+      if (airportSubsection === "F" || airportSubsection === "D") {
         // Approach procedure leg: procedure 14-19, route type 20, transition 21-25, sequence 27-29, fix 30-34,
         // continuation 39 (primary 0 or 1), waypoint description 40-43, turn 44, path terminator 48-49, magnetic course
         // 71-74 (tenths; T after is true), holding distance or time 75-78 (tenths of a NM, or T and tenths of a
@@ -249,8 +243,10 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
         if (!"01".includes(line[38])) { skipped += 1; return; }
         const icao = ident(7, 10, heliport ? "heliport ident" : "airport ident");
         if (!icao) return;
-        const key = `${icao} ${col(line, 14, 19)}`;
+        const key = `${icao} ${col(line, 14, 19)} ${airportSubsection}`;
         procedureRecords.set(key, [...(procedureRecords.get(key) ?? []), {
+          kind: airportSubsection === "D" ? "SID" : "APPROACH",
+          recommended: col(line, 51, 54), centre: col(line, 107, 111), radius: col(line, 57, 62), rho: col(line, 67, 70),
           routeType: line[19], transition: col(line, 21, 25), sequence: Number(col(line, 27, 29)), fix: col(line, 30, 34),
           description: line.slice(39, 43), turn: line[43], path: col(line, 48, 49), course: col(line, 71, 74),
           distance: col(line, 75, 78), altitudeDescription: line[82], altitude1: col(line, 85, 89), altitude2: col(line, 90, 94),
@@ -296,11 +292,12 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
   for (const entry of entries) if (!positions.has(entry.ident)) positions.set(entry.ident, entry.position);
   for (const [key, records] of procedureRecords) {
     const [icao, ident] = key.split(" ");
-    const built = buildApproach(icao, ident, records, airports.get(icao), pathPoints.get(key), ident => positions.get(ident), invalidPathPoints.get(key));
+    const site = airports.get(icao), place = (name: string) => positions.get(name) ?? site?.runways.find(r => r.ident === name)?.threshold;
+    const built = records[0].kind === "SID" ? buildDeparture(icao, ident, records, site, place)
+      : buildApproach(icao, ident, records, site, pathPoints.get(`${icao} ${ident}`), place, invalidPathPoints.get(`${icao} ${ident}`));
     if (typeof built === "string") errors.push(`${icao} ${ident}: ${built}`);
     else if (built) procedures.push(built);
   }
-  for (const departure of departures) errors.push(`${departure}: heliport departures (HD) are not read by this simulation`);
   return {
     data: {
       cycle: { id: cycle ? `CIFP${cycle}` : "LOADED", from: "", to: "" }, entries: [...entries, ...airports.values()], airways, procedures,
@@ -308,19 +305,6 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
     },
     read, skipped, errors: errors.slice(0, 20), invalid,
   };
-}
-
-type ProcedureRecord = {
-  routeType: string; transition: string; sequence: number; fix: string; description: string; turn: string; path: string;
-  course: string; distance: string; altitudeDescription: string; altitude1: string; altitude2: string;
-  speed: string; verticalAngle: string; speedDescription: string;
-};
-
-/** The speed limit a record codes (columns 100-102, description 118: blank or @ at, + at or above, - at or below). */
-function speedLimit(record: ProcedureRecord): SpeedLimit | undefined {
-  if (!/^\d{3}$/.test(record.speed) || Number(record.speed) === 0) return undefined;
-  const descriptor = record.speedDescription === "+" ? "AT OR ABOVE" : record.speedDescription === "-" ? "AT OR BELOW" : "AT";
-  return { kt: Number(record.speed), descriptor };
 }
 
 /**
@@ -345,99 +329,62 @@ const REVIEWED_COPTER_PINS: Readonly<Record<string, { map: string; source: strin
   "2P2 R029": { map: "OBIBE", source: "FAA CIFP 2609 Copter extract: 2P2 R029, MAP OBIBE (reviewed, #1256)" },
 };
 
-/** The altitude constraint as the simulation writes it: 3000 (at), 3000A (at or above), 3000B (at or below), a window. */
-function constraintText(record: ProcedureRecord): string | undefined {
-  const { altitudeDescription: d, altitude1: a, altitude2: b } = record;
-  const value = (text: string) => (/^FL\d{3}$/.test(text) ? text : /^\d{1,5}$/.test(text) ? String(Number(text)) : null);
-  const first = value(a);
-  if (first === null) return undefined;
-  if (d === "-") return `${first}B`;
-  if (d === " ") return first;
-  // B: between, altitude 1 the upper and altitude 2 the lower limit.
-  if (d === "B") { const second = value(b); return second === null ? `${first}B` : `${first}B${second}A`; }
-  // + and the glide path and step-down variants (V, G, H, I, J, X, Y): at or above altitude 1.
-  return `${first}A`;
-}
-
 /**
  * An RNAV approach from its leg records: transitions (route type A) to the final (route type R), whose final approach
  * fix is the leg described F and whose missed approach is everything after the missed approach point (described M).
  * The MAP is a runway, or on a point-in-space approach (a heliport's, or a Copter procedure's) a fix. null for other
- * approach types; a reason when the procedure uses a leg this simulation does not fly (RF, PI and the like) or its end
+ * approach types; a reason when the procedure uses an unsupported leg or its end
  * cannot be placed.
  *
  * A hold (HF, HA, HM) is kept on the fix leg it holds at, with its exit and its coded leg distance or time. Each
  * transition keeps all its legs, including the fix the final begins at: the route joins them by the records' roles
  * (procedures.ts), never by collapsing records that share a name.
  */
+function buildDeparture(icao: string, ident: string, records: ProcedureRecord[], site: Airport | undefined,
+  place: (ident: string) => { lat: number; lon: number } | undefined): Procedure | string {
+  if (!site) return "departure without its airport or heliport record";
+  const common: ProcedureRecord[] = [], transitions: Record<string, ProcedureLeg[]> = {}, runwayTransitions: Record<string, ProcedureLeg[]> = {};
+  const entries: NonNullable<Procedure["departure"]>["entries"] = {};
+  for (const r of records) if ("25M".includes(r.routeType)) common.push(r);
+  const decode = (list: ProcedureRecord[]) => decodeProcedureLegs(list.sort((a, b) => a.sequence - b.sequence), site.magneticVariation ?? 0, place);
+  const legs = decode(common);
+  if (typeof legs === "string") return legs;
+  const firstCommon = legs[0];
+  if (firstCommon && "ident" in firstCommon) entries[""] = { fix: firstCommon.ident, ...(firstCommon.altitude ? { altitude: firstCommon.altitude } : {}) };
+  for (const name of new Set(records.filter(r => "36SV".includes(r.routeType)).map(r => r.transition))) {
+    if (!name) return "departure without transition identifier";
+    const built = decode(records.filter(r => "36SV".includes(r.routeType) && r.transition === name));
+    if (typeof built === "string") return built;
+    transitions[name] = built;
+    const first = [...legs, ...built][0];
+    if (first && "ident" in first) entries[name] = { fix: first.ident, ...(first.altitude ? { altitude: first.altitude } : {}) };
+  }
+  for (const name of new Set(records.filter(r => "14FT".includes(r.routeType)).map(r => r.transition))) {
+    const built = decode(records.filter(r => "14FT".includes(r.routeType) && r.transition === name));
+    if (typeof built === "string") return built;
+    runwayTransitions[name] = built;
+  }
+  if (records.some(r => !"123456FMSTV".includes(r.routeType))) return "unsupported departure route type";
+  if (!legs.length && !Object.keys(transitions).length && !Object.keys(runwayTransitions).length) return "departure without instrument legs";
+  const chart = DEPARTURE_CHARTS[`${icao} ${ident}`], entry = chart && entries[chart.transition];
+  if (chart && (!entry || entry.fix !== chart.fix || entry.altitude !== chart.altitude)) return "departure IDF does not agree with its reviewed chart";
+  for (const leg of [...legs, ...Object.values(transitions).flat(), ...Object.values(runwayTransitions).flat()]) {
+    if ("ident" in leg && !leg.position && !place(leg.ident)) return `departure fix ${leg.ident} is missing`;
+  }
+  return { kind: "SID", airport: icao, ident, legs, transitions, runways: Object.keys(runwayTransitions),
+    ...(Object.keys(runwayTransitions).length ? { runwayTransitions } : {}),
+    ...(site.heliport ? { departure: { entries, visualSegment: chart ? { kind: chart.visualSegment, source: chart.source } : { kind: "UNKNOWN" } } } : {}) };
+}
+
 function buildApproach(icao: string, ident: string, records: ProcedureRecord[], site: Airport | undefined, fas: PublishedFas | undefined,
   place: (ident: string) => { lat: number; lon: number } | undefined, fasInvalid?: string): Procedure | string | null {
-  const final = records.filter(r => r.routeType === "R").sort((a, b) => a.sequence - b.sequence);
+  const finalType = records.find(r => "RPDVSNQ".includes(r.routeType))?.routeType;
+  if (!finalType) return null;
+  const final = [...records.filter(r => r.routeType === finalType).sort((a, b) => a.sequence - b.sequence),
+    ...records.filter(r => r.routeType === "Z").sort((a, b) => a.sequence - b.sequence)];
   if (!final.length) return null;
   const variation = site?.magneticVariation ?? 0;
-  const trueCourse = (text: string) => {
-    const m = /^(\d{4})(T?)$/.exec(text.replace(/\s/g, ""));
-    return m ? ((Number(m[1]) / 10 + (m[2] ? 0 : variation)) % 360 + 360) % 360 : null;
-  };
-  const extras = (r: ProcedureRecord) => {
-    const limit = speedLimit(r);
-    const angle = /^[+-]?\d{3}$/.test(r.verticalAngle.trim()) ? Number(r.verticalAngle.trim()) / 100 : null;
-    return {
-      ...(r.turn === "L" || r.turn === "R" ? { turnDirection: r.turn === "L" ? "LEFT" as const : "RIGHT" as const } : {}),
-      ...(limit ? { speedLimit: limit } : {}),
-      ...(angle !== null ? { verticalAngleDeg: angle === 0 ? 0 : angle } : {}),
-    };
-  };
-  const holdOf = (r: ProcedureRecord): ProcedureHold | string => {
-    const inbound = trueCourse(r.course);
-    if (inbound === null) return `${r.path} hold without an inbound course`;
-    const distance = /^\d{4}$/.test(r.distance) ? Number(r.distance) / 10 : null;
-    const time = /^T\d{3}$/.test(r.distance) ? Number(r.distance.slice(1)) / 10 : null;
-    const altitude = constraintText(r), limit = speedLimit(r);
-    return {
-      path: r.path as ProcedureHold["path"], inbound: Math.round(inbound * 10) / 10, turn: r.turn === "L" ? "LEFT" : "RIGHT", legDistanceNm: distance, legTimeMin: time,
-      exit: r.path === "HF" ? "ONCE" : r.path === "HA" ? "AT ALT" : "MANUAL", ...(altitude ? { altitude } : {}), ...(limit ? { speedLimit: limit } : {}),
-    };
-  };
-  const leg = (r: ProcedureRecord): ProcedureLeg | string => {
-    const altitude = constraintText(r);
-    const { turnDirection, speedLimit: limit, verticalAngleDeg } = extras(r);
-    const common = { ...(altitude ? { altitude } : {}), ...(turnDirection ? { turnDirection } : {}), ...(limit ? { speedLimit: limit } : {}) };
-    switch (r.path) {
-      case "IF": case "TF": return {
-        ident: r.fix, ...common, ...(r.path === "TF" ? { path: "TF" as const } : {}), ...(verticalAngleDeg !== undefined ? { verticalAngleDeg } : {}),
-      };
-      case "DF": return { ident: r.fix, ...common, path: "DF" };
-      case "CF": { const course = trueCourse(r.course); return course === null ? "CF leg without a course" : { ident: r.fix, ...common, path: "CF", course }; }
-      case "CA": case "FA": case "VA": case "VI": case "VM": case "FM": {
-        const course = trueCourse(r.course);
-        const feet = Number(/^\d{1,5}$/.test(r.altitude1) ? r.altitude1 : NaN);
-        return course === null ? `${r.path} leg without a course` : {
-          path: r.path, course, ...(Number.isFinite(feet) ? { altitude: feet } : {}), ...(turnDirection ? { turnDirection } : {}), ...(limit ? { speedLimit: limit } : {}),
-        };
-      }
-      default: return `${r.path} legs are not flown by this simulation`;
-    }
-  };
-  const legs = (list: ProcedureRecord[]) => {
-    const out: ProcedureLeg[] = [];
-    for (const r of list) {
-      if (r.path === "HF" || r.path === "HA" || r.path === "HM") {
-        // The hold belongs to the fix leg it holds at: the leg just flown to that fix, or a leg of its own when the
-        // hold begins the list (a hold-in-lieu transition of a single record).
-        const hold = holdOf(r);
-        if (typeof hold === "string") return hold;
-        const last = out.at(-1);
-        if (last && "ident" in last && last.ident === r.fix && !last.hold) out[out.length - 1] = { ...last, hold };
-        else out.push({ ident: r.fix, ...(hold.altitude ? { altitude: hold.altitude } : {}), hold });
-        continue;
-      }
-      const l = leg(r);
-      if (typeof l === "string") return l;
-      out.push(l);
-    }
-    return out;
-  };
+  const legs = (list: ProcedureRecord[]) => decodeProcedureLegs(list, variation, place);
   const mapAt = final.findIndex(r => r.description[3] === "M");
   if (mapAt < 0) return "no missed approach point";
   const approachLegs = legs(final.slice(0, mapAt + 1));
@@ -460,13 +407,13 @@ function buildApproach(icao: string, ident: string, records: ProcedureRecord[], 
   const transitions: Record<string, ProcedureLeg[]> = {};
   for (const name of new Set(records.filter(r => r.routeType === "A").map(r => r.transition))) {
     const built = legs(records.filter(r => r.routeType === "A" && r.transition === name).sort((a, b) => a.sequence - b.sequence));
-    if (typeof built === "string") continue;
+    if (typeof built === "string") return `transition ${name}: ${built}`;
     transitions[name] = built;
   }
   const missedHoldLeg = missed.find(l => "ident" in l && l.hold?.path === "HM");
   const hold = missedHoldLeg && "ident" in missedHoldLeg ? missedHoldLeg.hold : undefined;
   const chart = PROCEDURE_CHARTS[`${icao} ${ident}`];
-  const mapAngle = extras(map).verticalAngleDeg;
+  const mapAngle = codedVerticalAngle(map.verticalAngle);
   let visualSegment: ProcedureEndpoint["visualSegment"];
   if (isRunway) visualSegment = { kind: "RUNWAY", validated: true, source: "the MAP is the runway threshold (coded)" };
   else {
@@ -488,7 +435,8 @@ function buildApproach(icao: string, ident: string, records: ProcedureRecord[], 
         : { basis: "HELIPORT SECTION", source: `a heliport-section approach (${icao}): point-in-space by its section` },
   };
   return {
-    kind: "APPROACH", airport: icao, ident, runways: isRunway ? [map.fix] : [], transitions, legs: approachLegs, approachType: "RNAV",
+    kind: "APPROACH", airport: icao, ident, runways: isRunway ? [map.fix] : [], transitions, legs: approachLegs,
+    approachType: "RP".includes(finalType) ? "RNAV" : "NQ".includes(finalType) ? "NDB" : "VOR",
     faf: final.find(r => r.description[3] === "F")?.fix, missed,
     ...(hold ? {
       missedHold: {

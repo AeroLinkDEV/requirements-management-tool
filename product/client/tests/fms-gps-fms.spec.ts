@@ -1,6 +1,6 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
-import { distanceNm, type LatLon } from '../src/fmsCdu/fmsModel'
+import { distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import type { GpsBus, GpsReceiver } from '../src/fmsCdu/gps'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
@@ -75,6 +75,9 @@ test('on an RNAV approach a receiver reporting no approach level gives NO APPR I
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
   for (let i = 0; i < 3; i += 1) unit.sequence()
+  unit.directTo('FERDI'); unit.press('EXEC')
+  unit.placeAircraft({ position: offset(unit.coordinates('FERDI')!, 251, 1.9), altitude: 2000, track: 71 }, 'test: armed approach before FAF')
+  unit.armApproach()
   advance(1000)
   expect(unit.flightPhase).toBe('APPROACH')
   expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(false)

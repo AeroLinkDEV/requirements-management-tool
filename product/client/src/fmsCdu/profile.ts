@@ -63,7 +63,7 @@ const p = (value: number, unit: string, basis: ParameterBasis, source: string, i
 
 export const HELICOPTER_PROFILE: AircraftProfile = {
   id: "cma9000-s300-heli-civil",
-  version: 3,
+  version: 4,
   title: "CMA-9000 helicopter, civil SAR target (S/W -300 baseline)",
   aircraftType: "ROTOR",
   operationalProgram: "169-614876-300 (M300, Pub. 9000-GEN-0150 Rev 2)",
@@ -92,6 +92,11 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     drHeadingUncertainty: p(1, "deg", "lab", "DR heading uncertainty allowance", true),
     drNoAirGrowth: p(10, "NM/h", "lab", "position held without air data, with growing uncertainty", true),
     windRadioMaxGap: p(10, "s", "lab", "maximum successive radio-fix interval for computed wind", true),
+    idfCrossingTolerance: p(0.1, "NM", "lab", "PinS IDF crossing proximity; no obstacle/protection claim", true),
+    approachPredictionAge: p(60, "s", "lab", "maximum age of the simulated FAF/MAP integrity prediction", true),
+    afRadiusTolerance: p(0.15, "NM", "lab", "AF import consistency allowance for 0.1-NM rho coding", true),
+    rfRadiusTolerance: p(0.02, "NM", "lab", "RF import consistency allowance for 0.001-NM radius coding", true),
+    piSecondLegReserve: p(2.25, "NM", "lab", "short-limit PI construction reserves a full second outbound; OEM reduction formula unpublished", true),
     // Speeds and regimes
     cruiseSpeed: p(120, "kt", "lab", "crew-selected cruise speed (KIAS for the helicopter AFCS)", true),
     planningCruiseTas: p(130, "kt TAS", "sourced", "M300 3-19 PLAN DATA CRZ TAS default for ROTOR (planning data; v1 predicts only in the air)", true),
