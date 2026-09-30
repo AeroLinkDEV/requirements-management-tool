@@ -705,4 +705,5 @@ test('C.10: the executed 87N approach shows its chart notes on the Nav data tab,
   await expect(items).toHaveCount(9)
   await expect(items.nth(1)).toHaveText('Procedure NA at night.')
   await expect(items.nth(5)).toHaveText('Limit final and missed approach to 70K.')
-  await expect(items.nth(8)).toHaveText('LNAV MDA 560-1.')})
+  await expect(items.nth(8)).toHaveText('LNAV MDA 560-1.')
+})
