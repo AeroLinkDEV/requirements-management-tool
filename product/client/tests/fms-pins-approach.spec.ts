@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { parseArinc424 } from '../src/fmsCdu/arinc424'
-import type { Leg } from '../src/fmsCdu/fmsModel'
+import { courseDeg, distanceNm, type Leg } from '../src/fmsCdu/fmsModel'
 import { tasFromIas } from '../src/fmsCdu/kinematics'
 import { procedureSpeedLimit } from '../src/fmsCdu/procedureSpeed'
 import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
@@ -125,6 +125,25 @@ test('an at-or-above value is a minimum, not a limit', () => {
   const approach = r190()
   const raised = { ...approach, legs: approach.legs.map((leg, i) => (i === 0 ? { ...leg, speedLimit: { kt: 70, descriptor: 'AT OR ABOVE' as const } } : leg)) }
   expect(procedureSpeedLimit(raised, undefined, { kind: 'wpt', ident: 'STAYS', source: 'APPR' }, 1700)).toBeNull()
+})
+
+test('Astra F2: the forecast flies each leg ahead at the limit in force on it, not at cruise', () => {
+  const unit = flying(PINS, '87N', 'R190', 'HTO')
+  // Still before TIDUE: STAYS to CRANN is two legs ahead, flown under the 70 KIAS limit from TIDUE.
+  sequenceTo(unit, 'TIDUE')
+  const points = unit.profile().points
+  const at = (ident: string) => points.find(p => p.ident === ident)!
+  const stays = unit.coordinates('STAYS')!, crann = unit.coordinates('CRANN')!
+  // The leg starts from STAYS's 1700 ft: 70 KIAS as TAS there, over the ground in the present wind.
+  const groundSpeed = unit.groundSpeedOn(courseDeg(stays, crann), tasFromIas(70, 1700))
+  const expected = (distanceNm(stays, crann) / groundSpeed) * 3_600_000
+  expect(at('CRANN').eta! - at('STAYS').eta!).toBeCloseTo(expected, -2)
+  // Not the cruise speed: about 90 s at 120 KTAS against about 150 s at 70 KIAS in still air.
+  expect(at('CRANN').eta! - at('STAYS').eta!).toBeGreaterThan((distanceNm(stays, crann) / unit.groundSpeedOn(courseDeg(stays, crann), 110)) * 3_600_000)
+  // The missed approach leg to BEADS starts from the CA's 439 ft, below the 2,000 ft release: still 70 KIAS.
+  const crannToBeads = at('BEADS').eta! - at('CRANN').eta!
+  const beadsTas = tasFromIas(70, 439)
+  expect(crannToBeads).toBeGreaterThan((distanceNm(crann, unit.coordinates('BEADS')!) / unit.groundSpeedOn(courseDeg(crann, unit.coordinates('BEADS')!), beadsTas + 15)) * 3_600_000)
 })
 
 test('in the FMS the limit in force caps the planned speed, and LEGS shows the coded limits', () => {
