@@ -558,7 +558,13 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           { left: small(` ${fms.angleText(nextLeg?.course)}`) },
           { left: { text: pad(ident(next), 5), color: "green" }, right: medium(nextLeg ? `${fixed(toDistance + nextLeg.distance, 1)}NM ${eta(1, toDistance + nextLeg.distance)}` : "") },
           caption("TRUE WIND", "TK/GS "),
-          { left: medium(` ${three(fms.wind.direction)}T/ ${fms.wind.speed}KT`), right: medium(`${fms.angleText(fms.track)}/${Math.round(fms.groundSpeed)}KT`) },
+          // Preserve the system-wind computation/manual-entry rule and the TRUE wind reference.
+          {
+            left: fms.windComputed
+              ? medium(` ${three(fms.systemWind.direction)}T/ ${fms.systemWind.speed}KT`)
+              : { text: ` ${three(fms.systemWind.direction)}T/ ${fms.systemWind.speed}KT`, color: fms.manualWindEntered ? "cyan" : "white" },
+            right: medium(`${fms.angleText(fms.track)}/${Math.round(fms.groundSpeed)}KT`),
+          },
           caption(undefined, "TKE/XTK "),
           { right: medium(`${fms.trackError < 0 ? "L" : "R"}${three(Math.abs(fms.trackError))}°/${fms.crossTrack < 0 ? "L" : "R"}${fixed(Math.abs(fms.crossTrack), 2)}NM`) },
           caption(`RNP/ANP ${forced ? "TEST" : nav.rnpManual === null ? fms.flightPhase : "MANUAL"}`),
@@ -609,6 +615,14 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     lsk: (fms, side, row, scratch, index) => {
       if (index === 0) {
         if (side === "R" && row === 6) { fms.open("NAV_STATUS"); return; }
+        if (side === "L" && row === 3 && scratch) {
+          // WIND: a manual entry only while the FMS cannot compute the wind; DELETE returns to the last computed wind.
+          const wind = scratch === "DELETE" ? null : /^(\d{3})\/(\d{1,3})$/.exec(scratch);
+          if (wind !== null && (!wind || Number(wind[1]) > 360 || Number(wind[2]) > 200)) return "invalid";
+          if (!fms.enterManualWind(wind ? { direction: Number(wind[1]) % 360, speed: Number(wind[2]) } : null)) return "not-allowed";
+          fms.setScratch("");
+          return;
+        }
         if (side !== "L" || row !== 5 || !scratch) return;
         // RNP: a manual value (0.01 to 30 NM) replaces the phase default until it is deleted.
         if (scratch === "DELETE") { fms.setRnp(null); fms.setScratch(""); return; }

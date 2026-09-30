@@ -745,3 +745,77 @@ test('TOGA on the approach (laboratory airline profile) drops the rest of it and
   expect(unit.activeRoute.hold).toMatchObject({ fix: 'UL502', status: 'ARMED' })
   expect(unit.goAround()).toBe(false)
 })
+
+test('E1: the wind is computed only with valid air data and a measured ground velocity (GPS velocity or two radio fixes)', () => {
+  const start = { lat: 45, lon: -75 }
+  const air = { headingTrue: 90, tasKt: 120, altitudeFt: 3000 }
+  const gps = { position: start, anp: 0.05, receiver: 1 as const, northKt: 0, eastKt: 140 }
+  const base = { dt: 1, uncertainGps: null, radio: null, radioApproved: true, rnp: 1 }
+  const navigation = new CivilNavigation(start)
+  expect(navigation.current.windComputed).toBe(false)
+  expect(navigation.update({ ...base, air, gps }).windComputed).toBe(true)
+  // No velocity words, no air data, or air data out of range: the position may be measured, the wind is not.
+  expect(navigation.update({ ...base, air, gps: { ...gps, northKt: null } }).windComputed).toBe(false)
+  expect(navigation.update({ ...base, air: null, gps }).windComputed).toBe(false)
+  expect(navigation.update({ ...base, air: { ...air, tasKt: Number.NaN }, gps }).windComputed).toBe(false)
+  // Dead reckoning: never.
+  expect(navigation.update({ ...base, air, gps: null }).windComputed).toBe(false)
+  // Radio fixes: the first gives no velocity, the second within the allowed gap does.
+  const fix = (position: typeof start, at: number) => ({ position, at, mode: 'DME/DME' as const, anp: 0.2, dmes: ['A', 'B'], vor: null })
+  expect(navigation.update({ ...base, air, gps: null, radio: fix(start, 1000) }).windComputed).toBe(false)
+  expect(navigation.update({ ...base, air, gps: null, radio: fix(offset(start, 90, 140 / 3600), 2000) }).windComputed).toBe(true)
+})
+
+test('E1: PROGRESS 1/4 takes a manual wind only while the FMS cannot compute one; it drives the predictions and never the air mass', () => {
+  const { unit, fly } = setup()
+  fly(5)
+  expect(unit.windComputed).toBe(true)
+  expect(unit.systemWind).toEqual(unit.wind)
+  unit.press('PROG')
+  const windRow = 6
+  expect(lines(unit)[5]).toMatch(/^TRUE WIND/)
+  expect(unit.screen()[windRow][1].size).toBe('medium')
+  // Computed: medium font, and no manual entry.
+  enter(unit, '090/30', 'LSK3L')
+  expect(scratch(unit)).toBe('NOT ALLOWED')
+  expect(unit.manualWindEntered).toBe(false)
+  // No GPS and no DME: dead reckoning, and no wind can be computed. The last computed wind is carried, whatever the air
+  // mass does next.
+  unit.setCondition('gpsLost', true)
+  unit.setCondition('dmeOutage', true)
+  fly(5)
+  expect(unit.navState.mode).toBe('DR')
+  expect(unit.windComputed).toBe(false)
+  const carried = { ...unit.systemWind }
+  expect(carried).toEqual({ direction: unit.wind.direction, speed: unit.wind.speed })
+  Object.assign(unit.wind, { direction: 180, speed: 40 })
+  fly(2)
+  expect(unit.systemWind).toEqual(carried)
+  unit.press('PROG')
+  expect(unit.screen()[windRow][1].size).toBe('large')
+  // The crew's wind: shown large, used by the predictions, and the air mass untouched.
+  const before = unit.profile().points[0].eta!
+  for (let i = 0; i < 12 && scratch(unit) !== ''; i += 1) unit.press('CLR')
+  enter(unit, '360/60', 'LSK3L')
+  expect(unit.manualWindEntered).toBe(true)
+  expect(unit.systemWind).toEqual({ direction: 0, speed: 60 })
+  expect(unit.wind).toEqual({ direction: 180, speed: 40 })
+  expect(lines(unit)[windRow]).toMatch(/^ 000°\/ 60KT/)
+  expect(unit.profile().points[0].eta).not.toBe(before)
+  const leg = unit.profile().points[0]
+  const course = unit.legGeometry(unit.activeRoute)[0]!.course
+  expect((leg.eta! - unit.now.getTime()) / 3_600_000).toBeCloseTo(leg.distance! / unit.groundSpeedOn(course), 6)
+  // DELETE: back to the carried wind.
+  for (let i = 0; i < 12 && scratch(unit) !== 'DELETE'; i += 1) unit.press('CLR')
+  unit.press('LSK3L')
+  expect(unit.manualWindEntered).toBe(false)
+  expect(unit.systemWind).toEqual(carried)
+  // A manual wind again, then the sensors return: the computed wind replaces it.
+  enter(unit, '360/60', 'LSK3L')
+  unit.setCondition('gpsLost', false)
+  unit.setCondition('dmeOutage', false)
+  fly(20, () => unit.windComputed)
+  expect(unit.windComputed).toBe(true)
+  expect(unit.manualWindEntered).toBe(false)
+  expect(unit.systemWind).toEqual({ direction: 180, speed: 40 })
+})

@@ -1429,7 +1429,7 @@ export class FlightSimulator {
     if (!fix) return null;
     const tas = Math.max(this.tas, tasFromIas(hold.speed, this.fms.altitude));
     const legNm = hold.legDistance ?? ((hold.legTime ?? defaultLegMinutes(this.fms.altitude)) * tas) / 60;
-    return holdGeometry(fix, hold.inbound, hold.turn, tas, this.fms.wind.speed, legNm, this.steeringLimit);
+    return holdGeometry(fix, hold.inbound, hold.turn, tas, this.fms.systemWind.speed, legNm, this.steeringLimit);
   }
 
   /**
@@ -1466,7 +1466,7 @@ export class FlightSimulator {
     const plan = this.holdPlan!;
     const fms = this.fms;
     // The wind rising to the airspeed mid-circuit: no pattern can be flown from here either.
-    if (fms.wind.speed >= this.tas) {
+    if (fms.systemWind.speed >= this.tas) {
       this.unableHold();
       return { legFrom: null, legTo: fms.coordinates(hold.fix) ?? null, desiredTrack: fms.track, crossTrack: 0, distanceToGo: 0, bankCommand: 0 };
     }

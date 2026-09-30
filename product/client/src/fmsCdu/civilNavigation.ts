@@ -6,7 +6,13 @@ import { HELICOPTER_PROFILE, type AircraftProfile } from "./profile";
 
 export type PositionMeasurement = { position: LatLon; anp: number; receiver: 1 | 2; northKt: number | null; eastKt: number | null };
 export type CivilSolution = { position: LatLon; mode: NavMode; anp: number; gpsSource: 1 | 2 | null;
-  dmes: string[]; vor: string | null; uncertain: boolean; airValid: boolean };
+  dmes: string[]; vor: string | null; uncertain: boolean; airValid: boolean;
+  /**
+   * Whether this update computed the wind: valid air data (TAS and heading) and a measured ground velocity (a GPS
+   * with integrity and valid velocity words, or two radio fixes close enough in time). Otherwise the FMS cannot
+   * compute the wind (M300 12-22), and dead reckoning carries the last one.
+   */
+  windComputed: boolean };
 
 /** The estimator has no aircraft-truth input. Values for uncertainty growth are declared bench assumptions. */
 export class CivilNavigation {
@@ -16,7 +22,7 @@ export class CivilNavigation {
   private readonly parameters: AircraftProfile["parameters"];
   constructor(initial: LatLon, parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters) {
     this.parameters = parameters;
-    this.solution = { position: { ...initial }, mode: "DR", anp: 1, gpsSource: null, dmes: [], vor: null, uncertain: true, airValid: false };
+    this.solution = { position: { ...initial }, mode: "DR", anp: 1, gpsSource: null, dmes: [], vor: null, uncertain: true, airValid: false, windComputed: false };
   }
   get current(): CivilSolution { return structuredClone(this.solution); }
   get windEstimate() { return { ...this.wind }; }
@@ -48,10 +54,11 @@ export class CivilNavigation {
     if (gps) {
       this.previousRadio = null;
       this.solution = { position: { ...gps.position }, mode: "GPS", anp: Math.max(0.02, anp), gpsSource: gps.receiver,
-        dmes: radio?.dmes ?? [], vor: radio?.vor ?? null, uncertain, airValid };
+        dmes: radio?.dmes ?? [], vor: radio?.vor ?? null, uncertain, airValid, windComputed: false };
       if (airValid && !uncertain && gps.northKt !== null && gps.eastKt !== null) {
         const heading = air!.headingTrue * Math.PI / 180;
         this.wind = { north: gps.northKt - air!.tasKt * Math.cos(heading), east: gps.eastKt - air!.tasKt * Math.sin(heading) };
+        this.solution.windComputed = true;
       }
     } else if (radio && input.radioApproved) {
       const previous = this.previousRadio;
@@ -63,8 +70,9 @@ export class CivilNavigation {
         const heading = air!.headingTrue * Math.PI / 180;
         this.wind = { north: north - air!.tasKt * Math.cos(heading), east: east - air!.tasKt * Math.sin(heading) };
       }
+      const windComputed = airValid && previous !== null && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value;
       if (!previous || radio.at > previous.at) this.previousRadio = { position: { ...radio.position }, at: radio.at };
-      this.solution = { ...radio, gpsSource: null, uncertain: false, airValid };
+      this.solution = { ...radio, gpsSource: null, uncertain: false, airValid, windComputed };
     } else {
       this.previousRadio = null;
       const dt = Math.max(0, Number.isFinite(input.dt) ? input.dt : 0);
@@ -80,7 +88,7 @@ export class CivilNavigation {
       const growth = airValid ? Math.hypot(this.parameters.drWindUncertainty.value, this.parameters.drTasUncertainty.value,
         air!.tasKt * Math.sin(this.parameters.drHeadingUncertainty.value * Math.PI / 180)) : this.parameters.drNoAirGrowth.value;
       this.solution = { position, mode: "DR", anp: this.solution.anp + growth * dt / 3600,
-        gpsSource: null, dmes: [], vor: null, uncertain: true, airValid };
+        gpsSource: null, dmes: [], vor: null, uncertain: true, airValid, windComputed: false };
     }
     return this.current;
   }
