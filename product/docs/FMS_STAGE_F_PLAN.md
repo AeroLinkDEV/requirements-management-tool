@@ -1,7 +1,7 @@
 # FMS Test Bench Stage F: radio data, sensors and integrity (plan)
 
 - **Status:** draft for review, revision 2. This is a plan, not an implementation.
-- **Revision 2 (30 Sep, evening):** answers Astra's review of revision 1 (d0e7ef27), items SF-01 to SF-08 and the integration list. It also records Sean's clarification of DEC-150 item 2 (KALMAN expiry). The main changes are:
+- **Revision 2 (30 Sep, evening):** answers Astra's review of revision 1 (d0e7ef27), items SF-01 to SF-08 (SF-08 drafted by session 4) and the integration list. It also records Sean's clarification of DEC-150 item 2 (KALMAN expiry). The main changes are:
   - §3 now opens with the contracts every item reads (C1 values and consumers, C2 KALMAN and DVS inputs and clocks, C3 radio ownership, C4 the output vocabulary);
   - F3 now carries the transition table itself;
   - F5's worked cases are corrected;
@@ -284,24 +284,71 @@ A mode or display is not delivered while a value it needs is absent from the voc
 
 Each item has an exit condition and named owner tests. Tests go in new spec files per feature (the 30 Sep rule). The existing GPS-selection and approach-authority owner files keep their contracts; a Stage F item adds only the newly exposed failure to them. A proposed test name or count is not evidence: rows become Met only on executed, recorded runs.
 
-### F1. Navaid data prerequisite
+### F1. Navaid data prerequisite (with the elevation contract, SF-08; drafted by session 4)
 
-- Read DME-only stations, taking the DME position from ARINC 424 columns 56–74.
-- Read station elevation, and channel/frequency identity (including the TACAN channel and its VHF pairing).
-- Read a co-located DME's own position.
-- Missing data gives an explicit **unavailable** or **assumed** state: never a silent zero elevation.
+**Read from the ARINC 424 VHF navaid record (4.1.2).** The class is read positionally: column 28 is the VOR; column 29 is D for DME, T or M for TACAN, I for ILS/DME, and N or P for MLS/DME.
+- DME-only stations, placed at their DME position (columns 56–74). This includes an ILS's DME.
+- TACAN stations (DEC-150: on). A TACAN-only station is placed at its DME.
+- The station's DME elevation (columns 80–84).
+- A co-located DME's own position, where it differs from the VOR's.
+- The DME/TACAN channel of the frequency's standard pairing (ICAO Annex 10 Vol I, Attachment C, Table A).
 
-*(The elevation contract, SF-08, is being drafted by session 4 and merges here.)*
+**Elevation contract.**
+
+**Datum and units:** feet above mean sea level. Terrain heights are in metres above the geoid and are taken as MSL.
+
+**Sources, in order:**
+- **`data`:** the record's DME elevation. Provenance: "ARINC 424 DME elevation (columns 80–84)".
+- **`terrain`:** the ground elevation at an invented demonstration site, from the Terrarium tiles (zoom 14, with their date read).
+  - It applies only to the invented demonstration navaids, which have no navigation data.
+  - Its provenance says it is the ground's height, **not the antenna's**.
+- **`assumed`:** used when nothing is available (a blank field, or a VOR-only record, which carries no DME elevation). 0 ft is used and stated as assumed. It is never a silent zero.
+
+**Allowances:**
+- 100 ft for `terrain`: the unknown mast height of 10–30 m, plus SRTM's ~16 m vertical accuracy at 90%.
+- 1,000 ft for `assumed`.
+- `data` has none.
+
+Both allowances are named profile parameters (`terrainNavaidElevationUncertainty` and `assumedNavaidElevationUncertainty`, basis `lab`, with provenance stated).
+- They are **engineering allowances for a bounded demonstration**.
+- They are not 95% accuracy bounds and not integrity containment bounds, and they cannot bound an unknown station elevation in general.
+- The ANP they feed is the simulator's error model, not a validated installation accuracy.
+
+**Propagation through the geometry.**
+- The horizontal range is `r = √(s² − Δh²)`, where `s` is the slant range and `Δh` is the aircraft's height above the station.
+- With an allowance `a`, the height lies in `[max(0, |Δh| − a), |Δh| + a]`.
+- The range therefore lies in `[√(s² − (|Δh| + a)²), √(s² − max(0, |Δh| − a)²)]`, and its allowance is the larger departure from `r`. This is exact, not first-order.
+- The same vertical allowance costs more horizontally the nearer the aircraft is to overhead, so a fixed elevation allowance is not a fixed horizontal accuracy.
+
+**Refusals.** A range is refused, not clipped, and the fix names it with its reason:
+- `s ≤ |Δh|`: impossible geometry;
+- `s ≤ |Δh| + a`: near overhead. The allowance could explain the whole slant range, so the horizontal range is undetermined;
+- values that are not finite, and negative slant ranges or allowances.
 
 **Exit:**
-- the slant-range correction uses station elevation;
-- a DME-only facility is available to DME/DME;
-- the loader refuses malformed DME records, stating the reason.
+- the slant-range correction uses the station elevation and the DME's own position;
+- a DME-only or TACAN facility is available to DME/DME;
+- the loader refuses malformed DME records, stating the reason;
+- a range with a non-data elevation is named in the fix and widens its ANP (C1's accuracy95Nm) by the propagated allowance;
+- impossible and undetermined geometry is refused and reported.
 
-**Owner tests:** `fms-navaid-data.spec.ts`:
-- "a DME-only record is read with its own position and elevation";
-- "slant range uses the station elevation";
-- "a navaid without elevation is marked assumed and the solution's accuracy says so".
+**Owner tests** (`fms-navaid-data.spec.ts`, independent values):
+- "a DME-only record is read with its own position and elevation": KBTV IBTV, 342 ft, 40X;
+- VOR/DME and VORTAC data: BTV 417 ft 122X, HTO 22 ft 83X, and COL's separate DME;
+- "the slant range is measured over the height above the station": a DME on a 3,000 ft summit;
+- DME/DME from high-ground stations:
+  - correct with elevations, and more than 0.05 NM off at sea level;
+  - with separate VOR and DME positions: correct from the DME, and more than 0.1 NM off from the VOR;
+- "a range corrected with an assumed elevation is named in the solution", with terrain widening less than assumed;
+- the exact propagation:
+  - slant 5 NM, height 1 NM, allowance 0.1 NM, against the closed form;
+  - near overhead, slant 1.2 NM: the same allowance costs more than eight times as much;
+- the refusals, each with its reason, including the exact boundary `s = |Δh| + a`;
+- a fix leaving out a refused station and naming it;
+- the Annex 10 channel pairing table;
+- a TACAN's range serving DME/DME.
+
+**Contract change for other items:** `Navaid.elevation` is required, with the shape `{ feet, source: data | terrain | assumed, provenance }`. Anything that builds a navaid supplies it (F0, F2 and the bench's demonstration navaids).
 
 ### F2. The sensor state is split (C1, C4)
 
@@ -830,7 +877,7 @@ This is the bench's implementation scope. It does not prove every installed CMA 
 | C3 | Radio ownership: DME channels, TACAN, HOLD/TEST/MAN, command status, health and reception separate | M300 12-16, 12-19, 13-3 to 13-26, App. E | fms-rms-radios | Open |
 | C4 | Output vocabulary | Bench contract; #1345, #1376 | fms-output-bus-nav | Open |
 | F0 | Stage F equipment declared, with nothing simulated for absent equipment | M300 1-4, configuration | fms-stage-f-configuration | Open |
-| F1 | DME-only navaids, station elevation, co-located DME position | ARINC 424; rev 2 F1 | fms-navaid-data | Open |
+| F1 | DME-only and TACAN navaids, station elevation with its source and allowance propagated exactly, co-located DME position, Annex 10 pairing, refusals | ARINC 424 4.1.2; ICAO Annex 10; rev 2 F1 | fms-navaid-data | Open |
 | F2 | Split sensor state and its consumers | M300 1-3, 15-3 | fms-sensor-state | Open |
 | F3 | Three selection layers; the transition table; 100 m hysteresis and its exception; immediate reversion | M300 1-3 to 1-5, 3-25 | fms-sensor-transitions | Open |
 | F4 | GPS decision table (7 rows) | M300 1-4, 3-26, E-8 | fms-gps-decision | Partial (#1243, #1251) |
@@ -879,10 +926,11 @@ No functional questions remain open for this plan. Astra reviews it before any S
 
 ## 8. Reconciling the locally built pieces
 
-Local, unpushed branches exist for F0, F2, F8a (the RMS extension), F8b (the NAV and ADF pages) and F11. They were built against revision 1. Before any of them is proposed, each changes as follows:
+Local, unpushed branches exist for F0, F1 (session 4), F2, F8a (the RMS extension), F8b (the NAV and ADF pages) and F11. Most were built against revision 1. Before any of them is proposed, each changes as follows:
 
 | Piece | What it changes to meet this revision |
 |---|---|
+| F1 | Built by session 4 to this section's contract. `Navaid.elevation` becomes required, so every navaid builder in the other pieces supplies it on rebase. |
 | F0 | The external head is declared off with its pages guarded. The KALMAN row carries the clarification. |
 | F2 | The GPS entry's integrity bound stays the receiver HIL. The NAIM comparison moves out of `integrityNm` into its own laboratory field. Every consumer reads per C1's table. The GPS measurement's HFOM-or-HIL fallback for ANP goes. |
 | F8a | Radio health separates CONTROL LOST (timeout, reception kept) from FAIL/SILENT. REJECTED and SUPERSEDED command states are added. DME channels and HOLD and TEST per C3. A TACAN device. No ADF alert when untuned. |
