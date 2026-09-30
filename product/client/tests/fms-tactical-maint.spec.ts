@@ -3,7 +3,9 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import { iasFromTas } from '../src/fmsCdu/kinematics'
 import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
-import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { RENDEZVOUS_RANGE_NM, ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { fmsOutputs } from '../src/fmsCdu/efis'
+import { runHeadless, type Scenario } from '../src/fmsCdu/scenario'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import { NO_SURFACE, OFFSHORE_87N, radioHeight } from '../src/fmsCdu/surface'
 import type { CduFunction } from '../src/fmsCdu/variants'
@@ -242,4 +244,148 @@ test('the HOVER page shows the radio altimeter, dashes without a surface or with
   unit.setCondition('raFail', true)
   expect(radAlt()).toMatch(/^\s*----FT/)
   expect(unit.declareSurface('nowhere')).toBe(false)
+})
+
+// ------------------------------------------------------------------ the rendezvous with a moving waypoint (M300 11-37)
+
+/** A moving waypoint SHIP1 placed `nm` from the aircraft on `bearing`, moving on `track` at `speed`, flown direct. */
+function shipDirect(run: ReturnType<typeof setup>, bearing: number, nm: number, track: number, speed: number) {
+  const { unit } = run
+  Object.assign(unit.wind, { direction: 0, speed: 0 })
+  run.fly(1)
+  const ship = offset(unit.position, bearing, nm)
+  unit.defineMoving('SHIP1', ship, track, speed)
+  expect(unit.directTo('SHIP1')).toBeUndefined()
+  unit.press('EXEC')
+  return ship
+}
+
+test('D-R: the rendezvous is the intercept point with the moving waypoint\'s trajectory, flown straight at the ground speed (M300 11-37)', () => {
+  const run = setup()
+  const { unit } = run
+  // SHIP1 20 NM north, moving east at 60 kt, in still air: the intercept is where (60 t)² + 20² = (V t)².
+  const ship = shipDirect(run, 0, 20, 90, 60)
+  const tas = unit.trueAirspeed!
+  const hours = 20 / Math.sqrt(tas * tas - 60 * 60)
+  const rendezvous = unit.rendezvousFor(unit.activeRoute, 0)!
+  expect(rendezvous).toMatchObject({ achievable: true, condition: 1 })
+  expect(rendezvous.ttg!).toBeCloseTo(hours * 3600, 0)
+  expect(rendezvous.distanceNm!).toBeCloseTo(tas * hours, 2)
+  expect(distanceNm(rendezvous.position!, offset(ship, 90, 60 * hours))).toBeLessThan(0.01)
+  // The route flies to the rendezvous point, not to where the ship is now; the MOVING WPT page shows the ship itself.
+  expect(distanceNm(unit.coordinates('SHIP1')!, rendezvous.position!)).toBeLessThan(1e-9)
+  expect(distanceNm(unit.movingPositionNow('SHIP1')!, ship)).toBeLessThan(0.02)
+})
+
+test('D-R: the rendezvous is determined again every 10 s while the time to go is over one minute, then kept; the aircraft meets the ship', () => {
+  const run = setup()
+  const { unit } = run
+  shipDirect(run, 30, 12, 90, 40)
+  const computed: { at: number; ttg: number }[] = []
+  let met = Infinity
+  run.fly(1800, () => {
+    const r = unit.rendezvousFor(unit.activeRoute, 0)
+    if (!r) return true
+    if (computed.at(-1)?.at !== r.computedAt) computed.push({ at: r.computedAt, ttg: r.ttg! })
+    met = Math.min(met, distanceNm(unit.position, unit.movingPositionNow('SHIP1')!))
+    return false
+  })
+  expect(active(unit)).not.toBe('SHIP1')
+  // Every 10 s while the time to go was over a minute, none after.
+  const gaps = computed.slice(1).map((c, i) => (c.at - computed[i].at) / 1000)
+  expect(gaps.every(gap => gap === 10)).toBe(true)
+  expect(computed.slice(0, -1).every(c => c.ttg > 60)).toBe(true)
+  expect(computed.at(-1)!.ttg).toBeLessThanOrEqual(70)
+  expect(computed.length).toBeGreaterThan(5)
+  // Flown to the rendezvous point, the aircraft passes close to the ship itself.
+  expect(met).toBeLessThan(0.3)
+})
+
+test('D-R: no interception within 500 NM is unachievable; as the active waypoint, the alert, guidance toward the ship and the roll command invalid', () => {
+  const run = setup()
+  const { unit, sim } = run
+  run.sim.armLnav?.()
+  // A ship 600 NM away, almost stationary: beyond 500 NM of travel.
+  shipDirect(run, 0, 600, 0, 1)
+  run.fly(1)
+  const rendezvous = unit.rendezvousFor(unit.activeRoute, 0)!
+  expect(rendezvous).toMatchObject({ achievable: false, condition: 1, position: null })
+  expect(recalled(unit, 'RENDEZVOUS UNACHIEVABLE')).toBe(true)
+  expect(fmsOutputs(unit, sim).rollCommand.status).toBe('NCD')
+  expect(sim.lateralMode).not.toBe('LNAV')
+  // Guidance is toward the ship itself.
+  expect(distanceNm(unit.coordinates('SHIP1')!, unit.movingPositionNow('SHIP1')!)).toBeLessThan(1e-9)
+  // At 480 NM it is within reach.
+  const near = setup()
+  shipDirect(near, 0, 480, 0, 1)
+  expect(near.unit.rendezvousFor(near.unit.activeRoute, 0)).toMatchObject({ achievable: true })
+  expect(near.unit.rendezvousFor(near.unit.activeRoute, 0)!.distanceNm!).toBeLessThanOrEqual(RENDEZVOUS_RANGE_NM)
+  // A ship faster than the aircraft running away is never reached, however close.
+  const away = setup()
+  shipDirect(away, 0, 5, 0, 400)
+  expect(away.unit.rendezvousFor(away.unit.activeRoute, 0)).toMatchObject({ achievable: false })
+})
+
+test('D-R: later in the active route, or in the modified route, an unachievable rendezvous is an advisory, not an alert (conditions 2 to 4)', () => {
+  // Condition 4: SHIP1 is the first waypoint of the modification (a direct-to not yet executed).
+  const four = setup()
+  Object.assign(four.unit.wind, { direction: 0, speed: 0 })
+  four.unit.defineMoving('SHIP1', offset(four.unit.position, 0, 600), 0, 1)
+  expect(four.unit.directTo('SHIP1')).toBeUndefined()
+  four.fly(1)
+  expect(four.unit.rendezvousFor(four.unit.route, 0)).toMatchObject({ achievable: false, condition: 4 })
+  expect(scratch(four.unit)).toBe('RENDEZVOUS UNACHIEVABLE')
+  expect(recalled(four.unit, 'RENDEZVOUS UNACHIEVABLE')).toBe(false)
+  // Condition 3: after the first waypoint of the modification; condition 2 once executed, still not the active waypoint.
+  const later = setup()
+  const { unit } = later
+  Object.assign(unit.wind, { direction: 0, speed: 0 })
+  unit.defineMoving('SHIP1', offset(unit.position, 0, 700), 0, 1)
+  press(unit, 'LEGS')
+  enter(unit, 'SHIP1', 'LSK2L')
+  const at = unit.route.legs.findIndex(leg => leg.kind === 'wpt' && leg.ident === 'SHIP1')
+  expect(at).toBeGreaterThan(0)
+  later.fly(1)
+  expect(unit.rendezvousFor(unit.route, at)).toMatchObject({ achievable: false, condition: 3 })
+  unit.press('EXEC')
+  later.fly(1)
+  expect(unit.rendezvousFor(unit.activeRoute, at)).toMatchObject({ achievable: false, condition: 2 })
+  expect(recalled(unit, 'RENDEZVOUS UNACHIEVABLE')).toBe(false)
+})
+
+test('D-R: a moving waypoint never expires, and its age is the simulation time since its entry', () => {
+  const run = setup()
+  const { unit } = run
+  unit.defineMoving('SHIP1', offset(unit.position, 0, 10), 90, 10)
+  expect(unit.movingAge('SHIP1')).toBe(0)
+  run.advance(6 * 3_600_000)
+  expect(unit.movingAge('SHIP1')).toBe(6 * 3600)
+  // Six hours on it is still defined, 60 NM east of where it was entered.
+  expect(unit.movingWaypoints.SHIP1).toEqual({ track: 90, speed: 10 })
+  expect(unit.movingPositionNow('SHIP1')).toBeDefined()
+})
+
+test('D-R: a restarted scenario restores the moving waypoint\'s epoch from its own clock, never the wall clock', () => {
+  // SHIP1 is entered on the MOVING WPT page at scenario time 60 s; the run is replayed from its recorded start.
+  const scenario: Scenario = {
+    id: 'moving-restart', title: 'moving restart', objective: 'epoch', maxSeconds: 600, startTime: '2026-09-27T14:00:00Z',
+    steps: [
+      { when: { kind: 'time', seconds: 60 }, action: { kind: 'keys', keys: ['INIT_REF', 'NEXT', 'LSK6L'] } },
+      { when: { kind: 'start' }, action: { kind: 'type', text: 'SHIP1' } },
+      { when: { kind: 'start' }, action: { kind: 'keys', keys: ['LSK1L'] } },
+      { when: { kind: 'start' }, action: { kind: 'type', text: 'RDG180/5' } },
+      { when: { kind: 'start' }, action: { kind: 'keys', keys: ['LSK2L'] } },
+      { when: { kind: 'start' }, action: { kind: 'type', text: '270/20' } },
+      { when: { kind: 'start' }, action: { kind: 'keys', keys: ['LSK1R', 'LSK6R'] } },
+      // The run's last step, at 600 s.
+      { when: { kind: 'time', seconds: 600 }, action: { kind: 'keys', keys: ['PROG'] } },
+    ],
+  }
+  const first = runHeadless(scenario), again = runHeadless(scenario)
+  for (const run of [first, again]) {
+    expect(run.fms.movingWaypoints.SHIP1).toEqual({ track: 270, speed: 20 })
+    // Entered at 60 s of scenario time: at the end (600 s) it is 540 s old, whatever the wall clock was.
+    expect(run.fms.movingAge('SHIP1')).toBeCloseTo(540, 0)
+  }
+  expect(again.fms.movingPositionNow('SHIP1')).toEqual(first.fms.movingPositionNow('SHIP1'))
 })
