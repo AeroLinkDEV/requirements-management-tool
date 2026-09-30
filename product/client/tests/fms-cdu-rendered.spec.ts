@@ -16,6 +16,31 @@ const screenLines = async (page: Page) => ((await page.locator('.fmsCduScreen').
 const expectLine = async (page: Page, line: number, pattern: RegExp) =>
   expect.poll(async () => (await screenLines(page))[line] ?? '').toMatch(pattern)
 
+// Pointer owner: real ACT RTE 5L opens MOD LEGS; ERASE leaves guidance alone and the live ground input changes the preview.
+test('BACKTRACK on the actual CDU reviews airborne and ground histories before EXEC', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Jump to next waypoint' }).click()
+  const flight = page.getByRole('region', { name: 'Flight', exact: true })
+  const activeBefore = await flight.locator('.fmsBenchReadout').first().innerText()
+  await key(page, 'RTE').click()
+  await expectLine(page, 10, /^<BACKTRACK/)
+  await key(page, 'LSK5L').click()
+  await expectLine(page, 0, /^MOD RTE 1 LEGS/)
+  await expect(page.locator('.fmsCduScreen')).toHaveAttribute('aria-label', /BT001/)
+  await expect(flight.locator('.fmsBenchReadout').first()).toHaveText(activeBefore)
+  await key(page, 'LSK6L').click()
+  await expectLine(page, 0, /^ACT RTE 1 LEGS/)
+  await expect(page.locator('.fmsCduLamp[data-lamp="EXEC_LIGHT"]')).not.toHaveClass(/\blit\b/)
+  await page.getByLabel('On ground (live bench input)', { exact: true }).check()
+  await key(page, 'RTE').click(); await key(page, 'LSK5L').click()
+  await expectLine(page, 0, /^MOD RTE 1 LEGS/)
+  await expect(page.locator('.fmsCduScreen')).not.toHaveAttribute('aria-label', /BT001|DISCONTINUITY/)
+  await page.locator('.fmsCdu').screenshot({ path: 'C:/Sean Project/fms-research/Astra-backtrack-CDU.png' })
+  await key(page, 'EXEC').click()
+  await expectLine(page, 0, /^ACT RTE 1 LEGS/)
+  await expect(page.locator('.fmsCduLamp[data-lamp="EXEC_LIGHT"]')).not.toHaveClass(/\blit\b/)
+})
+
 test('keys on the rendered panel enter data, make a modification and execute it', async ({ page }) => {
   await open(page)
   await expectLine(page, 0, /^IDENT/)

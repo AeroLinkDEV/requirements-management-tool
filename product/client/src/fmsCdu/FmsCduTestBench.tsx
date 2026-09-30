@@ -393,6 +393,8 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
 
         <section className="fmsBenchCard fmsBenchFlight" aria-label="Flight">
           <h2>Flight</h2>
+          <label><input type="checkbox" checked={guidanceBackend.onGround} disabled={recording || !!runner && !runner.finished}
+            onChange={event => system.setOnGround(event.target.checked)} /> On ground (live bench input)</label>
           <label>FMS guidance source <select aria-label="FMS guidance source" value={system.guidanceSide} disabled={recording || !!runner && !runner.finished}
             onChange={event => system.selectGuidance(Number(event.target.value) as FmsSide)}>
             <option value={1}>FMS 1</option><option value={2}>FMS 2</option>

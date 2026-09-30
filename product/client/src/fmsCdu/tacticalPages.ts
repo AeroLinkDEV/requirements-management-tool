@@ -212,7 +212,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
           ["TIAF", a.iafDistance, String(a.iafAltitude)], ["TFAF", a.fafDistance, `${tactApprFafAltitude(fms)}A`], ["TMAP", a.mapDistance, undefined],
         ];
         for (const [ident, distance] of points) fms.definePoint(ident, offset(ref, a.bearing, distance));
-        const legs: Leg[] = points.map(([ident, , altitude]) => ({ kind: "wpt", ident, altitude }));
+        const legs: Leg[] = points.map(([ident, , altitude]) => ({ kind: "wpt", ident, altitude, special: "TACTICAL" }));
         fms.replaceLegs([...legs, { kind: "disco" }, ...fms.route.legs]);
         fms.open("LEGS");
         return;
