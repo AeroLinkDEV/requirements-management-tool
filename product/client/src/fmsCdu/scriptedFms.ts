@@ -40,6 +40,10 @@ import { lowestProcedureLimit, procedureSpeedLimit, type ProcedureSpeed } from "
 import { ACTIVE_PROFILE, type AircraftProfile } from "./profile";
 import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line } from "./screen";
 import { NO_SURFACE, radioHeight, surfaceById, type Surface } from "./surface";
+import {
+  EMPTY_USER_DATABASE, USER_WAYPOINT_CAPACITY, memoryUserDatabaseStore, mergeUserDatabase, parseUserDatabase, serializeUserDatabase,
+  type UserDatabase, type UserDatabaseStore, type UserScope,
+} from "./userDatabase";
 import { TACTICAL_PAGES } from "./tacticalPages";
 import { checkAtTdn, planTransition } from "./transition";
 import { defaultLegMinutes, designBank, holdingSpeedLimit, radiusAt } from "./holds";
@@ -245,7 +249,16 @@ export class ScriptedFms implements CduBackend {
   private chosen: Record<string, number> = {};
   private selectPending: { ident: string; apply: (ident: string) => LskResult; back: { page: PageId; index: number } } | null = null;
   private pilot: { ident: string; position: LatLon; definition: string }[] = [];
+  /** The company routes the database holds (demonstration data); the crew's saved routes are the user database's. */
   private companyRoutes: StoredRoute[] = structuredClone(DEMO_COMPANY_ROUTES);
+  /** The user database (E5, userDatabase.ts): user waypoints and user routes, kept in the store for this user and profile. */
+  private userDb: UserDatabase = structuredClone(EMPTY_USER_DATABASE);
+  private userStore: UserDatabaseStore = memoryUserDatabaseStore();
+  private userScope: UserScope = { userId: "local", profileId: "" };
+  /** Why the stored user database could not be read at start (it is then left as it was, and not overwritten), or null. */
+  userDatabaseProblem: string | null = null;
+  /** A NEW USER WPT being entered on USER WPT 1/2: its ident and position, and the reference it was made from. */
+  userWaypointDraft: { ident: string | null; position: LatLon | null; ref: { ident: string; position: LatLon } | null } | null = null;
   private secondaryRoute: Route | null = null;
   /** The ident shown on REF NAV DATA, and an airway chosen on RTE 2 waiting for its TO fix. */
   navDataQuery: string | null = null;
@@ -364,9 +377,12 @@ export class ScriptedFms implements CduBackend {
   /** The aircraft profile this FMS and its flight simulation fly (profile.ts); the helicopter profile unless given. */
   readonly aircraftProfile: AircraftProfile;
 
-  constructor(clock: () => Date = () => new Date(), options: { profile?: AircraftProfile } = {}) {
+  constructor(clock: () => Date = () => new Date(), options: { profile?: AircraftProfile; userDatabase?: { store: UserDatabaseStore; scope: UserScope } } = {}) {
     this.clock = clock;
     this.aircraftProfile = options.profile ?? ACTIVE_PROFILE;
+    this.userStore = options.userDatabase?.store ?? this.userStore;
+    this.userScope = options.userDatabase?.scope ?? { userId: "local", profileId: this.aircraftProfile.id };
+    this.loadUserDatabase();
     this.planData.cruiseTas = this.aircraftProfile.parameters.planningCruiseTas.value;
     this.pinActive();
     // The receivers start warm: powered a minute before the session, past self-test, first fix and SBAS acquisition.
@@ -1551,7 +1567,9 @@ export class ScriptedFms implements CduBackend {
     return this.lookup(ident, route);
   }
 
-  private ownPoint(ident: string) { return this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position; }
+  private ownPoint(ident: string) {
+    return this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position ?? this.userDb.waypoints.find(w => w.ident === ident)?.position;
+  }
 
   /** A database position in the active cycle, looked up now: a runway in the context of the route's airports. */
   private lookup(ident: string, route: Route): LatLon | undefined {
@@ -1572,7 +1590,60 @@ export class ScriptedFms implements CduBackend {
 
   get navdb() { return this.db; }
   get pilotWaypoints() { return this.pilot; }
-  get storedRoutes() { return this.companyRoutes; }
+  /** The routes CO ROUTE can load: the user routes, then the database's company routes not shadowed by one. */
+  get storedRoutes() { return [...this.userDb.routes, ...this.companyRoutes.filter(c => !this.userDb.routes.some(u => u.name === c.name))]; }
+  get userWaypoints() { return this.userDb.waypoints; }
+  get userRoutes() { return this.userDb.routes; }
+  get userWaypointsFree() { return USER_WAYPOINT_CAPACITY - this.userDb.waypoints.length; }
+
+  private loadUserDatabase() {
+    const text = this.userStore.read(this.userScope);
+    if (text === null) return;
+    const parsed = parseUserDatabase(text);
+    if ("errors" in parsed) { this.userDatabaseProblem = `stored user database not read: ${parsed.errors[0]}`; return; }
+    this.userDb = parsed.data;
+  }
+
+  /** Writes the user database to its store; false (with an advisory) when the store refuses it. */
+  private saveUserDatabase(next: UserDatabase) {
+    if (this.userDatabaseProblem) { this.advisory("USER DB NOT SAVED"); return false; }
+    try { this.userStore.write(this.userScope, serializeUserDatabase(this.userScope, next, this.now)); }
+    catch { this.advisory("USER DB NOT SAVED"); return false; }
+    this.userDb = next;
+    return true;
+  }
+
+  /**
+   * Stores a fixed user waypoint (NEW USER WPT, CONFIRM). Refused when the ident is not 1-5 letters or digits, is
+   * already in use (a navigation database, pilot or user waypoint: the bench does not store duplicate idents, where the
+   * CMA allows them with SELECT WPT), or the database is full (460).
+   */
+  createUserWaypoint(ident: string, position: LatLon): "invalid" | "in-use" | "full" | "not-saved" | undefined {
+    if (!/^[A-Z0-9]{1,5}$/.test(ident)) return "invalid";
+    if (this.coordinates(ident)) return "in-use";
+    if (this.userWaypointsFree <= 0) return "full";
+    if (!this.saveUserDatabase({ ...this.userDb, waypoints: [...this.userDb.waypoints, { ident, position: { ...position }, type: "FIXED" }] })) return "not-saved";
+    return undefined;
+  }
+
+  /** The user database as a versioned document, to save as a file. */
+  exportUserDatabase() { return serializeUserDatabase(this.userScope, this.userDb, this.now); }
+
+  /**
+   * Imports a user database document: all of it or nothing. A malformed document, a collision with a stored entry of
+   * the same ident, or an ident in use elsewhere writes nothing and says why.
+   */
+  importUserDatabase(text: string): { imported: { waypoints: number; routes: number } } | { refused: string[] } {
+    const parsed = parseUserDatabase(text);
+    if ("errors" in parsed) return { refused: parsed.errors };
+    const merged = mergeUserDatabase(this.userDb, parsed.data);
+    const clashes = parsed.data.waypoints.filter(w => !this.userDb.waypoints.some(u => u.ident === w.ident) && this.coordinates(w.ident))
+      .map(w => `${w.ident} is already a navigation database or pilot waypoint`);
+    const collisions = [...merged.collisions, ...clashes];
+    if (collisions.length) return { refused: collisions };
+    if (!this.saveUserDatabase(merged.data)) return { refused: ["the store refused the write"] };
+    return { imported: { waypoints: merged.addedWaypoints, routes: merged.addedRoutes } };
+  }
   get secondary() { return this.secondaryRoute; }
   get selection() { return this.selectPending; }
 
@@ -1705,7 +1776,7 @@ export class ScriptedFms implements CduBackend {
 
   /** Loads a company route into the active route (as a MOD) or into the secondary flight plan. */
   loadCompanyRoute(name: string, target: "active" | "secondary" = "active"): boolean {
-    const stored = this.companyRoutes.find(route => route.name === name);
+    const stored = this.storedRoutes.find(route => route.name === name);
     if (!stored) return false;
     const build = (route: Route) => {
       route.origin = stored.origin;
@@ -1724,7 +1795,9 @@ export class ScriptedFms implements CduBackend {
   saveCompanyRoute() {
     const route = this.route;
     const legs = enrouteLegs(route).flatMap(leg => (leg.kind === "wpt" ? [{ ident: leg.ident, via: leg.via, altitude: leg.altitude }] : []));
-    this.companyRoutes = [...this.companyRoutes.filter(stored => stored.name !== route.coRoute), { name: route.coRoute, origin: route.origin, dest: route.dest, legs }];
+    // A user route (E5): kept in the user database for this user and profile, replacing one of that name.
+    const saved: StoredRoute = { name: route.coRoute, origin: route.origin, dest: route.dest, legs: legs.map(leg => ({ ident: leg.ident, ...(leg.via ? { via: leg.via } : {}), ...(leg.altitude ? { altitude: leg.altitude } : {}) })) };
+    this.saveUserDatabase({ ...this.userDb, routes: [...this.userDb.routes.filter(stored => stored.name !== route.coRoute), saved] });
   }
 
   copyActiveToSecondary() { this.secondaryRoute = structuredClone({ ...this.active, hold: undefined }); }

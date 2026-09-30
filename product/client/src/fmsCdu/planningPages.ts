@@ -302,11 +302,12 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
         lines[4] = { left: boxes(15) };
       }
       lines[11] = { left: small(` NAV DATA ${fms.activeCycle.id}`, "green") };
-      lines[12] = { left: back("INDEX") };
+      lines[12] = { left: back("INDEX"), right: prompt("NEW USER WPT>") };
       return lines;
     },
     lsk: (fms, side, row, scratch) => {
       if (side === "L" && row === 6) { fms.open("INIT_REF"); return; }
+      if (side === "R" && row === 6) { fms.userWaypointDraft = { ident: null, position: null, ref: null }; fms.open("USER_WPT"); return; }
       if (side === "L" && row === 2 && scratch && fms.navDataQuery && !fms.navdb.find(fms.navDataQuery).length) {
         const resolved = /^[NS]\d{2}/.test(scratch) ? fms.resolveWaypoint(scratch) : "invalid";
         if (typeof resolved === "string" || "select" in resolved) return "invalid";

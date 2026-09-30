@@ -1317,7 +1317,7 @@ function App() {
       />
     );
   if (view === "fmsCdu" && project)
-    return inShell(<FmsCduTestBench />);
+    return inShell(<FmsCduTestBench userName={user.userName} />);
   if (view === "teamwork" && project)
     return inShell(<TeamWork api={API} projectId={project.project.id} user={user} />);
   if (view === "admin" && active)

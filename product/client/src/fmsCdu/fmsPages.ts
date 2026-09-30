@@ -789,11 +789,80 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         lines[2 + i * 2] = { left: { text: mark.ident, color: "green" }, right: medium(formatPosition(mark.position)) };
       });
       if (!fms.markList.length) lines[2] = { left: medium("NONE") };
+      // M300 11-31: NEW USER WPT takes the most recent mark on top to USER WPT 1/2 as its reference.
+      lines[12] = { left: prompt("<NEW USER WPT") };
       return lines;
     },
     lsk: (fms, side, row, scratch, index) => {
+      if (index === 1 && side === "L" && row === 6) {
+        const mark = fms.markList.at(-1);
+        fms.userWaypointDraft = { ident: null, position: mark ? { ...mark.position } : null, ref: mark ? { ident: "ONTOP", position: { ...mark.position } } : null };
+        fms.open("USER_WPT");
+        return;
+      }
       const wpt = index === 1 ? fms.markList.slice(-5)[row - 1] : fms.pilotWaypoints.slice(-5)[row - 1];
       if (side === "L" && wpt && !scratch) fms.setScratch(wpt.ident);
+    },
+  },
+
+  // The user database (E5; M300 11-23…11-31): USER WPT 1/2 enters a fixed user waypoint (an ident and a position, or
+  // the reference a mark on top gave), SAVE? CONFIRM stores it for this user and profile; 2/2 lists what is stored.
+  USER_WPT: {
+    pages: () => 2,
+    render: (fms, index) => {
+      const lines: (Line | undefined)[] = [title("USER WPT", `${index + 1}/2`)];
+      if (index === 1) {
+        lines[1] = caption(" ID", "TYPE ", `FREE=${fms.userWaypointsFree}`);
+        fms.userWaypoints.slice(-5).forEach((wpt, i) => { lines[2 + i * 2] = { left: { text: wpt.ident, color: "green" }, right: medium("WAYPOINT") }; });
+        if (!fms.userWaypoints.length) lines[2] = { left: medium("NO USER WAYPOINTS") };
+        lines[12] = { left: prompt("<WPT DATA") };
+        return lines;
+      }
+      const draft = fms.userWaypointDraft ?? { ident: null, position: null, ref: null };
+      lines[1] = caption(" ID/POS", `FREE=${fms.userWaypointsFree} `);
+      lines[2] = { left: draft.ident ? { text: draft.ident } : boxes(5), right: draft.position ? medium(formatPosition(draft.position)) : boxes(15) };
+      lines[5] = caption(" TYPE");
+      lines[6] = { left: medium(">FIXED") };
+      lines[7] = caption(" REF WPT ID");
+      lines[8] = { left: medium(draft.ref ? draft.ref.ident : "-----") };
+      lines[9] = caption(" REF WPT POS");
+      lines[10] = { left: medium(draft.ref ? formatPosition(draft.ref.position) : "---°--.-- ----°--.--") };
+      const complete = draft.ident !== null && draft.position !== null;
+      lines[11] = complete ? caption(undefined, "SAVE? ") : undefined;
+      lines[12] = complete ? { left: prompt("<CANCEL"), right: prompt("CONFIRM>") } : { left: prompt("<WPT DATA"), right: prompt("WPT LIST>") };
+      return lines;
+    },
+    lsk: (fms, side, row, scratch, index) => {
+      if (index === 1) { if (side === "L" && row === 6) fms.open("NAV_DATA"); return; }
+      const draft = fms.userWaypointDraft ?? (fms.userWaypointDraft = { ident: null, position: null, ref: null });
+      const complete = draft.ident !== null && draft.position !== null;
+      if (row === 1 && side === "L") {
+        if (!scratch) return;
+        if (!/^[A-Z0-9]{1,5}$/.test(scratch)) return "invalid";
+        draft.ident = scratch;
+        fms.setScratch("");
+        return;
+      }
+      if (row === 1 && side === "R") {
+        if (!scratch) return;
+        const at = parsePosition(scratch);
+        if (!at) return "invalid";
+        draft.position = at;
+        fms.setScratch("");
+        return;
+      }
+      if (row === 6 && complete) {
+        if (side === "L") { fms.userWaypointDraft = null; return; }
+        const refused = fms.createUserWaypoint(draft.ident!, draft.position!);
+        if (refused === "invalid") return "invalid";
+        if (refused === "in-use") { fms.advisory("DUPLICATE IDENT"); return; }
+        if (refused === "full") { fms.advisory("USER DB FULL"); return; }
+        if (refused === "not-saved") return;
+        fms.advisory(`${draft.ident} STORED`);
+        fms.userWaypointDraft = null;
+        return;
+      }
+      if (row === 6) { if (side === "L") fms.open("NAV_DATA"); else fms.open("USER_WPT", 1); }
     },
   },
 
