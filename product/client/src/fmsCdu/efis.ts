@@ -1,6 +1,5 @@
 import type { FlightSimulator, VerticalMode } from "./flight";
 import { courseDeg, distanceNm, offset, type LatLon, type Route } from "./fmsModel";
-import { makingProgress } from "./kinematics";
 import type { ScriptedFms } from "./scriptedFms";
 import { formatConstraint } from "./vnav";
 
@@ -208,8 +207,9 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     rollCommand: managed ? normal(g.bankCommand) : ncd(),
     distanceToGo: distanceToGo !== null && toIdent ? normal(distanceToGo) : ncd(),
     toWaypoint: toIdent ? normal(toIdent) : ncd(),
-    // No ETA without measurable progress: a time from an invented speed would be a plausible falsehood.
-    eta: distanceToGo !== null && makingProgress(fms.closureSpeed) ? normal(fms.now.getTime() + (distanceToGo / fms.closureSpeed) * 3_600_000) : ncd(),
+    // No ETA without measurable progress: a time from an invented speed would be a plausible falsehood. In a manual hold,
+    // the next crossing along the pattern (Astra F1), as the pages show it.
+    eta: (() => { const at = distanceToGo === null ? null : fms.shownEta(0, distanceToGo); return at === null ? ncd() : normal(at); })(),
     // Under the ADVISORY policy the FMS commands no speed or altitude: the crew selects them (aircraftData).
     targetSpeed: sim.advisory ? ncd() : normal(fms.targetSpeed),
     targetAltitude: sim.advisory || sim.altitudeHoldReference !== null ? ncd() : normal(g.targetAltitude),

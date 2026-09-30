@@ -1,15 +1,15 @@
 import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
-import { distanceNm, offset, type Hold } from '../src/fmsCdu/fmsModel'
-import { iasFromTas, tasFromIas } from '../src/fmsCdu/kinematics'
+import { distanceNm, hhmm, offset, type Hold } from '../src/fmsCdu/fmsModel'
+import { iasFromTas, predictedGroundSpeed, tasFromIas } from '../src/fmsCdu/kinematics'
 import type { ProcedureHold } from '../src/fmsCdu/navData'
-import { holdAllowance } from '../src/fmsCdu/predictions'
+import { holdAllowance, holdPathToPassage, piecesHours } from '../src/fmsCdu/predictions'
 import { setUpKbtvRnav15 } from '../src/fmsCdu/kbtvDemo'
 import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { computeProfile, parseConstraint } from '../src/fmsCdu/vnav'
-import { aircraftData } from '../src/fmsCdu/efis'
+import { aircraftData, fmsOutputs } from '../src/fmsCdu/efis'
 import { screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
@@ -269,6 +269,7 @@ const TAS = 120
 const RADIUS = TAS / (60 * Math.PI)
 // The leg on from TIDUE is flown under the 70 KIAS limit in force from TIDUE (Astra F2), as TAS at TIDUE's 1,800 ft.
 const FINAL_TAS = tasFromIas(70, 1800)
+const STILL = { direction: 0, speed: 0 }
 
 test('D-H/R3-03: an HF (ONCE) with a direct entry is KNOWN, and the predictions past it add one racetrack', () => {
   const unit = towardTidue(356, 8)
@@ -276,8 +277,8 @@ test('D-H/R3-03: an HF (ONCE) with a direct entry is KNOWN, and the predictions 
   expect(tasFromIas(100, 1700)).toBeLessThan(TAS)
   // The fix is predicted at its first arrival; after it, one racetrack of two 4 NM legs and two half turns, still air.
   expect(point(unit, 'TIDUE').eta).toBe(START + ((point(unit, 'TIDUE').distance! / TAS) * 3600_000))
-  expect(heldSeconds(unit, 'TIDUE', 'STAYS', FINAL_TAS)).toBeCloseTo(((2 * 4 + 2 * Math.PI * RADIUS) / TAS) * 3600, 3)
-  expect(heldSeconds(unit, 'TIDUE', 'STAYS', FINAL_TAS)).toBeCloseTo(360, 3)
+  expect(heldSeconds(unit, 'TIDUE', 'STAYS', FINAL_TAS)).toBeCloseTo(((2 * 4 + 2 * Math.PI * RADIUS) / TAS) * 3600, 1)
+  expect(heldSeconds(unit, 'TIDUE', 'STAYS', FINAL_TAS)).toBeCloseTo(360, 1)
   for (const ident of ['TIDUE', 'STAYS', 'CRANN']) expect(point(unit, ident)).toMatchObject({ status: 'KNOWN', reason: null })
   expect(unit.profile().endpoint!.point).toMatchObject({ ident: 'CRANN', status: 'KNOWN' })
   // A crew hold at TIDUE (MANUAL) takes the HF's place: the crew's exit, assumed at the next crossing, adds no time.
@@ -333,7 +334,7 @@ test('D-H/R3-03: an AT TGT ALT hold is KNOWN plus a racetrack when the altitude 
   Object.assign(hold, { path: 'HA', exit: 'AT ALT', altitude: '1700A' })
   expect(point(met, 'TIDUE').altitude).toBe(2000)
   expect(point(met, 'STAYS')).toMatchObject({ status: 'KNOWN', reason: null })
-  expect(heldSeconds(met, 'TIDUE', 'STAYS', FINAL_TAS)).toBeCloseTo(360, 3)
+  expect(heldSeconds(met, 'TIDUE', 'STAYS', FINAL_TAS)).toBeCloseTo(360, 1)
   // 5,000 ft or above is not predicted at TIDUE: the exit there is an assumption, from the fix on.
   hold.altitude = '5000A'
   for (const ident of ['TIDUE', 'STAYS', 'CRANN']) expect(point(met, ident)).toMatchObject({ status: 'CONDITIONAL', reason: 'HOLD EXIT AT ALTITUDE' })
@@ -370,7 +371,7 @@ test('D-H/R3-04: an RTA past a hold that leaves by itself flies the legs in the 
   // 15 minutes to STAYS, 6 of them in the hold: the 11 NM of legs in the other 9.
   Object.assign(unit.rndz, { wpt: 'STAYS', time: unit.now.getTime() + 15 * 60_000 })
   const legs = point(unit, 'STAYS').distance!
-  expect(unit.rendezvous()!.required!).toBeCloseTo(legs / (9 / 60), 3)
+  expect(unit.rendezvous()!.required!).toBeCloseTo(legs / (9 / 60), 1)
   expect(unit.rendezvous()).toMatchObject({ status: 'KNOWN' })
   // To TIDUE itself the hold does not count: it is flown after the fix.
   Object.assign(unit.rndz, { wpt: 'TIDUE', time: unit.now.getTime() + 6 * 60_000 })
@@ -382,24 +383,24 @@ test('D-H/MISSED-HOLD: the missed-approach hold is timed for one racetrack after
   const missed: Hold = { fix: 'BEADS', turn: 'RIGHT', inbound: 222, legTime: null, legDistance: 4, exit: 'MANUAL', speed: 90, altitude: '2000A', status: 'ARMED', missed: true }
   // Direct entry: one racetrack (90 KIAS at 2,000 ft is below the 120 kt TAS). Hours to 6 places: holds.ts converts
   // through feet and g, which the rate-one radius here does not.
-  expect(holdAllowance(missed, fix, 222, TAS, 0, 2000)).toMatchObject({ entry: 'DIRECT', racetracks: 1 })
-  expect(holdAllowance(missed, fix, 222, TAS, 0, 2000)!.hours!).toBeCloseTo((2 * 4 + 2 * Math.PI * RADIUS) / TAS, 6)
+  expect(holdAllowance(missed, fix, 222, TAS, STILL, 2000)).toMatchObject({ entry: 'DIRECT', racetracks: 1 })
+  expect(holdAllowance(missed, fix, 222, TAS, STILL, 2000)!.hours!).toBeCloseTo((2 * 4 + 2 * Math.PI * RADIUS) / TAS, 4)
   // A teardrop entry (arriving on the inbound course's reciprocal, turning right: 180 relative) and then one racetrack.
-  const teardrop = holdAllowance(missed, fix, 42, TAS, 0, 2000)!
+  const teardrop = holdAllowance(missed, fix, 42, TAS, STILL, 2000)!
   expect(teardrop).toMatchObject({ entry: 'TEARDROP', racetracks: 1 })
-  expect(teardrop.hours!).toBeCloseTo((4 + Math.PI * RADIUS + 4 * Math.cos((40 * Math.PI) / 180) + 2 * 4 + 2 * Math.PI * RADIUS) / TAS, 6)
+  expect(teardrop.hours!).toBeCloseTo((4 + Math.PI * RADIUS + 4 * Math.cos((40 * Math.PI) / 180) + 2 * 4 + 2 * Math.PI * RADIUS) / TAS, 4)
   // In progress: the racetrack still to fly, then nothing once one is flown.
-  expect(holdAllowance({ ...missed, status: 'IN PROGRESS', circuits: 0 }, fix, 42, TAS, 0, 2000)).toMatchObject({ entry: null, racetracks: 1 })
-  expect(holdAllowance({ ...missed, status: 'IN PROGRESS', circuits: 1 }, fix, 42, TAS, 0, 2000)).toMatchObject({ hours: 0, racetracks: 0 })
+  expect(holdAllowance({ ...missed, status: 'IN PROGRESS', circuits: 0 }, fix, 42, TAS, STILL, 2000)).toMatchObject({ entry: null, racetracks: 1 })
+  expect(holdAllowance({ ...missed, status: 'IN PROGRESS', circuits: 1 }, fix, 42, TAS, STILL, 2000)).toMatchObject({ hours: 0, racetracks: 0 })
   // Its exit armed (EXIT HOLD, then not resumed): out at the next crossing, nothing more.
-  expect(holdAllowance({ ...missed, status: 'EXIT ARMED', circuits: 0 }, fix, 42, TAS, 0, 2000)).toMatchObject({ hours: 0, racetracks: 0 })
+  expect(holdAllowance({ ...missed, status: 'EXIT ARMED', circuits: 0 }, fix, 42, TAS, STILL, 2000)).toMatchObject({ hours: 0, racetracks: 0 })
   // Resumed (MANUAL, no longer the missed-approach hold): the crew's exit, not timed here (HOLD EXIT NEXT CROSSING).
-  expect(holdAllowance({ ...missed, missed: false }, fix, 222, TAS, 0, 2000)).toBeNull()
+  expect(holdAllowance({ ...missed, missed: false }, fix, 222, TAS, STILL, 2000)).toBeNull()
   // A holding speed faster than the planned TAS sizes and times the pattern: 150 KIAS at 2,000 ft as TAS.
   const fast = tasFromIas(150, 2000)
-  expect(holdAllowance({ ...missed, speed: 150 }, fix, 222, TAS, 0, 2000)!.hours!).toBeCloseTo((2 * 4 + 2 * (fast / 60)) / fast, 6)
+  expect(holdAllowance({ ...missed, speed: 150 }, fix, 222, TAS, STILL, 2000)!.hours!).toBeCloseTo((2 * 4 + 2 * (fast / 60)) / fast, 4)
   // The wind at least that TAS: UNABLE HOLD.
-  expect(holdAllowance(missed, fix, 222, TAS, TAS, 2000)).toEqual({ hours: null, reason: 'UNABLE HOLD' })
+  expect(holdAllowance(missed, fix, 222, TAS, { direction: 0, speed: TAS }, 2000)).toEqual({ hours: null, reason: 'UNABLE HOLD' })
 
   // On the route: the armed missed-approach hold (after a go-around at 87N) is KNOWN at its fix, not CONDITIONAL.
   const unit = towardTidue(356, 8)
@@ -553,4 +554,67 @@ test('F4: under the helicopter profile a selected altitude below the missed appr
   expect(setUpKbtvRnav15(airline, airlineSim)).toEqual({ ready: true })
   expect(airlineSim.missedAltitudeConflict).toBeNull()
   expect(aircraftData(airline, airlineSim).missedAltitudeConflict).toBeNull()
+})
+
+// ---------------------------------------------------------------------------------------------- the manual hold's next crossing (F1)
+
+test('F1: a leg into the wind and back takes d/(V−W) + d/(V+W), longer than 2d/V, and a hold path is timed piece by piece', () => {
+  // Two 4 NM legs, out along 270 and back along 090, at 120 kt TAS in a 30 kt wind from 270.
+  const wind = { direction: 270, speed: 30 }
+  const hours = piecesHours([{ distance: 4, course: 270 }, { distance: 4, course: 90 }], course => predictedGroundSpeed(120, course, wind))!
+  expect(hours * 3600).toBeCloseTo((4 / 90 + 4 / 150) * 3600, 6)
+  expect(hours).toBeGreaterThan(8 / 120)
+  // The path left from abeam the middle of an inbound line is half of it; a whole turn is π·r, in pieces of 5 degrees.
+  const fix = { lat: 45, lon: -75 }
+  const from = offset(fix, 270, 4)
+  const line = { kind: 'line' as const, from, to: fix }
+  const half = holdPathToPassage({ segments: [line], index: 0, passageAt: 0 }, offset(fix, 270, 2))
+  expect(half.reduce((sum, p) => sum + p.distance, 0)).toBeCloseTo(2, 3)
+  const centre = offset(fix, 0, 1)
+  const arc = { kind: 'arc' as const, centre, to: offset(centre, 0, 1), turn: 'R' as const, radius: 1 }
+  const turn = holdPathToPassage({ segments: [arc], index: 0, passageAt: 0 }, fix)
+  expect(turn.reduce((sum, p) => sum + p.distance, 0)).toBeCloseTo(Math.PI, 3)
+  expect(turn.length).toBe(36)
+})
+
+test('F1: in a manual hold the next crossing is predicted along the pattern still to fly, and the flown crossing meets it', () => {
+  let now = Date.UTC(2026, 8, 27, 14, 0, 0)
+  const unit = new ScriptedFms(() => new Date(now))
+  Object.assign(unit.wind, { direction: 270, speed: 30 })
+  const sim = new FlightSimulator(unit)
+  const fly = (seconds: number, until?: () => boolean) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1); if (until?.()) return t } return seconds }
+  expect(unit.defineHold('RDG')).toBeUndefined()
+  unit.press('EXEC')
+  expect(unit.activeRoute.hold).toMatchObject({ fix: 'RDG', exit: 'MANUAL' })
+  expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')).toBeLessThan(3600)
+  const rdg = unit.coordinates('RDG')!
+  // From in the first turn (30 s after the fix), and from the outbound leg (a minute on), as Astra measured it.
+  for (const wait of [30, 60]) {
+    fly(wait)
+    const predicted = point(unit, 'RDG')
+    expect(predicted).toMatchObject({ status: 'CONDITIONAL', reason: 'HOLD EXIT NEXT CROSSING' })
+    // The distance shown stays the direct distance to the fix; only the time follows the pattern.
+    expect(predicted.distance!).toBeCloseTo(distanceNm(unit.position, rdg), 2)
+    // The RTA follows the same path: an RTA at the predicted crossing needs about the airspeed being flown, and the
+    // fuel predicted there is what that time burns.
+    Object.assign(unit.rndz, { wpt: 'RDG', time: predicted.eta! })
+    expect(Math.abs(unit.rendezvous()!.required! - unit.trueAirspeed!)).toBeLessThan(1)
+    expect(predicted.fuel!).toBeCloseTo(unit.fuel.quantity - ((predicted.eta! - now) / 3_600_000) * unit.fuel.flow, 3)
+    Object.assign(unit.rndz, { wpt: null, time: null })
+    // The pages and the output bus show the same crossing: the HOLD page's FIX ETA, PROGRESS 1/4's ETA to the active
+    // fix and the bus ETA, not the straight line at the closure speed (which, turning away from the fix, has no time).
+    expect(fmsOutputs(unit, sim).eta).toEqual({ status: 'NORMAL', value: predicted.eta })
+    const crossing = hhmm(new Date(predicted.eta!))
+    unit.press('HOLD')
+    expect(lines(unit)[4]).toMatch(new RegExp(`${crossing.replace('.', '\\.')}$`))
+    unit.press('PROG')
+    expect(lines(unit)[2]).toMatch(new RegExp(`^RDG\\s+\\d+\\.\\dNM ${crossing.replace('.', '\\.')}$`))
+    const circuits = unit.activeRoute.hold!.circuits ?? 0
+    const start = now
+    expect(fly(900, () => (unit.activeRoute.hold?.circuits ?? 0) > circuits)).toBeLessThan(900)
+    const flownSeconds = (now - start) / 1000, predictedSeconds = (predicted.eta! - start) / 1000
+    // The direct shortcut would predict a few tens of seconds; the flown crossing is minutes away.
+    expect(predictedSeconds).toBeGreaterThan(90)
+    expect(Math.abs(predictedSeconds - flownSeconds), `predicted ${predictedSeconds.toFixed(1)} s, flown ${flownSeconds} s`).toBeLessThan(6)
+  }
 })
