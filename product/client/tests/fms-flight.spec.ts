@@ -8,7 +8,7 @@ import { HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } fr
 import { stimulusFor, type GpsOp } from '../src/fmsCdu/gpsStimulus'
 import { radiusAt } from '../src/fmsCdu/holds'
 import { BufferedSensorPort, type SensorFrame } from '../src/fmsCdu/sensorPorts'
-import { checkAtTdn, planTransition } from '../src/fmsCdu/transition'
+import { checkAtTdn, planTransition, transitionSecondsToGo } from '../src/fmsCdu/transition'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
@@ -1407,6 +1407,8 @@ test('at TDN, 0.3 NM off the final track: TDN NOT POSSIBLE, roll steering withdr
   fly(2)
   expect(sim.lateralMode).toBe('HDG')
   expect(sim.modeEvents.some(e => e.event === 'NAV REMOVED')).toBe(true)
+  // The FMA shows NAV lost in amber on the roll axis (B4.1).
+  expect(sim.modeEvents.find(e => e.event === 'NAV REMOVED')?.lost).toEqual([{ axis: 'roll', mode: 'NAV' }])
 })
 
 test('at TDN 400 ft higher than planned: the recomputed transition does not fit before MRK, TDN DIST SHORT (Stage D, T6)', () => {
@@ -1778,4 +1780,66 @@ test('the helicopter attitude: the trim pitch for the forward airspeed, not rais
   expect(Math.abs(tdh.unit.attitude.pitch - (trimPitch(tdh.sim.indicatedAirspeed) + deg(0.75)))).toBeLessThan(0.3)
   expect(tdh.unit.attitude.pitch).toBeGreaterThan(trimPitch(tdh.sim.indicatedAirspeed))
   same(tdh.unit, tdh.sim)
+})
+
+test('B1.7: MRK is predicted along the planned transition, TD, the gate segment and TD/H, and the flown hover capture meets it; nothing is predicted past MRK', () => {
+  const { unit, sim, ticks } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  const point = (ident: string) => unit.profile().points.find(p => p.ident === ident)!
+  const plan = unit.hover.active!.plan!
+  const dtra = distanceNm(unit.coordinates('TDN')!, unit.coordinates('MRK')!)
+  // Before TDN: TDN to MRK is the whole transition, far longer than the same distance at the planned speed.
+  const planned = transitionSecondsToGo(plan, dtra, dtra)
+  const predictedLeg = (point('MRK').eta! - point('TDN').eta!) / 1000
+  expect(predictedLeg).toBeCloseTo(planned, 3)
+  expect(predictedLeg).toBeGreaterThan((dtra / 100) * 3600 * 1.5)
+  expect(point('MRK')).toMatchObject({ status: 'KNOWN' })
+  // The route ends at MRK: past the discontinuity nothing is predicted.
+  const after = unit.profile().points.slice(unit.profile().points.findIndex(p => p.ident === 'MRK') + 1)
+  expect(after.length).toBeGreaterThan(0)
+  expect(after.every(p => p.eta === null && p.status === 'UNKNOWN')).toBe(true)
+  // Flown: the MRK time predicted at TDN, and again halfway through, against the tick the hover is captured at MRK.
+  const atTdn = { predicted: 0 }, halfway = { predicted: 0, at: 0 }
+  ticks(900, () => {
+    const active = unit.activeRoute.legs[0]
+    if (active?.kind === 'wpt' && active.ident === 'MRK') {
+      if (!atTdn.predicted) atTdn.predicted = point('MRK').eta!
+      const toGo = distanceNm(unit.truePosition, unit.coordinates('MRK')!)
+      if (!halfway.predicted && toGo < dtra / 2) Object.assign(halfway, { predicted: point('MRK').eta!, at: unit.now.getTime() })
+    }
+    return sim.hoverCaptured
+  })
+  expect(sim.hoverCaptured).toBe(true)
+  const captured = unit.now.getTime()
+  // Within 3 s over the 129 s transition, from TDN; within 2 s from halfway.
+  expect(Math.abs(atTdn.predicted - captured) / 1000).toBeLessThan(3)
+  expect(Math.abs(halfway.predicted - captured) / 1000).toBeLessThan(2)
+})
+
+test('E3: in the hover the fuel burns at the current flow, and the FUEL page endurance follows it', () => {
+  const run = offshore(100)
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(20)
+  expect(sim.axisModes.pitch).toBe('HOV')
+  expect(unit.groundSpeed).toBeLessThan(1)
+  // Stopped over the sea: no progress, and still the fuel burns at the flow in force.
+  unit.setFuel('flow', 480)
+  const before = unit.fuel.quantity
+  fly(120)
+  expect(sim.axisModes.pitch).toBe('HOV')
+  expect(unit.fuel.quantity).toBeCloseTo(before - (480 * 120) / 3600, 6)
+  // A new flow applies from when it is entered.
+  unit.setFuel('flow', 600)
+  const later = unit.fuel.quantity
+  fly(60)
+  expect(unit.fuel.quantity).toBeCloseTo(later - (600 * 60) / 3600, 6)
+  unit.press('FUEL')
+  // FUEL 1/2 (#1343, M300 14-2): the flow, and the endurance in hours and minutes of the usable fuel at that flow.
+  const text = screenText(unit.screen())
+  expect(text[5]).toMatch(/^ FUEL FLOW/)
+  expect(text[6]).toMatch(/^600KG\/HR/)
+  const minutes = Math.floor(((unit.fuel.quantity - unit.fuel.reserve) / 600) * 60)
+  expect(text[4]).toMatch(new RegExp(`^${String(Math.floor(minutes / 60)).padStart(2, '0')}\\+${String(minutes % 60).padStart(2, '0')}\\s`))
 })

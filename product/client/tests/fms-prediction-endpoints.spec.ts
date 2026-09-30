@@ -660,3 +660,23 @@ test('E4: RTA WIND is the system wind unless the crew enters one; an entry chang
   expect(unit.rendezvous()!.required!).toBeCloseTo(80, 1)
   expect(lines(unit)[10]).toMatch(/^000T\/ 20KT/)
 })
+
+test('E1: the ETAs are flown in the system wind: a headwind or crosswind changes the ETA by the wind triangle', () => {
+  // 5 NM south of MUN, flying north to it at 2,000 ft in still air, then in a measured (computed) wind. The crew's
+  // manual entry, while no wind is computed, is fms-navigation's E1 test.
+  const unit = fiveMilesFromMun({ direction: 0, speed: 0 })
+  const tas = unit.plannedSpeed
+  const leg = () => unit.profile().points[0]
+  const still = (leg().eta! - unit.now.getTime()) / 1000
+  expect(still).toBeCloseTo((leg().distance! / tas) * 3600, 1)
+  expect(unit.windComputed).toBe(true)
+  // A 30 kt headwind (from 360, on the nose of the northbound leg): the ground speed is TAS - 30.
+  Object.assign(unit.wind, { direction: 0, speed: 30 })
+  expect(unit.systemWind).toEqual({ direction: 0, speed: 30 })
+  expect((leg().eta! - unit.now.getTime()) / 1000).toBeCloseTo((leg().distance! / (tas - 30)) * 3600, 1)
+  // A 30 kt crosswind (from 270): the ground speed is sqrt(TAS² - 30²), longer than still air, shorter than the headwind.
+  Object.assign(unit.wind, { direction: 270, speed: 30 })
+  const cross = (leg().eta! - unit.now.getTime()) / 1000
+  expect(cross).toBeCloseTo((leg().distance! / Math.sqrt(tas * tas - 900)) * 3600, 1)
+  expect(cross).toBeGreaterThan(still)
+})

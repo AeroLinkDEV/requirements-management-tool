@@ -211,8 +211,17 @@ export function segmentsOutline(start: LatLon, segments: readonly HoldSegment[])
  */
 export type VerticalMode = "ALT HOLD" | "VS" | "GA" | "TDN" | "APPR" | "VNAV PTH" | "DES NOW" | "VNAV CLB" | "VNAV DES" | "VNAV ALT";
 
-/** A recorded change of mode or authority: what happened and the references it set. */
-export type ModeEvent = { at: Date; event: string; detail: string };
+/** An autopilot axis, as the helicopter FMA's columns show them. */
+export type Axis = "collective" | "pitch" | "roll";
+/** A mode on an axis. */
+export type AxisMode = { axis: Axis; mode: string };
+/**
+ * A recorded change of mode or authority: what happened and the references it set; for a reversion forced by a failure
+ * (the B3.5 table), the modes it took away, which the FMA shows amber for a while (plan B4.1, B3.4).
+ */
+export type ModeEvent = { at: Date; event: string; detail: string; lost?: AxisMode[] };
+/** Per axis, the modes armed or degraded (plan B3.4): each column of the helicopter FMA. */
+export type AxisModeLists = Record<Axis, string[]>;
 
 /**
  * The vertical path at the aircraft's position, for a vertical deviation display: the VNAV descent path, or the final
@@ -454,7 +463,9 @@ export class FlightSimulator {
   /** Mode and authority changes, oldest first: failure, reversion, recovery, LNAV lost. */
   get modeEvents(): readonly ModeEvent[] { return this.events; }
 
-  private record(event: string, detail: string) { this.events = [...this.events, { at: this.fms.now, event, detail }]; }
+  private record(event: string, detail: string, lost?: AxisMode[]) {
+    this.events = [...this.events, { at: this.fms.now, event, detail, ...(lost?.length ? { lost } : {}) }];
+  }
 
   /**
    * The laboratory reversion on FMS failure (a labelled engineering assumption, not CMA installation behaviour):
@@ -465,6 +476,7 @@ export class FlightSimulator {
   private watchFailure() {
     const failed = this.fms.hasCondition("fmsFail");
     if (failed && !this.fmsFailed) {
+      const navLost: AxisMode[] = this.lateral === "LNAV" ? [{ axis: "roll", mode: "NAV" }] : [];
       this.lateral = "HDG";
       this.lnavArmed = false;
       this.heading = Math.round(norm360(this.fms.heading));
@@ -479,7 +491,7 @@ export class FlightSimulator {
       // F9: the distance to a target is FMS data. TD/H goes on to a stop at its nominal rate and holds there.
       if (this.lowHorizontal?.mode === "TDH") this.lowHorizontal.target = null;
       const vertical = this.altitudeHold !== null ? `ALT HOLD ${this.altitudeHold} FT` : `${this.axisModes.collective} kept (the autopilot's own)`;
-      this.record("FMS FAILURE", `managed guidance invalid; HDG HOLD ${String(this.heading).padStart(3, "0")}°T, ${vertical}`);
+      this.record("FMS FAILURE", `managed guidance invalid; HDG HOLD ${String(this.heading).padStart(3, "0")}°T, ${vertical}`, navLost);
     } else if (!failed && this.fmsFailed) {
       this.record("FMS RECOVERED", "basic modes kept; select LNAV and VNAV to resume managed guidance");
     }
@@ -993,6 +1005,35 @@ export class FlightSimulator {
   }
 
   /**
+   * The modes armed on each axis (plan B3.4, B4.1: white beside the engaged mode): the altitude capture while VS or GA
+   * is the collective's mode, climbing or descending toward the selected altitude; NAV armed to capture the route; TD/H
+   * to follow the TD now flying.
+   */
+  get axisArmed(): AxisModeLists {
+    const altitudeCapture = !this.lowCollective && (this.vertical === "VS" || this.vertical === "GA");
+    const tdh = this.pendingTdh !== null;
+    return {
+      collective: altitudeCapture ? ["ALT"] : [],
+      pitch: tdh ? ["TD/H"] : [],
+      roll: [...(this.lnavArmed ? ["NAV"] : []), ...(tdh ? ["TD/H"] : [])],
+    };
+  }
+
+  /**
+   * The modes a failure took away in the last `seconds` (plan B3.4, B4.1, B3.5: amber, as HOV goes amber and then ATT),
+   * newest first, from the recorded reversions.
+   */
+  axisDegraded(seconds: number): AxisModeLists {
+    const since = this.fms.now.getTime() - seconds * 1000;
+    const out: AxisModeLists = { collective: [], pitch: [], roll: [] };
+    for (const event of [...this.events].reverse()) {
+      if (event.at.getTime() < since) break;
+      for (const { axis, mode } of event.lost ?? []) if (!out[axis].includes(mode)) out[axis].push(mode);
+    }
+    return out;
+  }
+
+  /**
    * The FMS's hover procedure (ScriptedFms.hover): at TDN it requests the transition, which the autopilot flies as TD
    * (when above the gate height or the gate speed) and then TD/H to MRK; a refusal at TDN (TDN NOT POSSIBLE, TDN DIST
    * SHORT) withdraws roll steering, so NAV gives way to HDG (F8); the request withdrawn (TDN FUNCTION LOST, the
@@ -1036,7 +1077,7 @@ export class FlightSimulator {
       this.lateral = "HDG";
       this.heading = Math.round(norm360(this.fms.heading));
       this.held = true;
-      this.record("NAV REMOVED", `${hover.refused}: roll steering withdrawn; HDG HOLD ${String(this.heading).padStart(3, "0")}°T`);
+      this.record("NAV REMOVED", `${hover.refused}: roll steering withdrawn; HDG HOLD ${String(this.heading).padStart(3, "0")}°T`, [{ axis: "roll", mode: "NAV" }]);
     }
     this.hoverRefusal = hover.refused;
     const retained = this.fmsTransition !== null && (this.pendingTdh !== null || (this.lowHorizontal?.mode === "TDH" && this.lowHorizontal.target !== null));
@@ -1249,10 +1290,12 @@ export class FlightSimulator {
         this.lastFeedback = null;
         if (h.mode === "HOV" || h.mode === "TDH" || h.mode === "GSPD") {
           this.lowHorizontal = { ...h, mode: "ATT" };
-          this.record(h.mode === "GSPD" ? "GSPD LOST" : "HOV LOST", `${reason}; ATT holds the last air-velocity command`);
+          // What the FMA showed on each axis: TD/H or HOV on both; GSPD on pitch with LVL on roll.
+          const lost = h.mode === "TDH" ? "TD/H" : h.mode === "GSPD" ? "GSPD" : "HOV";
+          this.record(h.mode === "GSPD" ? "GSPD LOST" : "HOV LOST", `${reason}; ATT holds the last air-velocity command`, [{ axis: "pitch", mode: lost }, { axis: "roll", mode: h.mode === "GSPD" ? "LVL" : lost }]);
         } else if (h.mode === "TU") {
           this.lvlLost = true;
-          this.record("LVL LOST", `${reason}; the lateral air velocity is held (ATT); the departure acceleration and climb go on`);
+          this.record("LVL LOST", `${reason}; the lateral air velocity is held (ATT); the departure acceleration and climb go on`, [{ axis: "roll", mode: "LVL" }]);
         }
       }
     }
@@ -1394,7 +1437,8 @@ export class FlightSimulator {
       this.altitudeHold = Math.round(this.fms.altitude);
       this.lowHeight = "OFF";
       this.vertical = "ALT HOLD";
-      this.record("RA LOST", `${c.mode === "TDH" ? "TD/H" : c.mode} removed; ALT HOLD ${this.altitudeHold} FT on the barometric altitude`);
+      this.record("RA LOST", `${c.mode === "TDH" ? "TD/H" : c.mode} removed; ALT HOLD ${this.altitudeHold} FT on the barometric altitude`,
+        [{ axis: "collective", mode: c.mode === "TDH" ? "TD/H" : c.mode }]);
       return 0;
     }
     const height = ra.value!;
@@ -1483,7 +1527,8 @@ export class FlightSimulator {
       this.lateral = "HDG";
       this.heading = Math.round(norm360(this.fms.heading));
       this.held = true;
-      if (dt > 0) this.record("LNAV LOST", `${this.fms.pinsContinuation?.active ? "crew flying PinS visual segment" : !this.fms.departureInstrumentReady ? "departure IDF conditions not met" : this.fms.navState.mode === "DR" && !this.fms.navState.airValid ? "position input unavailable" : "no active leg"}; HDG HOLD ${String(this.heading).padStart(3, "0")}°T`);
+      if (dt > 0) this.record("LNAV LOST", `${this.fms.pinsContinuation?.active ? "crew flying PinS visual segment" : !this.fms.departureInstrumentReady ? "departure IDF conditions not met" : this.fms.navState.mode === "DR" && !this.fms.navState.airValid ? "position input unavailable" : "no active leg"}; HDG HOLD ${String(this.heading).padStart(3, "0")}°T`,
+        [{ axis: "roll", mode: "NAV" }]);
     }
     if (this.lateral === "LNAV") return managed;
     // Capture when the managed path is close and the aircraft is not heading away from it.
@@ -1628,13 +1673,14 @@ export class FlightSimulator {
   private unableHold() {
     this.holdPlan = null;
     // Hold guidance is invalid: NAV gives way to a latched heading hold (F8), never shown captured on a path it cannot fly.
+    const navLost: AxisMode[] = this.lateral === "LNAV" ? [{ axis: "roll", mode: "NAV" }] : [];
     if (this.lateral === "LNAV") {
       this.lateral = "HDG";
       this.heading = Math.round(norm360(this.fms.heading));
       this.held = true;
     }
     this.fms.raiseAlert("UNABLE HOLD");
-    this.record("UNABLE HOLD", "the wind is at least the airspeed: no holding pattern can be flown; hold guidance withdrawn");
+    this.record("UNABLE HOLD", "the wind is at least the airspeed: no holding pattern can be flown; hold guidance withdrawn", navLost);
   }
 
   /**
