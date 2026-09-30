@@ -13,7 +13,7 @@ import { Constellation } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput } from "./gps";
 import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas } from "./kinematics";
 import {
-  ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
+  ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, fasRequirement, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
   type GpsChoice,
 } from "./gpsSensors";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type ProcedureHold, type StoredRoute } from "./navData";
@@ -1327,12 +1327,14 @@ export class ScriptedFms implements CduBackend {
    * lateral guidance on its 116, descent on its 117. Not GPS navigation, or no RNAV approach, permits nothing.
    */
   get gpsApproachAuthority(): ApproachAuthority {
-    const rnav = findProcedure(this.db, this.active, "APPROACH")?.approachType === "RNAV";
+    const approach = findProcedure(this.db, this.active, "APPROACH");
+    const rnav = approach?.approachType === "RNAV";
     if (!rnav || this.nav.mode !== "GPS") return { annunciation: "NO APPR", lateral: false, vertical: false, reason: rnav ? "NO GPS NAVIGATION" : "NO RNAV APPROACH" };
     const chosen = this.gpsAssessment.chosen;
     if (!this.gpsSelection.qualified) return { annunciation: "NO APPR", lateral: false, vertical: false, reason: "GPS SOURCE CHANGE NOT QUALIFIED" };
-    // An executed RNAV approach with no FAS data block is LNAV only (approachAuthority).
-    return approachAuthority(chosen === null ? null : this.receivers[chosen].bus(), chosen === null ? null : this.gpsAssessment.assessed[chosen], this.pinnedFas !== null);
+    // Only an approach the data declares LNAV only is flown without a FAS block; a missing or unreadable one is NO APPR.
+    return approachAuthority(chosen === null ? null : this.receivers[chosen].bus(), chosen === null ? null : this.gpsAssessment.assessed[chosen],
+      fasRequirement(approach!, this.pinnedFas?.fas ?? null));
   }
 
   /**
