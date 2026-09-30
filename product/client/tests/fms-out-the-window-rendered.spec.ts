@@ -108,6 +108,9 @@ test('the scene draws only when something changes: still while the bench is paus
   await page.setViewportSize({ width: 700, height: 500 })
   await open(page, 'off')
   const view = await show(page)
+  // Relief ground: with imagery, tiles go on arriving down to zoom 16 long after the globe reports itself loaded (each
+  // drawn as it comes, as it should be), which on a software renderer outlasts the waits here.
+  await choose(page, 'Window ground', 'Relief')
   const scene = view.locator('.fmsOtwScene')
   const frames = async () => Number(await scene.getAttribute('data-frames') ?? 0)
   // Settled: every tile the globe needs has loaded (slowly, on a software renderer; Cesium draws as each arrives) and
@@ -132,6 +135,149 @@ test('the scene draws only when something changes: still while the bench is paus
   await page.getByRole('button', { name: 'Pause' }).click()
   previous = -1
   await expect.poll(settled, { intervals: [3000], timeout: 60_000 }).toBe('tiles loaded, still')
+})
+
+// How much of the view is the fixture's imagery (its teal and violet checkerboard) or the relative colouring's danger red,
+// counted from a screenshot of the view decoded in the page.
+const shares = async (page: Page) => {
+  const png = await page.locator('.fmsOtw').screenshot()
+  return page.evaluate(async b64 => {
+    const image = new Image()
+    image.src = `data:image/png;base64,${b64}`
+    await image.decode()
+    const canvas = Object.assign(document.createElement('canvas'), { width: image.width, height: image.height }), pen = canvas.getContext('2d')!
+    pen.drawImage(image, 0, 0)
+    const data = pen.getImageData(0, 0, canvas.width, canvas.height).data
+    let imagery = 0, red = 0, n = 0
+    for (let i = 0; i < data.length; i += 4 * 5) {
+      const r = data[i], g = data[i + 1], b = data[i + 2]
+      n++
+      if ((g > r + 60 && b > r + 40) || (b > g + 60 && r > g + 20)) imagery++
+      // The danger red blended over the ground: strongly red, green and blue under half of it (the absolute top band's
+      // firebrick, lighter over the ground, is not).
+      if (r > 160 && g < 0.45 * r && b < 0.4 * r) red++
+    }
+    return { imagery: imagery / n, red: red / n }
+  }, png.toString('base64'))
+}
+// The share of the view that looks different from an earlier screenshot of it (a colour change of more than 40 in sum).
+// The scene as drawn: not the view's own controls, which change as they are chosen, nor the credits, whose text changes
+// with the ground and wraps differently with the window size.
+const sceneShot = (page: Page) => page.locator('.fmsOtwScene').screenshot({ mask: [page.locator('.fmsOtwCredits')] })
+// The share of the scene's pixels that changed.
+const changedSince = async (page: Page, before: Buffer) => {
+  const after = await sceneShot(page)
+  return page.evaluate(async ([a, b]) => {
+    const pixels = async (b64: string) => {
+      const image = new Image()
+      image.src = `data:image/png;base64,${b64}`
+      await image.decode()
+      const canvas = Object.assign(document.createElement('canvas'), { width: image.width, height: image.height }), pen = canvas.getContext('2d')!
+      pen.drawImage(image, 0, 0)
+      return pen.getImageData(0, 0, canvas.width, canvas.height).data
+    }
+    const [p, q] = [await pixels(a), await pixels(b)]
+    let changed = 0, n = 0
+    for (let i = 0; i < Math.min(p.length, q.length); i += 4 * 5) { n++; if (Math.abs(p[i] - q[i]) + Math.abs(p[i + 1] - q[i + 1]) + Math.abs(p[i + 2] - q[i + 2]) > 40) changed++ }
+    return changed / n
+  }, [before.toString('base64'), after.toString('base64')])
+}
+const choose = (page: Page, group: string, name: string) => page.getByRole('radiogroup', { name: group }).getByText(name, { exact: true }).click()
+// The scene has drawn what was asked: every tile the globe needs has loaded and its frame count has stopped (a lull
+// between tiles, on a software renderer, is not enough).
+const drawn = async (page: Page) => {
+  const scene = page.locator('.fmsOtwScene')
+  let previous = -1
+  await expect.poll(async () => {
+    const now = Number(await scene.getAttribute('data-frames') ?? 0), loaded = await scene.getAttribute('data-tiles-loaded') === 'true'
+    const same = loaded && now === previous
+    previous = now
+    return same
+  }, { intervals: [3000], timeout: 150_000 }).toBe(true)
+}
+
+test('the ground is aerial imagery where there is some, relief where there is none, and relief when chosen; the choice is remembered', async ({ page }) => {
+  test.setTimeout(300_000)
+  // A small window, looking straight down (the map view): the fewest tiles to load on a software renderer.
+  await page.setViewportSize({ width: 480, height: 360 })
+  await open(page, 'hill')
+  const view = await show(page)
+  await choose(page, 'Window view', 'Map')
+  await expect(view).toHaveAttribute('data-ground', 'imagery')
+  await expect(view).toHaveAttribute('data-imagery', 'live', { timeout: 60_000 })
+  await drawn(page)
+  expect((await shares(page)).imagery, 'imagery on the ground').toBeGreaterThan(0.25)
+  await expect(view.locator('.fmsOtwCredits')).toContainText('Imagery: USGS The National Map, USDA NAIP (public domain)')
+
+  await choose(page, 'Window ground', 'Relief')
+  await expect(view).toHaveAttribute('data-ground', 'relief')
+  await drawn(page)
+  expect((await shares(page)).imagery, 'relief only').toBeLessThan(0.03)
+  await expect(view.locator('.fmsOtwCredits')).not.toContainText('Imagery:')
+  await page.reload()
+  await expect(page.locator('.fmsOtw')).toHaveAttribute('data-ground', 'relief')
+})
+
+test('with no imagery (outside the coverage, or the service\'s blank filler) the ground is relief; with imagery off, the view says so', async ({ page }) => {
+  test.setTimeout(300_000)
+  // A small window, looking straight down (the map view): the fewest tiles to load on a software renderer.
+  await page.setViewportSize({ width: 480, height: 360 })
+  for (const mode of ['none', 'blank']) {
+    await page.goto(`/tests/fixtures/fms-cdu.html?imagery=${mode}`)
+    const view = await show(page)
+    await choose(page, 'Window view', 'Map')
+    await drawn(page)
+    expect((await shares(page)).imagery, `${mode}: no imagery drawn`).toBeLessThan(0.03)
+    await expect(view.locator('.fmsOtwNote')).toHaveCount(0)
+    // What is drawn instead is the relief, as choosing Relief draws it: not a flat colour. (Once: the fallback is the
+    // same code whichever way the imagery was missing, and each draw is slow on a software renderer.)
+    if (mode === 'none') {
+      const fallback = await sceneShot(page)
+      await choose(page, 'Window ground', 'Relief')
+      await drawn(page)
+      expect(await changedSince(page, fallback), `${mode}: the relief, as Relief draws it`).toBeLessThan(0.05)
+      await choose(page, 'Window ground', 'Imagery')
+    }
+    await page.getByRole('button', { name: 'Hide the view' }).click()
+  }
+  await page.goto('/tests/fixtures/fms-cdu.html?imagery=off')
+  const view = await show(page)
+  await choose(page, 'Window view', 'Map')
+  await expect(view).toHaveAttribute('data-imagery', 'off', { timeout: 60_000 })
+  await expect(view.locator('.fmsOtwNote')).toContainText('Imagery is off on this installation')
+})
+
+test('terrain colouring: red where the ground reaches the aircraft (relative), height bands (absolute), none when off; remembered', async ({ page }) => {
+  test.setTimeout(300_000)
+  // A small window, looking straight down (the map view): the fewest tiles to load on a software renderer.
+  await page.setViewportSize({ width: 480, height: 360 })
+  // A hill higher than the aircraft, relief only so the colours are the colouring's.
+  await page.goto('/tests/fixtures/fms-cdu.html?hill=1300')
+  const view = await show(page)
+  await choose(page, 'Window view', 'Map')
+  await choose(page, 'Window ground', 'Relief')
+  await drawn(page)
+  const off = await shares(page)
+  expect(off.red, 'off: no red').toBeLessThan(0.002)
+  const uncoloured = await sceneShot(page)
+
+  await choose(page, 'Terrain colouring', 'Relative')
+  await expect(view).toHaveAttribute('data-colouring', 'relative')
+  await drawn(page)
+  const relative = await shares(page)
+  expect(relative.red, 'relative: the hill above the aircraft is red').toBeGreaterThan(0.01)
+  // Only the hill: the lowland far below the aircraft stays uncoloured (about a tenth of the view is red here).
+  expect(relative.red, 'relative: the lowland is not red').toBeLessThan(0.3)
+
+  await choose(page, 'Terrain colouring', 'Absolute')
+  await expect(view).toHaveAttribute('data-colouring', 'absolute')
+  await drawn(page)
+  // Bands by height alone: the hill's slopes change colour band by band, and none of it is the danger red.
+  const absolute = await shares(page)
+  expect(absolute.red, 'absolute: no danger red').toBeLessThan(0.01)
+  expect(await changedSince(page, uncoloured), 'absolute: the ground is tinted').toBeGreaterThan(0.2)
+  await page.reload()
+  await expect(page.locator('.fmsOtw')).toHaveAttribute('data-colouring', 'absolute')
 })
 
 test('the chase view flies the glTF helicopter model, its rotors turning, in place of the fallback shapes', async ({ page }, testInfo) => {
