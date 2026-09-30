@@ -849,3 +849,30 @@ test('D-R: the Nav data tab shows each moving waypoint\'s age as a bench aid; it
   await expect(item).toHaveText(/age 0:0[1-9]:\d\d|age 0:[1-5]\d:\d\d/, { timeout: 15_000 })
   await page.getByRole('button', { name: 'Pause' }).click()
 })
+
+test('B1.7: a paused run stops its clock: the predictions and the fuel on FUEL and PROGRESS read the same after a wait', async ({ page }) => {
+  await open(page)
+  const readout = page.locator('.fmsBench').getByText(/^Active waypoint/)
+  const toGo = async () => Number((await readout.innerText()).match(/([\d.]+) NM/)?.[1] ?? NaN)
+  const start = await toGo()
+  await page.getByLabel('Simulation rate').selectOption('16')
+  await tab(page, 'Scenarios')
+  await page.getByRole('region', { name: 'Scenarios' }).getByRole('button', { name: 'Run the scenario' }).click()
+  await expect.poll(toGo).toBeLessThan(start - 0.3)
+  await page.getByRole('button', { name: 'Pause' }).click()
+  await expect(page.getByText('Run paused: its clock is stopped.')).toBeVisible()
+  // Each page is drawn afresh after the wait (FUEL is the second key of the second row on the standard panel), so a
+  // moving clock or a burning fuel would show.
+  const read = async (id: string) => { await key(page, id).click(); return (await screenLines(page)).join('\n') }
+  const fuel = await read('F2_2'), progress = await read('PROG')
+  expect(fuel).toMatch(/\d+KG/)
+  expect(progress).toMatch(/\d{4}\.\dZ/)
+  // Longer than the ETA field's 6 s resolution: a clock left running, even at 1 times (an aircraft freeze), would move
+  // the ETAs; flying at 16 times would also burn fuel.
+  await page.waitForTimeout(6500)
+  expect(await read('F2_2')).toBe(fuel)
+  expect(await read('PROG')).toBe(progress)
+  // Resumed, they move again.
+  await page.getByRole('button', { name: 'Fly' }).click()
+  await expect.poll(async () => read('F2_2')).not.toBe(fuel)
+})
