@@ -50,7 +50,47 @@ public sealed class RuntimeIdentityTests
         Assert.DoesNotContain("hunter2", published);
         Assert.DoesNotContain("postgres", published);
         Assert.DoesNotContain("192.0.2.10", published);
-        Assert.DoesNotContain("54329", published);
+        // The port is five digits, which a timestamp's fractional seconds can hold by chance: "12:04:01.5432915"
+        // once failed a whole-string check. So every published value except a timestamp is checked for it.
+        Assert.DoesNotContain(PublishedValuesExceptTimestamps(published), value => value.Contains("54329", StringComparison.Ordinal));
+    }
+
+    /// <summary>The port check neither trips on a timestamp that happens to hold its digits nor misses a leaked port.</summary>
+    [Fact]
+    public void The_port_check_ignores_timestamps_but_finds_a_leaked_port()
+    {
+        Assert.DoesNotContain(PublishedValuesExceptTimestamps("""{"Utc":"2026-09-30T12:04:01.5432915+00:00","DatabaseName":"aerolink"}"""),
+            value => value.Contains("54329", StringComparison.Ordinal));
+        Assert.Equal(2, PublishedValuesExceptTimestamps("""{"Nested":{"Endpoint":"db:54329"},"List":[54329]}""")
+            .Count(value => value.Contains("54329", StringComparison.Ordinal)));
+    }
+
+    /// <summary>Every string and number in a JSON document, except strings that read as a date and time.</summary>
+    private static List<string> PublishedValuesExceptTimestamps(string json)
+    {
+        var values = new List<string>();
+        void Walk(System.Text.Json.JsonElement element)
+        {
+            switch (element.ValueKind)
+            {
+                case System.Text.Json.JsonValueKind.Object:
+                    foreach (var property in element.EnumerateObject()) Walk(property.Value);
+                    break;
+                case System.Text.Json.JsonValueKind.Array:
+                    foreach (var item in element.EnumerateArray()) Walk(item);
+                    break;
+                case System.Text.Json.JsonValueKind.String:
+                    var text = element.GetString() ?? "";
+                    if (!DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _)) values.Add(text);
+                    break;
+                case System.Text.Json.JsonValueKind.Number:
+                    values.Add(element.GetRawText());
+                    break;
+            }
+        }
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        Walk(document.RootElement);
+        return values;
     }
 
     /// <summary>
