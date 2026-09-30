@@ -42,6 +42,8 @@ const plan = (provenance: string): OutputTag => ({ kind: "plan", provenance });
 export const FMS_OUTPUT_TAGS: { [K in keyof FmsOutputs]: OutputTag } = {
   source: annunciation("the FMS the displays show (FMS1)"),
   failed: annunciation("the FMS's own failure state"),
+  angleReference: annunciation("the FMS's angular display reference (MAG or TRUE; the crew selects it, forced TRUE in the polar region)"),
+  magneticVariation: data("the FMS's magnetic model (WMM2025) at the aircraft's position"),
   desiredTrack: data("FMS lateral guidance (label 114)"),
   crossTrack: data("FMS lateral guidance, or the selected GPS's 116 on an RNAV final (label 116)"),
   lateralSource: annunciation("which of the route geometry or the selected GPS the lateral deviation comes from"),
