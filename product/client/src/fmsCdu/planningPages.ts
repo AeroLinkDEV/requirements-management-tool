@@ -81,10 +81,11 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
           caption(" ORIGIN", "DEST "),
           { left: { text: route.origin }, right: { text: route.dest } },
           caption(" CO ROUTE", "FLT NO "),
-          { left: { text: route.coRoute }, right: { text: route.flightNo } },
+          // An inversed custom route shows the INV prefix (M300 3-10).
+          { left: { text: route.coRouteInverse ? `INV ${route.coRoute}` : route.coRoute }, right: { text: route.flightNo } },
           caption(" RUNWAY"),
           { left: route.runway ? { text: route.runway } : dashes(5) },
-          undefined, undefined, undefined,
+          undefined, { right: prompt("CO ROUTES>") }, undefined,
           { right: prompt("SAVE ROUTE>") },
           { left: dashes(24) },
           footer,
@@ -110,6 +111,7 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
       }
       if (index === 0) {
         if (side === "R" && row === 5) { fms.saveCompanyRoute(); fms.advisory("ROUTE SAVED"); return; }
+        if (side === "R" && row === 4) { fms.open("CO_ROUTES"); return; }
         const field = side === "L" ? (row === 1 ? "origin" : row === 2 ? "coRoute" : row === 3 ? "runway" : null)
           : row === 1 ? "dest" : row === 2 ? "flightNo" : null;
         if (!field) return;
@@ -261,6 +263,32 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
       if (!item) return;
       if (item.kind === "proc") fms.selectProcedure(kind, item.on ? null : item.ident);
       else fms.selectProcedure(kind, choice!.ident, item.on ? undefined : item.ident);
+    },
+  },
+
+  // SELECT CO ROUTE (M300 3-11): the stored routes, five a side; LOAD toggles DIRECT/INVERSE (E6); a route's LSK loads it
+  // as a modification and returns to RTE.
+  CO_ROUTES: {
+    pages: fms => Math.max(1, Math.ceil(fms.storedRoutes.length / 8)),
+    render: (fms, index) => {
+      const routes = fms.storedRoutes.slice(index * 8, index * 8 + 8);
+      const lines: (Line | undefined)[] = [title("SELECT CO ROUTE", `${index + 1}/${Math.max(1, Math.ceil(fms.storedRoutes.length / 8))}`)];
+      for (let row = 0; row < 4; row += 1) {
+        const left = routes[row], right = routes[row + 4];
+        lines[2 + row * 2] = { left: left ? { text: left.name } : undefined, right: right ? { text: right.name } : undefined };
+      }
+      lines[9] = caption(" LOAD");
+      lines[10] = { left: medium(`>${fms.coRouteLoad}`) };
+      lines[12] = { left: back("ROUTE") };
+      return lines;
+    },
+    lsk: (fms, side, row, _scratch, index) => {
+      if (side === "L" && row === 5) { fms.coRouteLoad = fms.coRouteLoad === "DIRECT" ? "INVERSE" : "DIRECT"; return; }
+      if (side === "L" && row === 6) { fms.open("RTE"); return; }
+      if (row > 4) return;
+      const route = fms.storedRoutes.slice(index * 8, index * 8 + 8)[side === "L" ? row - 1 : row + 3];
+      if (!route) return;
+      if (fms.loadCompanyRoute(route.name, "active", fms.coRouteLoad)) fms.open("RTE");
     },
   },
 
