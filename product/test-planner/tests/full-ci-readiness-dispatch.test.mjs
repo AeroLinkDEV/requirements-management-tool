@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { runInNewContext } from 'node:vm'
 
 const read = (relative) => readFileSync(new URL(`../../../${relative}`, import.meta.url), 'utf8')
 const requester = read('.github/workflows/request-full-ci.yml')
@@ -13,6 +14,36 @@ const reset = read('.github/workflows/reset-full-ci-readiness.yml')
 const bash = process.platform === 'win32'
   ? resolve(execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(), '../../../bin/bash.exe')
   : 'bash'
+
+test('Product concurrency keeps adjacent main commits and independent proof channels separate', () => {
+  const template = full.match(/^  group: (.+)$/m)?.[1].trim()
+  assert.ok(template, 'Product must declare its workflow concurrency group')
+  const expression = template.match(/\$\{\{\s*(.*?)\s*\}\}/)?.[1]
+  assert.ok(expression, 'the group must use the live event context')
+  // Execute the workflow's actual boolean/property/format expression. These normalized event strings
+  // use the common JavaScript/Actions subset; this does not simulate scheduler ordering or cancellation.
+  const group = ({ event = 'push', sha = 'a'.repeat(40), ref = 'refs/heads/main', pr = '', ready = '' } = {}) => {
+    const value = runInNewContext(expression, {
+      github: { event_name: event, sha, ref, event: { pull_request: { number: pr } } },
+      inputs: { pull_request_number: ready },
+      format: (pattern, argument) => pattern.replace('{0}', String(argument)),
+    }, { timeout: 1_000 })
+    return template.replace(/\$\{\{.*?\}\}/, String(value))
+  }
+  assert.notEqual(group(), group({ sha: 'b'.repeat(40) }), 'adjacent main SHAs must not supersede one another')
+  assert.equal(group(), group(), 'duplicate proof for the same pushed SHA retains cancellation')
+  for (const [context, expected] of [
+    [{ event: 'pull_request', pr: 1234 }, 'quality-1234'],
+    [{ event: 'workflow_dispatch', ready: '1234', ref: 'refs/heads/topic' }, 'quality-1234'],
+    [{ event: 'merge_group', ref: 'refs/heads/gh-readonly-queue/main/candidate-a' }, 'quality-refs/heads/gh-readonly-queue/main/candidate-a'],
+    [{ event: 'merge_group', ref: 'refs/heads/gh-readonly-queue/main/candidate-b' }, 'quality-refs/heads/gh-readonly-queue/main/candidate-b'],
+    [{ event: 'schedule' }, 'quality-scheduled'],
+    [{ event: 'workflow_dispatch' }, 'quality-diagnostics-refs/heads/main'],
+    [{ event: 'workflow_dispatch', ref: 'refs/heads/topic' }, 'quality-diagnostics-refs/heads/topic'],
+  ]) {
+    assert.equal(group(context), expected, JSON.stringify(context))
+  }
+})
 
 test('ready label requester is trusted-base, readiness-gated, same-repository, and dispatch-only', () => {
   assert.match(requester, /pull_request_target:/)
