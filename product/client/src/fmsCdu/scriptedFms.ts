@@ -1,4 +1,7 @@
 import { alert } from "./alerts";
+import type { CrossTalkPort, RadioManagementPort } from "./crossTalk";
+import { DEFAULT_RADIOS, type RadioKey } from "./radioManagement";
+import type { CivilSolution } from "./civilNavigation";
 import { MagvarModel, normalizeAngle, polarRegion, type AngleReference } from "./magvar";
 import { WMM2025_DATABASE } from "./wmm2025";
 import { STANDARD_HPA, errorProblem, formatSetting, indicatedAltitudeFt, settingProblem, type BaroSetting } from "./baro";
@@ -75,6 +78,8 @@ const PAGES: Record<PageId, Page> = { ...CORE_PAGES, ...PLANNING_PAGES, ...NAV_P
 export type WaypointResolution = { ident: string } | { select: string } | "invalid" | "not-in-database";
 
 const wpt = (ident: string, altitude?: string): Leg => ({ kind: "wpt", ident, altitude });
+/** Below this airspeed the aircraft is held stationary in the air (a hover, the speed selected to zero): laboratory value. */
+const HELD_AIRSPEED_KT = 10;
 
 const demoRoute = (): Route => ({
   origin: "CYOW", dest: "CYUL", coRoute: "OWUL1", flightNo: "LIFE21",
@@ -168,7 +173,13 @@ export class ScriptedFms implements CduBackend {
   private recall: Message[] = [];
   private active: Route = demoRoute();
   private modified: Route | null = null;
-  private radios = { com1: "121.500", com1Stby: "126.700", com2: "119.100", com2Stby: "133.600", nav1: "113.90", nav2: "116.70", adf: "0350", tpdr: "1200" };
+  private radios = { ...DEFAULT_RADIOS };
+  private crossTalk: CrossTalkPort | null = null;
+  private rms: RadioManagementPort | null = null;
+  private localSolution: CivilSolution | null = null;
+  private receiverCommands = true;
+  private readonly benchRaim: boolean;
+  private crossfillPending: Pick<ScriptedFms["computerPlan"], "points" | "moving" | "pilot" | "sar" | "hover"> | null = null;
   private fuel = { quantity: 1850, flow: 540, reserve: 400 };
   /**
    * The FUEL pages (S300 manual 14-1…14-4): the crew's "what if" FUEL WT (usable, excluding the reserve) and FUEL FLOW,
@@ -215,10 +226,7 @@ export class ScriptedFms implements CduBackend {
    * FMS reads only their buses (gpsSensors.ts); the bench may inject faults and overrides into them directly.
    */
   private readonly constellation = new Constellation(1);
-  private readonly receivers: readonly [GpsReceiver, GpsReceiver] = [
-    new GpsReceiver({ constellation: this.constellation, seed: 101 }),
-    new GpsReceiver({ constellation: this.constellation, seed: 202 }),
-  ];
+  private readonly receivers: readonly [GpsReceiver, GpsReceiver];
   private gpsChoice: GpsChoice = "AUTO";
   private gpsAssessment: GpsAssessment = { assessed: [], chosen: null };
   /** AUTO receiver selection, approach-aware (gpsSensors.ts, the AeroLink simulator policy), and its last verdict. */
@@ -260,8 +268,6 @@ export class ScriptedFms implements CduBackend {
   private moving: Record<string, { track: number; speed: number; origin: LatLon; epoch: number }> = {};
   private faults: { at: Date; text: string }[] = [];
   private selfTest: { startedAt: number | null; result: "PASS" | "FAIL" | null } = { startedAt: null, result: null };
-  /** The other FMS: in dual operation every executed route is cross-loaded to it; in independent operation not. */
-  private crossRoute: Route = demoRoute();
   /**
    * Navigation database cycles, the active one first, each with its own dataset. The two demonstration cycles are
    * separate datasets built from the same demonstration data: only their idents and dates differ. A loaded file
@@ -351,12 +357,14 @@ export class ScriptedFms implements CduBackend {
    * The barometric altitude the FMS and the autopilot use (baro.ts): the physical height plus the injected baro error,
    * referenced to the declared QNH. The crew's setting does not change it; it changes what is indicated.
    */
-  get altitude() { return this.aircraft.altitude + this.baroSystem.errorFt; }
+  get altitude() { return this.measuredBaro?.altitudeFt ?? this.aircraft.altitude + this.baroSystem.errorFt; }
   /** What the altimeter indicates with the crew's setting: the barometric altitude, corrected to the setting (baro.ts). */
-  get indicatedAltitude() { return indicatedAltitudeFt(this.altitude, this.baroSystem.declaredQnhHpa, this.baroSystem.setting); }
+  get indicatedAltitude() { return indicatedAltitudeFt(this.altitude, this.measuredBaro?.indicationQnhHpa ?? this.baroSystem.declaredQnhHpa, this.baroSystem.setting); }
   /** The barometric altitude system: the injected error (ft), the declared QNH (hPa) and the crew's setting. */
   get baro(): { errorFt: number; declaredQnhHpa: number; setting: BaroSetting } { return { ...this.baroSystem, setting: { ...this.baroSystem.setting } }; }
   private baroSystem: { errorFt: number; declaredQnhHpa: number; setting: BaroSetting } = { errorFt: 0, declaredQnhHpa: STANDARD_HPA, setting: { kind: "QNH", hPa: STANDARD_HPA } };
+  // An externally fed computer retains its last connected measurement. validBaroAltitude separately vetoes stale data.
+  private measuredBaro: { altitudeFt: number; indicationQnhHpa?: number } | null = null;
   /** The crew sets the altimeter: STD, or a QNH in hPa. Refused (false) outside the altimeter's range. Never moves the aircraft. */
   setBaroSetting(setting: BaroSetting): boolean {
     if (settingProblem(setting) !== null) return false;
@@ -511,7 +519,13 @@ export class ScriptedFms implements CduBackend {
   enterManualWind(wind: Wind | null): boolean {
     if (this.nav.windComputed) return false;
     this.manualWind = wind ? { ...wind } : null;
+    this.applyEnteredWind();
     return true;
+  }
+  private applyEnteredWind() {
+    if (this.nav.windComputed) return;
+    const wind = this.systemWind, toward = (wind.direction + 180) * Math.PI / 180;
+    this.navigation.accept(this.navigation.current, { north: wind.speed * Math.cos(toward), east: wind.speed * Math.sin(toward) });
   }
   /** Entries on the VNAV approach page. The FAF altitude sets the vertical path angle to the threshold. */
   /**
@@ -555,9 +569,12 @@ export class ScriptedFms implements CduBackend {
   /** The aircraft profile this FMS and its flight simulation fly (profile.ts); the helicopter profile unless given. */
   readonly aircraftProfile: AircraftProfile;
 
-  constructor(clock: () => Date = () => new Date(), options: { profile?: AircraftProfile; sensors?: SensorInputPort; userDatabase?: { store: UserDatabaseStore; scope: UserScope } } = {}) {
+  constructor(clock: () => Date = () => new Date(), options: { profile?: AircraftProfile; sensors?: SensorInputPort; receivers?: readonly [GpsReceiver, GpsReceiver]; preferredGps?: 0 | 1; userDatabase?: { store: UserDatabaseStore; scope: UserScope } } = {}) {
     this.clock = clock;
     this.sensorPort = options.sensors ?? null;
+    this.receivers = options.receivers ?? [new GpsReceiver({ constellation: this.constellation, seed: 101 }), new GpsReceiver({ constellation: this.constellation, seed: 202 })];
+    this.benchRaim = !this.sensorPort || !!options.receivers;
+    this.autoSelection = new AutoSelection(options.preferredGps ?? 0);
     this.aircraftProfile = options.profile ?? ACTIVE_PROFILE;
     this.reference = this.aircraftProfile.defaultAngleReference;
     this.navigation = new CivilNavigation(START_POSITION, this.aircraftProfile.parameters);
@@ -577,7 +594,7 @@ export class ScriptedFms implements CduBackend {
     this.pinActive();
     // The receivers start warm: powered a minute before the session, past self-test, first fix and SBAS acquisition.
     const start = this.now.getTime();
-    for (const offset of [60_000, 40_000]) for (const receiver of this.receivers) receiver.step(this.gpsInput(start - offset));
+    if (!options.receivers) for (const offset of [60_000, 40_000]) for (const receiver of this.receivers) receiver.step(this.gpsInput(start - offset));
     // The default airborne demonstration also starts with its radios already acquired. Later tuning changes and
     // reacquisition after loss observe the declared delay; cold start uses the initialization workflow.
     this.radioReceiver.tune(this.autoRadioStations(), start - 40_000);
@@ -636,14 +653,14 @@ export class ScriptedFms implements CduBackend {
   }
   loadMagvar(candidate: unknown) {
     if (!this.magvar.load(candidate)) return false;
-    this.checkMagvar(); this.emit(); return true;
+    this.checkMagvar(); this.crossTalk?.healthChanged(); this.emit(); return true;
   }
   setUtcTime(value: Date) {
     if (this.gpsTimeAvailable || !Number.isFinite(value.getTime())) return false;
     this.utcOffsetMs = value.getTime() - this.now.getTime(); this.emit(); return true;
   }
   powerOff() {
-    this.powered = false; this.bootUntil = null; this.emit();
+    this.powered = false; this.bootUntil = null; this.crossTalk?.healthChanged(); this.emit();
   }
   /** Explicit weight-on-wheels input. A restart never moves the plant or resets separately powered receivers. */
   powerOn(kind: "COLD" | "WARM", onGround: boolean) {
@@ -657,7 +674,7 @@ export class ScriptedFms implements CduBackend {
     this.inhibited = []; this.raimExcluded.clear();
     if (kind === "COLD" && onGround) { this.planData.cruiseWind = { direction: 0, speed: 0 }; this.reference = this.aircraftProfile.defaultAngleReference; }
     this.navigation.initialize(this.here); this.updateNavigation(0);
-    this.open("IDENT"); this.emit();
+    this.open("IDENT"); this.crossTalk?.healthChanged(); this.emit();
   }
 
   // ------------------------------------------------------------------ CduBackend
@@ -707,6 +724,7 @@ export class ScriptedFms implements CduBackend {
   press(fn: CduFunction, options: { held?: boolean } = {}) {
     if (this.hasCondition("fmsFail")) return;
     this.handle(fn, options);
+    this.crossTalk?.settingsChanged();
     this.emit();
   }
 
@@ -720,6 +738,7 @@ export class ScriptedFms implements CduBackend {
 
   hasCondition(id: ConditionId): boolean {
     switch (id) {
+      case "independent": return this.crossTalk ? this.crossTalk.mode === "INDEPENDENT" : this.injected.has(id);
       case "fmsFail": return this.powerState !== "ON" || !this.magvar.valid || this.injected.has(id);
       case "magvarCrc": return !this.magvar.valid;
       case "offset": return this.active.offset !== undefined;
@@ -732,6 +751,7 @@ export class ScriptedFms implements CduBackend {
 
   setCondition(id: ConditionId, on: boolean) {
     if (on === this.hasCondition(id)) return;
+    if (id === "independent" && this.crossTalk) { this.crossTalk.setIndependent(on); return; }
     switch (id) {
       case "magvarCrc": this.loadMagvar(on ? { ...WMM2025_DATABASE, coefficients: WMM2025_DATABASE.coefficients + " " } : WMM2025_DATABASE); break;
       // Injected as an executed offset, as though the crew had entered and executed it.
@@ -753,8 +773,6 @@ export class ScriptedFms implements CduBackend {
         if (on && ["fmsFail", "gpsLost", "gpsIntegrity", "dmeOutage", "independent"].includes(id)) {
           this.recordFault({ fmsFail: "FMS FAILURE", gpsLost: "GPS LOST", gpsIntegrity: "GPS INTEGRITY LOST", dmeOutage: "DME OUTAGE", independent: "X-SIDE SYNC LOST" }[id as string] ?? id);
         }
-        // Leaving independent operation resynchronises the other FMS to this one.
-        if (!on && id === "independent") this.crossRoute = structuredClone(this.active);
         // Forcing RNP exceeded raises CHECK ANP at once, and that counts as this episode's alert (R11).
         if (on && id === "rnpExceeded") {
           this.alert(alert("CHECK ANP"));
@@ -770,7 +788,7 @@ export class ScriptedFms implements CduBackend {
         // An alert still unacknowledged when it fails is shown again, so MSG keeps its acknowledgement path (R13).
         if (!on && id === "fmsFail") { this.open("IDENT"); this.message = this.pendingAlert; }
     }
-    this.emit();
+    this.crossTalk?.healthChanged(); this.emit();
   }
 
   /**
@@ -956,7 +974,7 @@ export class ScriptedFms implements CduBackend {
     const gpsWord = (index: number) => ({ at: now, sequence, status: "NORMAL" as const, value: this.receivers[index].bus() });
     const gps: SensorFrame["gps"] = [gpsWord(0), gpsWord(1)];
     const ra = radioHeight(this.declaredSurface, this.truth, this.physicalAltitude, this.hasCondition("raFail"));
-    return { air: { at: now, sequence, status: "NORMAL", value: { headingTrue: this.heading, tasKt: this.aircraft.tas, altitudeFt: this.altitude } },
+    return { air: { at: now, sequence, status: "NORMAL", value: { headingTrue: this.heading, tasKt: this.aircraft.tas, altitudeFt: this.altitude, indicationQnhHpa: this.baroSystem.declaredQnhHpa } },
       attitude: { at: now, sequence, status: "NORMAL", value: { bank: this.aircraft.bank, pitch: this.aircraft.pitch } },
       radioHeight: { at: now, sequence, status: ra.status, value: ra.value },
       gps, radios: this.radioReceiver.sample(this.truth, this.physicalAltitude, now, this.injected.has("dmeOutage")) };
@@ -1009,8 +1027,8 @@ export class ScriptedFms implements CduBackend {
       const at = request.eta! + minutes * 60_000;
       const index = this.gpsChoice === "GPS2" ? 1 : this.nav.gpsSource === 2 ? 1 : 0;
       const hil = this.receivers[index].predictRaim(at, position, this.raimDeselectedSatellites);
-      const phase = hil === null || this.sensorPort !== null ? "****" : hil <= 0.3 ? "APPR" : hil <= 1 ? "TERM" : hil <= 2 ? "ENRT" : "NONE";
-      return { at, hil: this.sensorPort !== null ? null : hil, phase };
+      const phase = hil === null || !this.benchRaim ? "****" : hil <= 0.3 ? "APPR" : hil <= 1 ? "TERM" : hil <= 2 ? "ENRT" : "NONE";
+      return { at, hil: !this.benchRaim ? null : hil, phase };
     });
   }
 
@@ -1021,6 +1039,12 @@ export class ScriptedFms implements CduBackend {
   updateNavigation(dt: number) {
     this.sensorFrame = this.sampleSensors();
     if (!this.powered) return;
+    const connectedAir = sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge);
+    if (this.sensorPort && connectedAir && Number.isFinite(connectedAir.altitudeFt)) {
+      const qnh = connectedAir.indicationQnhHpa;
+      this.measuredBaro = { altitudeFt: connectedAir.altitudeFt,
+        ...(qnh !== undefined && settingProblem({ kind: "QNH", hPa: qnh }) === null ? { indicationQnhHpa: qnh } : {}) };
+    }
     const gps = this.updateGps(this.sensorFrame);
     const previous = this.nav.mode, previousSource = this.nav.gpsSource;
     const now = this.now.getTime();
@@ -1042,6 +1066,7 @@ export class ScriptedFms implements CduBackend {
       uncertainGps: uncertainIndex === undefined ? null : measurement(uncertainIndex, true), radio,
       radioApproved: this.flightPhase !== "APPROACH", rnp: this.requiredRnp });
     if (selection.mode !== "DR" && distanceNm(predicted, selection.position) > 0.5) this.alert(alert("POSITION SHIFT"));
+    this.localSolution = structuredClone(selection);
     this.here = selection.position;
     this.updateAngleReference();
     const gpsSource = selection.gpsSource;
@@ -1168,7 +1193,9 @@ export class ScriptedFms implements CduBackend {
    * The FAS data block of the active RNAV approach, sent to both receivers whenever the approach changes (GPS phase 3b);
    * no selection when the route has none, or an ILS.
    */
+  setReceiverCommandAuthority(enabled: boolean) { this.receiverCommands = enabled; if (enabled) { this.sentApproach = null; this.sendApproach(); } }
   private sendApproach() {
+    if (!this.receiverCommands) return;
     // The receivers fly the FAS pinned with the executed plan (pinActive), never one re-derived from a cycle activated since.
     const fas = this.pinnedFas?.fas ?? null;
     const key = fas ? `${fas.referencePathId}:${fas.crc}` : null;
@@ -1396,10 +1423,19 @@ export class ScriptedFms implements CduBackend {
 
   /** M300 1-11/7-10: loading an approach grants no approach phase, NPA or 0.3-NM RNP. */
   get flightPhase(): FlightPhase {
+    return this.phaseAt(this.here);
+  }
+
+  /** Local phase remains independently observable after system navigation adoption or a health notification. */
+  get localFlightPhase(): FlightPhase {
+    return this.phaseAt(this.localNavigationSolution.position);
+  }
+
+  private phaseAt(position: LatLon): FlightPhase {
     const leg = this.active.legs[0];
     // A missed approach request disarms the approach, so the final it continues along is flown in the terminal phase (M300 7-15).
     const approach = this.approachPhaseActive && this.armedApproach && leg?.kind !== "disco" && leg?.source === "APPR";
-    return s300Phase(this.here, this.validBaroAltitude, this.db.airport(this.active.origin), this.db.airport(this.active.dest), approach);
+    return s300Phase(position, this.validBaroAltitude, this.db.airport(this.active.origin), this.db.airport(this.active.dest), approach);
   }
 
   /** PinS instrument guidance starts at the coded IDF at/above its altitude; it never guides the unknown site-to-IDF segment. */
@@ -1483,16 +1519,42 @@ export class ScriptedFms implements CduBackend {
     return computeProfile({
       waypoints: this.predictionLegs(route).waypoints, altitude: this.altitude, cruiseAltitude: this.vnav.cruiseAltitude, climbRate: 1000,
       pathAngle: this.vnav.pathAngle, phase: this.vphase.phase, fuel: this.fuel.quantity, fuelFlow: this.fuel.flow, now: this.utcTime.getTime(),
-      // Held stationary off the plan (the ground speed below measurable progress): no ETA or EFOB ahead (plan B1.7).
-      noProgress: !makingProgress(this.groundSpeed),
+      noProgress: this.heldOffPlan,
     });
   }
 
   /**
-   * The time at the fix of the active route's leg `index`, `miles` ahead, as the pages and the output bus show it. In a
-   * manual hold being flown, the prediction's time along the pattern still to fly, so the hold fix is its next crossing
-   * (S300 5-17, Astra F1): turning away from the fix does not make it unknown. Elsewhere the distance at the closure
-   * speed, with no time without progress toward the fix (C8, C9). Null when there is no time.
+   * NO PROGRESS (plan B1.7): the aircraft is held stationary off the plan, so nothing ahead has a time. Either it is
+   * stopped over the ground, or it is held stationary in the air (the airspeed of a hover, the speed selected to zero)
+   * and not closing on the active waypoint, as when a wind carries a stopped helicopter backwards at 40 kt. A turn at
+   * flying speed that points away from the waypoint for a while is not held off the plan: it keeps its predictions.
+   */
+  get heldOffPlan() {
+    return !makingProgress(this.groundSpeed) || (this.aircraft.tas < HELD_AIRSPEED_KT && !makingProgress(this.closureSpeed));
+  }
+
+  /**
+   * The time the planned path reaches a point `miles` ahead (rev 3 B1.7): between the profile's predicted times, each
+   * flown at the planned speed through the wind on its leg, never from the present closure speed. Null without progress
+   * or where the path's time is unknown.
+   */
+  etaAlongPath(miles: number): number | null {
+    let previous = { distance: 0, eta: this.utcTime.getTime() };
+    for (const point of this.profile().points) {
+      if (point.distance === null || point.eta === null) return null;
+      if (point.distance >= miles - 1e-9) {
+        const span = point.distance - previous.distance;
+        return span <= 1e-9 ? point.eta : previous.eta + ((miles - previous.distance) / span) * (point.eta - previous.eta);
+      }
+      previous = { distance: point.distance, eta: point.eta };
+    }
+    return null;
+  }
+
+  /**
+   * The time at the fix of the active route's leg `index`, `miles` ahead, as the pages and the output bus show it: the
+   * planned path's time (rev 3 B1.7), none without progress. In a manual hold being flown, the prediction's time along
+   * the pattern still to fly, so the hold fix is its next crossing (S300 5-17, Astra F1).
    */
   shownEta(index: number, miles: number): number | null {
     const hold = this.active.hold, legs = this.active.legs, leg = legs[index];
@@ -1501,7 +1563,7 @@ export class ScriptedFms implements CduBackend {
       const point = this.profile().points[legs.slice(0, index).filter(l => l.kind === "wpt").length];
       return point?.ident === leg.ident ? point.eta : null;
     }
-    return makingProgress(this.closureSpeed) ? this.utcTime.getTime() + (miles / this.closureSpeed) * 3_600_000 : null;
+    return this.etaAlongPath(miles);
   }
 
   /**
@@ -2147,22 +2209,96 @@ export class ScriptedFms implements CduBackend {
     this.pilot = [...this.pilot.filter(p => p.ident !== ident), { ident, position, definition: "TEMP DB" }];
   }
 
+  /** Transfer payloads contain computed/entered FMS state, never power, faults, CDU entry or aircraft truth. */
+  get computerSettings() {
+    return structuredClone({ setup: this.setup, reference: this.reference, utcOffsetMs: this.utcOffsetMs, positionReference: this.positionReference,
+      planData: this.planData, qnh: this.vnav.qnh, rnp: this.nav.rnpManual, inhibited: this.inhibited,
+      manualWind: this.manualWind, lastComputedWind: this.lastComputedWind,
+      gpsSelected: this.gpsSelected, gpsChoice: this.gpsChoice, raimExcluded: [...this.raimExcluded], predictiveRaim: this.predictiveRaim,
+      fuel: this.fuel, userDb: this.userDb, pilot: this.pilot, points: this.points, moving: this.moving, chosen: this.chosen,
+      cycles: this.cycles.map(cycle => ({ data: cycle.db.exportData(), source: cycle.source })) });
+  }
+  receiveComputerSettings(data: ScriptedFms["computerSettings"]) {
+    const next = structuredClone(data);
+    Object.assign(this.setup, next.setup); this.reference = next.reference; this.utcOffsetMs = next.utcOffsetMs;
+    if (JSON.stringify(this.positionReference) !== JSON.stringify(next.positionReference) && next.positionReference && this.nav.mode === "DR") this.navigation.initialize(next.positionReference.position);
+    this.positionReference = next.positionReference; Object.assign(this.planData, next.planData); this.vnav.qnh = next.qnh;
+    this.manualWind = next.manualWind; this.lastComputedWind = next.lastComputedWind; this.applyEnteredWind();
+    this.nav.rnpManual = next.rnp; this.inhibited = next.inhibited; this.gpsSelected = next.gpsSelected; this.gpsChoice = next.gpsChoice;
+    this.raimExcluded.clear(); next.raimExcluded.forEach(prn => this.raimExcluded.add(prn)); Object.assign(this.predictiveRaim, next.predictiveRaim);
+    this.fuel = next.fuel; this.pilot = next.pilot; this.points = next.points; this.moving = next.moving; this.chosen = next.chosen;
+    if (JSON.stringify(this.userDb) !== JSON.stringify(next.userDb)) this.saveUserDatabase(next.userDb);
+    if (JSON.stringify(this.cycles.map(cycle => cycle.db.exportData())) !== JSON.stringify(next.cycles.map(cycle => cycle.data)))
+      this.cycles = next.cycles.map(cycle => cycleOf(new NavDatabase(cycle.data), cycle.source));
+    this.emit();
+  }
+  get computerPlan() {
+    return structuredClone({ active: this.active, secondary: this.secondaryRoute, vnav: this.vnav, legStart: this.legStart, sequenced: this.sequenced,
+      points: this.points, moving: this.moving, pilot: this.pilot, pins: this.pins, pinnedIn: this.pinnedIn ? this.pinnedIn.db.exportData() : null,
+      pinnedFas: this.pinnedFas, executedApproach: this.executedApproach, advisoryReference: this.advisoryReference,
+      sar: { ...this.sar, pending: null }, hover: this.hover.active });
+  }
+  receiveComputerPlan(data: ScriptedFms["computerPlan"], modification: boolean, secondary = false) {
+    if (modification && this.modified) { this.advisory("!CDU ENTRY CONFLICT"); return false; }
+    const next = structuredClone(data);
+    const route = secondary ? next.secondary : next.active;
+    if (!route) { this.advisory("NO INACTIVE ROUTE"); return false; }
+    if (modification) { this.modified = route; this.approachSelectionPending = true; this.crossfillPending = { points: next.points, moving: next.moving, pilot: next.pilot, sar: next.sar, hover: next.hover }; }
+    else {
+      this.active = route; this.secondaryRoute = next.secondary; Object.assign(this.vnav, next.vnav);
+      this.legStart = next.legStart; this.sequenced = next.sequenced; this.pins = next.pins;
+      this.pinnedIn = next.pinnedIn ? cycleOf(new NavDatabase(next.pinnedIn), "cross-talk executed plan") : this.activeCycle;
+      this.pinnedFas = next.pinnedFas; this.executedApproach = next.executedApproach; this.advisoryReference = next.advisoryReference;
+      this.modified = null; this.planRevision += 1;
+      this.receiveComputerProcedures(next, route);
+    }
+    if (!modification) { this.points = next.points; this.moving = next.moving; this.pilot = next.pilot; }
+    this.emit(); return true;
+  }
+  private receiveComputerProcedures(data: Pick<ScriptedFms["computerPlan"], "sar" | "hover">, route: Route, crossfill = false) {
+    const search = data.sar.active && route.legs.some(leg => leg.kind === "wpt" && leg.qualifier === "/S" && leg.ident === data.sar.id[data.sar.active!]);
+    Object.assign(this.sar, data.sar, { pending: null, active: search ? data.sar.active : null, status: search ? crossfill ? "ARMED" : data.sar.status : null });
+    const active = data.hover && route.legs.some(leg => leg.kind === "wpt" && (leg.ident === "TDN" || leg.ident === "MRK"));
+    // Procedure IDs belong to the local controller; replacing the geometry must invalidate its previous join/TD state.
+    const prior = this.hover.active, next = active ? data.hover : null;
+    const geometry = (procedure: typeof next) => procedure ? { mark: procedure.mark, finalTrack: procedure.finalTrack, dtra: procedure.dtra, join: procedure.join } : null;
+    if (JSON.stringify(geometry(prior)) !== JSON.stringify(geometry(next))) {
+      const committed = next ? { ...next, id: ++this.hover.procedures } : null;
+      Object.assign(this.hover, { active: committed, status: committed ? "ACT" : "NONE", mark: committed?.mark ?? null,
+        finalTrack: committed?.finalTrack ?? null, dtra: committed?.dtra ?? null, requestData: null, refused: null, refusedReason: null, functionLost: false });
+    }
+    this.pendingHoverPoints = null; this.pendingJoin = null;
+  }
+  get localNavigationSolution() { return this.localSolution ? structuredClone(this.localSolution) : this.navigation.current; }
+  get navigationWindEstimate() { return this.navigation.windEstimate; }
+  receiveSystemNavigation(solution: CivilSolution, wind: { north: number; east: number }) {
+    if (this.hasCondition("fmsFail")) return;
+    this.navigation.accept(solution, wind); this.here = { ...solution.position }; Object.assign(this.nav, solution);
+    this.updateAngleReference();
+  }
+  /** A second navigation computer observes the same physical aircraft; it never integrates another aircraft. */
+  observeAircraft(source: ScriptedFms) { this.setAircraft({ ...source.aircraft, heading: source.heading, position: { ...source.truePosition } }); Object.assign(this.wind, source.wind); }
+
   // ------------------------------------------------------------------ maintenance and dual operation
 
   get faultLog() { return this.faults; }
   get selfTestState() { return this.selfTest; }
-  get otherFms() { return this.crossRoute; }
+  get otherFms() { return this.crossTalk?.peerRoute ?? null; }
+  get dualOperation() { return this.crossTalk; }
+  get radioRequests() { return this.rms?.requests ?? []; }
+  attachComputerPorts(crossTalk: CrossTalkPort, rms: RadioManagementPort) { this.crossTalk = crossTalk; this.rms = rms; }
+  notifyComputerState() { this.emit(); }
 
   /** Whether the other FMS holds the same active route: always in dual operation, not necessarily when independent. */
   get crossSideInSync() {
-    const signature = (route: Route) => JSON.stringify(route.legs.map(leg => (leg.kind === "wpt" ? leg.ident : leg.kind)));
-    return signature(this.crossRoute) === signature(this.active);
+    return this.otherFms !== null && JSON.stringify(this.otherFms) === JSON.stringify(this.active);
   }
 
   /** SELF TEST: runs for five seconds, then passes unless a fault condition is present. */
   startSelfTest() { this.selfTest = { startedAt: this.now.getTime(), result: null }; }
 
-  private recordFault(text: string) { this.faults = [{ at: this.now, text }, ...this.faults].slice(0, 20); }
+  recordFault(text: string) { this.faults = [{ at: this.now, text }, ...this.faults].slice(0, 20); }
+  get missedApproachActive() { return this.missedRequested || this.active.legs[0]?.kind !== "disco" && this.active.legs[0]?.source === "MISSED"; }
 
   /** On an approach that is not an ILS: the NPA annunciator. */
   get nonPrecisionApproach() {
@@ -2273,7 +2409,7 @@ export class ScriptedFms implements CduBackend {
    * the missed approach legs (7-16 item 4; plan R2-03 MA-EARLY). Refused with the FMS failed, or with no missed
    * approach ahead (once it is being flown there is nothing left to go around from).
    */
-  requestMissedApproach() {
+  requestMissedApproach(fromPeer = false) {
     if (this.hasCondition("fmsFail")) return false;
     const missed = this.active.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
     if (missed <= 0) return false;
@@ -2285,6 +2421,7 @@ export class ScriptedFms implements CduBackend {
     this.armedApproach = false;
     this.armMissedHold(this.active);
     this.withdrawAlert("NO APPR INTEGRITY");
+    if (!fromPeer) this.crossTalk?.missedApproachRequested();
     this.emit();
     return true;
   }
@@ -2421,7 +2558,7 @@ export class ScriptedFms implements CduBackend {
   get routeStatus(): "ACT" | "MOD" { return this.modified ? "MOD" : "ACT"; }
   get now() { return this.clock(); }
   get position(): LatLon { return this.here; }
-  get radioState() { return this.radios; }
+  get radioState() { return this.rms?.state ?? this.radios; }
   get fuelState() { return this.fuel; }
 
   /**
@@ -2467,6 +2604,13 @@ export class ScriptedFms implements CduBackend {
    * an airport, so it resolves in the context of a route: the active route unless a page asks about the modification.
    */
   coordinates(ident: string, route: Route = this.active): LatLon | undefined {
+    if (route === this.modified && this.crossfillPending) {
+      const pending = this.crossfillPending;
+      const motion = pending.moving[ident];
+      if (motion) return offset(motion.origin, motion.track, motion.speed * (this.now.getTime() - motion.epoch) / 3_600_000);
+      const point = pending.points[ident] ?? pending.pilot.find(point => point.ident === ident)?.position;
+      if (point) return { ...point };
+    }
     const generated = route.legs.find(leg => leg.kind === "wpt" && leg.ident === ident && leg.procedureTurn?.role === "OUTBOUND");
     if (generated?.kind === "wpt") return generated.position;
     const pending = this.pendingHoverPoints;
@@ -2918,14 +3062,18 @@ export class ScriptedFms implements CduBackend {
 
   /** Starts (or continues) a modification of the active route. */
   modify(change: (route: Route) => void) {
+    if (this.crossTalk && !this.crossTalk.beginEdit()) { this.advisory("!CDU ENTRY CONFLICT"); return false; }
     const route = this.modified ?? structuredClone(this.active);
     change(route);
     this.modified = route;
+    return true;
   }
 
   /** The ERASE prompt: discards the modification; navigation never left the active route. */
   eraseModification() {
     this.modified = null;
+    this.crossfillPending = null;
+    this.crossTalk?.finishEdit(false);
     this.approachSelectionPending = false;
     this.pendingApproachTemperature = null;
     this.discardHoverModification();
@@ -2935,7 +3083,11 @@ export class ScriptedFms implements CduBackend {
   }
 
   setScratch(text: string) { this.scratch = text.slice(0, COLUMNS); }
-  setRadio(key: keyof ScriptedFms["radios"], value: string) { this.radios[key] = value; }
+  setRadio(key: RadioKey, value: string) { if (this.rms) this.rms.tune(key, value); else this.radios[key] = value; }
+  swapRadio(key: "com1" | "com2") {
+    if (this.rms) this.rms.swap(key);
+    else { const standby = `${key}Stby` as "com1Stby" | "com2Stby"; [this.radios[key], this.radios[standby]] = [this.radios[standby], this.radios[key]]; }
+  }
   setFuel(key: keyof ScriptedFms["fuel"], value: number) { this.fuel[key] = value; }
   /** Enters, changes or (with null) deletes the lateral offset, as a modification to execute. */
   setOffset(change: Partial<Offset> | null) {
@@ -2962,6 +3114,19 @@ export class ScriptedFms implements CduBackend {
     this.recall.unshift(message);
     this.message = message;
     this.pendingAlert = message;
+    this.crossTalk?.broadcastAlert(message.text);
+  }
+
+  /** Received alerts share their source text, while each CDU retains its own scratch entry and page. */
+  receiveComputerAlert(text: string) {
+    if (this.pendingAlert?.text === text) return;
+    const message = { text, alert: true };
+    this.recall.unshift(message); this.message = message; this.pendingAlert = message; this.emit();
+  }
+  acknowledgeComputerMessage(text: string) {
+    if (this.message?.text === text) this.message = null;
+    if (this.pendingAlert?.text === text) this.pendingAlert = null;
+    this.emit();
   }
 
   /** A message whose condition has ended leaves the scratchpad and no longer lights MSG; the recall list keeps it. */
@@ -3323,7 +3488,8 @@ export class ScriptedFms implements CduBackend {
     if (!route) return;
     // The hover procedure executes only with a valid radio height (M300 E-27: RALT FAILED); the modification stays.
     const hover = this.hover.status === "MOD" && route.legs.some(leg => leg.kind === "wpt" && leg.ident === "TDN");
-    if (hover && this.radioHeight.status !== "NORMAL") { this.alert(alert("RALT FAILED")); return; }
+    const crossfillHover = this.crossfillPending?.hover && route.legs.some(leg => leg.kind === "wpt" && leg.ident === "TDN");
+    if ((hover || crossfillHover) && this.radioHeight.status !== "NORMAL") { this.alert(alert("RALT FAILED")); return; }
     if (hover) {
       const h = this.hover;
       const joinPoint = this.pendingHoverPoints!.JN;
@@ -3353,6 +3519,11 @@ export class ScriptedFms implements CduBackend {
     this.directPending = false;
     this.directBypassed = [];
     this.active = route;
+    if (this.crossfillPending) {
+      const pending = this.crossfillPending;
+      this.points = pending.points; this.moving = pending.moving; this.pilot = pending.pilot;
+      this.receiveComputerProcedures(pending, route, true); this.crossfillPending = null;
+    }
     // Reselecting even the same procedure starts fresh MAP/phase authority only at a successful EXEC.
     if (this.approachSelectionPending) this.executedApproach = null;
     this.approachSelectionPending = false;
@@ -3360,8 +3531,7 @@ export class ScriptedFms implements CduBackend {
     this.pendingApproachTemperature = null;
     this.pinActive();
     this.modified = null;
-    // In dual operation the executed route is cross-loaded to the other FMS.
-    if (!this.injected.has("independent")) this.crossRoute = structuredClone(route);
+    this.crossTalk?.finishEdit(true);
   }
 
   private handle(fn: CduFunction, { held }: { held?: boolean }) {
@@ -3438,6 +3608,7 @@ export class ScriptedFms implements CduBackend {
   private clear(held: boolean) {
     if (this.message) {
       // CLR clears alert and advisory messages from the scratchpad, which also acknowledges the alert.
+      this.crossTalk?.acknowledgeMessage(this.message.text);
       this.message = null;
       this.pendingAlert = null;
       return;

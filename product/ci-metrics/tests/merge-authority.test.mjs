@@ -388,6 +388,46 @@ test('refuses an incomplete, over-counted, or inconsistent shard set', () => {
   assert.ok(inconsistent.reasons.some((reason) => reason.startsWith('shard-set-inconsistent: API test suite')))
 })
 
+// #1358: the browser group moves from 4 to 6 PR shards in two maintenance steps. The verifier the binder runs
+// is main's, so it accepts either size first; the matrix changes after it. Any other size is still drift.
+function withBrowserShards(jobs, total, shards = Array.from({ length: total }, (_, index) => index + 1), conclusion = 'success') {
+  return jobs
+    .filter((job) => !/^Browser journeys \(\d+\/\d+\)$/.test(job.name))
+    .concat(shards.map((shard) => ({ name: `Browser journeys (${shard}/${total})`, conclusion, runId: RUN_ID, runAttempt: RUN_ATTEMPT })))
+}
+
+test('accepts a complete browser shard set of 4 or of 6, on the full and the FMS topologies (#1358)', () => {
+  for (const total of [4, 6]) {
+    assert.deepEqual(reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), total) }), { decision: 'PASS', reasons: [] }, `${total} shards`)
+    assert.deepEqual(
+      evaluateMergeGroupCandidate({ ...legitimateCandidate(), jobs: withBrowserShards(fmsTopologyJobs(), total), fmsOnlyCandidate: true }),
+      { decision: 'PASS', reasons: [] },
+      `FMS topology, ${total} shards`,
+    )
+  }
+})
+
+test('refuses any other browser shard count, an incomplete or mixed 6-shard set, and a failed sixth shard (#1358)', () => {
+  for (const total of [1, 3, 5, 7, 8]) {
+    const drifted = reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), total) })
+    assert.equal(drifted.decision, 'REFUSE', `${total} shards`)
+    assert.ok(drifted.reasons.some((reason) => reason.startsWith('shard-count-drift: Browser journeys')), `${total} shards`)
+  }
+  const incomplete = reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), 6, [1, 2, 3, 4, 5]) })
+  assert.equal(incomplete.decision, 'REFUSE')
+  assert.ok(incomplete.reasons.some((reason) => reason.startsWith('shard-set-incomplete: Browser journeys ran 5 of 6')))
+  const duplicated = reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), 6, [1, 2, 3, 4, 5, 5]) })
+  assert.ok(duplicated.reasons.some((reason) => reason.startsWith('shard-set-incomplete: Browser journeys')))
+  const mixed = reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), 6, [1, 2, 3, 4, 5]).concat([{ name: 'Browser journeys (4/4)', conclusion: 'success', runId: RUN_ID, runAttempt: RUN_ATTEMPT }]) })
+  assert.ok(mixed.reasons.some((reason) => reason.startsWith('shard-set-inconsistent: Browser journeys')))
+  const failed = reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), 6).map((job) => (job.name === 'Browser journeys (6/6)' ? { ...job, conclusion: 'failure' } : job)) })
+  assert.ok(failed.reasons.some((reason) => reason === "job-not-success: Browser journeys shard 6 concluded 'failure'"))
+  // The API group is not part of the change: 3 only.
+  const api = reasonsFor({ jobs: allJobsSuccess().filter((job) => !/^API test suite \(/.test(job.name))
+    .concat([1, 2, 3, 4, 5, 6].map((shard) => ({ name: `API test suite (${shard}/6)`, conclusion: 'success', runId: RUN_ID, runAttempt: RUN_ATTEMPT }))) })
+  assert.ok(api.reasons.some((reason) => reason.startsWith('shard-count-drift: API test suite')))
+})
+
 test('refuses when the surface comparison is missing entirely', () => {
   const result = reasonsFor({ changedPaths: undefined })
   assert.equal(result.decision, 'REFUSE')

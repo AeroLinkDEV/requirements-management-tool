@@ -289,7 +289,8 @@ export class FlightSimulator {
   private sarPlan: { points: LatLon[]; index: number } | null = null;
   private last: Guidance;
 
-  constructor(fms: ScriptedFms, outputPort?: GuidanceOutputPort<Guidance>) {
+  private readonly beforeGuidance: (() => void) | null;
+  constructor(fms: ScriptedFms, outputPort?: GuidanceOutputPort<Guidance>, beforeGuidance?: () => void) {
     this.fms = fms;
     // The FMS times the manual hold's next crossing along the path flown here: where the aircraft is in the entry or the
     // racetrack, and which segment ends at the fix passage (Astra F1). In this bench the flight builds the hold path the
@@ -299,6 +300,7 @@ export class FlightSimulator {
       return plan ? { segments: plan.segments, index: plan.index, passageAt: plan.index <= plan.entryEnd ? plan.entryEnd : plan.segments.length - 1 } : null;
     });
     this.outputPort = outputPort ?? null;
+    this.beforeGuidance = beforeGuidance ?? null;
     this.profile = fms.aircraftProfile.parameters;
     this.hoverHeightFt = this.profile.hoverHeightDefault.value;
     this.airspeed = fms.targetSpeed;
@@ -629,6 +631,62 @@ export class FlightSimulator {
   get bankAngle() { return this.bank; }
   get sarPath() { return this.sarPlan?.points ?? null; }
 
+  private adoptAfcsSelections(previous: FlightSimulator) {
+    // Both computers observe the selections/state of the one physical AFCS.
+    this.selectedAlt = previous.selectedAlt; this.selectedTas = previous.selectedTas; this.vsTarget = previous.vsTarget;
+    this.altitudeHold = previous.altitudeHold; this.vertical = previous.vertical; this.goingAround = previous.goingAround;
+    this.lateral = previous.lateral; this.lnavArmed = previous.lnavArmed; this.heading = previous.heading; this.held = previous.held;
+    this.lowCollective = structuredClone(previous.lowCollective); this.lowHorizontal = structuredClone(previous.lowHorizontal);
+    this.hoverHeading = previous.hoverHeading; this.hoverHeightFt = previous.hoverHeightFt; this.tdSpeed = previous.tdSpeed; this.tdIas = previous.tdIas;
+  }
+
+  /** The bench changes the selected computer without resetting the single physical aircraft. */
+  adoptAircraftMotion(previous?: FlightSimulator) {
+    this.airspeed = this.fms.trueAirspeed ?? this.airspeed;
+    this.bank = this.fms.navigationInputs?.attitude?.value?.bank ?? 0;
+    if (previous) {
+      this.attitude = { ...previous.attitude };
+      this.lastGround = previous.lastGround ? { ...previous.lastGround } : null;
+      this.adoptAfcsSelections(previous);
+      // Laboratory source change cancels a captured approach; the crew must re-arm against the new computer's authority.
+      this.approach = "OFF"; this.gpsLateral = false; this.fms.armApproach(false);
+      this.watchFailure(); this.last = this.guide(); this.record("FMS SOURCE CHANGED", "AFCS selections retained; approach requires re-arming");
+    }
+  }
+
+  /** Accepted SYNC copies current procedure progress; each computer subsequently computes its own guidance. */
+  receiveSynchronizedProgress(source: FlightSimulator) {
+    if (JSON.stringify(this.fms.activeRoute) !== JSON.stringify(source.fms.activeRoute)) return;
+    this.sarPlan = this.fms.sar.status === "IN PROGRESS" ? structuredClone(source.sarPlan) : null;
+    this.holdPlan = this.fms.activeRoute.hold?.status === "IN PROGRESS" ? structuredClone(source.holdPlan) : null;
+    this.joinPlan = source.joinPlan && this.fms.hover.active && JSON.stringify(this.fms.hoverJoin) === JSON.stringify(source.fms.hoverJoin)
+      ? { ...structuredClone(source.joinPlan), id: this.fms.hover.active.id } : null;
+  }
+
+  /** An unselected computer computes its own route guidance against the common aircraft, without integrating physics. */
+  observe(dt: number, selected?: FlightSimulator) {
+    const fms = this.fms;
+    if (selected) this.adoptAfcsSelections(selected);
+    fms.refreshSensorInput(); this.beforeGuidance?.(); this.watchFailure(); this.watchGoAround(); this.watchGpsLateral(); this.watchHover();
+    const computed = this.guide(dt); this.updateApproach(computed.crossTrack);
+    this.last = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;
+    this.outputPort?.write({ at: fms.now.getTime(), sequence: ++this.outputSequence,
+      status: fms.hasCondition("fmsFail") ? "FAIL" : this.last.desiredTrack === null ? "NCD" : "NORMAL",
+      value: fms.hasCondition("fmsFail") ? null : structuredClone(this.last) });
+    const final = fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
+    this.path = final === null ? null : { altitude: final, source: "APPR", coupled: this.approach === "CAPTURED" };
+    this.adoptAircraftMotion(); fms.tick();
+  }
+
+  /** Publish current adopted navigation while paused, without integrating or sequencing another aircraft. */
+  refreshGuidance(selected?: FlightSimulator) {
+    if (selected) this.adoptAfcsSelections(selected);
+    this.watchFailure(); this.last = this.guide();
+    this.outputPort?.write({ at: this.fms.now.getTime(), sequence: ++this.outputSequence,
+      status: this.fms.hasCondition("fmsFail") ? "FAIL" : this.last.desiredTrack === null ? "NCD" : "NORMAL",
+      value: this.fms.hasCondition("fmsFail") ? null : structuredClone(this.last) });
+  }
+
   /** Flies for dt seconds of simulated time, in steps of at most one second. */
   step(dt: number) {
     let left = dt;
@@ -643,6 +701,7 @@ export class FlightSimulator {
   private integrate(dt: number) {
     const fms = this.fms;
     fms.refreshSensorInput();
+    this.beforeGuidance?.();
     this.watchFailure();
     this.watchGoAround();
     this.watchGpsLateral();
@@ -1481,8 +1540,8 @@ export class FlightSimulator {
         [{ axis: "roll", mode: "NAV" }]);
     }
     if (this.lateral === "LNAV") return managed;
-    // Capture when the managed path is close and the aircraft is not heading away from it.
-    if (this.lnavArmed && managed.desiredTrack !== null && Math.abs(managed.crossTrack) < 0.6 && Math.abs(angleDiff(this.fms.track, managed.desiredTrack)) < 100) {
+    // Capture during a flight step when the path is close; a paused guidance refresh leaves NAV armed.
+    if (dt > 0 && this.lnavArmed && managed.desiredTrack !== null && Math.abs(managed.crossTrack) < 0.6 && Math.abs(angleDiff(this.fms.track, managed.desiredTrack)) < 100) {
       this.lateral = "LNAV";
       this.lnavArmed = false;
       return managed;
