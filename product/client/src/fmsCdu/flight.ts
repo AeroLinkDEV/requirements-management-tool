@@ -3,6 +3,7 @@ import { defaultLegMinutes, entrySegments, holdGeometry, type HoldSegment } from
 import { groundVelocity, iasFromTas, tasFromIas } from "./kinematics";
 import { ACTIVE_PROFILE } from "./profile";
 import type { ScriptedFms } from "./scriptedFms";
+import { speedCommandIas, verticalArrived, verticalCommand } from "./transition";
 import type { ProfilePoint, VerticalPhase } from "./vnav";
 
 /**
@@ -571,10 +572,13 @@ export class FlightSimulator {
     } else {
       // The crew selects indicated airspeed (the helicopter profile); the aircraft flies the true airspeed it means here.
       const speedTarget = this.advisory ? tasFromIas(this.selectedTas, fms.altitude) : fms.targetSpeed;
-      // TD brings the speed back to the gate speed at its own rate.
-      const rate = this.tdSpeed ? TD_SPEED_RATE : SPEED_RATE;
-      this.airspeed += clamp(speedTarget - this.airspeed, -rate * dt, rate * dt);
-      if (this.tdSpeed && Math.abs(this.airspeed - speedTarget) < 0.01) this.tdSpeed = false;
+      if (this.tdSpeed) {
+        // TD brings the indicated airspeed back to the gate speed at the TD rate, in IAS (the shared command law); the
+        // aircraft flies the true airspeed that IAS means at its altitude.
+        this.tdIas = speedCommandIas(this.tdIas, this.selectedTas, TD_SPEED_RATE, dt);
+        this.airspeed = tasFromIas(this.tdIas, fms.altitude);
+        if (this.tdIas <= this.selectedTas + 1e-9) this.tdSpeed = false;
+      } else this.airspeed += clamp(speedTarget - this.airspeed, -SPEED_RATE * dt, SPEED_RATE * dt);
       this.bank += clamp(guidance.bankCommand - this.bank, -ROLL_RATE * dt, ROLL_RATE * dt);
       heading = norm360(fms.heading + (this.airspeed > 1 ? G_TURN * Math.tan(rad(this.bank)) / this.airspeed : 0) * dt);
       const ground = groundVelocity(this.airspeed, heading, fms.wind);
@@ -594,7 +598,7 @@ export class FlightSimulator {
     // Altitude hold, when latched, is the only vertical authority; otherwise the managed branches in order.
     let verticalSpeed: number;
     // The radio-height modes fly the collective when engaged (lowCollectiveSpeed).
-    const low = this.lowCollectiveSpeed();
+    const low = this.lowCollectiveSpeed(dt);
     // Under the ADVISORY policy altitude hold is the crew's ordinary mode, so the FMS's tactical descent takes the axis
     // from it; otherwise a latched hold is the only vertical authority.
     if (low !== null) verticalSpeed = low;
@@ -772,6 +776,8 @@ export class FlightSimulator {
   private hoverHeightFt = PROFILE.hoverHeightDefault.value;
   /** The TD pitch axis: decelerating toward the gate speed at the TD rate until it gets there. */
   private tdSpeed = false;
+  /** TD's speed command, in indicated airspeed: it decreases at the TD rate in IAS, as the planner assumes (transition.ts). */
+  private tdIas = 0;
   /** The last hover feedback used, for the receiver-change continuity check (R3-02, Astra rev 3.1). */
   private lastFeedback: { at: number; source: 1 | 2; position: LatLon; north: number; east: number } | null = null;
   private lowHeight: "ACTIVE" | "OFF" | null = null;
@@ -900,6 +906,7 @@ export class FlightSimulator {
     this.lowCollective = { mode: "TD", datum: Math.min(PROFILE.gateHeight.value, Math.round(ra.value!)), rate: -PROFILE.tdDescentRate.value };
     this.altitudeHold = null; this.vsTarget = null; this.goingAround = false;
     this.selectedTas = PROFILE.gateSpeed.value;
+    this.tdIas = Math.max(this.indicatedAirspeed, PROFILE.gateSpeed.value);
     this.tdSpeed = true;
     this.record("TD", `to ${this.lowCollective.datum} FT RA and ${PROFILE.gateSpeed.value} KT`);
     return true;
@@ -1110,7 +1117,7 @@ export class FlightSimulator {
    * to hold radio height). Low-height protection raises the collective below 75 ft in cruise and 17 ft in the hover
    * modes (AW189 values), and needs a valid radio height.
    */
-  private lowCollectiveSpeed(): number | null {
+  private lowCollectiveSpeed(dt: number): number | null {
     const c = this.lowCollective;
     const ra = this.radio;
     if (!c) { if (this.lowHeight !== "OFF") this.lowHeight = null; return null; }
@@ -1125,13 +1132,17 @@ export class FlightSimulator {
     const height = ra.value!;
     const toGo = c.datum - height;
     let vs: number;
-    // A transition flies its constant rate all the way (the vertical-acceleration limit in integrate() makes the ramps)
-    // until the stopping distance at that limit, then the datum is held firmly. The mode shows RHT once the height is in
-    // its capture band (20 ft, 200 fpm); that is an annunciation, it does not change the command (plan R3-01).
-    const rate = c.rate ?? 0;
-    const stopping = ((rate / 60) ** 2) / (2 * (VS_RATE / 60)) + 0.5;
-    if (rate !== 0 && Math.sign(toGo) === Math.sign(rate) && Math.abs(toGo) > stopping) vs = rate;
-    else { vs = clamp(toGo * RHT_GAIN, -MAX_VS, MAX_VS); if (c.rate) this.lowCollective = { ...c, rate: null }; }
+    // A transition flies the shared command profile (transition.ts verticalCommand): its rate, braking at the vertical-
+    // acceleration limit to rest on the datum (integrate() limits the response to that acceleration). At arrival the
+    // datum is held firmly. The mode shows RHT once the height is in its capture band (20 ft, 200 fpm); that is an
+    // annunciation, it does not change the command (plan R3-01).
+    // The command is taken where this step will leave the aircraft (the distance to go less this step's travel), so a
+    // step of any length brakes when the continuous profile would, not a step late.
+    // It has arrived at rest on the datum, or this step reaches it: from there the datum is held.
+    const travel = (this.fms.verticalSpeed * dt) / 60;
+    const reaching = Math.sign(travel) === Math.sign(toGo) && Math.abs(travel) >= Math.abs(toGo);
+    if (c.rate !== null && !verticalArrived(toGo, this.fms.verticalSpeed) && !reaching) vs = verticalCommand(toGo - travel, c.rate);
+    else { vs = clamp(toGo * RHT_GAIN, -MAX_VS, MAX_VS); if (c.rate !== null) this.lowCollective = { ...c, rate: null }; }
     if (c.mode !== "RHT" && Math.abs(toGo) <= ALT_CAPTURE_FT && Math.abs(this.fms.verticalSpeed) <= 200) {
       this.lowCollective = { mode: "RHT", datum: c.datum, rate: this.lowCollective!.rate };
       this.record("RHT", `${c.datum} FT RA`);

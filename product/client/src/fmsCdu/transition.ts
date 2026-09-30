@@ -49,16 +49,36 @@ export type TransitionPlan = {
   dtraNm: number;
 };
 
+// ------------------------------------------------------------------ the transition command laws (T5, R3-01)
+//
+// The declared command semantics of TD, TD/H and TU, shared by the planner below and the autopilot that flies them
+// (flight.ts), so the two cannot drift apart in their units or shapes (Astra's implementation review, F3). The
+// independent test oracle (tests/support/tdnOracle.ts) computes the same contract without this code.
+
 /**
- * One vertical step of the command profile toward a height: the commanded rate, or less where the aircraft must begin
- * braking to rest on the target (v = sqrt(2·a·distance), at the vertical acceleration limit), with every change of
- * vertical speed limited to that acceleration. A move that starts too fast, or away from the target, brakes, overshoots
- * and comes back. The plan follows this command profile: its arrival, not the later capture or completion, ends the
- * axis (R3-01), so the autopilot's capture tail is not counted in the distances.
+ * The vertical-speed command toward a height (fpm): the transition's rate, or less where the aircraft must begin
+ * braking to rest on the target (v = sqrt(2·a·distance), at the vertical acceleration limit a). A move that starts too
+ * fast, or away from the target, therefore brakes, overshoots and comes back. The vertical-speed response to it is
+ * limited to that acceleration by whoever integrates it.
  */
+export function verticalCommand(toGoFt: number, rateFpm: number) {
+  return Math.sign(toGoFt) * Math.min(Math.abs(rateFpm), Math.sqrt(2 * VS_RATE * 60 * Math.abs(toGoFt)));
+}
+
+/**
+ * The vertical axis has arrived: its command profile is at rest on the target (within 0.5 ft and 100 fpm; the command
+ * there is under 1 fpm per 0.1 ft). This ends the axis for the stage distances. The RHT capture band (20 ft, 200 fpm)
+ * is an annunciation before it, and completion (5 ft, 50 fpm) another: three different events (R3-01).
+ */
+export const verticalArrived = (toGoFt: number, vsFpm: number) => Math.abs(toGoFt) < 0.5 && Math.abs(vsFpm) < 100;
+
+/** The transition's speed command in indicated airspeed: from the present IAS toward the target at its rate (kt/s). */
+export const speedCommandIas = (ias: number, targetIas: number, rateKtPerS: number, dt: number) =>
+  ias + Math.max(-rateKtPerS * dt, Math.min(rateKtPerS * dt, targetIas - ias));
+
+/** One step of the vertical command profile, with the vertical-acceleration limit (the planner's integration). */
 function verticalStep(height: number, vs: number, target: number, rate: number, dt: number) {
-  const toGo = target - height;
-  const command = Math.sign(toGo) * Math.min(Math.abs(rate), Math.sqrt(2 * VS_RATE * 60 * Math.abs(toGo)));
+  const command = verticalCommand(target - height, rate);
   const next = vs + Math.max(-VS_RATE * dt, Math.min(VS_RATE * dt, command - vs));
   return { height: height + ((vs + next) / 2) * dt / 60, vs: next };
 }
@@ -80,13 +100,13 @@ export function planTransition(start: TransitionStart): TransitionPlan | Transit
   if (tasFromIas(P.gateSpeed.value, elevation + gateHeight) - start.headwind <= 0) return { refused: true, reason: "no closure" };
   // TD: integrate both axes until each has arrived.
   let t = 0, height = start.radioHeight, vs = start.verticalSpeed, ias = start.ias, distance = 0;
-  // Arrival within one step of the vertical-acceleration limit: the command profile is at rest on the target.
-  const arrived = () => Math.abs(height - gateHeight) < 0.3 && Math.abs(vs) <= VS_RATE * STEP_S && ias <= P.gateSpeed.value + 1e-9;
+  // Both axes arrived: the vertical command profile at rest on the gate height, the IAS command at the gate speed.
+  const arrived = () => verticalArrived(gateHeight - height, vs) && ias <= P.gateSpeed.value + 1e-9;
   while (!arrived() && t < 3600) {
     const ground = tasFromIas(ias, elevation + height) - start.headwind;
     distance += (ground * STEP_S) / 3600;
     ({ height, vs } = verticalStep(height, vs, gateHeight, -P.tdDescentRate.value, STEP_S));
-    ias = Math.max(P.gateSpeed.value, ias - P.tdDeceleration.value * STEP_S);
+    ias = speedCommandIas(ias, P.gateSpeed.value, P.tdDeceleration.value, STEP_S);
     t += STEP_S;
   }
   const groundSpeed = tasFromIas(P.gateSpeed.value, elevation + gateHeight) - start.headwind;
