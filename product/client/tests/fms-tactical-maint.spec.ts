@@ -235,7 +235,7 @@ const dualSetup = (secondaryProfile?: AircraftProfile) => {
   const system = new DualFmsSystem(() => new Date(now), { secondaryProfile })
   return { system, one: system.computers[0], two: system.computers[1],
     tick: (seconds = 1) => { for (let i = 0; i < seconds; i++) { now += 1000; system.tick() } },
-    fly: (seconds: number) => { for (let i = 0; i < seconds; i++) { now += 1000; system.step(1) } } }
+    fly: (seconds: number) => { let left = seconds; while (left > 1e-9) { const dt = Math.min(1, left); now += dt * 1000; system.step(dt); left -= dt } } }
 }
 const mode = (unit: ScriptedFms) => { unit.open('SETUP'); unit.press('LSK5L'); unit.press('LSK6R'); unit.press('CLR', { held: true }); unit.press('CLR', { held: true }) }
 test('two computers retain independent CDU and MOD state, synchronize EXEC and require receiving EXEC after crossfill', () => {
@@ -488,6 +488,17 @@ test('selecting FMS 2 guidance never creates or resets another aircraft and FMS 
   expect(recovered.system.simulator.guidance.mode).toBe('HDG')
   recovered.fly(600)
   expect(recovered.two.activeRoute).toEqual(recovered.one.activeRoute)
+  // #1370: source selection must continue the same fuselage estimator, not restart its pitch from zero.
+  // A settled heading/IAS leaves physical pitch unchanged over the next quarter-second; continuity is the contract.
+  const settled = dualSetup()
+  settled.system.simulator.selectHeading(settled.one.heading)
+  settled.system.simulator.selectSpeed(120); settled.fly(30)
+  const pitchBefore = settled.one.attitude.pitch
+  expect(pitchBefore).toBeLessThan(-4) // Positive control: this is a nonzero established rotorcraft attitude.
+  expect(settled.one.attitude.bank).toBeCloseTo(0, 8)
+  settled.system.selectGuidance(2); settled.fly(0.25)
+  expect(settled.two.attitude.pitch).toBeCloseTo(pitchBefore, 8)
+  expect(settled.two.attitude.bank).toBeCloseTo(0, 8)
 })
 
 // Stage B2 of the helicopter-first plan: the radio altimeter measures the aircraft's physical height above a declared
