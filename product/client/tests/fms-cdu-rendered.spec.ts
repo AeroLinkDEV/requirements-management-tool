@@ -488,6 +488,9 @@ test('the FMS GPS selection is set from the routing strip, and the integrity con
   await tab(page, 'GPS sensors')
   await expect(faults.getByRole('note')).toContainText('GPS integrity lost condition holds')
   await expect(faults.getByRole('button', { name: /^Mask low satellites/ })).toBeDisabled()
+  await expect(page.getByTestId('route-current-source')).toHaveText('AUTO — FMS on GPS1 (uncertain)')
+  await expect(page.getByTestId('route-gps1')).toContainText('in use · uncertain')
+  await expect(page.getByTestId('route-link-gps1')).not.toHaveClass(/dashed/)
 })
 
 test('a status word is overridden field by field from the bus monitor: what is transmitted changes, not what the receiver knows', async ({ page }) => {

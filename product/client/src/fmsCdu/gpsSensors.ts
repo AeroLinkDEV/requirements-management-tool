@@ -344,6 +344,8 @@ export const TRANSFER_REFERENCE_MS = 1000;
 export const REQUIRED_APPROACH_LEVEL: ApproachLevel = "LPV";
 
 export type SelectionInput = {
+  /** A position source retained with uncertainty by the civil navigation core, never approach authority. */
+  positionSource?: number | null;
   choice: GpsChoice;
   selected: boolean;
   assessed: readonly ReceiverAssessment[];
@@ -406,7 +408,9 @@ export class AutoSelection {
     const keep = (chosen: number | null, refused = ""): SelectionResult => ({ chosen, transferred: false, qualified: true, refused });
     // No approach being flown (none, not armed, or lost, which disarms it): the current receiver while usable (no
     // needless switching, and no switching back after a loss), else GPS1, else GPS2.
-    if (input.executedCrc === null || !input.approachArmed) return keep(current ?? usable[0] ?? null);
+    if (input.executedCrc === null || !input.approachArmed) return keep(current
+      ?? (input.positionSource !== null && input.positionSource !== undefined && usable.includes(input.positionSource) ? input.positionSource : null)
+      ?? usable[0] ?? null);
     if (current !== null && eligible[current]) return keep(current);
     const others = usable.filter(i => i !== current && eligible[i]);
     const refusals = others.map(i => this.transferRefusal(i, input, words));

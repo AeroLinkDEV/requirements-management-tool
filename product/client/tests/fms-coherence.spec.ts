@@ -62,11 +62,13 @@ test('forced NPA and forced RNP exceeded give one RNP and ANP on PROGRESS, NAV S
 test('CHECK ANP times out on the same effective RNP the pages show, not the sensor RNP beneath it (R11)', () => {
   let now = START
   const unit = new ScriptedFms(() => new Date(now))
-  unit.setCondition('gpsLost', true)
+  unit.setAircraft({ tas: 0, groundSpeed: 0, heading: 0 })
+  unit.updateNavigation(0)
   unit.setCondition('dmeOutage', true)
+  unit.setCondition('gpsLost', true)
   unit.setRnp(2)
   unit.setCondition('npa', true)
-  // Twenty minutes of dead reckoning: drift takes ANP above the forced 0.30 NM but far below the 2 NM entered.
+  // Twenty minutes of stationary DR keeps terminal phase: uncertainty exceeds forced 0.30 NM but not entered 2 NM.
   now += 1_200_000
   unit.updateNavigation(1200)
   const { anp } = progressPerformance(unit)

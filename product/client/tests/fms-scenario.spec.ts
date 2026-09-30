@@ -34,7 +34,11 @@ test('GPS lost 2 NM before the FAF: the loss is injected at the distance, and th
 
   // The checks prove the actions: without TOGA the aircraft reaches UL501 too late, and unarmed the FMS asks for it.
   const scenario = library('gps-lost-before-faf')
-  const without = (kind: string) => runHeadless({ ...scenario, steps: scenario.steps.map(step => (step.action.kind === kind ? { ...step, action: { kind: 'keys' as const, keys: ['PROG' as const] } } : step)) }).runner.results
+  // Distance triggers use aircraft truth; ARM APPROACH uses measured position. For the omitted-arm mutation, leave
+  // 0.1 NM inside the trigger boundary before immediately calling TOGA, so GPS noise cannot order those two events.
+  const without = (kind: string) => runHeadless({ ...scenario, steps: scenario.steps.map(step => step.action.kind === kind
+    ? { ...step, action: { kind: 'keys' as const, keys: ['PROG' as const] } }
+    : kind === 'armApproach' && step.when.kind === 'distance' ? { ...step, when: { ...step.when, nm: 1.9 } } : step) }).runner.results
   expect(without('goAround')[8]).toMatchObject({ status: 'fail' })
   expect(without('armApproach')[9]).toMatchObject({ status: 'fail', actual: 'ARM APPROACH' })
 })
@@ -164,7 +168,7 @@ test('a scenario becomes test procedure text, and its run a Markdown report mark
   expect(report).toMatch(/not flight-qualified evidence/)
   expect(report).toMatch(/^- Hardware variation: A$/m)
   // The run names the aircraft profile it flew, with a fingerprint that changes with any profile value (plan A2).
-  expect(report).toMatch(/^- Aircraft profile: cma9000-s300-heli-civil v2 \(fnv1a-[0-9a-f]{8}\): CMA-9000 helicopter, civil SAR target \(S\/W -300 baseline\); 46 of 47 parameters in force; declared only: settlingTime; civil-sar-s300: 87 configured references resolved; \d+ options on \(\d+ implemented, \d+ partial, \d+ pending\)$/m)
+  expect(report).toMatch(/^- Aircraft profile: cma9000-s300-heli-civil v3 \(fnv1a-[0-9a-f]{8}\): CMA-9000 helicopter, civil SAR target \(S\/W -300 baseline\); 58 of 59 parameters in force; declared only: settlingTime; civil-sar-s300: 87 configured references resolved; \d+ options on \(\d+ implemented, \d+ partial, \d+ pending\)$/m)
   expect(report).toMatch(new RegExp(`^- Scenario: manual-rnp, ${scenarioDigest(scenario)}$`, 'm'))
   expect(report).toMatch(/^\| 4 \| Then check that screen line 10 matches \/MANUAL\/\. \| 0 s \| PASS \| RNP\/ANP MANUAL \|$/m)
 })
@@ -358,11 +362,11 @@ test('a scenario names its aircraft profile and makes autopilot selections; both
     { when: { kind: 'start' }, action: { kind: 'autopilot', altitude: 3500, verticalSpeed: 500, speed: 100 } },
   ] }).runner
   expect(climb.results[0]).toEqual({ status: 'done', at: 0 })
-  expect(reportMarkdown(climb)).toMatch(/^- Aircraft profile: cma9000-s300-heli-civil v2 /m)
+  expect(reportMarkdown(climb)).toMatch(/^- Aircraft profile: cma9000-s300-heli-civil v3 /m)
   const lab = runHeadless({ id: 'l', title: 'l', objective: '', maxSeconds: 1, profile: 'lab-airline-vnav', steps: [
     { when: { kind: 'start' }, action: { kind: 'autopilot', verticalSpeed: 500 } },
   ] })
-  expect(reportMarkdown(lab.runner)).toMatch(/^- Aircraft profile: lab-airline-vnav v2 /m)
+  expect(reportMarkdown(lab.runner)).toMatch(/^- Aircraft profile: lab-airline-vnav v3 /m)
   // VS is a helicopter-profile mode: under the laboratory VNAV profile it is an execution error, not a silent pass.
   expect(lab.runner.outcome).toBe('error')
   expect(scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 1, profile: 'jet', steps: [] })).toEqual([expect.stringMatching(/profile must be one of cma9000-s300-heli-civil, lab-airline-vnav/)])

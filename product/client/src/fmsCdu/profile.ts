@@ -63,7 +63,7 @@ const p = (value: number, unit: string, basis: ParameterBasis, source: string, i
 
 export const HELICOPTER_PROFILE: AircraftProfile = {
   id: "cma9000-s300-heli-civil",
-  version: 2,
+  version: 3,
   title: "CMA-9000 helicopter, civil SAR target (S/W -300 baseline)",
   aircraftType: "ROTOR",
   operationalProgram: "169-614876-300 (M300, Pub. 9000-GEN-0150 Rev 2)",
@@ -80,6 +80,18 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
   notConfigured: ["CARP/HARP", "COSPAS-SARSAT", "EGI/IRS", "DVS (Doppler)", "military navigation option", "military tactical approach"],
   configuration: CIVIL_SAR_CONFIGURATION,
   parameters: {
+    sensorMaxAge: p(2, "s", "lab", "maximum sensor age for the internal simulator port", true),
+    radioAcquisition: p(3, "s", "lab", "AUTO facility acquisition after tuning or signal return", true),
+    radioRangeBias: p(0.02, "NM", "lab", "deterministic radio slant-range bias", true),
+    radioBearingBias: p(0.25, "deg", "lab", "deterministic VOR bearing bias", true),
+    radioCrossAngle: p(30, "deg", "lab", "minimum DME crossing angle; maximum is its supplement", true),
+    radioResidualLimit: p(0.5, "NM", "lab", "maximum range-circle residual", true),
+    radioMinFacilities: p(3, "facilities", "sourced", "M300 1-8: fewer than three DMEs falls back to VOR/DME", true),
+    drWindUncertainty: p(2, "kt", "lab", "DR last-wind uncertainty allowance", true),
+    drTasUncertainty: p(0.5, "kt", "lab", "DR TAS uncertainty allowance", true),
+    drHeadingUncertainty: p(1, "deg", "lab", "DR heading uncertainty allowance", true),
+    drNoAirGrowth: p(10, "NM/h", "lab", "position held without air data, with growing uncertainty", true),
+    windRadioMaxGap: p(10, "s", "lab", "maximum successive radio-fix interval for computed wind", true),
     // Speeds and regimes
     cruiseSpeed: p(120, "kt", "lab", "crew-selected cruise speed (KIAS for the helicopter AFCS)", true),
     planningCruiseTas: p(130, "kt TAS", "sourced", "M300 3-19 PLAN DATA CRZ TAS default for ROTOR (planning data; v1 predicts only in the air)", true),

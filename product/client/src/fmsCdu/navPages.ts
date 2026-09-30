@@ -33,9 +33,9 @@ export function sbasSummary(assessment: ReceiverAssessment | undefined) {
 }
 
 /** The navigation mode as the crew sees it: GPS names the receiver navigated on. */
-export function navModeText(fms: ScriptedFms) {
-  const chosen = fms.gpsStatus.chosen;
-  return fms.navState.mode === "GPS" && chosen !== null ? `GPS${chosen + 1}` : fms.navState.mode;
+export function navModeText(fms: ScriptedFms, compact = false) {
+  const chosen = fms.navState.gpsSource;
+  return fms.navState.mode === "GPS" && chosen !== null ? `GPS${chosen}${fms.navState.uncertain ? compact ? " UNC" : " UNCERTAIN" : ""}` : fms.navState.mode;
 }
 
 /**
@@ -44,6 +44,7 @@ export function navModeText(fms: ScriptedFms) {
  */
 export function gpsSourceLine(fms: ScriptedFms): Line {
   if (!fms.gpsNavSelected) return { left: medium("DESELECTED", "amber") };
+  if (fms.navState.mode === "GPS" && fms.navState.uncertain) return { left: medium(`GPS${fms.navState.gpsSource} UNCERTAIN`, "amber") };
   const { assessed, chosen } = fms.gpsStatus, choice = fms.gpsReceiverChoice;
   const own = choice === "AUTO" ? chosen : choice === "GPS1" ? 0 : 1;
   const other = own === 0 ? 1 : 0;
@@ -74,14 +75,14 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
         // The phase is abbreviated so the caption fits beside NAV MODE on one 24-column row (R19); the values are the same
         // effective RNP and ANP as PROGRESS, and a bench-forced value is labelled TEST (R11).
         caption(" NAV MODE", `ANP/RNP ${performance.forced ? "TEST" : performance.rnpSource === "MANUAL" ? "MAN" : PHASE_ABBREVIATION[fms.flightPhase]} `),
-        { left: { text: navModeText(fms), color: nav.mode === "DR" ? "amber" : "green" }, right: medium(`${fixed(performance.anp, 2)}/${fixed(performance.rnp, 2)}`, performance.anp > performance.rnp ? "amber" : "white") },
+        { left: { text: navModeText(fms), color: nav.mode === "DR" || nav.uncertain ? "amber" : "green" }, right: medium(`${fixed(performance.anp, 2)}/${fixed(performance.rnp, 2)}`, performance.anp > performance.rnp ? "amber" : "white") },
         caption(" DME 1", "DME 2 "),
         { left: dme1 ? medium(`${dme1} ${frequency(fms, dme1)}`) : dashes(4), right: dme2 ? medium(`${dme2} ${frequency(fms, dme2)}`) : dashes(4) },
         // LSK3R opens GPS STATUS for both receivers; the GPS line describes the one navigated on (or GPS1).
         caption(" VOR", "GPS STATUS> "),
         { left: nav.vor ? medium(`${nav.vor} ${frequency(fms, nav.vor)}`) : dashes(4), right: medium(gps.text, gps.ok ? "white" : "amber") },
-        caption(" DR ESTIMATE", "SBAS "),
-        { left: medium(nav.mode === "DR" ? "LAB DR" : "STBY"), right: medium(fms.gpsNavSelected ? sbasSummary(shown) : "----") },
+        caption(" DR ESTIMATE", "PRAIM> "),
+        { left: medium(nav.mode === "DR" ? nav.airValid ? "HDG/TAS/WIND" : "NO AIR DATA" : "STBY"), right: medium(fms.gpsNavSelected ? sbasSummary(shown) : "----") },
         caption(" INHIBITED"),
         { left: medium(fms.inhibitedNavaids.length ? fms.inhibitedNavaids.join(" ") : "NONE") },
         { left: dashes(24) },
@@ -91,8 +92,53 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
     },
     lsk: (fms, side, row) => {
       if (side === "R" && row === 3) { fms.open("GPS_STATUS"); return; }
+      if (side === "R" && row === 4) { fms.open("PREDICT_RAIM"); return; }
       if (row !== 6) return;
       fms.open(side === "L" ? "INIT_REF" : "NAV_OPTIONS");
+    },
+  },
+
+  PREDICT_RAIM: {
+    pages: () => 1,
+    render: fms => {
+      const prediction = fms.predictiveRaim, rows = fms.predictedRaim;
+      const time = (at: number) => new Date(at).toISOString().slice(11, 16).replace(":", "");
+      const result = (index: number) => rows[index] ? { text: `${time(rows[index].at)} ${rows[index].phase}`,
+        size: "medium" as const, inverse: index === 3, color: rows[index].phase === "NONE" || rows[index].phase === "****" ? "amber" as const : "white" as const } : undefined;
+      return [title("GPS PREDICT RAIM", "1/1"), caption(" IDENT", "SIM SKY "),
+        { left: prediction.ident ? { text: prediction.ident } : dashes(5), right: result(0) },
+        { left: small(" ETA"), right: result(1) },
+        { left: prediction.eta === null ? dashes(4) : { text: `${time(prediction.eta)} Z` }, right: result(2) },
+        { right: result(3) }, { right: result(4) }, { right: result(5) }, { right: result(6) },
+        { left: small("MODEL, NOT LIVE ALMANAC") }, undefined, { left: dashes(24) },
+        { left: prompt("<NAV STATUS"), right: prompt("SAT DESEL>") }];
+    },
+    lsk: (fms, side, row, scratch) => {
+      if (row === 6) { fms.open(side === "L" ? "NAV_STATUS" : "SAT_DESELECT"); return; }
+      if (side !== "L" || !scratch) return;
+      if (row === 1) return fms.predictRaimAt(scratch) ? undefined : "not-in-database";
+      if (row === 2) return fms.predictRaimEta(scratch) ? undefined : "invalid";
+    },
+  },
+
+  SAT_DESELECT: {
+    pages: () => 1,
+    render: fms => {
+      const cells = (start: number, end: number) => Array.from({ length: end - start + 1 }, (_, index) => {
+        const prn = start + index;
+        return { text: `${index ? " " : ""}${String(prn).padStart(2, "0")}`, size: "medium" as const, inverse: fms.raimDeselectedSatellites.includes(prn) };
+      });
+      return [title("GPS SAT DESELECT", "1/1"), caption(" DESEL", "PRN "), { left: dashes(2), right: cells(1, 5) },
+        caption(" RESEL"), { left: dashes(2), right: cells(6, 10) }, { right: cells(11, 15) }, { right: cells(16, 20) },
+        { right: cells(21, 25) }, { right: cells(26, 30) }, { right: cells(31, 32) },
+        { left: small("PREDICTIVE RAIM ONLY") }, { left: dashes(24) }, { left: prompt("<PREDICT RAIM") }];
+    },
+    lsk: (fms, side, row, scratch) => {
+      if (row === 6 && side === "L") { fms.open("PREDICT_RAIM"); return; }
+      if (side !== "L" || (row !== 1 && row !== 2) || !scratch) return;
+      if (!/^\d{1,2}$/.test(scratch) || Number(scratch) < 1 || Number(scratch) > 32) return "invalid";
+      fms.deselectRaimSatellite(Number(scratch), row === 1);
+      fms.setScratch("");
     },
   },
 
