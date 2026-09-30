@@ -1182,9 +1182,14 @@ jobs:
       # Playwright version; an unrelated dependency bump invalidates it needlessly, which costs one download
       # and is the safe direction. A stale browser cannot pass silently: Playwright refuses to start a browser
       # build its client library does not expect.
+      #
+      # Restore only (#1304). A cache a pull request saves is visible to that pull request alone (see
+      # warm-chromium-cache), so saving here helped nobody, and on a key miss — any lockfile change — every shard
+      # spent minutes archiving Chromium after its tests had passed, inside the same 30-minute job limit: #1301's
+      # shard 3 passed all 374 tests and was cancelled in "Post Cache Chromium". warm-chromium-cache saves on main.
       - name: Cache Chromium
         id: chromium
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/AppData/Local/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
@@ -1364,10 +1369,11 @@ jobs:
         run: |
           dotnet restore product/src/AeroLink.Api/AeroLink.Api.csproj
           dotnet build product/src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
-      # Shares the cache entry the pull request shards populate: same key, same runner, same browser.
+      # Shares the cache entry warm-chromium-cache saves on main: same key, same runner, same browser. Restore only,
+      # as in browser-pr (#1304): a save here would be scoped to this run's ref and cost minutes inside the job limit.
       - name: Cache Chromium
         id: chromium
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/AppData/Local/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
