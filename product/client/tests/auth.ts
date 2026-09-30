@@ -253,7 +253,7 @@ export async function layoutSettled(page: Page, timeoutMs = 15_000) {
     previous = current
     if (stable < 2) await page.waitForTimeout(120)
   }
-  if (stable < 2) throw new Error(`Layout did not settle within ${timeoutMs} ms (last heights: ${lastHeights.join(', ') || 'none'})`)
+  if (stable < 2 || Date.now() - started >= timeoutMs) throw new Error(`Layout did not settle within ${timeoutMs} ms (last heights: ${lastHeights.join(', ') || 'none'})`)
 }
 
 /**
