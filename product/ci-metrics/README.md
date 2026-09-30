@@ -112,8 +112,9 @@ runs label the record trusted. A PR modification cannot promote its own record t
 ## Rolling collection (phase B)
 
 `.github/workflows/ci-metrics-collector.yml` is a separate, non-authoritative workflow triggered by
-completed quality-gate runs (`workflow_run`), an hourly schedule, and manual dispatch. It always executes
-default-branch code and never executes PR content.
+an hourly schedule and manual dispatch. It no longer follows every completed quality-gate run: each collection
+spends a couple of hundred API calls, and with the cadence collector (also hourly now) that exhausted the repository's
+5,000-an-hour workflow-token budget (#1318). It always executes default-branch code and never executes PR content.
 
 `bin/rolling-collect.mjs`:
 

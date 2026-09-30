@@ -1576,7 +1576,7 @@ export class FlightSimulator {
     if (!leg || leg.kind === "disco") return { ...none, mode: "HDG" };
     if (leg.kind === "cond") return { ...this.flyConditional(leg, route.legs[1], sequencing), ...base };
 
-    const to = fms.coordinates(leg.ident);
+    const to = leg.position ?? fms.coordinates(leg.ident);
     if (!to) return { ...none, mode: "HDG" };
     // A course-to-fix leg is the published course line into the fix; otherwise the line from where the leg began.
     const from = leg.path === "CF" && leg.course !== undefined ? offset(to, leg.course + 180, 30) : fms.activeLegStart;
@@ -1593,7 +1593,7 @@ export class FlightSimulator {
     // Fly-by: start the turn onto the next leg early; fly-over for holding fixes, search starts, /O waypoints and moving
     // waypoints (M300 11-37: a moving waypoint in the route is a fly-over).
     const next = route.legs[1];
-    const nextTo = next?.kind === "wpt" ? fms.coordinates(next.ident) : undefined;
+    const nextTo = next?.kind === "wpt" ? next.position ?? fms.coordinates(next.ident) : undefined;
     // Search waypoints are fly-by (M300 11-2), but the ladder's entry waypoint is fly-over (11-4): a square or sector
     // search is joined turning early onto its first leg, on the SAR bearing.
     const sarEntry = leg.qualifier === "/S" && fms.sar.active !== null && fms.sar.active !== "LADDER";
