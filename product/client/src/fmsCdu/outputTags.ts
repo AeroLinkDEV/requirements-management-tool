@@ -101,6 +101,9 @@ export const AIRCRAFT_DATA_TAGS: { [K in Exclude<keyof AircraftData, "helicopter
 /** The helicopter profile's autopilot and hover data (efis.ts aircraftData, helicopter). */
 export const HELICOPTER_DATA_TAGS: { [K in keyof HelicopterData]: OutputTag } = {
   axes: { kind: "controller", state: "engaged" },
+  armed: { kind: "controller", state: "armed" },
+  degraded: { kind: "controller", state: "degraded" },
+  lowSpeed: annunciation("the autopilot's low-speed regime (TD/H, HOV, GSPD, TU): the ND draws the ground velocity instead of the trend"),
   radioHeight: data("the radio altimeter, over the declared surface", "word"),
   hoverHeight: { kind: "target", selectedBy: "crew", validity: "always valid (laboratory)" },
   lowHeight: annunciation("the autopilot's low-height protection caption"),
