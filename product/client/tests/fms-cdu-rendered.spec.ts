@@ -610,6 +610,8 @@ test('the helicopter autopilot fields keep only what they accept: digits, and a 
 })
 
 test('the 87N mission: after ACTIVATE and EXEC over the mark, the map draws the FMS joining path to JN (Phase 1)', async ({ page }) => {
+  // The scenario plays at 16× to the join, which takes 28-29 s alone: over the 30 s default, and longer under load (#1305).
+  test.setTimeout(120_000)
   await open(page)
   // The moving map as the lower display (it draws the route, holds, search patterns and the join).
   await page.getByRole('radiogroup', { name: 'Lower display' }).getByText('Engineering map', { exact: true }).click()
