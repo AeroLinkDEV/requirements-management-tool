@@ -1,6 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { aircraftData } from '../src/fmsCdu/efis'
-import { FlightSimulator, SAR_SEARCH_WAYPOINTS, angleDiff, legGeometry, racetrackOutline, sarTrack } from '../src/fmsCdu/flight'
+import { FlightSimulator, SAR_SEARCH_WAYPOINTS, angleDiff, legGeometry, racetrackOutline, sarTrack, trimPitch } from '../src/fmsCdu/flight'
+import { cameraPose } from '../src/fmsCdu/outTheWindow'
 import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
 import { HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
@@ -1699,4 +1700,43 @@ test('D-H: a leg time or speed the crew entered is kept at the entry, whatever t
   unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 5000 }, 'test: low when the entry begins')
   expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')).toBeLessThan(3600)
   expect(unit.activeRoute.hold).toMatchObject({ legTime: 2.5, speed: 150 })
+})
+
+test('the helicopter attitude: the trim pitch for the forward airspeed, not raised by a climb, down to accelerate and up to decelerate; the PFD, the cockpit camera and the GPS antennas share it (B1.5, B4.7)', () => {
+  const deg = (a: number) => (Math.atan((a * 0.514444) / 9.80665) * 180) / Math.PI
+  const same = (unit: ScriptedFms, sim: FlightSimulator) => {
+    const air = aircraftData(unit, sim)
+    expect(air.pitch).toBe(unit.attitude.pitch)
+    expect(air.bank).toBe(unit.attitude.bank)
+    const pose = cameraPose({ position: air.position, altitude: air.altitude, heading: air.heading, pitch: air.pitch, bank: air.bank }, 'cockpit', 'panel')
+    expect(pose.roll).toBeCloseTo((unit.attitude.bank * Math.PI) / 180, 12)
+  }
+  // Level cruise at 100 KIAS: the trim for it; a 500 fpm climb at the same speed leaves the nose where it was.
+  const cruise = offshore(1000)
+  cruise.sim.selectSpeed(100)
+  cruise.fly(90)
+  expect(Math.abs(cruise.unit.attitude.pitch - trimPitch(cruise.sim.tas))).toBeLessThan(0.2)
+  const level = cruise.unit.attitude.pitch
+  cruise.sim.selectAltitude(3000)
+  expect(cruise.sim.engageVerticalSpeed(500)).toBe(true)
+  cruise.fly(30)
+  expect(cruise.unit.verticalSpeed).toBeCloseTo(500, 0)
+  expect(Math.abs(cruise.unit.attitude.pitch - level)).toBeLessThan(0.2)
+  same(cruise.unit, cruise.sim)
+  // The hover in a 20 kt headwind: the trim for 20 kt of forward airspeed.
+  const hover = offshore()
+  slowToHover(hover)
+  hover.fly(30)
+  expect(Math.abs(hover.unit.attitude.pitch - trimPitch(20))).toBeLessThan(0.3)
+  same(hover.unit, hover.sim)
+  // TD/H decelerates at 0.75 kt/s: the nose up by atan(a/g) on the trim for the airspeed.
+  const tdh = offshore(150)
+  tdh.unit.wind.speed = 0
+  tdh.sim.selectSpeed(60)
+  tdh.fly(40)
+  expect(tdh.sim.engageTransitionDownToHover()).toBe(true)
+  tdh.fly(10)
+  expect(Math.abs(tdh.unit.attitude.pitch - (trimPitch(tdh.sim.indicatedAirspeed) + deg(0.75)))).toBeLessThan(0.3)
+  expect(tdh.unit.attitude.pitch).toBeGreaterThan(trimPitch(tdh.sim.indicatedAirspeed))
+  same(tdh.unit, tdh.sim)
 })

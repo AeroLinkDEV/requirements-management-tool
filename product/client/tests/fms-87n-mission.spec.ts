@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { aircraftData, type AircraftData } from '../src/fmsCdu/efis'
-import { FlightSimulator } from '../src/fmsCdu/flight'
+import { FlightSimulator, trimPitch } from '../src/fmsCdu/flight'
 import { bearingDeg, courseDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import { COPTER_PINS_CIFP_2609, COPTER_PINS_CIFP_2609_SHA256 } from '../src/fmsCdu/data/copterPinsCifp2609'
 import {
@@ -85,7 +85,7 @@ test('executing a hover procedure interrupts a search pattern in progress: the p
   expect(sim.sarPath).toBeNull()
 })
 
-test('climbing out of a hover the modelled pitch stays within its limit, and both receivers stay usable (air-relative pitch)', () => {
+test('climbing out of a hover the modelled pitch puts the nose down to accelerate, not up to climb, and both receivers stay usable (B1.5)', () => {
   let now = START
   const unit = new ScriptedFms(() => new Date(now))
   const sim = new FlightSimulator(unit)
@@ -100,16 +100,20 @@ test('climbing out of a hover the modelled pitch stays within its limit, and bot
   ticks(30)
   expect(unit.radioHeight.value!).toBeLessThan(80)
   expect(sim.engageTransitionUp()).toBe(true)
-  let steepest = 0
-  ticks(30, () => {
-    steepest = Math.max(steepest, Math.abs(unit.attitude.pitch))
-    // Pitch is the air-relative flight-path angle over at least 30 kt, within 20 degrees (flight.ts).
-    const expected = Math.max(-20, Math.min(20, (Math.atan(unit.verticalSpeed / 60 / (Math.max(sim.tas, 30) * 1.68781)) * 180) / Math.PI))
-    expect(unit.attitude.pitch).toBeCloseTo(expected, 9)
+  // The departure accelerates at 1 kt/s: the nose is atan(a/g), about 3 degrees, below the trim for the airspeed, and
+  // the 500 fpm climb does not raise it (the model, flight.ts attitudeFor; at the attitude rate once settled).
+  const accelerating = (1 * 0.514444) / 9.80665
+  let worst = 0, climbing = 0
+  ticks(5)
+  ticks(25, () => {
+    // The trim is for the forward airspeed (the IAS, the TAS at 60 ft): at the start the 20 kt of wind is on the side.
+    const forward = sim.indicatedAirspeed
+    if (forward < 70) worst = Math.max(worst, Math.abs(unit.attitude.pitch - (trimPitch(forward) - (Math.atan(accelerating) * 180) / Math.PI)))
+    climbing = Math.max(climbing, unit.verticalSpeed)
+    expect(Math.abs(unit.attitude.pitch)).toBeLessThan(20)
   })
-  // The climb out of the hover (about 500 fpm at 20 to 40 kt) is a few degrees nose-up, well inside the limit.
-  expect(steepest).toBeGreaterThan(3)
-  expect(steepest).toBeLessThan(15)
+  expect(climbing).toBeGreaterThan(300)
+  expect(worst).toBeLessThan(0.5)
   expect(unit.recallList.map(message => message.text)).not.toContain('GPS1 NOT USABLE')
   expect(unit.recallList.map(message => message.text)).not.toContain('GPS2 NOT USABLE')
 })

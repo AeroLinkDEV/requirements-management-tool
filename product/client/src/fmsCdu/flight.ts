@@ -25,6 +25,20 @@ export const MAX_BANK = fmsBankLimit(ACTIVE_PROFILE);
 /** The modelled pitch (the air-relative flight-path angle) is taken over at least this airspeed, kt, and held within this many degrees. */
 const PITCH_SPEED_FLOOR = 30;
 const PITCH_LIMIT = 20;
+/**
+ * The rotorcraft's fuselage pitch in steady level flight against its forward airspeed (knots, negative rearward):
+ * nose up in the hover and flying backwards, nose down with speed. A laboratory table (plan B1.5), not a type's data.
+ */
+const TRIM_PITCH: readonly [number, number][] = [[-30, 7], [0, 3], [20, 2], [40, 0], [60, -1], [80, -2], [100, -3], [120, -4], [140, -5], [160, -6]];
+/** How fast the displayed attitude follows its derivation, degrees per second (laboratory). */
+const ATTITUDE_RATE = 10;
+const KT_TO_MS = 0.514444, G_MS2 = 9.80665;
+export function trimPitch(forwardKt: number) {
+  const t = TRIM_PITCH;
+  if (forwardKt <= t[0][0]) return t[0][1];
+  for (let i = 1; i < t.length; i += 1) if (forwardKt <= t[i][0]) return t[i - 1][1] + ((t[i][1] - t[i - 1][1]) * (forwardKt - t[i - 1][0])) / (t[i][0] - t[i - 1][0]);
+  return t[t.length - 1][1];
+}
 const G_TURN = 1091; // turn rate (deg/s) = 1091 * tan(bank) / TAS (kt)
 /** The band in which a selected altitude is captured, feet. */
 const ALT_CAPTURE_FT = 20;
@@ -684,12 +698,9 @@ export class FlightSimulator {
     // Truth integrates from the physical height, never from what the altimeter reads (B1.1).
     const altitude = fms.physicalAltitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
-    // Bank and pitch too: they tilt the GPS antennas. The point-mass model has no attitude of its own, so pitch is the
-    // air-relative flight-path angle, over at least PITCH_SPEED_FLOOR of airspeed and within PITCH_LIMIT (laboratory).
-    // Over the ground it would be meaningless at low speed: a helicopter climbing out of a hover at 1 kt of ground speed
-    // is nearly level, not pointing its antennas at the horizon.
-    const pitch = clamp(deg(Math.atan(verticalSpeed / 60 / (Math.max(this.airspeed, PITCH_SPEED_FLOOR) * 1.68781))), -PITCH_LIMIT, PITCH_LIMIT);
-    fms.setAircraft({ position, track, heading, groundSpeed, tas: this.airspeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError, bank: this.bank, pitch });
+    // Bank and pitch too: the displays and the cameras show them, and they tilt the GPS antennas.
+    const { pitch, bank } = this.attitudeFor(heading, track, groundSpeed, verticalSpeed, dt);
+    fms.setAircraft({ position, track, heading, groundSpeed, tas: this.airspeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError, bank, pitch });
     // The path for the deviation display: the final approach path on final (coupled only when captured), otherwise the
     // descent path. None while the FMS has failed: it computes nothing to show.
     const final = this.fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
@@ -1270,6 +1281,40 @@ export class FlightSimulator {
    * at the vertical-acceleration limit), and below it a climb back to it; LOW HT while it limits the mode's command.
    * It needs a valid radio height.
    */
+  private lastGround: { north: number; east: number; heading: number } | null = null;
+  private attitude = { pitch: 0, bank: 0 };
+  /**
+   * The attitude for display (plan B1.5; a derivation, not rotor dynamics). The helicopter: pitch from the trim for its
+   * forward airspeed (TRIM_PITCH) less the longitudinal acceleration, atan(a/g), since the rotor and the nose tilt to
+   * accelerate; roll the bank of a coordinated turn, or at low speed atan(lateral acceleration / g); each following at
+   * ATTITUDE_RATE. The laboratory airline profile: the air-relative flight-path angle, over at least PITCH_SPEED_FLOOR
+   * of airspeed and within PITCH_LIMIT, and the bank.
+   */
+  private attitudeFor(heading: number, track: number, groundSpeed: number, verticalSpeed: number, dt: number) {
+    if (!this.advisory) {
+      const pitch = clamp(deg(Math.atan(verticalSpeed / 60 / (Math.max(this.airspeed, PITCH_SPEED_FLOOR) * 1.68781))), -PITCH_LIMIT, PITCH_LIMIT);
+      return { pitch, bank: this.bank };
+    }
+    const ground = { north: groundSpeed * Math.cos(rad(track)), east: groundSpeed * Math.sin(rad(track)), heading };
+    const previous = this.lastGround ?? ground;
+    this.lastGround = ground;
+    const accel = dt > 0 ? { north: (ground.north - previous.north) / dt, east: (ground.east - previous.east) / dt } : { north: 0, east: 0 };
+    // Resolved on the heading halfway through the step: in a turn the velocity's chord is then all centripetal.
+    const mid = rad(heading + angleDiff(heading, previous.heading) / 2), mx = Math.cos(mid), my = Math.sin(mid);
+    const along = accel.north * mx + accel.east * my, across = -accel.north * my + accel.east * mx;
+    const h = rad(heading), hx = Math.cos(h), hy = Math.sin(h);
+    const air = this.airVelocity;
+    const forward = air ? air.north * hx + air.east * hy : this.airspeed;
+    const pitchWanted = trimPitch(forward) - deg(Math.atan((along * KT_TO_MS) / G_MS2));
+    const bankWanted = air ? deg(Math.atan((across * KT_TO_MS) / G_MS2)) : this.bank;
+    const step = ATTITUDE_RATE * dt;
+    this.attitude = {
+      pitch: dt > 0 ? this.attitude.pitch + clamp(pitchWanted - this.attitude.pitch, -step, step) : pitchWanted,
+      bank: dt > 0 ? this.attitude.bank + clamp(bankWanted - this.attitude.bank, -step, step) : bankWanted,
+    };
+    return { ...this.attitude };
+  }
+
   private lowCollectiveSpeed(dt: number): number | null {
     const c = this.lowCollective;
     const ra = this.radio;

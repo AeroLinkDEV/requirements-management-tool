@@ -1,13 +1,14 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { FlightSimulator } from '../src/fmsCdu/flight'
+import { FlightSimulator, trimPitch } from '../src/fmsCdu/flight'
+import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { alertLimits, fmsGpsView, lowSatellites, modeLabel, overrideFor } from '../src/fmsCdu/gpsBench'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
 // The bench side of the CMA-5024 simulation, joined to the FMS: the FMS owns and feeds GPS1 and GPS2, the GPS sensors
 // tab reads them through a view, and every bench change is followed by the FMS re-reading them.
-const setup = () => {
+const setup = (profile?: AircraftProfile) => {
   let now = Date.UTC(2026, 8, 28, 14, 0, 0)
-  const fms = new ScriptedFms(() => new Date(now))
+  const fms = new ScriptedFms(() => new Date(now), { profile })
   const sim = new FlightSimulator(fms)
   const fly = (seconds: number, each?: () => boolean | void) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1); if (each?.()) return } }
   return { fms, sim, fly }
@@ -26,19 +27,24 @@ test('the FMS feeds its receivers the aircraft attitude: a steep bank hides sate
   expect(visible(fms, 0)).toBe(level)
 })
 
-test('the flight simulation reports its bank and pitch to the FMS: the air-relative flight-path angle', () => {
+test('the flight simulation reports its modelled attitude to the FMS: the trim pitch for the airspeed and the bank of the turn, not the climb (B1.5)', () => {
   const { fms, sim, fly } = setup()
-  // Climbing in VS (the crew's vertical mode under the helicopter profile), fly until also banked in a turn.
+  // Climbing in VS (the crew's vertical mode under the helicopter profile), fly until also banked in a steady turn.
   sim.selectAltitude(9000)
   sim.engageVerticalSpeed(500)
-  fly(3 * 3600, () => Math.abs(sim.bankAngle) > 5 && Math.abs(fms.verticalSpeed) > 100)
+  fly(3 * 3600, () => Math.abs(sim.bankAngle) > 5 && Math.abs(fms.verticalSpeed) > 400)
+  fly(3)
   expect(Math.abs(sim.bankAngle)).toBeGreaterThan(5)
-  expect(fms.attitude.bank).toBe(sim.bankAngle)
-  // Pitch: atan of the vertical speed (ft/s) over the true airspeed (1 kt = 1.68781 ft/s), taken over at least 30 kt
-  // and held within 20 degrees (flight.ts PITCH_SPEED_FLOOR, PITCH_LIMIT).
-  const pitch = Math.max(-20, Math.min(20, (Math.atan(fms.verticalSpeed / 60 / (Math.max(sim.tas, 30) * 1.68781)) * 180) / Math.PI))
-  expect(fms.attitude.pitch).not.toBe(0)
-  expect(fms.attitude.pitch).toBeCloseTo(pitch, 9)
+  // The bank of the coordinated turn, followed at the attitude rate; the pitch the trim for the airspeed: a helicopter
+  // climbs on its collective, not by raising its nose.
+  expect(Math.abs(fms.attitude.bank - sim.bankAngle)).toBeLessThan(1)
+  expect(Math.abs(fms.attitude.pitch - trimPitch(sim.tas))).toBeLessThan(0.3)
+  // The laboratory airline profile keeps the air-relative flight-path angle.
+  const lab = setup(LAB_AIRLINE_VNAV_PROFILE)
+  lab.fly(3 * 3600, () => Math.abs(lab.fms.verticalSpeed) > 100)
+  const pitch = Math.max(-20, Math.min(20, (Math.atan(lab.fms.verticalSpeed / 60 / (Math.max(lab.sim.tas, 30) * 1.68781)) * 180) / Math.PI))
+  expect(lab.fms.attitude.pitch).toBeCloseTo(pitch, 9)
+  expect(lab.fms.attitude.bank).toBe(lab.sim.bankAngle)
 })
 
 test('baro altitude can be lost on one receiver: its air data flag, not the other one\'s', () => {

@@ -246,10 +246,10 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
 export function aircraftData(fms: ScriptedFms, sim: FlightSimulator): AircraftData {
   const track = fms.track;
   const airspeed = sim.tas;
-  // Pitch approximated from the flight path angle, for display: a point-mass model has no attitude of its own.
-  const pitch = fms.groundSpeed > 1 ? (Math.atan(fms.verticalSpeed / (fms.groundSpeed * 101.27)) * 180) / Math.PI : 0;
+  // The modelled attitude (flight.ts attitudeFor): the one the cameras show and the GPS antennas tilt with.
+  const { pitch, bank } = fms.attitude;
   return {
-    pitch, bank: sim.bankAngle, heading: fms.heading, track, airspeed, groundSpeed: fms.groundSpeed,
+    pitch, bank, heading: fms.heading, track, airspeed, groundSpeed: fms.groundSpeed,
     altitude: fms.indicatedAltitude, baroSetting: formatSetting(fms.baro.setting), physicalAltitude: fms.physicalAltitude, verticalSpeed: fms.verticalSpeed, wind: fms.wind, position: fms.truePosition,
     selectedAltitude: sim.advisory ? sim.selectedAltitude : null, selectedSpeed: sim.advisory ? sim.selectedSpeed : null,
     selectedHeading: sim.selectedHeading,
