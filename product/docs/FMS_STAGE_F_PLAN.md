@@ -103,7 +103,7 @@ Every sensor solution carries five distinct values, each with its meaning, units
 
 | Value | Meaning | GPS | DME/DME, VOR/DME | KALMAN | DVS | DR |
 |---|---|---|---|---|---|---|
-| **accuracy95Nm** | Estimated horizontal radial error at 95%, NM | Receiver HFOM (label 247) | Declared model reproducing M300 15-3's typical figures (F6, F7) | 2.448 σ from the per-axis σ (below) | Declared growth, laboratory (F11) | Declared growth from input uncertainties (F10) |
+| **accuracy95Nm** | Estimated horizontal radial error at 95%, NM | Receiver HFOM (label 247) | Declared model reproducing M300 15-3's typical figures (F6, F7) | 2.448 × max(σx, σy), a conservative bound (below) | Declared growth, laboratory (F11) | Declared growth from input uncertainties (F10) |
 | **integrityBoundNm** | A containment bound, NM | Receiver HIL (label 130) | None (M300 15-3 rests on criteria, not an NP) | None | None | None |
 | **integrityValid** | The civil integrity criteria are met (M300 1-3) | HIL valid, fresh and strictly below the limit | Accuracy strictly below the limit **and** the reasonableness checks of 15-3 passed | Never (15-4) | Never (12-20) | Never |
 | **naimComparisonNm** (laboratory) | GPS-to-backup discrepancy plus the backup's accuracy95 (F5) | Only when retaining an uncertain GPS against a qualifying backup | — | — | — | — |
@@ -112,9 +112,15 @@ Every sensor solution carries five distinct values, each with its meaning, units
 **The limit** is the active RNP (DEC-150 item 4), whether the phase default or the crew entry. "Strictly below" is `value < limit`.
 
 **KALMAN's 2 σ is not a 95% radial figure.**
-- The KALMAN STATUS page shows 2 SIGMA POS ERR as 2 σ of the per-axis error.
-- accuracy95Nm converts it for a circular normal error: 2.448 σ, the 95% radial quantile.
-- The conversion is labelled laboratory. No page shows the one as the other.
+- The KALMAN STATUS page shows 2 SIGMA POS ERR as 2 σ of the larger per-axis error.
+- accuracy95Nm is **2.448 × max(σx, σy)**. This is a conservative bound, and it is labelled laboratory:
+  - 2.448 = √(−2 ln 0.05) is the exact 95% radius only for a circular bivariate normal (equal, uncorrelated axes);
+  - for unequal axes the true 95% radius is smaller, so the bound over-states the error, never under-states it.
+- F11's model applies the same σ₀ and σₐ on both axes, so in practice σx = σy and the bound is exact.
+- **Independent check (owner test):**
+  - σx = 1, σy = 1: the true 95% radius is 2.448, and the bound is 2.448;
+  - σx = 1, σy = 0: the error is one-dimensional, the true 95% radius is 1.960 (the two-sided 95% normal quantile), and the bound is 2.448.
+- No page shows the 2 σ value as the 95% figure, or the reverse.
 
 **The NAIM comparison never manufactures integrity.**
 - It is kept apart from the receiver HIL, and has its own validity:
@@ -174,9 +180,9 @@ This is a bench interface, not ARINC 705 or Doppler framing. The laboratory erro
 **Aiding.** The emulated INS is aided (reset to the GPS position and velocity) only by an **integrity-qualified** GPS update. That update needs a GPS with integrityValid and valid velocity words 166 and 174. An uncertain GPS, a GPS without velocity words, and radio fixes never aid it.
 
 **Error model (laboratory):**
-- σ₀ per axis at aiding = HFOM / 2.448;
+- σ₀ per axis at aiding = HFOM / 2.448 (the circular case: HFOM is a radial 95% figure);
 - the unaided growth adds ½ σₐ t² per axis, where σₐ is the declared accelerometer noise;
-- the KALMAN STATUS page shows 2 σ; accuracy95Nm is 2.448 σ (C1).
+- the KALMAN STATUS page shows 2 × max(σx, σy); accuracy95Nm is 2.448 × max(σx, σy) (C1).
 
 **Clocks.** All clocks run on simulation time, never wall time or tick counts.
 - **Readiness:** KALMAN is unavailable until one minute after FMS power-up (M300 12-24).
@@ -881,5 +887,5 @@ Local, unpushed branches exist for F0, F2, F8a (the RMS extension), F8b (the NAV
 | F2 | The GPS entry's integrity bound stays the receiver HIL. The NAIM comparison moves out of `integrityNm` into its own laboratory field. Every consumer reads per C1's table. The GPS measurement's HFOM-or-HIL fallback for ANP goes. |
 | F8a | Radio health separates CONTROL LOST (timeout, reception kept) from FAIL/SILENT. REJECTED and SUPERSEDED command states are added. DME channels and HOLD and TEST per C3. A TACAN device. No ADF alert when untuned. |
 | F8b | TEST removes that receiver's ranges from navigation. DME HOLD becomes C3's channel 1. |
-| F11 | σ becomes per axis, with the 2 σ page value and a 2.448 σ accuracy. The coast clock runs from the last integrity-qualified aiding, which also requires the GPS velocity words (already so). `powerInterrupt(ms)` gets the 50 ms boundary. The APIRS and Doppler failure conditions stay. |
+| F11 | σ becomes per axis, with the 2 σ page value and a 2.448 × max(σx, σy) accuracy. The coast clock runs from the last integrity-qualified aiding, which also requires the GPS velocity words (already so). `powerInterrupt(ms)` gets the 50 ms boundary. The APIRS and Doppler failure conditions stay. |
 | F3 | Being built from §4 F3's table. |
