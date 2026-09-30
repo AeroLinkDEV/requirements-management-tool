@@ -882,6 +882,28 @@ export class FlightSimulator {
   /** HOV holds its target within the capture conditions: an arrival, as distinct from a recovery toward it. */
   get hoverCaptured() { return this.lowHorizontal?.mode === "HOV" && this.lowHorizontal.captured === true; }
 
+  /**
+   * The cyclic force-trim release (FTR), pressed and let go. Its logic is laboratory (no public source gives an AFCS's):
+   * the horizontal references re-datum where the pilot leaves the aircraft. A TD/H plan the autopilot kept after the FMS
+   * withdrew its request (F2) ends (R3-02.5): HOV where it is, or ATT without feedback. HOV takes the present position
+   * as its target. The collective and the lateral upper modes (NAV, HDG) are not the cyclic's and stay.
+   */
+  releaseForceTrim() {
+    if (!this.advisory) return false;
+    const h = this.lowHorizontal, feedback = this.fms.hoverFeedback;
+    const kept = this.fmsTransition !== null && this.fms.hover.requestData === null;
+    if (kept && (this.pendingTdh !== null || (h?.mode === "TDH" && h.target !== null))) {
+      this.pendingTdh = null;
+      this.fmsTransition = null;
+      if (h?.mode === "TDH") this.lowHorizontal = { ...h, mode: feedback ? "HOV" : "ATT", target: feedback?.position ?? null, holding: false, captured: false };
+      this.record("TD/H CANCELLED", "cyclic force-trim release: the kept plan to MRK ends");
+    } else if (h?.mode === "HOV" && feedback) {
+      this.lowHorizontal = { ...h, target: feedback.position, captured: true };
+    }
+    this.record("FTR", h?.mode === "HOV" || h?.mode === "TDH" ? "the hover references re-datum at the present position" : "force trim released");
+    return true;
+  }
+
   /** The engaged modes per axis, as the FMA shows them (collective, pitch, roll/yaw): what is actually flying each axis. */
   get axisModes() {
     const c = this.lowCollective, h = this.lowHorizontal;

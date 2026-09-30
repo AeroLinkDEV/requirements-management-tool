@@ -1,5 +1,6 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { checkAtTdn, planTransition } from '../src/fmsCdu/transition'
+import { offset } from '../src/fmsCdu/fmsModel'
+import { checkAtTdn, planTransition, tdnGeometry } from '../src/fmsCdu/transition'
 import { checkAtTdn as oracleCheck, planTransition as oraclePlan, type TransitionPlan as OraclePlan } from './support/tdnOracle'
 
 // The production transition planner (src/fmsCdu/transition.ts) against the independent oracle
@@ -82,4 +83,44 @@ test('T6 at full precision: with the remaining distance D(TD) + D(TD/H) the tran
     expect(checkAtTdn(start, o.td.distanceNm + o.tdh.distanceNm + NM).engage).toBe(true)
     expect(oracleCheck(asOracle(start), exact - NM).decision).toBe('refuse')
   }
+})
+
+test('T6 at TDN, the geometry: 0.19 NM across the final track is within, 0.21 is TDN NOT POSSIBLE either side; a track 19 degrees off is within, 21 is not (M300 E-17)', () => {
+  const mrk = { lat: 40.7, lon: -72.45 }
+  const tdn = offset(mrk, 50, 1.5)
+  // Final track 230: its right side is toward 320, its left toward 140.
+  const at = (side: number, nm: number, trackOff = 0) => tdnGeometry(offset(tdn, side, nm), 230 + trackOff, mrk, 230)
+  for (const side of [320, 140]) {
+    expect(Math.abs(at(side, 0.19).crossTrack)).toBeCloseTo(0.19, 3)
+    expect(at(side, 0.19).refused).toBeNull()
+    expect(at(side, 0.21).refused).toBe('OFF FINAL TRACK')
+  }
+  for (const off of [19, -19]) expect(at(320, 0, off)).toMatchObject({ refused: null, trackError: expect.closeTo(Math.abs(off), 9) })
+  for (const off of [21, -21]) expect(at(320, 0, off).refused).toBe('TRACK ERROR')
+  // Across the 0/360 line: a track of 355 against a final of 010 is 15 degrees off.
+  expect(tdnGeometry(offset(mrk, 190, 1.5), 355, mrk, 10)).toMatchObject({ refused: null, trackError: expect.closeTo(15, 9) })
+  // Off the track by more than both: the cross-track reason is given.
+  expect(at(320, 0.3, 30).refused).toBe('OFF FINAL TRACK')
+})
+
+test('T6 worked cases against the fixed MRK: 105 KIAS engages with a gate under 0.2 NM, 125 KIAS and 900 ft are TDN DIST SHORT, 75 KIAS is below the gate speed; the gates agree with the oracle', () => {
+  const nominal: Start = { ias: 100, radioHeight: 500, verticalSpeed: 0, headwind: 20, hoverHeight: 50 }
+  const planned = planTransition(nominal)
+  if (planned.refused) throw new Error(planned.reason)
+  const theirs = oraclePlan(asOracle(nominal)) as OraclePlan
+  const mrk = planned.dtraNm
+  expect(Math.abs(mrk - theirs.plannedDtraNm)).toBeLessThanOrEqual(NM)
+  const both = (start: Start) => ({ mine: checkAtTdn(start, mrk), theirs: oracleCheck(asOracle(start), theirs.plannedDtraNm) })
+  const faster = both({ ...nominal, ias: 105 })
+  expect(faster.mine.engage).toBe(true)
+  expect(faster.mine.gateNm!).toBeGreaterThan(0)
+  expect(faster.mine.gateNm!).toBeLessThan(0.2)
+  expect(Math.abs(faster.mine.gateNm! - faster.theirs.gateNm!)).toBeLessThanOrEqual(NM)
+  for (const start of [{ ...nominal, ias: 125 }, { ...nominal, radioHeight: 900 }]) {
+    const { mine, theirs: oracle } = both(start)
+    expect(mine).toMatchObject({ engage: false, reason: 'TDN DIST SHORT' })
+    expect(oracle).toMatchObject({ decision: 'refuse', reason: 'TDN DIST SHORT' })
+    expect(Math.abs(mine.gateNm! - oracle.gateNm!)).toBeLessThanOrEqual(NM)
+  }
+  expect(checkAtTdn({ ...nominal, ias: 75 }, mrk)).toEqual({ engage: false, reason: 'BELOW GATE SPEED', gateNm: null })
 })

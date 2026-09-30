@@ -52,7 +52,7 @@ import {
   userWaypointPosition, type UserDatabase, type UserDatabaseStore, type UserScope, type UserWaypoint,
 } from "./userDatabase";
 import { TACTICAL_PAGES } from "./tacticalPages";
-import { checkAtTdn, planTransition } from "./transition";
+import { checkAtTdn, planTransition, tdnGeometry, type TdnDecision, type TransitionStart } from "./transition";
 import { defaultLegMinutes, designBank, holdGeometry, holdingSpeedLimit, radiusAt } from "./holds";
 import { JOIN_BEFORE_TDN_NM, joiningPath, type JoinPath } from "./joining";
 import type { CduFunction } from "./variants";
@@ -420,6 +420,8 @@ export class ScriptedFms implements CduBackend {
     mark: null as { ident: string; position: LatLon; label: string | null } | null,
     status: "NONE" as "NONE" | "MOD" | "ACT",
     finalTrack: null as number | null,
+    /** The wind direction frozen at the procedure request (ACTIVATE); its speed is frozen at the TDN overflight. */
+    windDirection: null as number | null,
     windSpeed: null as number | null,
     dtra: null as number | null,
     request: 0,
@@ -428,7 +430,9 @@ export class ScriptedFms implements CduBackend {
     /** Why the transition was refused at TDN, as the planner put it (below gate speed, no closure, …). */
     refusedReason: null as string | null,
     functionLost: false,
-    active: null as { id: number; mark: { ident: string; position: LatLon; label: string | null }; finalTrack: number; dtra: number; join: JoinPath | null } | null,
+    /** At TDN: the position against the final track, the remaining distance, the state and the recomputed decision. */
+    atTdn: null as { crossTrack: number; trackError: number; remainingNm: number; start: TransitionStart | null; decision: TdnDecision | null } | null,
+    active: null as { id: number; mark: { ident: string; position: LatLon; label: string | null }; finalTrack: number; windDirection: number; dtra: number; join: JoinPath | null } | null,
     procedures: 0,
   };
 
@@ -2477,6 +2481,12 @@ export class ScriptedFms implements CduBackend {
     this.pendingAlert = message;
   }
 
+  /** A message whose condition has ended leaves the scratchpad and no longer lights MSG; the recall list keeps it. */
+  private withdrawAlert(text: string) {
+    if (this.message?.text === text) this.message = null;
+    if (this.pendingAlert?.text === text) this.pendingAlert = null;
+  }
+
   addMark() {
     const ident = `MRK${String(this.marks.length + 1).padStart(2, "0")}`;
     this.marks.push({ ident, position: { ...this.here } });
@@ -2542,7 +2552,7 @@ export class ScriptedFms implements CduBackend {
         ...(rest[0]?.kind === "disco" ? rest.slice(1) : rest),
       ];
     });
-    Object.assign(this.hover, { status: "MOD", finalTrack, dtra: plan.dtraNm, windSpeed: null, refused: null, refusedReason: null, functionLost: false, requestData: null });
+    Object.assign(this.hover, { status: "MOD", finalTrack, windDirection: this.systemWind.direction, dtra: plan.dtraNm, windSpeed: null, refused: null, refusedReason: null, functionLost: false, requestData: null, atTdn: null });
     return null;
   }
 
@@ -2586,7 +2596,7 @@ export class ScriptedFms implements CduBackend {
     this.pendingJoin = null;
     if (this.hover.status !== "MOD") return;
     const active = this.hover.active;
-    Object.assign(this.hover, active ? { status: "ACT", mark: active.mark, finalTrack: active.finalTrack, dtra: active.dtra } : { status: "NONE" });
+    Object.assign(this.hover, active ? { status: "ACT", mark: active.mark, finalTrack: active.finalTrack, windDirection: active.windDirection, dtra: active.dtra } : { status: "NONE" });
   }
 
   /**
@@ -2596,22 +2606,28 @@ export class ScriptedFms implements CduBackend {
    * procedure must be activated again. Otherwise the wind speed is frozen and the request goes to the autopilot.
    */
   private reachTdn() {
-    const { id, mark, finalTrack } = this.hover.active!;
-    const e = toLocal(mark.position, this.here);
-    const crossTrack = e.x * Math.cos((finalTrack * Math.PI) / 180) - e.y * Math.sin((finalTrack * Math.PI) / 180);
-    const trackError = Math.abs(((this.track - finalTrack + 540) % 360) - 180);
-    if (Math.abs(crossTrack) > 0.2 || trackError > 20) {
+    const { id, mark, finalTrack, windDirection } = this.hover.active!;
+    // TRANSITION DOWN is shown from execution until TDN (M300 E-36).
+    this.withdrawAlert("TRANSITION DOWN");
+    const geometry = tdnGeometry(this.here, this.track, mark.position, finalTrack);
+    const remainingNm = distanceNm(this.here, mark.position);
+    if (geometry.refused) {
+      this.hover.atTdn = { ...geometry, remainingNm, start: null, decision: null };
       this.hover.refused = "TDN NOT POSSIBLE";
-      this.hover.refusedReason = Math.abs(crossTrack) > 0.2 ? "OFF FINAL TRACK" : "TRACK ERROR";
+      this.hover.refusedReason = geometry.refused;
       this.alert(alert("TDN NOT POSSIBLE"));
       return;
     }
     const ra = this.radioHeight;
-    const decision = checkAtTdn({
+    const start: TransitionStart = {
       ias: this.afcs?.ias ?? 0, radioHeight: ra.status === "NORMAL" ? ra.value : null, verticalSpeed: this.verticalSpeed,
-      headwind: this.systemWind.speed * Math.cos(((this.systemWind.direction - finalTrack) * Math.PI) / 180),
+      // The system wind's speed now, along the direction frozen at the request (M300 11-19; plan T3).
+      headwind: this.systemWind.speed * Math.cos(((windDirection - finalTrack) * Math.PI) / 180),
       hoverHeight: this.afcs?.hoverHeight ?? 50, elevation: ra.status === "NORMAL" ? this.altitude - ra.value! : 0,
-    }, distanceNm(this.here, mark.position));
+    };
+    const decision = checkAtTdn(start, remainingNm);
+    // The state at TDN and the recomputed plan, for the run record (the stage boundaries the flight is checked against).
+    this.hover.atTdn = { ...geometry, remainingNm, start, decision };
     if (!decision.engage) {
       // Only the three library messages reach the crew; the planner reason is kept for the run record. No radio height
       // is TDN FUNCTION LOST (M300 E-16); the recomputed transition not fitting is TDN DIST SHORT; any other refusal
@@ -2642,7 +2658,11 @@ export class ScriptedFms implements CduBackend {
     }
     const inRoute = this.active.legs.some(leg => leg.kind === "wpt" && (leg.ident === "TDN" || leg.ident === "MRK"));
     const atMark = this.lastSequenced === "MRK";
-    if (!inRoute && !atMark) Object.assign(hover, { status: hover.status === "MOD" ? "MOD" : "NONE", active: null, requestData: null });
+    if (!inRoute && !atMark) {
+      Object.assign(hover, { status: hover.status === "MOD" ? "MOD" : "NONE", active: null, requestData: null });
+      // Ended before TDN (a direct-to, the route changed): the transition down it announced is not coming.
+      this.withdrawAlert("TRANSITION DOWN");
+    }
   }
 
   squawk() { this.squawkIdentUntil = this.clock().getTime() + 18_000; }
@@ -2828,8 +2848,8 @@ export class ScriptedFms implements CduBackend {
       // Committed on EXEC: the joining path rebuilt from the state now, if JN is still the route's next leg (the crew may
       // have deleted it, to vector onto the final with headings).
       const joins = route.legs[0]?.kind === "wpt" && route.legs[0].ident === "JN";
-      h.active = { id: ++h.procedures, mark: h.mark!, finalTrack: h.finalTrack!, dtra: h.dtra!, join: joins ? this.joinFromHere(joinPoint, h.finalTrack!) : null };
-      Object.assign(h, { status: "ACT", requestData: null, refused: null, refusedReason: null, functionLost: false });
+      h.active = { id: ++h.procedures, mark: h.mark!, finalTrack: h.finalTrack!, windDirection: h.windDirection!, dtra: h.dtra!, join: joins ? this.joinFromHere(joinPoint, h.finalTrack!) : null };
+      Object.assign(h, { status: "ACT", requestData: null, refused: null, refusedReason: null, functionLost: false, atTdn: null });
       // The procedure takes the head of the route: a search pattern being flown is interrupted (its /S leg removed).
       if (this.sar.active) this.interruptSar();
       this.alert(alert("TRANSITION DOWN"));

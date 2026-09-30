@@ -804,6 +804,52 @@ test('radio height lost during TD/H: ALT on the barometric altitude, the horizon
   expect(metres(unit.truePosition, mark)).toBeLessThan(50)
 })
 
+test('the cyclic force-trim release ends the TD/H plan the autopilot kept after the FMS withdrew its request: HOV where it is, not at MRK (R3-02.5, F2)', () => {
+  const { unit, sim, fly, mark } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  // Into TD/H toward MRK, then every radio altimeter fails: TDN FUNCTION LOST withdraws the request; the plan is kept.
+  fly(900, () => sim.axisModes.pitch === 'TD/H' && sim.indicatedAirspeed < 50)
+  expect(sim.axisModes.pitch).toBe('TD/H')
+  unit.setCondition('raFail', true)
+  fly(2)
+  expect(unit.hover.requestData).toBeNull()
+  expect(sim.axisModes).toMatchObject({ collective: 'ALT', pitch: 'TD/H', roll: 'TD/H' })
+  const released = unit.truePosition
+  expect(sim.releaseForceTrim()).toBe(true)
+  expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED' && /force-trim release/.test(e.detail))).toBe(true)
+  expect(sim.axisModes).toMatchObject({ pitch: 'HOV', roll: 'HOV' })
+  fly(90)
+  // It stops near where the release was made, short of MRK; without the release the plan would have taken it to MRK.
+  expect(unit.groundSpeed).toBeLessThan(1)
+  expect(metres(unit.truePosition, mark)).toBeGreaterThan(100)
+  expect(metres(unit.truePosition, released)).toBeLessThan(metres(released, mark))
+})
+
+test('the cyclic force-trim release in HOV takes the present position as the hover target: moved off it, HOV no longer returns (laboratory)', () => {
+  const run = offshore()
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(30)
+  const first = unit.truePosition
+  // Displaced 40 m (the pilot moves the aircraft on the cyclic): without the release HOV brings it back.
+  unit.placeAircraft({ position: offset(first, 320, 40 / 1852), track: 230, altitude: unit.altitude }, 'test: moved on the cyclic')
+  fly(60)
+  expect(metres(unit.truePosition, first)).toBeLessThan(5)
+  // Displaced again, and the force trim released there: HOV holds the new position.
+  const second = offset(first, 320, 40 / 1852)
+  unit.placeAircraft({ position: second, track: 230, altitude: unit.altitude }, 'test: moved on the cyclic')
+  fly(1)
+  expect(sim.releaseForceTrim()).toBe(true)
+  fly(60)
+  expect(metres(unit.truePosition, second)).toBeLessThan(5)
+  expect(sim.axisModes).toMatchObject({ pitch: 'HOV', roll: 'HOV' })
+  expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'FTR' })
+  // The laboratory airline profile has no force-trim release.
+  const lab = setup(LAB_AIRLINE_VNAV_PROFILE)
+  expect(lab.sim.releaseForceTrim()).toBe(false)
+})
+
 test('a direct-to during the transition ends the procedure and cancels the retained TD/H: HOV where it is (Stage D, F2)', () => {
   const { unit, sim, fly } = hoverProcedure()
   unit.press('LSK6R')
@@ -845,6 +891,99 @@ test('a headwind at or above the gate true airspeed has no closure toward MRK: t
   expect(planTransition({ ...start, headwind: 20 }).refused).toBe(false)
   expect(planTransition({ ...start, headwind: 90 })).toEqual({ refused: true, reason: 'no closure' })
   expect(checkAtTdn({ ...start, headwind: 90 }, 5)).toEqual({ engage: false, reason: 'NO CLOSURE', gateNm: null })
+})
+
+test('MRK designation on the HOVER page: mark on top (4L), a database or user waypoint by ident (1L), coordinates (1R); a moving waypoint is refused (T1, M300 A-75)', () => {
+  const { unit } = offshore(500)
+  unit.open('HOVER')
+  unit.press('LSK4L')
+  expect(unit.hover.mark).toMatchObject({ ident: 'MRK01', label: 'MARK ON TOP POS' })
+  expect(distanceNm(unit.hover.mark!.position, unit.position)).toBeLessThan(1e-9)
+  // A user waypoint, and a database one, by ident.
+  const sighting = offset(unit.position, 180, 1)
+  expect(unit.createUserWaypoint('SGT1', sighting)).toBeUndefined()
+  typeText(unit, 'SGT1')
+  unit.press('LSK1L')
+  expect(unit.hover.mark).toEqual({ ident: 'SGT1', position: sighting, label: null })
+  typeText(unit, 'MUN')
+  unit.press('LSK1L')
+  expect(unit.hover.mark).toEqual({ ident: 'MUN', position: unit.coordinates('MUN'), label: null })
+  // Coordinates on 1R.
+  typeText(unit, 'N4042.0W07227.0')
+  unit.press('LSK1R')
+  expect(unit.hover.mark!.position.lat).toBeCloseTo(40.7, 9)
+  expect(unit.hover.mark!.position.lon).toBeCloseTo(-72.45, 9)
+  // A moving waypoint is refused, and the mark stays as it was.
+  unit.defineMoving('SHIP1', offset(unit.position, 90, 2), 270, 20)
+  typeText(unit, 'SHIP1')
+  unit.press('LSK1L')
+  expect(screenText(unit.screen())[13].trim()).toBe('INVALID ENTRY')
+  expect(unit.hover.mark!.position.lat).toBeCloseTo(40.7, 9)
+})
+
+test('the final track at MRK: into the wind from 5 kt, below it the bearing to MRK; the wind direction frozen at ACTIVATE, its speed taken at TDN (T3, M300 11-19, A-75)', () => {
+  for (const speed of [4.9, 5.1]) {
+    const { unit, mark } = hoverProcedure({ markNm: 3 })
+    Object.assign(unit.wind, { direction: 300, speed })
+    unit.press('LSK6R')
+    expect(unit.hover.status).toBe('MOD')
+    if (speed < 5) expect(unit.hover.finalTrack).toBeCloseTo(courseDeg(unit.position, mark), 9)
+    else expect(unit.hover.finalTrack).toBe(300)
+  }
+  // Activated in 230/20; before TDN the wind turns to 260/30. The final track stays 230, and at TDN the transition is
+  // planned with 30 kt along it: the speed now, the direction frozen.
+  const { unit, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  Object.assign(unit.wind, { direction: 260, speed: 30 })
+  fly(900, () => unit.hover.atTdn !== null)
+  expect(unit.hover.active!.finalTrack).toBe(230)
+  expect(unit.hover.atTdn!.start!.headwind).toBeCloseTo(30, 9)
+  expect(unit.hover.windSpeed).toBe(30)
+})
+
+test('TRANSITION DOWN is shown from EXEC until TDN: at TDN it leaves the scratchpad and MSG, and stays in the recall list (T7, M300 E-36)', () => {
+  const { unit, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  const scratchpad = () => screenText(unit.screen())[13].trim()
+  expect(scratchpad()).toBe('TRANSITION DOWN')
+  expect(unit.lamps().has('MSG')).toBe(true)
+  fly(600, () => unit.lastSequenced === 'JN')
+  expect(scratchpad()).toBe('TRANSITION DOWN')
+  fly(600, () => unit.hover.atTdn !== null)
+  expect(unit.hover.request).toBe(1)
+  expect(scratchpad()).toBe('')
+  expect(unit.lamps().has('MSG')).toBe(false)
+  expect(unit.recallList.map(m => m.text)).toContain('TRANSITION DOWN')
+  // A procedure ended before TDN by a direct-to withdraws it too.
+  const early = hoverProcedure()
+  early.unit.press('LSK6R')
+  early.unit.press('EXEC')
+  expect(early.unit.directTo('MUN')).toBeUndefined()
+  early.unit.press('EXEC')
+  early.fly(2)
+  expect(early.unit.hover.active).toBeNull()
+  expect(screenText(early.unit.screen())[13].trim()).toBe('')
+})
+
+test('the route to MRK cancelled (TDN and MRK deleted on LEGS, EXEC) ends the procedure: no request, no transition, the aircraft flies on (T9, M300 11-21)', () => {
+  const { unit, sim, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  unit.open('LEGS')
+  // JN, TDN, MRK at the head of the route: delete TDN, then MRK (now second). CLR first acknowledges TRANSITION DOWN.
+  for (let i = 0; i < 2; i++) {
+    while (screenText(unit.screen())[13].trim() !== 'DELETE') unit.press('CLR')
+    unit.press('LSK2L')
+  }
+  unit.press('EXEC')
+  expect(unit.activeRoute.legs.some(leg => leg.kind === 'wpt' && (leg.ident === 'TDN' || leg.ident === 'MRK'))).toBe(false)
+  fly(2)
+  expect(unit.hover.active).toBeNull()
+  fly(300)
+  expect(unit.hover.request).toBe(0)
+  expect(sim.modeEvents.some(e => e.event === 'TD')).toBe(false)
 })
 
 test('no waypoint goes between TDN and MRK: !HOVER MRK WPT, and the route is unchanged (Stage D)', () => {
