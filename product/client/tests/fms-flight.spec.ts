@@ -4,6 +4,7 @@ import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsMod
 import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
 import { HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { stimulusFor, type GpsOp } from '../src/fmsCdu/gpsStimulus'
+import { radiusAt } from '../src/fmsCdu/holds'
 import { checkAtTdn, planTransition } from '../src/fmsCdu/transition'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
@@ -417,6 +418,15 @@ test('every circuit, in a 30 kt wind from four azimuths and both turns: the outb
       for (const worst of inboundWorsts) expect(worst, label).toBeLessThan(0.1)
     }
   }
+})
+
+test('the hold turn radius agrees with the M300 turn table (twice the radius, to 0.1 NM) at sample points, rounding-aware (D-H oracles, M300 11-3)', () => {
+  // [ground speed kt, bank degrees, twice the radius NM as the table prints it] — sample points of M300 Table 11-1.
+  const samples: [number, number, number][] = [[60, 30, 0.2], [100, 20, 0.8], [150, 25, 1.4], [220, 15, 5.3]]
+  for (const [gs, bank, printed] of samples) expect(Math.abs(2 * radiusAt(gs, bank) - printed), `${gs} kt, ${bank}°`).toBeLessThanOrEqual(0.05 + 1e-9)
+  // Independent still-air kinematics: r = V² / (g tan φ).
+  const v = 100 * 1852 / 3600
+  expect(radiusAt(100, 20) * 1852).toBeCloseTo((v * v) / (9.80665 * Math.tan((20 * Math.PI) / 180)), 0)
 })
 
 test('a wind at or above the true airspeed cannot be held: UNABLE HOLD (D-H, laboratory)', () => {
