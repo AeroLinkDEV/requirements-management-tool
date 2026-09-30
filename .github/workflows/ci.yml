@@ -1127,8 +1127,14 @@ jobs:
     #
     # A timeout that fires after a green suite is the worst possible signal: it reports failure, names no
     # test, and costs a full gate to re-run something that already worked. The ceiling exists to stop a hung
-    # browser running for an hour, and thirty still does that.
-    timeout-minutes: 30
+    # browser running for an hour, and forty still does that.
+    #
+    # Forty since 30 September (#1320). With durations recorded for every FMS spec (#1288) the four shards are
+    # balanced, and the whole suite has grown until each needs about three and a half minutes of setup and
+    # 26-27 minutes of journeys: #1352's shard 1 passed every step and was cancelled at 30m15s during upload,
+    # #1326's candidates were cancelled at 30m25s and 30m27s. More shards are the lasting fix, but the merge
+    # verifier pins the shard count (SHARDED_JOB_GROUPS), so that change takes two maintenance runs.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
