@@ -50,6 +50,7 @@
     "fms-kbtv-demo.spec.ts",
     "fms-heliport-procedures.spec.ts",
     "fms-user-database.spec.ts",
+    "fms-route-load.spec.ts",
     "fms-pins-approach.spec.ts",
     "fms-gps-scenario.spec.ts",
     "fms-gps-approach-auto.spec.ts",
@@ -57,6 +58,7 @@
     "fms-prediction-endpoints.spec.ts"
   ],
   "rendered": [
+    "layout-settled.spec.ts",
     "review-workflow-rendered.spec.ts",
     "code-source-rendered.spec.ts",
     "code-evidence-rendered.spec.ts",

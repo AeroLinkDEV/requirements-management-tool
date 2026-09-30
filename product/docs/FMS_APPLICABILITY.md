@@ -95,6 +95,7 @@ Status: **sourced** (a source states it), **borrowed** (a representative public 
 | MAP-CREW | MAP passage | M300 7-11/7-12 | S300 | Keep final-course extension; only crew-selected MISSED APPR/TOGA sequences the missed approach | Integrity-only loss after FAF cancels steering/NPA and raises NO APPR INTEGRITY after 300 seconds; invalid/stale position or HDOP over 4 is immediate | Sourced + lab freshness boundary | Yes: MAP, timer and immediate-loss owners |
 | NO-LOC-UPD | No localizer updating | M300 1-3…1-6 | S300 | Not modelled | An airline (Boeing) feature, not a CMA mode | Sourced absence | — |
 | FUEL-FLOW | Fuel predictions from the current flow | M300 5-14, 14-1, 14-5 | S300 | Current flow; operator-entered reserve | — | Sourced | Yes |
+| WPT-WIND | Forecast waypoint winds in the ETAs | M300 5-14 (LEGS: ETAs "based on measured wind and forecast waypoint winds"); M300 11-82 | S300 | Not modelled: every leg is predicted in the system wind (measured, or the manual entry on PROGRESS); no forecast wind is entered or stored per waypoint | **Deferred** per plan rev 2 E2, kept in rev 3. The only S300 multi-level wind entry found is the CARP wind page (M300 11-82), which is military and out of scope (D6). The RRJ 4-level forecast form (M050 5-14…5-16) is a possible extension, not an S300 source | Sourced | No (deferred, E2) |
 
 ## References
 

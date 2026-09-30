@@ -123,10 +123,20 @@ export const MISSION_87N_OFFSHORE_SAR: Scenario = {
     // 1. The sector search about the datum.
     { when: then, action: { kind: "keys", keys: ["TACT", "LSK4L", "LSK6R", "EXEC"] } },
     { when: then, action: { kind: "expectLine", line: 0, pattern: "ACT SECTOR SAR" } },
-    // 2-3. The sighting: MARK ON TOP on the HOVER page, with a valid radio height over the sea; ACTIVATE and EXEC.
+    // 2. The sighting: MARK ON TOP on the HOVER page, with a valid radio height over the sea.
     { when: at(420), action: { kind: "keys", keys: ["TACT", "LSK1R", "LSK4L"] } },
     { when: then, action: { kind: "expectLine", line: 4, pattern: "^\\s*500FT\\s+50FT\\s*$" } },
-    { when: then, action: { kind: "keys", keys: ["LSK6R", "EXEC"] } },
+    // The sighting kept as a user waypoint (M300 11-31): PREDEF WPT 2/2, NEW USER WPT from the mark on top (the ONTOP
+    // reference), an ident, CONFIRM; stored in the user database (E5).
+    { when: then, action: { kind: "keys", keys: ["INIT_REF", "LSK2R", "NEXT"] } },
+    { when: then, action: { kind: "expectLine", line: 0, pattern: "^PREDEF WPT\\s+2/2" } },
+    { when: then, action: { kind: "keys", keys: ["LSK6L"] } },
+    { when: then, action: { kind: "expectLine", line: 8, pattern: "^ONTOP" } },
+    { when: then, action: { kind: "type", text: "SIGHT" } },
+    { when: then, action: { kind: "keys", keys: ["LSK1L", "LSK6R"] } },
+    { when: then, action: { kind: "expectScratchpad", text: "SIGHT STORED" } },
+    // 3. Back to the HOVER page, the mark still designated: ACTIVATE and EXEC.
+    { when: then, action: { kind: "keys", keys: ["TACT", "LSK1R", "LSK6R", "EXEC"] } },
     { when: then, action: { kind: "expectAlert", text: "TRANSITION DOWN" } },
     // 4. Phase 1: the FMS joining path to JN, on the final track before TDN, flown under NAV (Astra's review, Q9).
     { when: then, action: { kind: "expectActive", waypoint: "JN" } },
@@ -137,6 +147,10 @@ export const MISSION_87N_OFFSHORE_SAR: Scenario = {
     { when: then, action: { kind: "expectAircraft", near: "MRK", nearMetres: 50, radioHeight: 50, heightTolerance: 5, maxGroundSpeed: 1 }, within: 60 },
     // 6. Two minutes in the hover, from the capture (the spec checks every tick of them; this is the scenario's endpoint).
     { when: { kind: "after", seconds: 120 }, action: { kind: "expectAircraft", near: "MRK", nearMetres: 10, radioHeight: 50, heightTolerance: 5, maxGroundSpeed: 1 } },
+    // The fuel after the hover: the FUEL page's quantity, flow, reserve and ENDURANCE (the spec checks they agree).
+    { when: then, action: { kind: "keys", keys: ["FUEL"] } },
+    { when: then, action: { kind: "expectLine", line: 2, pattern: "^\\d+KG\\s+\\d+KG/H$" } },
+    { when: then, action: { kind: "expectLine", line: 4, pattern: "^\\d+KG\\s+\\d+\\.\\dH$" } },
     // 7. TU-LAB: each axis captures on its own; then the climb to 2,000 at 90 KIAS.
     { when: then, action: { kind: "autopilot", transitionUp: true } },
     { when: then, action: { kind: "expectAfcs", collective: "RHT", pitch: "IAS", roll: "HDG" }, within: 120 },
@@ -153,6 +167,11 @@ export const MISSION_87N_OFFSHORE_SAR: Scenario = {
     { when: then, action: { kind: "armApproach" } },
     // After STAYS, down to the MDA and level to CRANN.
     { when: { kind: "active", waypoint: "CRANN" }, action: { kind: "autopilot", altitude: 560, verticalSpeed: -600 } },
+    // The predictions end at the instrument end, the MAP (PROGRESS 2/4, plan R3-03), not at the heliport.
+    { when: then, action: { kind: "keys", keys: ["PROG", "NEXT"] } },
+    { when: then, action: { kind: "expectLine", line: 3, pattern: "^\\s*INSTR END\\b" } },
+    { when: then, action: { kind: "expectLine", line: 4, pattern: "^CRANN \\(MAP\\)" } },
+    { when: then, action: { kind: "expectLine", line: 6, pattern: "^KNOWN" } },
     { when: then, action: { kind: "expectAircraft", altitude: 560, heightTolerance: 60 }, within: 240 },
     // The RNAV 190 is LNAV-only (no FAS): flown and annunciated LNAV on a usable receiver, with no integrity alert.
     { when: then, action: { kind: "expectApproachLevel", level: "LNAV" } },
@@ -162,7 +181,9 @@ export const MISSION_87N_OFFSHORE_SAR: Scenario = {
     { when: then, action: { kind: "autopilot", altitude: 2000 } },
     { when: then, action: { kind: "expectActive", waypoint: "BEADS" }, within: 60 },
     { when: then, action: { kind: "expectAfcs", collective: "ALT" }, within: 300 },
-    { when: then, action: { kind: "autopilot", speed: 90 } },
+    // 70 KIAS until reaching 2,000 (the chart's "limit ... missed approach to 70K"; the FMS releases the limit to the
+    // hold's 90 there, MA-SPD-90): the crew accelerates when the altimeter reads 2,000, not at the capture below it.
+    { when: { kind: "above", feet: 2000 }, action: { kind: "autopilot", speed: 90 } },
     // 10. The BEADS hold: flown once, then left at the fix (MISSED-HOLD); the route ends and NAV gives way to HDG.
     { when: then, action: { kind: "expectAlert", text: "END OF ROUTE" }, within: 1200 },
     { when: then, action: { kind: "expectAfcs", roll: "HDG" }, within: 5 },
@@ -232,11 +253,12 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
     { when: S, action: { kind: "expectAlert", text: "TDN FUNCTION LOST", fresh: true }, within: 2 },
     { when: S, action: { kind: "expectAfcs", collective: "ALT", pitch: "TD" }, within: 2 },
   ]),
-  variant("a4-ra-lost-in-hover", "(a4) RA lost in the hover: ALT latched, HOV continues", "(a4) RA lost in the hover: ALT latched, HOV continues. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+  variant("a4-ra-lost-in-hover", "(a4) RA lost in the hover: ALT latched, HOV continues, LOW HT OFF", "(a4) RA lost in the hover: ALT latched, HOV continues, LOW HT OFF. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
     ...markAndActivate,
     { when: S, action: { kind: "expectAfcs", collective: "RHT", pitch: "HOV", roll: "HOV" }, within: 900 },
-    { when: after(30), action: { kind: "condition", condition: "raFail", on: true } },
-    { when: S, action: { kind: "expectAfcs", collective: "ALT", pitch: "HOV", roll: "HOV" }, within: 2 },
+    { when: after(30), action: { kind: "expectAfcs", lowHeight: "NONE" } },
+    { when: S, action: { kind: "condition", condition: "raFail", on: true } },
+    { when: S, action: { kind: "expectAfcs", collective: "ALT", pitch: "HOV", roll: "HOV", lowHeight: "LOW HT OFF" }, within: 2 },
     { when: after(60), action: { kind: "expectAircraft", near: "MRK", nearMetres: 10, maxGroundSpeed: 1 } },
   ]),
   variant("b-tdn-off-track", "(b) TDN reached 0.3 NM off the final track: TDN NOT POSSIBLE, NAV gives way to HDG", "(b) TDN reached 0.3 NM off the final track: TDN NOT POSSIBLE, NAV gives way to HDG. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
@@ -289,9 +311,16 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
     // Still climbing when the missed approach begins: the published turn comes only after the MAP.
     { when: S, action: { kind: "expectAircraft", minAltitude: 1900 } },
   ], "87n-rnav190-final"),
-  variant("e-direct-on-final", "(e) Crew direct-to during the final: immediate", "(e) Crew direct-to during the final: immediate. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
-    { when: { kind: "distance", waypoint: "STAYS", nm: 1 }, action: { kind: "keys", keys: ["LEGS", "CHAR_B", "CHAR_E", "CHAR_A", "CHAR_D", "CHAR_S", "LSK1L", "EXEC"] } },
+  variant("e-direct-on-final", "(e) Crew direct-to during the final: immediate, terminal phase", "(e) Crew direct-to during the final: immediate, and the flight phase becomes terminal (plan C.3). A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+    // On the approach legs the phase is APPROACH (PROGRESS 1/4, the RNP/ANP caption).
+    { when: { kind: "distance", waypoint: "STAYS", nm: 1 }, action: { kind: "keys", keys: ["PROG"] } },
+    { when: S, action: { kind: "expectLine", line: 9, pattern: "RNP/ANP APPROACH" } },
+    { when: S, action: { kind: "keys", keys: ["LEGS", "CHAR_B", "CHAR_E", "CHAR_A", "CHAR_D", "CHAR_S", "LSK1L", "EXEC"] } },
     { when: S, action: { kind: "expectActive", waypoint: "BEADS" } },
+    // Off the approach legs within 30 NM of 87N: TERMINAL, its default RNP 1.0.
+    { when: S, action: { kind: "keys", keys: ["PROG"] } },
+    { when: S, action: { kind: "expectLine", line: 9, pattern: "RNP/ANP TERMINAL" } },
+    { when: S, action: { kind: "expectLine", line: 10, pattern: "^1\\.00/" } },
     { when: S, action: { kind: "expectAfcs", roll: "NAV" }, within: 5 },
   ], "87n-rnav190-final"),
   variant("f-proceed-vfr", "(f) Proceed VFR: DIRECT 87N at CRANN", "(f) Proceed VFR: DIRECT 87N at CRANN. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [

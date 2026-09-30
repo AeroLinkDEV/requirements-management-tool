@@ -1175,13 +1175,17 @@ export class ScriptedFms implements CduBackend {
   /**
    * Valid barometric altitude, or null without fresh connected air data. The default bench's ideal air-data generator
    * has no failure injection; the procedure speed release reads null as invalid (R3-04).
+   *
+   * As the air-data word carries it: pressure altitude at its 1 ft resolution (ARINC 429 label 203, 17-bit BNR),
+   * rounded to the nearest foot (a laboratory decision: the standard fixes the resolution, not the rounding). The
+   * truth settles onto a captured altitude without ever reaching it exactly, so the FMS must not compare the raw value.
    */
   get validBaroAltitude(): number | null {
-    if (!this.sensorPort) return this.altitude;
+    if (!this.sensorPort) return Math.round(this.altitude);
     const air = sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge);
-    if (air?.baroCorrected === false) return this.advisoryBaroAltitude;
+    if (air?.baroCorrected === false) { const corrected = this.advisoryBaroAltitude; return corrected === null ? null : Math.round(corrected); }
     const altitude = air?.altitudeFt;
-    return altitude !== undefined && Number.isFinite(altitude) ? altitude : null;
+    return altitude !== undefined && Number.isFinite(altitude) ? Math.round(altitude) : null;
   }
 
   /** The procedure speed limit in force on the executed approach (C.5, procedureSpeed.ts), knots indicated; or null. */
@@ -2188,16 +2192,53 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** Loads a company route into the active route (as a MOD) or into the secondary flight plan. */
-  loadCompanyRoute(name: string, target: "active" | "secondary" = "active"): boolean {
+  /** The direction SELECT CO ROUTE loads in (LOAD, 5L: M300 3-11). */
+  coRouteLoad: "DIRECT" | "INVERSE" = "DIRECT";
+  /** What the last CO ROUTE load reported: fixes not in the database (it was refused), or fixes that have moved. */
+  routeLoadReport: string[] = [];
+
+  /**
+   * Loads a stored route (CO ROUTE). INVERSE (E6; M300 3-10…3-11 define the INV prefix and the toggle, not the leg
+   * semantics) follows the nearest S300 rule, BACKTRACK [M300 11-35], and is inferred and labelled: the origin and
+   * destination swap, the waypoints are flown in reverse order, every leg as TF with the first as DF (the route
+   * before it is not kept), and airways and altitude constraints, which belong to the direction flown, are not
+   * carried. A stored route holds no procedures, conditional legs or arcs to reverse.
+   *
+   * The fixes are resolved by ident at load time in the active database. A fix that is not there is reported and the
+   * load refused, never substituted; a fix a user route recorded at another position is reported as moved (it is
+   * flown where the database has it now).
+   */
+  loadCompanyRoute(name: string, target: "active" | "secondary" = "active", direction: "DIRECT" | "INVERSE" = "DIRECT"): boolean {
     const stored = this.storedRoutes.find(route => route.name === name);
     if (!stored) return false;
+    // Looked up in the active database, not through the executed plan's pins (a route other than the active one).
+    const lookupRoute = { ...this.active };
+    const missing = stored.legs.filter(leg => !this.coordinates(leg.ident, lookupRoute)).map(leg => leg.ident);
+    if (missing.length) {
+      this.routeLoadReport = missing.map(ident => `${ident} NOT IN DATA BASE`);
+      this.recordDataset("ROUTE NOT LOADED", `${name}: ${missing.join(", ")} not in ${this.activeCycle.id}; nothing substituted`);
+      this.advisory("NOT IN DATA BASE");
+      return false;
+    }
+    const moved = stored.legs.filter(leg => { const now = leg.position && this.coordinates(leg.ident, lookupRoute); return now && leg.position && distanceNm(now, leg.position) > 0.01; })
+      .map(leg => leg.ident);
+    this.routeLoadReport = moved.map(ident => `${ident} MOVED`);
+    if (moved.length) {
+      this.recordDataset("ROUTE FIX MOVED", `${name}: ${moved.join(", ")} moved since the route was saved; flown where ${this.activeCycle.id} has them`);
+      this.advisory("ROUTE FIX MOVED");
+    }
+    const inverse = direction === "INVERSE";
+    const legs: Leg[] = inverse
+      ? [...stored.legs].reverse().map((leg, i) => ({ kind: "wpt" as const, ident: leg.ident, ...(i === 0 ? { path: "DF" as const } : {}) }))
+      : stored.legs.map(leg => ({ kind: "wpt" as const, ident: leg.ident, ...(leg.via ? { via: leg.via } : {}), ...(leg.altitude ? { altitude: leg.altitude } : {}) }));
     const build = (route: Route) => {
-      route.origin = stored.origin;
-      route.dest = stored.dest;
+      route.origin = inverse ? stored.dest : stored.origin;
+      route.dest = inverse ? stored.origin : stored.dest;
       route.coRoute = stored.name;
+      route.coRouteInverse = inverse || undefined;
       route.sid = route.star = route.approach = undefined;
       route.hold = undefined;
-      route.legs = [...stored.legs.map(leg => ({ kind: "wpt" as const, ...leg })), { kind: "wpt", ident: stored.dest }];
+      route.legs = [...legs, { kind: "wpt", ident: route.dest }];
     };
     if (target === "active") this.modify(build);
     else { const route = structuredClone(this.secondaryRoute ?? this.active); build(route); this.secondaryRoute = route; }
@@ -2209,7 +2250,13 @@ export class ScriptedFms implements CduBackend {
     const route = this.route;
     const legs = enrouteLegs(route).flatMap(leg => (leg.kind === "wpt" ? [{ ident: leg.ident, via: leg.via, altitude: leg.altitude }] : []));
     // A user route (E5): kept in the user database for this user and profile, replacing one of that name.
-    const saved: StoredRoute = { name: route.coRoute, origin: route.origin, dest: route.dest, legs: legs.map(leg => ({ ident: leg.ident, ...(leg.via ? { via: leg.via } : {}), ...(leg.altitude ? { altitude: leg.altitude } : {}) })) };
+    const saved: StoredRoute = {
+      name: route.coRoute, origin: route.origin, dest: route.dest,
+      legs: legs.map(leg => {
+        const position = this.coordinates(leg.ident);
+        return { ident: leg.ident, ...(leg.via ? { via: leg.via } : {}), ...(leg.altitude ? { altitude: leg.altitude } : {}), ...(position ? { position: { ...position } } : {}) };
+      }),
+    };
     this.saveUserDatabase({ ...this.userDb, routes: [...this.userDb.routes.filter(stored => stored.name !== route.coRoute), saved] });
   }
 

@@ -147,6 +147,24 @@ test('stale external position and air data hold the last estimate and withdraw m
   expect(distanceNm(unit.position, lastFix)).toBeGreaterThan(0.3)
 })
 
+test('the FMS reads barometric altitude as the air-data word carries it, to the foot (ARINC 429 label 203), so a settled capture reaches its altitude', () => {
+  const now = Date.UTC(2026, 8, 27, 14)
+  // The default bench (no sensor port): the truth, to the foot.
+  const unit = new ScriptedFms(() => new Date(now))
+  const at = (altitude: number) => { unit.placeAircraft({ position: unit.truePosition, track: 0, altitude }, 'test: altitude'); return unit.validBaroAltitude }
+  expect(at(1999.4)).toBe(1999)
+  expect(at(1999.5)).toBe(2000)
+  expect(at(2000.49)).toBe(2000)
+  // Through a sensor port: the air-data word, to the foot.
+  const template = new ScriptedFms(() => new Date(now)).navigationInputs!
+  template.air.value = { ...template.air.value!, altitudeFt: 1999.6 }
+  const port = new BufferedSensorPort()
+  expect(port.publish(template)).toBe(true)
+  const ported = new ScriptedFms(() => new Date(now), { sensors: port })
+  ported.updateNavigation(0)
+  expect(ported.validBaroAltitude).toBe(2000)
+})
+
 test('dead reckoning cannot read a changed truth position when every position sensor is unavailable', () => {
   const { unit } = setup()
   unit.setCondition('dmeOutage', true)
