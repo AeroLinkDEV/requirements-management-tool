@@ -42,14 +42,15 @@ permissions:
   contents: read
   pull-requests: read
 
-# A pull request groups by its number, so a new push cancels the run it supersedes. Everything else groups by
-# ref — and a merge-queue entry's ref is its own `gh-readonly-queue/...` branch, unique per candidate. Queue
+# A pull request groups by its number, so a new push cancels the run it supersedes. Main pushes group by
+# immutable SHA: event delivery order must not let an older commit cancel a newer commit's diagnostics.
+# A merge-queue entry's ref is its own `gh-readonly-queue/...` branch, unique per candidate. Queue
 # entries therefore cannot cancel each other, and a pull request's own run cannot cancel its queue run. That
 # matters more than it looks: a queue whose runs cancel one another does not fail, it deadlocks.
 # Scheduled and manual diagnostic proofs have their own group; an ordinary main
 # push must not cancel the weekly environment-drift check.
 concurrency:
-  group: quality-${{ github.event_name == 'schedule' && 'scheduled' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && format('diagnostics-{0}', github.ref)) || inputs.pull_request_number || github.event.pull_request.number || github.ref }}
+  group: quality-${{ github.event_name == 'schedule' && 'scheduled' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && format('diagnostics-{0}', github.ref)) || (github.event_name == 'push' && format('push-{0}', github.sha)) || inputs.pull_request_number || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -1126,8 +1127,14 @@ jobs:
     #
     # A timeout that fires after a green suite is the worst possible signal: it reports failure, names no
     # test, and costs a full gate to re-run something that already worked. The ceiling exists to stop a hung
-    # browser running for an hour, and thirty still does that.
-    timeout-minutes: 30
+    # browser running for an hour, and forty still does that.
+    #
+    # Forty since 30 September (#1320). With durations recorded for every FMS spec (#1288) the four shards are
+    # balanced, and the whole suite has grown until each needs about three and a half minutes of setup and
+    # 26-27 minutes of journeys: #1352's shard 1 passed every step and was cancelled at 30m15s during upload,
+    # #1326's candidates were cancelled at 30m25s and 30m27s. More shards are the lasting fix, but the merge
+    # verifier pins the shard count (SHARDED_JOB_GROUPS), so that change takes two maintenance runs.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -1182,9 +1189,14 @@ jobs:
       # Playwright version; an unrelated dependency bump invalidates it needlessly, which costs one download
       # and is the safe direction. A stale browser cannot pass silently: Playwright refuses to start a browser
       # build its client library does not expect.
+      #
+      # Restore only (#1304). A cache a pull request saves is visible to that pull request alone (see
+      # warm-chromium-cache), so saving here helped nobody, and on a key miss — any lockfile change — every shard
+      # spent minutes archiving Chromium after its tests had passed, inside the same 30-minute job limit: #1301's
+      # shard 3 passed all 374 tests and was cancelled in "Post Cache Chromium". warm-chromium-cache saves on main.
       - name: Cache Chromium
         id: chromium
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/AppData/Local/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}
@@ -1364,10 +1376,11 @@ jobs:
         run: |
           dotnet restore product/src/AeroLink.Api/AeroLink.Api.csproj
           dotnet build product/src/AeroLink.Api/AeroLink.Api.csproj --configuration Release --no-restore
-      # Shares the cache entry the pull request shards populate: same key, same runner, same browser.
+      # Shares the cache entry warm-chromium-cache saves on main: same key, same runner, same browser. Restore only,
+      # as in browser-pr (#1304): a save here would be scoped to this run's ref and cost minutes inside the job limit.
       - name: Cache Chromium
         id: chromium
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/AppData/Local/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ hashFiles('product/client/package-lock.json') }}

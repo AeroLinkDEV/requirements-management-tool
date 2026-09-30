@@ -88,9 +88,12 @@ test('Fast runs the Node contract suites that Full owns, and its aggregate fails
     // Additive only: Full must keep running the same directory.
     assert.ok(fullWorkflow.includes(`-LiteralPath ${suite} -Filter '*.test.mjs'`), `Full no longer runs ${suite}`)
   }
-  assert.ok(workflow.includes('needs: [backend-fast, client-fast, contracts-fast]'), 'the Fast aggregate does not wait for contracts-fast')
+  assert.ok(workflow.includes('needs: [backend-fast, client-fast, client-rendered-fast, client-3d-fast, contracts-fast]'), 'the Fast aggregate does not wait for every job')
   assert.ok(workflow.includes("$contracts -ne 'success'"), 'a contracts failure does not fail the Fast aggregate')
-  assert.ok(workflow.includes('[Math]::Max([Math]::Max($backendMs, $clientMs), $contractsMs)'), 'contracts time is outside the Fast budget')
+  for (const result of ["$client -ne 'success'", "$rendered -ne 'success'", "$rendered3d -ne 'success'"]) {
+    assert.ok(workflow.includes(result), `a failed client part does not fail the Fast aggregate: ${result}`)
+  }
+  assert.ok(workflow.includes('($backendMs, $clientMs, $renderedMs, $rendered3dMs, $contractsMs | Measure-Object -Maximum).Maximum'), 'a job is outside the Fast budget')
 })
 
 test('Fast workflow contains no persistent-database or persistent-evidence escape hatch', () => {
@@ -105,4 +108,32 @@ test('Fast workflow contains no persistent-database or persistent-evidence escap
     workflow,
     /(?:Get|Set|Remove|New|Test)-(?:Item|Content|ChildItem|Path)[^\n]*product[\\/]\.local|(?:path|working-directory):[^\n]*product[\\/]\.local/i,
   )
+})
+
+// #1313: one serial client job needed 10.3–15 minutes and hit its 10-minute limit on every PR. It now runs in three
+// parallel parts, and nothing may fall out of the split: every manifest command runs in some part, each part is a
+// reviewed job, and the two rendered parts divide the rendered tier's specs between them.
+test('Fast client parts together run every client command, and split the rendered tier without losing a spec', () => {
+  const parts = manifest.client.parts
+  assert.deepEqual(Object.keys(parts), ['static-logic', 'rendered-standard', 'rendered-3d'])
+  const run = new Set(Object.values(parts).flatMap((part) => part.commands))
+  assert.deepEqual([...run].sort(), [...manifest.client.commands].sort(), 'the parts must run exactly the manifest commands')
+  for (const [name, part] of Object.entries(parts)) {
+    assert.ok(workflow.includes(`$part = $manifest.client.parts.'${name}'`), `no reviewed job runs the ${name} part`)
+    for (const command of part.commands) assert.ok(manifest.client.commands.includes(command), `${name} runs an unreviewed command: ${command}`)
+    assert.equal(part.commands[0], 'npm ci', `${name} must install first`)
+  }
+  // Each rendered part runs the rendered tier with its own half of it; lint, types, routes, logic and isolation run once.
+  assert.deepEqual(Object.values(parts).filter((part) => part.commands.includes('npm run test:fast:rendered')).map((part) => part.renderedPart).sort(), ['3d', 'standard'])
+  for (const once of ['npm run lint', 'npm run typecheck', 'npm run test:fast:routes', 'npm run test:fast:logic', 'npm run test:fast:isolation']) {
+    assert.equal(Object.values(parts).filter((part) => part.commands.includes(once)).length, 1, `${once} must run in exactly one part`)
+  }
+  const tiers = JSON.parse(readFileSync(join(repoRoot, 'product/client/fast-client-tests.json'), 'utf8'))
+  const config = readFileSync(join(repoRoot, 'product/client/playwright.rendered.config.ts'), 'utf8')
+  const heavy = JSON.parse(config.match(/export const RENDERED_3D = (\[[^\]]*\])/)[1].replace(/'/g, '"'))
+  assert.ok(heavy.length > 0, 'the 3d part must have specs')
+  for (const spec of heavy) assert.ok(tiers.rendered.includes(spec), `the 3d part names a spec outside the rendered tier: ${spec}`)
+  assert.ok(tiers.rendered.some((spec) => !heavy.includes(spec)), 'the standard part must have specs')
+  assert.match(config, /part === '3d' \? tiers\.rendered\.filter\(\(file\) => RENDERED_3D\.includes\(file\)\)/)
+  assert.match(config, /part === 'standard' \? tiers\.rendered\.filter\(\(file\) => !RENDERED_3D\.includes\(file\)\)/)
 })
