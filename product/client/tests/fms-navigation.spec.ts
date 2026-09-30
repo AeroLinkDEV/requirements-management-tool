@@ -12,7 +12,7 @@ import type { GpsReceiver } from '../src/fmsCdu/gps'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
-import { readFileSync } from 'node:fs'
+import { NOAA_WMM2025_REFERENCE } from './fixtures/fms-wmm2025-reference'
 import { MagvarModel } from '../src/fmsCdu/magvar'
 import { WMM2025_DATABASE } from '../src/fmsCdu/wmm2025'
 import { fmsOutputs } from '../src/fmsCdu/efis'
@@ -21,7 +21,7 @@ test('WMM2025 agrees with all independent NOAA field vectors at both epochs and 
   const model = new MagvarModel()
   expect(model.valid).toBe(true)
   // Public-domain NOAA reference file; 0.11 nT / 0.011 deg laboratory comparison tolerance allows its rounding.
-  const vectors = readFileSync('tests/fixtures/WMM2025_TEST_VALUES.txt', 'utf8').split(/\r?\n/).filter(line => line.trim() && !line.startsWith('#'))
+  const vectors = NOAA_WMM2025_REFERENCE.split(/\r?\n/).filter(line => line.trim() && !line.startsWith('#'))
   expect(vectors).toHaveLength(12)
   for (const line of vectors) {
     const [date, height, lat, lon, x, y, z, h, f, inclination, declination] = line.trim().split(/\s+/).map(Number)

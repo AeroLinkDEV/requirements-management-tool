@@ -370,8 +370,12 @@ test('SETUP transfers configured settings and sync refuses link, software, data,
   const missed = dualSetup()
   expect(setUp87nRnav190Final(missed.one, missed.system.flights[0])).toEqual({ ready: true })
   missed.tick()
+  expect(missed.one.requestMissedApproach()).toBe(true)
+  expect(missed.two.missedApproachActive).toBe(true)
+  expect(missed.one.goArounds).toBe(0); expect(missed.two.goArounds).toBe(0) // The synchronized FMS request is not TOGA.
   expect(missed.one.goAround()).toBe(true)
   expect(missed.two.missedApproachActive).toBe(true)
+  expect(missed.one.goArounds).toBe(1); expect(missed.two.goArounds).toBe(0)
   const winds = dualSetup()
   winds.one.setCondition('gpsLost', true); winds.one.setCondition('dmeOutage', true); winds.tick(10)
   expect(winds.one.windComputed).toBe(false); expect(winds.two.windComputed).toBe(false)

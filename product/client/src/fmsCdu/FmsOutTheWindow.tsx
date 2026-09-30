@@ -5,20 +5,33 @@ import {
   AIRCRAFT_PARTS, FT, MESH_MAX_ZOOM, RELIEF_MAX_ZOOM, TILE_PIXELS, ancestorOf, blendAircraft, cameraPose, pixelMetres,
   routeHeights, sampleHeights, shadeTile, tileLatitude, type AircraftSample, type Layout, type View,
 } from "./outTheWindow";
+import { GroundImagery, IMAGERY_MAX_ZOOM, browserImageryDecoder, type ImagerySource } from "./groundImagery";
 import { MAIN_ROTOR_RAD_S, createAircraftModel } from "./otwAircraftModel";
 import { workerReliefShader } from "./reliefShader";
+import {
+  ABSOLUTE_BANDS_FT, ABSOLUTE_RGB, CAUTION_RGB, DANGER_RGB, RELATIVE_CAUTION_FT, RELATIVE_DANGER_FT, type TerrainColouring,
+} from "./terrainAwareness";
 import type { TerrainTiles } from "./terrainTiles";
 import "./FmsOutTheWindow.css";
 
 /** The modes on the flight mode annunciator, as the bench's Flight card shows them. */
 export type HudModes = { lateral: string; vertical: string; armed: string[]; angleReference?: "MAG" | "TRUE"; magneticVariation?: number };
 
-type Props = { air: AircraftData; route: RoutePoint[]; modes: HudModes; layout: Layout; view: View; tiles: TerrainTiles };
+/** What the ground shows: aerial imagery where there is some (the United States), relief elsewhere; or relief only. */
+export type Ground = "imagery" | "relief";
+
+type Props = {
+  air: AircraftData; route: RoutePoint[]; modes: HudModes; layout: Layout; view: View; tiles: TerrainTiles;
+  ground: Ground; colouring: TerrainColouring; imagery: GroundImagery<ImageBitmap>;
+};
+
+/** The imagery tiles for a bench, from a source (the server's relay, or a test fixture's), decoded by the browser. */
+export const groundImagery = (source: ImagerySource) => new GroundImagery(source, browserImageryDecoder());
 
 type Status = "loading" | "ready" | "no-webgl" | "failed";
 
-/** Heights per side of a terrain mesh tile. */
-const MESH_SAMPLES = 33;
+/** Heights per side of a terrain mesh tile: 65 puts a vertex about every 75 m at level 13, where 33 put one every 150 m. */
+const MESH_SAMPLES = 65;
 const ROUTE_MAGENTA = "#e04cd6";
 
 // Cesium fetches its workers and assets at run time from here: the development server answers it from the package,
@@ -26,7 +39,10 @@ const ROUTE_MAGENTA = "#e04cd6";
 const CESIUM_BASE = `${import.meta.env.BASE_URL}cesium/`;
 
 type Live = { from: AircraftSample; to: AircraftSample; at: number; interval: number; view: View; layout: Layout };
-type SceneHandle = { setRoute: (route: RoutePoint[], altitude: number) => void; requestRender: () => void; destroy: () => void };
+type SceneHandle = {
+  setRoute: (route: RoutePoint[], altitude: number) => void; setGround: (ground: Ground) => void; setColouring: (colouring: TerrainColouring) => void;
+  requestRender: () => void; destroy: () => void;
+};
 
 /**
  * The view out of the aircraft, drawn with CesiumJS over open elevation data: the ground coloured by height and
@@ -37,7 +53,7 @@ type SceneHandle = { setRoute: (route: RoutePoint[], altitude: number) => void; 
  * seated pilot sees it, with the bench's CDU, PFD and ND below it standing in for the instrument panel. The engine is
  * loaded only when this is first shown.
  */
-export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles }: Props) {
+export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles, ground, colouring, imagery }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const credits = useRef<HTMLDivElement>(null);
   const pathMarker = useRef<HTMLDivElement>(null);
@@ -45,6 +61,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
   const [status, setStatus] = useState<Status>("loading");
   const [failure, setFailure] = useState("");
   const terrain = useSyncExternalStore(listener => tiles.subscribe(listener), () => tiles.status);
+  const imageryStatus = useSyncExternalStore(listener => imagery.subscribe(listener), () => imagery.status);
 
   // The scene reads this every frame; renders only move its target.
   const live = useRef<Live | null>(null);
@@ -68,7 +85,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
   useEffect(() => {
     let disposed = false;
     let handle: SceneHandle | null = null;
-    startScene(host.current!, credits.current!, pathMarker.current!, live, tiles)
+    startScene(host.current!, credits.current!, pathMarker.current!, live, tiles, imagery)
       .then(created => {
         if (disposed) { created.destroy(); return; }
         handle = created;
@@ -80,7 +97,10 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
         setStatus(/webgl/i.test(String(error)) ? "no-webgl" : "failed");
       });
     return () => { disposed = true; handle?.destroy(); scene.current = null; };
-  }, [tiles]);
+  }, [tiles, imagery]);
+
+  useEffect(() => { scene.current?.setGround(ground); }, [ground, status]);
+  useEffect(() => { scene.current?.setColouring(colouring); }, [colouring, status]);
 
   const routeKey = route.map(point => `${point.ident}:${point.position.lat},${point.position.lon}:${point.constraint ?? ""}:${point.active}`).join("|");
   useEffect(() => {
@@ -92,10 +112,13 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
     : status === "failed" ? `The 3D view could not start: ${failure}`
     : terrain === "off" ? "Terrain data is off on this installation, so the ground is drawn flat. An administrator can turn it on with the FmsBench:TerrainRelay setting (the server then fetches open elevation tiles from AWS)."
     : terrain === "unreachable" ? "The server cannot reach the terrain source, so the ground is drawn flat where tiles are missing."
+    : ground === "imagery" && imageryStatus === "off" ? "Imagery is off on this installation, so the ground is drawn as relief. An administrator can turn it on with the FmsBench:ImageryRelay setting (the server then fetches USGS aerial imagery)."
+    : ground === "imagery" && imageryStatus === "unreachable" ? "The server cannot reach the imagery source, so the ground is drawn as relief where imagery is missing."
     : null;
 
   return (
-    <div className={`fmsOtw layout-${layout} view-${view}`} data-status={status} data-terrain={terrain}>
+    <div className={`fmsOtw layout-${layout} view-${view}`} data-status={status} data-terrain={terrain} data-imagery={imageryStatus}
+      data-ground={ground} data-colouring={colouring}>
       <div className="fmsOtwScene" ref={host} />
       {layout === "panel" && view === "cockpit" ? <div className="fmsOtwGlareshield" aria-hidden="true" /> : null}
       <div className="fmsOtwPathMarker" ref={pathMarker} hidden={!hud || status !== "ready"} aria-hidden="true">
@@ -106,7 +129,10 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
       {note ? <p className="fmsOtwNote" role="status">{note}</p> : null}
       <div className="fmsOtwCredits">
         <div ref={credits} />
-        <span>Terrain: Mapzen Terrain Tiles on AWS Open Data (SRTM, GMTED2010, USGS NED and others). Route fixes are invented.</span>
+        <span>
+          Terrain: Mapzen Terrain Tiles on AWS Open Data (SRTM, GMTED2010, USGS NED and others).
+          {ground === "imagery" ? " Imagery: USGS The National Map, USDA NAIP (public domain)." : null} Route fixes are invented.
+        </span>
       </div>
     </div>
   );
@@ -154,7 +180,7 @@ const canvas = (size = TILE_PIXELS) => Object.assign(document.createElement("can
 
 async function startScene(
   container: HTMLElement, creditContainer: HTMLElement, pathMarker: HTMLElement, live: { current: Live | null },
-  tiles: TerrainTiles,
+  tiles: TerrainTiles, imagery: GroundImagery<ImageBitmap>,
 ): Promise<SceneHandle> {
   (window as unknown as { CESIUM_BASE_URL: string }).CESIUM_BASE_URL = CESIUM_BASE;
   // The engine alone: the `cesium` package's widgets evaluate a string as script, which the policy refuses.
@@ -173,31 +199,46 @@ async function startScene(
     },
   });
 
-  // The ground's colour is drawn from the same heights: no photographic imagery, so no imagery licence. It is shaded
-  // in a worker (reliefShader.ts), so a burst of new tiles does not freeze the page.
+  // The ground: aerial imagery where the relay has some (groundImagery.ts: the United States), otherwise relief drawn
+  // from the same heights, shaded in a worker (reliefShader.ts) so a burst of new tiles does not freeze the page.
+  // Imagery goes deeper than relief (16 against 14); past the relief's depth, a tile with no imagery is refused, and
+  // Cesium draws its parent's relief there instead.
   const shader = workerReliefShader();
   const flat = canvas();
   flat.getContext("2d")!.putImageData(new ImageData(shadeTile(new Float32Array(TILE_PIXELS * TILE_PIXELS), 30), TILE_PIXELS, TILE_PIXELS), 0, 0);
-  const relief = {
-    tilingScheme, rectangle: tilingScheme.rectangle, tileWidth: TILE_PIXELS, tileHeight: TILE_PIXELS,
-    minimumLevel: 0, maximumLevel: RELIEF_MAX_ZOOM, hasAlphaChannel: false, ready: true,
-    errorEvent: new Cesium.Event(), credit: undefined, proxy: undefined, tileDiscardPolicy: undefined,
-    getTileCredits: () => [],
-    pickFeatures: () => undefined,
-    requestImage: async (x: number, y: number, level: number) => {
-      const tile = await heights(level, x, y);
-      if (!tile) return flat;
-      const rgba = await shader.shade(tile, pixelMetres(level, tileLatitude(level, y)));
-      const image = canvas();
-      image.getContext("2d")!.putImageData(new ImageData(rgba, TILE_PIXELS, TILE_PIXELS), 0, 0);
-      return image;
-    },
-  } as unknown as InstanceType<typeof Cesium.UrlTemplateImageryProvider>;
+  const reliefImage = async (x: number, y: number, level: number) => {
+    const tile = await heights(level, x, y);
+    if (!tile) return flat;
+    const rgba = await shader.shade(tile, pixelMetres(level, tileLatitude(level, y)));
+    const image = canvas();
+    image.getContext("2d")!.putImageData(new ImageData(rgba, TILE_PIXELS, TILE_PIXELS), 0, 0);
+    return image;
+  };
+  const groundProvider = (ground: Ground) => {
+    const errorEvent = new Cesium.Event();
+    // A refused tile is expected (no imagery past the relief's depth): Cesium draws the parent, and nothing is retried.
+    errorEvent.addEventListener((error: { retry: boolean }) => { error.retry = false; });
+    return {
+      tilingScheme, rectangle: tilingScheme.rectangle, tileWidth: TILE_PIXELS, tileHeight: TILE_PIXELS,
+      minimumLevel: 0, maximumLevel: ground === "imagery" ? IMAGERY_MAX_ZOOM : RELIEF_MAX_ZOOM, hasAlphaChannel: false, ready: true,
+      errorEvent, credit: undefined, proxy: undefined, tileDiscardPolicy: undefined,
+      getTileCredits: () => [],
+      pickFeatures: () => undefined,
+      requestImage: async (x: number, y: number, level: number) => {
+        if (ground === "imagery") {
+          const photo = await imagery.load(level, x, y);
+          if (photo) return photo;
+        }
+        if (level > RELIEF_MAX_ZOOM) throw new Error("no imagery here: the parent tile's relief is drawn");
+        return reliefImage(x, y, level);
+      },
+    } as unknown as InstanceType<typeof Cesium.UrlTemplateImageryProvider>;
+  };
 
   // Throws when the browser has no WebGL; the component says so rather than failing the page.
   const widget = new Cesium.CesiumWidget(container, {
-    baseLayer: new Cesium.ImageryLayer(relief), terrainProvider, creditContainer,
-    skyBox: false, showRenderLoopErrors: false, targetFrameRate: 30, useBrowserRecommendedResolution: true,
+    baseLayer: false, terrainProvider, creditContainer,
+    skyBox: false, showRenderLoopErrors: false, targetFrameRate: 30, useBrowserRecommendedResolution: true, msaaSamples: 4,
     // Draw only when something changes: a paused bench, or a view waiting for the next tick, costs nothing. Cesium
     // itself asks for frames while tiles load and when the window is resized.
     requestRenderMode: true, maximumRenderTimeChange: Number.POSITIVE_INFINITY,
@@ -209,6 +250,68 @@ async function startScene(
   scene.fog.enabled = true;
   scene.fog.density = 1.4e-4;
   scene.screenSpaceCameraController.enableInputs = false;
+
+  // The ground layer, replaced when the ground choice changes (imagery or relief).
+  let groundChoice: Ground | null = null;
+  let groundLayer: InstanceType<typeof Cesium.ImageryLayer> | null = null;
+  const setGround = (ground: Ground) => {
+    if (ground === groundChoice) return;
+    groundChoice = ground;
+    if (groundLayer) scene.imageryLayers.remove(groundLayer, true);
+    groundLayer = scene.imageryLayers.addImageryProvider(groundProvider(ground), 0);
+    scene.requestRender();
+  };
+  setGround("imagery");
+
+  // Terrain colouring (terrainAwareness.ts), computed per pixel on the GPU from the height of the ground there: red and
+  // amber against the aircraft's altitude (relative), or height bands (absolute), with a faint contour every 500 ft,
+  // blended over the ground. It costs the page nothing: the aircraft's height is one number set each frame.
+  const colour = (rgb: readonly number[], alpha: number) => new Cesium.Color(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, alpha);
+  const CONTOUR = "float contour(float h) { float f = fract(h / 152.4); return (1.0 - smoothstep(0.0, 0.03, min(f, 1.0 - f))) * 0.35; }\n";
+  const relative = new Cesium.Material({
+    translucent: true,
+    fabric: {
+      type: "FmsRelativeTerrain",
+      uniforms: {
+        aircraft: 0.0, danger: RELATIVE_DANGER_FT * FT, caution: RELATIVE_CAUTION_FT * FT,
+        dangerColour: colour(DANGER_RGB, 0.55), cautionColour: colour(CAUTION_RGB, 0.45),
+      },
+      source: CONTOUR + `czm_material czm_getMaterial(czm_materialInput materialInput) {
+  czm_material m = czm_getDefaultMaterial(materialInput);
+  float h = materialInput.height;
+  vec4 c = h >= aircraft - danger ? dangerColour : h >= aircraft - caution ? cautionColour : vec4(0.0);
+  c = mix(c, vec4(1.0, 1.0, 1.0, max(c.a, 0.35)), contour(h));
+  m.diffuse = c.rgb; m.alpha = c.a;
+  return m;
+}`,
+    },
+  });
+  const edges = ABSOLUTE_BANDS_FT.map(feet => feet * FT);
+  const absolute = new Cesium.Material({
+    translucent: true,
+    fabric: {
+      type: "FmsAbsoluteTerrain",
+      uniforms: {
+        edge0: edges[0], edge1: edges[1], edge2: edges[2], edge3: edges[3],
+        band0: colour(ABSOLUTE_RGB[0], 0.3), band1: colour(ABSOLUTE_RGB[1], 0.3), band2: colour(ABSOLUTE_RGB[2], 0.3),
+        band3: colour(ABSOLUTE_RGB[3], 0.3), band4: colour(ABSOLUTE_RGB[4], 0.3),
+      },
+      source: CONTOUR + `czm_material czm_getMaterial(czm_materialInput materialInput) {
+  czm_material m = czm_getDefaultMaterial(materialInput);
+  float h = materialInput.height;
+  vec4 c = h >= edge3 ? band4 : h >= edge2 ? band3 : h >= edge1 ? band2 : h >= edge0 ? band1 : band0;
+  c = mix(c, vec4(1.0, 1.0, 1.0, max(c.a, 0.35)), contour(h));
+  m.diffuse = c.rgb; m.alpha = c.a;
+  return m;
+}`,
+    },
+  });
+  let colouringChoice: TerrainColouring = "off";
+  const setColouring = (colouring: TerrainColouring) => {
+    colouringChoice = colouring;
+    scene.globe.material = colouring === "relative" ? relative : colouring === "absolute" ? absolute : undefined;
+    scene.requestRender();
+  };
 
   const routeLine = scene.primitives.add(new Cesium.PolylineCollection());
   const fixes = scene.primitives.add(new Cesium.PointPrimitiveCollection());
@@ -276,6 +379,7 @@ async function startScene(
         orientation: { heading: pose.heading, pitch: pose.pitch, roll: pose.roll },
       });
     }
+    if (colouringChoice === "relative") relative.uniforms.aircraft = air.altitude * FT;
     const at = Cesium.Cartesian3.fromDegrees(air.position.lon, air.position.lat, air.altitude * FT);
     ownship.show = state.view === "map";
     ownship.position = at;
@@ -312,6 +416,8 @@ async function startScene(
 
   return {
     requestRender: () => scene.requestRender(),
+    setGround,
+    setColouring,
     setRoute: (route, altitude) => {
       scene.requestRender();
       routeLine.removeAll(); fixes.removeAll(); labels.removeAll();

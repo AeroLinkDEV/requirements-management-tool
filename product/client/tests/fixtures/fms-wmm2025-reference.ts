@@ -1,4 +1,5 @@
-# Field 1: Date
+/** Unchanged public-domain NOAA WMM2025 reference text; column meanings are retained below. */
+export const NOAA_WMM2025_REFERENCE = String.raw`# Field 1: Date
 # Field 2: Height above WGS84 ellipsoid (km)
 # Field 3: Geodetic Latitude (deg)
 # Field 4: Geodetic Longitude (deg)
@@ -29,3 +30,4 @@
   2027.5  100.0   80.0    0.0     6196.7      233.8    52670.5     6201.1    53034.3   83.29    2.16    2.16       -7.7       56.5       28.7       -5.6       27.8    0.01    0.52
   2027.5  100.0    0.0  120.0    37711.5     -148.7    -9969.8    37711.8    39007.4  -14.81   -0.23     NaN        9.2      -21.0       72.9        9.3       -9.7    0.11   -0.03
   2027.5  100.0  -80.0  240.0     5984.0    14760.1   -49317.7    15927.0    51825.7  -72.10   67.93  -52.07       30.6       -8.0       89.2        4.0      -83.7    0.03   -0.11
+`;

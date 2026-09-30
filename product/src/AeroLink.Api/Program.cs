@@ -58,6 +58,7 @@ builder.Services.AddExceptionHandler<ConcurrencyExceptionHandler>();
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddAeroLinkInfrastructure(builder.Configuration);
 builder.Services.AddFmsBenchTerrainClient();
+builder.Services.AddFmsBenchImageryClient();
 builder.Services.AddScoped<TeamWorkProjectionService>();
 builder.Services.AddScoped<WorkflowAuthorityService>();
 builder.Services.AddScoped<TestChangeReviewWorkflowService>();
@@ -412,6 +413,7 @@ app.MapGet("/health/routes", (EndpointDataSource endpoints) =>
 app.MapAuthEndpoints();
 app.MapWorkspaceEndpoints();
 app.MapFmsBenchTerrainEndpoints();
+app.MapFmsBenchImageryEndpoints();
 app.MapProjectSetupEndpoints();
 app.MapProjectSetupSourceEndpoints();
 app.MapProjectRepositoryEndpoints();
