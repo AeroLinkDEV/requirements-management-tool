@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
-import { bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
+import { bearingDeg, courseDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import { COPTER_PINS_CIFP_2609, COPTER_PINS_CIFP_2609_SHA256 } from '../src/fmsCdu/data/copterPinsCifp2609'
 import {
   COPTER_PINS_SOURCE, FINAL_START_BEFORE_STAYS_NM, MISSION_87N_OFFSHORE_SAR, MISSION_87N_VARIANTS, MISSION_START_SOUTH_NM, setUp87nOffshoreSar, setUp87nRnav190Final,
@@ -132,26 +132,141 @@ for (const variant of MISSION_87N_VARIANTS) {
   })
 }
 
-test('MA-GRAD: the missed approach at CRANN climbs at least 400 ft/NM over the ground, ramp included, measured on the flown trace (AIM 5-4-21)', () => {
-  // The nominal run, observed tick by tick. The declared interval: from the tick TOGA is pressed at CRANN over the first
-  // nautical mile flown over the ground (or to the 2,000 ft capture, if sooner). The GA vertical-acceleration ramp is
-  // inside the interval, not excused (rev 3.1 addendum).
-  let now = START
+
+// ---------------------------------------------------------------------------------------------- measured on the trace
+// Astra's review of v1 (F6): the claims the scenario steps sample at single moments are measured here over their
+// intervals, on the flown trace, tick by tick.
+
+type Tick = { t: number; active: string | null; altitude: number; groundSpeed: number; track: number; crossTrack: number; ra: number | null; mrkM: number | null }
+
+/** Runs a scenario tick by tick, recording each tick, and returns the trace with the final state. */
+function observed(scenario: typeof MISSION_87N_OFFSHORE_SAR) {
+  let now = Date.parse(scenario.startTime!)
   const fms = new ScriptedFms(() => new Date(now))
   const sim = new FlightSimulator(fms)
-  const runner = new ScenarioRunner(MISSION_87N_OFFSHORE_SAR, fms, undefined, sim)
-  let from: number | null = null, flownNm = 0, climbed = 0
-  while (!runner.finished) {
-    const before = fms.altitude
+  const runner = new ScenarioRunner(scenario, fms, undefined, sim)
+  const ticks: Tick[] = []
+  for (let n = 1; !runner.finished; n++) {
     advanceTicks(1, ms => { now += ms }, sim, runner)
-    if (from === null && sim.modeEvents.some(e => e.event === 'GO AROUND')) from = before
-    if (from !== null && flownNm < 1 && fms.altitude < 1990) {
-      flownNm += (fms.groundSpeed * 0.25) / 3600
-      climbed = fms.altitude - from
-    }
+    const leg = fms.activeRoute.legs[0]
+    const mrk = fms.coordinates('MRK')
+    ticks.push({
+      t: n * 0.25, active: leg?.kind === 'wpt' ? leg.ident : leg?.kind ?? null, altitude: fms.altitude, groundSpeed: fms.groundSpeed, track: fms.track,
+      crossTrack: fms.crossTrack, ra: fms.radioHeight.status === 'NORMAL' ? fms.radioHeight.value : null, mrkM: mrk ? distanceNm(fms.truePosition, mrk) * 1852 : null,
+    })
   }
-  expect(from).not.toBeNull()
-  expect(flownNm).toBeGreaterThan(0.3)
-  const gradient = climbed / flownNm
+  const eventAt = (event: string, detail?: RegExp) => {
+    const found = sim.modeEvents.find(e => e.event === event && (!detail || detail.test(e.detail)))
+    return found ? (found.at.getTime() - Date.parse(scenario.startTime!)) / 1000 : null
+  }
+  return { fms, sim, runner, ticks, eventAt }
+}
+
+let nominalRun: ReturnType<typeof observed> | null = null
+const nominal = () => (nominalRun ??= observed(MISSION_87N_OFFSHORE_SAR))
+
+test('the hover is held for two minutes from its capture, every tick: at MRK, 50 ft, stopped (plan §10 step 6)', () => {
+  const { ticks, eventAt, runner } = nominal()
+  expect(runner.outcome).toBe('passed')
+  const capture = eventAt('HOV', /holding the target|captured at the target/)!
+  const departure = eventAt('TU')!
+  expect(capture).not.toBeNull()
+  // The departure comes no sooner than two minutes after the capture.
+  expect(departure - capture).toBeGreaterThanOrEqual(120)
+  const hover = ticks.filter(k => k.t > capture && k.t <= capture + 120)
+  expect(hover.length).toBe(480)
+  // The whole two minutes: within the capture limits (50 m, 50 ft ± 5, 1 kt).
+  for (const k of hover) {
+    expect(k.mrkM!, `at ${k.t} s`).toBeLessThanOrEqual(50)
+    expect(Math.abs(k.ra! - 50), `at ${k.t} s`).toBeLessThanOrEqual(5)
+    expect(k.groundSpeed, `at ${k.t} s`).toBeLessThanOrEqual(1)
+  }
+  // Settled after 20 s: within 2 m and 0.5 kt for the remaining 100 s.
+  for (const k of hover.filter(k => k.t > capture + 20)) {
+    expect(k.mrkM!, `at ${k.t} s`).toBeLessThanOrEqual(2)
+    expect(k.groundSpeed, `at ${k.t} s`).toBeLessThanOrEqual(0.5)
+  }
+})
+
+test('the crew NEW HOLD at BEADS completes at least two whole circuits, counted by the hold, still under NAV (plan §10 step 10)', () => {
+  const { fms, sim, eventAt } = nominal()
+  const hold = fms.activeRoute.hold!
+  expect(hold).toMatchObject({ fix: 'BEADS', exit: 'MANUAL', status: 'IN PROGRESS' })
+  expect(hold.missed).toBeFalsy()
+  // Whole racetracks flown after the entry: each ends at a fix passage the FMS sequenced.
+  expect(hold.circuits ?? 0).toBeGreaterThanOrEqual(2)
+  expect(sim.lateralMode).toBe('LNAV')
+  // The missed-approach hold was left first: this one is the crew's new hold, not the missed one continued.
+  expect(eventAt('HOLD EXITED', /^BEADS: 1 whole racetrack/)).not.toBeNull()
+})
+
+/** Height gained per NM over the ground from time t over the first NM, or to 1,990 ft if sooner. */
+function gradientFrom(ticks: Tick[], t: number) {
+  const start = ticks.findIndex(k => k.t >= t)
+  const from = ticks[Math.max(0, start - 1)].altitude
+  let nm = 0, climbed = 0
+  for (const k of ticks.slice(start)) {
+    if (nm >= 1 || k.altitude >= 1990) break
+    nm += (k.groundSpeed * 0.25) / 3600
+    climbed = k.altitude - from
+  }
+  return { gradient: climbed / nm, nm }
+}
+
+test('MA-GRAD from TOGA: the missed approach climbs at least 400 ft/NM over the first NM from the TOGA tick, ramp included', () => {
+  // Named for what it measures: from the tick TOGA is pressed (0.1 NM before CRANN) over the first nautical mile flown
+  // over the ground, or to the 2,000 ft capture if sooner. The GA vertical-acceleration ramp is inside it.
+  const { ticks, eventAt } = nominal()
+  const toga = eventAt('GO AROUND')!
+  expect(toga).not.toBeNull()
+  const { gradient, nm } = gradientFrom(ticks, toga)
+  expect(nm).toBeGreaterThan(0.3)
   expect(gradient).toBeGreaterThanOrEqual(400)
+})
+
+test('MA-GRAD from the MAP: the missed approach climbs at least 400 ft/NM over the first NM after CRANN is passed (AIM 5-4-21)', () => {
+  // Anchored to the MAP passage itself: the first tick CRANN is no longer the active leg.
+  const { ticks } = nominal()
+  const onFinal = ticks.findIndex(k => k.active === 'CRANN')
+  const passage = ticks.findIndex((k, i) => i > onFinal && k.active !== 'CRANN')
+  expect(onFinal).toBeGreaterThan(0)
+  expect(passage).toBeGreaterThan(onFinal)
+  const { gradient, nm } = gradientFrom(ticks, ticks[passage - 1].t)
+  expect(nm).toBeGreaterThan(0.3)
+  expect(gradient).toBeGreaterThanOrEqual(400)
+})
+
+test('variant (d): from TOGA to the MAP, every tick stays on the final to CRANN, climbing: no early turn (MA-EARLY, R2-03)', () => {
+  const scenario = MISSION_87N_VARIANTS.find(v => v.id === '87n-d-early-toga')!
+  const { ticks, eventAt, fms, runner } = observed(scenario)
+  expect(runner.outcome).toBe('passed')
+  const toga = eventAt('GO AROUND')!
+  expect(toga).not.toBeNull()
+  const final = courseDeg(fms.coordinates('STAYS')!, fms.coordinates('CRANN')!)
+  const firstAfter = ticks.findIndex(k => k.t > toga)
+  const passage = ticks.findIndex((k, i) => i >= firstAfter && k.active !== 'CRANN')
+  const preMap = ticks.slice(firstAfter, passage)
+  // About 1.5 NM at 70 KIAS into the wind: more than a minute of trace, all of it on CRANN.
+  expect(preMap.length).toBeGreaterThan(4 * 60)
+  let previous = -Infinity
+  for (const k of preMap) {
+    expect(k.active, `active at ${k.t} s`).toBe('CRANN')
+    expect(Math.abs(k.crossTrack), `cross-track at ${k.t} s`).toBeLessThanOrEqual(0.1)
+    expect(Math.abs(((k.track - final + 540) % 360) - 180), `track at ${k.t} s`).toBeLessThanOrEqual(10)
+    // Never descending after the first 2 s of the go-around (the vertical-speed ramp).
+    if (k.t > toga + 2) expect(k.altitude, `altitude at ${k.t} s`).toBeGreaterThanOrEqual(previous - 0.01)
+    previous = k.altitude
+  }
+})
+
+test('variant (f): DIRECT 87N at CRANN moves the prediction endpoint to SITE ARRIVAL 87N; no vertical approach guidance', () => {
+  const scenario = MISSION_87N_VARIANTS.find(v => v.id === '87n-f-proceed-vfr')!
+  // Before: the approach ends at its instrument end.
+  const before = new ScriptedFms(() => new Date(START))
+  setUp87nRnav190Final(before, new FlightSimulator(before))
+  expect(before.profile().endpoint).toMatchObject({ kind: 'INSTRUMENT END', label: 'CRANN (MAP)' })
+  const { fms, runner } = observed(scenario)
+  expect(runner.outcome).toBe('passed')
+  expect(fms.profile().endpoint).toMatchObject({ kind: 'SITE ARRIVAL', label: '87N' })
+  expect(fms.approachVertical).toBe(false)
 })
