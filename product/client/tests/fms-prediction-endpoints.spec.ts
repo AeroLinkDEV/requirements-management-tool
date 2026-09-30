@@ -8,6 +8,8 @@ import { holdAllowance } from '../src/fmsCdu/predictions'
 import { setUpKbtvRnav15 } from '../src/fmsCdu/kbtvDemo'
 import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { computeProfile, parseConstraint } from '../src/fmsCdu/vnav'
+import { aircraftData } from '../src/fmsCdu/efis'
 import { screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
@@ -476,4 +478,79 @@ test('KBTV R15 is unchanged: VNAV 1/3 shows its runway path, and its missed appr
   const threshold = unit.profile().points.findIndex(p => p.ident === 'RW15')
   expect(threshold).toBeGreaterThan(0)
   for (const p of unit.profile().points.slice(threshold + 1)) if (p.altitude !== null) expect(p.altitude, p.ident).toBeLessThanOrEqual(missedTop)
+})
+
+// ---------------------------------------------------------------------------------------------- the missed approach target (F4)
+
+test('F4: the missed approach altitude is its own planning target, above cruise as well as below it', () => {
+  // A climb after the MAP over 20 NM at 120 kt (10 minutes at 1,000 fpm): enough to reach either target from 1,000 ft.
+  const run = (missed: string) => computeProfile({
+    waypoints: [
+      { ident: 'MAP', legDistance: 2, groundSpeed: 120, constraint: null, endOfDescent: false },
+      { ident: 'MA1', legDistance: 10, groundSpeed: 120, constraint: null, endOfDescent: false, missed: true },
+      { ident: 'MAHF', legDistance: 10, groundSpeed: 120, constraint: parseConstraint(missed), endOfDescent: false, missed: true },
+    ],
+    altitude: 1000, cruiseAltitude: 4500, climbRate: 1000, pathAngle: 3, fuel: 1000, fuelFlow: 500, now: START, phase: 'CLIMB',
+  })
+  const above = run('5600A')
+  expect(above.points.find(p => p.ident === 'MAHF')).toMatchObject({ altitude: 5600, constraintMet: true })
+  expect(above.missedTarget).toEqual({ kind: 'A', altitude: 5600 })
+  // Cruise does not cap the climb on the way either: the point before the holding fix is already above it.
+  expect(above.points.find(p => p.ident === 'MA1')!.altitude).toBeGreaterThan(4500)
+  const below = run('2000A')
+  expect(below.points.find(p => p.ident === 'MAHF')).toMatchObject({ altitude: 2000, constraintMet: true })
+  expect(below.points.find(p => p.ident === 'MA1')!.altitude).toBe(2000)
+})
+
+test('F4: KBTV R15 predicts YUNUD at its 5600A, not at the 4,500 ft cruise', () => {
+  const unit = new ScriptedFms(() => new Date(START))
+  const sim = new FlightSimulator(unit)
+  expect(setUpKbtvRnav15(unit, sim)).toEqual({ ready: true })
+  expect(unit.vnav.cruiseAltitude).toBe(4500)
+  const yunud = point(unit, 'YUNUD')
+  expect(yunud.altitude!).toBeGreaterThan(4500)
+  expect(yunud.altitude!).toBeLessThanOrEqual(5600)
+  expect(unit.profile().missedTarget).toEqual({ kind: 'A', altitude: 5600 })
+})
+
+test('F4: the airline VNAV flying the KBTV missed approach climbs to 5600, above its cruise', () => {
+  const unit = new ScriptedFms(() => new Date(START), { profile: LAB_AIRLINE_VNAV_PROFILE })
+  expect(setUpKbtvRnav15(unit)).toEqual({ ready: true })
+  const final = unit.activeRoute.legs.findIndex(leg => leg.kind === 'wpt' && /^RW15/.test(leg.ident))
+  expect(final).toBeGreaterThan(0)
+  expect(unit.goAround()).toBe(true)
+  expect(unit.activeRoute.legs[0]).toMatchObject({ source: 'MISSED' })
+  expect(unit.vnav.cruiseAltitude).toBe(4500)
+  expect(unit.profile().climbCap).toBe(5600)
+})
+
+test('F4: under the helicopter profile a selected altitude below the missed approach altitude is shown, never flown instead', () => {
+  const unit = new ScriptedFms(() => new Date(START))
+  const sim = new FlightSimulator(unit)
+  expect(setUpKbtvRnav15(unit, sim)).toEqual({ ready: true })
+  expect(sim.advisory).toBe(true)
+  // On the approach, a selection below 5600A is shown.
+  expect(unit.flightPhase).toBe('APPROACH')
+  sim.selectAltitude(4500)
+  expect(sim.missedAltitudeConflict).toEqual({ target: { kind: 'A', altitude: 5600 }, selected: 4500 })
+  expect(aircraftData(unit, sim).missedAltitudeConflict).toBe('5600A')
+  // The crew's selection stays what the go-around climbs to: the FMS takes over nothing.
+  expect(sim.engageGoAround()).toBe(true)
+  expect(sim.selectedAltitude).toBe(4500)
+  expect(sim.missedAltitudeConflict).not.toBeNull()
+  // Reselecting the missed approach altitude clears it; so does anything above an at-or-above target.
+  sim.selectAltitude(5600)
+  expect(sim.missedAltitudeConflict).toBeNull()
+  sim.selectAltitude(6000)
+  expect(sim.missedAltitudeConflict).toBeNull()
+  // With the FMS failed its missed approach data is gone, and so is the caption.
+  sim.selectAltitude(4500)
+  unit.setCondition('fmsFail', true)
+  expect(sim.missedAltitudeConflict).toBeNull()
+  // The airline profile's VNAV flies the missed approach altitude itself: there is no selection to conflict with.
+  const airline = new ScriptedFms(() => new Date(START), { profile: LAB_AIRLINE_VNAV_PROFILE })
+  const airlineSim = new FlightSimulator(airline)
+  expect(setUpKbtvRnav15(airline, airlineSim)).toEqual({ ready: true })
+  expect(airlineSim.missedAltitudeConflict).toBeNull()
+  expect(aircraftData(airline, airlineSim).missedAltitudeConflict).toBeNull()
 })

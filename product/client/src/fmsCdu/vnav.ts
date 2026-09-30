@@ -161,11 +161,24 @@ export type Profile = {
   reserve: { available: false; reason: string };
   /** The altitude the climb may go to now: cruise, or the lowest "at" or "at or below" constraint ahead in the climb. */
   climbCap: number;
+  /**
+   * The missed approach's planning target: the highest altitude constraint it codes (KBTV R15 YUNUD 5600A, 87N R190
+   * BEADS 2000A), whether above cruise or below it; null when the route ahead has no missed approach altitude.
+   */
+  missedTarget: AltitudeConstraint | null;
   /** Past the top of descent: the active waypoint is on the descent path. */
   descending: boolean;
 };
 
 const FT_PER_NM = 6076.12;
+
+/** The highest altitude a constraint codes: its altitude, or a window's upper bound. */
+const ceilingOf = (c: AltitudeConstraint) => (c.kind === "WINDOW" ? c.upper : c.altitude);
+
+/** Whether an altitude meets a constraint, within 100 ft (as the AT TGT ALT hold exit and the missed approach judge it). */
+export function altitudeMeets(target: AltitudeConstraint, altitude: number) {
+  return targetMet(target, altitude);
+}
 
 /** Whether an altitude meets a hold's target as the AT TGT ALT exit judges it: within 100 ft, or on its side of it. */
 function targetMet(target: AltitudeConstraint | null, altitude: number) {
@@ -263,21 +276,25 @@ export function computeProfile(input: ProfileInput): Profile {
 
   // The missed approach tops out at its missed approach altitude, the highest altitude it codes (87N R190: BEADS
   // 2000A): the climb after the MAP levels there, never on up to cruise, which belongs to the route before it.
-  const missedTop = waypoints.reduce((top, w) => (w.missed && w.constraint ? Math.max(top, w.constraint.kind === "WINDOW" ? w.constraint.upper : w.constraint.altitude) : top), -Infinity);
-  const missedCap = (i: number) => (waypoints[i]?.missed && Number.isFinite(missedTop) ? missedTop : Infinity);
+  // It is the missed approach's own planning target, whether below cruise or above it (KBTV R15: YUNUD 5600A over a
+  // 4,500 ft cruise): the cruise altitude belongs to the route before the approach and caps nothing after the MAP.
+  const missedConstraint = waypoints.reduce<AltitudeConstraint | null>((top, w) => (w.missed && w.constraint && (top === null || ceilingOf(w.constraint) > ceilingOf(top)) ? w.constraint : top), null);
+  const missedTop = missedConstraint ? ceilingOf(missedConstraint) : -Infinity;
+  const hasMissedTarget = Number.isFinite(missedTop);
+  // The altitude a point's climb levels at before its own constraints: cruise, or on the missed approach its target.
+  const ceiling = (i: number) => (waypoints[i]?.missed && hasMissedTarget ? missedTop : cruiseAltitude);
 
   // The climb levels at the lowest "at" or "at or below" constraint ahead in the climb, until passing it.
   // In the descent there is no climb: the cap is where the aircraft is, so nothing pulls it back up toward cruise.
-  let climbCap = inDescent ? Math.min(cruiseAltitude, input.altitude) : cruiseAltitude;
+  // Flying the missed approach, VNAV climbs to its missed approach altitude instead, above cruise or below it.
+  let climbCap = waypoints[0]?.missed && hasMissedTarget ? missedTop : inDescent ? Math.min(cruiseAltitude, input.altitude) : cruiseAltitude;
   // Only constraints on the known part of the route cap the climb: nothing behind a gap commands the connected segment.
   for (let i = 0; i < waypoints.length && descent[i] === Infinity && basis[i] !== "unknown"; i += 1) climbCap = Math.min(climbCap, capOf(waypoints[i].constraint));
-  // Flying the missed approach, VNAV climbs to its missed approach altitude.
-  climbCap = Math.min(climbCap, missedCap(0));
 
   // The climb at each point levels at the lowest at-or-below constraint at or after it on the known climb segment, as
   // guidance does (climbCap): a restriction ahead holds the climb before it, not only at its own fix.
-  const aheadCap: number[] = waypoints.map(() => cruiseAltitude);
-  for (let i = waypoints.length - 1, lowest = cruiseAltitude; i >= 0; i -= 1) {
+  const aheadCap: number[] = waypoints.map(() => Infinity);
+  for (let i = waypoints.length - 1, lowest = Infinity; i >= 0; i -= 1) {
     if (descent[i] === Infinity && basis[i] !== "unknown") lowest = Math.min(lowest, capOf(waypoints[i].constraint));
     aheadCap[i] = lowest;
   }
@@ -289,7 +306,7 @@ export function computeProfile(input: ProfileInput): Profile {
     const hours = legHours(w);
     time += hours * 3_600_000;
     fuel -= hours * input.fuelFlow;
-    const cap = Math.min(cruiseAltitude, capOf(w.constraint), aheadCap[i], missedCap(i));
+    const cap = Math.min(ceiling(i), capOf(w.constraint), aheadCap[i]);
     // In the descent nothing up to the E/D climbs; after it (the missed approach) the go-around may.
     const climbs = !inDescent || (edIndex >= 0 && i > edIndex);
     const climbed = climbs && altitude < cap ? Math.min(cap, altitude + input.climbRate * hours * 60) : altitude;
@@ -319,7 +336,7 @@ export function computeProfile(input: ProfileInput): Profile {
   const at = waypoints.findIndex(w => w.endpoint);
   const endpoint = at >= 0 ? { ...waypoints[at].endpoint!, point: points[at] } : null;
   return {
-    points, topOfDescent, endOfDescent: edIndex >= 0 ? waypoints[edIndex].ident : null, unableNext, climbCap,
+    points, topOfDescent, endOfDescent: edIndex >= 0 ? waypoints[edIndex].ident : null, unableNext, climbCap, missedTarget: missedConstraint,
     descending: inDescent || (edIndex >= 0 && topOfDescent === null && descent[0] !== Infinity),
     endpoint, destination: endpoint?.point ?? null, reserve: { available: false, reason: "landing not modelled" },
   };
