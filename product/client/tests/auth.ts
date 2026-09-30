@@ -237,19 +237,23 @@ export async function surfacePainted(page: Page, minimumCharacters = 60) {
  * `surfacePainted` is the right signal for "is there something to audit", but not for "how tall is it": the
  * verification workspace keeps loading datasets after its first paint, and a height sampled mid-load made
  * compact look taller than comfortable. Two consecutive equal readings is a settled layout; the poll interval
- * is a poll, not a guess at how long rendering takes.
+ * is a poll, not a guess at how long rendering takes. A deadline is a failed precondition for measurement.
  */
 export async function layoutSettled(page: Page, timeoutMs = 15_000) {
   const height = () => page.evaluate(() => document.documentElement.scrollHeight)
   let previous = -1
   let stable = 0
+  const lastHeights: number[] = []
   const started = Date.now()
   while (Date.now() - started < timeoutMs && stable < 2) {
     const current = await height()
+    lastHeights.push(current)
+    if (lastHeights.length > 3) lastHeights.shift()
     stable = current === previous ? stable + 1 : 0
     previous = current
     if (stable < 2) await page.waitForTimeout(120)
   }
+  if (stable < 2) throw new Error(`Layout did not settle within ${timeoutMs} ms (last heights: ${lastHeights.join(', ') || 'none'})`)
 }
 
 /**
