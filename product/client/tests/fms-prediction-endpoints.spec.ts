@@ -618,3 +618,36 @@ test('F1: in a manual hold the next crossing is predicted along the pattern stil
     expect(Math.abs(predictedSeconds - flownSeconds), `predicted ${predictedSeconds.toFixed(1)} s, flown ${flownSeconds} s`).toBeLessThan(6)
   }
 })
+
+test('E4: RTA WIND is the system wind unless the crew enters one; an entry changes only the RTA, and DELETE restores it (M300 A-141)', () => {
+  // 5 NM south of MUN, northbound, still air: MUN in 5 minutes needs 60 kt.
+  const unit = fiveMilesFromMun({ direction: 0, speed: 0 })
+  Object.assign(unit.rndz, { wpt: 'MUN', time: unit.now.getTime() + 5 * 60_000 })
+  const eta = unit.profile().points[0].eta
+  expect(unit.rendezvous()!.required!).toBeCloseTo(60, 1)
+  unit.press('INIT_REF'); unit.press('NEXT'); unit.press('LSK6R')
+  expect(lines(unit)[0]).toMatch(/RENDEZVOUS/)
+  expect(lines(unit)[9]).toMatch(/^ RTA WIND/)
+  expect(lines(unit)[10]).toMatch(/^000T\/  0KT/)
+  // The crew's RTA wind, 30 kt on the nose: the RTA needs 90 kt. The system wind, and the ETAs flown in it, are unchanged.
+  enter(unit, '360/30', 'LSK5L')
+  expect(unit.rndz.wind).toEqual({ direction: 0, speed: 30 })
+  expect(unit.rendezvous()!.required!).toBeCloseTo(90, 1)
+  expect(unit.wind).toEqual({ direction: 0, speed: 0 })
+  expect(unit.profile().points[0].eta).toBe(eta)
+  expect(lines(unit)[10]).toMatch(/^000T\/ 30KT/)
+  expect(unit.screen()[10][0].size).toBe('large')
+  // An entry out of range is refused and changes nothing.
+  enter(unit, '090/250', 'LSK5L')
+  expect(unit.rndz.wind).toEqual({ direction: 0, speed: 30 })
+  // DELETE brings the default back: the system wind, which the RTA then follows. (CLR clears the message, then the
+  // entry a character at a time; CLR on the empty scratchpad arms DELETE.)
+  for (let i = 0; i < 12 && lines(unit)[13].trim() !== 'DELETE'; i += 1) unit.press('CLR')
+  expect(lines(unit)[13].trim()).toBe('DELETE')
+  unit.press('LSK5L')
+  expect(unit.rndz.wind).toBeNull()
+  expect(unit.rendezvous()!.required!).toBeCloseTo(60, 1)
+  Object.assign(unit.wind, { direction: 0, speed: 20 })
+  expect(unit.rendezvous()!.required!).toBeCloseTo(80, 1)
+  expect(lines(unit)[10]).toMatch(/^000T\/ 20KT/)
+})
