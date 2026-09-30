@@ -253,6 +253,13 @@ export class FlightSimulator {
 
   constructor(fms: ScriptedFms) {
     this.fms = fms;
+    // The FMS times the manual hold's next crossing along the path flown here: where the aircraft is in the entry or the
+    // racetrack, and which segment ends at the fix passage (Astra F1). In this bench the flight builds the hold path the
+    // FMS would own, so it reports it rather than the FMS guessing it.
+    fms.attachHoldPath(() => {
+      const plan = this.holdPlan;
+      return plan ? { segments: plan.segments, index: plan.index, passageAt: plan.index <= plan.entryEnd ? plan.entryEnd : plan.segments.length - 1 } : null;
+    });
     this.airspeed = fms.targetSpeed;
     this.selectedAlt = Math.round(fms.altitude);
     this.selectedTas = fms.vnav.cruiseSpeed;

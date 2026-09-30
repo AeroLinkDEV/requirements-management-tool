@@ -20,7 +20,8 @@ import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type Nav
 import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
 import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
 import { NAV_PAGES } from "./navPages";
-import { holdAllowance, predictionEndpoint } from "./predictions";
+import { holdAllowance, holdPathToPassage, piecesHours, predictionEndpoint, type HoldPathReport, type PathPiece } from "./predictions";
+import { MAX_BANK } from "./flight";
 import type { PredictionStatus } from "./vnav";
 
 /**
@@ -42,7 +43,7 @@ import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line
 import { NO_SURFACE, radioHeight, surfaceById, type Surface } from "./surface";
 import { TACTICAL_PAGES } from "./tacticalPages";
 import { checkAtTdn, planTransition } from "./transition";
-import { defaultLegMinutes, designBank, holdingSpeedLimit, radiusAt } from "./holds";
+import { defaultLegMinutes, designBank, holdGeometry, holdingSpeedLimit, radiusAt } from "./holds";
 import { JOIN_BEFORE_TDN_NM, joiningPath, type JoinPath } from "./joining";
 import type { CduFunction } from "./variants";
 
@@ -282,6 +283,17 @@ export class ScriptedFms implements CduBackend {
    * before the flight simulation first reports it, the track stands in.
    */
   get heading() { return this.aircraft.heading ?? this.aircraft.track; }
+  /**
+   * The true airspeed flown now, from the ground velocity and the wind (air = ground − wind), as air data would give it;
+   * null when the aircraft is not moving through the air measurably (below 1 kt).
+   */
+  get trueAirspeed(): number | null {
+    const toward = ((this.wind.direction + 180) * Math.PI) / 180, track = (this.track * Math.PI) / 180;
+    const north = this.groundSpeed * Math.cos(track) - this.wind.speed * Math.cos(toward);
+    const east = this.groundSpeed * Math.sin(track) - this.wind.speed * Math.sin(toward);
+    const tas = Math.hypot(north, east);
+    return tas >= 1 ? tas : null;
+  }
   /**
    * The speed at which the aircraft is closing on the active waypoint (knots, signed: negative when moving away): the
    * ground velocity's component toward it. Progress, for a time to go, is this, not the ground speed's magnitude:
@@ -909,6 +921,22 @@ export class ScriptedFms implements CduBackend {
     });
   }
 
+  /**
+   * The time at the fix of the active route's leg `index`, `miles` ahead, as the pages and the output bus show it. In a
+   * manual hold being flown, the prediction's time along the pattern still to fly, so the hold fix is its next crossing
+   * (S300 5-17, Astra F1): turning away from the fix does not make it unknown. Elsewhere the distance at the closure
+   * speed, with no time without progress toward the fix (C8, C9). Null when there is no time.
+   */
+  shownEta(index: number, miles: number): number | null {
+    const hold = this.active.hold, legs = this.active.legs, leg = legs[index];
+    const inHold = hold?.status === "IN PROGRESS" && legs[0]?.kind === "wpt" && legs[0].ident === hold.fix;
+    if (inHold && leg?.kind === "wpt") {
+      const point = this.profile().points[legs.slice(0, index).filter(l => l.kind === "wpt").length];
+      return point?.ident === leg.ident ? point.eta : null;
+    }
+    return makingProgress(this.closureSpeed) ? this.now.getTime() + (miles / this.closureSpeed) * 3_600_000 : null;
+  }
+
   /** The legs the predictions fly, as computeProfile takes them, with the course of each (for the RTA's wind triangle). */
   private predictionLegs(route: Route) {
     const geometry = this.legGeometry(route);
@@ -933,6 +961,8 @@ export class ScriptedFms implements CduBackend {
       const limit = procedureSpeedLimit(approach, route.approach?.transition, leg, planAltitude);
       return limit ? tasFromIas(limit.kt, planAltitude) : Infinity;
     };
+    // The ground path of a leg where it is not the straight line to its fix: the manual hold being flown (Astra F1).
+    const paths: (PathPiece[] | null)[] = [];
     route.legs.forEach((leg, i) => {
       // Past a discontinuity or a manually terminated leg the path is not defined; after a course or heading leg that
       // ends on an event, the leg into the next fix is estimated from the last fixed point.
@@ -955,17 +985,43 @@ export class ScriptedFms implements CduBackend {
       const isFaf = this.finalApproachFix ? leg.ident === this.finalApproachFix && i < runwayAt : i === runwayAt - 1;
       const constraint = isFaf ? { kind: "AT" as const, altitude: this.fafAltitudeCorrected } : parseConstraint(leg.altitude);
       if (constraint) planAltitude = constraint.kind === "WINDOW" ? constraint.lower : constraint.altitude;
+      // In the manual hold, the fix's next crossing is at the end of the path still to fly around the pattern, not the
+      // straight line to the fix (S300 5-17: the direct distance and the ETA at the next crossing are different things).
+      // The direct distance stays the leg's distance, as shown; the time is the path's, piece by piece through the wind.
+      const path = i === 0 && hold?.status === "IN PROGRESS" && leg.ident === hold.fix && to ? this.holdPathToCrossing(hold, to, tas) : null;
+      // Timed at the airspeed flown now: under the ADVISORY policy the crew's selected speed, not the planned one.
+      const holdTas = this.trueAirspeed ?? tas;
+      const pathHours = path ? piecesHours(path, c => this.groundSpeedOn(c, holdTas)) : undefined;
       waypoints.push({
-        ident: leg.ident, legDistance, groundSpeed: this.groundSpeedOn(course ?? this.track, tas),
+        ident: leg.ident, legDistance, groundSpeed: pathHours === null ? null : this.groundSpeedOn(course ?? this.track, tas),
+        ...(pathHours !== undefined && pathHours !== null ? { hours: pathHours } : {}),
         constraint, endOfDescent: i === runwayAt, basis, missed: leg.source === "MISSED",
         ...(hold && leg.ident === hold.fix ? { assumption: "HOLD EXIT NEXT CROSSING" } : {}),
         ...(end && i === end.legIndex ? { endpoint: { kind: end.kind, label: end.label } } : {}),
         ...this.predictedHold(route, leg, to, course ?? this.track, tas),
       });
       courses.push(legDistance === null ? null : course ?? this.track);
+      paths.push(path);
       lastFix = to;
     });
-    return { waypoints, courses };
+    return { waypoints, courses, paths };
+  }
+
+  /** Reports the hold path the flight is flying, where it is on it and where the next fix passage is (flight.ts). */
+  attachHoldPath(source: () => HoldPathReport | null) { this.holdPathSource = source; }
+  private holdPathSource: (() => HoldPathReport | null) | null = null;
+
+  /**
+   * The ground path from the aircraft to the manual hold's next fix passage: from the path the flight reports, or, with
+   * no flight attached (the hold only just entered, a test), one whole racetrack from the fix at the holding speed.
+   */
+  private holdPathToCrossing(hold: Hold, fix: LatLon, tas: number): PathPiece[] {
+    const report = this.holdPathSource?.() ?? null;
+    if (report) return holdPathToPassage(report, this.here);
+    const holdTas = Math.max(tas, tasFromIas(hold.speed, this.altitude));
+    const legNm = hold.legDistance ?? ((hold.legTime ?? defaultLegMinutes(this.altitude)) * holdTas) / 60;
+    const geometry = holdGeometry(fix, hold.inbound, hold.turn, holdTas, this.wind.speed, legNm, MAX_BANK);
+    return geometry ? holdPathToPassage({ segments: geometry.racetrack, index: 0, passageAt: geometry.racetrack.length - 1 }, fix) : [];
   }
 
   /**
@@ -978,7 +1034,7 @@ export class ScriptedFms implements CduBackend {
     // Sized at the hold altitude (its target), or the present altitude when it has none.
     const target = parseConstraint(hold.altitude);
     const altitude = target === null ? this.altitude : target.kind === "WINDOW" ? target.lower : target.altitude;
-    const allowance = holdAllowance(hold, fix, arrivalTrack, tas, this.wind.speed, altitude);
+    const allowance = holdAllowance(hold, fix, arrivalTrack, tas, this.wind, altitude);
     if (!allowance) return {};
     return { hold: { hours: allowance.hours, ...(hold.exit === "AT TGT ALT" && !hold.missed ? { target } : {}) } };
   }
@@ -1085,11 +1141,12 @@ export class ScriptedFms implements CduBackend {
    * is found by bisection. Null when no airspeed up to 400 kt reaches the fix in time.
    */
   private requiredTas(at: number, hours: number): number | null {
-    const { waypoints, courses } = this.predictionLegs(this.active);
-    const legs = waypoints.slice(0, at + 1).map((w, i) => ({ distance: w.legDistance ?? 0, course: courses[i] ?? this.track }));
+    const { waypoints, courses, paths } = this.predictionLegs(this.active);
+    // Each leg as its pieces: the straight line to its fix, or the manual hold's path to its next crossing (Astra F1).
+    const pieces = waypoints.slice(0, at + 1).flatMap((w, i) => paths[i] ?? [{ distance: w.legDistance ?? 0, course: courses[i] ?? this.track }]);
     // A hold before the fix that leaves by itself takes its time whatever the speed on the legs (holdAllowance).
     const held = waypoints.slice(0, at).reduce((sum, w) => sum + (w.hold?.hours ?? 0), 0);
-    const time = (tas: number) => held + legs.reduce((sum, leg) => {
+    const time = (tas: number) => held + pieces.reduce((sum, leg) => {
       if (leg.distance === 0) return sum;
       const gs = predictedGroundSpeed(tas, leg.course, this.wind);
       return gs === null ? Infinity : sum + leg.distance / gs;

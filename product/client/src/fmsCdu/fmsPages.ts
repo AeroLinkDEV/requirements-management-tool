@@ -454,9 +454,9 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const geometry = fms.legGeometry(fms.activeRoute);
       const [to, next] = legs;
       const toLeg = geometry[0], nextLeg = geometry[1];
-      const now = fms.now.getTime();
-      // No time without progress toward the active waypoint: dashes, never a time from an invented or wrong speed.
-      const eta = (miles: number) => (makingProgress(fms.closureSpeed) ? hhmm(new Date(now + (miles / fms.closureSpeed) * 3_600_000)) : "----.-");
+      // No time without progress toward the active waypoint: dashes, never a time from an invented or wrong speed. In a
+      // manual hold, the fix's next crossing along the pattern (Astra F1).
+      const eta = (leg: number, miles: number) => { const at = fms.shownEta(leg, miles); return at === null ? "----.-" : hhmm(new Date(at)); };
       const ident = (leg: Leg | undefined) => (leg?.kind === "wpt" ? leg.ident : leg?.kind === "cond" ? conditionalLabel(leg) : "-----");
       const nav = fms.navState;
       if (index === 0) {
@@ -466,9 +466,9 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         return [
           title("PROGRESS", "1/4", "ACT"),
           { left: small(` ${toLeg ? three(toLeg.course) : "---"}°`), center: small("DTG", "green"), right: small("ETA ", "green") },
-          { left: { text: pad(ident(to), 5), color: "magenta", inverse: true }, right: medium(toLeg ? `${fixed(toDistance, 1)}NM ${eta(toDistance)}` : "") },
+          { left: { text: pad(ident(to), 5), color: "magenta", inverse: true }, right: medium(toLeg ? `${fixed(toDistance, 1)}NM ${eta(0, toDistance)}` : "") },
           { left: small(` ${nextLeg ? three(nextLeg.course) : "---"}°`) },
-          { left: { text: pad(ident(next), 5), color: "green" }, right: medium(nextLeg ? `${fixed(toDistance + nextLeg.distance, 1)}NM ${eta(toDistance + nextLeg.distance)}` : "") },
+          { left: { text: pad(ident(next), 5), color: "green" }, right: medium(nextLeg ? `${fixed(toDistance + nextLeg.distance, 1)}NM ${eta(1, toDistance + nextLeg.distance)}` : "") },
           caption("TRUE WIND", "TK/GS "),
           { left: medium(` ${three(fms.wind.direction)}°/ ${fms.wind.speed}KT`), right: medium(`${three(fms.track)}°/${Math.round(fms.groundSpeed)}KT`) },
           caption(undefined, "TKE/XTK "),
@@ -677,7 +677,9 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           undefined, undefined, undefined, undefined, { left: dashes(24) }, footer];
       const at = fms.route.legs.findIndex(leg => leg.kind === "wpt" && leg.ident === hold.fix);
       const toFix = fms.legGeometry(fms.route).slice(0, at + 1).reduce((sum, leg) => sum + (leg?.distance ?? 0), 0);
-      const eta = makingProgress(fms.closureSpeed) ? hhmm(new Date(fms.now.getTime() + (toFix / fms.closureSpeed) * 3_600_000)) : "----.-";
+      // In the hold, the fix's next crossing along the pattern (Astra F1), not the straight line at the closure speed.
+      const fixEta = fms.shownEta(at, toFix);
+      const eta = fixEta === null ? "----.-" : hhmm(new Date(fixEta));
       const entry = fms.holdEntryFor(fms.route);
       const exitPrompt = hold.status === "IN PROGRESS" ? prompt("EXIT HOLD>") : hold.status === "EXIT ARMED" ? prompt("RESUME HOLD>") : undefined;
       return [

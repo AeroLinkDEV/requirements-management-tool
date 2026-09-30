@@ -104,6 +104,12 @@ export type ProfileInput = {
     ident: string; legDistance: number | null;
     /** Predicted ground speed on the leg into it, or null where the leg cannot be flown with progress (kinematics.ts). */
     groundSpeed: number | null; constraint: AltitudeConstraint | null; endOfDescent: boolean;
+    /**
+     * The time to fly the leg, hours, where its path is not the straight line of `legDistance` (the manual hold being
+     * flown: the path around the pattern to the next crossing, timed through the wind). `legDistance` stays the direct
+     * distance that is shown.
+     */
+    hours?: number;
     basis?: PredictionBasis; missed?: boolean;
     /** From this waypoint on the prediction rests on this labelled assumption (CONDITIONAL). */
     assumption?: string;
@@ -193,7 +199,8 @@ function targetMet(target: AltitudeConstraint | null, altitude: number) {
  * The time to fly a leg, hours. A leg without a known length or ground speed contributes none: its point, and every point
  * after it, is already unknown (the basis), so no time or fuel is ever computed across it from an invented speed.
  */
-const legHours = (w: ProfileInput["waypoints"][number]) => (w.legDistance === null || w.groundSpeed === null ? 0 : w.legDistance / w.groundSpeed);
+const legHours = (w: ProfileInput["waypoints"][number]) =>
+  (w.legDistance === null || w.groundSpeed === null ? 0 : w.hours ?? w.legDistance / w.groundSpeed);
 
 export function computeProfile(input: ProfileInput): Profile {
   const { waypoints, cruiseAltitude, pathAngle } = input;
