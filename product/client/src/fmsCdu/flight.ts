@@ -680,7 +680,8 @@ export class FlightSimulator {
     }
     // The commanded vertical speed is reached at the vertical acceleration limit, so captures have a transient.
     verticalSpeed = fms.verticalSpeed + clamp(verticalSpeed - fms.verticalSpeed, -this.profile.verticalAccel.value * dt, this.profile.verticalAccel.value * dt);
-    const altitude = fms.altitude + (verticalSpeed * dt) / 60;
+    // Truth integrates from the physical height, never from what the altimeter reads (B1.1).
+    const altitude = fms.physicalAltitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
     // Bank and pitch too: they tilt the GPS antennas. The point-mass model has no attitude of its own, so pitch is the
     // air-relative flight-path angle, over at least PITCH_SPEED_FLOOR of airspeed and within PITCH_LIMIT (laboratory).

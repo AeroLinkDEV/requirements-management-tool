@@ -211,8 +211,10 @@ export const AIRCRAFT_PARTS: AircraftPart[] = [
 ];
 
 /**
- * What the view needs of the aircraft. `hoverData` is the helicopter profile's "hover data on the display" flag
- * (AircraftData.helicopter.hoverData), when the aircraft data carries it.
+ * What the view needs of the aircraft. Its `altitude` is the physical height (AircraftData.physicalAltitude): the view
+ * shows the world as it is, not where an erroneous or mis-set altimeter would put the aircraft. `hoverData` is the
+ * helicopter profile's "hover data on the display" flag (AircraftData.helicopter.hoverData), when the aircraft data
+ * carries it.
  */
 export type AircraftSample = Pick<AircraftData, "position" | "altitude" | "heading" | "pitch" | "bank"> & { hoverData?: boolean };
 
