@@ -225,12 +225,15 @@ test('with no imagery (outside the coverage, or the service\'s blank filler) the
     await drawn(page)
     expect((await shares(page)).imagery, `${mode}: no imagery drawn`).toBeLessThan(0.03)
     await expect(view.locator('.fmsOtwNote')).toHaveCount(0)
-    // What is drawn instead is the relief, as choosing Relief draws it: not a flat colour.
-    const fallback = await view.screenshot()
-    await choose(page, 'Window ground', 'Relief')
-    await drawn(page)
-    expect(await changedSince(page, fallback), `${mode}: the relief, as Relief draws it`).toBeLessThan(0.05)
-    await choose(page, 'Window ground', 'Imagery')
+    // What is drawn instead is the relief, as choosing Relief draws it: not a flat colour. (Once: the fallback is the
+    // same code whichever way the imagery was missing, and each draw is slow on a software renderer.)
+    if (mode === 'none') {
+      const fallback = await view.screenshot()
+      await choose(page, 'Window ground', 'Relief')
+      await drawn(page)
+      expect(await changedSince(page, fallback), `${mode}: the relief, as Relief draws it`).toBeLessThan(0.05)
+      await choose(page, 'Window ground', 'Imagery')
+    }
     await page.getByRole('button', { name: 'Hide the view' }).click()
   }
   await page.goto('/tests/fixtures/fms-cdu.html?imagery=off')
