@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import fs, { existsSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { browserStoragePath, createBrowserStorage, removeBrowserStorage } from './browser-storage.mjs'
+import BrowserStorageReporter from './browser-storage-reporter.mjs'
 
 // An OS handle, not a mocked remover: Windows refuses deletion until the holder releases it.
 test('a Windows deletion failure retains ownership and can be retried after the handle closes', {
@@ -19,16 +20,30 @@ test('a Windows deletion failure retains ownership and can be retried after the 
     '$f=[IO.File]::Open($env:LOCKED_FILE,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite); try { [Console]::WriteLine("locked"); Start-Sleep -Seconds 20 } finally { $f.Dispose() }'],
   { windowsHide: true, env: { ...process.env, LOCKED_FILE: state.database }, stdio: ['ignore', 'pipe', 'pipe'] })
   let stderr = ''; holder.stderr.on('data', chunk => { stderr += chunk })
-  const closed = once(holder, 'exit', { signal: AbortSignal.timeout(25_000) })
+  const closed = once(holder, 'exit')
   // Observe early spawn failures even while waiting for the readiness message.
   void closed.catch(() => {})
   try {
-    const [ready] = await once(holder.stdout, 'data', { signal: AbortSignal.timeout(10_000) })
+    // Startup shares this test's existing 30-second deadline. A separate ten-second
+    // timer measured PowerShell scheduling, not the storage contract under test.
+    const [ready] = await Promise.race([
+      once(holder.stdout, 'data', { signal: t.signal }),
+      closed.then(([code, signal]) => { throw new Error(`Handle holder exited before readiness (${code ?? signal}): ${stderr}`) }),
+    ])
     assert.match(ready.toString(), /locked/)
     t.diagnostic('exclusive-delete handle acquired')
     assert.throws(() => removeBrowserStorage(runId), { code: 'EPERM' })
     assert.equal(readFileSync(join(state.root, '.owner'), 'utf8'), runId)
     assert.equal(readFileSync(state.database, 'utf8'), 'owned database')
+    // The reporter starts while the OS handle is still held. Its await must cover
+    // release and complete cleanup, rather than fail a run with passing assertions.
+    const release = setTimeout(() => holder.kill(), 1_000)
+    try {
+      assert.equal(await new BrowserStorageReporter({ runId }).onEnd({ status: 'passed' }), undefined)
+      assert.equal(existsSync(state.root), false)
+    } finally {
+      clearTimeout(release)
+    }
   } finally {
     // Terminating this one owned helper releases its native handle. Do not rely on
     // Console.ReadLine accepting redirected stdin on a headless Windows runner.
@@ -36,7 +51,7 @@ test('a Windows deletion failure retains ownership and can be retried after the 
     await closed
     t.diagnostic(`handle holder exited${stderr ? `: ${stderr}` : ''}`)
     // Restore only this fixture's marker after exercising the pre-fix regression.
-    if (!existsSync(join(state.root, '.owner'))) writeFileSync(join(state.root, '.owner'), runId, { flag: 'wx' })
+    if (existsSync(state.root) && !existsSync(join(state.root, '.owner'))) writeFileSync(join(state.root, '.owner'), runId, { flag: 'wx' })
     removeBrowserStorage(runId)
   }
   assert.equal(existsSync(state.root), false)
@@ -72,7 +87,7 @@ test('the Playwright CLI fails for incomplete cleanup and succeeds after ownersh
   }
 })
 
-test('failure removing the emptied directory restores its marker for retry', t => {
+test('failure removing the emptied directory restores its marker and fails the run after bounded retries', async t => {
   const runId = randomUUID(); const state = createBrowserStorage(runId)
   const original = fs.rmdirSync
   // Inject the otherwise timing-dependent final directory failure at the OS boundary.
@@ -83,6 +98,8 @@ test('failure removing the emptied directory restores its marker for retry', t =
   syncBuiltinESMExports()
   try {
     assert.throws(() => removeBrowserStorage(runId), { code: 'EPERM' })
+    assert.equal(readFileSync(join(state.root, '.owner'), 'utf8'), runId)
+    assert.deepEqual(await new BrowserStorageReporter({ runId }).onEnd({ status: 'passed' }), { status: 'failed' })
     assert.equal(readFileSync(join(state.root, '.owner'), 'utf8'), runId)
   } finally {
     t.mock.restoreAll(); syncBuiltinESMExports()
