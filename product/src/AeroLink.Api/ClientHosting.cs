@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
 
 namespace AeroLink.Api;
@@ -105,9 +106,14 @@ public static class ClientHosting
     public static void UseAeroLinkClient(this WebApplication app, string clientRoot)
     {
         var files = new PhysicalFileProvider(clientRoot);
+        // The default map has no binary glTF, so the FMS Test Bench's helicopter model was answered with the entry
+        // document and the chase view fell back to placeholder shapes in production (the dev server knew the type).
+        var types = new FileExtensionContentTypeProvider();
+        types.Mappings[".glb"] = "model/gltf-binary";
         app.UseStaticFiles(new StaticFileOptions
         {
             FileProvider = files,
+            ContentTypeProvider = types,
             OnPrepareResponse = context =>
             {
                 // Everything under /assets carries a content hash in its name, so it can be cached forever and
