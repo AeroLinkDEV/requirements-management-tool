@@ -7,6 +7,7 @@ import {
 } from "./outTheWindow";
 import { GroundImagery, IMAGERY_MAX_ZOOM, browserImageryDecoder, type ImagerySource } from "./groundImagery";
 import { MAIN_ROTOR_RAD_S, createAircraftModel } from "./otwAircraftModel";
+import { createObstacleLayer } from "./otwObstacles";
 import { workerReliefShader } from "./reliefShader";
 import {
   ABSOLUTE_BANDS_FT, ABSOLUTE_RGB, CAUTION_RGB, DANGER_RGB, RELATIVE_CAUTION_FT, RELATIVE_DANGER_FT, type TerrainColouring,
@@ -339,6 +340,10 @@ async function startScene(
   // has loaded, or if it cannot. The scene draws only on change, so it asks for a frame once the model is there.
   const helicopter = createAircraftModel(Cesium, scene);
   void helicopter.ready.then(outcome => { container.dataset.model = "loaded" in outcome ? "glb" : "fallback"; scene.requestRender(); });
+  // The FAA obstacles near the bench areas (otwObstacles.ts, Brief C), coloured as the terrain colouring colours their
+  // tops; drawn once the extract has loaded, which the scene element records (the count, or "failed").
+  const obstacles = createObstacleLayer(Cesium, scene);
+  void obstacles.ready.then(outcome => { container.dataset.obstacles = "drawn" in outcome ? String(outcome.drawn) : "failed"; scene.requestRender(); });
   const orientation = new Cesium.HeadingPitchRoll();
   // The plan-view symbol: the rotor disc, the fuselage and the tail boom, nose up.
   const symbol = canvas(48);
@@ -378,6 +383,7 @@ async function startScene(
       });
     }
     if (colouringChoice === "relative") relative.uniforms.aircraft = air.altitude * FT;
+    obstacles.update(air.altitude, colouringChoice);
     const at = Cesium.Cartesian3.fromDegrees(air.position.lon, air.position.lat, air.altitude * FT);
     ownship.show = state.view === "map";
     ownship.position = at;
@@ -438,6 +444,7 @@ async function startScene(
     },
     destroy: () => {
       helicopter.destroy();
+      obstacles.destroy();
       scene.preRender.removeEventListener(onFrame);
       scene.postRender.removeEventListener(counted);
       shader.dispose();
