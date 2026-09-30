@@ -1531,8 +1531,8 @@ export class FlightSimulator {
         [{ axis: "roll", mode: "NAV" }]);
     }
     if (this.lateral === "LNAV") return managed;
-    // Capture when the managed path is close and the aircraft is not heading away from it.
-    if (this.lnavArmed && managed.desiredTrack !== null && Math.abs(managed.crossTrack) < 0.6 && Math.abs(angleDiff(this.fms.track, managed.desiredTrack)) < 100) {
+    // Capture during a flight step when the path is close; a paused guidance refresh leaves NAV armed.
+    if (dt > 0 && this.lnavArmed && managed.desiredTrack !== null && Math.abs(managed.crossTrack) < 0.6 && Math.abs(angleDiff(this.fms.track, managed.desiredTrack)) < 100) {
       this.lateral = "LNAV";
       this.lnavArmed = false;
       return managed;
