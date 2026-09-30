@@ -2787,6 +2787,7 @@ choices are created as focused issues only when their trigger and acceptance bou
 - **Decision:** The civil SAR helicopter profile is equipped and configured for Stage F as follows.
   1. **TACAN on.** DME/DME may use TACAN ranges, and VOR/DME/TCN may use one TACAN. M300 1-4 admits civil TACAN "when proven accurate".
   2. **AHRS/APIRS KALMAN mode equipped**, with a 2-minute coast after GPS loss and then dead reckoning (M300 1-5, 12-23 to 12-24). It is not RNP-applicable (15-4).
+     - **Clarification (Sean, 30 September 2026, about 7:40 PM ET, answering Astra's plan review item SF-02; relayed by session 1):** at KALMAN expiry, KALMAN becomes ineligible, and selection takes the best remaining usable source, DVS included when healthy. Dead reckoning follows only when nothing else is usable. The wording above is unchanged; this clarifies it.
   3. **Doppler (DVS) on**, at the lowest priority and without integrity in the civil option (M300 12-20).
   4. **Error limits on an RNP basis** (M300 1-3's configurable choice).
   5. **AUTO-tuned VORs are eligible for VOR/DME navigation.** This departs from M300 12-19, which navigates on manually tuned stations only. It is a named profile option (`autoVorNavigation`) carrying this decision as provenance and citing 12-19 as the manual default it overrides.
