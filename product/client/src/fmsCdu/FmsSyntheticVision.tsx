@@ -30,10 +30,10 @@ export function SyntheticVisionLayer({ air, tiles, cx, cy, pitchPx }: { air: Air
     if (!pen) return;
     const view: SvsView = { width: SIDE, height: SIDE, centreX: SIDE / 2, centreY: SIDE / 2, focal: pitchPx / Math.tan(Math.PI / 180) };
     const image = pen.createImageData(SIDE, SIDE);
-    renderSyntheticVision(image.data, view, { lat, lon, altitude: air.altitude * FT, heading: air.heading, pitch: air.pitch },
+    renderSyntheticVision(image.data, view, { lat, lon, altitude: air.physicalAltitude * FT, heading: air.heading, pitch: air.pitch },
       (pointLat, pointLon) => tiles.heightAt(pointLat, pointLon, SVS_ZOOM));
     pen.putImageData(image, 0, 0);
-  }, [lat, lon, air.altitude, air.heading, air.pitch, tiles, pitchPx, arrivals]);
+  }, [lat, lon, air.physicalAltitude, air.heading, air.pitch, tiles, pitchPx, arrivals]);
 
   return (
     <foreignObject x={cx - SIDE / 2} y={cy - SIDE / 2} width={SIDE} height={SIDE} data-testid="pfd-svs">
