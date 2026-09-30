@@ -58,6 +58,7 @@
     "fms-prediction-endpoints.spec.ts"
   ],
   "rendered": [
+    "layout-settled.spec.ts",
     "review-workflow-rendered.spec.ts",
     "code-source-rendered.spec.ts",
     "code-evidence-rendered.spec.ts",
