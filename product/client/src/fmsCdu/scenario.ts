@@ -38,7 +38,12 @@ export type Trigger =
   /** This many seconds after the step before it finished: the timing inside a stage, wherever the stage began. */
   | { kind: "after"; seconds: number }
   /** When the aircraft is at or below this altitude, feet MSL (over the declared sea, its radio height). */
-  | { kind: "below"; feet: number };
+  | { kind: "below"; feet: number }
+  /**
+   * When the altimeter reads at or above this altitude, feet MSL, to the foot: a crew action on reaching an altitude
+   * (the truth settles onto a captured altitude without ever reaching it exactly).
+   */
+  | { kind: "above"; feet: number };
 
 export type Action =
   | { kind: "keys"; keys: CduFunction[] }
@@ -56,8 +61,11 @@ export type Action =
    * toward it, hold the present altitude, or select a speed (knots). Each field given is applied, in that order.
    */
   | { kind: "autopilot"; altitude?: number; verticalSpeed?: number; hold?: boolean; speed?: number; heading?: number; lnav?: boolean; hover?: boolean; transitionUp?: boolean }
-  /** The autopilot's engaged mode on each axis (collective, pitch, roll), as the helicopter FMA shows them. */
-  | { kind: "expectAfcs"; collective?: string; pitch?: string; roll?: string }
+  /**
+   * The autopilot's engaged mode on each axis (collective, pitch, roll), as the helicopter FMA shows them; and the
+   * low-height protection caption the PFD shows ("LOW HT", "LOW HT OFF", or "NONE" for no caption).
+   */
+  | { kind: "expectAfcs"; collective?: string; pitch?: string; roll?: string; lowHeight?: "LOW HT" | "LOW HT OFF" | "NONE" }
   /**
    * The aircraft's state; each part given is checked. Ground speed within [minGroundSpeed, maxGroundSpeed] kt; track
    * within trackTolerance (5 by default) of track; radio height radioHeight, or altitude (MSL) altitude, ± heightTolerance
@@ -145,7 +153,7 @@ export const linePattern = (text: string) =>
 /** The step in words, for the run log, the report and the test procedure. After the first step, "start" means "then". */
 export function describeStep(step: ScenarioStep, index = 0): string {
   const w = step.when;
-  const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "after" ? `${formatSeconds(w.seconds)} later` : w.kind === "below" ? `At or below ${w.feet} ft` : w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : `When ${w.waypoint} is the active waypoint`;
+  const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "after" ? `${formatSeconds(w.seconds)} later` : w.kind === "below" ? `At or below ${w.feet} ft` : w.kind === "above" ? `When the altimeter reads ${w.feet} ft or more` :w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : `When ${w.waypoint} is the active waypoint`;
   const a = step.action;
   const within = step.within ? ` within ${step.within} s` : "";
   const what = (() => {
@@ -163,7 +171,12 @@ export function describeStep(step: ScenarioStep, index = 0): string {
         a.speed !== undefined ? `select ${a.speed} kt` : null, a.heading !== undefined ? `select heading ${a.heading}°` : null, a.lnav ? "arm NAV" : null,
         a.hover ? "engage HOV" : null, a.transitionUp ? "engage TU" : null,
       ].filter(Boolean).join(", then ");
-      case "expectAfcs": return `check that the autopilot modes are ${[a.collective ?? "any", a.pitch ?? "any", a.roll ?? "any"].join(" | ")}${within}`;
+      case "expectAfcs": {
+        const modes = a.collective === undefined && a.pitch === undefined && a.roll === undefined ? null
+          : `the autopilot modes are ${[a.collective ?? "any", a.pitch ?? "any", a.roll ?? "any"].join(" | ")}`;
+        const caption = a.lowHeight === undefined ? null : a.lowHeight === "NONE" ? "no low-height caption is shown" : `the low-height caption is ${a.lowHeight}`;
+        return `check that ${[modes, caption].filter(Boolean).join(" and ")}${within}`;
+      }
       case "expectAircraft": {
         const parts = [
           a.minGroundSpeed !== undefined || a.maxGroundSpeed !== undefined ? `ground speed ${a.minGroundSpeed ?? 0} to ${a.maxGroundSpeed ?? "any"} kt` : null,
@@ -231,6 +244,7 @@ function triggerProblem(when: unknown): string | null {
     case "distance": return text(w.waypoint, IDENT) && finite(w.nm, 0.01, 1000) ? null : "a distance trigger needs a waypoint ident and nm between 0.01 and 1000";
     case "active": return text(w.waypoint, IDENT) ? null : "an active trigger needs a waypoint ident";
     case "below": return finite(w.feet, -1500, 60000) ? null : "a below trigger needs feet between -1500 and 60000";
+    case "above": return finite(w.feet, -1500, 60000) ? null : "an above trigger needs feet between -1500 and 60000";
     case "after": return finite(w.seconds, 0, MAX_RUN_SECONDS) ? null : "an after trigger needs seconds between 0 and 86400";
     default: return `unsupported trigger "${String(w.kind)}"`;
   }
@@ -267,7 +281,8 @@ function actionProblem(action: unknown): string | null {
     }
     case "expectAfcs": {
       const mode = (v: unknown) => v === undefined || text(v, /^[A-Z/-]{2,8}$/);
-      if (a.collective === undefined && a.pitch === undefined && a.roll === undefined) return "expectAfcs needs at least one of collective, pitch and roll";
+      if (a.collective === undefined && a.pitch === undefined && a.roll === undefined && a.lowHeight === undefined) return "expectAfcs needs at least one of collective, pitch, roll and lowHeight";
+      if (a.lowHeight !== undefined && !(["LOW HT", "LOW HT OFF", "NONE"] as unknown[]).includes(a.lowHeight)) return "expectAfcs lowHeight must be LOW HT, LOW HT OFF or NONE";
       return mode(a.collective) && mode(a.pitch) && mode(a.roll) ? null : "expectAfcs modes must be mode names";
     }
     case "expectAircraft": {
@@ -470,6 +485,7 @@ export class ScenarioRunner {
       case "time": return this.elapsed >= when.seconds - 1e-9;
       case "after": return this.elapsed >= this.previousAt + when.seconds - 1e-9;
       case "below": return this.fms.altitude <= when.feet + 1e-9;
+      case "above": return Math.round(this.fms.altitude) >= when.feet;
       case "distance": {
         const at = this.fms.coordinates(when.waypoint);
         return at !== undefined && distanceNm(this.fms.truePosition, at) <= when.nm;
@@ -568,10 +584,10 @@ export class ScenarioRunner {
       case "expectAfcs": {
         const sim = this.sim;
         if (!sim) throw new Error("expectAfcs needs the flight simulation, which this run was not given.");
-        const modes = sim.axisModes;
+        const modes = sim.axisModes, caption = sim.lowHeightCaption ?? "NONE";
         const ok = (action.collective === undefined || modes.collective === action.collective) && (action.pitch === undefined || modes.pitch === action.pitch)
-          && (action.roll === undefined || modes.roll === action.roll);
-        return { ok, actual: `${modes.collective} | ${modes.pitch} | ${modes.roll}` };
+          && (action.roll === undefined || modes.roll === action.roll) && (action.lowHeight === undefined || caption === action.lowHeight);
+        return { ok, actual: `${modes.collective} | ${modes.pitch} | ${modes.roll}${action.lowHeight === undefined ? "" : `, low height ${caption}`}` };
       }
       case "expectAircraft": {
         const ra = fms.radioHeight;
