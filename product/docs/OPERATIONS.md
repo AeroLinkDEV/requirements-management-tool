@@ -205,6 +205,15 @@ credentials are per-user), and neither carrying a secret:
   `AeroLinkRemoteDemo.ps1` rather than letting the version already in memory finish a transition whose
   subordinate scripts have just changed underneath it.
 
+  **Work hours hold the source ([DEC-149](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-149---production-redeploys-only-on-request-during-work-hours)).**
+  Monday to Friday, 08:00 to 18:00 US Eastern (wall-clock, so it follows daylight saving), a timed pass that
+  finds `origin/main` moved logs that it is holding and stops nothing, and a Start (the operator launcher or the
+  boot/logon recovery task) runs the revision already on disk instead of advancing. The pass still inspects, so
+  the instance badge keeps reporting how far production is behind. `REDEPLOY_AEROLINK_PRODUCTION.bat` records a
+  request and starts the installed reconciliation task, which then redeploys; the request lets one pass
+  through, is taken by the next pass whatever it decides, and is not honoured after two hours. Outside those
+  hours the timed pass redeploys as before.
+
   **The reconciler is a source reconciler, not a desired-state controller.** It does nothing when
   `origin/main` has not moved — including when the demo is not running. `STOP_AEROLINK_REMOTE_DEMO.bat` is a
   supported operator command and nothing persists a desired-up state, so a task that "healed" a stopped demo
@@ -570,6 +579,7 @@ separately proven transition plan.
 | `BACKUP_AEROLINK.bat` | Backup/recovery | `product/scripts/Backup-AeroLink.ps1` | `README.md`, this document, Managed Documentation; scheduled runner calls the PowerShell script directly | Backup automation and operator shortcuts may retain the path; keep stable root entry point. |
 | `CONFIGURE_AEROLINK_REMOTE_DEMO.bat` | Protected remote-demo scheduled recovery setup | `product/scripts/AeroLinkRemoteDemo.ps1 -Action Configure` with forwarded action/arguments | `docs/REMOTE_DEMO_OPERATOR.md`; remote-demo module error guidance | Recovery setup instructions may be copied to another host; keep stable root entry point. |
 | `CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat` | Dedicated HOME production source setup | `product/scripts/Configure-AeroLinkProductionSource.ps1` with forwarded action/arguments | This document; `docs/REMOTE_DEMO_OPERATOR.md` | Run once per HOME machine; the resulting configuration is per-user and outside source control. Keep stable root entry point. |
+| `REDEPLOY_AEROLINK_PRODUCTION.bat` | Request a HOME production redeploy during the DEC-149 work-hours hold | `product/scripts/AeroLinkRemoteDemo.ps1 -Action RequestRedeploy`, which records the request and starts the installed `AeroLinkProductionSourceReconcile` task | This document; `docs/REMOTE_DEMO_OPERATOR.md` | HOME operator action; agents run it when the owner asks for a redeploy. Keep stable root entry point. |
 | `REFRESH_AEROLINK_FROM_HOME.bat` | Explicit one-way HOME to work-laptop snapshot refresh | `product/scripts/Import-AeroLinkHomeSnapshot.ps1` | This document | Work-laptop operator action only; never invoked by startup, and refused on a HOME canonical installation. Keep stable root entry point. |
 | `INSTALL_AEROLINK_DOCUMENT_CONNECTOR.bat` | Connector/install/setup | `product/scripts/Install-AeroLinkDocumentConnector.ps1` | This document; `MANAGED_DOCUMENTATION_CENTER.md` | Per-user installation instructions and shortcuts may retain the path; keep stable root entry point. |
 | `RESTORE_AEROLINK.bat` | Backup/recovery and isolated restore validation | `product/scripts/Restore-AeroLink.ps1 -BackupArchive ... -TargetDatabase ...` | This document; usage text; historical delivery report | Recovery runbooks and desktop shortcuts may retain the path; keep stable root entry point. |

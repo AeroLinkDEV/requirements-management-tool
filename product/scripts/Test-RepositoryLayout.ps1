@@ -190,7 +190,7 @@ $requiredLaunchers = @(
     'START_AEROLINK_EMAIL_DEMO.bat', 'START_AEROLINK_SMTP4DEV.bat', 'AEROLINK_SMTP4DEV_STATUS.bat',
     'STOP_AEROLINK_SMTP4DEV.bat', 'TEST_AEROLINK_CHANGED.bat', 'VERIFY_AEROLINK_BACKUP.bat',
     'CONFIGURE_AEROLINK_PRODUCTION_SOURCE.bat', 'REFRESH_AEROLINK_FROM_HOME.bat',
-    'DECLARE_AEROLINK_INSTANCE.bat'
+    'DECLARE_AEROLINK_INSTANCE.bat', 'REDEPLOY_AEROLINK_PRODUCTION.bat'
 )
 $actualBatCmd = @(Get-ChildItem -LiteralPath $RepositoryRoot -File | Where-Object { $_.Extension -in '.bat', '.cmd' } | ForEach-Object Name)
 foreach ($name in $requiredLaunchers) { if ($name -notin $actualBatCmd) { Fail "Required root launcher is missing: $name" } }
