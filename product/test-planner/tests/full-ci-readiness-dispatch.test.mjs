@@ -177,9 +177,24 @@ const boundStep = () => {
 
 test('every read the requester makes retries transient errors, and no write is ever retried', () => {
   const step = boundStep()
-  const helper = step.match(/          read_api\(\) \{\n([^\n]*)\n          \}/)
+  const helper = step.match(/          read_api\(\) \{\n([\s\S]*?)\n          \}/)
   assert.ok(helper, 'reads go through one helper')
-  assert.match(helper[1], /curl --retry 4 --retry-delay 5 --retry-max-time 90 --fail-with-body --silent --show-error "\$\{headers\[@\]\}" "\$@"/)
+  assert.match(helper[1], /curl --retry 4 --retry-delay 5 --retry-max-time 90 --fail-with-body --silent --show-error --dump-header "\$RUNNER_TEMP\/read-api-headers" "\$\{headers\[@\]\}" "\$@" && return 0/)
+  // #1318: a failed read keeps curl's failure and reports the status and rate-limit headers it was refused with.
+  // Run the workflow's own helper with curl intercepted: it writes a refused response's headers and fails.
+  const scratch = mkdtempSync(join(tmpdir(), 'aerolink-read-api-'))
+  try {
+    const refused = 'HTTP/2 403\\r\\nx-ratelimit-limit: 1000\\r\\nx-ratelimit-remaining: 0\\r\\nx-ratelimit-reset: 1790000000\\r\\nx-ratelimit-resource: core\\r\\ncontent-type: application/json\\r\\n'
+    const script = `set -euo pipefail\nRUNNER_TEMP='${scratch.replace(/\\/g, '/')}'\nheaders=()\ncurl() { printf '${refused}' > "$RUNNER_TEMP/read-api-headers"; return 22; }\n${helper[0].replace(/^          /gm, '')}\nif read_api https://invalid.example; then echo PASSED; else echo "FAILED $?"; fi`
+    const result = spawnSync(bash, ['--noprofile', '--norc', '-c', script], { encoding: 'utf8', timeout: 10_000 })
+    assert.ifError(result.error)
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /::warning::GitHub API read failed: HTTP\/2 403 x-ratelimit-limit: 1000 x-ratelimit-remaining: 0 x-ratelimit-reset: 1790000000 x-ratelimit-resource: core/)
+    assert.doesNotMatch(result.stdout, /content-type/)
+    assert.match(result.stdout, /FAILED 22$/m)
+  } finally {
+    rmSync(scratch, { recursive: true, force: true })
+  }
   // Every other curl in the step is a write, and none of them retries: a retried dispatch could start a second
   // Full run, and a retried check-run publication could publish twice.
   const others = [...step.matchAll(/^ *curl (?:[^\n]*\\\n)*[^\n]*/gm)].map(match => match[0]).filter(call => !call.includes('--retry 4'))
@@ -196,7 +211,7 @@ test('every read the requester makes retries transient errors, and no write is e
   assert.doesNotMatch(publish, /--retry/)
 })
 
-test('the requester waits on a time budget, polling every 10s for two minutes and then every 30s', () => {
+test('the requester waits on a time budget, polling every 10s for two minutes, every 30s to ten, then every 120s', () => {
   const step = boundStep()
   const timeout = Number(requester.match(/dispatch-and-bind:[\s\S]*?timeout-minutes: (\d+)/)[1])
   const budget = Number(step.match(/wait_deadline=\$\(\(wait_started \+ (\d+)\)\)/)[1])
@@ -207,11 +222,15 @@ test('the requester waits on a time budget, polling every 10s for two minutes an
   assert.doesNotMatch(step, /seq 1 420|sleep 10; continue/)
   const pause = step.match(/          poll_pause\(\) \{\n[\s\S]*?\n          \}/)[0].replace(/^          /gm, '')
   // Run the workflow's own function with sleep intercepted. SECONDS is bash's clock and can be set directly.
-  const script = `set -euo pipefail\nsleep() { printf '%s\\n' "$1"; }\n${pause}\nwait_started=0\nfor at in 0 60 119 120 600 4100; do SECONDS=$at; poll_pause; done`
+  const script = `set -euo pipefail\nsleep() { printf '%s\\n' "$1"; }\n${pause}\nwait_started=0\nfor at in 0 60 119 120 599 600 4100; do SECONDS=$at; poll_pause; done`
   const result = spawnSync(bash, ['--noprofile', '--norc', '-c', script], { encoding: 'utf8', timeout: 10_000 })
   assert.ifError(result.error)
   assert.equal(result.status, 0, result.stderr)
-  assert.deepEqual(result.stdout.trim().split('\n'), ['10', '10', '10', '30', '30', '30'])
+  // #1318: at a steady 30s one requester spent about 300 reads an hour of the repository's shared budget.
+  assert.deepEqual(result.stdout.trim().split('\n'), ['10', '10', '10', '30', '30', '120', '120'])
+  // The last poll can start just inside the deadline, then read (two reads, at most 90s of retries each) and
+  // pause once more before the loop ends: the job's timeout must still cover it.
+  assert.ok(timeout * 60 - budget >= 2 * 90 + 120, `timeout-minutes ${timeout} must cover a last poll and its 120s pause`)
 })
 
 test('the actual required aggregate refuses every non-success prerequisite result', () => {
