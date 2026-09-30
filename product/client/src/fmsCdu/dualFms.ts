@@ -71,7 +71,10 @@ export class DualFmsSystem {
         system.editor = side; return true;
       },
       finishEdit(executed) {
-        if (executed && system.operation === "SYNC" && system.link) system.peer(side).receiveComputerPlan(system.unit(side).computerPlan, false);
+        if (executed && system.operation === "SYNC" && system.link) {
+          system.peer(side).receiveComputerPlan(system.unit(side).computerPlan, false);
+          system.flights[2 - side].receiveSynchronizedProgress(system.flights[side - 1]);
+        }
         if (system.editor === side) system.editor = null;
         system.notify();
       },
@@ -120,6 +123,7 @@ export class DualFmsSystem {
       if (refused) { this.refuse(side, refused); this.notify(); return; }
       const own = this.unit(side), peer = this.peer(side);
       peer.receiveComputerSettings(own.computerSettings); peer.receiveComputerPlan(own.computerPlan, false);
+      this.flights[2 - side].receiveSynchronizedProgress(this.flights[side - 1]);
       this.settings = this.computers.map(unit => JSON.stringify(unit.computerSettings));
       this.operation = "SYNC"; this.editor = null; this.phaseDifferentSince = null; this.navSide = side;
       this.reconcile(); this.notify();

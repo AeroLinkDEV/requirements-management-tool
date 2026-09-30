@@ -182,7 +182,7 @@ export class ScriptedFms implements CduBackend {
   private localSolution: CivilSolution | null = null;
   private receiverCommands = true;
   private readonly benchRaim: boolean;
-  private crossfillPending: Pick<ScriptedFms["computerPlan"], "points" | "moving" | "pilot"> | null = null;
+  private crossfillPending: Pick<ScriptedFms["computerPlan"], "points" | "moving" | "pilot" | "sar" | "hover"> | null = null;
   private fuel = { quantity: 1850, flow: 540, reserve: 400 };
   private marks: { ident: string; position: LatLon }[] = [];
   private points: Record<string, LatLon> = {};
@@ -2114,14 +2114,15 @@ export class ScriptedFms implements CduBackend {
     return structuredClone({ active: this.active, secondary: this.secondaryRoute, vnav: this.vnav, legStart: this.legStart, sequenced: this.sequenced,
       points: this.points, moving: this.moving, pilot: this.pilot, pins: this.pins, pinnedIn: this.pinnedIn ? this.pinnedIn.db.exportData() : null,
       pinnedFas: this.pinnedFas, executedApproach: this.executedApproach, advisoryReference: this.advisoryReference,
-      flownHistory: this.flownHistory, historyOrigin: this.historyOrigin, backtrackGeneration: this.backtrackGeneration });
+      flownHistory: this.flownHistory, historyOrigin: this.historyOrigin, backtrackGeneration: this.backtrackGeneration,
+      sar: { ...this.sar, pending: null }, hover: this.hover.active });
   }
   receiveComputerPlan(data: ScriptedFms["computerPlan"], modification: boolean, secondary = false) {
     if (modification && this.modified) { this.advisory("!CDU ENTRY CONFLICT"); return false; }
     const next = structuredClone(data);
     const route = secondary ? next.secondary : next.active;
     if (!route) { this.advisory("NO INACTIVE ROUTE"); return false; }
-    if (modification) { this.modified = route; this.approachSelectionPending = true; this.crossfillPending = { points: next.points, moving: next.moving, pilot: next.pilot }; }
+    if (modification) { this.modified = route; this.approachSelectionPending = true; this.crossfillPending = { points: next.points, moving: next.moving, pilot: next.pilot, sar: next.sar, hover: next.hover }; }
     else {
       this.active = route; this.secondaryRoute = next.secondary; Object.assign(this.vnav, next.vnav);
       this.legStart = next.legStart; this.sequenced = next.sequenced; this.pins = next.pins;
@@ -2131,9 +2132,24 @@ export class ScriptedFms implements CduBackend {
       this.flownHistory = next.flownHistory; this.historyOrigin = next.historyOrigin;
       if (this.backtrackGeneration !== next.backtrackGeneration) this.leaveProceduresForBacktrack();
       this.backtrackGeneration = next.backtrackGeneration;
+      this.receiveComputerProcedures(next, route);
     }
     if (!modification) { this.points = next.points; this.moving = next.moving; this.pilot = next.pilot; }
     this.emit(); return true;
+  }
+  private receiveComputerProcedures(data: Pick<ScriptedFms["computerPlan"], "sar" | "hover">, route: Route, crossfill = false) {
+    const search = data.sar.active && route.legs.some(leg => leg.kind === "wpt" && leg.qualifier === "/S" && leg.ident === data.sar.id[data.sar.active!]);
+    Object.assign(this.sar, data.sar, { pending: null, active: search ? data.sar.active : null, status: search ? crossfill ? "ARMED" : data.sar.status : null });
+    const active = data.hover && route.legs.some(leg => leg.kind === "wpt" && (leg.ident === "TDN" || leg.ident === "MRK"));
+    // Procedure IDs belong to the local controller; replacing the geometry must invalidate its previous join/TD state.
+    const prior = this.hover.active, next = active ? data.hover : null;
+    const geometry = (procedure: typeof next) => procedure ? { mark: procedure.mark, finalTrack: procedure.finalTrack, dtra: procedure.dtra, join: procedure.join } : null;
+    if (JSON.stringify(geometry(prior)) !== JSON.stringify(geometry(next))) {
+      const committed = next ? { ...next, id: ++this.hover.procedures } : null;
+      Object.assign(this.hover, { active: committed, status: committed ? "ACT" : "NONE", mark: committed?.mark ?? null,
+        finalTrack: committed?.finalTrack ?? null, dtra: committed?.dtra ?? null, requestData: null, refused: null, refusedReason: null, functionLost: false });
+    }
+    this.pendingHoverPoints = null; this.pendingJoin = null;
   }
   get localNavigationSolution() { return this.localSolution ? structuredClone(this.localSolution) : this.navigation.current; }
   get navigationWindEstimate() { return this.navigation.windEstimate; }
@@ -3256,7 +3272,8 @@ export class ScriptedFms implements CduBackend {
     if (!route) return;
     // The hover procedure executes only with a valid radio height (M300 E-27: RALT FAILED); the modification stays.
     const hover = this.hover.status === "MOD" && route.legs.some(leg => leg.kind === "wpt" && leg.ident === "TDN");
-    if (hover && this.radioHeight.status !== "NORMAL") { this.alert(alert("RALT FAILED")); return; }
+    const crossfillHover = this.crossfillPending?.hover && route.legs.some(leg => leg.kind === "wpt" && leg.ident === "TDN");
+    if ((hover || crossfillHover) && this.radioHeight.status !== "NORMAL") { this.alert(alert("RALT FAILED")); return; }
     if (this.directPending && !this.onGround && !this.specialProcedureActive()) this.flownHistory.push(this.historyPpos());
     if (hover) {
       const h = this.hover;
@@ -3293,7 +3310,11 @@ export class ScriptedFms implements CduBackend {
       this.flownHistory = []; this.backtrackPending = false; this.backtrackGeneration++;
       this.leaveProceduresForBacktrack();
     }
-    if (this.crossfillPending) { Object.assign(this, this.crossfillPending); this.crossfillPending = null; }
+    if (this.crossfillPending) {
+      const pending = this.crossfillPending;
+      this.points = pending.points; this.moving = pending.moving; this.pilot = pending.pilot;
+      this.receiveComputerProcedures(pending, route, true); this.crossfillPending = null;
+    }
     // Reselecting even the same procedure starts fresh MAP/phase authority only at a successful EXEC.
     if (this.approachSelectionPending) this.executedApproach = null;
     this.approachSelectionPending = false;

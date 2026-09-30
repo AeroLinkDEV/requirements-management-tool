@@ -610,6 +610,15 @@ export class FlightSimulator {
     }
   }
 
+  /** Accepted SYNC copies current procedure progress; each computer subsequently computes its own guidance. */
+  receiveSynchronizedProgress(source: FlightSimulator) {
+    if (JSON.stringify(this.fms.activeRoute) !== JSON.stringify(source.fms.activeRoute)) return;
+    this.sarPlan = this.fms.sar.status === "IN PROGRESS" ? structuredClone(source.sarPlan) : null;
+    this.holdPlan = this.fms.activeRoute.hold?.status === "IN PROGRESS" ? structuredClone(source.holdPlan) : null;
+    this.joinPlan = source.joinPlan && this.fms.hover.active && JSON.stringify(this.fms.hoverJoin) === JSON.stringify(source.fms.hoverJoin)
+      ? { ...structuredClone(source.joinPlan), id: this.fms.hover.active.id } : null;
+  }
+
   /** An unselected computer computes its own route guidance against the common aircraft, without integrating physics. */
   observe(dt: number) {
     const fms = this.fms;

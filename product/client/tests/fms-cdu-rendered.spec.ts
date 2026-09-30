@@ -244,7 +244,7 @@ test('Fly moves the aircraft along the route on the map at the chosen rate, and 
   // waypoint is proved in the logic tier).
   await expect.poll(toGo).toBeLessThan(start - 2)
   await expect(map).toHaveAttribute('aria-label', /LNAV mode, active waypoint MUN/)
-  await expect(page.getByLabel('Guidance')).toContainText('LNAV')
+  await expect(page.getByLabel('Guidance', { exact: true })).toContainText('LNAV')
   await page.getByRole('button', { name: 'Pause' }).click()
   const paused = await readout.innerText()
   // Unpaused, a second at 64 times would move the aircraft about two miles.
@@ -481,7 +481,7 @@ test('the bench tools are tabs under the cockpit, keyboard-navigable, and the ch
   await page.goto('/tests/fixtures/fms-cdu.html')
   await expect(page.locator('.fmsCdu')).toBeVisible()
   const tabs = page.getByRole('tablist', { name: 'Bench tools' }).getByRole('tab')
-  await expect(tabs).toHaveText(['Scenarios', 'Conditions', 'GPS sensors', 'Nav data', 'Lighting and keys'])
+  await expect(tabs).toHaveText(['Scenarios', 'Conditions', 'GPS sensors', 'Dual FMS and radios', 'Nav data', 'Lighting and keys'])
   await expect(page.getByRole('tab', { name: 'Scenarios' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('region', { name: 'Scenarios' })).toBeVisible()
   await tab(page, 'GPS sensors')
@@ -493,6 +493,8 @@ test('the bench tools are tabs under the cockpit, keyboard-navigable, and the ch
   await expect(page.getByRole('tab', { name: 'GPS sensors' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('region', { name: 'Sensor routing' })).toBeVisible()
   await page.getByRole('tab', { name: 'GPS sensors' }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('tab', { name: 'Dual FMS and radios' })).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('ArrowRight')
   await expect(page.getByRole('tab', { name: 'Nav data' })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByLabel('ARINC 424 navigation data file')).toBeVisible()
@@ -577,6 +579,11 @@ test('AUTO keeps GPS 2 after GPS 1 recovers: the strip says so, GPS 1 shows as a
 
 test('the FMS GPS selection is set from the routing strip, and the integrity condition holds the satellite masking', async ({ page }) => {
   await open(page)
+  // This owner tests local receiver AUTO selection. Synchronized best-source selection has its own dual-FMS owner.
+  await key(page, 'INIT_REF').click()
+  await key(page, 'LSK5L').click() // SETUP
+  await key(page, 'LSK5L').click() // Request INDEPENDENT
+  await key(page, 'LSK6R').click() // Confirm without interrupting the shared receiver environment.
   await tab(page, 'GPS sensors')
   const routing = page.getByRole('img', { name: /^Sensor routing/ })
   // In use and standby are the FMS's own judgement of each receiver: GPS 2 usable, so an eligible standby.
@@ -755,8 +762,8 @@ test('the PinS crew continuation requires MAP passage and the actual chart condi
   await expect(continueButton).toBeEnabled()
   await continueButton.locator('..').screenshot({ path: test.info().outputPath('pins-crew-conditions.png') })
   await continueButton.click()
-  await expect(page.getByLabel('Guidance')).toContainText('crew flying the visual segment')
-  await expect(page.getByLabel('Guidance')).toContainText('HDG')
+  await expect(page.getByLabel('Guidance', { exact: true })).toContainText('crew flying the visual segment')
+  await expect(page.getByLabel('Guidance', { exact: true })).toContainText('HDG')
   await page.locator('.fmsBench').screenshot({ path: test.info().outputPath('pins-crew-continuation.png') })
 })
 
