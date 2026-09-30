@@ -1,9 +1,11 @@
 import { expect, logicTest as test } from './isolated-client-test'
+import { aircraftData } from '../src/fmsCdu/efis'
 import { FlightSimulator, SAR_SEARCH_WAYPOINTS, angleDiff, legGeometry, racetrackOutline, sarTrack } from '../src/fmsCdu/flight'
 import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
 import { HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { stimulusFor, type GpsOp } from '../src/fmsCdu/gpsStimulus'
+import { radiusAt } from '../src/fmsCdu/holds'
 import { checkAtTdn, planTransition } from '../src/fmsCdu/transition'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
@@ -299,6 +301,135 @@ test('the hold is a ground racetrack in any wind, either turn: the inbound leg i
   }
 })
 
+test('the hold entry advisories: DIRECT, TEARDROP and PARALLEL HOLD ENTRY a minute before the fix on track inbound; DIRECT leaves at the fix, the others at the second passage (D-H, M300 10-2, 10-4, 10-6)', () => {
+  const cases: { changes: [string, CduFunction][]; text: string; passes: number }[] = [
+    { changes: [], text: 'DIRECT HOLD ENTRY', passes: 1 },
+    { changes: [['263', 'LSK3L']], text: 'TEARDROP HOLD ENTRY', passes: 2 },
+    { changes: [['263', 'LSK3L'], ['', 'LSK2L']], text: 'PARALLEL HOLD ENTRY', passes: 2 },
+  ]
+  for (const c of cases) {
+    const { unit, fly } = setup()
+    holdAtRdg(unit, ...c.changes)
+    const rdg = unit.coordinates('RDG')!
+    const scratch = () => screenText(unit.screen())[13].trim()
+    let toFix: number | null = null
+    fly(3600, () => { if (scratch() === c.text) { toFix = (distanceNm(unit.position, rdg) / unit.groundSpeed) * 3600; return true } })
+    // On track inbound: shown one minute before the fix (the first one-second step inside it).
+    expect(toFix, c.text).not.toBeNull()
+    expect(toFix!, c.text).toBeLessThanOrEqual(60)
+    expect(toFix!, c.text).toBeGreaterThan(58)
+    // An advisory: MSG stays dark.
+    expect(unit.lamps().has('MSG'), c.text).toBe(false)
+    // Passages of the fix: local minima of the distance to it within a mile.
+    let passes = 0, before = Infinity, last = Infinity
+    const shownAtPass: boolean[] = []
+    fly(1800, () => {
+      const d = distanceNm(rdg, unit.position)
+      if (last < before && last <= d && last < 1) { passes += 1; shownAtPass.push(scratch() === c.text) }
+      before = last
+      last = d
+      return passes >= 2
+    })
+    // Still shown after each passage before the last it waits for, gone after that one.
+    expect(shownAtPass, c.text).toEqual(c.passes === 1 ? [false, false] : [true, false])
+  }
+})
+
+test('the entries flown in a 30 kt wind from four azimuths: the teardrop on a 40 degree ground track for the leg, the parallel outbound for 2.6 turn radii, each on its side (D-H, M300 10-2, 10-4)', () => {
+  for (const kind of ['TEARDROP', 'PARALLEL'] as const) {
+    for (const from of [0, 90, 180, 270]) {
+      const { unit, sim, fly } = setup()
+      Object.assign(unit.wind, { direction: from, speed: 30 })
+      holdAtRdg(unit, ['263', 'LSK3L'], ...(kind === 'PARALLEL' ? [['', 'LSK2L'] as [string, CduFunction]] : []))
+      const label = `${kind}, wind ${from}/30`
+      expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS'), label).toBeLessThan(3600)
+      expect(unit.holdEntryFlown, label).toBe(kind)
+      const hold = unit.activeRoute.hold!, rdg = unit.coordinates('RDG')!
+      const s = hold.turn === 'RIGHT' ? 1 : -1
+      const outbound = (hold.inbound + 180) % 360
+      fly(1)
+      const progress = sim.holdProgress!
+      const leg = progress.segments[0]
+      if (leg.kind !== 'line') throw new Error('entry leg')
+      const radius = progress.segments.find(seg => seg.kind === 'arc')!
+      if (radius.kind !== 'arc') throw new Error('arc')
+      const length = distanceNm(leg.from, leg.to), track = courseDeg(leg.from, leg.to)
+      // The construction.
+      if (kind === 'TEARDROP') {
+        expect(Math.abs(angleDiff(track, outbound - 40 * s)), label).toBeLessThan(0.01)
+        expect(length, label).toBeCloseTo(sim.holdLegNm!, 6)
+      } else {
+        expect(Math.abs(angleDiff(track, outbound)), label).toBeLessThan(0.01)
+        expect(length / radius.radius, label).toBeCloseTo(2.6, 6)
+      }
+      // Flown: the ground track on the latter part of the leg, whatever the wind, and the side of the inbound course.
+      const tracks: number[] = []
+      let worstSide = 0
+      fly(900, () => {
+        if (sim.holdProgress?.index !== 0) return true
+        const along = distanceNm(leg.from, unit.position)
+        if (along > (kind === 'TEARDROP' ? 0.6 : 0.75) * length && along < 0.95 * length) tracks.push(unit.track)
+        const side = s * sideOfInbound(rdg, hold.inbound, unit.position)
+        worstSide = kind === 'TEARDROP' ? Math.min(worstSide, side) : Math.max(worstSide, side)
+      })
+      expect(tracks.length, label).toBeGreaterThan(5)
+      // The parallel leg is short (2.6 radii) and begins with the turn off the arrival track: its last quarter within 5°.
+      for (const t of tracks) expect(Math.abs(angleDiff(t, track)), label).toBeLessThan(kind === 'TEARDROP' ? 3 : 5)
+      // The teardrop leg is on the holding side, the parallel leg not on it (a hair either way at the fix).
+      if (kind === 'TEARDROP') expect(worstSide, label).toBeGreaterThan(-0.05)
+      else expect(worstSide, label).toBeLessThan(0.05)
+    }
+  }
+})
+
+test('every circuit, in a 30 kt wind from four azimuths and both turns: the outbound leg flown for its length, and the inbound leg within 0.1 NM from its capture to the fix (D-H oracles)', () => {
+  for (const turn of ['RIGHT', 'LEFT'] as const) {
+    for (const from of [0, 90, 180, 270]) {
+      const { unit, sim, fly } = setup()
+      Object.assign(unit.wind, { direction: from, speed: 30 })
+      holdAtRdg(unit, ...(turn === 'LEFT' ? [['', 'LSK2L'] as [string, CduFunction]] : []))
+      const label = `${turn} turns, wind ${from}/30`
+      expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS'), label).toBeLessThan(3600)
+      const hold = unit.activeRoute.hold!, rdg = unit.coordinates('RDG')!
+      // Two whole circuits of the racetrack (outbound turn, outbound leg, inbound turn, inbound leg).
+      let circuits = 0, previous = -1, outboundFlown = 0, lastAt = unit.position
+      let captured = false, inboundWorst = 0
+      const outboundLengths: number[] = [], inboundWorsts: number[] = []
+      fly(3600, () => {
+        const p = sim.holdProgress
+        if (!p || p.entryEnd >= 0) { lastAt = unit.position; return false }
+        if (p.index === 1) outboundFlown += distanceNm(lastAt, unit.position)
+        if (p.index === 3) {
+          const xtk = Math.abs(sideOfInbound(rdg, hold.inbound, unit.position))
+          if (!captured && xtk < 0.05) captured = true
+          if (captured) inboundWorst = Math.max(inboundWorst, xtk)
+        }
+        if (previous === 3 && p.index === 0) {
+          circuits += 1
+          outboundLengths.push(outboundFlown)
+          inboundWorsts.push(captured ? inboundWorst : Infinity)
+          outboundFlown = 0; captured = false; inboundWorst = 0
+        }
+        previous = p.index
+        lastAt = unit.position
+        return circuits >= 2
+      })
+      expect(circuits, label).toBe(2)
+      for (const flown of outboundLengths) expect(Math.abs(flown - sim.holdLegNm!), label).toBeLessThan(0.05)
+      for (const worst of inboundWorsts) expect(worst, label).toBeLessThan(0.1)
+    }
+  }
+})
+
+test('the hold turn radius agrees with the M300 turn table (twice the radius, to 0.1 NM) at sample points, rounding-aware (D-H oracles, M300 11-3)', () => {
+  // [ground speed kt, bank degrees, twice the radius NM as the table prints it] — sample points of M300 Table 11-1.
+  const samples: [number, number, number][] = [[60, 30, 0.2], [100, 20, 0.8], [150, 25, 1.4], [220, 15, 5.3]]
+  for (const [gs, bank, printed] of samples) expect(Math.abs(2 * radiusAt(gs, bank) - printed), `${gs} kt, ${bank}°`).toBeLessThanOrEqual(0.05 + 1e-9)
+  // Independent still-air kinematics: r = V² / (g tan φ).
+  const v = 100 * 1852 / 3600
+  expect(radiusAt(100, 20) * 1852).toBeCloseTo((v * v) / (9.80665 * Math.tan((20 * Math.PI) / 180)), 0)
+})
+
 test('a wind at or above the true airspeed cannot be held: UNABLE HOLD (D-H, laboratory)', () => {
   const { unit, sim, fly } = setup()
   holdAtRdg(unit)
@@ -313,16 +444,45 @@ test('a wind at or above the true airspeed cannot be held: UNABLE HOLD (D-H, lab
   expect(activeIdent(unit)).toBe('RDG')
 })
 
-test('the helicopter hold defaults to its holding speed limit and leg time for the altitude, and warns above the limit (D-H, M300 10-8, 10-9)', () => {
-  const { unit, fly } = setup()
+test('the helicopter hold defaults to its holding speed limit and leg time for the altitude (D-H, M300 10-9)', () => {
+  const { unit } = setup()
   press(unit, 'HOLD', 'LSK2L')
   const hold = unit.route.hold!
   expect(hold.speed).toBe(unit.altitude <= 6000 ? 100 : 170)
   expect(hold.legTime).toBe(unit.altitude <= 14000 ? 1 : 1.5)
-  unit.changeHold(h => { h.speed = unit.altitude <= 6000 ? 120 : 190 })
-  unit.press('EXEC')
-  fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')
-  expect(unit.recallList.some(m => m.text === 'HIGH HOLDING SPEED')).toBe(true)
+})
+
+test('HIGH HOLDING SPEED: the pattern at the speed and wind now against the ICAO protected area for the table speed and the maximum wind, a minute before the fix and at each fly-over (D-H, M300 10-8)', () => {
+  // Above the table speed (120 against 100 KIAS) in calm air: the pattern still fits the area built for the table
+  // speed in the ICAO maximum wind (2h + 47 kt): no alert.
+  const calm = setup()
+  press(calm.unit, 'HOLD', 'LSK2L')
+  calm.unit.changeHold(h => { h.speed = 120 })
+  calm.unit.press('EXEC')
+  calm.fly(3600, () => calm.unit.activeRoute.hold?.status === 'IN PROGRESS')
+  calm.fly(600)
+  expect(calm.unit.recallList.map(m => m.text)).not.toContain('HIGH HOLDING SPEED')
+  expect(calm.unit.holdExceedsProtection(calm.unit.activeRoute.hold!)).toBe(false)
+  // The same hold in a 70 kt wind: its turns, sized for 190 kt over the ground, pass the area's: HIGH HOLDING SPEED a
+  // minute before the fix, and again at a fly-over in the hold.
+  const windy = setup()
+  Object.assign(windy.unit.wind, { direction: 90, speed: 70 })
+  press(windy.unit, 'HOLD', 'LSK2L')
+  windy.unit.changeHold(h => { h.speed = 120 })
+  windy.unit.press('EXEC')
+  const rdg = windy.unit.coordinates('RDG')!
+  let toFix: number | null = null
+  windy.fly(3600, () => {
+    if (toFix === null && windy.unit.recallList.some(m => m.text === 'HIGH HOLDING SPEED')) toFix = (distanceNm(windy.unit.position, rdg) / windy.unit.groundSpeed) * 3600
+    return windy.unit.activeRoute.hold?.status === 'IN PROGRESS'
+  })
+  expect(toFix).not.toBeNull()
+  expect(toFix!).toBeLessThanOrEqual(60)
+  expect(toFix!).toBeGreaterThan(55)
+  const alerts = () => windy.unit.recallList.filter(m => m.text === 'HIGH HOLDING SPEED').length
+  const before = alerts()
+  windy.fly(1800, () => alerts() > before)
+  expect(alerts()).toBeGreaterThan(before)
 })
 
 test('a search pattern is flown along its geometry to its 80th search waypoint, then END OF SEARCH and the route continues (M300 11-15)', () => {
@@ -623,6 +783,108 @@ test('radio height lost in the hover: RHT gives way to ALT HOLD on the barometri
   expect(sim.altitudeHoldReference).toBe(Math.round(altitude))
   expect(sim.lowHeightCaption).toBe('LOW HT OFF')
   expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'RA LOST' })
+})
+
+test('GSPD holds a selected ground speed along the heading on the measured velocity, the lateral drift at zero, through a wind change; GSPD 0 stands still (B3.1)', () => {
+  const run = offshore()
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(20)
+  expect(sim.engageGroundSpeed(10)).toBe(true)
+  expect(sim.axisModes).toEqual({ collective: 'RHT', pitch: 'GSPD', roll: 'LVL' })
+  fly(30)
+  expect(sim.modeEvents.some(e => e.event === 'GSPD' && /captured at 10 KT/.test(e.detail))).toBe(true)
+  expect(Math.abs(unit.groundSpeed - 10)).toBeLessThanOrEqual(1)
+  expect(Math.abs(angleDiff(unit.track, unit.heading))).toBeLessThan(3)
+  expect(aircraftData(unit, sim).helicopter).toMatchObject({ selectedVelocity: { vx: 10, vy: 0 }, vx: expect.closeTo(10, 0) })
+  // The wind veers and strengthens: the ground velocity held is the measured one, so the aircraft does not drift.
+  Object.assign(unit.wind, { direction: 260, speed: 30 })
+  let worst = 0
+  fly(60, () => { worst = Math.max(worst, Math.abs(angleDiff(unit.track, unit.heading))) })
+  expect(Math.abs(unit.groundSpeed - 10)).toBeLessThanOrEqual(1)
+  expect(Math.abs(angleDiff(unit.track, unit.heading))).toBeLessThan(3)
+  // GSPD 0: stationary, the route not flown (the NO PROGRESS case of B1.7).
+  expect(sim.engageGroundSpeed(0)).toBe(true)
+  fly(40)
+  expect(unit.groundSpeed).toBeLessThanOrEqual(0.5)
+  expect(aircraftData(unit, sim).helicopter!.selectedVelocity).toEqual({ vx: 0, vy: 0 })
+})
+
+test('GSPD is refused out of range, above the low-speed regime, without hover feedback or below the minimum use height, and where its airspeed would leave the low-speed regime; feedback lost gives ATT; GA and TU replace it (B3.1, B3.2)', () => {
+  // Above the low-speed regime: cruise at 80 kt.
+  const cruise = offshore(100)
+  cruise.sim.selectSpeed(80)
+  cruise.fly(30)
+  expect(cruise.sim.engageGroundSpeed(10)).toBe(false)
+  const run = offshore()
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(20)
+  for (const knots of [-1, 31]) expect(sim.engageGroundSpeed(knots), `${knots} kt`).toBe(false)
+  // Into a 20 kt wind, 30 kt over the ground needs 50 kt of airspeed: out of the low-speed regime. 15 kt needs 35.
+  expect(sim.engageGroundSpeed(30)).toBe(false)
+  expect(sim.engageGroundSpeed(15)).toBe(true)
+  // The hover feedback lost: ATT on the last air-velocity command, announced.
+  unit.setCondition('gpsLost', true)
+  fly(3)
+  expect(sim.axisModes).toMatchObject({ pitch: 'ATT', roll: 'ATT' })
+  expect(sim.modeEvents.some(e => e.event === 'GSPD LOST')).toBe(true)
+  expect(sim.engageGroundSpeed(5)).toBe(false)
+  unit.setCondition('gpsLost', false)
+  fly(3)
+  expect(sim.engageGroundSpeed(5)).toBe(true)
+  // TU from GSPD; and GA from GSPD in another run.
+  expect(sim.engageTransitionUp()).toBe(true)
+  expect(sim.axisModes.pitch).toBe('TU')
+  const ga = offshore()
+  slowToHover(ga)
+  ga.fly(20)
+  expect(ga.sim.engageGroundSpeed(5)).toBe(true)
+  ga.sim.selectAltitude(500)
+  expect(ga.sim.engageGoAround()).toBe(true)
+  ga.fly(2)
+  expect(ga.sim.axisModes).toMatchObject({ collective: 'GA', pitch: 'GA' })
+  // Downwind the airspeed rule allows fast ground speeds: 30 kt is the range limit, 31 refused by the range alone.
+  const downwind = offshore()
+  slowToHover(downwind)
+  downwind.fly(20)
+  downwind.sim.selectHeading(50)
+  downwind.fly(90)
+  expect(Math.abs(angleDiff(downwind.unit.heading, 50))).toBeLessThan(2)
+  expect(downwind.sim.engageGroundSpeed(31)).toBe(false)
+  expect(downwind.sim.engageGroundSpeed(30)).toBe(true)
+  // Below the minimum use height, as every SAR mode.
+  const low = offshore(40)
+  slowToHover(low)
+  low.fly(10)
+  low.unit.placeAircraft({ position: low.unit.truePosition, track: 230, altitude: 25 }, 'test: below MUH')
+  expect(low.sim.engageGroundSpeed(5)).toBe(false)
+})
+
+test('a GSPD selection ends a TD/H plan the autopilot kept after the radio height was lost (R3-02.5, F2)', () => {
+  const run = offshore(150)
+  const { unit, sim, fly } = run
+  // Still air: the airspeed is the ground speed, so the low-speed regime comes well before the target.
+  unit.wind.speed = 0
+  sim.selectSpeed(60)
+  fly(40)
+  // Close enough that the deceleration starts at once (inside the nominal stopping distance at 60 kt).
+  const target = offset(unit.position, 230, 0.6)
+  expect(sim.engageTransitionDownToHover(target)).toBe(true)
+  fly(5)
+  unit.setCondition('raFail', true)
+  fly(3)
+  // F2: ALT on the barometric altitude, the horizontal plan to the target kept.
+  expect(sim.axisModes).toMatchObject({ collective: 'ALT', pitch: 'TD/H', roll: 'TD/H' })
+  fly(120, () => sim.indicatedAirspeed < 38)
+  expect(sim.indicatedAirspeed).toBeLessThan(38)
+  expect(distanceNm(unit.truePosition, target)).toBeGreaterThan(0.15)
+  expect(sim.engageGroundSpeed(0)).toBe(true)
+  expect(sim.axisModes).toMatchObject({ pitch: 'GSPD', roll: 'LVL' })
+  fly(60)
+  // Stopped where GSPD brought it, not at the target the TD/H plan had.
+  expect(unit.groundSpeed).toBeLessThanOrEqual(0.5)
+  expect(distanceNm(unit.truePosition, target)).toBeGreaterThan(0.1)
 })
 
 test('hover feedback lost: HOV gives way to ATT on the last command; with the wind unchanged it stays, and a wind change drifts it (B3b, F5)', () => {
@@ -1165,6 +1427,8 @@ test('D-H: a crew hold takes its default leg time and speed from the altitude wh
   unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 5000 }, 'test: low when the entry begins')
   expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')).toBeLessThan(3600)
   expect(unit.activeRoute.hold).toMatchObject({ legTime: 1, speed: 100 })
+  // HIGH HOLDING SPEED, judged a minute before the fix, judges the hold as its entry will begin: 100 kt, not 170.
+  expect(unit.recallList.some(m => m.text === 'HIGH HOLDING SPEED')).toBe(false)
   // Fixed from the entry on: climbing through 14,000 ft does not change them (M300 10-9).
   unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 15000 }, 'test: climbing in the hold')
   fly(30)

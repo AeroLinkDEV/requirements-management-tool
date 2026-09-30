@@ -147,10 +147,11 @@ export const MISSION_87N_OFFSHORE_SAR: Scenario = {
     { when: then, action: { kind: "expectAircraft", near: "MRK", nearMetres: 50, radioHeight: 50, heightTolerance: 5, maxGroundSpeed: 1 }, within: 60 },
     // 6. Two minutes in the hover, from the capture (the spec checks every tick of them; this is the scenario's endpoint).
     { when: { kind: "after", seconds: 120 }, action: { kind: "expectAircraft", near: "MRK", nearMetres: 10, radioHeight: 50, heightTolerance: 5, maxGroundSpeed: 1 } },
-    // The fuel after the hover: the FUEL page's quantity, flow, reserve and ENDURANCE (the spec checks they agree).
+    // The fuel after the hover: FUEL 1/2's ENDURANCE and FUEL WT (usable, excluding the reserve), then its FUEL FLOW and,
+    // stationary, no MILEAGE (the spec checks they agree with the fuel on board, the reserve and the flow).
     { when: then, action: { kind: "keys", keys: ["FUEL"] } },
-    { when: then, action: { kind: "expectLine", line: 2, pattern: "^\\d+KG\\s+\\d+KG/H$" } },
-    { when: then, action: { kind: "expectLine", line: 4, pattern: "^\\d+KG\\s+\\d+\\.\\dH$" } },
+    { when: then, action: { kind: "expectLine", line: 4, pattern: "^\\d\\d\\+\\d\\d\\s+\\d+KG$" } },
+    { when: then, action: { kind: "expectLine", line: 6, pattern: "^\\d+KG/HR\\s+---KG/NM$" } },
     // 7. TU-LAB: each axis captures on its own; then the climb to 2,000 at 90 KIAS.
     { when: then, action: { kind: "autopilot", transitionUp: true } },
     { when: then, action: { kind: "expectAfcs", collective: "RHT", pitch: "IAS", roll: "HDG" }, within: 120 },

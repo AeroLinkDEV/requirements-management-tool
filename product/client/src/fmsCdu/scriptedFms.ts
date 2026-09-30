@@ -151,6 +151,13 @@ export class ScriptedFms implements CduBackend {
   private modified: Route | null = null;
   private radios = { com1: "121.500", com1Stby: "126.700", com2: "119.100", com2Stby: "133.600", nav1: "113.90", nav2: "116.70", adf: "0350", tpdr: "1200" };
   private fuel = { quantity: 1850, flow: 540, reserve: 400 };
+  /**
+   * The FUEL pages (S300 manual 14-1…14-4): the crew's "what if" FUEL WT (usable, excluding the reserve) and FUEL FLOW,
+   * which the fuel computer's values replace on each new access of the page; the FIX; the unit shown. KG throughout inside.
+   */
+  readonly fuelPage = { whatIfUsable: null as number | null, whatIfFlow: null as number | null, fix: null as string | null, unit: "KG" as "KG" | "LB" };
+  /** The FUEL+WEIGHTS option's crew weights (FUEL 2/2), kilograms; the gross weight is their sum plus the fuel on board. */
+  readonly weights = { empty: null as number | null, equip: null as number | null, crew: null as number | null, cargo: null as number | null };
   private marks: { ident: string; position: LatLon }[] = [];
   private points: Record<string, LatLon> = {};
   /**
@@ -825,8 +832,15 @@ export class ScriptedFms implements CduBackend {
       if (leg.source === "MISSED") route.hold.missed = true;
     }
     const hold = route.hold;
+    // The hold entry advisory counts the passages of the holding fix, and leaves when its entry is flown.
+    if (hold && hold.fix === leg.ident && this.holdEntryAdvisory && ++this.holdEntryAdvisory.seen >= this.holdEntryAdvisory.passes) {
+      this.withdrawAlert(this.holdEntryAdvisory.text);
+      this.holdEntryAdvisory = null;
+    }
     // A fix crossing in the hold: at the end of the entry (the first crossing after it), or after a whole racetrack.
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && completedCircuit) hold.circuits = (hold.circuits ?? 0) + 1;
+    // HIGH HOLDING SPEED at each fly-over of the fix after the first (M300 10-8), the pattern rebuilt at the speed now.
+    if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExitReached(hold)) hold.status = "EXIT ARMED";
     if (hold && hold.fix === leg.ident && hold.status !== "EXIT ARMED") {
       if (hold.status === "ARMED") {
@@ -835,11 +849,11 @@ export class ScriptedFms implements CduBackend {
         // The defaults are for the altitude at which the entry begins (M300 10-9: leg time 1 or 1.5 minutes "depending on
         // aircraft altitude at the time the hold entry is initiated"; the holding speed by altitude, 10-8), and are not
         // changed again automatically, even across 14,000 ft. Crew entries and coded values are kept as they are.
-        if (hold.defaults?.legTime !== undefined && hold.legDistance === null && hold.legTime === hold.defaults.legTime) hold.legTime = this.defaultHoldLegTime();
-        if (hold.defaults?.speed !== undefined && hold.speed === hold.defaults.speed) hold.speed = this.defaultHoldSpeed();
+        Object.assign(hold, this.entryDefaults(hold));
         delete hold.defaults;
-        const limit = holdingSpeedLimit(this.altitude, this.aircraftProfile);
-        if (limit !== null && hold.speed > limit) this.alert(alert("HIGH HOLDING SPEED"));
+        // Entered without the minute's notice (the hold made within it): checked at the fix.
+        if (this.holdSpeedChecked !== hold && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
+        this.holdSpeedChecked = hold;
       }
       return "hold";
     }
@@ -1358,6 +1372,7 @@ export class ScriptedFms implements CduBackend {
   /** M300 1-11/7-10: loading an approach grants no approach phase, NPA or 0.3-NM RNP. */
   get flightPhase(): FlightPhase {
     const leg = this.active.legs[0];
+    // A missed approach request disarms the approach, so the final it continues along is flown in the terminal phase (M300 7-15).
     const approach = this.approachPhaseActive && this.armedApproach && leg?.kind !== "disco" && leg?.source === "APPR";
     return s300Phase(this.here, this.validBaroAltitude, this.db.airport(this.active.origin), this.db.airport(this.active.dest), approach);
   }
@@ -2065,35 +2080,61 @@ export class ScriptedFms implements CduBackend {
   }
 
   /**
-   * TOGA or MISSED APPR before the MAP: the missed approach is requested, but lateral guidance continues along the
-   * approach to the MAP, which then sequences the missed approach legs (M300 7-16 item 4; plan R2-03 MA-EARLY and
-   * TOGA-EARLY). The approach is disarmed (no descent on its path) and the missed-approach hold armed. The laboratory
-   * airline profile, whose VNAV climbs on the missed approach legs, drops the rest of the approach at once instead.
+   * The FMS missed-approach request (M300 7-15, 7-16; plan C.3.1), from MISSED APPR or TOGA: the FMS reverts to the
+   * terminal phase (RNP 1.0), NO APPR INTEGRITY is withdrawn, the approach is disarmed (no descent on its path) and the
+   * missed-approach hold armed. Before the MAP guidance continues along the approach to the MAP, which then sequences
+   * the missed approach legs (7-16 item 4; plan R2-03 MA-EARLY). Refused with the FMS failed, or with no missed
+   * approach ahead (once it is being flown there is nothing left to go around from).
    */
-  goAround() {
+  requestMissedApproach() {
     if (this.hasCondition("fmsFail")) return false;
-    const route = this.active;
-    const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
-    // Only from the approach: once the missed approach is being flown there is nothing left to go around from.
+    const missed = this.active.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
     if (missed <= 0) return false;
     this.missedRequested = true;
     this.approachCancelled = false;
     this.approachIntegrityLostAt = null;
     this.visualContinuation = false;
     if (this.mapPassed && this.aircraftProfile.verticalPolicy === "ADVISORY") this.passLeg(this.instrumentEnd);
+    this.armedApproach = false;
+    this.armMissedHold(this.active);
+    this.withdrawAlert("NO APPR INTEGRITY");
+    this.emit();
+    return true;
+  }
+
+  /**
+   * MISSED APPR> (LSK 6R on LEGS 1/X, VNAV and PROGRESS 1/4), when configured: in the approach phase, until pressed.
+   * An approach that NO APPR INTEGRITY cancelled has left the approach phase but is still armed and flown, and the
+   * request is what withdraws that alert (C.3.1), so the prompt stays until the request is made or the approach disarmed.
+   */
+  get missedPromptShown() {
+    const flown = this.flightPhase === "APPROACH" || this.approachCancelled && this.armedApproach;
+    return this.aircraftProfile.configuration?.options.missedPrompt.configured === true && !this.hasCondition("fmsFail") && flown
+      && this.active.legs.some((leg, i) => i > 0 && leg.kind !== "disco" && leg.source === "MISSED");
+  }
+
+  /**
+   * TOGA: the FMS missed-approach request, with the autopilot's go-around (the flight simulation takes it from
+   * goArounds). TOGA before the MAP keeps the lateral path to the MAP as MISSED APPR does (TOGA-EARLY, inferred). The
+   * laboratory airline profile, whose VNAV climbs on the missed approach legs, drops the rest of the approach at once.
+   */
+  goAround() {
+    const route = this.active;
+    const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
+    if (!this.requestMissedApproach()) return false;
     if (this.aircraftProfile.verticalPolicy !== "ADVISORY") {
       route.legs.splice(0, missed);
       this.legStart = { ...this.here };
     }
-    this.armedApproach = false;
     this.goArounds += 1;
-    this.armMissedHold(route);
     this.emit();
     return true;
   }
 
   /** Accepted go-arounds, so the flight simulation takes the go-around transition however TOGA was pressed. */
   goArounds = 0;
+  /** A missed approach requested (MISSED APPR or TOGA), until another approach is loaded. */
+  get missedApproachRequested() { return this.missedRequested; }
   /** The active plan's revision and fingerprint, as the engineering record states them. */
   get planIdentity() { return { revision: this.planRevision, fingerprint: planFingerprint(this.active.legs) }; }
 
@@ -2173,6 +2214,8 @@ export class ScriptedFms implements CduBackend {
       if (this.restartNeedsLeg) this.statusAdvisory("!ENTER ACT WPT/LEG");
     }
     this.watchHover();
+    this.watchHoldEntry();
+    this.watchHoldSpeed();
     // A database past the end of its cycle is flagged once; swapping to the next cycle clears it.
     // A cycle whose data gives no dates is never out of date: its end is unknown, not past.
     if (this.activeCycle.to !== null && this.utcTime.getTime() > this.activeCycle.to && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE")); }
@@ -2193,6 +2236,33 @@ export class ScriptedFms implements CduBackend {
   get position(): LatLon { return this.here; }
   get radioState() { return this.radios; }
   get fuelState() { return this.fuel; }
+
+  /**
+   * FUEL 1/2 (S300 manual 14-2): from the usable fuel (the fuel on board less the reserve, or the crew's what-if) and the
+   * flow (or the what-if), the endurance (hours) and, making progress, the maximum range at the present ground speed and
+   * the mileage (kg per NM); the fuel remaining at the FIX (by default the last waypoint of the active route) after the
+   * predicted time to it; the gross weight once the crew weights are entered. EST when a what-if is in use.
+   */
+  fuelPerformance() {
+    const usable = this.fuelPage.whatIfUsable ?? Math.max(0, this.fuel.quantity - this.fuel.reserve);
+    const flow = this.fuelPage.whatIfFlow ?? this.fuel.flow;
+    const endurance = flow > 0 ? usable / flow : null;
+    const moving = makingProgress(this.groundSpeed);
+    const lastWaypoint = [...this.active.legs].reverse().find(leg => leg.kind === "wpt");
+    const fix = this.fuelPage.fix ?? (lastWaypoint?.kind === "wpt" ? lastWaypoint.ident : null);
+    const point = fix === null ? undefined : [...this.profile().points].reverse().find(p => p.ident === fix);
+    const hours = point?.eta != null ? (point.eta - this.now.getTime()) / 3_600_000 : null;
+    const { empty, equip, crew, cargo } = this.weights;
+    const fuelOnBoard = this.fuelPage.whatIfUsable === null ? this.fuel.quantity : this.fuelPage.whatIfUsable + this.fuel.reserve;
+    return {
+      usable, flow, endurance, fix, point: point ?? null,
+      maxRange: endurance !== null && moving ? endurance * this.groundSpeed : null,
+      mileage: moving && flow > 0 ? flow / this.groundSpeed : null,
+      remaining: hours === null ? null : usable - flow * hours,
+      grossWeight: empty === null ? null : empty + (equip ?? 0) + (crew ?? 0) + (cargo ?? 0) + fuelOnBoard,
+      estimated: this.fuelPage.whatIfUsable !== null || this.fuelPage.whatIfFlow !== null,
+    };
+  }
   get markList() { return this.marks; }
   get recallList() { return this.recall; }
   get squawkIdent() { return this.clock().getTime() < this.squawkIdentUntil; }
@@ -2545,6 +2615,85 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** The entry the aircraft will fly (or flew) into the hold, from the track that arrives at the holding fix. */
+  /** The hold entry advisory on show, and the passages of the holding fix that remove it. */
+  private holdEntryAdvisory: { text: string; passes: number; seen: number } | null = null;
+
+  /**
+   * PARALLEL, TEARDROP or DIRECT HOLD ENTRY (M300 10-2, 10-4, 10-6), for the entry the FMS will fly: shown one minute
+   * before the holding fix when the aircraft is on track inbound to it, otherwise one minute before above 250 kt of
+   * ground speed and ten seconds before below it; removed at the fix for a direct entry, and at the second passage of
+   * the fix (the end of the entry) for the others. "On track" is laboratory: within 0.1 NM and 10 degrees of the leg.
+   */
+  private watchHoldEntry() {
+    const route = this.active, hold = route.hold, leg = route.legs[0];
+    // The hold gone (erased, exited, replaced) takes its advisory with it.
+    if (this.holdEntryAdvisory && (!hold || hold.status === "EXIT ARMED")) { this.withdrawAlert(this.holdEntryAdvisory.text); this.holdEntryAdvisory = null; }
+    if (this.holdEntryAdvisory || !hold || hold.status !== "ARMED" || leg?.kind !== "wpt" || leg.ident !== hold.fix) return;
+    const fix = this.coordinates(hold.fix);
+    const entry = this.holdEntryFor(route);
+    if (!fix || !entry || this.groundSpeed <= 1) return;
+    const seconds = (distanceNm(this.here, fix) / this.groundSpeed) * 3600;
+    const onTrack = Math.abs(this.crossTrack) <= 0.1 && Math.abs(this.trackError) <= 10;
+    if (seconds > (onTrack || this.groundSpeed > 250 ? 60 : 10)) return;
+    this.holdEntryAdvisory = { text: `${entry} HOLD ENTRY`, passes: entry === "DIRECT" ? 1 : 2, seen: 0 };
+    this.advisory(this.holdEntryAdvisory.text);
+  }
+
+  /** The hold whose entry HIGH HOLDING SPEED has been judged for, a minute before its fix. */
+  private holdSpeedChecked: Hold | null = null;
+
+  /** HIGH HOLDING SPEED on entry: judged once, one minute before the holding fix (M300 10-8). */
+  private watchHoldSpeed() {
+    const route = this.active, hold = route.hold, leg = route.legs[0];
+    if (!hold || hold.status !== "ARMED" || this.holdSpeedChecked === hold || leg?.kind !== "wpt" || leg.ident !== hold.fix) return;
+    const fix = this.coordinates(hold.fix);
+    if (!fix || this.groundSpeed <= 1 || (distanceNm(this.here, fix) / this.groundSpeed) * 3600 > 60) return;
+    this.holdSpeedChecked = hold;
+    // Judged as the entry will begin, with its defaults taken from the altitude now (M300 10-9).
+    if (this.holdExceedsProtection({ ...hold, ...this.entryDefaults(hold) })) this.alert(alert("HIGH HOLDING SPEED"));
+  }
+
+  /**
+   * The leg time and speed a hold's entry begins with: a value still at the default it was given is taken again from
+   * the altitude now (M300 10-8, 10-9); crew entries and coded values are kept.
+   */
+  private entryDefaults(hold: Hold): Pick<Hold, "legTime" | "speed"> {
+    return {
+      legTime: hold.defaults?.legTime !== undefined && hold.legDistance === null && hold.legTime === hold.defaults.legTime ? this.defaultHoldLegTime() : hold.legTime,
+      speed: hold.defaults?.speed !== undefined && hold.speed === hold.defaults.speed ? this.defaultHoldSpeed() : hold.speed,
+    };
+  }
+
+  /**
+   * HIGH HOLDING SPEED (M300 10-8; a bench heuristic, plan D-H, not a containment proof): the hold's pattern at the
+   * present true airspeed (or its holding speed, if faster) and computed wind against the ICAO protected area for the maximum holding speed of Table
+   * 10-1 and the maximum wind at the altitude, less a buffer. Both are built as the flight builds a hold (holds.ts,
+   * rate-one bank or the limit), the ICAO one at the table speed's true airspeed in the omnidirectional wind of
+   * PANS-OPS (Doc 8168): 2h + 47 kt, h the altitude in thousands of feet, its timed leg stretched by that wind. Exceeded when its
+   * length (the leg and the turn diameter) or its width (the turn diameter) passes the protected area's less 5 percent
+   * (a laboratory buffer), or it cannot be flown at all. No table speed (the helicopter above 14,000 ft): no check.
+   */
+  holdExceedsProtection(hold: Hold) {
+    const maxIas = holdingSpeedLimit(this.altitude, this.aircraftProfile);
+    const fix = this.coordinates(hold.fix);
+    if (maxIas === null || !fix) return false;
+    const minutes = hold.legTime ?? defaultLegMinutes(this.altitude);
+    // The leg as flown is the timed leg at the true airspeed (a ground racetrack); the protected area allows the maximum
+    // wind to stretch it, a timed outbound leg flown with the wind behind (a leg distance stays what it is).
+    const size = (tas: number, wind: number, legNm: number) => {
+      const g = holdGeometry(fix, hold.inbound, hold.turn, tas, wind, legNm, MAX_BANK);
+      return g ? { length: g.legNm + 2 * g.radius, width: 2 * g.radius } : null;
+    };
+    // Flown as the bench flies a hold: at the present true airspeed, or the hold's speed if faster.
+    const tas = Math.max(this.aircraft.tas, tasFromIas(hold.speed, this.altitude));
+    const flown = size(tas, this.systemWind.speed, hold.legDistance ?? (minutes * tas) / 60);
+    const maxTas = tasFromIas(maxIas, this.altitude), maxWind = (2 * this.altitude) / 1000 + 47;
+    const area = size(maxTas, maxWind, hold.legDistance ?? (minutes * (maxTas + maxWind)) / 60);
+    if (!area) return false;
+    if (!flown) return true;
+    return flown.length > 0.95 * area.length || flown.width > 0.95 * area.width;
+  }
+
   holdEntryFor(route: Route): HoldEntry | null {
     const hold = route.hold;
     if (!hold) return null;
@@ -2567,6 +2716,8 @@ export class ScriptedFms implements CduBackend {
       this.advisory("NOT CONFIGURED");
       return;
     }
+    // A new access of the FUEL pages replaces the crew's what-if entries by the fuel computer's values (14-1).
+    if (page === "FUEL" && this.page !== "FUEL") Object.assign(this.fuelPage, { whatIfUsable: null, whatIfFlow: null });
     this.page = page;
     this.index = index;
   }

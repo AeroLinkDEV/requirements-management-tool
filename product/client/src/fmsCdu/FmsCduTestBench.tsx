@@ -7,8 +7,10 @@ import { aircraftData, fmsOutputs } from "./efis";
 import { Nd, Pfd } from "./FmsEfis";
 import FmsMap from "./FmsMap";
 import FmsGpsTab from "./FmsGpsTab";
-import FmsOutTheWindow, { type HudModes } from "./FmsOutTheWindow";
-import { relayTerrain } from "./terrainRelay";
+import FmsOutTheWindow, { groundImagery, type Ground, type HudModes } from "./FmsOutTheWindow";
+import type { ImagerySource } from "./groundImagery";
+import { TERRAIN_COLOURINGS, type TerrainColouring } from "./terrainAwareness";
+import { relayImagery, relayTerrain } from "./terrainRelay";
 import { TerrainTiles, type TerrainSource } from "./terrainTiles";
 import type { Layout, View } from "./outTheWindow";
 import FmsScenarioCard from "./FmsScenarioCard";
@@ -53,17 +55,21 @@ const WINDOW_KEY = "aerolink.fmsCdu.window";
 // Synthetic vision on the PFD, remembered; off until chosen, for the same reason.
 const SVS_KEY = "aerolink.fmsCdu.svs";
 const storedSvs = () => { try { return window.localStorage.getItem(SVS_KEY) === "on"; } catch { return false; } };
-type WindowChoice = { shown: boolean; layout: Layout; view: View };
+type WindowChoice = { shown: boolean; layout: Layout; view: View; ground: Ground; colouring: TerrainColouring };
 const WINDOW_LAYOUTS = [["hud", "HUD"], ["panel", "Panel"]] as const;
 const WINDOW_VIEWS = [["cockpit", "Cockpit"], ["chase", "Chase"], ["map", "Map"]] as const;
+const WINDOW_GROUNDS = [["imagery", "Imagery"], ["relief", "Relief"]] as const;
+const COLOURING_LABELS: Record<TerrainColouring, string> = { off: "Off", relative: "Relative", absolute: "Absolute" };
 const storedWindow = (): WindowChoice => {
-  const fallback: WindowChoice = { shown: false, layout: "hud", view: "cockpit" };
+  const fallback: WindowChoice = { shown: false, layout: "hud", view: "cockpit", ground: "imagery", colouring: "off" };
   try {
     const stored = JSON.parse(window.localStorage.getItem(WINDOW_KEY) ?? "null") as Partial<WindowChoice> | null;
     return {
       shown: stored?.shown === true,
       layout: WINDOW_LAYOUTS.find(([id]) => id === stored?.layout)?.[0] ?? fallback.layout,
       view: WINDOW_VIEWS.find(([id]) => id === stored?.view)?.[0] ?? fallback.view,
+      ground: WINDOW_GROUNDS.find(([id]) => id === stored?.ground)?.[0] ?? fallback.ground,
+      colouring: TERRAIN_COLOURINGS.find(id => id === stored?.colouring) ?? fallback.colouring,
     };
   } catch { return fallback; }
 };
@@ -78,7 +84,7 @@ const formatLuminance = (fl: number) => (fl < 10 ? fl.toFixed(1) : String(Math.r
  * aircraft along its route, and sets the cockpit lighting. Scenarios run scripted steps against a restarted
  * simulation and check the screen, can be recorded from the bench, and are written out as test procedure text.
  */
-export default function FmsCduTestBench({ terrain, userName }: { terrain?: TerrainSource; userName?: string } = {}) {
+export default function FmsCduTestBench({ terrain, imagery, userName }: { terrain?: TerrainSource; imagery?: ImagerySource; userName?: string } = {}) {
   const { layout, failed } = useCduLayout();
   const [variantId, setVariantId] = useState(storedVariant);
   const [session, setSession] = useState(0);
@@ -146,10 +152,12 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
   const pinsContext = `${session}:${backend.pinsContinuation?.revision ?? 0}`;
   const [pinsDeclaration, setPinsDeclaration] = useState({ context: "", basicVfr: false, landingAreaVisible: false, publishedVisibility: false });
   const crewConditions = pinsDeclaration.context === pinsContext ? pinsDeclaration : { context: pinsContext, basicVfr: false, landingAreaVisible: false, publishedVisibility: false };
+  const [gsInput, setGsInput] = useState("");
   const [jumpNote, setJumpNote] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(storedTab);
   // One set of height tiles for the out-the-window view and the PFD's synthetic vision.
   const tiles = useMemo(() => new TerrainTiles(terrain ?? relayTerrain), [terrain]);
+  const photos = useMemo(() => groundImagery(imagery ?? relayImagery), [imagery]);
   const [svs, setSvs] = useState(storedSvs);
   const chooseSvs = (on: boolean) => {
     setSvs(on);
@@ -314,6 +322,23 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
                     </label>
                   ))}
                 </div>
+                <div className="fmsBenchModes" role="radiogroup" aria-label="Window ground" title="Aerial imagery where there is some (the United States), relief elsewhere; or relief only">
+                  {WINDOW_GROUNDS.map(([id, label]) => (
+                    <label key={id} className={outside.ground === id ? "selected" : undefined}>
+                      <input type="radio" name="fmsBenchWindowGround" value={id} checked={outside.ground === id} onChange={() => chooseWindow({ ground: id })} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div className="fmsBenchModes" role="radiogroup" aria-label="Terrain colouring"
+                  title="Relative: red at or above 100 ft below the aircraft, amber within 500 ft. Absolute: height bands. Both with a contour every 500 ft">
+                  {TERRAIN_COLOURINGS.map(id => (
+                    <label key={id} className={outside.colouring === id ? "selected" : undefined}>
+                      <input type="radio" name="fmsBenchTerrainColouring" value={id} checked={outside.colouring === id} onChange={() => chooseWindow({ colouring: id })} />
+                      {COLOURING_LABELS[id]}
+                    </label>
+                  ))}
+                </div>
               </>
             ) : null}
             <button type="button" aria-expanded={outside.shown} onClick={() => chooseWindow({ shown: !outside.shown })}>
@@ -322,7 +347,8 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
           </div>
         </div>
         {outside.shown
-          ? <FmsOutTheWindow air={air} route={bus.activeRoute} modes={modes} layout={outside.layout} view={outside.view} tiles={tiles} />
+          ? <FmsOutTheWindow air={air} route={bus.activeRoute} modes={modes} layout={outside.layout} view={outside.view} tiles={tiles}
+            ground={outside.ground} colouring={outside.colouring} imagery={photos} />
           : <p className="fmsBenchHint">A 3D view from the simulated aircraft over open elevation data, with the active route in magenta: head-up or over a glareshield, from the cockpit, behind the aircraft, or above it.</p>}
       </section>
 
@@ -448,6 +474,14 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
                   onChange={event => setSpdInput(event.target.value.replace(/\D/g, ""))} />
               </label>
               <button type="button" disabled={!spdInput} onClick={() => { const speed = Number(spdInput); recordTo?.autopilot({ speed }); sim.selectSpeed(speed); setSpdInput(""); }}>SET SPD</button>
+              {/* GSPD: a ground speed held along the heading in the low-speed regime, on the hover feedback (plan B3.1). */}
+              <label>
+                <span>GS</span>
+                <input inputMode="numeric" value={gsInput} maxLength={2} aria-label="Selected ground speed"
+                  onChange={event => setGsInput(event.target.value.replace(/\D/g, ""))} />
+              </label>
+              <button type="button" aria-pressed={sim.axisModes.pitch === "GSPD"} disabled={!gsInput}
+                onClick={() => { const groundSpeed = Number(gsInput); if (sim.engageGroundSpeed(groundSpeed)) { recordTo?.autopilot({ groundSpeed }); setGsInput(""); } }}>GSPD</button>
               {/* The cyclic force-trim release, pressed and let go: the hover references re-datum where the aircraft is. */}
               <button type="button" title="Cyclic force-trim release" onClick={() => { recordTo?.autopilot({ forceTrimRelease: true }); sim.releaseForceTrim(); }}>FTR</button>
             </form>
