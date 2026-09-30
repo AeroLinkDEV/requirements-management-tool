@@ -1,6 +1,6 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
-import { distanceNm } from '../src/fmsCdu/fmsModel'
+import { distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import { iasFromTas } from '../src/fmsCdu/kinematics'
 import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
@@ -95,6 +95,25 @@ test('a moving waypoint advances on its track and the aircraft closes on it', ()
   const moved = distanceNm(start, unit.coordinates('SHIP1')!)
   expect(moved).toBeGreaterThan(1)
   expect(unit.coordinates('SHIP1')!.lon).toBeLessThan(start.lon)
+})
+
+// Rev 2 D-R epoch: the epoch is the simulation time of entry, and the position follows the simulation clock along the
+// track at the ground speed: stopped clock (paused), nothing moves; the same place however the time was ticked.
+test('a moving waypoint is placed from its epoch by the simulation clock alone', () => {
+  const { unit, sim, advance } = setup()
+  const origin = { lat: 45.3, lon: -75.6 }
+  unit.defineMoving('SHIP1', origin, 90, 30)
+  // Paused: the simulation clock stands still, and so does the waypoint, however often the aircraft is stepped.
+  for (let i = 0; i < 10; i += 1) sim.step(1)
+  expect(unit.coordinates('SHIP1')).toEqual(origin)
+  // Twenty minutes in one step, or in 1200 one-second steps, places it at the same point: 10 NM east.
+  advance(20 * 60_000)
+  expect(unit.coordinates('SHIP1')).toEqual(offset(origin, 90, 10))
+  const ticked = setup()
+  ticked.unit.defineMoving('SHIP1', origin, 90, 30)
+  ticked.fly(1200)
+  expect(ticked.unit.coordinates('SHIP1')!.lat).toBeCloseTo(offset(origin, 90, 10).lat, 9)
+  expect(ticked.unit.coordinates('SHIP1')!.lon).toBeCloseTo(offset(origin, 90, 10).lon, 9)
 })
 
 test('a tactical descent flies its angle down to its altitude; too steep is TDN NOT POSSIBLE', () => {

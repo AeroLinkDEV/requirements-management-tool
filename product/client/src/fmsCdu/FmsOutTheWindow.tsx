@@ -5,6 +5,7 @@ import {
   AIRCRAFT_PARTS, FT, MESH_MAX_ZOOM, RELIEF_MAX_ZOOM, TILE_PIXELS, ancestorOf, blendAircraft, cameraPose, pixelMetres,
   routeHeights, sampleHeights, shadeTile, tileLatitude, type AircraftSample, type Layout, type View,
 } from "./outTheWindow";
+import { MAIN_ROTOR_RAD_S, createAircraftModel } from "./otwAircraftModel";
 import { workerReliefShader } from "./reliefShader";
 import type { TerrainTiles } from "./terrainTiles";
 import "./FmsOutTheWindow.css";
@@ -233,6 +234,10 @@ async function startScene(
     show: false,
   }));
   const models = [modelPart(false), modelPart(true)];
+  // The glTF helicopter (otwAircraftModel.ts), with turning rotors; the boxes and ellipsoids stay the fallback until it
+  // has loaded, or if it cannot. The scene draws only on change, so it asks for a frame once the model is there.
+  const helicopter = createAircraftModel(Cesium, scene);
+  void helicopter.ready.then(outcome => { container.dataset.model = "loaded" in outcome ? "glb" : "fallback"; scene.requestRender(); });
   const orientation = new Cesium.HeadingPitchRoll();
   // The plan-view symbol: the rotor disc, the fuselage and the tail boom, nose up.
   const symbol = canvas(48);
@@ -276,7 +281,7 @@ async function startScene(
     ownship.position = at;
     ownship.rotation = -Cesium.Math.toRadians(air.heading);
     const chase = state.view === "chase";
-    for (const model of models) model.show = chase;
+    for (const model of models) model.show = chase && !helicopter.loaded;
     if (chase) {
       // The model's +x is forward; Cesium's heading turns +x from east, so north-up heading is a quarter turn less.
       orientation.heading = Cesium.Math.toRadians(air.heading - 90);
@@ -284,7 +289,8 @@ async function startScene(
       orientation.roll = Cesium.Math.toRadians(air.bank);
       const placed = Cesium.Transforms.headingPitchRollToFixedFrame(at, orientation);
       for (const model of models) model.modelMatrix = placed;
-    }
+      helicopter.update(placed, (performance.now() / 1000) * MAIN_ROTOR_RAD_S, true);
+    } else helicopter.update(undefined, 0, false);
 
     // The flight path marker sits where the aircraft is going: a point 2 NM along the flight path, projected.
     if (state.view === "cockpit" && state.layout === "hud") {
@@ -327,6 +333,7 @@ async function startScene(
       });
     },
     destroy: () => {
+      helicopter.destroy();
       scene.preRender.removeEventListener(onFrame);
       scene.postRender.removeEventListener(counted);
       shader.dispose();
