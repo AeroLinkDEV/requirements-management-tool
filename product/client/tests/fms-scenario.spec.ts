@@ -4,6 +4,7 @@ import {
   ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, linePattern, parseScenario, procedureText, reportMarkdown, runHeadless,
   scenarioDigest, scenarioProblems, type Scenario,
 } from '../src/fmsCdu/scenario'
+import { UNMODELLED_CONDITIONS } from '../src/fmsCdu/conditions'
 import { HELICOPTER_PROFILE, profileById, profileFingerprint } from '../src/fmsCdu/profile'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
@@ -355,6 +356,25 @@ test('a scenario declares the radio altimeter surface by id; the report names it
   const unknown = runHeadless({ id: 'u', title: 'u', objective: '', maxSeconds: 1, surface: 'moon', steps: [] }).runner
   expect(unknown.outcome).toBe('invalid')
   expect(unknown.problems.join(' ')).toMatch(/surface must be one of none, offshore-87n/)
+})
+
+// Rev 3 B3.5 F10: baro, heading and attitude failures are not modelled in v1, so a scenario that injects one is refused
+// at admission with that reason, rather than run as though the aircraft had them.
+test('a scenario that injects baro, heading or attitude invalid is refused at admission, with the reason (F10)', () => {
+  for (const [condition, name] of [['baroFail', 'barometric altitude invalid'], ['headingFail', 'heading invalid'], ['attitudeFail', 'attitude invalid']]) {
+    for (const on of [true, false]) {
+      const scenario = { id: 'f10', title: 'f10', objective: '', maxSeconds: 5, steps: [{ when: { kind: 'after', seconds: 1 }, action: { kind: 'condition', condition, on } }] }
+      expect(scenarioProblems(scenario), condition).toEqual([`step 1: ${name} is not modelled in v1, so a scenario that injects it is refused (rev 3 B3.5 F10)`])
+      const { runner } = runHeadless(scenario as unknown as Scenario)
+      expect(runner.outcome).toBe('invalid')
+      // Refused before it ran: no step was reached.
+      expect(runner.results.every(result => result.status === 'pending')).toBe(true)
+    }
+  }
+  expect(UNMODELLED_CONDITIONS.map(condition => condition.id)).toEqual(['baroFail', 'headingFail', 'attitudeFail'])
+  // An unknown condition is still an unknown condition.
+  expect(scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 5, steps: [{ when: { kind: 'start' }, action: { kind: 'condition', condition: 'gremlins', on: true } }] }))
+    .toEqual(['step 1: condition needs a known condition and on true or false'])
 })
 
 test('a scenario names its aircraft profile and makes autopilot selections; both are validated (Stage B3)', () => {

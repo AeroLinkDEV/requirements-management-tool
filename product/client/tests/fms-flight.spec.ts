@@ -39,6 +39,32 @@ const typeText = (unit: ScriptedFms, text: string) => {
 }
 const activeIdent = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : null }
 
+test('an altitude capture levels off firmly: from an 800 fpm climb it settles on the preselection within 30 s of ALT CAPTURED, without overshoot, under 0.1 g', () => {
+  const { unit, sim, ticks } = setup()
+  unit.placeAircraft({ position: unit.truePosition, track: 0, altitude: 1000 }, 'test: the climb starts')
+  sim.selectAltitude(2000)
+  expect(sim.engageVerticalSpeed(800)).toBe(true)
+  let t = 0, captured: number | null = null, capturedAt = 0, highest = 0, harshest = 0, previous = unit.verticalSpeed
+  const trace: { t: number; altitude: number }[] = []
+  ticks(300, () => {
+    t += 0.25
+    if (captured === null && sim.modeEvents.some(e => e.event === 'ALT CAPTURED')) { captured = t; capturedAt = unit.altitude }
+    highest = Math.max(highest, unit.altitude)
+    // The level-off's vertical acceleration (the climb's own start is the acceleration limit's business).
+    if (unit.altitude >= 1800) harshest = Math.max(harshest, Math.abs(unit.verticalSpeed - previous) / 0.25)
+    previous = unit.verticalSpeed
+    trace.push({ t, altitude: unit.altitude })
+  })
+  expect(captured).not.toBeNull()
+  expect(Math.abs(capturedAt - 2000)).toBeLessThanOrEqual(20)
+  // Within 30 s of the capture the altimeter reads 2,000 (to the foot), and it stays there.
+  for (const k of trace.filter(k => k.t >= captured! + 30)) expect(Math.abs(k.altitude - 2000), `at ${k.t} s`).toBeLessThan(0.5)
+  expect(highest).toBeLessThanOrEqual(2000.5)
+  // 0.1 g is 193 fpm/s.
+  expect(harshest).toBeLessThanOrEqual(193)
+  expect(sim.axisModes.collective).toBe('ALT')
+})
+
 test('the declared bank envelope and roll rate govern the selected computer, without an extra five degrees', () => {
   const profile = structuredClone(HELICOPTER_PROFILE)
   profile.parameters.afcsBankLimit.value = 8
