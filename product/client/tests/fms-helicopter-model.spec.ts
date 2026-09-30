@@ -49,10 +49,9 @@ test('the GLB is well formed: every accessor fits its buffer view, every view it
   for (const mesh of json.meshes) for (const primitive of mesh.primitives) {
     const vertices = json.accessors[primitive.attributes.POSITION].count
     const indices = json.accessors[primitive.indices], view = json.bufferViews[indices.bufferView]
-    for (let i = 0; i < indices.count; i += 1) {
-      const index = indices.componentType === 5123 ? data.getUint16(view.byteOffset + i * 2, true) : data.getUint32(view.byteOffset + i * 4, true)
-      expect(index).toBeLessThan(vertices)
-    }
+    let largest = 0
+    for (let i = 0; i < indices.count; i += 1) largest = Math.max(largest, indices.componentType === 5123 ? data.getUint16(view.byteOffset + i * 2, true) : data.getUint32(view.byteOffset + i * 4, true))
+    expect(largest).toBeLessThan(vertices)
   }
   // No liveries or logos: no textures, images or samplers at all.
   expect(json.textures).toBeUndefined()

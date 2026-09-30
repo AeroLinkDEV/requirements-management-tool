@@ -124,70 +124,196 @@ export const MAIN_ROTOR_CENTRE: Vec3 = [0, 0, 1.55];
 export const TAIL_ROTOR_CENTRE: Vec3 = [-6.55, 0, 0.55];
 export const MAIN_ROTOR_RADIUS = 5.1;
 
-/** The body, the main rotor and the tail fan, each a list of solids. */
-export function helicopterParts(): { body: Part[]; mainRotor: Part[]; tailRotor: Part[] } {
-  const body: Part[] = [
-    // Cabin and nose: a long ellipsoid, the nose rounded forward, the cabin floor flat enough to sit on the skids.
-    { mesh: ellipsoid([0.75, 0, -0.35], [2.65, 0.78, 0.95]), material: "body" },
-    { mesh: ellipsoid([2.05, 0, -0.1], [1.3, 0.7, 0.72]), material: "glass" },
-    // The engine and gearbox fairing on top, behind the mast.
-    { mesh: ellipsoid([-0.5, 0, 0.62], [1.9, 0.55, 0.42]), material: "body" },
-    { mesh: tube([0, 0, 0.7], [0, 0, 1.5], 0.12), material: "metal" },
-    // The tail boom, tapering aft to the shroud.
-    { mesh: tube([-2.0, 0, 0.35], [-5.85, 0, 0.5], 0.42, 0.18), material: "body" },
-    // The shrouded fan's housing and fin.
-    { mesh: ring(TAIL_ROTOR_CENTRE, 0.55, 0.14, 0.18), material: "body" },
-    { mesh: box([-6.7, 0, 1.45], [0.8, 0.1, 1.3]), material: "body" },
-    // The horizontal stabiliser with its end plates.
-    { mesh: box([-4.8, 0, 0.5], [0.55, 2.5, 0.07]), material: "body" },
-    { mesh: box([-4.8, 1.25, 0.62], [0.6, 0.05, 0.45]), material: "body" },
-    { mesh: box([-4.8, -1.25, 0.62], [0.6, 0.05, 0.45]), material: "body" },
-    // Skids: two tubes along x, turned up at the front, on two cross tubes.
-    { mesh: tube([2.3, 1.0, -1.45], [-1.6, 1.0, -1.45], 0.05), material: "metal" },
-    { mesh: tube([-1.6, 1.0, -1.45], [-1.8, 1.0, -1.35], 0.05), material: "metal" },
-    { mesh: tube([2.3, 1.0, -1.45], [2.65, 1.0, -1.2], 0.05), material: "metal" },
-    { mesh: tube([2.3, -1.0, -1.45], [-1.6, -1.0, -1.45], 0.05), material: "metal" },
-    { mesh: tube([-1.6, -1.0, -1.45], [-1.8, -1.0, -1.35], 0.05), material: "metal" },
-    { mesh: tube([2.3, -1.0, -1.45], [2.65, -1.0, -1.2], 0.05), material: "metal" },
-    { mesh: tube([1.3, 1.0, -1.45], [1.3, -1.0, -1.45], 0.045), material: "metal" },
-    { mesh: tube([-0.9, 1.0, -1.45], [-0.9, -1.0, -1.45], 0.045), material: "metal" },
-    { mesh: tube([1.3, 0.55, -0.9], [1.3, 1.0, -1.45], 0.045), material: "metal" },
-    { mesh: tube([1.3, -0.55, -0.9], [1.3, -1.0, -1.45], 0.045), material: "metal" },
-    { mesh: tube([-0.9, 0.55, -0.9], [-0.9, 1.0, -1.45], 0.045), material: "metal" },
-    { mesh: tube([-0.9, -0.55, -0.9], [-0.9, -1.0, -1.45], 0.045), material: "metal" },
-  ];
-  // The main rotor, in its node's frame (the node sits at MAIN_ROTOR_CENTRE): a hub and four blades, and a faint disc
-  // for the blur of the turning blades.
-  const mainRotor: Part[] = [
-    { mesh: ellipsoid([0, 0, 0], [0.32, 0.32, 0.14]), material: "metal" },
-    ...[0, 1, 2, 3].map(k => {
-      const a = (k * Math.PI) / 2, c = Math.cos(a), s = Math.sin(a), mid = (MAIN_ROTOR_RADIUS + 0.35) / 2;
-      const blade = box([0, 0, 0], [MAIN_ROTOR_RADIUS - 0.35, 0.3, 0.04]);
-      // Rotated about z by a, then moved out along the blade.
-      const positions = blade.positions.slice(), normals = blade.normals.slice();
-      for (let i = 0; i < positions.length; i += 3) {
-        const x = positions[i] + mid, y = positions[i + 1];
-        positions[i] = x * c - y * s; positions[i + 1] = x * s + y * c;
-        const nx = normals[i], ny = normals[i + 1];
-        normals[i] = nx * c - ny * s; normals[i + 1] = nx * s + ny * c;
-      }
-      return { mesh: { positions, normals, indices: blade.indices }, material: "rotor" as const };
-    }),
-    { mesh: disc([0, 0, 0.01], MAIN_ROTOR_RADIUS), material: "blur" },
-  ];
-  // The tail fan, in its node's frame (centred in the shroud, turning about y): ten blades.
-  const tailRotor: Part[] = Array.from({ length: 10 }, (_, k) => {
-    const a = (k * 2 * Math.PI) / 10, c = Math.cos(a), s = Math.sin(a);
-    const blade = box([0.25, 0, 0], [0.4, 0.03, 0.08]);
-    const positions = blade.positions.slice(), normals = blade.normals.slice();
-    for (let i = 0; i < positions.length; i += 3) {
-      const x = positions[i], z = positions[i + 2];
-      positions[i] = x * c - z * s; positions[i + 2] = x * s + z * c;
-      const nx = normals[i], nz = normals[i + 2];
-      normals[i] = nx * c - nz * s; normals[i + 2] = nx * s + nz * c;
+/** Linear interpolation through (x, value) keys sorted by x, smoothed between keys (smoothstep). */
+function keyed(keys: [number, number][], x: number): number {
+  if (x <= keys[0][0]) return keys[0][1];
+  for (let i = 1; i < keys.length; i += 1) {
+    const [x0, v0] = keys[i - 1], [x1, v1] = keys[i];
+    if (x <= x1) { const t = (x - x0) / (x1 - x0), s = t * t * (3 - 2 * t); return v0 + (v1 - v0) * s; }
+  }
+  return keys[keys.length - 1][1];
+}
+
+/**
+ * A lofted body along x: at each station a superellipse cross-section with its half-width, its top and bottom, and an
+ * exponent (2 an ellipse, larger boxier). The angle range lets a loft cover only part of the section (a window band).
+ * Normals are computed from the surface, so it shades smoothly.
+ */
+function loft(stations: number, around: number, xAt: (i: number) => number, section: (x: number) => { halfWidth: number; top: number; bottom: number; exponent: number },
+  angles: [number, number] = [0, 2 * Math.PI], offset = 0): Mesh {
+  const grid: Vec3[][] = [];
+  for (let i = 0; i <= stations; i += 1) {
+    const x = xAt(i), s = section(x), cz = (s.top + s.bottom) / 2, hz = (s.top - s.bottom) / 2, e = 2 / s.exponent;
+    const row: Vec3[] = [];
+    for (let j = 0; j <= around; j += 1) {
+      const t = angles[0] + ((angles[1] - angles[0]) * j) / around, c = Math.cos(t), si = Math.sin(t);
+      const y = Math.sign(c) * Math.abs(c) ** e * (s.halfWidth + offset), z = cz + Math.sign(si) * Math.abs(si) ** e * (hz + offset);
+      row.push([x, y, z]);
     }
-    return { mesh: { positions, normals, indices: blade.indices }, material: "rotor" as const };
+    grid.push(row);
+  }
+  return gridMesh(grid);
+}
+
+/** A mesh from a grid of points (rows along the length, columns around), with averaged face normals. */
+function gridMesh(grid: Vec3[][]): Mesh {
+  const rows = grid.length, cols = grid[0].length;
+  const positions: number[] = [], normals: number[] = [], indices: number[] = [];
+  const acc = grid.map(row => row.map(() => [0, 0, 0] as Vec3));
+  for (let i = 0; i < rows - 1; i += 1) for (let j = 0; j < cols - 1; j += 1) {
+    const a = grid[i][j], b = grid[i + 1][j], c = grid[i][j + 1];
+    const n = cross([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]);
+    for (const [ii, jj] of [[i, j], [i + 1, j], [i, j + 1], [i + 1, j + 1]]) for (let k = 0; k < 3; k += 1) acc[ii][jj][k] += n[k];
+  }
+  for (let i = 0; i < rows; i += 1) for (let j = 0; j < cols; j += 1) {
+    positions.push(...grid[i][j]);
+    const n = acc[i][j], l = Math.hypot(...n) || 1;
+    normals.push(n[0] / l, n[1] / l, n[2] / l);
+  }
+  for (let i = 0; i < rows - 1; i += 1) for (let j = 0; j < cols - 1; j += 1) {
+    const a = i * cols + j, b = a + cols;
+    indices.push(a, b, a + 1, b, b + 1, a + 1);
+  }
+  return { positions, normals, indices };
+}
+
+/** A symmetric airfoil section (NACA 00xx) of unit chord, as points around from the trailing edge. */
+function airfoil(thickness: number, points = 14): [number, number][] {
+  const half = (x: number) => 5 * thickness * (0.2969 * Math.sqrt(x) - 0.126 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4);
+  const xs = Array.from({ length: points + 1 }, (_, i) => (1 - Math.cos((Math.PI * i) / points)) / 2);
+  return [...xs.slice().reverse().map(x => [x, half(x)] as [number, number]), ...xs.slice(1).map(x => [x, -half(x)] as [number, number])];
+}
+
+/**
+ * A wing along a span axis: an airfoil section (chord along `chordAxis`, thickness along the third axis) swept from
+ * `root` along `span` with a chord and twist that vary along it. Used for rotor blades, the fin and the stabiliser.
+ */
+function wing(root: Vec3, span: Vec3, chordAxis: Vec3, steps: number, chordAt: (t: number) => number, thickness: number, twistAt: (t: number) => number = () => 0, leadingEdgeAt = 0.25): Mesh {
+  const length = Math.hypot(...span), s = span.map(v => v / length) as Vec3;
+  const cAxis = normalise(chordAxis), tAxis = normalise(cross(s, cAxis));
+  const section = airfoil(thickness);
+  const grid: Vec3[][] = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps, chord = chordAt(t), twist = twistAt(t), ct = Math.cos(twist), st = Math.sin(twist);
+    const centre: Vec3 = [root[0] + span[0] * t, root[1] + span[1] * t, root[2] + span[2] * t];
+    grid.push(section.map(([cx, cy]) => {
+      const u = (leadingEdgeAt - cx) * chord, v = cy * chord;
+      const a = u * ct - v * st, b = u * st + v * ct;
+      return [centre[0] + cAxis[0] * a + tAxis[0] * b, centre[1] + cAxis[1] * a + tAxis[1] * b, centre[2] + cAxis[2] * a + tAxis[2] * b] as Vec3;
+    }));
+  }
+  return gridMesh(grid);
+}
+
+/** A tube along a path of points (a bent skid or cross tube). */
+function path(points: Vec3[], radius: number, sectors = 16): Mesh {
+  const grid: Vec3[][] = points.map((p, i) => {
+    const a = points[Math.max(0, i - 1)], b = points[Math.min(points.length - 1, i + 1)];
+    const w = normalise([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+    const helper: Vec3 = Math.abs(w[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+    const u = normalise(cross(w, helper)), v = cross(w, u);
+    return Array.from({ length: sectors + 1 }, (_, k) => {
+      const t = (2 * Math.PI * k) / sectors, c = Math.cos(t), s = Math.sin(t);
+      return [p[0] + (u[0] * c + v[0] * s) * radius, p[1] + (u[1] * c + v[1] * s) * radius, p[2] + (u[2] * c + v[2] * s) * radius] as Vec3;
+    });
   });
+  return gridMesh(grid);
+}
+
+/** Points along an arc from a to b bowing out by `bow` toward `towards` (a skid's bent cross tube). */
+function bent(a: Vec3, b: Vec3, mid: Vec3, steps = 10): Vec3[] {
+  return Array.from({ length: steps + 1 }, (_, i) => {
+    const t = i / steps, u = 1 - t;
+    return [u * u * a[0] + 2 * u * t * mid[0] + t * t * b[0], u * u * a[1] + 2 * u * t * mid[1] + t * t * b[1], u * u * a[2] + 2 * u * t * mid[2] + t * t * b[2]] as Vec3;
+  });
+}
+
+/** Rotates a mesh about z (or y) by an angle, about the origin. */
+function rotated(mesh: Mesh, angle: number, axis: "z" | "y"): Mesh {
+  const c = Math.cos(angle), s = Math.sin(angle), p = mesh.positions.slice(), n = mesh.normals.slice();
+  const [i0, i1] = axis === "z" ? [0, 1] : [0, 2];
+  for (let i = 0; i < p.length; i += 3) {
+    const x = p[i + i0], y = p[i + i1]; p[i + i0] = x * c - y * s; p[i + i1] = x * s + y * c;
+    const nx = n[i + i0], ny = n[i + i1]; n[i + i0] = nx * c - ny * s; n[i + i1] = nx * s + ny * c;
+  }
+  return { positions: p, normals: n, indices: mesh.indices };
+}
+
+/** The fuselage's cross-section at x: the rounded nose, the cabin, the tapering aft body and the tail boom. */
+function fuselage(x: number) {
+  return {
+    halfWidth: keyed([[-6.0, 0.16], [-2.4, 0.3], [-1.3, 0.72], [-0.2, 0.8], [1.6, 0.8], [2.7, 0.66], [3.25, 0.34], [3.42, 0.05]], x),
+    top: keyed([[-6.0, 0.62], [-2.4, 0.66], [-1.3, 0.7], [0.4, 0.74], [1.6, 0.66], [2.6, 0.2], [3.2, -0.2], [3.42, -0.42]], x),
+    bottom: keyed([[-6.0, 0.3], [-2.4, 0.18], [-1.3, -0.95], [-0.6, -1.2], [2.0, -1.2], [2.9, -0.95], [3.3, -0.7], [3.42, -0.5]], x),
+    exponent: keyed([[-6.0, 2], [-2.4, 2.2], [-1.3, 2.8], [2.2, 2.8], [3.42, 2.2]], x),
+  };
+}
+const FUSELAGE_NOSE = 3.42, FUSELAGE_TAIL = -6.05;
+
+/** The body, the main rotor and the tail fan. */
+export function helicopterParts(): { body: Part[]; mainRotor: Part[]; tailRotor: Part[] } {
+  const stations = 120, around = 64;
+  const along = (from: number, to: number, n: number) => (i: number) => from + ((to - from) * i) / n;
+  const body: Part[] = [
+    // The fuselage in one smooth loft from the nose to the end of the boom.
+    { mesh: loft(stations, around, along(FUSELAGE_TAIL, FUSELAGE_NOSE, stations), fuselage), material: "body" },
+    // The windscreen and chin windows: the forward upper surface, a few centimetres proud of the body.
+    { mesh: loft(40, 40, along(1.55, 3.36, 40), fuselage, [-0.15 * Math.PI, 1.15 * Math.PI], 0.012), material: "glass" },
+    // The cabin side windows and doors' glazing, a band each side.
+    { mesh: loft(36, 10, along(-0.9, 1.5, 36), fuselage, [0.08 * Math.PI, 0.34 * Math.PI], 0.01), material: "glass" },
+    { mesh: loft(36, 10, along(-0.9, 1.5, 36), fuselage, [0.66 * Math.PI, 0.92 * Math.PI], 0.01), material: "glass" },
+    // The engine and gearbox fairing on the roof, with its intakes and two exhausts.
+    { mesh: loft(60, 40, along(-2.35, 0.95, 60), x => ({
+      halfWidth: keyed([[-2.35, 0.2], [-1.6, 0.52], [0.2, 0.55], [0.95, 0.2]], x),
+      top: keyed([[-2.35, 0.7], [-1.6, 1.12], [0.3, 1.18], [0.95, 0.76]], x),
+      bottom: 0.55, exponent: 2.6,
+    })), material: "body" },
+    { mesh: ellipsoid([0.35, 0.5, 1.0], [0.28, 0.07, 0.12], 10, 16), material: "metal" },
+    { mesh: ellipsoid([0.35, -0.5, 1.0], [0.28, 0.07, 0.12], 10, 16), material: "metal" },
+    { mesh: tube([-1.9, 0.3, 1.02], [-2.4, 0.42, 1.08], 0.1, 0.12, 20), material: "metal" },
+    { mesh: tube([-1.9, -0.3, 1.02], [-2.4, -0.42, 1.08], 0.1, 0.12, 20), material: "metal" },
+    // The mast and its fairing.
+    { mesh: tube([0, 0, 1.1], [0, 0, 1.52], 0.13, 0.1, 24), material: "metal" },
+    // The shrouded fan's housing: a thick ring, faired into the boom, with the fin above and a ventral fin below.
+    { mesh: ring(TAIL_ROTOR_CENTRE, 0.52, 0.16, 0.2, 48), material: "body" },
+    { mesh: wing([-6.2, 0, 1.0], [-0.55, 0, 1.2], [1, 0, 0], 20, t => 0.9 - 0.35 * t, 0.12), material: "body" },
+    { mesh: wing([-6.35, 0, 0.1], [-0.15, 0, -0.45], [1, 0, 0], 8, t => 0.55 - 0.2 * t, 0.12), material: "body" },
+    // The horizontal stabiliser (an airfoil), with end plates.
+    { mesh: wing([-4.75, -1.3, 0.52], [0, 2.6, 0], [1, 0, 0], 30, () => 0.55, 0.12), material: "body" },
+    { mesh: wing([-4.8, 1.3, 0.3], [0, 0, 0.55], [1, 0, 0], 8, t => 0.6 - 0.15 * t, 0.1), material: "body" },
+    { mesh: wing([-4.8, -1.3, 0.3], [0, 0, 0.55], [1, 0, 0], 8, t => 0.6 - 0.15 * t, 0.1), material: "body" },
+    // Skids: tubes turned up at the front, on two bent cross tubes, with a step each side.
+    ...[1, -1].flatMap(side => [
+      { mesh: path([[-1.75, side * 1.05, -1.38], [-1.6, side * 1.05, -1.45], ...bent([-1.4, side * 1.05, -1.47], [2.2, side * 1.05, -1.47], [0.4, side * 1.05, -1.47], 6), ...bent([2.2, side * 1.05, -1.47], [2.75, side * 1.05, -1.1], [2.6, side * 1.05, -1.48], 8).slice(1)], 0.045), material: "metal" as const },
+      { mesh: box([0.5, side * 0.98, -1.18], [0.5, 0.18, 0.03]), material: "metal" as const },
+    ]),
+    ...[1.25, -0.85].map(x => ({ mesh: path(bent([x, 1.05, -1.47], [x, -1.05, -1.47], [x, 0, -0.6], 16), 0.04), material: "metal" as const })),
+    // The landing light under the nose and the antennas on the boom and belly.
+    { mesh: ellipsoid([2.9, 0, -0.88], [0.1, 0.1, 0.05], 8, 16), material: "glass" },
+    { mesh: wing([-3.4, 0, 0.55], [0, 0, 0.3], [1, 0, 0], 4, t => 0.18 - 0.1 * t, 0.1), material: "metal" },
+    { mesh: wing([0.9, 0, -1.2], [0, 0, -0.18], [1, 0, 0], 4, t => 0.12 - 0.06 * t, 0.1), material: "metal" },
+  ];
+  // The main rotor, in its node's frame (at MAIN_ROTOR_CENTRE): a hub with its star plate, four tapered, twisted
+  // airfoil blades, the pitch links, and a faint disc for the blur of the turning blades.
+  const blade = wing([0, -0.35, 0], [0, -(MAIN_ROTOR_RADIUS - 0.35), 0], [1, 0, 0], 48, t => (t > 0.94 ? 0.3 - 0.12 * (t - 0.94) / 0.06 : 0.3), 0.12, t => 0.14 - 0.14 * t);
+  const mainRotor: Part[] = [
+    { mesh: tube([0, 0, -0.12], [0, 0, 0.1], 0.3, 0.26, 32), material: "metal" },
+    { mesh: ellipsoid([0, 0, 0.12], [0.2, 0.2, 0.12], 12, 24), material: "metal" },
+    ...[0, 1, 2, 3].flatMap(k => [
+      { mesh: rotated(blade, (k * Math.PI) / 2, "z"), material: "rotor" as const },
+      { mesh: rotated(tube([0.08, -0.22, -0.3], [0.1, -0.3, -0.02], 0.02, 0.02, 8), (k * Math.PI) / 2, "z"), material: "metal" as const },
+    ]),
+    { mesh: tube([0, 0, -0.34], [0, 0, -0.28], 0.28, 0.28, 32), material: "metal" },
+    { mesh: disc([0, 0, 0.01], MAIN_ROTOR_RADIUS, 64), material: "blur" },
+  ];
+  // The tail fan, in its node's frame (centred in the shroud, turning about y): a hub and ten blades, unevenly spaced
+  // as shrouded fans are to spread their noise.
+  const spacing = [0, 33, 72, 108, 144, 180, 213, 252, 288, 324];
+  const fanBlade = wing([0.08, 0, 0], [0.44, 0, 0], [0, 0, 1], 10, () => 0.09, 0.12, () => 0.35);
+  const tailRotor: Part[] = [
+    { mesh: tube([0, -0.07, 0], [0, 0.07, 0], 0.09, 0.09, 24), material: "metal" },
+    ...spacing.map(deg => ({ mesh: rotated(fanBlade, (deg * Math.PI) / 180, "y"), material: "rotor" as const })),
+  ];
   return { body, mainRotor, tailRotor };
 }
 
@@ -197,9 +323,9 @@ function merge(parts: Part[]): Map<MaterialId, Mesh> {
   for (const part of parts) {
     const into = out.get(part.material) ?? { positions: [], normals: [], indices: [] };
     const base = into.positions.length / 3;
-    into.positions.push(...part.mesh.positions);
-    into.normals.push(...part.mesh.normals);
-    into.indices.push(...part.mesh.indices.map(i => i + base));
+    for (const v of part.mesh.positions) into.positions.push(v);
+    for (const v of part.mesh.normals) into.normals.push(v);
+    for (const i of part.mesh.indices) into.indices.push(i + base);
     out.set(part.material, into);
   }
   return out;
