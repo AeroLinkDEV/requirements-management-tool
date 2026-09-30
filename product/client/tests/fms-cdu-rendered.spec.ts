@@ -786,3 +786,27 @@ test('B1.1: the PFD writes the altimeter setting beside the altitude; setting ST
   await card.getByLabel('Baro error (ft)').fill('3000')
   await expect(card.getByRole('button', { name: 'Inject the error' })).toBeDisabled()
 })
+
+test('D-R: the Nav data tab shows each moving waypoint\'s age as a bench aid; it never expires', async ({ page }) => {
+  await open(page)
+  await key(page, 'INIT_REF').click()
+  await key(page, 'NEXT').click()
+  await key(page, 'LSK6L').click()
+  await expectLine(page, 0, /^MOVING WPT/)
+  await page.locator('.fmsCdu').focus()
+  for (const [text, lsk] of [['SHIP1', 'LSK1L'], ['RDG180/5', 'LSK2L'], ['270/20', 'LSK1R']]) {
+    await page.keyboard.type(text)
+    await key(page, lsk).click()
+  }
+  await key(page, 'LSK6R').click()
+  await tab(page, 'Nav data')
+  const card = page.getByRole('region', { name: 'Moving waypoints' })
+  await expect(card).toContainText('Bench aid')
+  const item = card.getByTestId('fms-moving-waypoints').getByRole('listitem')
+  await expect(item).toHaveText(/^SHIP1 270°\/20 kt, age 0:00:\d\d$/)
+  // Flying on, it ages on the simulation clock (64 times real time): minutes, not seconds.
+  await page.getByLabel('Simulation rate').selectOption('64')
+  await page.getByRole('button', { name: 'Fly' }).click()
+  await expect(item).toHaveText(/age 0:0[1-9]:\d\d|age 0:[1-5]\d:\d\d/, { timeout: 15_000 })
+  await page.getByRole('button', { name: 'Pause' }).click()
+})
