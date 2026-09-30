@@ -605,3 +605,25 @@ test('the helicopter autopilot fields keep only what they accept: digits, and a 
   await page.getByLabel('Selected speed').fill('9z0')
   await expect(page.getByLabel('Selected speed')).toHaveValue('90')
 })
+
+test('the 87N mission: after ACTIVATE and EXEC over the mark, the map draws the FMS joining path to JN (Phase 1)', async ({ page }) => {
+  await open(page)
+  // The moving map as the lower display (it draws the route, holds, search patterns and the join).
+  await page.getByRole('radiogroup', { name: 'Lower display' }).getByText('Engineering map', { exact: true }).click()
+  await page.getByLabel('Map range').selectOption('5')
+  await tab(page, 'Scenarios')
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  await page.getByLabel('Simulation rate').selectOption('16')
+  await card.getByLabel('Scenario', { exact: true }).selectOption({ label: '87N offshore SAR: search, hover at the mark, the Copter RNAV 190 and its missed approach' })
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  const join = page.locator('[data-testid="hover-join"]')
+  await expect(join).toBeVisible({ timeout: 60_000 })
+  await page.getByRole('button', { name: 'Pause' }).click()
+  // A curved path: the turns are drawn as arcs, many points, not a straight line to JN.
+  const points = ((await join.getAttribute('d')) ?? '').split(/[ML]/).filter(Boolean).length
+  expect(points).toBeGreaterThan(8)
+  const box = (await join.boundingBox())!
+  expect(box.width).toBeGreaterThan(10)
+  expect(box.height).toBeGreaterThan(10)
+  await page.locator('.fmsMap').screenshot({ path: test.info().outputPath('hover-join-map.png') })
+})

@@ -91,7 +91,8 @@ function verticalStep(height: number, vs: number, target: number, rate: number, 
 export function planTransition(start: TransitionStart): TransitionPlan | TransitionRefusal {
   const elevation = start.elevation ?? 0;
   if (start.radioHeight === null) return { refused: true, reason: "radio height invalid" };
-  if (start.ias < P.gateSpeed.value) return { refused: true, reason: "below gate speed" };
+  // An IAS read back from the true airspeed carries rounding: within 1e-6 kt of the gate speed is the gate speed.
+  if (start.ias < P.gateSpeed.value - 1e-6) return { refused: true, reason: "below gate speed" };
   if (Math.abs(start.verticalSpeed) > P.maxVerticalSpeed.value) return { refused: true, reason: "vertical speed limit" };
   if (start.hoverHeight < P.hoverHeightMin.value || start.hoverHeight > P.hoverHeightMax.value) return { refused: true, reason: "hover height out of range" };
   if (start.radioHeight < P.minimumUseHeight.value) return { refused: true, reason: "below minimum use height" };

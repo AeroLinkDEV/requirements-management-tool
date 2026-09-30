@@ -42,7 +42,8 @@ import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line
 import { NO_SURFACE, radioHeight, surfaceById, type Surface } from "./surface";
 import { TACTICAL_PAGES } from "./tacticalPages";
 import { checkAtTdn, planTransition } from "./transition";
-import { defaultLegMinutes, holdingSpeedLimit } from "./holds";
+import { defaultLegMinutes, designBank, holdingSpeedLimit, radiusAt } from "./holds";
+import { JOIN_BEFORE_TDN_NM, joiningPath, type JoinPath } from "./joining";
 import type { CduFunction } from "./variants";
 
 /**
@@ -143,7 +144,9 @@ export class ScriptedFms implements CduBackend {
    * TDN and MRK of a hover procedure being modified: the modified route resolves them from here, the active route
    * from `points`, so a pending ACTIVATE never moves the active procedure (written to `points` at EXEC).
    */
-  private pendingHoverPoints: { TDN: LatLon; MRK: LatLon } | null = null;
+  private pendingHoverPoints: { JN: LatLon; TDN: LatLon; MRK: LatLon } | null = null;
+  /** The joining path of a hover procedure being modified (preview), from the present state; rebuilt at EXEC. */
+  private pendingJoin: JoinPath | null = null;
   private level = 6;
   private readonly maxLevel = 10;
   private brighten = true;
@@ -311,7 +314,7 @@ export class ScriptedFms implements CduBackend {
     /** Why the transition was refused at TDN, as the planner put it (below gate speed, no closure, …). */
     refusedReason: null as string | null,
     functionLost: false,
-    active: null as { id: number; mark: { ident: string; position: LatLon; label: string | null }; finalTrack: number; dtra: number } | null,
+    active: null as { id: number; mark: { ident: string; position: LatLon; label: string | null }; finalTrack: number; dtra: number; join: JoinPath | null } | null,
     procedures: 0,
   };
 
@@ -1539,7 +1542,7 @@ export class ScriptedFms implements CduBackend {
    */
   coordinates(ident: string, route: Route = this.active): LatLon | undefined {
     const pending = this.pendingHoverPoints;
-    if (pending && route !== this.active && (ident === "TDN" || ident === "MRK")) return pending[ident];
+    if (pending && route !== this.active && (ident === "JN" || ident === "TDN" || ident === "MRK")) return pending[ident];
     const own = this.ownPoint(ident);
     if (own) return own;
     // The active plan flies its fixes as they were resolved when it became active (pinActive): a fix it was executed
@@ -1872,10 +1875,16 @@ export class ScriptedFms implements CduBackend {
       hoverHeight: this.afcs?.hoverHeight ?? 50, elevation: this.altitude - ra.value!,
     });
     if (plan.refused) return plan.reason.toUpperCase();
-    this.pendingHoverPoints = { TDN: offset(mark.position, finalTrack + 180, plan.dtraNm), MRK: mark.position };
+    const tdn = offset(mark.position, finalTrack + 180, plan.dtraNm);
+    const join = offset(tdn, finalTrack + 180, JOIN_BEFORE_TDN_NM);
+    this.pendingHoverPoints = { JN: join, TDN: tdn, MRK: mark.position };
+    // Phase 1: the joining path from here onto the final track, previewed now and rebuilt from the state at EXEC.
+    this.pendingJoin = this.joinFromHere(join, finalTrack);
     this.modify(route => {
-      const rest = route.legs.filter(leg => !(leg.kind === "wpt" && (leg.ident === "TDN" || leg.ident === "MRK")));
+      const rest = route.legs.filter(leg => !(leg.kind === "wpt" && (leg.ident === "JN" || leg.ident === "TDN" || leg.ident === "MRK")));
       route.legs = [
+        // JN: the end of the joining path, on the final course before TDN, arrived at on the final track (Phase 1).
+        { kind: "wpt", ident: "JN", path: "CF", course: finalTrack },
         { kind: "wpt", ident: "TDN", qualifier: "/O", path: "CF", course: finalTrack },
         { kind: "wpt", ident: "MRK", qualifier: "/O" },
         { kind: "disco" },
@@ -1887,14 +1896,31 @@ export class ScriptedFms implements CduBackend {
   }
 
   /**
-   * Whether inserting a waypoint at `index` of `legs` would put it between TDN and MRK of a hover procedure (MOD or
-   * ACT): refused with !HOVER MRK WPT, so the transition always flies TDN straight to MRK.
+   * Whether inserting a waypoint at `index` of `legs` would put it between JN and TDN, or TDN and MRK, of a hover
+   * procedure (MOD or ACT): refused with !HOVER MRK WPT, so the procedure flies JN, TDN and MRK on the final course.
    */
   splitsHover(legs: readonly Leg[], index: number) {
     if (this.hover.status === "NONE") return false;
     const before = legs[index - 1], after = legs[index];
-    return before?.kind === "wpt" && before.ident === "TDN" && after?.kind === "wpt" && after.ident === "MRK";
+    const pair = (a: string, b: string) => before?.kind === "wpt" && before.ident === a && after?.kind === "wpt" && after.ident === b;
+    return pair("JN", "TDN") || pair("TDN", "MRK");
   }
+
+  /**
+   * The joining path (joining.ts) from the present position and track to JN on the final track. Its turns are sized for
+   * the true airspeed plus the wind speed at the design bank (rate one, capped at the bank limit), as the holds are.
+   */
+  private joinFromHere(join: LatLon, finalTrack: number): JoinPath {
+    const tas = tasFromIas(Math.max(this.afcs?.ias ?? 0, 1), this.altitude);
+    const fastest = tas + this.wind.speed;
+    const radius = radiusAt(fastest, designBank(fastest, this.aircraftProfile.parameters.afcsBankLimit.value));
+    return joiningPath(this.here, this.track, join, finalTrack, radius);
+  }
+
+  /** The joining path the active hover procedure flies to JN (Phase 1), or null when there is none. */
+  get hoverJoin() { return this.hover.active?.join ?? null; }
+  /** The joining path of a hover modification, for its preview (the map; LEGS shows JN). */
+  get hoverJoinPreview() { return this.hover.status === "MOD" ? this.pendingJoin : null; }
 
   /** CANCEL (M300 A-76): the hover modification is discarded; the active route, and any active procedure, as they were. */
   cancelHover() {
@@ -1906,6 +1932,7 @@ export class ScriptedFms implements CduBackend {
   /** A hover modification erased (CANCEL, or the whole modification): the active procedure, if any, as it was. */
   private discardHoverModification() {
     this.pendingHoverPoints = null;
+    this.pendingJoin = null;
     if (this.hover.status !== "MOD") return;
     const active = this.hover.active;
     Object.assign(this.hover, active ? { status: "ACT", mark: active.mark, finalTrack: active.finalTrack, dtra: active.dtra } : { status: "NONE" });
@@ -2135,9 +2162,14 @@ export class ScriptedFms implements CduBackend {
     if (hover && this.radioHeight.status !== "NORMAL") { this.alert(alert("RALT FAILED")); return; }
     if (hover) {
       const h = this.hover;
+      const joinPoint = this.pendingHoverPoints!.JN;
       Object.assign(this.points, this.pendingHoverPoints);
       this.pendingHoverPoints = null;
-      h.active = { id: ++h.procedures, mark: h.mark!, finalTrack: h.finalTrack!, dtra: h.dtra! };
+      this.pendingJoin = null;
+      // Committed on EXEC: the joining path rebuilt from the state now, if JN is still the route's next leg (the crew may
+      // have deleted it, to vector onto the final with headings).
+      const joins = route.legs[0]?.kind === "wpt" && route.legs[0].ident === "JN";
+      h.active = { id: ++h.procedures, mark: h.mark!, finalTrack: h.finalTrack!, dtra: h.dtra!, join: joins ? this.joinFromHere(joinPoint, h.finalTrack!) : null };
       Object.assign(h, { status: "ACT", requestData: null, refused: null, refusedReason: null, functionLost: false });
       // The procedure takes the head of the route: a search pattern being flown is interrupted (its /S leg removed).
       if (this.sar.active) this.interruptSar();
@@ -2148,6 +2180,7 @@ export class ScriptedFms implements CduBackend {
       this.discardHoverModification();
     }
     this.pendingHoverPoints = null;
+    this.pendingJoin = null;
     if (route.hold?.status === "INACTIVE") route.hold.status = "ARMED";
     if (this.sar.pending) { this.sar.active = this.sar.pending; this.sar.status = "ARMED"; this.sar.pending = null; }
     // A new active waypoint, or a direct-to, starts the active leg at present position.

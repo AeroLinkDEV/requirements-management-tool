@@ -1,4 +1,4 @@
-import { racetrackOutline, sarTrack, type FlightSimulator } from "./flight";
+import { racetrackOutline, sarTrack, segmentsOutline, type FlightSimulator } from "./flight";
 import { arcSweep, bearingDeg, distanceNm, longitudeDelta, offset, type LatLon, type Route } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
 import "./FmsMap.css";
@@ -58,6 +58,10 @@ export default function FmsMap({ fms, sim, range }: Props) {
   const holdFix = hold ? fms.coordinates(hold.fix) : undefined;
   const racetrack = hold && holdFix ? racetrackOutline(holdFix, hold, fms.groundSpeed, sim.tas, fms.wind.speed) : null;
 
+  // Phase 1 of a hover procedure: its joining path, previewed while in MOD, then the committed one.
+  const join = fms.hoverJoinPreview ?? fms.hoverJoin;
+  const joinPath = join ? segmentsOutline(join.from, join.segments) : null;
+
   const sarStart = active.legs.find(leg => leg.kind === "wpt" && leg.qualifier === "/S");
   const sarPath = sim.sarPath
     ?? (fms.sar.active && sarStart?.kind === "wpt" && fms.coordinates(sarStart.ident) ? sarTrack(fms.coordinates(sarStart.ident)!, fms.sar, fms.sar.active) : null);
@@ -103,6 +107,7 @@ export default function FmsMap({ fms, sim, range }: Props) {
         })}
         {racetrack ? <path className="hold" d={path(racetrack)} /> : null}
         {sarPath ? <path className="sar" d={path(sarPath)} /> : null}
+        {joinPath ? <path className={fms.hoverJoinPreview ? "modified" : "active"} d={path(joinPath)} data-testid="hover-join" /> : null}
         {modified.map((line, i) => <path key={`m${i}`} className="modified" d={path(line)} />)}
         {first && first.length > 2 ? <path className="later" d={path(first.slice(1))} /> : null}
         {later.map((line, i) => <path key={`l${i}`} className="later" d={path(line)} />)}

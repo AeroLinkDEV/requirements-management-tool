@@ -40,6 +40,7 @@
     "fms-tdn-production.spec.ts",
     "fms-tdn-flight.spec.ts",
     "fms-87n-mission.spec.ts",
+    "fms-hover-join.spec.ts",
     "fms-out-the-window.spec.ts",
     "fms-synthetic-vision.spec.ts",
     "fms-terrain-tiles.spec.ts",
