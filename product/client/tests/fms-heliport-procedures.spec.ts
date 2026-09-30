@@ -147,10 +147,12 @@ test('C.6, C.7: each transition keeps its HF course reversal at TIDUE, 4 NM legs
 test('C.7: the transition joins the final by record role, TIDUE flown once with its HF, never collapsed by name', () => {
   const r190 = procedure('87N', 'R190')!
   const joined = joinTransition(r190.transitions.HTO, r190.legs)
-  // HTO, then TIDUE reached on the TF at or above 1800 with the HF there, then the final from TIDUE: STAYS and CRANN.
-  // The final's IF adds its 70 kt limit; its 1700 applies after the hold, which carries it.
+  // The incoming path/HF are retained, with the final's 1700/70 kt constraints taking precedence (M300 7-2).
   expect(joined.map(l => ('ident' in l ? l.ident : l.path))).toEqual(['HTO', 'TIDUE', 'STAYS', 'CRANN'])
-  expect(joined[1]).toMatchObject({ ident: 'TIDUE', altitude: '1800A', hold: { path: 'HF', exit: 'ONCE', altitude: '1700A' }, speedLimit: { kt: 70 } })
+  expect(joined[1]).toMatchObject({ ident: 'TIDUE', altitude: '1700A', hold: { path: 'HF', exit: 'ONCE', altitude: '1700A' }, speedLimit: { kt: 70 } })
+  // M300 7-2: common-waypoint approach constraints take precedence, independent of the incoming path terminator.
+  const constrained = joinTransition([{ ident: 'TIDUE', path: 'TF', altitude: '2000A', speedLimit: { kt: 90, descriptor: 'AT OR BELOW' } }], r190.legs)
+  expect(constrained[0]).toMatchObject({ ident: 'TIDUE', path: 'TF', altitude: '1700A', speedLimit: { kt: 70 } })
   // A transition that does not end at the final's IF is not joined: its legs and the final's are kept whole.
   const apart = joinTransition([{ ident: 'HTO' }], r190.legs)
   expect(apart.map(l => ('ident' in l ? l.ident : l.path))).toEqual(['HTO', 'TIDUE', 'STAYS', 'CRANN'])
@@ -166,7 +168,7 @@ test('C.7: in the FMS the route flies TIDUE once with its HF; a direct-to TIDUE 
   const approach = legs().slice(legs().findIndex(l => l.kind === 'wpt' && l.ident === 'HTO'))
   expect(approach.map(l => (l.kind === 'wpt' ? l.ident : l.kind === 'cond' ? `(${l.path})` : '(disco)'))).toEqual(['HTO', 'TIDUE', 'STAYS', 'CRANN', '(CA)', 'BEADS'])
   const tidue = approach[1]
-  expect(tidue).toMatchObject({ kind: 'wpt', ident: 'TIDUE', altitude: '1800A', hold: { path: 'HF', legDistanceNm: 4, exit: 'ONCE' }, speedLimit: { kt: 70 } })
+  expect(tidue).toMatchObject({ kind: 'wpt', ident: 'TIDUE', altitude: '1700A', hold: { path: 'HF', legDistanceNm: 4, exit: 'ONCE' }, speedLimit: { kt: 70 } })
   expect(approach[5]).toMatchObject({ kind: 'wpt', ident: 'BEADS', path: 'DF', hold: { path: 'HM', legDistanceNm: 4 }, speedLimit: { kt: 70 } })
 
   // Direct-to TIDUE replaces the legs before it and keeps the HF that follows.

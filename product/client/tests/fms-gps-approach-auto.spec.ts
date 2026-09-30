@@ -9,6 +9,7 @@ import { stimulusFor, type GpsOp } from '../src/fmsCdu/gpsStimulus'
 import { setUpKbtvRnav15 } from '../src/fmsCdu/kbtvDemo'
 import { runHeadless } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
+import { LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
 
@@ -19,7 +20,7 @@ const START = Date.UTC(2026, 8, 27, 14, 0, 0)
 
 const setup = () => {
   let now = START
-  const fms = new ScriptedFms(() => new Date(now))
+  const fms = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(fms)
   expect(setUpKbtvRnav15(fms, sim)).toEqual({ ready: true })
   const tick = () => { now += 250; sim.step(0.25) }
@@ -81,7 +82,7 @@ test('case 1: both receivers support the approach, so the current one is kept, e
 
 test('case 1, en route: a recovered GPS 1 does not take the navigation back from GPS 2', () => {
   let now = START
-  const fms = new ScriptedFms(() => new Date(now))
+  const fms = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(fms)
   const stimulus = stimulusFor(fms)
   stimulus.apply(0, { op: 'fault', fault: 'RECEIVER', on: true })
@@ -325,7 +326,7 @@ test('eligibility needs the executed approach sent, and an unqualified change di
 /** The demonstration route en route, stepped in quarter seconds, with the GPS stimulus and the CDU. */
 const enRoute = () => {
   let now = START
-  const fms = new ScriptedFms(() => new Date(now))
+  const fms = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(fms)
   const fly = (seconds: number) => { for (let i = 0; i < seconds * 4; i += 1) { now += 250; sim.step(0.25) } }
   const gps = (receiver: 1 | 2, op: GpsOp) => expect(stimulusFor(fms).apply(receiver - 1, op)).toBe(true)

@@ -2,6 +2,7 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import type { GpsBus, GpsReceiver } from '../src/fmsCdu/gps'
+import { LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
@@ -12,7 +13,7 @@ import type { CduFunction } from '../src/fmsCdu/variants'
 const START = Date.UTC(2026, 8, 27, 14, 0, 0)
 const setup = () => {
   let now = START
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   expect(receivers(unit), 'the FMS owns GPS1 and GPS2').toHaveLength(2)
   return { unit, advance: (ms: number) => { now += ms; unit.updateNavigation(ms / 1000) } }
 }
@@ -132,7 +133,7 @@ test('the GPS integrity condition is a satellite fault neither receiver can excl
 
 test('the GPS integrity condition holds through a whole flight as the sky moves: RAIM always sees the faulted satellite (3a.5)', () => {
   let now = START
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(unit)
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')

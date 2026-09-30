@@ -323,7 +323,7 @@ export class FlightSimulator {
    * The vertical deviation is flagged: on the final leg of an RNAV approach without GPS vertical guidance (a level
    * without it, 117 withdrawn, or no GPS). The display shows the flag instead of a path (GPS phase 3b).
    */
-  get verticalFlag() { return !this.fms.hasCondition("fmsFail") && this.onFinal && this.rnavApproach && !this.fms.gpsApproachVertical; }
+  get verticalFlag() { return !this.fms.s300Advisory && !this.fms.hasCondition("fmsFail") && this.onFinal && this.rnavApproach && !this.fms.gpsApproachVertical; }
 
   /** On the final leg: the FAF has been sequenced and the runway is the active waypoint. */
   /** On the final approach segment: past the executed approach's FAF, with the runway ahead (ScriptedFms.onFinalSegment). */
@@ -376,6 +376,8 @@ export class FlightSimulator {
     const converging = this.previousCrossTrack === null || Math.abs(crossTrack) <= Math.abs(this.previousCrossTrack) + 1e-6;
     this.previousCrossTrack = crossTrack;
     const fms = this.fms;
+    // S300 FMS approach arming controls lateral phase/RNP. Its barometric VNAV never arms the AFCS vertical axis.
+    if (fms.s300Advisory) { this.approach = "OFF"; this.gpsLateral = false; return; }
     const capable = fms.approachVertical;
     if (this.approach === "CAPTURED") {
       if (!this.onFinal || fms.hasCondition("fmsFail")) { this.approach = fms.approachArmed ? "ARMED" : "OFF"; return; }
@@ -1280,7 +1282,7 @@ export class FlightSimulator {
     const leg = route.legs[0];
     const base = { targetAltitude: this.targetAltitude() };
     const none = { mode: "LNAV" as const, legFrom: null, legTo: null, desiredTrack: null, crossTrack: 0, distanceToGo: null, bankCommand: 0, ...base };
-    if (fms.navState.mode === "DR" && !fms.navState.airValid || !fms.departureInstrumentReady || fms.pinsContinuation?.active) return { ...none, mode: "HDG" };
+    if (fms.navState.mode === "DR" && !fms.navState.airValid || !fms.approachSteeringValid || !fms.departureInstrumentReady || fms.pinsContinuation?.active) return { ...none, mode: "HDG" };
     const sequencing = dt > 0 && this.lateral === "LNAV";
     this.lead = 0;
 

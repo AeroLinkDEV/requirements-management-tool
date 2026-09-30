@@ -16,8 +16,8 @@ import {
   ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, fasRequirement, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
   type GpsChoice,
 } from "./gpsSensors";
-import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type Navaid, type ProcedureHold, type StoredRoute } from "./navData";
-import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
+import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type Navaid, type Procedure, type ProcedureHold, type Runway, type StoredRoute } from "./navData";
+import { coldTemperatureCorrection, computeProfile, formatConstraint, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
 import { RNP_DEFAULTS, type FlightPhase, type NavMode } from "./navigation";
 import { CivilNavigation, type PositionMeasurement } from "./civilNavigation";
 import { BenchRadioReceiver, solveRadio } from "./radioNavigation";
@@ -45,6 +45,7 @@ import { ACTIVE_PROFILE, fmsBankLimit, type AircraftProfile } from "./profile";
 import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line } from "./screen";
 import { NO_SURFACE, radioHeight, surfaceById, type Surface } from "./surface";
 import { s300Phase } from "./flightPhase";
+import { advisoryVnav } from "./advisoryVnav";
 import {
   EMPTY_USER_DATABASE, USER_WAYPOINT_CAPACITY, memoryUserDatabaseStore, mergeUserDatabase, parseUserDatabase, serializeUserDatabase,
   type UserDatabase, type UserDatabaseStore, type UserScope,
@@ -203,11 +204,22 @@ export class ScriptedFms implements CduBackend {
   private pinnedFas: { fas: FasDataBlock; cycle: string; revision: number } | null = null;
   /** The executed approach's final approach fix and runway, pinned with the plan (pinActive); null without an approach. */
   private executedApproach: { ident: string; faf: string | null; runway: string | null; instrumentEnd: string | null } | null = null;
+  private advisoryReference: { approach: Procedure; runway?: Runway } | null = null;
   /** The satellite the GPS integrity condition faults, so a change of PRN clears the old one. */
   private integrityFaultPrn: number | null = null;
   /** Every change of navigation source: GPS1, GPS2, DME/DME, VOR/DME or DR, when it changed. */
   private sourceLog: { at: Date; source: string }[] = [];
   private armedApproach = false;
+  private approachSelectionPending = false;
+  private approachSession = 0;
+  private scaleAdvisorySession: number | null = null;
+  private approachIntegrityLostAt: number | null = null;
+  private approachCancelled = false;
+  private temperatureAlertSession: number | null = null;
+  private angleAlertSession: string | null = null;
+  private pendingApproachTemperature: { value: number | null } | null = null;
+  private vnavSelectionKey: string | null = null;
+  approachMdaEntered = false;
   private mapPassed = false;
   private missedRequested = false;
   private visualContinuation = false;
@@ -650,6 +662,8 @@ export class ScriptedFms implements CduBackend {
       this.sar.status = "IN PROGRESS";
       return "sar";
     }
+    // At the actual exit crossing, evaluate the approach entry gate before the FAF leaves the route.
+    if (hold?.fix === leg.ident && hold.status === "EXIT ARMED" && leg.ident === this.finalApproachFix) this.refreshApproachPhase(true);
     this.passLeg(leg.ident);
     return route.legs.some(next => next.kind !== "disco") ? "route" : "end";
   }
@@ -843,11 +857,26 @@ export class ScriptedFms implements CduBackend {
       this.automaticRaimFor = raimKey;
       this.predictRaimAt(this.active.dest, true);
     }
-    if (nearFaf && !this.armedApproach) {
+    const advisoryWindow = toFaf !== null && toFaf <= 3 && !this.onFinalSegment && this.flightPhase === "TERMINAL"
+      && findProcedure(this.db, this.active, "APPROACH")?.approachType === "RNAV";
+    // M300 7-10; the bench displays the scale advisory once per executed approach, not every simulation tick.
+    if (advisoryWindow && !this.holdingAtFaf && this.scaleAdvisorySession !== this.approachSession) {
+      this.scaleAdvisorySession = this.approachSession;
+      this.advisory("HSI SCALE TO CHANGE");
+    }
+    if (advisoryWindow && !this.armedApproach) {
       if (!this.nav.armAlerted) { this.nav.armAlerted = true; this.alert(alert("ARM APPROACH")); }
-    } else if (!nearFaf) this.nav.armAlerted = false;
+    } else this.nav.armAlerted = false;
 
-    // On an RNAV approach, a position without GPS integrity is not good enough to continue.
+    const advisory = this.advisoryVertical;
+    if (advisory && this.active.approach && this.flightPhase !== "EN ROUTE" && this.vnav.destTemp === null && this.aircraftProfile.temperatureEntry !== "OPTIONAL"
+      && this.temperatureAlertSession !== this.approachSession) {
+      this.temperatureAlertSession = this.approachSession;
+      this.alert(alert("SET AIRPORT TEMP"));
+    }
+    const angleKey = advisory?.angleAlert ? `${this.approachSession}:${advisory.angleDeg}:${this.vnav.destTemp}` : null;
+    if (angleKey && angleKey !== this.angleAlertSession) { this.angleAlertSession = angleKey; this.alert(alert(advisory!.angleAlert!)); }
+    // S300 retains valid uncertain GPS guidance for the manual's post-FAF delay; the later SBAS profile has no delay.
     const approach = findProcedure(this.db, this.active, "APPROACH");
     const rnavApproach = approach?.approachType === "RNAV" && (this.flightPhase === "APPROACH" || this.armedApproach && nearFaf);
     // The approach needs the selected receiver's words to permit it (gpsApproachAuthority: a usable receiver, a valid
@@ -856,7 +885,9 @@ export class ScriptedFms implements CduBackend {
     const authority = this.gpsApproachAuthority, vertical = authority.vertical;
     if (rnavApproach && vertical) this.nav.approachVerticalSeen = true;
     if (!rnavApproach) this.nav.approachVerticalSeen = false;
-    if (rnavApproach && (!this.approachIntegrityEligible || selection.mode !== "GPS" || authority.annunciation === "NO APPR" || (this.nav.approachVerticalSeen && !vertical))) {
+    const integrityDenied = this.s300Advisory ? this.approachCancelled || !this.onFinalSegment && !this.approachIntegrityEligible
+      : !this.approachIntegrityEligible || selection.mode !== "GPS" || authority.annunciation === "NO APPR" || (this.nav.approachVerticalSeen && !vertical);
+    if (rnavApproach && integrityDenied) {
       if (!this.nav.approachIntegrityAlerted) { this.nav.approachIntegrityAlerted = true; this.alert(alert("NO APPR INTEGRITY")); }
     } else this.nav.approachIntegrityAlerted = false;
   }
@@ -881,7 +912,7 @@ export class ScriptedFms implements CduBackend {
     const selection = this.autoSelection.choose({
       choice: this.gpsChoice, selected: this.gpsSelected, assessed, buses, time,
       position: assessed[this.nav.gpsSource === 2 ? 1 : 0]?.fix ?? this.here, positionSource: this.nav.gpsSource === null ? null : this.nav.gpsSource - 1,
-      executedCrc: this.pinnedFas?.fas.crc ?? null, sentCrc: this.sentFas?.crc ?? null, approachArmed: this.armedApproach,
+      executedCrc: this.pinnedFas?.fas.crc ?? null, sentCrc: this.sentFas?.crc ?? null, approachArmed: !this.s300Advisory && this.armedApproach,
     });
     const chosen = selection.chosen;
     this.gpsSelection = { qualified: selection.qualified, refused: selection.refused };
@@ -996,14 +1027,21 @@ export class ScriptedFms implements CduBackend {
     return distance;
   }
 
-  /** S300 current and predicted integrity are separate. The prediction is this bench's seeded sky, not an almanac. */
-  private refreshApproachPhase() {
+  /** A hold remains a hold when its exit is armed; actual passage ends it. */
+  private get holdingAtFaf() {
+    const faf = this.finalApproachFix;
+    const leg = this.active.legs.find(leg => leg.kind === "wpt" && leg.source === "APPR" && leg.ident === faf);
+    return leg?.kind === "wpt" && (leg.hold !== undefined || this.active.hold?.fix === faf);
+  }
+
+  private refreshApproachPhase(leavingFafHold = false) {
+    this.refreshS300Integrity();
     this.approachIntegrityEligible = false;
     const approach = findProcedure(this.db, this.active, "APPROACH"), distance = this.distanceToFaf;
     const source = this.nav.gpsSource, bus = source === null ? null : this.gpsBus(source - 1);
     const hdop = bus?.["101"], assessment = assessReceiver(bus, 0.3);
-    const current = this.nav.mode === "GPS" && assessment.usable && hdop?.ssm === "NORMAL" && typeof hdop.value === "number" && hdop.value <= 4;
-    const holding = this.active.hold?.fix === approach?.faf && this.active.hold?.status !== "EXIT ARMED";
+    const current = this.nav.mode === "GPS" && assessment.usable && hdop?.ssm === "NORMAL" && typeof hdop.value === "number" && hdop.value >= 0 && hdop.value <= 4;
+    const holding = !leavingFafHold && this.holdingAtFaf;
     if (!approach || approach.approachType !== "RNAV" || !this.armedApproach || holding || distance === null || distance > 2) this.approachPhaseActive = false;
     if (!approach || distance === null || distance > 6 || !source || this.sensorPort) return;
     const key = `${this.planRevision}:${source}:${this.raimDeselectedSatellites.join(",")}`;
@@ -1021,9 +1059,78 @@ export class ScriptedFms implements CduBackend {
     const predicted = prediction.faf !== null && prediction.faf <= 0.3 && prediction.map !== null && prediction.map <= 0.3;
     // The FAF prediction is an entry gate, not a new requirement to predict a fix already passed.
     this.approachIntegrityEligible = current && (this.onFinalSegment ? this.approachPhaseActive : predicted) && this.gpsApproachAuthority.annunciation !== "NO APPR";
-    if (this.armedApproach && !holding && distance <= 2 && this.approachIntegrityEligible) this.approachPhaseActive = true;
+    if (this.armedApproach && !this.approachCancelled && !holding && distance <= 2 && this.approachIntegrityEligible) this.approachPhaseActive = true;
     // A later loss on the final is handled by the approach guidance integrity policy, rather than changing RNP to 1.
     if ((!current || !predicted) && !this.onFinalSegment) this.approachPhaseActive = false;
+  }
+
+  /** M300 7-12: five minutes for integrity-only loss after FAF inbound; invalid input/HDOP loss is immediate. */
+  private refreshS300Integrity() {
+    if (!this.s300Advisory || !this.armedApproach || !this.onFinalSegment || !this.approachPhaseActive) return;
+    const source = this.nav.gpsSource, bus = source === null ? null : this.gpsBus(source - 1);
+    const assessment = assessReceiver(bus, 0.3), hdop = bus?.["101"];
+    const hdopValid = hdop?.ssm === "NORMAL" && typeof hdop.value === "number" && Number.isFinite(hdop.value) && hdop.value >= 0 && hdop.value <= 4;
+    if (this.nav.mode !== "GPS" || !assessment.fix || !hdopValid || !assessment.usable && assessment.reason !== "INTEGRITY") this.approachCancelled = true;
+    else if (assessment.usable) this.approachIntegrityLostAt = null;
+    else {
+      this.approachIntegrityLostAt ??= this.now.getTime();
+      if (this.now.getTime() - this.approachIntegrityLostAt >= 300_000) this.approachCancelled = true;
+    }
+    if (this.approachCancelled) this.approachPhaseActive = false;
+  }
+
+  get s300Advisory() { return this.aircraftProfile.approachPolicy === "S300_ADVISORY"; }
+  get approachSteeringValid() { return !this.s300Advisory || !this.approachCancelled; }
+  get baroCorrectedAvailable() {
+    return !this.sensorPort || sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge)?.baroCorrected !== false;
+  }
+  /** Corrected ADC altitude, or pressure altitude corrected with crew QNH. 27 ft/hPa is declared bench approximation. */
+  get advisoryBaroAltitude() {
+    if (this.baroCorrectedAvailable) return this.validBaroAltitude;
+    const air = sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge);
+    if (!air || !Number.isFinite(air.pressureAltitudeFt) || this.vnav.qnh === null) return null;
+    const qnh = Number(this.vnav.qnh), hpa = qnh < 100 ? qnh * 33.8638866667 : qnh;
+    return air.pressureAltitudeFt! + (hpa - 1013.25) * this.aircraftProfile.parameters.qnhAltitudeSlope.value;
+  }
+  get advisoryVertical() {
+    if (!this.s300Advisory) return null;
+    const approach = this.advisoryReference?.approach;
+    const runway = this.advisoryReference?.runway;
+    const threshold = runway ? this.coordinates(runway.ident) : undefined;
+    const bus = this.nav.gpsSource === null ? null : this.gpsBus(this.nav.gpsSource - 1);
+    const assessment = assessReceiver(bus, HAL_NM[this.flightPhase]);
+    const north = bus?.["166"], east = bus?.["174"];
+    const velocity = north?.ssm === "NORMAL" && east?.ssm === "NORMAL" && typeof north.value === "number" && typeof east.value === "number"
+      && Number.isFinite(north.value) && Number.isFinite(east.value);
+    const air = sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge);
+    const fafLeg = approach?.legs.find(leg => "ident" in leg && leg.ident === approach.faf);
+    const fafEncoded = fafLeg && "ident" in fafLeg && parseConstraint(fafLeg.altitude) !== null;
+    return advisoryVnav({ approach, runway: runway && threshold ? { ...runway, threshold, elevation: this.vnav.runwayElevation } : undefined,
+      faf: approach?.faf ? this.coordinates(approach.faf) : undefined, fafAltitude: fafEncoded ? this.vnav.fafAltitude : null,
+      position: this.position, altitude: this.advisoryBaroAltitude, track: velocity ? Math.atan2(east.value!, north.value!) * 180 / Math.PI : null,
+      groundSpeed: velocity ? Math.hypot(north.value!, east.value!) : null, terminal: this.flightPhase !== "EN ROUTE",
+      approachPhase: this.flightPhase === "APPROACH", gps: this.nav.mode === "GPS" && assessment.usable,
+      systemValid: !this.hasCondition("fmsFail"), rateValid: air?.altitudeRateValid !== false, altitudesAgree: air?.altitudesAgree !== false,
+      temperatureRequired: this.aircraftProfile.temperatureEntry === "MANDATORY", temperature: this.vnav.destTemp, thresholdPassed: this.mapPassed || this.missedRequested,
+      minimumProgress: this.aircraftProfile.parameters.advisoryMinimumProgress.value, temperatureLapseRate: this.aircraftProfile.parameters.temperatureLapseRate.value });
+  }
+  setApproachTemperature(value: number | null) {
+    this.pendingApproachTemperature = { value };
+    this.modify(() => {});
+  }
+  get shownApproachTemperature() { return this.pendingApproachTemperature ? this.pendingApproachTemperature.value : this.vnav.destTemp; }
+  /** Display compensation never replaces the charted constraints stored with the procedure/route. */
+  compensatedAltitude(altitude: number) {
+    const temp = this.vnav.destTemp, elevation = this.vnav.runwayElevation;
+    const isa = 15 - elevation * this.aircraftProfile.parameters.temperatureLapseRate.value;
+    return temp === null ? altitude : Math.round(elevation + (altitude - elevation) * (273.15 + isa) / (273.15 + temp));
+  }
+  compensatedConstraint(text: string | undefined) {
+    if (!text || this.vnav.destTemp === null) return text;
+    const parsed = parseConstraint(text);
+    if (!parsed) return text;
+    return formatConstraint(parsed.kind === "WINDOW" ? { ...parsed, lower: this.compensatedAltitude(parsed.lower), upper: this.compensatedAltitude(parsed.upper) }
+      : { ...parsed, altitude: this.compensatedAltitude(parsed.altitude) });
   }
 
   /** M300 1-11/7-10: loading an approach grants no approach phase, NPA or 0.3-NM RNP. */
@@ -1063,7 +1170,7 @@ export class ScriptedFms implements CduBackend {
     return destTemp === null ? 0 : coldTemperatureCorrection(fafAltitude - runwayElevation, destTemp, runwayElevation);
   }
 
-  get fafAltitudeCorrected() { return this.vnav.fafAltitude + this.coldCorrection; }
+  get fafAltitudeCorrected() { return this.s300Advisory ? this.compensatedAltitude(this.vnav.fafAltitude) : this.vnav.fafAltitude + this.coldCorrection; }
 
   /**
    * Valid barometric altitude, or null without fresh connected air data. The default bench's ideal air-data generator
@@ -1071,7 +1178,9 @@ export class ScriptedFms implements CduBackend {
    */
   get validBaroAltitude(): number | null {
     if (!this.sensorPort) return this.altitude;
-    const altitude = sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge)?.altitudeFt;
+    const air = sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge);
+    if (air?.baroCorrected === false) return this.advisoryBaroAltitude;
+    const altitude = air?.altitudeFt;
     return altitude !== undefined && Number.isFinite(altitude) ? altitude : null;
   }
 
@@ -1175,7 +1284,8 @@ export class ScriptedFms implements CduBackend {
       // The final approach fix is crossed at its (cold-corrected) altitude: the executed approach's FAF, or on the
       // demonstration route without an approach the fix before the runway.
       const isFaf = this.finalApproachFix ? leg.ident === this.finalApproachFix && i < runwayAt : i === runwayAt - 1;
-      const constraint = isFaf ? { kind: "AT" as const, altitude: this.fafAltitudeCorrected } : parseConstraint(leg.altitude);
+      const constraint = isFaf ? { kind: "AT" as const, altitude: this.fafAltitudeCorrected }
+        : parseConstraint(this.s300Advisory && leg.source === "APPR" ? this.compensatedConstraint(leg.altitude) : leg.altitude);
       if (constraint) planAltitude = constraint.kind === "WINDOW" ? constraint.lower : constraint.altitude;
       // In the manual hold, the fix's next crossing is at the end of the path still to fly around the pattern, not the
       // straight line to the fix (S300 5-17: the direct distance and the ETA at the next crossing are different things).
@@ -1459,6 +1569,7 @@ export class ScriptedFms implements CduBackend {
    * the cycle, the FAF where the executed plan has it. Derived only when a plan becomes active (pinActive), and to compare.
    */
   private deriveFas(): FasDataBlock | null {
+    if (this.s300Advisory) return null;
     const approach = findProcedure(this.db, this.active, "APPROACH");
     const runway = approach ? this.db.airport(approach.airport)?.runways.find(entry => entry.ident === approach.runways[0]) : undefined;
     return approach ? buildFas(approach, runway, approach.airport, approach.faf ? this.coordinates(approach.faf) : undefined) : null;
@@ -1471,15 +1582,34 @@ export class ScriptedFms implements CduBackend {
    */
   private pinApproachReference() {
     const approach = findProcedure(this.db, this.active, "APPROACH");
-    if (!approach) { this.executedApproach = null; this.mapPassed = this.missedRequested = this.visualContinuation = false; this.approachPhaseActive = false; return; }
+    if (!approach) {
+      this.executedApproach = this.advisoryReference = null;
+      this.mapPassed = this.missedRequested = this.visualContinuation = this.approachCancelled = false;
+      this.approachPhaseActive = false; this.approachIntegrityLostAt = null; return;
+    }
+    const referenceRunway = this.db.airport(approach.airport)?.runways.find(entry => entry.ident === approach.runways[0]);
+    this.advisoryReference = structuredClone({ approach, runway: referenceRunway });
+    if (this.s300Advisory) {
+      const faf = approach.legs.find(leg => "ident" in leg && leg.ident === approach.faf);
+      const altitude = faf && "ident" in faf ? parseConstraint(faf.altitude) : null;
+      if (altitude) this.vnav.fafAltitude = altitude.kind === "WINDOW" ? altitude.lower : altitude.altitude;
+      if (referenceRunway) this.vnav.runwayElevation = referenceRunway.elevation;
+    }
     const changed = this.executedApproach?.ident !== approach.ident;
     this.executedApproach = {
       ident: approach.ident, faf: approach.faf ?? null, runway: approach.runways[0] ?? null,
       instrumentEnd: approach.endpoint?.instrumentEnd.fix ?? approach.runways[0] ?? null,
     };
     if (!changed) return;
+    const selectionKey = `${approach.airport}:${approach.ident}`;
+    if (this.s300Advisory && this.vnavSelectionKey !== selectionKey) this.approachMdaEntered = false;
+    if (this.s300Advisory && this.vnavSelectionKey?.split(":")[0] !== approach.airport) { this.vnav.qnh = null; this.vnav.destTemp = null; }
+    this.vnavSelectionKey = selectionKey;
+    this.approachSession += 1;
     this.mapPassed = this.missedRequested = this.visualContinuation = false;
     this.approachPhaseActive = false;
+    this.approachIntegrityLostAt = null;
+    this.approachCancelled = false;
     this.approachPrediction = null;
     const fafLeg = approach.legs.find(leg => "ident" in leg && leg.ident === approach.faf);
     const fafAltitude = fafLeg && "ident" in fafLeg ? Number(/^(\d{1,5})/.exec(fafLeg.altitude ?? "")?.[1] ?? NaN) : NaN;
@@ -1500,7 +1630,7 @@ export class ScriptedFms implements CduBackend {
   get pinsContinuation() {
     const endpoint = findProcedure(this.db, this.active, "APPROACH")?.endpoint;
     return endpoint && endpoint.landingSite.kind !== "RUNWAY" ? {
-      endpoint, mapPassed: this.mapPassed, active: this.visualContinuation,
+      endpoint, revision: this.approachSession, mapPassed: this.mapPassed, active: this.visualContinuation,
       available: endpoint.visualSegment.validated && endpoint.visualSegment.kind !== "UNKNOWN",
     } : null;
   }
@@ -1619,6 +1749,14 @@ export class ScriptedFms implements CduBackend {
   get gpsApproachAuthority(): ApproachAuthority {
     const approach = findProcedure(this.db, this.active, "APPROACH");
     const rnav = approach?.approachType === "RNAV";
+    if (this.s300Advisory) {
+      const source = this.nav.gpsSource, bus = source === null ? null : this.gpsBus(source - 1);
+      const assessment = assessReceiver(bus, 0.3), hdop = bus?.["101"];
+      const delayed = this.onFinalSegment && this.approachPhaseActive && this.approachIntegrityLostAt !== null && !this.approachCancelled;
+      const valid = approach && approach.approachType !== "ILS" && this.nav.mode === "GPS" && assessment.fix !== null
+        && !this.approachCancelled && hdop?.ssm === "NORMAL" && typeof hdop.value === "number" && hdop.value >= 0 && hdop.value <= 4 && (assessment.usable || delayed);
+      return { annunciation: valid ? "LNAV" : "NO APPR", lateral: !!valid, vertical: false, reason: valid ? "" : "S300 GPS APPROACH UNAVAILABLE" };
+    }
     if (!rnav || this.nav.mode !== "GPS") return { annunciation: "NO APPR", lateral: false, vertical: false, reason: rnav ? "NO GPS NAVIGATION" : "NO RNAV APPROACH" };
     const chosen = this.gpsAssessment.chosen;
     if (!this.gpsSelection.qualified) return { annunciation: "NO APPR", lateral: false, vertical: false, reason: "GPS SOURCE CHANGE NOT QUALIFIED" };
@@ -1634,6 +1772,7 @@ export class ScriptedFms implements CduBackend {
    * null otherwise. Guidance on the final approach comes from here once the approach is captured (GPS phase 3b).
    */
   get gpsApproach(): GpsApproachWords | null {
+    if (this.s300Advisory) return null;
     if (findProcedure(this.db, this.active, "APPROACH")?.approachType !== "RNAV" || this.nav.mode !== "GPS") return null;
     const chosen = this.gpsAssessment.chosen;
     return chosen === null ? null : approachWords(this.gpsBus(chosen));
@@ -1653,6 +1792,7 @@ export class ScriptedFms implements CduBackend {
 
   /** The approach can be captured and flown down its path: an ILS, or an RNAV approach with GPS vertical guidance. */
   get approachVertical() {
+    if (this.s300Advisory) return false;
     const type = this.approachType;
     return type === "ILS" || (type !== null && type !== "NO APPR" && this.gpsApproachVertical);
   }
@@ -1670,6 +1810,7 @@ export class ScriptedFms implements CduBackend {
       this.emit();
       return false;
     }
+    if (on && !this.armedApproach) { this.approachCancelled = false; this.approachIntegrityLostAt = null; }
     this.armedApproach = on;
     if (!on) this.approachPhaseActive = false;
     this.refreshApproachPhase();
@@ -1698,6 +1839,8 @@ export class ScriptedFms implements CduBackend {
     // Only from the approach: once the missed approach is being flown there is nothing left to go around from.
     if (missed <= 0) return false;
     this.missedRequested = true;
+    this.approachCancelled = false;
+    this.approachIntegrityLostAt = null;
     this.visualContinuation = false;
     if (this.mapPassed && this.aircraftProfile.verticalPolicy === "ADVISORY") this.passLeg(this.instrumentEnd);
     if (this.aircraftProfile.verticalPolicy !== "ADVISORY") {
@@ -2029,6 +2172,7 @@ export class ScriptedFms implements CduBackend {
       else route.approach = choice;
       route.legs = composeRoute(route, this.db, enroute);
     });
+    if (kind === "APPROACH") this.approachSelectionPending = true;
   }
 
   selectRunway(ident: string) {
@@ -2140,6 +2284,8 @@ export class ScriptedFms implements CduBackend {
   /** The ERASE prompt: discards the modification; navigation never left the active route. */
   eraseModification() {
     this.modified = null;
+    this.approachSelectionPending = false;
+    this.pendingApproachTemperature = null;
     this.discardHoverModification();
     this.sar.pending = null;
     this.directPending = false;
@@ -2539,6 +2685,11 @@ export class ScriptedFms implements CduBackend {
     this.directPending = false;
     this.directBypassed = [];
     this.active = route;
+    // Reselecting even the same procedure starts fresh MAP/phase authority only at a successful EXEC.
+    if (this.approachSelectionPending) this.executedApproach = null;
+    this.approachSelectionPending = false;
+    if (this.pendingApproachTemperature) this.vnav.destTemp = this.pendingApproachTemperature.value;
+    this.pendingApproachTemperature = null;
     this.pinActive();
     this.modified = null;
     // In dual operation the executed route is cross-loaded to the other FMS.

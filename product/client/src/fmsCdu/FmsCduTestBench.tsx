@@ -137,8 +137,9 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
   const [altInput, setAltInput] = useState("");
   const [vsInput, setVsInput] = useState("-500");
   const [spdInput, setSpdInput] = useState("");
-  const [pinsDeclaration, setPinsDeclaration] = useState({ session: -1, basicVfr: false, landingAreaVisible: false, publishedVisibility: false });
-  const crewConditions = pinsDeclaration.session === session ? pinsDeclaration : { session, basicVfr: false, landingAreaVisible: false, publishedVisibility: false };
+  const pinsContext = `${session}:${backend.pinsContinuation?.revision ?? 0}`;
+  const [pinsDeclaration, setPinsDeclaration] = useState({ context: "", basicVfr: false, landingAreaVisible: false, publishedVisibility: false });
+  const crewConditions = pinsDeclaration.context === pinsContext ? pinsDeclaration : { context: pinsContext, basicVfr: false, landingAreaVisible: false, publishedVisibility: false };
   const [jumpNote, setJumpNote] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(storedTab);
   // One set of height tiles for the out-the-window view and the PFD's synthetic vision.
@@ -538,7 +539,8 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
               <p className="fmsBenchHint">
                 Real data: the FAA CIFP cycle 2609 extract for Burlington, Vermont (KBTV), bundled with the bench. It is a
                 US Government work in the public domain, for demonstration only, not for navigation: the cycle is not kept
-                current. The invented CYUL demonstration stays the default start.
+                current. This start flies LNAV with advisory VNAV under S300, or coupled LPV under the separate later
+                CMA/SBAS profile. The invented CYUL demonstration stays the default start.
               </p>
               <div className="fmsBenchActions">
                 <button type="button" disabled={failedFms || backend.activeCycle.source === KBTV_SOURCE}
@@ -570,7 +572,7 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
                 onChange={event => setNavAirports(event.target.value.toUpperCase().replace(/[^A-Z0-9 ,]/g, ""))} />
             </label>
             <label className="fmsBenchFile">
-              <span>Load ARINC 424 data (waypoints, navaids, airports, runways, airways, RNAV approaches with their published FAS) as the inactive cycle</span>
+              <span>Load ARINC 424 data (waypoints, navaids, airports, runways, airways, procedures and published RNAV FAS) as the inactive cycle</span>
               <input type="file" accept=".pc,.dat,.txt,.424,text/plain,*" aria-label="ARINC 424 navigation data file"
                 onChange={async event => {
                   const file = event.target.files?.[0];

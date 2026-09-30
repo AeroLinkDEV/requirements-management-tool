@@ -77,7 +77,23 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
     ],
   },
   {
+    id: "kbtv-rnav15-advisory",
+    title: "KBTV RNAV (GPS) RWY 15, S300 LNAV and advisory VNAV",
+    objective: "Fly the FAA CIFP 2609 runway approach laterally as LNAV in the default S300 profile. The crew controls descent with VS and altitude selection; the barometric VNAV path is advisory and never captures the AFCS. Public-domain demonstration data, not for navigation.",
+    profile: "cma9000-s300-heli-civil",
+    maxSeconds: 900,
+    start: "kbtv-rnav15",
+    steps: [
+      { when: { kind: "start" }, action: { kind: "expectApproach", type: "LNAV", state: "OFF" } },
+      { when: { kind: "active", waypoint: "JUNEL" }, action: { kind: "expectApproach", type: "LNAV", state: "OFF", verticalMode: "ALT HOLD" } },
+      { when: { kind: "start" }, action: { kind: "autopilot", altitude: 400, verticalSpeed: -600 } },
+      { when: { kind: "distance", waypoint: "RW15", nm: 1 }, action: { kind: "expectApproach", type: "LNAV", state: "OFF", verticalMode: "VS" } },
+      { when: { kind: "start" }, action: { kind: "expectNoAlert", text: "NO APPR INTEGRITY" } },
+    ],
+  },
+  {
     id: "kbtv-rnav15-lpv",
+    profile: "cma9000-later-sbas-heli",
     title: "KBTV RNAV (GPS) RWY 15, LPV on the published FAS",
     objective: "Fly the real FAA CIFP 2609 approach at Burlington, Vermont, on its published FAS data block: LPV annunciated and armed, captured at the final approach fix (FOVES), and held on the published glide path to the runway. Real public-domain data, for demonstration only, not for navigation.",
     maxSeconds: 900,
@@ -95,6 +111,7 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
   },
   {
     id: "kbtv-rnav15-integrity-lost",
+    profile: "cma9000-later-sbas-heli",
     title: "KBTV RNAV (GPS) RWY 15, GPS integrity lost on final",
     objective: "On the real KBTV LPV approach, show that GPS integrity lost after capture ends the approach: GPS POS UNCERTAIN and NO APPR INTEGRITY, the approach lost to a latched altitude hold (it does not descend on without integrity), and TOGA climbing on the missed approach from there.",
     maxSeconds: 900,
@@ -113,6 +130,7 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
   },
   {
     id: "kbtv-rnav15-sbas-lost",
+    profile: "cma9000-later-sbas-heli",
     title: "KBTV RNAV (GPS) RWY 15, SBAS lost on final",
     objective: "On the real KBTV LPV approach, show that SBAS marked do not use after capture (on both receivers, as a GEO broadcast does) drops the level to LNAV: NO APPR INTEGRITY and the approach lost to a latched altitude hold, while GPS integrity holds (no GPS POS UNCERTAIN) and the FMS stays on GPS 1; TOGA then climbs on the missed approach.",
     maxSeconds: 900,
@@ -133,6 +151,7 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
   },
   {
     id: "kbtv-rnav15-sbas-lost-gps1",
+    profile: "cma9000-later-sbas-heli",
     title: "KBTV RNAV (GPS) RWY 15, SBAS lost on GPS 1 on final, LPV continues on GPS 2",
     objective: "On the real KBTV LPV approach, show the approach-aware AUTO selection (the AeroLink simulator policy): SBAS marked do not use on GPS 1 only after capture transfers the approach to GPS 2, annunciated APPR ON GPS2, with LPV, the capture and the path kept and no NO APPR INTEGRITY; GPS 1 recovering does not take it back.",
     maxSeconds: 900,
@@ -152,6 +171,7 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
   },
   {
     id: "gps1-fde-then-gps2",
+    profile: "cma9000-later-sbas-heli",
     title: "GPS 1 satellite ramp on the RNAV approach, then GPS 1 fails",
     objective: "Show that GPS 1 excludes a satellite with a growing range error (FDE) and keeps LPV, and that when a second fault then makes GPS 1 unusable the FMS moves to GPS 2 and keeps the approach without GPS NAV LOST.",
     maxSeconds: 3600,
@@ -177,6 +197,7 @@ export const SCENARIO_LIBRARY: readonly Scenario[] = [
   },
   {
     id: "gps1-spoof-walks-off",
+    profile: "cma9000-later-sbas-heli",
     title: "A spoofed GPS 1 walks off; only GPS DISAGREE catches it",
     objective: "Show that a spoofer walking GPS 1 away at 2 m/s passes the receiver's own integrity (it stays in SBAS PA, the FMS keeps navigating on it and keeps LPV, with no GPS POS UNCERTAIN), and that only the comparison with GPS 2 raises GPS DISAGREE.",
     maxSeconds: 3600,

@@ -86,6 +86,14 @@ test('the chart controls the MAP crew decision: VFR and visually have distinct c
   const sim = new FlightSimulator(unit)
   expect(sim.guidance.mode).toBe('HDG')
   expect(unit.approachArmed).toBe(false)
+  // A reselected procedure is a new approach only when EXEC commits it. ERASE keeps the crew's current decision.
+  unit.selectProcedure('APPROACH', 'R190', 'HTO')
+  expect(unit.pinsContinuation).toMatchObject({ mapPassed: true, active: true })
+  unit.eraseModification()
+  expect(unit.pinsContinuation).toMatchObject({ mapPassed: true, active: true })
+  unit.selectProcedure('APPROACH', 'R190', 'HTO'); unit.press('EXEC')
+  expect(unit.pinsContinuation).toMatchObject({ mapPassed: false, active: false })
+  expect(unit.proceedFromPins({ ...declaration, basicVfr: true })).toBe(false)
   // A laboratory chart declaration exercises the other supported kind without claiming an actual chart says so.
   for (const kind of ['PROCEED VISUALLY', 'UNKNOWN'] as const) {
     const lab = new ScriptedFms()

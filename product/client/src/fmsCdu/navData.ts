@@ -335,7 +335,8 @@ export class NavDatabase {
     const entries = [...[...this.byIdent.values()].flat().filter(e => !replaced.has(`${e.kind}:${e.ident}`)), ...other.entries];
     const airways = [...[...this.airwayByIdent.values()].filter(a => !other.airways.some(o => o.ident === a.ident)), ...other.airways];
     const msa = [...this.msa.filter(m => !(other.msa ?? []).some(o => o.airport === m.airport && o.centre === m.centre)), ...(other.msa ?? [])];
-    return new NavDatabase({ cycle: other.cycle, entries, airways, procedures: [...this.procedures, ...other.procedures], msa });
+    const procedures = [...this.procedures.filter(p => !other.procedures.some(next => next.kind === p.kind && next.airport === p.airport && next.ident === p.ident)), ...other.procedures];
+    return new NavDatabase({ cycle: other.cycle, entries, airways, procedures, msa });
   }
 }
 

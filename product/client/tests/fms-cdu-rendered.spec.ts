@@ -574,7 +574,7 @@ test('a numeric word can be forced with a status from the bus monitor, and the F
   await expect(page.getByTestId('route-gps1')).toContainText('not usable · no fix')
 })
 
-test('the KBTV demonstration loads real FAA data from the Nav data tab, sets up RNAV RWY 15, and its LPV scenario passes on the bench', async ({ page }) => {
+test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit later-SBAS LPV scenario passes on the bench', async ({ page }) => {
   await open(page)
   await tab(page, 'Nav data')
   const demo = page.getByRole('group', { name: 'Real-data demonstration' })
@@ -589,12 +589,17 @@ test('the KBTV demonstration loads real FAA data from the Nav data tab, sets up 
   await expect(demo.getByRole('status')).toHaveText(/^Set up: KBTV RNAV \(GPS\) RWY 15/)
   await key(page, 'PROG').click()
   await expectLine(page, 2, /^STAEV\b/)
+  for (const id of ['INIT_REF', 'NEXT', 'LSK1R']) await key(page, id).click()
+  await expectLine(page, 0, /^ACT VNAV R15\s+1\/1$/)
+  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-s300-heli-civil v5')
+  await page.screenshot({ path: 'test-results/s300-kbtv-advisory.png', fullPage: true })
   // The library scenario flies it from the same start state, on a restarted simulation.
   await tab(page, 'Scenarios')
   const card = page.getByRole('region', { name: 'Scenarios' })
   await page.getByLabel('Simulation rate').selectOption('64')
   await card.getByLabel('Scenario', { exact: true }).selectOption({ label: 'KBTV RNAV (GPS) RWY 15, LPV on the published FAS' })
   await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-later-sbas-heli v1')
   await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible({ timeout: 45_000 })
   await expect(card.getByRole('list', { name: 'Scenario steps' }).locator('li[data-status="pass"]')).toHaveCount(5)
 })

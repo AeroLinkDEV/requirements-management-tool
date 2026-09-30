@@ -267,8 +267,8 @@ const heldSeconds = (unit: ScriptedFms, a: string, b: string, tas: number) => {
 // bank, inside the 25 degree limit. The HF's holding speed (100 KIAS at 1,700 ft) is below the 120 kt planned TAS.
 const TAS = 120
 const RADIUS = TAS / (60 * Math.PI)
-// The leg on from TIDUE is flown under the 70 KIAS limit in force from TIDUE (Astra F2), as TAS at TIDUE's 1,800 ft.
-const FINAL_TAS = tasFromIas(70, 1800)
+// M300 7-2 gives the approach's common-fix 1,700-ft constraint precedence, so this leg's 70 KIAS is converted there.
+const FINAL_TAS = tasFromIas(70, 1700)
 const STILL = { direction: 0, speed: 0 }
 
 test('D-H/R3-03: an HF (ONCE) with a direct entry is KNOWN, and the predictions past it add one racetrack', () => {
@@ -445,11 +445,11 @@ test('the laboratory airline VNAV flying a missed approach climbs to its missed 
   expect(point(unit, 'BEADS').altitude).toBe(2000)
 })
 
-test('VNAV 1/3 on a point-in-space approach says there is no vertical path (LNAV) and where it ends, not that there is no approach', () => {
+test('S300 VNAV 1/1 on a point-in-space approach says there is no vertical path and where it ends', () => {
   const unit = towardTidue(356, 8)
   unit.press('VNAV')
   const screen = lines(unit)
-  expect(screen[0]).toMatch(/^\s*VNAV\s+1\/3/)
+  expect(screen[0]).toMatch(/^\s*VNAV\s+1\/1/)
   expect(screen[2]).toMatch(/^\s*NO VERTICAL PATH \(LNAV\)\s*$/)
   expect(screen[4]).toMatch(/^\s*TO CRANN \(MAP\)\s*$/)
   expect(screen.join('\n')).not.toContain('NO APPROACH IN ROUTE')
@@ -467,12 +467,13 @@ test('VNAV 1/3 on a point-in-space approach says there is no vertical path (LNAV
   expect(lines(none)[2]).toMatch(/^\s*NO APPROACH IN ROUTE\s*$/)
 })
 
-test('KBTV R15 is unchanged: VNAV 1/3 shows its runway path, and its missed approach tops out at its own altitude', () => {
+test('default KBTV R15 shows its S300 advisory runway path and keeps the coded missed-approach altitude', () => {
   const unit = new ScriptedFms(() => new Date(START))
   const sim = new FlightSimulator(unit)
   expect(setUpKbtvRnav15(unit, sim)).toEqual({ ready: true })
   unit.press('VNAV')
-  expect(lines(unit)[0]).toMatch(/^ACT VNAV 15 LPV\s+1\/3/)
+  expect(lines(unit)[0]).toMatch(/^ACT VNAV R15\s+1\/1/)
+  expect(unit.approachType).toBe('LNAV')
   expect(lines(unit).join('\n')).not.toContain('NO VERTICAL PATH')
   const missedTop = Math.max(...unit.activeRoute.legs.flatMap(leg => (leg.kind === 'wpt' && leg.source === 'MISSED' && leg.altitude ? [Number(/^(\d+)/.exec(leg.altitude)![1])] : [])))
   expect(Number.isFinite(missedTop)).toBe(true)

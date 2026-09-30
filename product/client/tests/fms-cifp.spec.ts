@@ -5,6 +5,7 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import type { GpsReceiver } from '../src/fmsCdu/gps'
 import type { Airport } from '../src/fmsCdu/navData'
+import { LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
@@ -68,8 +69,14 @@ test('imported PI is the S300 two-outbound construction followed by the coded in
   // Reload the unchanged route for the separate crew deletion check.
   unit.selectProcedure('APPROACH', 'R99'); unit.press('EXEC')
   unit.press('LEGS')
+  unit.press('LSK2L')
+  expect(screenText(unit.screen())[SCRATCHPAD_LINE].trim()).toBe('NOT ALLOWED')
+  unit.press('CLR'); unit.open('FIX'); unit.setScratch('PTRPTR'); unit.press('LSK1L')
+  expect(screenText(unit.screen())[SCRATCHPAD_LINE].trim()).toBe('INVALID ENTRY')
+  expect(unit.resolveWaypoint('PTRPTR')).toBe('invalid')
+  unit.press('CLR'); unit.press('LEGS')
   // Reference plus the two private outbound fixes are one procedure-turn deletion; its inbound CF stays.
-  for (let i = 0; i < 5 && !screenText(unit.screen())[SCRATCHPAD_LINE].includes('DELETE'); i += 1) unit.press('CLR')
+  for (let i = 0; i < 8 && !screenText(unit.screen())[SCRATCHPAD_LINE].includes('DELETE'); i += 1) unit.press('CLR')
   expect(screenText(unit.screen())[SCRATCHPAD_LINE]).toContain('DELETE')
   unit.press('LSK1L')
   expect(unit.route.legs.filter(l => l.kind === 'wpt' && l.procedureTurn?.role === 'OUTBOUND')).toEqual([])
@@ -202,7 +209,7 @@ test('CIFP altitude descriptions become the constraints the simulation flies', (
 
 test('the FMS flies a CIFP RNAV approach with its published FAS: executed, sent to both receivers and accepted', () => {
   let now = Date.UTC(2026, 8, 27, 14, 0, 0)
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(unit)
   const fly = (seconds: number) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1) } }
   expect(unit.loadArinc424(FIXTURE, 'kbtv-2609.pc')).toMatchObject({ loaded: 'CIFP2609' })
@@ -229,7 +236,7 @@ test('the FMS flies a CIFP RNAV approach with its published FAS: executed, sent 
 
 test('the aircraft flies the published KBTV RNAV RWY 15 LPV: captured on final, on the published path to the threshold', () => {
   let now = Date.UTC(2026, 8, 27, 14, 0, 0)
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(unit)
   unit.loadArinc424(FIXTURE, 'kbtv-2609.pc')
   unit.swapCycles()

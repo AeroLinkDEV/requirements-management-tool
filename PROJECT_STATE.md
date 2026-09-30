@@ -424,6 +424,13 @@ display unit for engineers.
   approach or declares conditions for its verified Proceed VFR/Visually continuation. These declarations establish
   no computed weather, obstacle protection or landing clearance.
 
+- **S300 advisory VNAV and separate SBAS profile.** The default helicopter uses barometric advisory approach VNAV,
+  with runway/FAF construction, validity gates, temperature MOD/EXEC and crew QNH/MDA. It commands no vertical
+  autopilot mode. The default KBTV mission is LNAV with advisory VNAV and crew VS; coupled LPV and its fault missions
+  explicitly select the representative later-CMA/CMA-5024 profile, whose exact OEM installed baseline remains unqualified.
+  Established S300 finals retain steering for five minutes after integrity-only loss; invalid position or HDOP over 4
+  withdraws it immediately. The applicability matrix identifies the temperature/QNH models and adapter validity limits.
+
 - The faceplate is rendered in Blender from `product/tools/AeroLink.FmsCduModel`, which uses the public CMC
   datasheet dimensions and the Operator's Manual front-panel figures. No manufacturer logo is shown.
 - The user selects one of nine hardware variations. Each variation relabels the seven annunciators and the second

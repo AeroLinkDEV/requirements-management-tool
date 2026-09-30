@@ -44,6 +44,7 @@ export const ALERTS: readonly AlertDefinition[] = [
   { text: "POSITION SHIFT", meaning: "The navigation solution has jumped" },
   { text: "RENDEZVOUS UNACHIEVABLE", meaning: "The rendezvous time cannot be met" },
   { text: "SET QNH", meaning: "Set the barometric reference for the approach" },
+  { text: "SET AIRPORT TEMP", meaning: "Enter the destination temperature for advisory VNAV (M300 7-22..27)" },
   { text: "TDN NOT POSSIBLE", meaning: "A tactical descent cannot be flown from the current state, or the transition to hover from TDN (M300 E-17)" },
   { text: "TRANSITION DOWN", meaning: "The hover procedure is executed; shown until TDN is reached (M300)" },
   { text: "TDN FUNCTION LOST", meaning: "Every radio altimeter has failed: the transition down to hover is lost (M300)" },

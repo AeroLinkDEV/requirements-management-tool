@@ -5,7 +5,7 @@ import { bearingDeg, distanceNm } from '../src/fmsCdu/fmsModel'
 import { ScenarioRunner, procedureText, reportMarkdown, runHeadless, scenarioProblems, type Scenario } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { FlightSimulator } from '../src/fmsCdu/flight'
-import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
+import { LAB_AIRLINE_VNAV_PROFILE, LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
 // The real-data demonstration (kbtvDemo.ts): the FAA CIFP 2609 extract for Burlington, Vermont, bundled with the client,
@@ -46,10 +46,10 @@ test('loading the KBTV demonstration activates the CIFP cycle, keeps the demonst
   expect(unit.datasetLog).toHaveLength(log)
 })
 
-test('the KBTV RNAV RWY 15 start state: the approach executed and armed, the aircraft 8 NM before STAEV at 3200 ft, recorded', async () => {
+test('the later-SBAS KBTV RNAV RWY 15 start state: the approach executed and armed, 8 NM before STAEV at 3200 ft', async () => {
   const kbtv = await demo()
   expect(kbtv, 'the KBTV demonstration module').not.toBeNull()
-  const unit = new ScriptedFms(() => new Date(START))
+  const unit = new ScriptedFms(() => new Date(START), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(unit)
   expect(kbtv!.setUpKbtvRnav15(unit, sim)).toEqual({ ready: true })
   expect(unit.activeRoute.dest).toBe('KBTV')
@@ -90,6 +90,17 @@ test('the KBTV LPV scenario is in the library and passes: armed LPV, captured at
   expect(procedureText(lpv!).preconditions).toMatch(/start state KBTV RNAV \(GPS\) RWY 15/)
 })
 
+test('the default KBTV mission flies LNAV with advisory VNAV and crew VS, while LPV explicitly names the later profile', () => {
+  const nominal = scenario('kbtv-rnav15-advisory')!
+  expect(nominal.profile).toBe('cma9000-s300-heli-civil')
+  const { runner, fms, sim } = runHeadless(nominal)
+  expect(runner.results.filter(result => result.status !== 'done' && result.status !== 'pass')).toEqual([])
+  expect(runner.outcome).toBe('passed')
+  expect(fms.executedFas).toBeNull()
+  expect(sim.modeEvents.some(event => event.event === 'APPR CAPTURED')).toBe(false)
+  expect(scenario('kbtv-rnav15-lpv')?.profile).toBe(LATER_SBAS_PROFILE.id)
+})
+
 test('the KBTV integrity scenario passes: integrity lost after capture ends the approach to a hold, and TOGA climbs', () => {
   const lost = scenario('kbtv-rnav15-integrity-lost')
   expect(lost, 'the KBTV integrity library scenario').toBeDefined()
@@ -102,7 +113,7 @@ test('the approach check fails on each field that differs: the type, the approac
   // At the start state the approach is LPV and armed. Under the laboratory airline-style VNAV profile the aircraft is
   // 1300 ft below the VNAV path (capped at the demonstration's cruise altitude until DES NOW brings the path down); under
   // the helicopter profile there is no en-route path at all. Each failing check below names one wrong field.
-  const check = (action: Record<string, unknown>, profile?: string) => {
+  const check = (action: Record<string, unknown>, profile = LATER_SBAS_PROFILE.id) => {
     const { runner } = runHeadless({ id: 'c', title: 'C', objective: '', maxSeconds: 1, start: 'kbtv-rnav15', profile, steps: [{ when: { kind: 'start' }, action: { kind: 'expectApproach', ...action }, within: 0.5 }] } as unknown as Scenario)
     return runner.results[0]
   }

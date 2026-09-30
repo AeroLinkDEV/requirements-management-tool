@@ -8,6 +8,7 @@ import { BufferedSensorPort, type RadioObservation, type SensorFrame } from '../
 import type { Navaid } from '../src/fmsCdu/navData'
 import { CivilNavigation } from '../src/fmsCdu/civilNavigation'
 import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
+import type { GpsReceiver } from '../src/fmsCdu/gps'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
@@ -37,6 +38,41 @@ const lines = (unit: ScriptedFms) => screenText(unit.screen())
 const scratch = (unit: ScriptedFms) => lines(unit)[SCRATCHPAD_LINE].trimEnd()
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
 const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : leg?.kind === 'cond' ? `(${leg.path})` : null }
+
+test('S300 after-FAF integrity-only cancellation waits 300 seconds, while HDOP above four cancels immediately (M300 7-12)', () => {
+  const prepared = () => {
+    let now = Date.UTC(2026, 8, 29, 14)
+    const unit = new ScriptedFms(() => new Date(now))
+    unit.selectProcedure('APPROACH', 'R24R'); unit.press('EXEC')
+    unit.directTo('FERDI'); unit.press('EXEC')
+    unit.placeAircraft({ position: offset(unit.coordinates('FERDI')!, 237, 1), altitude: 1500, track: 237 }, 'S300 integrity timer fixture')
+    unit.armApproach(); unit.updateNavigation(0)
+    expect(unit.nonPrecisionApproach).toBe(true)
+    unit.arrive(); unit.updateNavigation(0)
+    expect(unit.onFinalSegment).toBe(true)
+    const receivers = (unit as unknown as { gps: readonly GpsReceiver[] }).gps
+    const lose = (hdop: number) => {
+      for (const rx of receivers) { rx.override('130', { kind: 'FORCE', value: 1, ssm: 'NORMAL' }); rx.override('101', { kind: 'FORCE', value: hdop, ssm: 'NORMAL' }) }
+      unit.updateNavigation(0)
+    }
+    return { unit, lose, advance: (seconds: number) => { now += seconds * 1000; unit.updateNavigation(0) } }
+  }
+  const delayed = prepared(); delayed.lose(1)
+  expect(delayed.unit.navState.uncertain).toBe(true)
+  expect(delayed.unit.approachType).toBe('LNAV')
+  expect(delayed.unit.nonPrecisionApproach).toBe(true)
+  delayed.advance(299)
+  expect(delayed.unit.nonPrecisionApproach).toBe(true)
+  expect(recalled(delayed.unit, 'NO APPR INTEGRITY')).toBe(false)
+  delayed.advance(1)
+  expect(delayed.unit.approachType).toBe('NO APPR')
+  expect(delayed.unit.nonPrecisionApproach).toBe(false)
+  expect(recalled(delayed.unit, 'NO APPR INTEGRITY')).toBe(true)
+  const immediate = prepared(); immediate.lose(4.01)
+  expect(immediate.unit.nonPrecisionApproach).toBe(false)
+  expect(immediate.unit.approachType).toBe('NO APPR')
+  expect(recalled(immediate.unit, 'NO APPR INTEGRITY')).toBe(true)
+})
 
 test('an external sensor mailbox refuses a receiver replay even when its air-data packet is newer', () => {
   const template = new ScriptedFms().navigationInputs!
@@ -276,7 +312,7 @@ test('S300 phase boundaries use airport-relative altitude and separate arrival a
 })
 
 test('RNP defaults by phase: a loaded approach does not grant approach phase', () => {
-  const unit = new ScriptedFms()
+  const unit = new ScriptedFms(() => new Date('2026-09-29T14:00:00Z'))
   expect(unit.flightPhase).toBe('TERMINAL')
   expect(unit.requiredRnp).toBe(RNP_DEFAULTS.TERMINAL.rnp)
   unit.sequence()
@@ -295,6 +331,13 @@ test('RNP defaults by phase: a loaded approach does not grant approach phase', (
   unit.directTo('FERDI')
   unit.press('EXEC')
   const faf = unit.coordinates('FERDI')!
+  unit.placeAircraft({ position: offset(faf, 57, 3.1), altitude: 2000, track: 237, tas: 90 })
+  unit.armApproach(true)
+  expect(screenText(unit.screen())[SCRATCHPAD_LINE]).not.toContain('HSI SCALE TO CHANGE')
+  unit.placeAircraft({ position: offset(faf, 57, 2.9), altitude: 2000, track: 237, tas: 90 })
+  expect(screenText(unit.screen())[SCRATCHPAD_LINE]).toContain('HSI SCALE TO CHANGE')
+  unit.armApproach(false); unit.updateNavigation(0)
+  expect(recalled(unit, 'ARM APPROACH')).toBe(true)
   unit.placeAircraft({ position: offset(faf, 57, 2.1), altitude: 2000, track: 237, tas: 90 })
   unit.armApproach(true)
   expect(unit.flightPhase).toBe('TERMINAL')
@@ -305,6 +348,20 @@ test('RNP defaults by phase: a loaded approach does not grant approach phase', (
   unit.updateNavigation(0)
   expect(unit.flightPhase).toBe('TERMINAL')
   expect(unit.lamps().has('NPA')).toBe(false)
+  // M300 7-10: EXIT HOLD is permission to leave at the next crossing, not passage of the FAF.
+  for (let prn = 1; prn <= 32; prn += 1) unit.deselectRaimSatellite(prn, false)
+  unit.defineHold('FERDI'); unit.press('EXEC')
+  unit.sequence(); unit.updateNavigation(0)
+  expect(unit.activeRoute.hold?.status).toBe('IN PROGRESS')
+  expect(unit.flightPhase).toBe('TERMINAL')
+  unit.changeHold(hold => { hold.status = 'EXIT ARMED' }); unit.press('EXEC')
+  unit.updateNavigation(0)
+  expect(unit.flightPhase).toBe('TERMINAL')
+  expect(unit.lamps().has('NPA')).toBe(false)
+  unit.arrive(); unit.updateNavigation(0)
+  expect(unit.activeRoute.legs[0]).toMatchObject({ ident: 'RW24R' })
+  expect(unit.flightPhase).toBe('APPROACH')
+  expect(unit.requiredRnp).toBe(0.3)
 })
 
 test('ANP above RNP raises CHECK ANP only after the time to alert for the phase', () => {
@@ -340,13 +397,10 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, larger ANP, and no RNAV approach
   const unit = new ScriptedFms()
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
-  // The receivers report the approach selected (156) once the FMS has sent its FAS block, at the next navigation update;
-  // until then it is not selected, and an unselected approach may not be flown (the GPS review's GPS-06).
-  expect(unit.approachType).toBe('NO APPR')
+  // S300 uses the executed route and measured GPS integrity; later-software FAS acceptance is a separate profile.
+  expect(unit.approachType).toBe('LNAV')
   unit.updateNavigation(0)
-  // The level the GPS reports (305, GPS phase 3b): outside the 30 NM approach region SBAS NAV supports LNAV/VNAV; LPV
-  // comes only inside it, in SBAS PA.
-  expect(unit.approachType).toBe('LNAV/VNAV')
+  expect(unit.approachType).toBe('LNAV')
   unit.setCondition('gpsIntegrity', true)
   expect(scratch(unit)).toBe('GPS POS UNCERTAIN')
   // The independent radio comparison is adequate here (M300 1-7). The position is retained as uncertain, without
@@ -413,13 +467,14 @@ test('the NPA annunciator follows a non-precision approach, not an ILS', () => {
   expect(ils.lamps().has('NPA')).toBe(false)
 })
 
-test('ARM APPROACH is asked for within 2 NM of the final approach fix when the approach is not armed', () => {
+test('ARM APPROACH is asked for within 3 NM of the final approach fix when the approach is not armed (M300 7-10)', () => {
   const { unit, fly } = setup()
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
   fly(3 * 3600, () => active(unit) === 'RW24R' || recalled(unit, 'ARM APPROACH'))
   expect(recalled(unit, 'ARM APPROACH')).toBe(true)
-  expect(distanceNm(unit.position, unit.coordinates('FERDI')!)).toBeLessThanOrEqual(2.05)
+  expect(distanceNm(unit.position, unit.coordinates('FERDI')!)).toBeLessThanOrEqual(3.05)
+  expect(distanceNm(unit.position, unit.coordinates('FERDI')!)).toBeGreaterThan(2)
 
   const armed = setup()
   armed.unit.selectProcedure('APPROACH', 'R24R')

@@ -6,7 +6,7 @@ import { codedVerticalAngle, constraintText, decodeProcedureLegs, type Procedure
 /**
  * Reads the parts of an ARINC 424 navigation data file that the simulation uses: enroute and terminal waypoints,
  * VHF and NDB navaids, airports and heliports (with their magnetic variation), runways (their magnetic bearing made
- * true), airways, minimum sector altitudes, RNAV approach procedures and their published FAS data blocks (path point
+ * true), airways, minimum sector altitudes, RNAV/ILS/radio approach procedures and published RNAV FAS blocks (path point
  * records). The heliport section (HA, HC, HF, HS) is read like the airport section (PA, PC, PF, PS); heliport
  * departures (HD) are also read. Records are the 132-column fixed-width lines of the specification; only primary
  * records are read (continuation records are skipped). Field positions are the ones listed beside each reader, 1-based

@@ -61,7 +61,7 @@ export function setUpKbtvRnav15(fms: ScriptedFms, sim?: FlightSimulator): { read
     // The crew descends it; without the flight simulation there is no autopilot to set, so the start state is refused.
     if (!sim) return { refused: "the helicopter profile start state needs the flight simulation (autopilot selections)" };
     // The helicopter profile: the crew preselects the FAF altitude and descends to it in VS, so the aircraft is level
-    // at the FAF altitude when LPV captures there. The constraints are advisories; nothing in the FMS descends it.
+    // at the FAF altitude. S300 remains LNAV/advisory; LPV capture exists only in the later-SBAS profile.
     sim?.selectAltitude(fms.fafAltitudeCorrected);
     sim?.engageVerticalSpeed(-500);
   } else if (!fms.profile().descending) {
@@ -75,7 +75,7 @@ export function setUpKbtvRnav15(fms: ScriptedFms, sim?: FlightSimulator): { read
 
 /** Start states a scenario can name (scenario.ts): each sets up a fresh simulation before the first step. */
 export const START_STATES = {
-  "kbtv-rnav15": { label: "KBTV RNAV (GPS) RWY 15: FAA CIFP 2609, 8 NM before STAEV at 3200 ft, approach armed", setUp: setUpKbtvRnav15 },
+  "kbtv-rnav15": { label: "KBTV RNAV (GPS) RWY 15: FAA CIFP 2609, 8 NM before STAEV at 3200 ft, approach armed (S300 LNAV/advisory; later profile LPV)", setUp: setUpKbtvRnav15 },
   "87n-offshore-sar": { label: "87N offshore SAR (synthetic): FAA CIFP 2609 Copter PinS, 10 NM south of 87N at 500 ft, 100 KIAS, wind 230/20, SAR datum set", setUp: setUp87nOffshoreSar },
   "87n-rnav190-final": { label: "87N COPTER RNAV 190 final (synthetic): 3 NM before STAYS at 1700 ft, 70 KIAS, NAV and approach armed", setUp: setUp87nRnav190Final },
 } as const satisfies Record<string, { label: string; setUp: (fms: ScriptedFms, sim?: FlightSimulator) => { ready: true } | { refused: string } }>;
