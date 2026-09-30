@@ -341,6 +341,18 @@ test('an FMS failure in flight reverts the flight modes, and Pause still works (
   await expect(page.getByRole('button', { name: 'LNAV', exact: true })).toBeDisabled()
 })
 
+test('the PFD draws the selected heading: a cyan bug on the heading scale and its value, following HDG SEL (B4.4)', async ({ page }) => {
+  await open(page)
+  const efis = page.getByRole('region', { name: 'EFIS' })
+  const bug = efis.getByTestId('pfd-selected-heading')
+  await expect(bug).toBeVisible()
+  await page.getByLabel('Selected heading').fill('45')
+  await page.getByRole('button', { name: 'HDG SEL' }).click()
+  await expect(efis.getByTestId('pfd-selected-heading-value')).toHaveText('HDG 045')
+  await expect(efis.getByTestId('fma-roll')).toHaveText('HDG')
+  await expect(bug).toHaveAttribute('fill', '#48d4ff')
+})
+
 test('the EFIS shows the FMS modes, route and TO waypoint, and flags them when the FMS fails', async ({ page }) => {
   await open(page)
   const efis = page.getByRole('region', { name: 'EFIS' })
