@@ -68,6 +68,8 @@ ACT RTE 1 page 1 LSK5L creates a MOD LEGS preview. The declared profile uses the
 
 The live ground state is a separate explicit bench input, shared by the computers. It is not inferred weight-on-wheels and is not the independent ground-at-power-up checkbox. The session records a warm demonstration's configured origin; it does not reconstruct a real flight before the session began. History recording at the existing flyby sequencing boundary and the integrating mission's 0.2-NM passage allowance are simulator policies; they do not establish obstacle clearance or installed-unit trajectory accuracy. The route-header origin swap follows the bench's existing reverse-route convention; the actual flown leg snapshots govern steering. Alternate airborne option 2 is not selected. Moving rendezvous remains its separately delivered M300 11-37 capability.
 
+SAR PPOS selection and default PPOS activation are unavailable on the live ground input; a referenced search can still be planned and cancelled. Airborne PPOS also requires no other search waypoint in the active route (M300 A-157/A-173/A-177). CANCEL remains available for a pending search, independent of PPOS availability. This qualifies the laboratory input and CDU gates, not an installed ground discrete.
+
 ## Vertical-guidance policy (decision D1)
 
 | Phase | Default profile | Status |
