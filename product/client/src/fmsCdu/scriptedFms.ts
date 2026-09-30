@@ -430,7 +430,13 @@ export class ScriptedFms implements CduBackend {
   enterManualWind(wind: Wind | null): boolean {
     if (this.nav.windComputed) return false;
     this.manualWind = wind ? { ...wind } : null;
+    this.applyEnteredWind();
     return true;
+  }
+  private applyEnteredWind() {
+    if (this.nav.windComputed) return;
+    const wind = this.systemWind, toward = (wind.direction + 180) * Math.PI / 180;
+    this.navigation.accept(this.navigation.current, { north: wind.speed * Math.cos(toward), east: wind.speed * Math.sin(toward) });
   }
   /** Entries on the VNAV approach page. The FAF altitude sets the vertical path angle to the threshold. */
   /**
@@ -1908,6 +1914,7 @@ export class ScriptedFms implements CduBackend {
   get computerSettings() {
     return structuredClone({ setup: this.setup, reference: this.reference, utcOffsetMs: this.utcOffsetMs, positionReference: this.positionReference,
       planData: this.planData, qnh: this.vnav.qnh, rnp: this.nav.rnpManual, inhibited: this.inhibited,
+      manualWind: this.manualWind, lastComputedWind: this.lastComputedWind,
       gpsSelected: this.gpsSelected, gpsChoice: this.gpsChoice, raimExcluded: [...this.raimExcluded], predictiveRaim: this.predictiveRaim,
       fuel: this.fuel, userDb: this.userDb, pilot: this.pilot, points: this.points, moving: this.moving, chosen: this.chosen,
       cycles: this.cycles.map(cycle => ({ data: cycle.db.exportData(), source: cycle.source })) });
@@ -1917,6 +1924,7 @@ export class ScriptedFms implements CduBackend {
     Object.assign(this.setup, next.setup); this.reference = next.reference; this.utcOffsetMs = next.utcOffsetMs;
     if (JSON.stringify(this.positionReference) !== JSON.stringify(next.positionReference) && next.positionReference && this.nav.mode === "DR") this.navigation.initialize(next.positionReference.position);
     this.positionReference = next.positionReference; Object.assign(this.planData, next.planData); this.vnav.qnh = next.qnh;
+    this.manualWind = next.manualWind; this.lastComputedWind = next.lastComputedWind; this.applyEnteredWind();
     this.nav.rnpManual = next.rnp; this.inhibited = next.inhibited; this.gpsSelected = next.gpsSelected; this.gpsChoice = next.gpsChoice;
     this.raimExcluded.clear(); next.raimExcluded.forEach(prn => this.raimExcluded.add(prn)); Object.assign(this.predictiveRaim, next.predictiveRaim);
     this.fuel = next.fuel; this.pilot = next.pilot; this.points = next.points; this.moving = next.moving; this.chosen = next.chosen;

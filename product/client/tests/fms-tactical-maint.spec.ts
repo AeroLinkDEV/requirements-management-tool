@@ -289,6 +289,15 @@ test('SETUP transfers configured settings and sync refuses link, software, data,
   missed.tick()
   expect(missed.one.goAround()).toBe(true)
   expect(missed.two.missedApproachActive).toBe(true)
+  const winds = dualSetup()
+  winds.one.setCondition('gpsLost', true); winds.one.setCondition('dmeOutage', true); winds.tick(10)
+  expect(winds.one.windComputed).toBe(false); expect(winds.two.windComputed).toBe(false)
+  winds.one.open('PROG'); winds.one.press('CLR', { held: true }); winds.one.press('CLR', { held: true })
+  winds.one.setScratch('090/30'); winds.one.press('LSK3L')
+  expect(winds.two.systemWind).toEqual({ direction: 90, speed: 30 })
+  expect(winds.two.manualWindEntered).toBe(true)
+  expect(winds.one.navigationWindEstimate.east).toBeCloseTo(-30, 6)
+  expect(winds.two.navigationWindEstimate.east).toBeCloseTo(-30, 6)
 })
 
 // Owner: measured same-type source selection, 100 m civil hysteresis, independent computed-position disagreement.
