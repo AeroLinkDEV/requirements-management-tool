@@ -252,7 +252,11 @@ export const DEMO_NAV_DATA: NavData = {
 };
 
 /** Company routes the CO ROUTE field can load: stored enroute legs between an origin and destination. */
-export type StoredRoute = { name: string; origin: string; dest: string; legs: { ident: string; via?: string; altitude?: string }[] };
+/**
+ * A stored route. A user route (E5) also records where each fix was when it was saved, so a load can report a fix
+ * the active database has since moved (E6).
+ */
+export type StoredRoute = { name: string; origin: string; dest: string; legs: { ident: string; via?: string; altitude?: string; position?: LatLon }[] };
 
 export const DEMO_COMPANY_ROUTES: StoredRoute[] = [
   { name: "OWUL1", origin: "CYOW", dest: "CYUL", legs: [{ ident: "MUN", altitude: "3000" }, { ident: "RDG", altitude: "4500" }, { ident: "TOLGU", altitude: "4500" }] },
