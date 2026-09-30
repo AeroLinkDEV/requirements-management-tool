@@ -115,6 +115,8 @@ export type AircraftData = {
    */
   selectedAltitude: number | null;
   selectedSpeed: number | null;
+  /** The heading the crew selected, or HDG holds (drawn cyan on the heading scale): the heading bug. */
+  selectedHeading: number;
   /**
    * The missed approach altitude the selected altitude does not meet, as the CDU writes it ("5600A"), for the PFD to
    * show amber (FlightSimulator.missedAltitudeConflict); null when there is no conflict to show.
@@ -254,6 +256,7 @@ export function aircraftData(fms: ScriptedFms, sim: FlightSimulator): AircraftDa
     pitch, bank: sim.bankAngle, heading: fms.heading, track, airspeed, groundSpeed: fms.groundSpeed,
     altitude: fms.indicatedAltitude, baroSetting: formatSetting(fms.baro.setting), physicalAltitude: fms.physicalAltitude, verticalSpeed: fms.verticalSpeed, wind: fms.wind, position: fms.truePosition,
     selectedAltitude: sim.advisory ? sim.selectedAltitude : null, selectedSpeed: sim.advisory ? sim.selectedSpeed : null,
+    selectedHeading: sim.selectedHeading,
     missedAltitudeConflict: sim.missedAltitudeConflict ? formatConstraint(sim.missedAltitudeConflict.target) : null,
     ias: sim.iasReliable ? sim.indicatedAirspeed : null,
     helicopter: sim.advisory ? {

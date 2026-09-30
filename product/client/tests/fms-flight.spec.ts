@@ -6,6 +6,7 @@ import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/k
 import { HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { stimulusFor, type GpsOp } from '../src/fmsCdu/gpsStimulus'
 import { radiusAt } from '../src/fmsCdu/holds'
+import { BufferedSensorPort, type SensorFrame } from '../src/fmsCdu/sensorPorts'
 import { checkAtTdn, planTransition } from '../src/fmsCdu/transition'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
@@ -909,6 +910,207 @@ test('a GSPD selection ends a TD/H plan the autopilot kept after the radio heigh
   expect(distanceNm(unit.truePosition, target)).toBeGreaterThan(0.1)
 })
 
+test('the radio height valid again re-engages nothing: ALT stays and LOW HT OFF stays, until the crew engages RHT (F4)', () => {
+  const run = offshore()
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(20)
+  unit.setCondition('raFail', true)
+  fly(5)
+  expect(sim.axisModes.collective).toBe('ALT')
+  unit.setCondition('raFail', false)
+  fly(10)
+  expect(unit.radioHeight.status).toBe('NORMAL')
+  expect(sim.axisModes).toEqual({ collective: 'ALT', pitch: 'HOV', roll: 'HOV' })
+  expect(sim.lowHeightCaption).toBe('LOW HT OFF')
+  expect(aircraftData(unit, sim).helicopter!.lowHeight).toBe('LOW HT OFF')
+  // The crew's explicit RHT: a radio-height collective mode again, and the caption clears.
+  expect(sim.engageRadioHeight()).toBe(true)
+  fly(1)
+  expect(sim.axisModes.collective).toBe('RHT')
+  expect(sim.lowHeightCaption).toBeNull()
+})
+
+test('radio height lost during TD at -500 fpm: ALT latched at the failure tick, the descent stops at the acceleration limit about 3.5 ft below, then recaptures; TD pitch goes on, LOW HT OFF (F1)', () => {
+  const run = offshore(500)
+  const { unit, sim, fly, ticks } = run
+  sim.selectSpeed(120)
+  fly(40)
+  expect(sim.engageTransitionDown()).toBe(true)
+  // Down through 450 ft at the TD rate, still slowing toward the gate speed at 1 kt/s.
+  fly(60, () => unit.radioHeight.value! <= 450)
+  expect(unit.verticalSpeed).toBeCloseTo(-500, 0)
+  expect(sim.axisModes.pitch).toBe('TD')
+  const latch = Math.round(unit.altitude)
+  unit.setCondition('raFail', true)
+  let t = 0, stopped: number | null = null, lowest = Infinity, pitchAfter: string | null = null
+  ticks(60, () => {
+    t += 0.25
+    if (t === 1) pitchAfter = sim.axisModes.pitch
+    if (stopped === null && unit.verticalSpeed >= -1e-6) stopped = t
+    lowest = Math.min(lowest, unit.altitude)
+  })
+  expect(sim.altitudeHoldReference).toBe(latch)
+  // 500 fpm at 600 fpm/s: 0.83 s, so stopped on the fourth quarter-second tick; about 3.5 ft of descent in the stop.
+  expect(stopped).toBe(1)
+  expect(latch - lowest).toBeGreaterThan(2.5)
+  expect(latch - lowest).toBeLessThan(4.5)
+  expect(Math.abs(unit.altitude - latch)).toBeLessThan(1)
+  expect(sim.axisModes.collective).toBe('ALT')
+  // The pitch axis goes on with TD to the gate speed, then IAS holds it.
+  expect(pitchAfter).toBe('TD')
+  expect(sim.axisModes.pitch).toBe('IAS')
+  expect(sim.indicatedAirspeed).toBeCloseTo(80, 0)
+  expect(sim.lowHeightCaption).toBe('LOW HT OFF')
+})
+
+test('low-height protection: below 75 ft in cruise and below 17 ft in the hover it raises the collective back to the threshold and shows LOW HT (B3.2, B4.3)', () => {
+  // Cruise, RHT at 100 ft and 80 kt: a disturbance puts the aircraft at 60 ft.
+  const cruise = offshore(100)
+  cruise.sim.selectSpeed(80)
+  cruise.fly(40)
+  expect(cruise.sim.engageRadioHeight()).toBe(true)
+  cruise.unit.placeAircraft({ position: cruise.unit.truePosition, track: 230, altitude: 60 }, 'test: a downdraft')
+  cruise.ticks(0.25)
+  expect(cruise.sim.lowHeightCaption).toBe('LOW HT')
+  expect(aircraftData(cruise.unit, cruise.sim).helicopter!.lowHeight).toBe('LOW HT')
+  let cleared: number | null = null
+  cruise.ticks(30, () => { if (cleared === null && cruise.sim.lowHeightCaption === null) cleared = cruise.unit.radioHeight.value })
+  // The caption clears at the threshold, where RHT's own climb takes over from the protection.
+  expect(cleared!).toBeGreaterThan(73)
+  expect(cleared!).toBeLessThan(77)
+  cruise.fly(30)
+  expect(Math.abs(cruise.unit.radioHeight.value! - 100)).toBeLessThan(2)
+  // TD engaged at 60 ft in cruise (its target never above the present height): the protection raises the aircraft to
+  // the 75 ft threshold and holds it there, LOW HT shown steadily, not flickering as the mode pushes down.
+  const low = offshore(60)
+  low.sim.selectSpeed(90)
+  low.fly(40)
+  expect(low.sim.engageTransitionDown()).toBe(true)
+  low.fly(30)
+  low.ticks(30, () => {
+    expect(low.sim.lowHeightCaption).toBe('LOW HT')
+    expect(Math.abs(low.unit.radioHeight.value! - 75)).toBeLessThan(0.5)
+  })
+  // The hover, RHT at 40 ft: a disturbance to 10 ft; the hover threshold is 17 ft.
+  const hover = offshore(40)
+  slowToHover(hover)
+  hover.fly(20)
+  hover.unit.placeAircraft({ position: hover.unit.truePosition, track: 230, altitude: 10 }, 'test: a downdraft')
+  hover.ticks(0.25)
+  expect(hover.sim.lowHeightCaption).toBe('LOW HT')
+  cleared = null
+  hover.ticks(20, () => { if (cleared === null && hover.sim.lowHeightCaption === null) cleared = hover.unit.radioHeight.value })
+  expect(cleared!).toBeGreaterThan(15)
+  expect(cleared!).toBeLessThan(19)
+  hover.fly(30)
+  expect(Math.abs(hover.unit.radioHeight.value! - 40)).toBeLessThan(2)
+  expect(hover.sim.axisModes).toEqual({ collective: 'RHT', pitch: 'HOV', roll: 'HOV' })
+})
+
+test('the minimum use height: below 30 ft RA no SAR mode engages (HOV, RHT, TD, TD/H, TU); at 30 ft they do (B3.2)', () => {
+  const run = offshore(25)
+  const { unit, sim, fly } = run
+  sim.selectSpeed(25)
+  fly(120, () => sim.tas < 26)
+  expect(unit.radioHeight).toEqual({ status: 'NORMAL', value: 25 })
+  expect(sim.engageHover()).toBe(false)
+  expect(sim.engageRadioHeight()).toBe(false)
+  expect(sim.engageTransitionDownToHover()).toBe(false)
+  expect(sim.engageTransitionUp()).toBe(false)
+  expect(sim.axisModes.pitch).toBe('IAS')
+  unit.placeAircraft({ position: unit.truePosition, track: 230, altitude: 30 }, 'test: at the minimum use height')
+  expect(sim.engageHover()).toBe(true)
+  expect(sim.axisModes).toEqual({ collective: 'RHT', pitch: 'HOV', roll: 'HOV' })
+  // TD: from cruise at 25 ft, refused.
+  const cruise = offshore(25)
+  cruise.sim.selectSpeed(90)
+  cruise.fly(30)
+  expect(cruise.sim.engageTransitionDown()).toBe(false)
+  // A departure from a hover that has sunk below the minimum use height: refused.
+  const sunk = offshore(40)
+  slowToHover(sunk)
+  sunk.fly(10)
+  sunk.unit.placeAircraft({ position: sunk.unit.truePosition, track: 230, altitude: 25 }, 'test: sunk below MUH')
+  expect(sunk.sim.engageTransitionUp()).toBe(false)
+})
+
+test('GA from each coupled mode (ALT, VS, RHT, TD, TD/H): the collective climbs at the GA rate to the selected altitude; the lateral mode is unchanged, or the departure from the low-speed regime (B3.2)', () => {
+  const climbs = (run: ReturnType<typeof offshore>, roll: string) => {
+    run.sim.selectAltitude(1500)
+    expect(run.sim.engageGoAround()).toBe(true)
+    run.fly(5)
+    expect(run.sim.axisModes.collective).toBe('GA')
+    expect(run.sim.axisModes.roll).toBe(roll)
+    expect(run.unit.verticalSpeed).toBeCloseTo(800, 0)
+    run.fly(180, () => run.sim.axisModes.collective === 'ALT')
+    expect(Math.abs(run.unit.altitude - 1500)).toBeLessThan(25)
+  }
+  const alt = offshore(500)
+  alt.sim.selectSpeed(90)
+  alt.fly(20)
+  expect(alt.sim.axisModes.collective).toBe('ALT')
+  climbs(alt, 'HDG')
+  const vs = offshore(800)
+  vs.sim.selectSpeed(90)
+  vs.sim.selectAltitude(300)
+  expect(vs.sim.engageVerticalSpeed(-500)).toBe(true)
+  vs.fly(10)
+  expect(vs.sim.axisModes.collective).toBe('VS')
+  climbs(vs, 'HDG')
+  const rht = offshore(150)
+  rht.sim.selectSpeed(80)
+  rht.fly(30)
+  expect(rht.sim.engageRadioHeight()).toBe(true)
+  climbs(rht, 'HDG')
+  const td = offshore(500)
+  td.sim.selectSpeed(100)
+  td.fly(30)
+  expect(td.sim.engageTransitionDown()).toBe(true)
+  td.fly(10)
+  expect(td.sim.axisModes.collective).toBe('TD')
+  climbs(td, 'HDG')
+  expect(td.sim.axisModes.pitch).toBe('IAS')
+  // TD/H: in the low-speed regime, GA runs the departure's acceleration with the GA climb.
+  const tdh = offshore(150)
+  tdh.sim.selectSpeed(60)
+  tdh.fly(40)
+  expect(tdh.sim.engageTransitionDownToHover()).toBe(true)
+  // Well into the low-speed regime (below 40 KIAS) on the deceleration.
+  tdh.fly(120, () => tdh.sim.indicatedAirspeed < 30)
+  expect(tdh.sim.axisModes.pitch).toBe('TD/H')
+  tdh.sim.selectAltitude(1500)
+  expect(tdh.sim.engageGoAround()).toBe(true)
+  tdh.fly(5)
+  expect(tdh.sim.axisModes.collective).toBe('GA')
+  expect(tdh.sim.axisModes.pitch).toBe('GA')
+  expect(tdh.unit.verticalSpeed).toBeCloseTo(800, 0)
+  // The departure's acceleration toward 80 KIAS, into coordinated flight on the held heading.
+  tdh.fly(60)
+  expect(tdh.sim.indicatedAirspeed).toBeGreaterThan(70)
+  expect(tdh.sim.axisModes.roll).toBe('HDG')
+})
+
+test('sideways at 10 kt: in ATT at low speed a wind change carries the aircraft 90 degrees from its heading, which holds (B1.3)', () => {
+  const run = offshore()
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(20)
+  unit.setCondition('gpsLost', true)
+  fly(3)
+  expect(sim.axisModes).toMatchObject({ pitch: 'ATT', roll: 'ATT' })
+  // ATT holds the air velocity it had: the 230/20 wind reversed. Ten more knots of wind toward 320, the aircraft's
+  // right from heading 230, make the ground velocity 10 kt toward 320.
+  const rad = (d: number) => (d * Math.PI) / 180
+  const north = 20 * Math.cos(rad(50)) + 10 * Math.cos(rad(320)), east = 20 * Math.sin(rad(50)) + 10 * Math.sin(rad(320))
+  unit.wind.direction = ((Math.atan2(-east, -north) * 180) / Math.PI + 360) % 360
+  unit.wind.speed = Math.hypot(north, east)
+  fly(40)
+  expect(unit.groundSpeed).toBeCloseTo(10, 1)
+  expect(Math.abs(angleDiff(230, unit.heading))).toBeLessThan(1)
+  expect(Math.abs(angleDiff(unit.heading + 90, unit.track))).toBeLessThan(1)
+})
+
 test('hover feedback lost: HOV gives way to ATT on the last command; with the wind unchanged it stays, and a wind change drifts it (B3b, F5)', () => {
   const run = offshore()
   const { unit, sim, fly } = run
@@ -985,6 +1187,61 @@ test('the hover steers on the measured velocity, not the true wind: a velocity b
   plain.fly(60)
   biased.fly(60)
   expect(metres(plain.unit.truePosition, biased.unit.truePosition)).toBeGreaterThan(20)
+})
+
+test('hover feedback lost during the TD/H deceleration, the FMS healthy: the horizontal axes go to ATT on the air velocity they had, and the TD/H collective descends on to the hover height (F6)', () => {
+  const run = offshore(150)
+  const { unit, sim, fly } = run
+  sim.selectSpeed(60)
+  fly(40)
+  expect(sim.selectHoverHeight(50)).toBe(true)
+  expect(sim.engageTransitionDownToHover()).toBe(true)
+  fly(10)
+  expect(sim.axisModes).toEqual({ collective: 'TD/H', pitch: 'TD/H', roll: 'TD/H' })
+  unit.setCondition('gpsLost', true)
+  fly(2)
+  expect(sim.axisModes).toEqual({ collective: 'TD/H', pitch: 'ATT', roll: 'ATT' })
+  expect(unit.hasCondition('fmsFail')).toBe(false)
+  const tas = sim.tas
+  expect(tas).toBeGreaterThan(30)
+  fly(180, () => sim.axisModes.collective === 'RHT')
+  expect(sim.axisModes.collective).toBe('RHT')
+  fly(30)
+  expect(Math.abs(unit.radioHeight.value! - 50)).toBeLessThan(2)
+  // ATT held the air velocity: the airspeed at the loss, not the deceleration to zero the TD/H would have flown.
+  expect(Math.abs(sim.tas - tas)).toBeLessThan(1)
+  expect(sim.axisModes).toMatchObject({ pitch: 'ATT', roll: 'ATT' })
+})
+
+test('the FMS roll command NCD in NAV (no position input), the FMS not failed: HDG latched on the heading at that tick, pitch and collective unchanged, and NAV only when the crew arms it again (F7)', () => {
+  let now = Date.UTC(2026, 8, 27, 14)
+  const template = new ScriptedFms(() => new Date(now)).navigationInputs!
+  const port = new BufferedSensorPort()
+  expect(port.publish(template)).toBe(true)
+  const profile = structuredClone(HELICOPTER_PROFILE)
+  profile.parameters.sensorMaxAge.value = 1.5
+  const unit = new ScriptedFms(() => new Date(now), { sensors: port, profile })
+  const output: { status: string }[] = []
+  const sim = new FlightSimulator(unit, { write: frame => output.push(frame) })
+  expect(sim.lateralMode).toBe('LNAV')
+  const before = { ...sim.axisModes }, heading = unit.heading
+  now += 1600
+  sim.step(1)
+  expect(output.at(-1)?.status).toBe('NCD')
+  expect(unit.hasCondition('fmsFail')).toBe(false)
+  expect(sim.lateralMode).toBe('HDG')
+  expect(sim.axisModes.roll).toBe('HDG')
+  expect(sim.selectedHeading).toBe(Math.round(heading))
+  expect({ collective: sim.axisModes.collective, pitch: sim.axisModes.pitch }).toEqual({ collective: before.collective, pitch: before.pitch })
+  expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'LNAV LOST' })
+  // The inputs back: the roll command is valid, but NAV is not re-engaged by itself.
+  const fresh: SensorFrame = structuredClone(template)
+  for (const part of [fresh.air, fresh.attitude, fresh.radioHeight, ...fresh.gps]) { part.at = now; part.sequence += 1 }
+  expect(port.publish(fresh)).toBe(true)
+  now += 250
+  sim.step(0.25)
+  expect(sim.lateralMode).toBe('HDG')
+  expect(sim.lnavIsArmed).toBe(false)
 })
 
 test('FMS failure during TD/H drops the FMS target and hovers where it stops; either order with GPS loss ends the same (B3c, F9)', () => {

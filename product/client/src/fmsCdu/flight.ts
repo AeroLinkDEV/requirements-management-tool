@@ -1062,10 +1062,15 @@ export class FlightSimulator {
     return true;
   }
 
-  /** HOV: holds the present position (entry below the coordinated-flight speed, with eligible hover feedback). */
+  /**
+   * HOV: holds the present position (entry below the coordinated-flight speed, with eligible hover feedback). Like
+   * every SAR mode it does not engage below the minimum use height (a valid radio height under it); without a valid
+   * radio height it engages on the horizontal axes only.
+   */
   engageHover() {
-    const feedback = this.fms.hoverFeedback;
+    const feedback = this.fms.hoverFeedback, ra = this.radio;
     if (!this.advisory || !feedback || this.indicatedAirspeed >= this.profile.coordinatedLeaveBelow.value) return false;
+    if (ra.status === "NORMAL" && ra.value! < this.profile.minimumUseHeight.value) return false;
     this.enterLowSpeed();
     this.lowHorizontal = { mode: "HOV", target: feedback.position, speed: 0, track: this.fms.track, captured: true };
     this.noteFeedback(feedback);
@@ -1321,8 +1326,10 @@ export class FlightSimulator {
   /**
    * The collective under the radio-height modes, or null when the ordinary vertical modes fly it. A collective mode
    * that loses its radio height is replaced by ALT HOLD on the barometric altitude at that moment (it does not claim
-   * to hold radio height). Low-height protection raises the collective below 75 ft in cruise and 17 ft in the hover
-   * modes (AW189 values), and needs a valid radio height.
+   * to hold radio height). Low-height protection is a floor under the collective at 75 ft in cruise and 17 ft in the
+   * hover modes (AW189 values): no descent faster than can still stop on the threshold (the transition's braking law
+   * at the vertical-acceleration limit), and below it a climb back to it; LOW HT while it limits the mode's command.
+   * It needs a valid radio height.
    */
   private lowCollectiveSpeed(dt: number): number | null {
     const c = this.lowCollective;
@@ -1355,8 +1362,13 @@ export class FlightSimulator {
       this.record("RHT", `${c.datum} FT RA`);
     }
     const floor = this.lowHorizontal !== null ? this.profile.lowHeightHover.value : this.profile.lowHeightCruise.value;
-    if (height < floor) { this.lowHeight = "ACTIVE"; vs = Math.max(vs, (floor - height) * 2 + 100); }
-    else this.lowHeight = null;
+    // Above the floor, the fastest descent that still stops on it; once this step would reach it, or at or below it,
+    // back to it and held there firmly (as the datum hold). LOW HT while it limits the mode, or the aircraft is below.
+    const above = height - floor, max = this.profile.maxVerticalSpeed.value;
+    const reachingFloor = above > 0 && travel < 0 && -travel >= above;
+    const protection = above > 0 && !reachingFloor ? verticalCommand(-above - travel, max) : clamp(-above * RHT_GAIN, -max, max);
+    if (vs < protection) { this.lowHeight = "ACTIVE"; vs = protection; }
+    else this.lowHeight = above < -0.5 ? "ACTIVE" : null;
     this.vertical = "ALT HOLD";
     return vs;
   }
