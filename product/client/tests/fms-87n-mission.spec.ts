@@ -1,15 +1,18 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
+import { aircraftData, type AircraftData } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { bearingDeg, courseDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import { COPTER_PINS_CIFP_2609, COPTER_PINS_CIFP_2609_SHA256 } from '../src/fmsCdu/data/copterPinsCifp2609'
 import {
   COPTER_PINS_SOURCE, FINAL_START_BEFORE_STAYS_NM, MISSION_87N_OFFSHORE_SAR, MISSION_87N_VARIANTS, MISSION_START_SOUTH_NM, setUp87nOffshoreSar, setUp87nRnav190Final,
 } from '../src/fmsCdu/heliDemo'
+import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
 import { ScenarioRunner, advanceTicks, runHeadless, scenarioProblems } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { memoryUserDatabaseStore } from '../src/fmsCdu/userDatabase'
 
 // The helicopter acceptance mission (helicopter-first plan §10, "87N offshore SAR"): its bundled real data, its start
 // state (synthetic, checked against its admission state), and the nominal run as a library scenario, flown headless on
@@ -137,12 +140,22 @@ for (const variant of MISSION_87N_VARIANTS) {
 // Astra's review of v1 (F6): the claims the scenario steps sample at single moments are measured here over their
 // intervals, on the flown trace, tick by tick.
 
-type Tick = { t: number; active: string | null; altitude: number; groundSpeed: number; track: number; crossTrack: number; ra: number | null; mrkM: number | null }
+type Tick = {
+  t: number; active: string | null; altitude: number; groundSpeed: number; track: number; crossTrack: number; ra: number | null; mrkM: number | null;
+  /** Fuel on board and the flow it burns at (kg, kg/h); the procedure speed limit in force (KIAS) or null. */
+  fuel: number; flow: number; procedureKt: number | null;
+  /** The PFD's data (efis.ts aircraftData): what the display draws, not the truth behind it. */
+  pfd: AircraftData;
+}
+
+/** The user database the observed runs store into, for this user and profile: read back after a run as a restart would. */
+const MISSION_USER = { userId: 'mission.crew', profileId: HELICOPTER_PROFILE.id }
 
 /** Runs a scenario tick by tick, recording each tick, and returns the trace with the final state. */
 function observed(scenario: typeof MISSION_87N_OFFSHORE_SAR) {
   let now = Date.parse(scenario.startTime!)
-  const fms = new ScriptedFms(() => new Date(now))
+  const store = memoryUserDatabaseStore()
+  const fms = new ScriptedFms(() => new Date(now), { userDatabase: { store, scope: MISSION_USER } })
   const sim = new FlightSimulator(fms)
   const runner = new ScenarioRunner(scenario, fms, undefined, sim)
   const ticks: Tick[] = []
@@ -153,13 +166,20 @@ function observed(scenario: typeof MISSION_87N_OFFSHORE_SAR) {
     ticks.push({
       t: n * 0.25, active: leg?.kind === 'wpt' ? leg.ident : leg?.kind ?? null, altitude: fms.altitude, groundSpeed: fms.groundSpeed, track: fms.track,
       crossTrack: fms.crossTrack, ra: fms.radioHeight.status === 'NORMAL' ? fms.radioHeight.value : null, mrkM: mrk ? distanceNm(fms.truePosition, mrk) * 1852 : null,
+      fuel: fms.fuelState.quantity, flow: fms.fuelState.flow, procedureKt: fms.procedureSpeed?.kt ?? null, pfd: aircraftData(fms, sim),
     })
   }
   const eventAt = (event: string, detail?: RegExp) => {
     const found = sim.modeEvents.find(e => e.event === event && (!detail || detail.test(e.detail)))
     return found ? (found.at.getTime() - Date.parse(scenario.startTime!)) / 1000 : null
   }
-  return { fms, sim, runner, ticks, eventAt }
+  /** What the scenario's expectLine step matching the pattern read on the CDU, and when (seconds from the start). */
+  const lineRead = (pattern: RegExp) => {
+    const index = scenario.steps.findIndex(step => step.action.kind === 'expectLine' && pattern.test(step.action.pattern))
+    const result = runner.results[index]
+    return index < 0 || result?.status !== 'pass' ? null : { text: result.actual!, at: result.at! }
+  }
+  return { fms, sim, runner, ticks, eventAt, store, lineRead }
 }
 
 let nominalRun: ReturnType<typeof observed> | null = null
@@ -186,6 +206,93 @@ test('the hover is held for two minutes from its capture, every tick: at MRK, 50
     expect(k.mrkM!, `at ${k.t} s`).toBeLessThanOrEqual(2)
     expect(k.groundSpeed, `at ${k.t} s`).toBeLessThanOrEqual(0.5)
   }
+})
+
+test('the sighting is stored as user waypoint SIGHT at the mark on top, and a restarted FMS reads it back (plan §10 step 2, E5)', () => {
+  const { fms, store, lineRead } = nominal()
+  // NEW USER WPT from the mark on top: the ONTOP reference shown, then SIGHT STORED.
+  expect(lineRead(/\^ONTOP/)).not.toBeNull()
+  const mark = fms.markList[0]
+  expect(mark.ident).toBe('MRK01')
+  expect(fms.userWaypoints).toEqual([{ ident: 'SIGHT', position: mark.position, type: 'FIXED' }])
+  // The hover was flown to that same mark.
+  expect(fms.hover.active?.mark.position ?? fms.hover.mark?.position).toEqual(mark.position)
+  // Persisted: a new FMS for the same user and profile, on the same store, has it.
+  const restarted = new ScriptedFms(() => new Date(START), { userDatabase: { store, scope: MISSION_USER } })
+  expect(restarted.userWaypoints).toEqual([{ ident: 'SIGHT', position: mark.position, type: 'FIXED' }])
+  expect(restarted.coordinates('SIGHT')).toEqual(mark.position)
+})
+
+test('in the hover the PFD shows IAS dashes, RA 50 on the 50 ft datum, VX/VY about 0, the wind 230/20 and RHT | HOV | HOV (plan §10 step 5)', () => {
+  const { ticks, eventAt } = nominal()
+  const capture = eventAt('HOV', /holding the target|captured at the target/)!
+  // Settled (20 s on) to the TU selection two minutes after the capture, which acts on its tick.
+  const settled = ticks.filter(k => k.t > capture + 20 && k.t < capture + 120)
+  expect(settled.length).toBe(399)
+  for (const { t, pfd } of settled) {
+    const heli = pfd.helicopter!
+    expect(heli, `at ${t} s`).not.toBeNull()
+    expect(pfd.ias, `IAS at ${t} s`).toBeNull()
+    expect(heli.axes, `FMA at ${t} s`).toEqual({ collective: 'RHT', pitch: 'HOV', roll: 'HOV' })
+    expect(heli.radioHeight.status, `RA at ${t} s`).toBe('NORMAL')
+    expect(Math.abs(heli.radioHeight.value! - 50), `RA at ${t} s`).toBeLessThanOrEqual(2)
+    expect(heli.hoverHeight, `datum at ${t} s`).toBe(50)
+    expect(heli.hoverData, `hover data at ${t} s`).toBe(true)
+    expect(heli.lowHeight, `caption at ${t} s`).toBeNull()
+    expect(Math.hypot(heli.vx!, heli.vy!), `VX/VY at ${t} s`).toBeLessThanOrEqual(0.5)
+    expect(pfd.wind, `wind at ${t} s`).toEqual({ direction: 230, speed: 20 })
+    // Stationary in the 20 kt wind: the airspeed is the wind, the nose into it.
+    expect(Math.abs(pfd.airspeed - 20), `TAS at ${t} s`).toBeLessThanOrEqual(1)
+    expect(Math.abs(((pfd.heading - 230 + 540) % 360) - 180), `heading at ${t} s`).toBeLessThanOrEqual(5)
+  }
+})
+
+test('over the two-minute hover the fuel falls at the flow, and the FUEL page ENDURANCE agrees with its quantity, reserve and flow (plan §10 step 6)', () => {
+  const { ticks, eventAt, fms, lineRead } = nominal()
+  const capture = eventAt('HOV', /holding the target|captured at the target/)!
+  const window = ticks.filter(k => k.t >= capture && k.t <= capture + 120)
+  expect(window.length).toBe(481)
+  const flow = window[0].flow
+  expect(flow).toBeGreaterThan(0)
+  // Every tick burns the flow for a quarter of a second, stationary or not.
+  for (let i = 1; i < window.length; i++) {
+    expect(window[i].flow).toBe(flow)
+    expect(window[i - 1].fuel - window[i].fuel, `burn at ${window[i].t} s`).toBeCloseTo((flow * 0.25) / 3600, 9)
+  }
+  expect(window[0].fuel - window.at(-1)!.fuel).toBeCloseTo((flow * 120) / 3600, 6)
+  // The FUEL page read at the end of the hover: quantity and flow, then reserve and endurance.
+  const quantityLine = lineRead(/KG\/H/)!, enduranceLine = lineRead(/\\\.\\dH/)!
+  expect(quantityLine).not.toBeNull()
+  expect(enduranceLine).not.toBeNull()
+  const [, quantity, shownFlow] = /^(\d+)KG\s+(\d+)KG\/H$/.exec(quantityLine.text)!.map(Number)
+  const [, reserve, endurance] = /^(\d+)KG\s+(\d+\.\d)H$/.exec(enduranceLine.text)!.map(Number)
+  const read = ticks.find(k => Math.abs(k.t - quantityLine.at) < 1e-9)!
+  expect(read.t).toBeGreaterThanOrEqual(capture + 120)
+  expect(quantity).toBe(Math.round(read.fuel))
+  expect(shownFlow).toBe(flow)
+  expect(reserve).toBe(fms.fuelState.reserve)
+  expect(endurance).toBeCloseTo((read.fuel - reserve) / flow, 1)
+})
+
+test('the missed approach at 70 KIAS until 2,000 ft, then 90: the procedure limit in force and the crew selection (plan §10 step 9, MA-SPD-90)', () => {
+  const { ticks, eventAt } = nominal()
+  const toga = eventAt('GO AROUND')!
+  expect(toga).not.toBeNull()
+  const from = ticks.findIndex(k => k.t > toga)
+  // 2,000 as the air data reads it, to the foot (the truth settles onto the capture without reaching it exactly).
+  const reached = ticks.findIndex((k, i) => i >= from && Math.round(k.altitude) >= 2000)
+  expect(reached).toBeGreaterThan(from)
+  // Below 2,000: the 70 kt limit is in force, and flown.
+  for (const k of ticks.slice(from, reached)) {
+    expect(k.procedureKt, `limit at ${k.t} s`).toBe(70)
+    expect(k.pfd.ias!, `IAS at ${k.t} s`).toBeLessThanOrEqual(70.5)
+  }
+  // From 2,000: the limit released to the hold's 90 on the tick, and the crew's 90 selection reached.
+  expect(ticks[reached].procedureKt).toBe(90)
+  const at90 = ticks.findIndex((k, i) => i >= reached && k.pfd.ias !== null && k.pfd.ias >= 89.5)
+  expect(at90).toBeGreaterThan(reached)
+  expect(ticks[at90].t - ticks[reached].t).toBeLessThanOrEqual(60)
+  for (const k of ticks.slice(reached, at90 + 4 * 60)) expect(k.pfd.ias!, `IAS at ${k.t} s`).toBeLessThanOrEqual(90.5)
 })
 
 test('the crew NEW HOLD at BEADS completes at least two whole circuits, counted by the hold, still under NAV (plan §10 step 10)', () => {
@@ -269,4 +376,35 @@ test('variant (f): DIRECT 87N at CRANN moves the prediction endpoint to SITE ARR
   expect(runner.outcome).toBe('passed')
   expect(fms.profile().endpoint).toMatchObject({ kind: 'SITE ARRIVAL', label: '87N' })
   expect(fms.approachVertical).toBe(false)
+})
+
+test('C.5a: the missed approach CA (190, to 439 ft) completes at once at the MAP when already above 439: DF BEADS next, no descent', () => {
+  // At the MDA (560 ft), 0.3 NM before CRANN on the final, NAV engaged and the altitude held: the aircraft is already
+  // above the CA's 439 ft ("at or above"), so the CA completes on the tick after the MAP, and BEADS follows.
+  const unit = new ScriptedFms(() => new Date(START))
+  const sim = new FlightSimulator(unit)
+  expect(setUp87nRnav190Final(unit, sim)).toEqual({ ready: true })
+  unit.sequence()
+  const active = () => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : leg?.kind === 'cond' ? `(${leg.path})` : null }
+  expect(active()).toBe('CRANN')
+  const stays = unit.coordinates('STAYS')!, crann = unit.coordinates('CRANN')!
+  const course = courseDeg(stays, crann)
+  unit.placeAircraft({ position: offset(crann, course + 180, 0.3), track: course, altitude: 560 }, 'test: 0.3 NM before CRANN at the MDA')
+  sim.engageAltitudeHold()
+  const seen: (string | null)[] = []
+  let lowest = Infinity
+  for (let tick = 0; tick < 240 && active() !== 'BEADS'; tick += 1) {
+    sim.step(0.25)
+    seen.push(active())
+    lowest = Math.min(lowest, unit.altitude)
+  }
+  expect(active()).toBe('BEADS')
+  expect(sim.lateralMode).toBe('LNAV')
+  // CRANN, then the CA for the one tick that passes the MAP, then BEADS: the CA is complete the first tick it is flown.
+  const ca = seen.indexOf('(CA)')
+  expect(ca).toBeGreaterThan(0)
+  expect(seen.slice(0, ca).every(ident => ident === 'CRANN')).toBe(true)
+  expect(seen.slice(ca)).toEqual(['(CA)', 'BEADS'])
+  // No descent toward 439 ft.
+  expect(lowest).toBeGreaterThan(550)
 })

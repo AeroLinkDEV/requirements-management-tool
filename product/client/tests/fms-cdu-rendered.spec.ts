@@ -690,3 +690,19 @@ test('in the low-speed regime the ND draws the ground velocity, not the bank tre
   expect(Number(y1) - Number(y2)).toBeCloseTo(Math.min(knots, 40) * 3, -0.5)
   await efis.screenshot({ path: test.info().outputPath('nd-ground-velocity.png') })
 })
+
+test('C.10: the executed 87N approach shows its chart notes on the Nav data tab, for reference only', async ({ page }) => {
+  await open(page)
+  await tab(page, 'Nav data')
+  // The invented demonstration approach has no chart: no notes.
+  await expect(page.getByRole('region', { name: 'Procedure notes' })).toHaveCount(0)
+  await page.getByRole('group', { name: 'Real-data demonstration' }).getByRole('button', { name: 'Set up 87N COPTER RNAV 190 final' }).click()
+  const notes = page.getByRole('region', { name: 'Procedure notes' })
+  await expect(notes).toBeVisible()
+  await expect(notes).toContainText('87N R190, from the chart (FAA AL-9013 COPTER RNAV (GPS) 190, Orig-B, d-TPP 2609)')
+  await expect(notes).toContainText('never enforced')
+  const items = notes.getByTestId('fms-procedure-notes').getByRole('listitem')
+  await expect(items).toHaveCount(9)
+  await expect(items.nth(1)).toHaveText('Procedure NA at night.')
+  await expect(items.nth(5)).toHaveText('Limit final and missed approach to 70K.')
+  await expect(items.nth(8)).toHaveText('LNAV MDA 560-1.')})
