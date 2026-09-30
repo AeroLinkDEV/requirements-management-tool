@@ -156,6 +156,12 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
               <text x="112" y="256">{heli.vx === null ? "VX ---.-" : `VX ${signed(heli.vx)}`}</text>
               <text x="112" y="272">{heli.vy === null ? "VY ---.-" : `VY ${signed(heli.vy)}`}</text>
               <text x="112" y="290">{`${three(air.wind.direction)}/${Math.round(air.wind.speed)}`}</text>
+              {heli.selectedVelocity ? (
+                <g fill={CYAN} data-testid="pfd-selected-velocity">
+                  <text x="178" y="256">{signed(heli.selectedVelocity.vx)}</text>
+                  <text x="178" y="272">{signed(heli.selectedVelocity.vy)}</text>
+                </g>
+              ) : null}
             </g>
           ) : null}
         </g>

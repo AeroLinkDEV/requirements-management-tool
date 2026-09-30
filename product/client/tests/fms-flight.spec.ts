@@ -1,4 +1,5 @@
 import { expect, logicTest as test } from './isolated-client-test'
+import { aircraftData } from '../src/fmsCdu/efis'
 import { FlightSimulator, SAR_SEARCH_WAYPOINTS, angleDiff, legGeometry, racetrackOutline, sarTrack } from '../src/fmsCdu/flight'
 import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
@@ -618,6 +619,108 @@ test('radio height lost in the hover: RHT gives way to ALT HOLD on the barometri
   expect(sim.altitudeHoldReference).toBe(Math.round(altitude))
   expect(sim.lowHeightCaption).toBe('LOW HT OFF')
   expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'RA LOST' })
+})
+
+test('GSPD holds a selected ground speed along the heading on the measured velocity, the lateral drift at zero, through a wind change; GSPD 0 stands still (B3.1)', () => {
+  const run = offshore()
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(20)
+  expect(sim.engageGroundSpeed(10)).toBe(true)
+  expect(sim.axisModes).toEqual({ collective: 'RHT', pitch: 'GSPD', roll: 'LVL' })
+  fly(30)
+  expect(sim.modeEvents.some(e => e.event === 'GSPD' && /captured at 10 KT/.test(e.detail))).toBe(true)
+  expect(Math.abs(unit.groundSpeed - 10)).toBeLessThanOrEqual(1)
+  expect(Math.abs(angleDiff(unit.track, unit.heading))).toBeLessThan(3)
+  expect(aircraftData(unit, sim).helicopter).toMatchObject({ selectedVelocity: { vx: 10, vy: 0 }, vx: expect.closeTo(10, 0) })
+  // The wind veers and strengthens: the ground velocity held is the measured one, so the aircraft does not drift.
+  Object.assign(unit.wind, { direction: 260, speed: 30 })
+  let worst = 0
+  fly(60, () => { worst = Math.max(worst, Math.abs(angleDiff(unit.track, unit.heading))) })
+  expect(Math.abs(unit.groundSpeed - 10)).toBeLessThanOrEqual(1)
+  expect(Math.abs(angleDiff(unit.track, unit.heading))).toBeLessThan(3)
+  // GSPD 0: stationary, the route not flown (the NO PROGRESS case of B1.7).
+  expect(sim.engageGroundSpeed(0)).toBe(true)
+  fly(40)
+  expect(unit.groundSpeed).toBeLessThanOrEqual(0.5)
+  expect(aircraftData(unit, sim).helicopter!.selectedVelocity).toEqual({ vx: 0, vy: 0 })
+})
+
+test('GSPD is refused out of range, above the low-speed regime, without hover feedback or below the minimum use height, and where its airspeed would leave the low-speed regime; feedback lost gives ATT; GA and TU replace it (B3.1, B3.2)', () => {
+  // Above the low-speed regime: cruise at 80 kt.
+  const cruise = offshore(100)
+  cruise.sim.selectSpeed(80)
+  cruise.fly(30)
+  expect(cruise.sim.engageGroundSpeed(10)).toBe(false)
+  const run = offshore()
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(20)
+  for (const knots of [-1, 31]) expect(sim.engageGroundSpeed(knots), `${knots} kt`).toBe(false)
+  // Into a 20 kt wind, 30 kt over the ground needs 50 kt of airspeed: out of the low-speed regime. 15 kt needs 35.
+  expect(sim.engageGroundSpeed(30)).toBe(false)
+  expect(sim.engageGroundSpeed(15)).toBe(true)
+  // The hover feedback lost: ATT on the last air-velocity command, announced.
+  unit.setCondition('gpsLost', true)
+  fly(3)
+  expect(sim.axisModes).toMatchObject({ pitch: 'ATT', roll: 'ATT' })
+  expect(sim.modeEvents.some(e => e.event === 'GSPD LOST')).toBe(true)
+  expect(sim.engageGroundSpeed(5)).toBe(false)
+  unit.setCondition('gpsLost', false)
+  fly(3)
+  expect(sim.engageGroundSpeed(5)).toBe(true)
+  // TU from GSPD; and GA from GSPD in another run.
+  expect(sim.engageTransitionUp()).toBe(true)
+  expect(sim.axisModes.pitch).toBe('TU')
+  const ga = offshore()
+  slowToHover(ga)
+  ga.fly(20)
+  expect(ga.sim.engageGroundSpeed(5)).toBe(true)
+  ga.sim.selectAltitude(500)
+  expect(ga.sim.engageGoAround()).toBe(true)
+  ga.fly(2)
+  expect(ga.sim.axisModes).toMatchObject({ collective: 'GA', pitch: 'GA' })
+  // Downwind the airspeed rule allows fast ground speeds: 30 kt is the range limit, 31 refused by the range alone.
+  const downwind = offshore()
+  slowToHover(downwind)
+  downwind.fly(20)
+  downwind.sim.selectHeading(50)
+  downwind.fly(90)
+  expect(Math.abs(angleDiff(downwind.unit.heading, 50))).toBeLessThan(2)
+  expect(downwind.sim.engageGroundSpeed(31)).toBe(false)
+  expect(downwind.sim.engageGroundSpeed(30)).toBe(true)
+  // Below the minimum use height, as every SAR mode.
+  const low = offshore(40)
+  slowToHover(low)
+  low.fly(10)
+  low.unit.placeAircraft({ position: low.unit.truePosition, track: 230, altitude: 25 }, 'test: below MUH')
+  expect(low.sim.engageGroundSpeed(5)).toBe(false)
+})
+
+test('a GSPD selection ends a TD/H plan the autopilot kept after the radio height was lost (R3-02.5, F2)', () => {
+  const run = offshore(150)
+  const { unit, sim, fly } = run
+  // Still air: the airspeed is the ground speed, so the low-speed regime comes well before the target.
+  unit.wind.speed = 0
+  sim.selectSpeed(60)
+  fly(40)
+  // Close enough that the deceleration starts at once (inside the nominal stopping distance at 60 kt).
+  const target = offset(unit.position, 230, 0.6)
+  expect(sim.engageTransitionDownToHover(target)).toBe(true)
+  fly(5)
+  unit.setCondition('raFail', true)
+  fly(3)
+  // F2: ALT on the barometric altitude, the horizontal plan to the target kept.
+  expect(sim.axisModes).toMatchObject({ collective: 'ALT', pitch: 'TD/H', roll: 'TD/H' })
+  fly(120, () => sim.indicatedAirspeed < 38)
+  expect(sim.indicatedAirspeed).toBeLessThan(38)
+  expect(distanceNm(unit.truePosition, target)).toBeGreaterThan(0.15)
+  expect(sim.engageGroundSpeed(0)).toBe(true)
+  expect(sim.axisModes).toMatchObject({ pitch: 'GSPD', roll: 'LVL' })
+  fly(60)
+  // Stopped where GSPD brought it, not at the target the TD/H plan had.
+  expect(unit.groundSpeed).toBeLessThanOrEqual(0.5)
+  expect(distanceNm(unit.truePosition, target)).toBeGreaterThan(0.1)
 })
 
 test('hover feedback lost: HOV gives way to ATT on the last command; with the wind unchanged it stays, and a wind change drifts it (B3b, F5)', () => {
