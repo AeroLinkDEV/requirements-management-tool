@@ -1,7 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import {
   AIRCRAFT_PARTS, CHASE_ABOVE, CHASE_BEHIND, FT, HOVER_LOOK_DOWN, TILE_PIXELS, WATER, ancestorOf, blendAircraft, cameraPose, decodeTerrarium, pixelMetres, rampColour, routeHeights,
-  sampleHeights, shadeTile, tileLatitude, type AircraftSample,
+  RELIEF_MAX_ZOOM, sampleHeights, shadeTile, tileLatitude, type AircraftSample,
 } from '../src/fmsCdu/outTheWindow'
 
 // The pure half of the out-the-window view (outTheWindow.ts): the terrain decode and the ground colouring drawn from
@@ -167,4 +167,53 @@ test('with the hover data shown, the cockpit camera looks further down; the flag
   expect(cameraPose({ ...level, hoverData: true }, 'chase', 'hud')).toEqual(cameraPose(level, 'chase', 'hud'))
   expect(blendAircraft(level, { ...level, hoverData: true }, 0.4).hoverData).toBe(true)
   expect(blendAircraft({ ...level, hoverData: true }, level, 0.4).hoverData).toBeUndefined()
+})
+
+// The shading as it was first written: the reference the faster shadeTile must reproduce (to the colour table's
+// whole-metre rounding). Kept here verbatim, so the test does not share the code it checks.
+function referenceShade(heights: Float32Array, cellMetres: number) {
+  const out = new Uint8ClampedArray(TILE_PIXELS * TILE_PIXELS * 4)
+  const at = (x: number, y: number) => heights[Math.min(TILE_PIXELS - 1, Math.max(0, y)) * TILE_PIXELS + Math.min(TILE_PIXELS - 1, Math.max(0, x))]
+  const azimuth = (315 * Math.PI) / 180, zenith = (45 * Math.PI) / 180
+  for (let y = 0; y < TILE_PIXELS; y++) for (let x = 0; x < TILE_PIXELS; x++) {
+    const h = at(x, y)
+    const dzdx = (at(x + 1, y) - at(x - 1, y)) / (2 * cellMetres), dzdy = (at(x, y + 1) - at(x, y - 1)) / (2 * cellMetres)
+    let flat = true
+    for (let dy = -2; dy <= 2 && flat; dy++) for (let dx = -2; dx <= 2; dx++) if (Math.abs(at(x + dx, y + dy) - h) > 0.05) { flat = false; break }
+    const slope = Math.atan(Math.hypot(dzdx, dzdy)), aspect = Math.atan2(dzdy, -dzdx)
+    const light = Math.cos(zenith) * Math.cos(slope) + Math.sin(zenith) * Math.sin(slope) * Math.cos(azimuth - Math.PI / 2 - aspect)
+    const shade = 0.55 + 0.55 * Math.max(0, light)
+    const base = flat && h > 0 ? WATER : rampColour(h)
+    const i = (y * TILE_PIXELS + x) * 4
+    out[i] = Math.min(255, base[0] * shade); out[i + 1] = Math.min(255, base[1] * shade); out[i + 2] = Math.min(255, base[2] * shade); out[i + 3] = 255
+  }
+  return out
+}
+
+test('the fast shading draws what the per-pixel form drew: slopes, water, sea, snow and noise, within 2 of 255', () => {
+  let seed = 7
+  const noise = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+  const cases: [string, Float32Array, number][] = [
+    ['ridge', grid(x => 500 - Math.abs(x - 128) * 4), 20],
+    ['lake among hills', grid((x, y) => (Math.hypot(x - 128, y - 128) < 40 ? 200 : 200 + Math.hypot(x - 128, y - 128) - 40)), 20],
+    ['sea and a shore', grid(x => (x < 100 ? -20 : (x - 100) * 3)), 30],
+    ['snow above the ramp', grid((x, y) => 3000 + x * 5 + y * 2), 10],
+    ['terraces a few centimetres apart', grid(x => 300 + Math.floor(x / 9) * 0.04), 5],
+    ['stripes 8 cm apart', grid(x => 300 + (Math.floor(x / 3) % 2) * 0.08), 5],
+    ['a level plateau with one bump', grid((x, y) => 400 + (x === 60 && y === 60 ? 0.2 : 0)), 5],
+    ['rough ground', grid(() => 800 + noise() * 60), 8],
+  ]
+  for (const [name, heights, cell] of cases) {
+    const fast = shadeTile(heights, cell), reference = referenceShade(heights, cell)
+    let worst = 0
+    for (let i = 0; i < fast.length; i++) worst = Math.max(worst, Math.abs(fast[i] - reference[i]))
+    expect(worst, name).toBeLessThanOrEqual(2)
+  }
+})
+
+test('the ground colour stops at level 14, where its pixels are already finer than the source heights', () => {
+  expect(RELIEF_MAX_ZOOM).toBe(14)
+  // At 45° a level-14 pixel is under 7 m, finer than the 10 m US source; level 13 (about 13.5 m) would be coarser.
+  expect(pixelMetres(RELIEF_MAX_ZOOM, 45)).toBeLessThan(10)
+  expect(pixelMetres(RELIEF_MAX_ZOOM - 1, 45)).toBeGreaterThan(10)
 })

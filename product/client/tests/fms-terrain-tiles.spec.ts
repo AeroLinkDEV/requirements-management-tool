@@ -1,5 +1,5 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { TerrainTiles, tileOf, type TerrainSource } from '../src/fmsCdu/terrainTiles'
+import { TERRAIN_TILE_CAPACITY, TerrainTiles, tileOf, type TerrainSource } from '../src/fmsCdu/terrainTiles'
 
 // The bench's shared height tiles (terrainTiles.ts): fetched once, decoded once, sampled by point for the PFD's
 // synthetic vision, and the source's status reported so a display can say when there is no terrain.
@@ -70,4 +70,57 @@ test('a failing source is unreachable, a missing tile is not a failure, and a la
   mode = 'ok'
   expect((await tiles.load(5, 1, 3))?.[0]).toBe(50)
   expect(tiles.status).toBe('live')
+})
+
+test('the tiles kept are bounded: the least recently used are dropped and fetched again when needed', async () => {
+  const asked: string[] = []
+  const source: TerrainSource = async (z, x, y) => { asked.push(`${z}/${x}/${y}`); return tile(() => x) }
+  const tiles = new TerrainTiles(source, rawDecoder, 2)
+  await tiles.load(9, 1, 1)
+  await tiles.load(9, 2, 1)
+  // Using the first again makes the second the least recently used.
+  await tiles.load(9, 1, 1)
+  await tiles.load(9, 3, 1)
+  expect(tiles.size).toBe(2)
+  expect(asked).toEqual(['9/1/1', '9/2/1', '9/3/1'])
+  // The first is still held; the second was dropped and is fetched again.
+  expect((await tiles.load(9, 1, 1))?.[0]).toBe(1)
+  expect((await tiles.load(9, 2, 1))?.[0]).toBe(2)
+  expect(asked).toEqual(['9/1/1', '9/2/1', '9/3/1', '9/2/1'])
+  expect(tiles.size).toBe(2)
+})
+
+test('a point read counts as a use, and a tile still loading is never dropped', async () => {
+  const asked: string[] = []
+  let release: (() => void) | null = null
+  const source: TerrainSource = async (z, x, y) => {
+    asked.push(`${z}/${x}/${y}`)
+    if (x === 9) await new Promise<void>(resolve => { release = resolve })
+    return tile(() => x)
+  }
+  const tiles = new TerrainTiles(source, rawDecoder, 2)
+  await tiles.load(11, 604, 732)
+  await tiles.load(11, 605, 732)
+  // Reading a height from the first makes it recent: the second goes when a third arrives.
+  expect(tiles.heightAt(45.5, -73.7, 11)).not.toBeNull()
+  await tiles.load(11, 606, 732)
+  await tiles.load(11, 604, 732)
+  expect(asked.filter(key => key === '11/604/732')).toHaveLength(1)
+  // A slow tile, the oldest when the capacity is exceeded, is never dropped while it loads: settled tiles go instead,
+  // and once it arrives it is held, not fetched again.
+  const slow = tiles.load(11, 9, 732)
+  await tiles.load(11, 607, 732)
+  await tiles.load(11, 608, 732)
+  expect(tiles.size).toBe(2)
+  release!()
+  expect((await slow)?.[0]).toBe(9)
+  await settle()
+  const again = tiles.load(11, 9, 732)
+  expect(asked.filter(key => key === '11/9/732'), 'fetched once').toHaveLength(1)
+  expect((await again)?.[0]).toBe(9)
+})
+
+test('by default a few hundred tiles are kept (about 100 MB of heights), not every tile ever passed over', () => {
+  expect(TERRAIN_TILE_CAPACITY).toBe(384)
+  expect((TERRAIN_TILE_CAPACITY * 256 * 256 * 4) / 1e6).toBeLessThan(110)
 })

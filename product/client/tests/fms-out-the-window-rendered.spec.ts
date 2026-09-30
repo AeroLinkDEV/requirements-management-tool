@@ -99,3 +99,26 @@ test('synthetic vision draws terrain behind the PFD attitude, and is flagged ins
   await expect(pfd.getByTestId('pfd-svs-flag')).toHaveText('SVS', { timeout: 30_000 })
   await expect(pfd.getByTestId('pfd-svs')).toHaveCount(0)
 })
+
+test('the scene draws only when something changes: still while the bench is paused, every frame while it flies', async ({ page }) => {
+  test.setTimeout(240_000)
+  await open(page, 'hill')
+  const view = await show(page)
+  const scene = view.locator('.fmsOtwScene')
+  const frames = async () => Number(await scene.getAttribute('data-frames') ?? 0)
+  // Settled: the tiles loaded (slowly, on the software renderer here) and nothing moving, so the count stops.
+  let previous = -1
+  const settled = async () => { const now = await frames(); const same = now === previous; previous = now; return same }
+  await expect.poll(settled, { intervals: [3000], timeout: 120_000 }).toBe(true)
+  const still = await frames()
+  await page.waitForTimeout(2000)
+  expect(await frames(), 'paused: no frames drawn').toBe(still)
+  // Flying: the aircraft moves every tick (four a second), and each tick asks for frames. The software renderer here
+  // draws only a few frames a second, so the bar is that it keeps drawing, not a frame rate.
+  await page.getByRole('button', { name: 'Fly' }).click()
+  await page.waitForTimeout(2000)
+  expect(await frames() - still, 'flying: frames drawn').toBeGreaterThan(5)
+  await page.getByRole('button', { name: 'Pause' }).click()
+  previous = -1
+  await expect.poll(settled, { intervals: [3000], timeout: 60_000 }).toBe(true)
+})

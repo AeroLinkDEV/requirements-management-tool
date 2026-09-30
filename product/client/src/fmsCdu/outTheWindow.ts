@@ -14,6 +14,11 @@ export const FT = 0.3048;
 export const TERRAIN_MAX_ZOOM = 15;
 /** The terrain mesh is built from level 13 at most; finer levels sample their level-13 ancestor. */
 export const MESH_MAX_ZOOM = 13;
+/**
+ * The deepest level the ground colour is drawn at. Level 14 pixels (about 7 m at 45° latitude) are already finer than
+ * the source heights (about 10 m in the US, 30 m elsewhere): level 15 quadrupled the tiles shaded and added nothing.
+ */
+export const RELIEF_MAX_ZOOM = 14;
 export const TILE_PIXELS = 256;
 
 export type Layout = "hud" | "panel";
@@ -77,26 +82,61 @@ export function rampColour(height: number): [number, number, number] {
   return RAMP[RAMP.length - 1][1];
 }
 
+/** The ramp at each whole metre from 0 to its top (RGB triples), so shading a pixel looks its colour up. */
+let rampTable: Uint8Array | null = null;
+const RAMP_TOP = RAMP[RAMP.length - 1][0];
+function rampLookup() {
+  if (rampTable) return rampTable;
+  rampTable = new Uint8Array((RAMP_TOP + 1) * 3);
+  for (let metres = 0; metres <= RAMP_TOP; metres++) rampTable.set(rampColour(metres), metres * 3);
+  return rampTable;
+}
+
 /**
  * Colours a 256 × 256 height tile as RGBA: height colour, lit from the north-west at 45° (the cartographic convention),
  * and water where the ground is perfectly level over its neighbourhood (lakes and rivers are flat in the source data).
+ *
+ * It runs for every tile the view shows, so it is written for speed (a whole-metre colour table, the light as a dot
+ * product with the surface normal, the 5 × 5 level test as separable minimum and maximum passes); it draws what the
+ * direct per-pixel form drew, to within the colour table's whole-metre rounding.
  */
 export function shadeTile(heights: Float32Array, cellMetres: number): Uint8ClampedArray<ArrayBuffer> {
-  const out = new Uint8ClampedArray(TILE_PIXELS * TILE_PIXELS * 4);
-  const at = (x: number, y: number) =>
-    heights[Math.min(TILE_PIXELS - 1, Math.max(0, y)) * TILE_PIXELS + Math.min(TILE_PIXELS - 1, Math.max(0, x))];
-  const azimuth = (315 * Math.PI) / 180, zenith = (45 * Math.PI) / 180;
-  for (let y = 0; y < TILE_PIXELS; y++) for (let x = 0; x < TILE_PIXELS; x++) {
-    const h = at(x, y);
+  const N = TILE_PIXELS, last = N - 1, table = rampLookup();
+  const out = new Uint8ClampedArray(N * N * 4);
+  const at = (x: number, y: number) => heights[Math.min(last, Math.max(0, y)) * N + Math.min(last, Math.max(0, x))];
+  // Level: every height in the 5 × 5 neighbourhood (edges clamped) within 5 cm of the centre, i.e. its maximum and
+  // minimum both are. Rows first, then columns.
+  const rowMin = new Float32Array(N * N), rowMax = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let lo = Infinity, hi = -Infinity;
+    for (let d = -2; d <= 2; d++) { const v = at(x + d, y); if (v < lo) lo = v; if (v > hi) hi = v; }
+    rowMin[y * N + x] = lo; rowMax[y * N + x] = hi;
+  }
+  // The light from azimuth 315° at 45° elevation, in the tile's frame (x east, y south, z up).
+  const lx = -0.5, ly = -0.5, lz = Math.SQRT1_2;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const h = heights[y * N + x];
+    let lo = Infinity, hi = -Infinity;
+    for (let d = -2; d <= 2; d++) {
+      const k = Math.min(last, Math.max(0, y + d)) * N + x;
+      if (rowMin[k] < lo) lo = rowMin[k];
+      if (rowMax[k] > hi) hi = rowMax[k];
+    }
+    const level = hi - h <= 0.05 && h - lo <= 0.05;
     const dzdx = (at(x + 1, y) - at(x - 1, y)) / (2 * cellMetres), dzdy = (at(x, y + 1) - at(x, y - 1)) / (2 * cellMetres);
-    let level = true;
-    for (let dy = -2; dy <= 2 && level; dy++) for (let dx = -2; dx <= 2; dx++) if (Math.abs(at(x + dx, y + dy) - h) > 0.05) { level = false; break; }
-    const slope = Math.atan(Math.hypot(dzdx, dzdy)), aspect = Math.atan2(dzdy, -dzdx);
-    const light = Math.cos(zenith) * Math.cos(slope) + Math.sin(zenith) * Math.sin(slope) * Math.cos(azimuth - Math.PI / 2 - aspect);
+    const light = (-dzdx * lx + dzdy * ly + lz) / Math.sqrt(dzdx * dzdx + dzdy * dzdy + 1);
     const shade = 0.55 + 0.55 * Math.max(0, light);
-    const base = level && h > 0 ? WATER : rampColour(h);
-    const i = (y * TILE_PIXELS + x) * 4;
-    out[i] = Math.min(255, base[0] * shade); out[i + 1] = Math.min(255, base[1] * shade); out[i + 2] = Math.min(255, base[2] * shade); out[i + 3] = 255;
+    const i = (y * N + x) * 4;
+    if (level && h > 0) {
+      out[i] = WATER[0] * shade; out[i + 1] = WATER[1] * shade; out[i + 2] = WATER[2] * shade;
+    } else if (h > RAMP_TOP) {
+      const c = rampColour(h);
+      out[i] = c[0] * shade; out[i + 1] = c[1] * shade; out[i + 2] = c[2] * shade;
+    } else {
+      const k = Math.max(0, Math.round(h)) * 3;
+      out[i] = table[k] * shade; out[i + 1] = table[k + 1] * shade; out[i + 2] = table[k + 2] * shade;
+    }
+    out[i + 3] = 255;
   }
   return out;
 }
