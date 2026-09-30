@@ -353,7 +353,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         caption(" MOVING"),
       ];
       moving.slice(0, 3).forEach(([ident, motion], i) => {
-        const at = fms.coordinates(ident);
+        const at = fms.movingPositionNow(ident);
         lines[6 + i] = { left: medium(`${ident} ${fms.angleText(motion.track)}/${motion.speed}KT`, "green"), right: at ? small(formatPosition(at)) : undefined };
       });
       lines[11] = { left: dashes(24) };

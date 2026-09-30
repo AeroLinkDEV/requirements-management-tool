@@ -133,6 +133,25 @@ function planFingerprint(legs: Route["legs"]) {
 
 export type LegGeometry = { course: number; distance: number } | null;
 
+/** M300 11-37: a rendezvous is unachievable when no interception is possible within this travelling distance. */
+export const RENDEZVOUS_RANGE_NM = 500;
+/** M300 11-37: the rendezvous is determined again every 10 seconds, as long as the time to go is over one minute. */
+export const RENDEZVOUS_RECOMPUTE_S = 10;
+export const RENDEZVOUS_FREEZE_S = 60;
+
+/** The rendezvous with a moving waypoint in a route (M300 11-37). */
+export type MovingRendezvous = {
+  /** The intercept point with the moving waypoint's trajectory, when the rendezvous is achievable. */
+  position: LatLon | null;
+  achievable: boolean;
+  /** 1: the active waypoint; 2: later in the active route; 3: later in the modified route; 4: first of the modified route. */
+  condition: 1 | 2 | 3 | 4;
+  /** When it was determined (simulation ms), the time to go to it then (s), and its distance from where the leg starts. */
+  computedAt: number;
+  ttg: number | null;
+  distanceNm: number | null;
+};
+
 export class ScriptedFms implements CduBackend {
   private listeners = new Set<() => void>();
   private changes = 0;
@@ -1581,6 +1600,7 @@ export class ScriptedFms implements CduBackend {
   updatePerformance(dt: number) {
     // Moving waypoints follow the simulation clock from their epochs (rev 2 D-R epoch), not the ticks.
     for (const ident of Object.keys(this.moving)) this.points[ident] = this.movingAt(ident)!;
+    this.updateRendezvous();
     const rendezvous = this.rndz.active ? this.rendezvous() : null;
     if (rendezvous && rendezvous.required !== null && !rendezvous.achievable && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE")); }
     if (rendezvous?.achievable) this.rndz.alerted = false;
@@ -1678,6 +1698,148 @@ export class ScriptedFms implements CduBackend {
   private movingAt(ident: string): LatLon | undefined {
     const m = this.moving[ident];
     return m && movingPosition(m.origin, m.track, m.speed, m.epoch, this.now.getTime());
+  }
+
+  /** Where a moving waypoint, pilot or stored user one, is at simulation time `at` (ms); undefined for any other. */
+  private movingPositionAt(ident: string, at: number): LatLon | undefined {
+    const m = this.moving[ident];
+    if (m) return movingPosition(m.origin, m.track, m.speed, m.epoch, at);
+    const user = this.userDb.waypoints.find(w => w.ident === ident && w.type === "MOVING");
+    return user ? userWaypointPosition(user, new Date(at)) : undefined;
+  }
+
+  /** Where a moving waypoint is now (its own position, not the rendezvous with it), for the MOVING WPT page. */
+  movingPositionNow(ident: string) { return this.movingPositionAt(ident, this.now.getTime()); }
+
+  /**
+   * How long ago a moving waypoint's position was entered (seconds of simulation time): it never expires (plan rev2
+   * D-R), and the propagated age is shown as a labelled bench aid.
+   */
+  movingAge(ident: string): number | null {
+    const m = this.moving[ident];
+    const user = this.userDb.waypoints.find(w => w.ident === ident && w.type === "MOVING");
+    const epoch = m ? m.epoch : user?.type === "MOVING" ? Date.parse(user.epoch) : NaN;
+    return Number.isFinite(epoch) ? (this.now.getTime() - epoch) / 1000 : null;
+  }
+
+  // ---------------------------------------------------------------- the rendezvous with a moving waypoint (M300 11-37)
+
+  /**
+   * The rendezvous with each moving waypoint in the active and modified routes (M300 11-37): the intercept point with
+   * its trajectory, determined when it is inserted and every 10 seconds from there on while the time to go is over one
+   * minute, then kept. Keyed by route and ident.
+   */
+  private rendezvousCache = new Map<string, MovingRendezvous>();
+  private rendezvousWarned = new Set<string>();
+
+  private rendezvousKey(route: Route, ident: string) { return (route === this.active ? "ACT:" : "MOD:") + ident; }
+
+  /** The M300 11-37 condition a moving waypoint at `index` of `route` falls under. */
+  private rendezvousCondition(route: Route, index: number): 1 | 2 | 3 | 4 {
+    const first = route.legs.findIndex(leg => leg.kind === "wpt") === index;
+    return route === this.active ? (index === 0 ? 1 : 2) : first ? 4 : 3;
+  }
+
+  /** The rendezvous with the moving waypoint at `index` of `route`, as last determined (determined now if it never was). */
+  rendezvousFor(route: Route, index: number): MovingRendezvous | null {
+    const leg = route.legs[index];
+    if (leg?.kind !== "wpt" || !this.isMoving(leg.ident)) return null;
+    const key = this.rendezvousKey(route, leg.ident);
+    const cached = this.rendezvousCache.get(key);
+    if (cached && cached.condition === this.rendezvousCondition(route, index)) return cached;
+    const solved = this.solveRendezvous(route, index, leg.ident);
+    this.rendezvousCache.set(key, solved);
+    return solved;
+  }
+
+  /**
+   * The rendezvous point (M300 11-37): the first point of the moving waypoint's trajectory the aircraft can meet, flying
+   * straight to it at its ground speed on that course (the airspeed flown now, through the system wind). From the
+   * present position when it is the active waypoint, or the first of the modified route (conditions 1 and 4); from the
+   * previous waypoint, reached along the route, otherwise (2 and 3). Unachievable when no such point lies within a
+   * travelling distance of 500 NM from there.
+   */
+  private solveRendezvous(route: Route, index: number, ident: string): MovingRendezvous {
+    const now = this.now.getTime();
+    const condition = this.rendezvousCondition(route, index);
+    const tas = this.trueAirspeed ?? this.plannedSpeed;
+    const unachievable = (): MovingRendezvous => ({ position: null, achievable: false, condition, computedAt: now, ttg: null, distanceNm: null });
+    let start = this.here, t0 = now;
+    if (condition === 2 || condition === 3) {
+      let hours = 0;
+      for (let i = 0; i < index; i += 1) {
+        const leg = route.legs[i];
+        if (leg.kind !== "wpt") continue;
+        const to = this.isMoving(leg.ident) ? (this.rendezvousFor(route, i)?.position ?? this.movingPositionAt(leg.ident, now)) : this.coordinates(leg.ident, route);
+        if (!to) continue;
+        const gs = distanceNm(start, to) < 1e-6 ? tas : this.groundSpeedOn(courseDeg(start, to), tas);
+        if (gs === null || gs <= 0) return unachievable();
+        hours += distanceNm(start, to) / gs;
+        start = to;
+      }
+      t0 = now + hours * 3_600_000;
+    }
+    // Ahead of the target by s seconds: positive once the aircraft could be where the moving waypoint then is.
+    const reach = (s: number) => {
+      const target = this.movingPositionAt(ident, t0 + s * 1000)!;
+      const nm = distanceNm(start, target);
+      const gs = nm < 1e-6 ? tas : this.groundSpeedOn(courseDeg(start, target), tas);
+      return { ahead: gs === null || gs <= 0 ? -Infinity : (gs * s) / 3600 - nm, nm, target };
+    };
+    // Within 500 NM of travel: no longer than 500 NM at the fastest ground speed the wind allows.
+    const limit = (RENDEZVOUS_RANGE_NM / Math.max(1, tas + this.systemWind.speed)) * 3600;
+    let low = 0, bracket: number | null = null;
+    for (let s = 0; s <= limit; s += 10) {
+      if (reach(s).ahead >= 0) { bracket = s; break; }
+      low = s;
+    }
+    if (bracket === null) return unachievable();
+    let high: number = bracket;
+    for (let i = 0; i < 40; i += 1) { const mid: number = (low + high) / 2; if (reach(mid).ahead >= 0) high = mid; else low = mid; }
+    const found = reach(high);
+    if (found.nm > RENDEZVOUS_RANGE_NM) return unachievable();
+    return { position: found.target, achievable: true, condition, computedAt: now, ttg: (t0 - now) / 1000 + high, distanceNm: found.nm };
+  }
+
+  /**
+   * Each tick: the rendezvous determined for a moving waypoint newly in a route, and again every 10 seconds while its
+   * time to go is over one minute (then kept). An unachievable one is annunciated once: as the active waypoint
+   * (condition 1) the RENDEZVOUS UNACHIEVABLE alert, with the roll command invalid; otherwise as an advisory.
+   */
+  private updateRendezvous() {
+    const now = this.now.getTime();
+    const live = new Set<string>();
+    for (const route of [this.active, this.modified]) {
+      if (!route) continue;
+      route.legs.forEach((leg, index) => {
+        if (leg.kind !== "wpt" || !this.isMoving(leg.ident)) return;
+        const key = this.rendezvousKey(route, leg.ident);
+        live.add(key);
+        const cached = this.rendezvousCache.get(key);
+        const toGo = cached?.ttg == null ? null : cached.ttg - (now - cached.computedAt) / 1000;
+        const due = !cached || cached.condition !== this.rendezvousCondition(route, index)
+          || (now - cached.computedAt >= RENDEZVOUS_RECOMPUTE_S * 1000 && (toGo === null || toGo > RENDEZVOUS_FREEZE_S));
+        const solved = due ? this.solveRendezvous(route, index, leg.ident) : cached!;
+        if (due) this.rendezvousCache.set(key, solved);
+        const warned = key + ":" + solved.condition;
+        if (solved.achievable) { this.rendezvousWarned.delete(warned); return; }
+        if (this.rendezvousWarned.has(warned)) return;
+        this.rendezvousWarned.add(warned);
+        if (solved.condition === 1) this.alert(alert("RENDEZVOUS UNACHIEVABLE"));
+        else this.advisory("RENDEZVOUS UNACHIEVABLE");
+      });
+    }
+    for (const key of [...this.rendezvousCache.keys()]) if (!live.has(key)) this.rendezvousCache.delete(key);
+  }
+
+  /**
+   * The active waypoint is a moving one whose rendezvous is unachievable (M300 11-37 condition 1): guidance is toward
+   * the moving waypoint itself, and the roll command is invalid.
+   */
+  get rendezvousRollInvalid(): boolean {
+    const leg = this.active.legs[0];
+    if (leg?.kind !== "wpt" || !this.isMoving(leg.ident)) return false;
+    return this.rendezvousFor(this.active, 0)?.achievable === false;
   }
 
   /** The TDN path angle from present altitude to the target altitude at the point before the reference. */
@@ -2260,6 +2422,13 @@ export class ScriptedFms implements CduBackend {
     if (generated?.kind === "wpt") return generated.position;
     const pending = this.pendingHoverPoints;
     if (pending && route !== this.active && (ident === "JN" || ident === "TDN" || ident === "MRK")) return pending[ident];
+    // A moving waypoint in the route stands at its rendezvous point while that is achievable (M300 11-37); otherwise at
+    // the moving waypoint itself, so guidance is toward it.
+    if (this.isMoving(ident)) {
+      const index = route.legs.findIndex(leg => leg.kind === "wpt" && leg.ident === ident);
+      const rendezvous = index >= 0 ? this.rendezvousFor(route, index) : null;
+      if (rendezvous?.achievable && rendezvous.position) return rendezvous.position;
+    }
     const own = this.ownPoint(ident);
     if (own) return own;
     // The active plan flies its fixes as they were resolved when it became active (pinActive): a fix it was executed
