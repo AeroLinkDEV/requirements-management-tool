@@ -667,7 +667,7 @@ test('AUTO keeps GPS 2 after GPS 1 recovers: the strip says so, GPS 1 shows as a
   await hil.getByRole('button', { name: 'Clear' }).click()
   await expect(page.getByTestId('route-gps1')).toContainText('available / standby')
   await expect(page.getByTestId('route-current-source')).toHaveText('AUTO — FMS on GPS2')
-  await expect(page.getByTestId('route-source-note')).toContainText('Last transfer: GPS1 to GPS2 (GPS1 NOT USABLE: HIL 99.00 > HAL')
+  await expect(page.getByTestId('route-source-note')).toContainText('Last transfer: GPS1 to GPS2 (GPS1 NOT USABLE: HIL 99.00 >= HAL')
   // The CDU's own presentation: NAV OPTIONS under GPS NAV, not only the bench.
   for (const id of ['INIT_REF', 'NEXT', 'LSK5R', 'LSK6R']) await key(page, id).click()
   await expectLine(page, 0, /NAV OPTIONS/)

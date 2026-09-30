@@ -26,6 +26,7 @@ import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type Nav
 import { coldTemperatureCorrection, computeProfile, formatConstraint, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
 import { RNP_DEFAULTS, type FlightPhase, type NavMode } from "./navigation";
 import { CivilNavigation, type PositionMeasurement } from "./civilNavigation";
+import type { SensorSolution } from "./sensorState";
 import { BenchRadioReceiver, solveRadio } from "./radioNavigation";
 import { sampled, type SensorFrame, type SensorInputPort } from "./sensorPorts";
 import { NAV_PAGES } from "./navPages";
@@ -1094,6 +1095,7 @@ export class ScriptedFms implements CduBackend {
       const velocity = (label: "166" | "174") => bus[label].ssm === "NORMAL" && Number.isFinite(bus[label].value) ? bus[label].value : null;
       return { position: assessed.fix, receiver: (index + 1) as 1 | 2,
         anp: uncertain ? Math.max(assessed.hil ?? 0, assessed.hfom ?? 0) : Math.max(ANP_FLOOR_NM, assessed.hfom ?? assessed.hil ?? 0.3),
+        accuracy95Nm: assessed.hfom === null ? null : Math.max(ANP_FLOOR_NM, assessed.hfom), hilNm: assessed.hil,
         northKt: velocity("166"), eastKt: velocity("174") };
     };
     const uncertainOrder = candidates(this.gpsChoice, this.gpsSelected);
@@ -1106,6 +1108,7 @@ export class ScriptedFms implements CduBackend {
     if (selection.mode !== "DR" && distanceNm(predicted, selection.position) > 0.5) this.alert(alert("POSITION SHIFT"));
     this.localSolution = structuredClone(selection);
     this.here = selection.position;
+    this.sensorState = { sensors: selection.sensors, selected: selection.selected };
     this.updateAngleReference();
     const gpsSource = selection.gpsSource;
     this.nav = {
@@ -2536,12 +2539,18 @@ export class ScriptedFms implements CduBackend {
    * second, named layer on top: forced NPA sets the approach RNP of 0.30 NM, forced RNP exceeded sets an ANP above
    * it. `forced` is true when either applies, and the pages label the value TEST so it is not mistaken for a sensor.
    */
+  /** The split sensor state of the last navigation update (plan F2): every candidate weighed, and the one navigated on. */
+  private sensorState: { sensors: SensorSolution[]; selected: SensorSolution } | null = null;
+  get sensorSolutions(): SensorSolution[] { return structuredClone(this.sensorState?.sensors ?? this.navigation.current.sensors); }
+
   get navPerformance() {
     const forcedNpa = this.injected.has("npa"), forcedAnp = this.injected.has("rnpExceeded");
     const rnp = forcedNpa ? RNP_DEFAULTS.APPROACH.rnp : this.requiredRnp;
     const anp = forcedAnp ? Math.max(1.35, rnp + 0.35) : this.nav.anp;
     return {
       rnp, anp, sensorRnp: this.requiredRnp, sensorAnp: this.nav.anp, forced: forcedNpa || forcedAnp,
+      /** The selected sensor's availability, 95% accuracy, integrity and eligibility (plan F2). */
+      sensor: structuredClone(this.sensorState?.selected ?? this.navigation.current.selected),
       rnpSource: forcedNpa ? "TEST" as const : this.nav.rnpManual === null ? "PHASE" as const : "MANUAL" as const,
     };
   }

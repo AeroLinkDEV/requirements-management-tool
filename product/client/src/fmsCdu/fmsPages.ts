@@ -1,3 +1,4 @@
+import { withinLimit } from "./sensorState";
 import { alert } from "./alerts";
 import { formatConstraint, parseAltitude, parseConstraint } from "./vnav";
 import {
@@ -663,7 +664,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           caption(` ${name}`, "HIL "),
           {
             left: assessment?.fix && assessment.mode && fms.gpsNavSelected ? medium(`${MODE_TEXT[assessment.mode]} ${assessment.used} SAT`) : medium(summary.text, "amber"),
-            right: hil === null ? dashes(6) : medium(`${fixed(hil, 2)}NM`, hil > HAL_NM[fms.flightPhase] ? "amber" : "white"),
+            right: hil === null ? dashes(6) : medium(`${fixed(hil, 2)}NM`, !withinLimit(hil, HAL_NM[fms.flightPhase]) ? "amber" : "white"),
           },
           caption(" SBAS", "INTEGRITY "),
           { left: medium(fms.gpsNavSelected ? sbasSummary(assessment) : "----"), right: intact ? medium("OK", "green") : medium("LOST", "amber") },

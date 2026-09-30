@@ -489,7 +489,7 @@ test('a transfer never suppresses an integrity alert: GPS1 over its alert limit 
   bench.gps(1, { op: 'override', label: '130', kind: 'FORCE', amount: 9 })
   expect(bench.fms.gpsStatus.chosen).toBe(1)
   expect(bench.alerts()).toEqual(expect.arrayContaining(['GPS POS UNCERTAIN', 'GPS1 NOT USABLE']))
-  expect(bench.log()[0]).toBe('TRANSFER GPS1>GPS2 GPS1 NOT USABLE: HIL 9.00 > HAL 1.00')
+  expect(bench.log()[0]).toBe('TRANSFER GPS1>GPS2 GPS1 NOT USABLE: HIL 9.00 >= HAL 1.00')
 })
 
 test('a crew change from a failed manual receiver to AUTO is logged as the crew\'s, not annunciated as an approach transfer', () => {

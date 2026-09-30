@@ -1,4 +1,5 @@
 import { distanceNm, offset, type LatLon } from "./fmsModel";
+import { withinLimit } from "./sensorState";
 import { DEFAULT_GEOID_SEPARATION_M, fasCrc, type ApproachLevel, type ApproachStatus, type DeviationScale, type FasDataBlock, type GpsBus, type GpsMode, type Integrity } from "./gps";
 import type { Procedure, Runway } from "./navData";
 import type { FlightPhase } from "./navigation";
@@ -17,7 +18,7 @@ import type { FlightPhase } from "./navigation";
  *   4. position domain: the assembled coarse + fine latitude and longitude finite and within ±90 and ±180 (BAD DATA);
  *   5. integrity: 273 integrity DETECTED, or 130 not Normal (INTEGRITY);
  *   6. integrity domain: HIL finite and not negative, HFOM (when Normal) finite and not negative (BAD DATA);
- *   7. integrity limit: HIL within the phase's horizontal alert limit (INTEGRITY).
+ *   7. integrity limit: HIL strictly less than the phase's horizontal alert limit (INTEGRITY; M300 1-3, plan F2).
  * May the approach be flown on the selected receiver (approachAuthority), in order:
  *   1. the receiver may be navigated on (above);
  *   2. approach identity and availability (156): Normal, selected, CRC valid, for the approach selected, complete,
@@ -126,7 +127,7 @@ export function assessReceiver(bus: GpsBus | null, halNm: number): ReceiverAsses
     if (hil === null) return ["INTEGRITY", `130 ${bus["130"].ssm}`];
     if (!valid(hil, true)) return ["BAD DATA", `HIL ${shown(hil)} INVALID`];
     if (hfom !== null && !valid(hfom, true)) return ["BAD DATA", `HFOM ${shown(hfom)} INVALID`];
-    if (hil > halNm) return ["INTEGRITY", `HIL ${shown(hil)} > HAL ${shown(halNm)}`];
+    if (!withinLimit(hil, halNm)) return ["INTEGRITY", `HIL ${shown(hil)} >= HAL ${shown(halNm)}`];
     return null;
   })();
   const [reason, detail] = veto ?? ["OK", ""];
