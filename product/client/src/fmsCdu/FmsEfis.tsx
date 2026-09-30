@@ -208,6 +208,8 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
         <text x="369" y="54" textAnchor="middle" fontSize="13" fill={bus.targetAltitude.status === "NORMAL" ? MAGENTA : CYAN}>
           {bus.targetAltitude.status === "NORMAL" ? Math.round(bus.targetAltitude.value!) : air.selectedAltitude !== null ? air.selectedAltitude : bus.verticalMode === "ALT HOLD" ? "HOLD" : "----"}
         </text>
+        {/* The crew's altimeter setting (cyan, a crew selection): STD, or QNH and hPa (B1.1, baro.ts). */}
+        <text x="369" y="316" textAnchor="middle" fontSize="12" fill={CYAN} data-testid="pfd-baro">{air.baroSetting}</text>
       </g>
       {/* The missed approach altitude the selected altitude does not meet (helicopter profile): shown, never flown. */}
       {air.missedAltitudeConflict ? (

@@ -167,6 +167,11 @@ export type Hold = {
   exit: HoldExit; speed: number; altitude: string; status: HoldStatus; missed?: boolean;
   /** Whole racetracks flown since the entry: the missed-approach hold leaves after one. */
   circuits?: number;
+  /**
+   * The defaults the hold was given where nothing was entered or coded. A value still at its default when the entry
+   * begins is taken again from the altitude then (M300 10-9), and fixed from then on; one the crew changed is kept.
+   */
+  defaults?: { legTime?: number; speed?: number };
 };
 
 /**
