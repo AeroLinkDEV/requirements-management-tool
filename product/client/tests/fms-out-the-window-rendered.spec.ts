@@ -161,8 +161,12 @@ const shares = async (page: Page) => {
   }, png.toString('base64'))
 }
 // The share of the view that looks different from an earlier screenshot of it (a colour change of more than 40 in sum).
+// The scene as drawn: not the view's own controls, which change as they are chosen, nor the credits, whose text changes
+// with the ground and wraps differently with the window size.
+const sceneShot = (page: Page) => page.locator('.fmsOtwScene').screenshot({ mask: [page.locator('.fmsOtwCredits')] })
+// The share of the scene's pixels that changed.
 const changedSince = async (page: Page, before: Buffer) => {
-  const after = await page.locator('.fmsOtw').screenshot()
+  const after = await sceneShot(page)
   return page.evaluate(async ([a, b]) => {
     const pixels = async (b64: string) => {
       const image = new Image()
@@ -195,7 +199,7 @@ const drawn = async (page: Page) => {
 test('the ground is aerial imagery where there is some, relief where there is none, and relief when chosen; the choice is remembered', async ({ page }) => {
   test.setTimeout(300_000)
   // A small window, looking straight down (the map view): the fewest tiles to load on a software renderer.
-  await page.setViewportSize({ width: 700, height: 500 })
+  await page.setViewportSize({ width: 480, height: 360 })
   await open(page, 'hill')
   const view = await show(page)
   await choose(page, 'Window view', 'Map')
@@ -217,7 +221,7 @@ test('the ground is aerial imagery where there is some, relief where there is no
 test('with no imagery (outside the coverage, or the service\'s blank filler) the ground is relief; with imagery off, the view says so', async ({ page }) => {
   test.setTimeout(300_000)
   // A small window, looking straight down (the map view): the fewest tiles to load on a software renderer.
-  await page.setViewportSize({ width: 700, height: 500 })
+  await page.setViewportSize({ width: 480, height: 360 })
   for (const mode of ['none', 'blank']) {
     await page.goto(`/tests/fixtures/fms-cdu.html?imagery=${mode}`)
     const view = await show(page)
@@ -228,7 +232,7 @@ test('with no imagery (outside the coverage, or the service\'s blank filler) the
     // What is drawn instead is the relief, as choosing Relief draws it: not a flat colour. (Once: the fallback is the
     // same code whichever way the imagery was missing, and each draw is slow on a software renderer.)
     if (mode === 'none') {
-      const fallback = await view.screenshot()
+      const fallback = await sceneShot(page)
       await choose(page, 'Window ground', 'Relief')
       await drawn(page)
       expect(await changedSince(page, fallback), `${mode}: the relief, as Relief draws it`).toBeLessThan(0.05)
@@ -246,7 +250,7 @@ test('with no imagery (outside the coverage, or the service\'s blank filler) the
 test('terrain colouring: red where the ground reaches the aircraft (relative), height bands (absolute), none when off; remembered', async ({ page }) => {
   test.setTimeout(300_000)
   // A small window, looking straight down (the map view): the fewest tiles to load on a software renderer.
-  await page.setViewportSize({ width: 700, height: 500 })
+  await page.setViewportSize({ width: 480, height: 360 })
   // A hill higher than the aircraft, relief only so the colours are the colouring's.
   await page.goto('/tests/fixtures/fms-cdu.html?hill=1300')
   const view = await show(page)
@@ -255,7 +259,7 @@ test('terrain colouring: red where the ground reaches the aircraft (relative), h
   await drawn(page)
   const off = await shares(page)
   expect(off.red, 'off: no red').toBeLessThan(0.002)
-  const uncoloured = await page.locator('.fmsOtw').screenshot()
+  const uncoloured = await sceneShot(page)
 
   await choose(page, 'Terrain colouring', 'Relative')
   await expect(view).toHaveAttribute('data-colouring', 'relative')
