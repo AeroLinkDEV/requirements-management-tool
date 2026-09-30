@@ -108,6 +108,9 @@ test('the scene draws only when something changes: still while the bench is paus
   await page.setViewportSize({ width: 700, height: 500 })
   await open(page, 'off')
   const view = await show(page)
+  // Relief ground: with imagery, tiles go on arriving down to zoom 16 long after the globe reports itself loaded (each
+  // drawn as it comes, as it should be), which on a software renderer outlasts the waits here.
+  await choose(page, 'Window ground', 'Relief')
   const scene = view.locator('.fmsOtwScene')
   const frames = async () => Number(await scene.getAttribute('data-frames') ?? 0)
   // Settled: every tile the globe needs has loaded (slowly, on a software renderer; Cesium draws as each arrives) and
