@@ -20,12 +20,14 @@ function rows(): Row[] {
 }
 /** The tests a cell names: a spec file in backticks followed by a quoted fragment of the test's title. */
 const namedTests = (cell: string) => [...cell.matchAll(/`(fms-[a-z0-9-]+\.spec\.ts)` "([^"]+)"/g)].map(([, file, title]) => ({ file, title }))
-/** Whether the spec declares a test whose title contains the fragment (escaped quotes in the source read as quotes). */
-function declares(file: string, title: string) {
+/** The titles a spec declares: the first string argument of each test(…) call, escaped quotes read as quotes. */
+function titles(file: string): string[] {
   const path = `tests/${file}`
-  if (!existsSync(path)) return false
-  return readFileSync(path, 'utf8').replace(/\\'/g, "'").split('\n').some(line => /\btest\(/.test(line) && line.includes(title))
+  if (!existsSync(path)) return []
+  return [...readFileSync(path, 'utf8').matchAll(/\btest\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/g)].map(([, , title]) => title.replace(/\\(.)/g, '$1'))
 }
+/** Whether the spec declares a test whose title contains the fragment. */
+const declares = (file: string, title: string) => titles(file).some(declared => declared.includes(title))
 
 test('A1: the matrix has its behaviour rows, each with an owner-evidence cell', () => {
   const all = rows()
@@ -55,8 +57,12 @@ test('A1: the guard itself sees a missing test: a title no spec declares is repo
   expect(declares('fms-flight.spec.ts', 'the helicopter hold defaults to its holding speed limit')).toBe(true)
   expect(declares('fms-flight.spec.ts', 'a title nobody wrote')).toBe(false)
   expect(declares('fms-no-such.spec.ts', 'anything')).toBe(false)
-  // A fragment that only appears in a comment or an assertion is not a test title.
+  // A fragment that only appears outside a title (a comment, an assertion, the test body on the same line) is not one.
   expect(declares('fms-flight.spec.ts', 'expect(')).toBe(false)
+  expect(declares('fms-flight.spec.ts', '=> {')).toBe(false)
+  // Titles are read whole, with their escaped quotes: every title in the spec is found, apostrophes included.
+  expect(titles('fms-flight.spec.ts').length).toBeGreaterThan(50)
+  expect(titles('fms-output-tags.spec.ts').some(title => title.includes("the vertical deviation's coupling"))).toBe(true)
 })
 
 test('A1: the register refers to the matrix for which source governs each behaviour', () => {

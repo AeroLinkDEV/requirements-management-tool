@@ -24,10 +24,14 @@ function corrections(): Correction[] {
 const namedTests = (cell: string) => [...cell.matchAll(/`(fms-[a-z0-9-]+\.spec\.ts)` "([^"]+)"/g)].map(([, file, title]) => ({ file, title }))
 const namedRows = (cell: string) => [...cell.matchAll(/\bmatrix ([A-Z0-9-]+)/g)].map(([, id]) => id)
 const namedScans = (cell: string) => [...cell.matchAll(/\bscan ([a-z0-9-]+)/g)].map(([, id]) => id)
-function declares(file: string, title: string) {
+/** The titles a spec declares: the first string argument of each test(…) call, escaped quotes read as quotes. */
+function titles(file: string): string[] {
   const path = `tests/${file}`
-  return existsSync(path) && readFileSync(path, 'utf8').replace(/\\'/g, "'").split('\n').some(line => /\btest\(/.test(line) && line.includes(title))
+  if (!existsSync(path)) return []
+  return [...readFileSync(path, 'utf8').matchAll(/\btest\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/g)].map(([, , title]) => title.replace(/\\(.)/g, '$1'))
 }
+/** Whether the spec declares a test whose title contains the fragment. */
+const declares = (file: string, title: string) => titles(file).some(declared => declared.includes(title))
 
 /** Each scan: the source lines that still show the defect the correction removed. */
 const SCANS: Record<string, () => string[]> = {
