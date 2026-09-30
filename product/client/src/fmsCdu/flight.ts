@@ -268,7 +268,11 @@ export class FlightSimulator {
     this.last = this.guide();
   }
 
-  get guidance() { return this.last; }
+  get guidance() {
+    // Power/table failure is observable even while the plant is paused; reading outputs cannot retain stale LNAV.
+    if (this.fms.hasCondition("fmsFail") !== this.fmsFailed) { this.watchFailure(); this.last = this.guide(); }
+    return this.last;
+  }
   get verticalMode() { return this.vertical; }
   get approachMode() { return this.approach; }
   /** The vertical path here, or null where there is none (climb, cruise, or no computable path). */

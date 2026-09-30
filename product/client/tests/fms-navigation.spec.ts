@@ -138,7 +138,8 @@ test('cold/warm FMS power-up retains TAS/position, applies the ground wind rule,
   unit.planData.cruiseWind = { direction: 110, speed: 18 }
   unit.powerOff()
   expect(unit.lamps().size).toBe(0)
-  expect(fmsOutputs(unit, sim).failed).toBe(true)
+  expect(fmsOutputs(unit, sim)).toMatchObject({ failed: true, lateralMode: 'HDG HOLD' })
+  expect(sim.guidance).toMatchObject({ mode: 'HDG', desiredTrack: null })
   unit.powerOn('WARM', true)
   expect(unit.powerState).toBe('TEST')
   expect(unit.lamps()).toContain('EXEC')
@@ -180,8 +181,13 @@ test('POS INIT permits RTC date/time entries without GPS time and refuses them w
   expect(unit.utcTime.toISOString()).toBe('2026-09-30T14:00:00.000Z')
   unit.press('CLR', { held: true }); unit.press('CLR', { held: true })
   unit.setCondition('gpsLost', true); unit.setCondition('dmeOutage', true)
+  const etaBefore = unit.profile().points[0].eta!
   enter(unit, '121530', 'LSK5L')
   expect(unit.utcTime.toISOString()).toBe('2026-09-30T12:15:30.000Z')
+  expect(unit.profile().points[0].eta).toBe(etaBefore - 6270000)
+  unit.open('TIMER'); enter(unit, '1230', 'LSK1L')
+  expect(unit.timer.alarmAt).toBe(Date.UTC(2026, 8, 30, 12, 30))
+  unit.open('POS')
   enter(unit, 'OCT01/26', 'LSK5R')
   expect(unit.utcTime.toISOString()).toBe('2026-10-01T12:15:30.000Z')
   expect(unit.now.toISOString()).toBe('2026-09-30T14:00:00.000Z')

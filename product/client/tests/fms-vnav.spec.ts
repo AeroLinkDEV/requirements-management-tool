@@ -286,7 +286,7 @@ test('a wind entered on VNAV CRZ changes the ground speed the predictions use', 
   press(unit, 'VNAV', 'NEXT')
   // A strong wind from the east: a headwind on the way to Montreal.
   enter(unit, '090/40', 'LSK2R')
-  expect(lines(unit)[4]).toMatch(/090°\/40KT$/)
+  expect(lines(unit)[4]).toMatch(/090T\/40KT$/)
   expect(unit.profile().points.at(-1)!.eta).toBeGreaterThan(before + 10 * 60_000)
   enter(unit, '400/10', 'LSK2R')
   expect(scratch(unit)).toBe('INVALID ENTRY')

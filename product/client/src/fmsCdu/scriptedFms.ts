@@ -861,10 +861,10 @@ export class ScriptedFms implements CduBackend {
   predictRaimEta(text: string): boolean {
     const match = /^(\d{2})(\d{2})Z?$/.exec(text);
     if (!match || Number(match[1]) > 23 || Number(match[2]) > 59 || !this.predictiveRaim.ident) return false;
-    const now = this.now, at = new Date(now);
+    const now = this.utcTime, at = new Date(now);
     at.setUTCHours(Number(match[1]), Number(match[2]), 0, 0);
     this.predictiveRaim.eta = at.getTime() < now.getTime() ? at.getTime() + 86_400_000 : at.getTime();
-    this.predictiveRaim.requestedAt = now.getTime();
+    this.predictiveRaim.requestedAt = this.now.getTime();
     this.setScratch("");
     return true;
   }
@@ -1346,7 +1346,7 @@ export class ScriptedFms implements CduBackend {
   profile(route: Route = this.active): Profile {
     return computeProfile({
       waypoints: this.predictionLegs(route).waypoints, altitude: this.altitude, cruiseAltitude: this.vnav.cruiseAltitude, climbRate: 1000,
-      pathAngle: this.vnav.pathAngle, phase: this.vphase.phase, fuel: this.fuel.quantity, fuelFlow: this.fuel.flow, now: this.now.getTime(),
+      pathAngle: this.vnav.pathAngle, phase: this.vphase.phase, fuel: this.fuel.quantity, fuelFlow: this.fuel.flow, now: this.utcTime.getTime(),
       // Held stationary off the plan (the ground speed below measurable progress): no ETA or EFOB ahead (plan B1.7).
       noProgress: !makingProgress(this.groundSpeed),
     });
@@ -1365,7 +1365,7 @@ export class ScriptedFms implements CduBackend {
       const point = this.profile().points[legs.slice(0, index).filter(l => l.kind === "wpt").length];
       return point?.ident === leg.ident ? point.eta : null;
     }
-    return makingProgress(this.closureSpeed) ? this.now.getTime() + (miles / this.closureSpeed) * 3_600_000 : null;
+    return makingProgress(this.closureSpeed) ? this.utcTime.getTime() + (miles / this.closureSpeed) * 3_600_000 : null;
   }
 
   /** The legs the predictions fly, as computeProfile takes them, with the course of each (for the RTA's wind triangle). */
@@ -1550,7 +1550,7 @@ export class ScriptedFms implements CduBackend {
     const none = (reason: string): Rendezvous => ({ distance: point.distance, required: null, requiredIas: null, speed: this.plannedSpeed, achievable: false, eta: point.eta, status: "UNKNOWN", reason });
     // Scoped to the path to its fix (R3-03): a later unknown segment does not matter; an unknown one before it does.
     if (point.status === "UNKNOWN" || point.distance === null) return none(point.reason ?? "UNKNOWN");
-    const hours = (time - this.now.getTime()) / 3_600_000;
+    const hours = (time - this.utcTime.getTime()) / 3_600_000;
     if (hours <= 0) return none("OVERDUE");
     const required = this.requiredTas(at, hours);
     if (required === null) return none("NO TAS REACHES IT");
@@ -2067,12 +2067,12 @@ export class ScriptedFms implements CduBackend {
     this.watchHover();
     // A database past the end of its cycle is flagged once; swapping to the next cycle clears it.
     // A cycle whose data gives no dates is never out of date: its end is unknown, not past.
-    if (this.activeCycle.to !== null && now > this.activeCycle.to && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE")); }
+    if (this.activeCycle.to !== null && this.utcTime.getTime() > this.activeCycle.to && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE")); }
     if (this.selfTest.startedAt !== null && this.selfTest.result === null && now - this.selfTest.startedAt >= this.aircraftProfile.parameters.fmsPowerTestTime.value * 1000) {
       const failing = ["fmsFail", "gpsLost", "dmeOutage"].some(id => this.injected.has(id as ConditionId));
       this.selfTest = { ...this.selfTest, result: failing ? "FAIL" : "PASS" };
     }
-    if (this.timer.alarmAt !== null && now >= this.timer.alarmAt) { this.timer.alarmAt = null; this.alert(alert("TIMER ALARM")); }
+    if (this.timer.alarmAt !== null && this.utcTime.getTime() >= this.timer.alarmAt) { this.timer.alarmAt = null; this.alert(alert("TIMER ALARM")); }
     if (this.timer.countdownEnd !== null && now >= this.timer.countdownEnd) { this.timer.countdownEnd = null; this.alert(alert("TIMER ALARM")); }
     this.emit();
   }

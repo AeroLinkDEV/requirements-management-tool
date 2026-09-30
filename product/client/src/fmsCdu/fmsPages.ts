@@ -75,7 +75,7 @@ const basisText = (fms: ScriptedFms) => {
 function vnavCruise(fms: ScriptedFms): (Line | undefined)[] {
   const profile = fms.profile();
   const tod = profile.topOfDescent;
-  const todEta = tod === null || !makingProgress(fms.closureSpeed) ? null : fms.now.getTime() + (tod / fms.closureSpeed) * 3_600_000;
+  const todEta = tod === null || !makingProgress(fms.closureSpeed) ? null : fms.utcTime.getTime() + (tod / fms.closureSpeed) * 3_600_000;
   const next = profile.points.find(p => { const leg = fms.activeRoute.legs.find(l => l.kind === "wpt" && l.ident === p.ident); return leg?.kind === "wpt" && leg.altitude; });
   const nextLeg = next ? fms.activeRoute.legs.find(l => l.kind === "wpt" && l.ident === next.ident) : undefined;
   return [
@@ -255,7 +255,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       caption(" MODEL", "OP PROGRAM "),
       { left: medium("CMA-9000"), right: medium(`SIM ${fms.s300Advisory ? "S300" : "SBAS"} v${fms.aircraftProfile.version}`) },
       caption(" NAV DATA", "ACTIVE "),
-      { left: medium(fms.activeCycle.id), right: medium(cycleDates(fms.activeCycle), fms.activeCycle.to !== null && fms.now.getTime() > fms.activeCycle.to ? "amber" : "white") },
+      { left: medium(fms.activeCycle.id), right: medium(cycleDates(fms.activeCycle), fms.activeCycle.to !== null && fms.utcTime.getTime() > fms.activeCycle.to ? "amber" : "white") },
       caption(undefined, fms.inactiveCycle ? "INACTIVE " : undefined),
       fms.inactiveCycle ? { left: small(fms.inactiveCycle.id), right: prompt(cycleDates(fms.inactiveCycle)) } : undefined,
       undefined,
@@ -1119,7 +1119,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const { alarmAt, countdownEnd } = fms.timer;
       const remaining = countdownEnd === null ? null : Math.max(0, Math.ceil((countdownEnd - now) / 1000));
       const utc = (ms: number) => { const d = new Date(ms); return `${String(d.getUTCHours()).padStart(2, "0")}${String(d.getUTCMinutes()).padStart(2, "0")}`; };
-      const seconds = String(fms.now.getUTCSeconds()).padStart(2, "0");
+      const seconds = String(fms.utcTime.getUTCSeconds()).padStart(2, "0");
       return [
         title("TIMER", "1/1"),
         caption(" ALARM TIME", "COUNTDOWN "),
@@ -1128,7 +1128,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           right: remaining === null ? { text: "--:--" } : { text: `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`, color: "green" },
         },
         caption(" UTC"),
-        { left: medium(`${utc(now)}:${seconds}Z`) },
+        { left: medium(`${utc(fms.utcTime.getTime())}:${seconds}Z`) },
         undefined,
         { left: prompt("<ADD 5 MIN") },
         undefined,
@@ -1150,10 +1150,10 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       if (side === "L" && row === 1) {
         const shape = /^([01]\d|2[0-3])([0-5]\d)Z?$/.exec(scratch);
         if (!shape) return "invalid";
-        const at = new Date(now);
+        const utcNow = fms.utcTime.getTime(), at = new Date(utcNow);
         at.setUTCHours(Number(shape[1]), Number(shape[2]), 0, 0);
         // An alarm time already past today is tomorrow's.
-        fms.timer.alarmAt = at.getTime() <= now ? at.getTime() + 86_400_000 : at.getTime();
+        fms.timer.alarmAt = at.getTime() <= utcNow ? at.getTime() + 86_400_000 : at.getTime();
         return void fms.setScratch("");
       }
       if (side === "R" && row === 1) {

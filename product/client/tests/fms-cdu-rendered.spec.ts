@@ -242,6 +242,7 @@ test('IDENT and preflight wire the consumed MAGVAR loader, reference displays, F
   await expect(page.locator('.efisPfd').getByText(magneticHeading, { exact: true })).toBeVisible()
   await tab(page, 'Nav data')
   const preflight = page.getByRole('region', { name: 'FMS initialization and preflight' })
+  await page.screenshot({ path: 'C:/Sean Project/fms-research/Astra-MAG-preflight-MAG.png', fullPage: true })
   const [packageDownload] = await Promise.all([page.waitForEvent('download'), preflight.getByRole('button', { name: 'Export MAGVAR package' }).click()])
   const packageData = JSON.parse(await readFile((await packageDownload.path())!, 'utf8'))
   packageData.coefficients += ' ' // CRC remains unchanged; this is the actual loader boundary.

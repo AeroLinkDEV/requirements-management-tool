@@ -325,7 +325,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         // A time of day, HHMM or HHMMZ: the next occurrence of it.
         const shape = /^([01]\d|2[0-3])([0-5]\d)Z?$/.exec(scratch);
         if (!shape) return "invalid";
-        const now = fms.now.getTime();
+        const now = fms.utcTime.getTime();
         const at = new Date(now);
         at.setUTCHours(Number(shape[1]), Number(shape[2]), 0, 0);
         r.time = at.getTime() <= now ? at.getTime() + 86_400_000 : at.getTime();
