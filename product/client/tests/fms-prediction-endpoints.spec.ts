@@ -660,3 +660,24 @@ test('E4: RTA WIND is the system wind unless the crew enters one; an entry chang
   expect(unit.rendezvous()!.required!).toBeCloseTo(80, 1)
   expect(lines(unit)[10]).toMatch(/^000T\/ 20KT/)
 })
+
+test('E1: the ETAs are flown in the system wind: a crew wind entry changes the ETA by the wind triangle', () => {
+  // 5 NM south of MUN, flying north to it at 2,000 ft in still air, then with the crew's wind entered on VNAV CRZ.
+  const unit = fiveMilesFromMun({ direction: 0, speed: 0 })
+  const tas = unit.plannedSpeed
+  const leg = () => unit.profile().points[0]
+  const still = (leg().eta! - unit.now.getTime()) / 1000
+  expect(still).toBeCloseTo((leg().distance! / tas) * 3600, 1)
+  unit.press('VNAV')
+  unit.press('NEXT')
+  expect(lines(unit)[0]).toMatch(/VNAV CRZ/)
+  // A 30 kt headwind (from 360, on the nose of the northbound leg): the ground speed is TAS - 30.
+  enter(unit, '360/30', 'LSK2R')
+  expect(unit.wind).toEqual({ direction: 0, speed: 30 })
+  expect((leg().eta! - unit.now.getTime()) / 1000).toBeCloseTo((leg().distance! / (tas - 30)) * 3600, 1)
+  // A 30 kt crosswind (from 270): the ground speed is sqrt(TAS² - 30²), longer than still air, shorter than the headwind.
+  enter(unit, '270/30', 'LSK2R')
+  const cross = (leg().eta! - unit.now.getTime()) / 1000
+  expect(cross).toBeCloseTo((leg().distance! / Math.sqrt(tas * tas - 900)) * 3600, 1)
+  expect(cross).toBeGreaterThan(still)
+})
