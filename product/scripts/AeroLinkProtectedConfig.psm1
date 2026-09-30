@@ -137,9 +137,9 @@ function Set-AeroLinkProtectedFileAcl {
 }
 
 function Assert-AeroLinkProtectedAcl {
-    param([Parameter(Mandatory)][string]$FilePath, [Parameter(Mandatory)][string]$OwnerSid)
+    param([Parameter(Mandatory)][string]$FilePath, [Parameter(Mandatory)][string]$OwnerSid, [string]$Subject = 'protected GitLab configuration')
     $acl = Get-Acl -LiteralPath $FilePath
-    if (-not $acl.AreAccessRulesProtected) { throw 'The protected GitLab configuration inherits permissions; refusing to read it.' }
+    if (-not $acl.AreAccessRulesProtected) { throw "The $Subject inherits permissions; refusing to read it." }
     $allowed = @($OwnerSid, 'S-1-5-18', 'S-1-5-32-544')
     $seen = @{}
     $rules = @($acl.Access)
@@ -147,19 +147,19 @@ function Assert-AeroLinkProtectedAcl {
         $sid = Get-AeroLinkProtectedAclSid $rule.IdentityReference
         if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or $sid -notin $allowed -or
             (($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -ne [Security.AccessControl.FileSystemRights]::FullControl)) {
-            throw 'The protected GitLab configuration has an unexpected ACL entry; refusing to read it.'
+            throw "The $Subject has an unexpected ACL entry; refusing to read it."
         }
         $seen[$sid] = $true
     }
     foreach ($sid in $allowed) {
-        if (-not $seen.ContainsKey($sid)) { throw 'The protected GitLab configuration is missing a required FullControl ACL principal.' }
+        if (-not $seen.ContainsKey($sid)) { throw "The $Subject is missing a required FullControl ACL principal." }
     }
 }
 
 function Assert-AeroLinkProtectedDirectoryAcl {
-    param([Parameter(Mandatory)][string]$DirectoryPath, [Parameter(Mandatory)][string]$OwnerSid)
+    param([Parameter(Mandatory)][string]$DirectoryPath, [Parameter(Mandatory)][string]$OwnerSid, [string]$Subject = 'protected GitLab configuration')
     $acl = Get-Acl -LiteralPath $DirectoryPath
-    if (-not $acl.AreAccessRulesProtected) { throw 'The protected GitLab configuration directory inherits permissions; refusing to use it.' }
+    if (-not $acl.AreAccessRulesProtected) { throw "The $Subject directory inherits permissions; refusing to use it." }
     $allowed = @($OwnerSid, 'S-1-5-18', 'S-1-5-32-544')
     $seen = @{}
     $rules = @($acl.Access)
@@ -167,12 +167,12 @@ function Assert-AeroLinkProtectedDirectoryAcl {
         $sid = Get-AeroLinkProtectedAclSid $rule.IdentityReference
         if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or $sid -notin $allowed -or
             (($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -ne [Security.AccessControl.FileSystemRights]::FullControl)) {
-            throw 'The protected GitLab configuration directory has an unexpected ACL entry; refusing to use it.'
+            throw "The $Subject directory has an unexpected ACL entry; refusing to use it."
         }
         $seen[$sid] = $true
     }
     foreach ($sid in $allowed) {
-        if (-not $seen.ContainsKey($sid)) { throw 'The protected GitLab configuration directory is missing a required FullControl ACL principal.' }
+        if (-not $seen.ContainsKey($sid)) { throw "The $Subject directory is missing a required FullControl ACL principal." }
     }
 }
 
@@ -318,4 +318,113 @@ function Set-AeroLinkProtectedGitLabConfig {
     return [pscustomobject]@{ Configured = $true; Path = $path; Fingerprint = $fingerprint; OwnerSid = $ownerSid; BaseUrl = $baseUrl; SyntheticDemoProjectId = $SyntheticDemoProjectId; SyntheticDemoRemoteProjectId = $SyntheticDemoRemoteProjectId; ScopeConfigured = ($scopeCount -eq 5) }
 }
 
-Export-ModuleMember -Function Get-AeroLinkProtectedConfigPath, Get-AeroLinkProtectedGitLabDescriptor, Get-AeroLinkProtectedGitLabRuntimeEnvironment, Set-AeroLinkProtectedGitLabConfig
+# The Esri World Imagery API key (DEC-151). One per machine, not per installation: it is the owner's ArcGIS account key,
+# and the API process reads it itself (FmsBenchEsriImageryKey.cs), so it never passes through a launcher, a transition
+# spool or a child environment. The record format and entropy are shared with that reader and must change together.
+$script:ProtectedImagerySchemaVersion = 1
+$script:ProtectedImageryPurpose = 'esri-world-imagery'
+$script:ProtectedImageryEntropy = 'AeroLink protected Esri imagery v1'
+$script:ProtectedImagerySubject = 'protected Esri imagery key'
+
+function Get-AeroLinkProtectedImageryPath {
+    [CmdletBinding()]
+    param([string]$RootOverride)
+    $root = if ([string]::IsNullOrWhiteSpace($RootOverride)) {
+        Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)) $script:ProtectedConfigDirectoryName
+    } else {
+        if (-not [IO.Path]::IsPathRooted($RootOverride)) { throw 'The protected configuration root override must be absolute.' }
+        [IO.Path]::GetFullPath($RootOverride)
+    }
+    return Join-Path (Join-Path $root 'imagery') 'esri-world-imagery.json'
+}
+
+function Read-AeroLinkProtectedImageryRecord {
+    param([Parameter(Mandatory)][string]$Path)
+    $ownerSid = Get-AeroLinkProtectedConfigOwnerSid
+    Assert-AeroLinkProtectedDirectoryAcl -DirectoryPath (Split-Path -Parent $Path) -OwnerSid $ownerSid -Subject $script:ProtectedImagerySubject
+    Assert-AeroLinkProtectedAcl -FilePath $Path -OwnerSid $ownerSid -Subject $script:ProtectedImagerySubject
+    try { $record = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw 'The protected Esri imagery key is malformed; refusing to use it.' }
+    if ($null -eq $record -or [int]$record.schemaVersion -ne $script:ProtectedImagerySchemaVersion -or [string]$record.purpose -ne $script:ProtectedImageryPurpose -or
+        [string]$record.ownerSid -ne $ownerSid -or [string]::IsNullOrWhiteSpace([string]$record.protectedKey) -or [string]$record.fingerprint -notmatch '^[0-9a-f]{64}$') {
+        throw 'The protected Esri imagery key identity or schema is unexpected; refusing to use it.'
+    }
+    return $record
+}
+
+function Get-AeroLinkProtectedImageryDescriptor {
+    <# Whether a key is stored, and its fingerprint and date. Never the key. #>
+    [CmdletBinding()]
+    param([string]$RootOverride)
+    $path = Get-AeroLinkProtectedImageryPath -RootOverride $RootOverride
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return [pscustomobject]@{ Configured = $false; Path = $path; Fingerprint = 'unconfigured'; UpdatedAtUtc = $null } }
+    $record = Read-AeroLinkProtectedImageryRecord -Path $path
+    return [pscustomobject]@{ Configured = $true; Path = $path; Fingerprint = [string]$record.fingerprint; UpdatedAtUtc = [string]$record.updatedAtUtc }
+}
+
+function Set-AeroLinkProtectedImageryKey {
+    <#
+      Encrypts the key with Windows DPAPI (LocalMachine, with purpose entropy) and writes it with an explicit ACL: the
+      current account, SYSTEM and Administrators, inheritance off. LocalMachine because the recovery and reconciliation
+      tasks run S4U, which cannot open a CurrentUser DPAPI key; the ACL is what keeps other accounts out.
+    #>
+    [CmdletBinding()]
+    param([securestring]$ApiKey, [string]$RootOverride)
+    if ($null -eq $ApiKey) { $ApiKey = Read-Host 'Esri API key (input is hidden)' -AsSecureString }
+    if ($ApiKey.Length -le 0) { throw 'The Esri API key was empty; refusing to write it.' }
+    $ownerSid = Get-AeroLinkProtectedConfigOwnerSid
+    $path = Get-AeroLinkProtectedImageryPath -RootOverride $RootOverride
+    $directory = Split-Path -Parent $path
+    # Replacement never repairs an invalid record: ownership or ACL damage is resolved explicitly first.
+    if (Test-Path -LiteralPath $path -PathType Leaf) { $null = Read-AeroLinkProtectedImageryRecord -Path $path }
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($ApiKey)
+    try {
+        $plainText = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr).Trim()
+        if ([string]::IsNullOrWhiteSpace($plainText)) { throw 'The Esri API key was empty; refusing to write it.' }
+        if ($plainText -match '\s') { throw 'The Esri API key contains whitespace; paste the key alone.' }
+        $plain = [Text.Encoding]::UTF8.GetBytes($plainText)
+        $entropy = [Text.Encoding]::UTF8.GetBytes($script:ProtectedImageryEntropy)
+        try {
+            $protected = [Security.Cryptography.ProtectedData]::Protect($plain, $entropy, [Security.Cryptography.DataProtectionScope]::LocalMachine)
+            $ciphertext = [Convert]::ToBase64String($protected)
+            [Array]::Clear($protected, 0, $protected.Length)
+        }
+        finally { [Array]::Clear($plain, 0, $plain.Length) }
+    }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr); $plainText = $null }
+    if (Test-Path -LiteralPath $directory -PathType Container) {
+        Assert-AeroLinkProtectedDirectoryAcl -DirectoryPath $directory -OwnerSid $ownerSid -Subject $script:ProtectedImagerySubject
+    } else {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        Set-AeroLinkProtectedDirectoryAcl -DirectoryPath $directory -OwnerSid $ownerSid
+    }
+    # A fingerprint of a random generation, not of the key: it identifies which key is stored without revealing it.
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $fingerprint = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([Guid]::NewGuid().ToString('N') + "|$ownerSid")))).Replace('-', '').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+    $record = [ordered]@{ schemaVersion = $script:ProtectedImagerySchemaVersion; purpose = $script:ProtectedImageryPurpose; ownerSid = $ownerSid; protectedKey = $ciphertext; fingerprint = $fingerprint; updatedAtUtc = (Get-Date).ToUniversalTime().ToString('o') }
+    $tempPath = Join-Path $directory ('.imagery.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    $backupPath = Join-Path $directory ('.imagery.' + [guid]::NewGuid().ToString('N') + '.bak')
+    try {
+        [IO.File]::WriteAllText($tempPath, ($record | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+        Set-AeroLinkProtectedFileAcl -FilePath $tempPath -OwnerSid $ownerSid
+        if (Test-Path -LiteralPath $path -PathType Leaf) { [IO.File]::Replace($tempPath, $path, $backupPath, $true) } else { [IO.File]::Move($tempPath, $path) }
+    }
+    finally {
+        if (Test-Path -LiteralPath $tempPath -PathType Leaf) { Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $backupPath -PathType Leaf) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue }
+    }
+    return [pscustomobject]@{ Configured = $true; Path = $path; Fingerprint = $fingerprint }
+}
+
+function Remove-AeroLinkProtectedImageryKey {
+    [CmdletBinding()]
+    param([string]$RootOverride)
+    $path = Get-AeroLinkProtectedImageryPath -RootOverride $RootOverride
+    $existed = Test-Path -LiteralPath $path -PathType Leaf
+    if ($existed) { Remove-Item -LiteralPath $path -Force }
+    return [pscustomobject]@{ Removed = $existed; Path = $path }
+}
+
+Export-ModuleMember -Function Get-AeroLinkProtectedConfigPath, Get-AeroLinkProtectedGitLabDescriptor, Get-AeroLinkProtectedGitLabRuntimeEnvironment, Set-AeroLinkProtectedGitLabConfig,
+    Get-AeroLinkProtectedImageryPath, Get-AeroLinkProtectedImageryDescriptor, Set-AeroLinkProtectedImageryKey, Remove-AeroLinkProtectedImageryKey

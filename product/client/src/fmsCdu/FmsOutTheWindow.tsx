@@ -63,6 +63,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
   const [failure, setFailure] = useState("");
   const terrain = useSyncExternalStore(listener => tiles.subscribe(listener), () => tiles.status);
   const imageryStatus = useSyncExternalStore(listener => imagery.subscribe(listener), () => imagery.status);
+  const esriImagery = useSyncExternalStore(listener => imagery.subscribe(listener), () => imagery.usesEsri);
 
   // The scene reads this every frame; renders only move its target.
   const live = useRef<Live | null>(null);
@@ -132,7 +133,9 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
         <div ref={credits} />
         <span>
           Terrain: Mapzen Terrain Tiles on AWS Open Data (SRTM, GMTED2010, USGS NED and others).
-          {ground === "imagery" ? " Imagery: USGS The National Map, USDA NAIP (public domain)." : null} Route fixes are invented.
+          {ground === "imagery" ? " Imagery: USGS The National Map, USDA NAIP (public domain)." : null}
+          {ground === "imagery" && esriImagery ? " Imagery outside the United States: Esri, Maxar, Earthstar Geographics, and the GIS User Community. Powered by Esri." : null}
+          {" "}Route fixes are invented.
         </span>
       </div>
     </div>

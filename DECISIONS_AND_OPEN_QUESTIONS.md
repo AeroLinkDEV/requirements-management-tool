@@ -2813,3 +2813,13 @@ choices are created as focused issues only when their trigger and acceptance bou
   - No simulator result is OEM conformance or operational qualification.
   - DEC-146, DEC-147 and DEC-148 remain in force.
   - This entry is DEC-150 because PR #1329 already claimed DEC-149 (since merged).
+
+### DEC-151 - Esri World Imagery Outside the USGS Coverage
+
+- **Date:** 2026-09-30
+- **Status:** Accepted owner decision.
+- **Authority:** Sean, 2026-09-30: "i just always want nice visuals." After comparing Sentinel-2, Esri World Imagery and USGS at three altitudes over Montreal, he chose Esri ("let me sign up for esri"), created an ArcGIS Location Platform account, accepted its agreement himself, and created an API key credential (public application, Basemaps privilege only, no item access, no referrer restriction).
+- **Decision:** The FMS Test Bench out-the-window view keeps USGS The National Map imagery wherever it has some (the United States). Elsewhere, when a key is stored, the server relays Esri World Imagery. Relief is drawn only where neither has imagery, or when chosen. The demonstration scenarios stay where they are.
+- **Key handling:** The key is the owner's, stored on the serving machine with `CONFIGURE_AEROLINK_IMAGERY.bat` (Windows DPAPI, owner-only ACL) and read by the API itself. It never enters the repository, an argument, a launcher, a transition spool, a URL or a log, and an agent never enters it.
+- **Terms:** The view credits Esri whenever Esri imagery is shown. The relay passes Esri's own cache instruction through. The free tier (2,000,000 basemap tiles a month at the time of the decision) is the budget. The relay treats a refusal as "none here", never as a failure of the view, so an exhausted allowance or an expired key degrades to relief.
+- **Not decided here:** a paid plan, or a second worldwide source.
