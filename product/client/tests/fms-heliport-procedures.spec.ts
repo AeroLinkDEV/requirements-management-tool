@@ -386,3 +386,42 @@ test('UNABLE HOLD at the first fix passage: no hold guidance, NAV gives way to a
   const leg = unit.activeRoute.legs[0]
   expect(leg?.kind === 'wpt' && leg.ident).toBe('TIDUE')
 })
+
+// Q8 (Astra's answer 8): an airport-section procedure's course ident (R plus three digits) is how CIFP 2609 happens to
+// code its Copter point-in-space approaches, not an ARINC 424 rule. It identifies one only within a reviewed set.
+test('Q8: the five CIFP 2609 Copter point-in-space approaches stay accepted, each stating how it was identified', () => {
+  for (const [airport, ident, basis, map] of [
+    ['87N', 'R190', 'HELIPORT SECTION', 'CRANN'], ['KJRA', 'R210', 'HELIPORT SECTION', 'JORBA'],
+    ['KJFK', 'R027', 'REVIEWED COPTER PROCEDURE', 'HELOG'], ['KLGA', 'R250', 'REVIEWED COPTER PROCEDURE', 'WITKN'], ['2P2', 'R029', 'REVIEWED COPTER PROCEDURE', 'OBIBE'],
+  ] as const) {
+    const approach = procedure(airport, ident)
+    expect(approach, `${airport} ${ident}`).toMatchObject({ pointInSpace: true, endpoint: { instrumentEnd: { fix: map }, identification: { basis } } })
+    // A reviewed procedure names what was reviewed: the airport, the ident and the MAP.
+    if (basis === 'REVIEWED COPTER PROCEDURE') expect(approach!.endpoint!.identification.source).toContain(`${airport} ${ident}, MAP ${map}`)
+  }
+  expect(parsed().errors).toEqual([])
+})
+
+test('Q8: an airport-section approach with a Copter course ident outside the reviewed set is refused with the reason, never imported as point-in-space', () => {
+  // A synthetic sixth: KJFK and its R027 copied, record for record, as airport KXYZ and procedure R123.
+  const sixth = FIXTURE.split('\n').filter(line => /^SUSAP KJFKK6/.test(line)).map(line => line.replace('KJFK', 'KXYZ').replace('FR027 ', 'FR123 '))
+  expect(sixth.length).toBeGreaterThan(5)
+  const result = parseArinc424(`${FIXTURE}${sixth.join('\n')}\n`)
+  expect(result.errors).toContain('KXYZ R123: Copter point-in-space identification not reviewed: R123 has a Copter course ident and its MAP HELOG is not a runway')
+  expect(result.data.procedures.find(p => p.airport === 'KXYZ')).toBeUndefined()
+  // Its airport still loads, and so do the reviewed five.
+  expect(result.data.entries.some(entry => entry.kind === 'airport' && entry.ident === 'KXYZ')).toBe(true)
+  expect(result.data.procedures).toHaveLength(5)
+  // The review is of a procedure, not of an ident: R027 at another airport is not KJFK's R027.
+  const sameIdent = FIXTURE.split('\n').filter(line => /^SUSAP KJFKK6/.test(line)).map(line => line.replace('KJFK', 'KXYZ'))
+  expect(parseArinc424(`${FIXTURE}${sameIdent.join('\n')}\n`).errors)
+    .toContain('KXYZ R027: Copter point-in-space identification not reviewed: R027 has a Copter course ident and its MAP HELOG is not a runway')
+})
+
+test('Q8: a reviewed Copter procedure whose data no longer matches the review (a different MAP) is refused with the reason', () => {
+  const changed = FIXTURE.split('\n').map(line => (/^SUSAP KJFKK6FR027  R      030HELOG/.test(line) ? line.replace('030HELOG', '030COVIR') : line)).join('\n')
+  const result = parseArinc424(changed)
+  expect(result.errors).toContain('KJFK R027: Copter point-in-space identification not reviewed: reviewed with MAP HELOG, this data codes COVIR')
+  expect(result.data.procedures.find(p => p.airport === 'KJFK')).toBeUndefined()
+  expect(result.data.procedures).toHaveLength(4)
+})

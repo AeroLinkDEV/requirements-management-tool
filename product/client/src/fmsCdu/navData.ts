@@ -84,6 +84,12 @@ export type ProcedureEndpoint = {
    * point-in-space approach flown LNAV with advisory step-downs), or NOT CODED.
    */
   vertical: { kind: "VPA"; angleDeg: number } | { kind: "NONE"; reason: string } | { kind: "NOT CODED" };
+  /**
+   * Why the MAP is taken for what it is (plan Q8): a coded runway threshold; a heliport-section approach, point-in-space
+   * by its section; or an airport-section Copter procedure in the reviewed set (arinc424.ts REVIEWED_COPTER_PINS), with
+   * what was reviewed. Never the ident pattern alone.
+   */
+  identification: { basis: "RUNWAY" | "HELIPORT SECTION" | "REVIEWED COPTER PROCEDURE"; source: string };
 };
 export type ProcedureKind = "SID" | "STAR" | "APPROACH";
 export type ApproachType = "RNAV" | "ILS" | "VOR" | "NDB";

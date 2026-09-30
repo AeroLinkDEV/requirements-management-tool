@@ -329,6 +329,20 @@ function speedLimit(record: ProcedureRecord): SpeedLimit | undefined {
  */
 const COPTER_COURSE_IDENT = /^[A-Z]\d{3}$/;
 
+/**
+ * The airport-section Copter point-in-space approaches that have been reviewed (plan Q8; Astra's answer 8): the course
+ * ident is accepted as identifying one only within this bounded set, each pinned by its airport, ident and MAP as read
+ * from the FAA CIFP 2609 Copter extract (#1256). An airport-section approach that matches the ident pattern but is not
+ * in the set, or whose MAP differs from the one reviewed, is refused with the reason rather than imported as
+ * point-in-space on the pattern alone: taking it for one would make it assert a landing site and a MAP that nobody
+ * checked. Adding a procedure here is the review.
+ */
+const REVIEWED_COPTER_PINS: Readonly<Record<string, { map: string; source: string }>> = {
+  "KJFK R027": { map: "HELOG", source: "FAA CIFP 2609 Copter extract: KJFK R027, MAP HELOG (reviewed, #1256)" },
+  "KLGA R250": { map: "WITKN", source: "FAA CIFP 2609 Copter extract: KLGA R250, MAP WITKN (reviewed, #1256)" },
+  "2P2 R029": { map: "OBIBE", source: "FAA CIFP 2609 Copter extract: 2P2 R029, MAP OBIBE (reviewed, #1256)" },
+};
+
 /** The altitude constraint as the simulation writes it: 3000 (at), 3000A (at or above), 3000B (at or below), a window. */
 function constraintText(record: ProcedureRecord): string | undefined {
   const { altitudeDescription: d, altitude1: a, altitude2: b } = record;
@@ -432,7 +446,12 @@ function buildApproach(icao: string, ident: string, records: ProcedureRecord[], 
   if (typeof missed === "string") return missed;
   const map = final[mapAt];
   const isRunway = /^RW\d{2}[LRC]?$/.test(map.fix);
-  const pointInSpace = !isRunway && (site?.heliport === true || COPTER_COURSE_IDENT.test(ident));
+  // An airport-section procedure with a Copter course ident is point-in-space only when it was reviewed (Q8).
+  const copterIdent = !isRunway && site?.heliport !== true && COPTER_COURSE_IDENT.test(ident);
+  const reviewed = copterIdent ? REVIEWED_COPTER_PINS[`${icao} ${ident}`] : undefined;
+  if (copterIdent && !reviewed) return `Copter point-in-space identification not reviewed: ${ident} has a Copter course ident and its MAP ${map.fix} is not a runway`;
+  if (reviewed && reviewed.map !== map.fix) return `Copter point-in-space identification not reviewed: reviewed with MAP ${reviewed.map}, this data codes ${map.fix}`;
+  const pointInSpace = !isRunway && (site?.heliport === true || reviewed !== undefined);
   if (!isRunway && !pointInSpace) return "missed approach point is not a runway";
   if (pointInSpace && !site) return "point-in-space approach without its landing site record";
   if (pointInSpace && !place(map.fix)) return `point-in-space approach whose missed approach point ${map.fix} is not in the data`;
@@ -462,6 +481,9 @@ function buildApproach(icao: string, ident: string, records: ProcedureRecord[], 
     vertical: fas ? { kind: "VPA", angleDeg: fas.gpaDeg }
       : mapAngle === 0 ? { kind: "NONE", reason: "vertical angle 000 at the MAP: flown LNAV, step-down altitudes advisory" }
         : mapAngle !== undefined ? { kind: "VPA", angleDeg: Math.abs(mapAngle) } : { kind: "NOT CODED" },
+    identification: isRunway ? { basis: "RUNWAY", source: "the MAP is the runway threshold (coded)" }
+      : reviewed ? { basis: "REVIEWED COPTER PROCEDURE", source: reviewed.source }
+        : { basis: "HELIPORT SECTION", source: `a heliport-section approach (${icao}): point-in-space by its section` },
   };
   return {
     kind: "APPROACH", airport: icao, ident, runways: isRunway ? [map.fix] : [], transitions, legs: approachLegs, approachType: "RNAV",
