@@ -6,7 +6,9 @@ import { HELICOPTER_PROFILE } from "./profile";
 /** Internal bench contracts, not physical ARINC framing or an interface to an actual CMA unit. */
 export type SensorStatus = "NORMAL" | "NCD" | "FAIL";
 export type Sample<T> = { at: number; sequence: number; status: SensorStatus; value: T | null };
-export type AirData = { headingTrue: number; tasKt: number; altitudeFt: number };
+export type AirData = { headingTrue: number; tasKt: number; altitudeFt: number;
+  /** Adapter-provided validity flags; omitted means the legacy corrected, mutually consistent air-data contract. */
+  baroCorrected?: boolean; pressureAltitudeFt?: number; altitudeRateValid?: boolean; altitudesAgree?: boolean };
 export type Attitude = { bank: number; pitch: number };
 export type RadioObservation = { station: Navaid; slantRangeNm: Sample<number>; bearingTrue: Sample<number> };
 export type SensorFrame = {

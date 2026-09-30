@@ -1,4 +1,5 @@
 import type { FlightSimulator, VerticalMode } from "./flight";
+import { formatSetting } from "./baro";
 import { courseDeg, distanceNm, offset, type LatLon, type Route } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
 import { formatConstraint } from "./vnav";
@@ -93,7 +94,15 @@ export type AircraftData = {
   track: number;
   airspeed: number;
   groundSpeed: number;
+  /** What the altimeter indicates with the crew's setting (baro.ts): the PFD's altitude. */
   altitude: number;
+  /** The crew's altimeter setting as the PFD writes it: STD, or QNH and hPa. */
+  baroSetting: string;
+  /**
+   * Truth: the physical height above MSL, where the out-the-window view and synthetic vision place the eye (the world as
+   * it is, not as a mis-set or erroneous altimeter would put it).
+   */
+  physicalAltitude: number;
   verticalSpeed: number;
   wind: { direction: number; speed: number };
   position: LatLon;
@@ -177,6 +186,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
 
   const managed = sim.lateralMode === "LNAV" && g.desiredTrack !== null;
   const path = sim.verticalPath;
+  const advisory = fms.advisoryVertical;
   const profile = fms.profile();
   const toIdent = next?.kind === "wpt" ? next.ident : null;
   const distanceToGo = g.distanceToGo;
@@ -201,9 +211,10 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     crossTrack: !managed ? ncd() : gpsLateral !== null ? normal(gpsLateral / 6076.12) : normal(g.crossTrack),
     lateralSource: !managed ? null : gpsLateral !== null ? "GPS" : "ROUTE",
     // Flagged on an RNAV final without GPS vertical guidance: the receiver withdrew it, so no path is shown (3b).
-    verticalDeviation: sim.verticalFlag ? fail() : gpsVertical !== null ? normal(gpsVertical) : path ? normal(fms.altitude - path.altitude) : ncd(),
-    verticalSource: path?.source ?? null,
-    verticalCoupled: path?.coupled ?? false,
+    verticalDeviation: advisory ? advisory.available ? normal(advisory.deviationFt!) : ncd()
+      : sim.verticalFlag ? fail() : gpsVertical !== null ? normal(gpsVertical) : path ? normal(fms.altitude - path.altitude) : ncd(),
+    verticalSource: advisory?.available ? "VNAV" : path?.source ?? null,
+    verticalCoupled: advisory ? false : path?.coupled ?? false,
     rollCommand: managed ? normal(g.bankCommand) : ncd(),
     distanceToGo: distanceToGo !== null && toIdent ? normal(distanceToGo) : ncd(),
     toWaypoint: toIdent ? normal(toIdent) : ncd(),
@@ -217,7 +228,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     verticalArmed: sim.approachMode === "ARMED" && verticalLevel ? [type] : [],
     approach: { type, state: sim.approachMode },
     lateralFullScaleNm: lateralScale ? lateralScale.lateralFullScaleFt / 6076.12 : LATERAL_FULL_SCALE[phase],
-    verticalFullScaleFt: gpsScale ? gpsScale.verticalFullScaleFt : path?.source === "APPR" ? 150 : 400,
+    verticalFullScaleFt: advisory ? advisory.fullScaleFt : gpsScale ? gpsScale.verticalFullScaleFt : path?.source === "APPR" ? 150 : 400,
     activeRoute,
     modifiedRoute: fms.routeStatus === "MOD" ? routePoints(fms, fms.route) : null,
     offsetTrack: offsetNm ? line.slice(1).map((p, i) => offset(p, courseDeg(line[i], p) + (offsetNm > 0 ? 90 : -90), Math.abs(offsetNm))) : null,
@@ -234,7 +245,7 @@ export function aircraftData(fms: ScriptedFms, sim: FlightSimulator): AircraftDa
   const pitch = fms.groundSpeed > 1 ? (Math.atan(fms.verticalSpeed / (fms.groundSpeed * 101.27)) * 180) / Math.PI : 0;
   return {
     pitch, bank: sim.bankAngle, heading: fms.heading, track, airspeed, groundSpeed: fms.groundSpeed,
-    altitude: fms.altitude, verticalSpeed: fms.verticalSpeed, wind: fms.wind, position: fms.truePosition,
+    altitude: fms.indicatedAltitude, baroSetting: formatSetting(fms.baro.setting), physicalAltitude: fms.physicalAltitude, verticalSpeed: fms.verticalSpeed, wind: fms.wind, position: fms.truePosition,
     selectedAltitude: sim.advisory ? sim.selectedAltitude : null, selectedSpeed: sim.advisory ? sim.selectedSpeed : null,
     missedAltitudeConflict: sim.missedAltitudeConflict ? formatConstraint(sim.missedAltitudeConflict.target) : null,
     ias: sim.iasReliable ? sim.indicatedAirspeed : null,

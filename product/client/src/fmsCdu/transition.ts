@@ -14,6 +14,7 @@
  * the wind is a headwind along it.
  */
 
+import { toLocal, type LatLon } from "./fmsModel";
 import { tasFromIas } from "./kinematics";
 import { ACTIVE_PROFILE } from "./profile";
 
@@ -130,6 +131,18 @@ export type TdnDecision = { engage: true; gateNm: number; plan: TransitionPlan }
  * D(TD/H) at full precision: at or above zero it engages (the slack is the gate segment); below zero it is refused
  * (TDN DIST SHORT). MRK never moves.
  */
+/**
+ * T6 (M300 E-17): at TDN, the aircraft against the final track into MRK. More than 0.2 NM across it, or a track more
+ * than 20 degrees from it, is TDN NOT POSSIBLE; exactly at a limit is within it.
+ */
+export function tdnGeometry(here: LatLon, track: number, mrk: LatLon, finalTrack: number) {
+  const e = toLocal(mrk, here), rad = (finalTrack * Math.PI) / 180;
+  const crossTrack = e.x * Math.cos(rad) - e.y * Math.sin(rad);
+  const trackError = Math.abs(((track - finalTrack + 540) % 360) - 180);
+  const refused = Math.abs(crossTrack) > 0.2 ? "OFF FINAL TRACK" : trackError > 20 ? "TRACK ERROR" : null;
+  return { crossTrack, trackError, refused };
+}
+
 export function checkAtTdn(start: TransitionStart, remainingNm: number): TdnDecision {
   const plan = planTransition(start);
   if (plan.refused) return { engage: false, reason: plan.reason.toUpperCase(), gateNm: null };

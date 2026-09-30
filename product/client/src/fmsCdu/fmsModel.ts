@@ -115,12 +115,14 @@ export type LegSource = "SID" | "STAR" | "APPR" | "MISSED";
  * altitude; VI flies a heading until the next leg is intercepted; VM and FM fly a heading or track until the crew
  * takes over (manual termination).
  */
-export type FixPath = "TF" | "CF" | "DF" | "RF";
+export type FixPath = "TF" | "CF" | "DF" | "RF" | "AF";
 export type ConditionalPath = "CA" | "FA" | "VA" | "VI" | "VM" | "FM";
 export type Leg =
   | {
     kind: "wpt"; ident: string; altitude?: string; qualifier?: "/H" | "/S" | "/O"; via?: string; source?: LegSource;
     path?: FixPath; course?: number; arc?: { centre: LatLon; turn: "L" | "R" };
+    position?: LatLon; turnDirection?: "LEFT" | "RIGHT";
+    procedureTurn?: { reference: string; role: "REFERENCE" | "OUTBOUND" | "INBOUND" };
     /** A speed constraint at the fix, knots. */
     speed?: number;
     /**
@@ -165,6 +167,11 @@ export type Hold = {
   exit: HoldExit; speed: number; altitude: string; status: HoldStatus; missed?: boolean;
   /** Whole racetracks flown since the entry: the missed-approach hold leaves after one. */
   circuits?: number;
+  /**
+   * The defaults the hold was given where nothing was entered or coded. A value still at its default when the entry
+   * begins is taken again from the altitude then (M300 10-9), and fixed from then on; one the crew changed is kept.
+   */
+  defaults?: { legTime?: number; speed?: number };
 };
 
 /**

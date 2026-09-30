@@ -25,6 +25,7 @@ import { KBTV_SOURCE, START_STATES, loadKbtvDemonstration, type StartStateId } f
 import { ACTIVE_PROFILE, PROFILES, profileById, profileFingerprint } from "./profile";
 import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, scenarioStart, type Scenario } from "./scenario";
 import { ScriptedFms } from "./scriptedFms";
+import { MAX_BARO_ERROR_FT, SETTING_RANGE_HPA, formatSetting } from "./baro";
 import { browserUserDatabaseStore } from "./userDatabase";
 import { screenText } from "./screen";
 import { CDU_VARIANTS, DEFAULT_VARIANT_ID, variantById } from "./variants";
@@ -145,6 +146,9 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const [altInput, setAltInput] = useState("");
   const [vsInput, setVsInput] = useState("-500");
   const [spdInput, setSpdInput] = useState("");
+  const pinsContext = `${session}:${backend.pinsContinuation?.revision ?? 0}`;
+  const [pinsDeclaration, setPinsDeclaration] = useState({ context: "", basicVfr: false, landingAreaVisible: false, publishedVisibility: false });
+  const crewConditions = pinsDeclaration.context === pinsContext ? pinsDeclaration : { context: pinsContext, basicVfr: false, landingAreaVisible: false, publishedVisibility: false };
   const [jumpNote, setJumpNote] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(storedTab);
   // One set of height tiles for the out-the-window view and the PFD's synthetic vision.
@@ -461,6 +465,10 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </form>
           ) : null}
           <dl className="fmsBenchGuidance" aria-label="Guidance">
+            {backend.pinsContinuation ? <><dt>PinS continuation</dt><dd>
+              {backend.pinsContinuation.available ? backend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? "Proceed VFR" : "Proceed visually" : "Chart continuation not verified"}
+              {backend.pinsContinuation.active ? " — crew flying the visual segment" : ""}
+            </dd></> : null}
             <dt>Mode</dt><dd>{guidance.mode}</dd>
             <dt>DTK</dt><dd>{guidance.desiredTrack === null ? "---" : `${String(Math.round(guidance.desiredTrack) || 360).padStart(3, "0")}°`}</dd>
             <dt>TRK</dt><dd>{String(Math.round(backend.track) || 360).padStart(3, "0")}°</dd>
@@ -470,6 +478,17 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             <dt>ALT</dt><dd>{Math.round(backend.altitude)} ft → {Math.round(guidance.targetAltitude)}</dd>
             <dt>VS</dt><dd>{signed(Math.round(backend.verticalSpeed / 10) * 10)} fpm</dd>
           </dl>
+          {backend.pinsContinuation?.available && !backend.pinsContinuation.active ? <fieldset>
+            <legend>{backend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? "Proceed VFR" : "Proceed visually"} from the MAP</legend>
+            {backend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? <label><input type="checkbox" checked={crewConditions.basicVfr}
+              onChange={event => setPinsDeclaration({ ...crewConditions, basicVfr: event.target.checked })} />Basic VFR conditions met</label> : <>
+              <label><input type="checkbox" checked={crewConditions.landingAreaVisible} onChange={event => setPinsDeclaration({ ...crewConditions, landingAreaVisible: event.target.checked })} />Landing area in sight</label>
+              <label><input type="checkbox" checked={crewConditions.publishedVisibility} onChange={event => setPinsDeclaration({ ...crewConditions, publishedVisibility: event.target.checked })} />Published visibility met throughout the visual segment</label>
+            </>}
+            <p className="fmsBenchHint">Crew declaration required. Follow the published chart and fly the visual segment using heading and altitude controls.</p>
+            <button type="button" disabled={failedFms || !backend.pinsContinuation.mapPassed || (backend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? !crewConditions.basicVfr : !crewConditions.landingAreaVisible || !crewConditions.publishedVisibility)}
+              onClick={() => { if (sim.proceedFromPins(crewConditions)) recordTo?.proceedPins(crewConditions); }}>Continue from MAP</button>
+          </fieldset> : null}
         </section>
       </div>
 
@@ -523,6 +542,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </p>
           </section>
 
+          <BaroCard backend={backend} recordTo={recordTo} />
+
           <section className="fmsBenchCard">
             <h2>Alerts</h2>
             <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); recordTo?.alert(libraryAlert); backend.raiseAlert(libraryAlert); }}>
@@ -556,7 +577,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
               <p className="fmsBenchHint">
                 Real data: the FAA CIFP cycle 2609 extract for Burlington, Vermont (KBTV), bundled with the bench. It is a
                 US Government work in the public domain, for demonstration only, not for navigation: the cycle is not kept
-                current. The invented CYUL demonstration stays the default start.
+                current. This start flies LNAV with advisory VNAV under S300, or coupled LPV under the separate later
+                CMA/SBAS profile. The invented CYUL demonstration stays the default start.
               </p>
               <div className="fmsBenchActions">
                 <button type="button" disabled={failedFms || backend.activeCycle.source === KBTV_SOURCE}
@@ -592,7 +614,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                 onChange={event => setNavAirports(event.target.value.toUpperCase().replace(/[^A-Z0-9 ,]/g, ""))} />
             </label>
             <label className="fmsBenchFile">
-              <span>Load ARINC 424 data (waypoints, navaids, airports, runways, airways, RNAV approaches with their published FAS) as the inactive cycle</span>
+              <span>Load ARINC 424 data (waypoints, navaids, airports, runways, airways, procedures and published RNAV FAS) as the inactive cycle</span>
               <input type="file" accept=".pc,.dat,.txt,.424,text/plain,*" aria-label="ARINC 424 navigation data file"
                 onChange={async event => {
                   const file = event.target.files?.[0];
@@ -717,5 +739,49 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
         </div>
       </div>
     </main>
+  );
+}
+
+/**
+ * The barometric altitude system (B1.1, baro.ts): the crew's altimeter setting, and the laboratory's declared QNH and
+ * injected baro error. The readout shows the physical height beside what the altimeter reads, so an error or a mis-set
+ * altimeter is visible for what it is. None of these moves the aircraft directly or changes the radio height.
+ */
+function BaroCard({ backend, recordTo }: { backend: ScriptedFms; recordTo: ScenarioRecorder | null }) {
+  const [setting, setSetting] = useState("");
+  const [qnh, setQnh] = useState("");
+  const [error, setError] = useState("");
+  const baro = backend.baro;
+  const hpa = (text: string) => Number(text);
+  const settingValid = /^\d{3,4}$/.test(setting) && hpa(setting) >= SETTING_RANGE_HPA.min && hpa(setting) <= SETTING_RANGE_HPA.max;
+  const qnhValid = /^\d{3,4}$/.test(qnh) && hpa(qnh) >= SETTING_RANGE_HPA.min && hpa(qnh) <= SETTING_RANGE_HPA.max;
+  const errorValid = /^-?\d{1,4}$/.test(error) && Math.abs(Number(error)) <= MAX_BARO_ERROR_FT;
+  return (
+    <section className="fmsBenchCard" aria-label="Barometric altitude">
+      <h2>Barometric altitude</h2>
+      <p className="fmsBenchReadout" data-testid="baro-readout">
+        Physical height <strong>{Math.round(backend.physicalAltitude)} ft</strong>, barometric <strong>{Math.round(backend.altitude)} ft</strong>,
+        indicated <strong>{Math.round(backend.indicatedAltitude)} ft</strong> ({formatSetting(baro.setting)}; declared QNH {baro.declaredQnhHpa} hPa;
+        baro error {baro.errorFt >= 0 ? "+" : ""}{baro.errorFt} ft).
+      </p>
+      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!settingValid) return; recordTo?.baro({ setting: hpa(setting) }); backend.setBaroSetting({ kind: "QNH", hPa: hpa(setting) }); setSetting(""); }}>
+        <input inputMode="numeric" value={setting} maxLength={4} placeholder="QNH hPa" aria-label="Altimeter setting (QNH, hPa)"
+          onChange={event => setSetting(event.target.value.replace(/\D/g, ""))} />
+        <button type="submit" disabled={!settingValid}>Set QNH</button>
+        <button type="button" aria-pressed={baro.setting.kind === "STD"} onClick={() => { recordTo?.baro({ setting: "STD" }); backend.setBaroSetting({ kind: "STD" }); }}>STD</button>
+      </form>
+      <p className="fmsBenchHint">The crew's setting changes what the altimeter indicates; the autopilot and the FMS work on the barometric altitude referenced to the declared QNH.</p>
+      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!qnhValid) return; recordTo?.baro({ declaredQnh: hpa(qnh) }); backend.declareQnh(hpa(qnh), "bench"); setQnh(""); }}>
+        <input inputMode="numeric" value={qnh} maxLength={4} placeholder="QNH hPa" aria-label="Declared QNH (hPa)"
+          onChange={event => setQnh(event.target.value.replace(/\D/g, ""))} />
+        <button type="submit" disabled={!qnhValid}>Declare the QNH</button>
+      </form>
+      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!errorValid) return; recordTo?.baro({ errorFt: Number(error) }); backend.setBaroError(Number(error), "bench"); setError(""); }}>
+        <input inputMode="numeric" value={error} maxLength={5} placeholder="Error ft" aria-label="Baro error (ft)"
+          onChange={event => setError(event.target.value.replace(/[^\d-]/g, ""))} />
+        <button type="submit" disabled={!errorValid}>Inject the error</button>
+      </form>
+      <p className="fmsBenchHint">An engineering stimulus, logged: the altimeter reads the physical height plus the error, and the autopilot holding an altitude flies with it, as it would in an aircraft.</p>
+    </section>
   );
 }

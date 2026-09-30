@@ -1,4 +1,5 @@
 import { CONDITIONS, UNMODELLED_CONDITIONS, type ConditionId } from "./conditions";
+import { MAX_BARO_ERROR_FT, SETTING_RANGE_HPA, errorProblem, settingProblem } from "./baro";
 import { FlightSimulator } from "./flight";
 import { distanceNm } from "./fmsModel";
 import { START_STATES, type StartStateId } from "./kbtvDemo";
@@ -34,10 +35,11 @@ export type Trigger =
   | { kind: "start" }
   | { kind: "time"; seconds: number }
   | { kind: "distance"; waypoint: string; nm: number }
+  | { kind: "fafDistance"; nm: number }
   | { kind: "active"; waypoint: string }
   /** This many seconds after the step before it finished: the timing inside a stage, wherever the stage began. */
   | { kind: "after"; seconds: number }
-  /** When the aircraft is at or below this altitude, feet MSL (over the declared sea, its radio height). */
+  /** When the aircraft is at or below this physical height, feet MSL (over the declared sea, its radio height). */
   | { kind: "below"; feet: number }
   /**
    * When the altimeter reads at or above this altitude, feet MSL, to the foot: a crew action on reaching an altitude
@@ -54,8 +56,15 @@ export type Action =
   /** APPR: arms the approach, or (on false) presses it off: a disarm, or after capture a cancellation. */
   | { kind: "armApproach"; on?: boolean }
   | { kind: "goAround" }
+  | { kind: "proceedPins"; basicVfr: boolean; landingAreaVisible: boolean; publishedVisibility: boolean }
   /** The wind the air mass moves with, from `direction` (degrees true) at `speed` kt: a laboratory stimulus. */
   | { kind: "wind"; direction: number; speed: number }
+  /**
+   * The barometric altitude system (B1.1, baro.ts): the crew's altimeter setting (STD, or a QNH in hPa), an injected baro
+   * error (ft, a laboratory stimulus) and the atmosphere's declared QNH (hPa). Each field given is applied: the QNH, then
+   * the error, then the setting. None ever moves the aircraft directly or changes the radio height.
+   */
+  | { kind: "baro"; setting?: "STD" | number; errorFt?: number; declaredQnh?: number }
   /**
    * The crew's autopilot selections under the helicopter profile: preselect an altitude, engage a vertical speed (fpm)
    * toward it, hold the present altitude, or select a speed (knots). Each field given is applied, in that order.
@@ -68,8 +77,9 @@ export type Action =
   | { kind: "expectAfcs"; collective?: string; pitch?: string; roll?: string; lowHeight?: "LOW HT" | "LOW HT OFF" | "NONE" }
   /**
    * The aircraft's state; each part given is checked. Ground speed within [minGroundSpeed, maxGroundSpeed] kt; track
-   * within trackTolerance (5 by default) of track; radio height radioHeight, or altitude (MSL) altitude, ± heightTolerance
-   * ft (10 by default), and altitude within [minAltitude, maxAltitude]; within nearMetres (50 by default) of the waypoint
+   * within trackTolerance (5 by default) of track; radio height radioHeight, or physical height (MSL, truth,
+   * not the altimeter) altitude, ± heightTolerance ft (10 by default), and the physical height within [minAltitude,
+   * maxAltitude]; within nearMetres (50 by default) of the waypoint
    * near, and no nearer than minNearMetres; cross-track from the active leg at most maxCrossTrack NM.
    */
   | {
@@ -153,7 +163,7 @@ export const linePattern = (text: string) =>
 /** The step in words, for the run log, the report and the test procedure. After the first step, "start" means "then". */
 export function describeStep(step: ScenarioStep, index = 0): string {
   const w = step.when;
-  const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "after" ? `${formatSeconds(w.seconds)} later` : w.kind === "below" ? `At or below ${w.feet} ft` : w.kind === "above" ? `When the altimeter reads ${w.feet} ft or more` :w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : `When ${w.waypoint} is the active waypoint`;
+  const when = w.kind === "start" ? (index > 0 ? "Then" : "At the start") : w.kind === "time" ? `At ${formatSeconds(w.seconds)}` : w.kind === "after" ? `${formatSeconds(w.seconds)} later` : w.kind === "below" ? `At or below ${w.feet} ft` : w.kind === "above" ? `When the altimeter reads ${w.feet} ft or more` : w.kind === "distance" ? `Within ${w.nm} NM of ${w.waypoint}` : w.kind === "fafDistance" ? `Within ${w.nm} NM along the predicted path to the FAF` : `When ${w.waypoint} is the active waypoint`;
   const a = step.action;
   const within = step.within ? ` within ${step.within} s` : "";
   const what = (() => {
@@ -165,7 +175,13 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "procedure": return `select the ${a.procedure === "APPROACH" ? "approach" : a.procedure} ${a.ident}${a.transition ? ` via ${a.transition}` : ""}`;
       case "armApproach": return a.on === false ? "press APPR off" : "arm the approach";
       case "goAround": return "press TOGA";
+      case "proceedPins": return "declare the conditions for the published PinS continuation";
       case "wind": return `set the wind to ${String(a.direction).padStart(3, "0")}°T / ${a.speed} kt`;
+      case "baro": return [
+        a.declaredQnh !== undefined ? `declare the QNH ${a.declaredQnh} hPa` : null,
+        a.errorFt !== undefined ? `inject a baro error of ${a.errorFt >= 0 ? "+" : ""}${a.errorFt} ft` : null,
+        a.setting !== undefined ? `set the altimeter to ${a.setting === "STD" ? "STD" : `QNH ${a.setting} hPa`}` : null,
+      ].filter(Boolean).join(", ");
       case "autopilot": return [
         a.altitude !== undefined ? `preselect ${a.altitude} ft` : null, a.verticalSpeed !== undefined ? `engage VS ${a.verticalSpeed} fpm` : null, a.hold ? "engage ALT" : null,
         a.speed !== undefined ? `select ${a.speed} kt` : null, a.heading !== undefined ? `select heading ${a.heading}°` : null, a.lnav ? "arm NAV" : null,
@@ -242,6 +258,7 @@ function triggerProblem(when: unknown): string | null {
     case "start": return null;
     case "time": return finite(w.seconds, 0, MAX_RUN_SECONDS) ? null : "a time trigger needs seconds between 0 and 86400";
     case "distance": return text(w.waypoint, IDENT) && finite(w.nm, 0.01, 1000) ? null : "a distance trigger needs a waypoint ident and nm between 0.01 and 1000";
+    case "fafDistance": return finite(w.nm, 0.01, 1000) ? null : "a FAF path-distance trigger needs nm between 0.01 and 1000";
     case "active": return text(w.waypoint, IDENT) ? null : "an active trigger needs a waypoint ident";
     case "below": return finite(w.feet, -1500, 60000) ? null : "a below trigger needs feet between -1500 and 60000";
     case "above": return finite(w.feet, -1500, 60000) ? null : "an above trigger needs feet between -1500 and 60000";
@@ -275,7 +292,15 @@ function actionProblem(action: unknown): string | null {
     case "procedure": return (a.procedure === "SID" || a.procedure === "STAR" || a.procedure === "APPROACH") && text(a.ident, /^[A-Z0-9]{1,7}$/) && (a.transition === undefined || text(a.transition, /^[A-Z0-9]{1,7}$/)) ? null : "procedure needs SID, STAR or APPROACH, an ident, and a transition ident when given";
     case "armApproach": return a.on === undefined || typeof a.on === "boolean" ? null : "armApproach on must be true or false when given";
     case "goAround": return null;
+    case "proceedPins": return [a.basicVfr, a.landingAreaVisible, a.publishedVisibility].every(value => typeof value === "boolean") ? null : "proceedPins declarations must be true or false";
     case "wind": return finite(a.direction, 0, 360) && finite(a.speed, 0, 150) ? null : "wind needs a direction from 0 to 360 and a speed from 0 to 150 kt";
+    case "baro": {
+      if (a.setting === undefined && a.errorFt === undefined && a.declaredQnh === undefined) return "baro needs a setting, an errorFt or a declaredQnh";
+      if (a.setting !== undefined && a.setting !== "STD" && (typeof a.setting !== "number" || settingProblem({ kind: "QNH", hPa: a.setting }) !== null)) return `baro setting is STD or a QNH of ${SETTING_RANGE_HPA.min} to ${SETTING_RANGE_HPA.max} hPa`;
+      if (a.errorFt !== undefined && (typeof a.errorFt !== "number" || errorProblem(a.errorFt) !== null)) return `baro errorFt is a number of feet, at most ${MAX_BARO_ERROR_FT} either way`;
+      if (a.declaredQnh !== undefined && (typeof a.declaredQnh !== "number" || settingProblem({ kind: "QNH", hPa: a.declaredQnh }) !== null)) return `baro declaredQnh is ${SETTING_RANGE_HPA.min} to ${SETTING_RANGE_HPA.max} hPa`;
+      return null;
+    }
     case "autopilot": {
       const finite = (v: unknown) => v === undefined || (typeof v === "number" && Number.isFinite(v));
       const flag = (v: unknown) => v === undefined || typeof v === "boolean";
@@ -485,11 +510,12 @@ export class ScenarioRunner {
 
   private triggered(when: Trigger) {
     switch (when.kind) {
+      case "fafDistance": return this.fms.distanceToFaf !== null && this.fms.distanceToFaf <= when.nm;
       case "start": return true;
       case "time": return this.elapsed >= when.seconds - 1e-9;
       case "after": return this.elapsed >= this.previousAt + when.seconds - 1e-9;
-      case "below": return this.fms.altitude <= when.feet + 1e-9;
-      case "above": return Math.round(this.fms.altitude) >= when.feet;
+      case "below": return this.fms.physicalAltitude <= when.feet + 1e-9;
+      case "above": return Math.round(this.fms.indicatedAltitude) >= when.feet;
       case "distance": {
         const at = this.fms.coordinates(when.waypoint);
         return at !== undefined && distanceNm(this.fms.truePosition, at) <= when.nm;
@@ -516,7 +542,13 @@ export class ScenarioRunner {
       // TOGA: the FMS missed-approach request and, under the helicopter profile, the autopilot's GA.
       // A refused TOGA (no missed approach to go around onto, or the FMS failed) is an error in the run, never a silent pass.
       case "goAround": if (!fms.goAround()) throw new Error("TOGA refused by the FMS: no missed approach ahead, or the FMS has failed"); this.sim?.engageGoAround(); return;
+      case "proceedPins": if (!(this.sim ? this.sim.proceedFromPins(action) : fms.proceedFromPins(action))) throw new Error("PinS continuation refused: MAP, chart or crew conditions unavailable"); return;
       case "wind": Object.assign(fms.wind, { direction: action.direction, speed: action.speed }); return;
+      case "baro":
+        if (action.declaredQnh !== undefined) fms.declareQnh(action.declaredQnh, "scenario");
+        if (action.errorFt !== undefined) fms.setBaroError(action.errorFt, "scenario");
+        if (action.setting !== undefined) fms.setBaroSetting(action.setting === "STD" ? { kind: "STD" } : { kind: "QNH", hPa: action.setting });
+        return;
       case "autopilot": {
         const sim = this.sim;
         if (!sim) throw new Error("autopilot selections need the flight simulation");
@@ -602,9 +634,9 @@ export class ScenarioRunner {
           && (action.maxGroundSpeed === undefined || fms.groundSpeed <= action.maxGroundSpeed)
           && (action.track === undefined || trackOff <= (action.trackTolerance ?? 5))
           && (action.radioHeight === undefined || (ra.status === "NORMAL" && Math.abs(ra.value! - action.radioHeight) <= (action.heightTolerance ?? 10)))
-          && (action.altitude === undefined || Math.abs(fms.altitude - action.altitude) <= (action.heightTolerance ?? 10))
-          && (action.minAltitude === undefined || fms.altitude >= action.minAltitude)
-          && (action.maxAltitude === undefined || fms.altitude <= action.maxAltitude)
+          && (action.altitude === undefined || Math.abs(fms.physicalAltitude - action.altitude) <= (action.heightTolerance ?? 10))
+          && (action.minAltitude === undefined || fms.physicalAltitude >= action.minAltitude)
+          && (action.maxAltitude === undefined || fms.physicalAltitude <= action.maxAltitude)
           && (action.near === undefined || (metres !== null && metres <= (action.nearMetres ?? 50) && metres >= (action.minNearMetres ?? 0)))
           && (action.maxCrossTrack === undefined || Math.abs(fms.crossTrack) <= action.maxCrossTrack);
         const parts = [
@@ -791,9 +823,12 @@ export class ScenarioRecorder {
 
   key(fn: CduFunction) { this.add({ kind: "keys", keys: [fn] }); }
   condition(condition: ConditionId, on: boolean) { this.add({ kind: "condition", condition, on }); }
+  /** A barometric altitude change made on the bench: the crew's setting, an injected error or the declared QNH. */
+  baro(change: { setting?: "STD" | number; errorFt?: number; declaredQnh?: number }) { this.add({ kind: "baro", ...change }); }
   alert(text: string) { this.add({ kind: "alert", text }); }
   armApproach(on = true) { this.add(on ? { kind: "armApproach" } : { kind: "armApproach", on: false }); }
   goAround() { this.add({ kind: "goAround" }); }
+  proceedPins(declaration: { basicVfr: boolean; landingAreaVisible: boolean; publishedVisibility: boolean }) { this.add({ kind: "proceedPins", ...declaration }); }
   /** An autopilot selection made on the bench (helicopter profile). */
   autopilot(selection: { altitude?: number; verticalSpeed?: number; hold?: boolean; speed?: number }) { this.add({ kind: "autopilot", ...selection }); }
   /** A stimulus applied on the GPS sensors tab. */

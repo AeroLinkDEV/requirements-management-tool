@@ -362,6 +362,44 @@ test('the EFIS shows the FMS modes, route and TO waypoint, and flags them when t
   await expect(efis.getByTestId('fma-collective')).toHaveText('ALT')
 })
 
+// Rev 3 B1.7 (h) and D-R: the aircraft freeze. Not flying and with no run, the bench's clock runs while the aircraft and
+// its fuel stand still; a moving waypoint, placed by the simulation clock from its epoch (#1306), keeps moving.
+test('the aircraft freeze: the clock runs, the fuel and aircraft stand still, and a moving waypoint keeps moving (B1.7 h)', async ({ page }) => {
+  await open(page)
+  await expect(page.getByText('Aircraft frozen: the clock runs.')).toBeVisible()
+  const panel = page.locator('.fmsCdu')
+  const typeIn = async (text: string) => { await panel.focus(); await page.keyboard.type(text) }
+  // MOVING WPT (INIT/REF 2/2, 6L): SHIP1 at a position, moving east at 60 kt.
+  const movingPage = async () => { await key(page, 'INIT_REF').click(); await key(page, 'NEXT').click(); await key(page, 'LSK6L').click(); await expectLine(page, 0, /^MOVING WPT/) }
+  await movingPage()
+  // Each entry leaves the scratchpad empty once taken.
+  for (const [text, lsk] of [['SHIP1', 'LSK1L'], ['N4520.0W07540.0', 'LSK2L'], ['090/60', 'LSK1R']] as const) {
+    await typeIn(text)
+    await expectLine(page, 13, new RegExp(`^${text.replace('/', '\\/')}`))
+    await key(page, lsk).click()
+    await expectLine(page, 13, /^\s*$/)
+  }
+  await key(page, 'LSK6R').click()
+  await expectLine(page, 6, /^SHIP1 090°\/60KT/)
+  // Its position, on the line below, now; the motion line carries nothing over it.
+  await expectLine(page, 6, /^SHIP1 090°\/60KT\s*$/)
+  await expectLine(page, 7, /^N4520\.0W075\d\d\.\d\s*$/)
+  const start = (await screenLines(page))[7]
+  // The fuel on PROGRESS 2/4, read before and after the waypoint has moved.
+  const fuelNow = async () => {
+    await key(page, 'PROG').click()
+    await key(page, 'NEXT').click()
+    await expectLine(page, 0, /PROGRESS\s+2\/4/)
+    return (await screenLines(page))[2]
+  }
+  const fuel = await fuelNow()
+  await movingPage()
+  await expect.poll(async () => (await screenLines(page))[7], { timeout: 20_000 }).not.toBe(start)
+  expect(await fuelNow()).toBe(fuel)
+  // Still frozen: nothing started the flight.
+  await expect(page.getByText('Aircraft frozen: the clock runs.')).toBeVisible()
+})
+
 test('the bench tools are tabs under the cockpit, keyboard-navigable, and the chosen one is remembered', async ({ page }) => {
   // A fresh context starts with no remembered tab; this test keeps what it stores across the reload.
   await page.goto('/tests/fixtures/fms-cdu.html')
@@ -583,7 +621,7 @@ test('a numeric word can be forced with a status from the bus monitor, and the F
   await expect(page.getByTestId('route-gps1')).toContainText('not usable · no fix')
 })
 
-test('the KBTV demonstration loads real FAA data from the Nav data tab, sets up RNAV RWY 15, and its LPV scenario passes on the bench', async ({ page }) => {
+test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit later-SBAS LPV scenario passes on the bench', async ({ page }) => {
   await open(page)
   await tab(page, 'Nav data')
   const demo = page.getByRole('group', { name: 'Real-data demonstration' })
@@ -598,12 +636,17 @@ test('the KBTV demonstration loads real FAA data from the Nav data tab, sets up 
   await expect(demo.getByRole('status')).toHaveText(/^Set up: KBTV RNAV \(GPS\) RWY 15/)
   await key(page, 'PROG').click()
   await expectLine(page, 2, /^STAEV\b/)
+  for (const id of ['INIT_REF', 'NEXT', 'LSK1R']) await key(page, id).click()
+  await expectLine(page, 0, /^ACT VNAV R15\s+1\/1$/)
+  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-s300-heli-civil v5')
+  await page.screenshot({ path: 'test-results/s300-kbtv-advisory.png', fullPage: true })
   // The library scenario flies it from the same start state, on a restarted simulation.
   await tab(page, 'Scenarios')
   const card = page.getByRole('region', { name: 'Scenarios' })
   await page.getByLabel('Simulation rate').selectOption('64')
   await card.getByLabel('Scenario', { exact: true }).selectOption({ label: 'KBTV RNAV (GPS) RWY 15, LPV on the published FAS' })
   await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-later-sbas-heli v1')
   await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible({ timeout: 45_000 })
   await expect(card.getByRole('list', { name: 'Scenario steps' }).locator('li[data-status="pass"]')).toHaveCount(5)
 })
@@ -616,6 +659,29 @@ test('the helicopter autopilot fields keep only what they accept: digits, and a 
   await expect(page.getByLabel('Vertical speed')).toHaveValue('-800')
   await page.getByLabel('Selected speed').fill('9z0')
   await expect(page.getByLabel('Selected speed')).toHaveValue('90')
+})
+
+test('the PinS crew continuation requires MAP passage and the actual chart condition, then leaves instrument guidance', async ({ page }) => {
+  await open(page)
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  const scenario = { id: 'pins-ui', title: 'PinS crew controls', objective: 'UI wiring at the published MAP', maxSeconds: 1,
+    start: '87n-rnav190-final', steps: [{ when: { kind: 'start' }, action: { kind: 'expectActive', waypoint: 'STAYS' } }] }
+  await card.getByLabel('Scenario file').setInputFiles({ name: 'pins-ui.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scenario)) })
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  const continueButton = page.getByRole('button', { name: 'Continue from MAP' })
+  await expect(continueButton).toBeDisabled()
+  await expect(page.getByLabel('Landing area in sight')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Jump to next waypoint' }).click()
+  await page.getByRole('button', { name: 'Jump to next waypoint' }).click()
+  await expect(continueButton).toBeDisabled()
+  await page.getByLabel('Basic VFR conditions met').check()
+  await expect(continueButton).toBeEnabled()
+  await continueButton.locator('..').screenshot({ path: test.info().outputPath('pins-crew-conditions.png') })
+  await continueButton.click()
+  await expect(page.getByLabel('Guidance')).toContainText('crew flying the visual segment')
+  await expect(page.getByLabel('Guidance')).toContainText('HDG')
+  await page.locator('.fmsBench').screenshot({ path: test.info().outputPath('pins-crew-continuation.png') })
 })
 
 test('the 87N mission: after ACTIVATE and EXEC over the mark, the map draws the FMS joining path to JN (Phase 1)', async ({ page }) => {
@@ -657,4 +723,44 @@ test('C.10: the executed 87N approach shows its chart notes on the Nav data tab,
   await expect(items.nth(1)).toHaveText('Procedure NA at night.')
   await expect(items.nth(5)).toHaveText('Limit final and missed approach to 70K.')
   await expect(items.nth(8)).toHaveText('LNAV MDA 560-1.')
+})
+
+test('B1.1: the PFD writes the altimeter setting beside the altitude; setting STD or injecting an error changes the reading, never the radio or physical height', async ({ page }) => {
+  await open(page)
+  const efis = page.getByRole('region', { name: 'EFIS' })
+  const pfdBaro = efis.getByTestId('pfd-baro')
+  await expect(pfdBaro).toHaveText('QNH 1013')
+  await tab(page, 'Conditions')
+  const card = page.getByRole('region', { name: 'Barometric altitude' })
+  const readout = card.getByTestId('baro-readout')
+  const heights = async () => {
+    const text = (await readout.textContent()) ?? ''
+    const [, physical, baro, indicated] = /Physical height (-?\d+) ft, barometric (-?\d+) ft,\s*indicated (-?\d+) ft/.exec(text.replace(/\s+/g, ' '))!
+    return { physical: Number(physical), baro: Number(baro), indicated: Number(indicated) }
+  }
+  const before = await heights()
+  expect(before.baro).toBe(before.physical)
+  expect(before.indicated).toBe(before.physical)
+  // A low declared: the altimeter, still set to 1013, reads high by about 27 ft a hectopascal.
+  await card.getByLabel('Declared QNH (hPa)').fill('1003')
+  await card.getByRole('button', { name: 'Declare the QNH' }).click()
+  await expect.poll(async () => (await heights()).indicated - before.physical).toBeGreaterThan(260)
+  await card.getByLabel('Altimeter setting (QNH, hPa)').fill('1003')
+  await card.getByRole('button', { name: 'Set QNH' }).click()
+  await expect(pfdBaro).toHaveText('QNH 1003')
+  await expect.poll(async () => (await heights()).indicated).toBe(before.physical)
+  await card.getByRole('button', { name: 'STD' }).click()
+  await expect(pfdBaro).toHaveText('STD')
+  await expect(card.getByRole('button', { name: 'STD' })).toHaveAttribute('aria-pressed', 'true')
+  // An injected error: the barometric reading moves by it, the physical height does not.
+  await card.getByLabel('Baro error (ft)').fill('-200')
+  await card.getByRole('button', { name: 'Inject the error' }).click()
+  const after = await heights()
+  expect(after.physical).toBe(before.physical)
+  expect(after.baro).toBe(before.physical - 200)
+  // Out of range: the buttons stay disabled.
+  await card.getByLabel('Altimeter setting (QNH, hPa)').fill('800')
+  await expect(card.getByRole('button', { name: 'Set QNH' })).toBeDisabled()
+  await card.getByLabel('Baro error (ft)').fill('3000')
+  await expect(card.getByRole('button', { name: 'Inject the error' })).toBeDisabled()
 })

@@ -34,7 +34,7 @@ export default function FmsMap({ fms, sim, range }: Props) {
       if (!at) continue;
       // An RF leg is drawn as its arc, not as the chord.
       const previous = current.at(-1);
-      if (leg.path === "RF" && leg.arc && previous) {
+      if ((leg.path === "RF" || leg.path === "AF") && leg.arc && previous) {
         const sweep = arcSweep(previous, at, leg.arc), radius = distanceNm(leg.arc.centre, at), start = bearingDeg(leg.arc.centre, previous);
         for (let i = 1; i < 12; i += 1) current.push(offset(leg.arc.centre, start + (leg.arc.turn === "R" ? 1 : -1) * (sweep * i) / 12, radius));
       }

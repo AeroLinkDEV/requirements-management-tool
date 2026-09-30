@@ -267,8 +267,8 @@ const heldSeconds = (unit: ScriptedFms, a: string, b: string, tas: number) => {
 // bank, inside the 25 degree limit. The HF's holding speed (100 KIAS at 1,700 ft) is below the 120 kt planned TAS.
 const TAS = 120
 const RADIUS = TAS / (60 * Math.PI)
-// The leg on from TIDUE is flown under the 70 KIAS limit in force from TIDUE (Astra F2), as TAS at TIDUE's 1,800 ft.
-const FINAL_TAS = tasFromIas(70, 1800)
+// M300 7-2 gives the approach's common-fix 1,700-ft constraint precedence, so this leg's 70 KIAS is converted there.
+const FINAL_TAS = tasFromIas(70, 1700)
 const STILL = { direction: 0, speed: 0 }
 
 test('D-H/R3-03: an HF (ONCE) with a direct entry is KNOWN, and the predictions past it add one racetrack', () => {
@@ -445,11 +445,11 @@ test('the laboratory airline VNAV flying a missed approach climbs to its missed 
   expect(point(unit, 'BEADS').altitude).toBe(2000)
 })
 
-test('VNAV 1/3 on a point-in-space approach says there is no vertical path (LNAV) and where it ends, not that there is no approach', () => {
+test('S300 VNAV 1/1 on a point-in-space approach says there is no vertical path and where it ends', () => {
   const unit = towardTidue(356, 8)
   unit.press('VNAV')
   const screen = lines(unit)
-  expect(screen[0]).toMatch(/^\s*VNAV\s+1\/3/)
+  expect(screen[0]).toMatch(/^\s*VNAV\s+1\/1/)
   expect(screen[2]).toMatch(/^\s*NO VERTICAL PATH \(LNAV\)\s*$/)
   expect(screen[4]).toMatch(/^\s*TO CRANN \(MAP\)\s*$/)
   expect(screen.join('\n')).not.toContain('NO APPROACH IN ROUTE')
@@ -467,12 +467,13 @@ test('VNAV 1/3 on a point-in-space approach says there is no vertical path (LNAV
   expect(lines(none)[2]).toMatch(/^\s*NO APPROACH IN ROUTE\s*$/)
 })
 
-test('KBTV R15 is unchanged: VNAV 1/3 shows its runway path, and its missed approach tops out at its own altitude', () => {
+test('default KBTV R15 shows its S300 advisory runway path and keeps the coded missed-approach altitude', () => {
   const unit = new ScriptedFms(() => new Date(START))
   const sim = new FlightSimulator(unit)
   expect(setUpKbtvRnav15(unit, sim)).toEqual({ ready: true })
   unit.press('VNAV')
-  expect(lines(unit)[0]).toMatch(/^ACT VNAV 15 LPV\s+1\/3/)
+  expect(lines(unit)[0]).toMatch(/^ACT VNAV R15\s+1\/1/)
+  expect(unit.approachType).toBe('LNAV')
   expect(lines(unit).join('\n')).not.toContain('NO VERTICAL PATH')
   const missedTop = Math.max(...unit.activeRoute.legs.flatMap(leg => (leg.kind === 'wpt' && leg.source === 'MISSED' && leg.altitude ? [Number(/^(\d+)/.exec(leg.altitude)![1])] : [])))
   expect(Number.isFinite(missedTop)).toBe(true)
@@ -530,8 +531,8 @@ test('F4: under the helicopter profile a selected altitude below the missed appr
   const sim = new FlightSimulator(unit)
   expect(setUpKbtvRnav15(unit, sim)).toEqual({ ready: true })
   expect(sim.advisory).toBe(true)
-  // On the approach, a selection below 5600A is shown.
-  expect(unit.flightPhase).toBe('APPROACH')
+  // On the executed approach, before the actual approach-phase gate, a selection below 5600A is already shown.
+  expect(unit.flightPhase).toBe('TERMINAL')
   sim.selectAltitude(4500)
   expect(sim.missedAltitudeConflict).toEqual({ target: { kind: 'A', altitude: 5600 }, selected: 4500 })
   expect(aircraftData(unit, sim).missedAltitudeConflict).toBe('5600A')
@@ -617,4 +618,37 @@ test('F1: in a manual hold the next crossing is predicted along the pattern stil
     expect(predictedSeconds).toBeGreaterThan(90)
     expect(Math.abs(predictedSeconds - flownSeconds), `predicted ${predictedSeconds.toFixed(1)} s, flown ${flownSeconds} s`).toBeLessThan(6)
   }
+})
+
+test('E4: RTA WIND is the system wind unless the crew enters one; an entry changes only the RTA, and DELETE restores it (M300 A-141)', () => {
+  // 5 NM south of MUN, northbound, still air: MUN in 5 minutes needs 60 kt.
+  const unit = fiveMilesFromMun({ direction: 0, speed: 0 })
+  Object.assign(unit.rndz, { wpt: 'MUN', time: unit.now.getTime() + 5 * 60_000 })
+  const eta = unit.profile().points[0].eta
+  expect(unit.rendezvous()!.required!).toBeCloseTo(60, 1)
+  unit.press('INIT_REF'); unit.press('NEXT'); unit.press('LSK6R')
+  expect(lines(unit)[0]).toMatch(/RENDEZVOUS/)
+  expect(lines(unit)[9]).toMatch(/^ RTA WIND/)
+  expect(lines(unit)[10]).toMatch(/^000T\/  0KT/)
+  // The crew's RTA wind, 30 kt on the nose: the RTA needs 90 kt. The system wind, and the ETAs flown in it, are unchanged.
+  enter(unit, '360/30', 'LSK5L')
+  expect(unit.rndz.wind).toEqual({ direction: 0, speed: 30 })
+  expect(unit.rendezvous()!.required!).toBeCloseTo(90, 1)
+  expect(unit.wind).toEqual({ direction: 0, speed: 0 })
+  expect(unit.profile().points[0].eta).toBe(eta)
+  expect(lines(unit)[10]).toMatch(/^000T\/ 30KT/)
+  expect(unit.screen()[10][0].size).toBe('large')
+  // An entry out of range is refused and changes nothing.
+  enter(unit, '090/250', 'LSK5L')
+  expect(unit.rndz.wind).toEqual({ direction: 0, speed: 30 })
+  // DELETE brings the default back: the system wind, which the RTA then follows. (CLR clears the message, then the
+  // entry a character at a time; CLR on the empty scratchpad arms DELETE.)
+  for (let i = 0; i < 12 && lines(unit)[13].trim() !== 'DELETE'; i += 1) unit.press('CLR')
+  expect(lines(unit)[13].trim()).toBe('DELETE')
+  unit.press('LSK5L')
+  expect(unit.rndz.wind).toBeNull()
+  expect(unit.rendezvous()!.required!).toBeCloseTo(60, 1)
+  Object.assign(unit.wind, { direction: 0, speed: 20 })
+  expect(unit.rendezvous()!.required!).toBeCloseTo(80, 1)
+  expect(lines(unit)[10]).toMatch(/^000T\/ 20KT/)
 })

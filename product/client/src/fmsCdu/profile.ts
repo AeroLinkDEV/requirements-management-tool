@@ -46,6 +46,8 @@ export type AircraftProfile = {
    * the laboratory airline-style VNAV (top of descent, VNAV PTH, DES NOW, the FMS speed schedule).
    */
   verticalPolicy: "ADVISORY" | "AIRLINE_VNAV";
+  approachPolicy: "S300_ADVISORY" | "SBAS_COUPLED";
+  temperatureEntry: "OPTIONAL" | "ALERT" | "MANDATORY";
   /** The vertical-guidance policy (plan A4). */
   verticalGuidance: {
     enRoute: string;
@@ -63,19 +65,21 @@ const p = (value: number, unit: string, basis: ParameterBasis, source: string, i
 
 export const HELICOPTER_PROFILE: AircraftProfile = {
   id: "cma9000-s300-heli-civil",
-  version: 3,
+  version: 5,
   title: "CMA-9000 helicopter, civil SAR target (S/W -300 baseline)",
   aircraftType: "ROTOR",
   operationalProgram: "169-614876-300 (M300, Pub. 9000-GEN-0150 Rev 2)",
   navigationOption: "CIVIL",
   errorLimit: "RNP",
   verticalPolicy: "ADVISORY",
+  approachPolicy: "S300_ADVISORY",
+  temperatureEntry: "ALERT",
   equipment: ["2 × CMA-5024 GPS/SBAS", "1 radio altimeter (height above a declared flat surface)", "representative rotorcraft AFCS (laboratory)"],
   missionFunctions: ["HOVER", "MARK ON TOP", "SAR SQUARE, LADDER, SECTOR", "moving waypoints", "rendezvous"],
   verticalGuidance: {
     enRoute: "no airline-style en-route VNAV; constraints advisory, flown with AFCS ALT/VS (Stage B)",
     approach: "S300 advisory approach VNAV where it can be constructed (M300 7-22…7-27); none on no-VPA point-in-space approaches",
-    sbasFinals: "coupled LPV and LNAV/VNAV finals: bench capability for a modern CMA-5024 SBAS installation, not S300 behaviour",
+    sbasFinals: "not available in S300; select the separate later-CMA/CMA-5024 SBAS profile for coupled LPV",
   },
   notConfigured: ["CARP/HARP", "COSPAS-SARSAT", "EGI/IRS", "DVS (Doppler)", "military navigation option", "military tactical approach"],
   configuration: CIVIL_SAR_CONFIGURATION,
@@ -92,6 +96,14 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     drHeadingUncertainty: p(1, "deg", "lab", "DR heading uncertainty allowance", true),
     drNoAirGrowth: p(10, "NM/h", "lab", "position held without air data, with growing uncertainty", true),
     windRadioMaxGap: p(10, "s", "lab", "maximum successive radio-fix interval for computed wind", true),
+    idfCrossingTolerance: p(0.1, "NM", "lab", "PinS IDF crossing proximity; no obstacle/protection claim", true),
+    approachPredictionAge: p(60, "s", "lab", "maximum age of the simulated FAF/MAP integrity prediction", true),
+    advisoryMinimumProgress: p(1, "kt", "lab", "minimum measured progress for advisory VNAV; not an OEM threshold", true),
+    qnhAltitudeSlope: p(27, "ft/hPa", "lab", "linear pressure-altitude correction; not an ADC atmosphere model", true),
+    temperatureLapseRate: p(0.0019812, "deg C/ft", "lab", "linear ISA ratio for advisory compensation; OEM formula unpublished", true),
+    afRadiusTolerance: p(0.15, "NM", "lab", "AF import consistency allowance for 0.1-NM rho coding", true),
+    rfRadiusTolerance: p(0.02, "NM", "lab", "RF import consistency allowance for 0.001-NM radius coding", true),
+    piSecondLegReserve: p(2.25, "NM", "lab", "short-limit PI construction reserves a full second outbound; OEM reduction formula unpublished", true),
     // Speeds and regimes
     cruiseSpeed: p(120, "kt", "lab", "crew-selected cruise speed (KIAS for the helicopter AFCS)", true),
     planningCruiseTas: p(130, "kt TAS", "sourced", "M300 3-19 PLAN DATA CRZ TAS default for ROTOR (planning data; v1 predicts only in the air)", true),
@@ -150,6 +162,26 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
 /** The profile the bench flies by default. */
 export const ACTIVE_PROFILE = HELICOPTER_PROFILE;
 
+/** Representative later installation; the brochure/SIL establish applicability, not an exact qualified OEM build. */
+export const LATER_SBAS_PROFILE: AircraftProfile = {
+  ...HELICOPTER_PROFILE,
+  id: "cma9000-later-sbas-heli",
+  version: 1,
+  title: "Later CMA software + CMA-5024 SBAS helicopter (representative simulation)",
+  operationalProgram: "later SBAS-capable CMA family; exact OEM software baseline unqualified",
+  approachPolicy: "SBAS_COUPLED",
+  parameters: {
+    ...HELICOPTER_PROFILE.parameters,
+    advisoryMinimumProgress: { ...HELICOPTER_PROFILE.parameters.advisoryMinimumProgress, inForce: false },
+    temperatureLapseRate: { ...HELICOPTER_PROFILE.parameters.temperatureLapseRate, inForce: false },
+  },
+  verticalGuidance: {
+    ...HELICOPTER_PROFILE.verticalGuidance,
+    approach: "coupled GPS LPV/LNAV-VNAV from the accepted FAS and receiver guidance; generic simulated AFCS",
+    sbasFinals: "CMC CMA-9000 brochure and SIL-25-04A Rev 2 applicability; laboratory receiver/AFCS contracts",
+  },
+};
+
 /**
  * A laboratory profile: the helicopter profile with the generic airline-style VNAV in place of crew-selected vertical
  * modes. Not a CMA installation; kept as an intentional, selectable profile (the seed of a later fixed-wing profile).
@@ -159,13 +191,17 @@ export const LAB_AIRLINE_VNAV_PROFILE: AircraftProfile = {
   id: "lab-airline-vnav",
   title: "Laboratory: generic airline-style VNAV (not a CMA installation)",
   verticalPolicy: "AIRLINE_VNAV",
+  approachPolicy: "SBAS_COUPLED",
+  parameters: LATER_SBAS_PROFILE.parameters,
   verticalGuidance: {
     ...HELICOPTER_PROFILE.verticalGuidance,
     enRoute: "generic airline-style VNAV: top of descent, VNAV PTH, DES NOW and the FMS speed schedule (laboratory)",
+    approach: "generic coupled FMS/receiver approach controller; intentional laboratory behavior",
+    sbasFinals: "coupled LPV/LNAV-VNAV receiver simulation; not an S300 or installed OEM implementation",
   },
 };
 
-export const PROFILES: readonly AircraftProfile[] = [HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE];
+export const PROFILES: readonly AircraftProfile[] = [HELICOPTER_PROFILE, LATER_SBAS_PROFILE, LAB_AIRLINE_VNAV_PROFILE];
 
 export const profileById = (id: string | null | undefined) => PROFILES.find(profile => profile.id === id);
 

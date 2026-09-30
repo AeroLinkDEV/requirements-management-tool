@@ -1,7 +1,7 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { aircraftData, fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
-import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
+import { LAB_AIRLINE_VNAV_PROFILE, LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
@@ -10,7 +10,7 @@ import type { CduFunction } from '../src/fmsCdu/variants'
 // show only what the FMS actually computes, remove it when the FMS fails, and never show a pending edit as active.
 const setup = () => {
   let now = Date.UTC(2026, 8, 27, 14, 0, 0)
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(unit)
   const fly = (seconds: number, each?: () => boolean | void) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1); if (each?.()) return } }
   return { unit, sim, fly }

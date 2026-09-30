@@ -3,7 +3,7 @@ import { fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import { bearingDeg, distanceNm } from '../src/fmsCdu/fmsModel'
 import type { GpsBus, GpsReceiver } from '../src/fmsCdu/gps'
-import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
+import { LAB_AIRLINE_VNAV_PROFILE, LATER_SBAS_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
 
@@ -14,7 +14,7 @@ import { screenText } from '../src/fmsCdu/screen'
 // vertical deviation flagged, and NO APPR INTEGRITY. The receiver side (FAS CRC, 156, SBAS PA only inside the approach
 // region, the deviations and scaling) is proved in fms-gps-sbas.spec.ts.
 const START = Date.UTC(2026, 8, 27, 14, 0, 0)
-const setup = (procedure = 'R24R', profile?: AircraftProfile) => {
+const setup = (procedure = 'R24R', profile: AircraftProfile = LATER_SBAS_PROFILE) => {
   let now = START
   const unit = new ScriptedFms(() => new Date(now), { profile })
   const sim = new FlightSimulator(unit)

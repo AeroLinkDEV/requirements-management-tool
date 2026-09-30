@@ -7,6 +7,7 @@ import {
   scenarioStart, type Scenario, type ScenarioStep,
 } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
+import { profileById } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
 // GPS faults scripted and replayed in scenarios. A `gps` step applies one stimulus to receiver 1 or 2 through the
@@ -163,7 +164,7 @@ test('while recording, what the GPS tab applies is recorded with its time, and r
 /** Every tick: what both receivers put out and what the FMS made of it. */
 const gpsTimeline = (scenario: Scenario, chunk: number) => {
   let now = scenarioStart(scenario)!
-  const fms = new ScriptedFms(() => new Date(now))
+  const fms = new ScriptedFms(() => new Date(now), { profile: profileById(scenario.profile) })
   const sim = new FlightSimulator(fms)
   const runner = new ScenarioRunner(scenario, fms)
   const timeline: string[] = []
@@ -229,7 +230,7 @@ test('the report and the procedure list every GPS stimulus and clear, and name w
 test('GPS 1 ramp: FDE excludes the satellite and GPS 1 keeps LPV; its receiver fault moves the FMS to GPS 2 (library)', () => {
   const scenario = library('gps1-fde-then-gps2')
   let now = scenarioStart(scenario)!
-  const fms = new ScriptedFms(() => new Date(now))
+  const fms = new ScriptedFms(() => new Date(now), { profile: profileById(scenario.profile) })
   const sim = new FlightSimulator(fms)
   const runner = new ScenarioRunner(scenario, fms)
   const excluded = (index: number) => fms.gps[index].bus()?.['060'].filter(word => word.value!.excluded).map(word => word.value!.prn) ?? []

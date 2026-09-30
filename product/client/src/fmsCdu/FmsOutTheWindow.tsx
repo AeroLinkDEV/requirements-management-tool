@@ -68,7 +68,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
   useLayoutEffect(() => {
     // The helicopter profile's hover-data flag, where the aircraft data carries one.
     const hoverData = (air as AircraftData & { helicopter?: { hoverData?: boolean } | null }).helicopter?.hoverData === true;
-    const sample: AircraftSample = { position: air.position, altitude: air.altitude, heading: air.heading, pitch: air.pitch, bank: air.bank, hoverData };
+    const sample: AircraftSample = { position: air.position, altitude: air.physicalAltitude, heading: air.heading, pitch: air.pitch, bank: air.bank, hoverData };
     const previous = live.current, now = performance.now();
     if (!previous) { live.current = { from: sample, to: sample, at: now, interval: 250, view, layout }; return; }
     if (!sameSample(previous.to, sample)) {
@@ -104,7 +104,7 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
 
   const routeKey = route.map(point => `${point.ident}:${point.position.lat},${point.position.lon}:${point.constraint ?? ""}:${point.active}`).join("|");
   useEffect(() => {
-    scene.current?.setRoute(route, air.altitude);
+    scene.current?.setRoute(route, air.physicalAltitude);
   }, [routeKey, status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hud = layout === "hud" && view === "cockpit";

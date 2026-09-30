@@ -845,6 +845,99 @@ test('a headwind at or above the gate true airspeed has no closure toward MRK: t
   expect(checkAtTdn({ ...start, headwind: 90 }, 5)).toEqual({ engage: false, reason: 'NO CLOSURE', gateNm: null })
 })
 
+test('MRK designation on the HOVER page: mark on top (4L), a database or user waypoint by ident (1L), coordinates (1R); a moving waypoint is refused (T1, M300 A-75)', () => {
+  const { unit } = offshore(500)
+  unit.open('HOVER')
+  unit.press('LSK4L')
+  expect(unit.hover.mark).toMatchObject({ ident: 'MRK01', label: 'MARK ON TOP POS' })
+  expect(distanceNm(unit.hover.mark!.position, unit.position)).toBeLessThan(1e-9)
+  // A user waypoint, and a database one, by ident.
+  const sighting = offset(unit.position, 180, 1)
+  expect(unit.createUserWaypoint('SGT1', sighting)).toBeUndefined()
+  typeText(unit, 'SGT1')
+  unit.press('LSK1L')
+  expect(unit.hover.mark).toEqual({ ident: 'SGT1', position: sighting, label: null })
+  typeText(unit, 'MUN')
+  unit.press('LSK1L')
+  expect(unit.hover.mark).toEqual({ ident: 'MUN', position: unit.coordinates('MUN'), label: null })
+  // Coordinates on 1R.
+  typeText(unit, 'N4042.0W07227.0')
+  unit.press('LSK1R')
+  expect(unit.hover.mark!.position.lat).toBeCloseTo(40.7, 9)
+  expect(unit.hover.mark!.position.lon).toBeCloseTo(-72.45, 9)
+  // A moving waypoint is refused, and the mark stays as it was.
+  unit.defineMoving('SHIP1', offset(unit.position, 90, 2), 270, 20)
+  typeText(unit, 'SHIP1')
+  unit.press('LSK1L')
+  expect(screenText(unit.screen())[13].trim()).toBe('INVALID ENTRY')
+  expect(unit.hover.mark!.position.lat).toBeCloseTo(40.7, 9)
+})
+
+test('the final track at MRK: into the wind from 5 kt, below it the bearing to MRK; the wind direction frozen at ACTIVATE, its speed taken at TDN (T3, M300 11-19, A-75)', () => {
+  for (const speed of [4.9, 5.1]) {
+    const { unit, mark } = hoverProcedure({ markNm: 3 })
+    Object.assign(unit.wind, { direction: 300, speed })
+    unit.press('LSK6R')
+    expect(unit.hover.status).toBe('MOD')
+    if (speed < 5) expect(unit.hover.finalTrack).toBeCloseTo(courseDeg(unit.position, mark), 9)
+    else expect(unit.hover.finalTrack).toBe(300)
+  }
+  // Activated in 230/20; before TDN the wind turns to 260/30. The final track stays 230, and at TDN the transition is
+  // planned with 30 kt along it: the speed now, the direction frozen.
+  const { unit, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  Object.assign(unit.wind, { direction: 260, speed: 30 })
+  fly(900, () => unit.hover.atTdn !== null)
+  expect(unit.hover.active!.finalTrack).toBe(230)
+  expect(unit.hover.atTdn!.start!.headwind).toBeCloseTo(30, 9)
+  expect(unit.hover.windSpeed).toBe(30)
+})
+
+test('TRANSITION DOWN is shown from EXEC until TDN: at TDN it leaves the scratchpad and MSG, and stays in the recall list (T7, M300 E-36)', () => {
+  const { unit, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  const scratchpad = () => screenText(unit.screen())[13].trim()
+  expect(scratchpad()).toBe('TRANSITION DOWN')
+  expect(unit.lamps().has('MSG')).toBe(true)
+  fly(600, () => unit.lastSequenced === 'JN')
+  expect(scratchpad()).toBe('TRANSITION DOWN')
+  fly(600, () => unit.hover.atTdn !== null)
+  expect(unit.hover.request).toBe(1)
+  expect(scratchpad()).toBe('')
+  expect(unit.lamps().has('MSG')).toBe(false)
+  expect(unit.recallList.map(m => m.text)).toContain('TRANSITION DOWN')
+  // A procedure ended before TDN by a direct-to withdraws it too.
+  const early = hoverProcedure()
+  early.unit.press('LSK6R')
+  early.unit.press('EXEC')
+  expect(early.unit.directTo('MUN')).toBeUndefined()
+  early.unit.press('EXEC')
+  early.fly(2)
+  expect(early.unit.hover.active).toBeNull()
+  expect(screenText(early.unit.screen())[13].trim()).toBe('')
+})
+
+test('the route to MRK cancelled (TDN and MRK deleted on LEGS, EXEC) ends the procedure: no request, no transition, the aircraft flies on (T9, M300 11-21)', () => {
+  const { unit, sim, fly } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  unit.open('LEGS')
+  // JN, TDN, MRK at the head of the route: delete TDN, then MRK (now second). CLR first acknowledges TRANSITION DOWN.
+  for (let i = 0; i < 2; i++) {
+    while (screenText(unit.screen())[13].trim() !== 'DELETE') unit.press('CLR')
+    unit.press('LSK2L')
+  }
+  unit.press('EXEC')
+  expect(unit.activeRoute.legs.some(leg => leg.kind === 'wpt' && (leg.ident === 'TDN' || leg.ident === 'MRK'))).toBe(false)
+  fly(2)
+  expect(unit.hover.active).toBeNull()
+  fly(300)
+  expect(unit.hover.request).toBe(0)
+  expect(sim.modeEvents.some(e => e.event === 'TD')).toBe(false)
+})
+
 test('no waypoint goes between TDN and MRK: !HOVER MRK WPT, and the route is unchanged (Stage D)', () => {
   const { unit } = hoverProcedure()
   unit.press('LSK6R')
@@ -933,4 +1026,36 @@ test('CANCEL of a new mark over an active procedure keeps the active one flying 
   fly(600, () => sim.hoverCaptured)
   expect(sim.hoverCaptured).toBe(true)
   expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED')).toBe(false)
+})
+
+test('D-H: a crew hold takes its default leg time and speed from the altitude when the entry begins, not when it is made (M300 10-9)', () => {
+  const { unit, fly } = setup()
+  const fix = activeIdent(unit)!
+  // Made at 16,000 ft: the defaults shown then are for above 14,000 ft (1.5 minutes, the high holding speed).
+  unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 16000 }, 'test: high when the hold is made')
+  expect(unit.defineHold(fix)).toBeUndefined()
+  expect(unit.route.hold).toMatchObject({ legTime: 1.5, speed: 170 })
+  unit.press('EXEC')
+  // Down to 5,000 ft before the fix: the entry begins there, so the defaults become 1.0 minute and 100 kt.
+  unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 5000 }, 'test: low when the entry begins')
+  expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')).toBeLessThan(3600)
+  expect(unit.activeRoute.hold).toMatchObject({ legTime: 1, speed: 100 })
+  // Fixed from the entry on: climbing through 14,000 ft does not change them (M300 10-9).
+  unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 15000 }, 'test: climbing in the hold')
+  fly(30)
+  expect(unit.activeRoute.hold).toMatchObject({ legTime: 1, speed: 100 })
+})
+
+test('D-H: a leg time or speed the crew entered is kept at the entry, whatever the altitude', () => {
+  const { unit, fly } = setup()
+  unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 16000 }, 'test: high when the hold is made')
+  press(unit, 'HOLD', 'LSK2L')
+  expect(unit.route.hold).toBeDefined()
+  typeText(unit, '2.5'); unit.press('LSK4L')
+  typeText(unit, '150'); unit.press('LSK1R')
+  expect(unit.route.hold).toMatchObject({ legTime: 2.5, speed: 150 })
+  unit.press('EXEC')
+  unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 5000 }, 'test: low when the entry begins')
+  expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')).toBeLessThan(3600)
+  expect(unit.activeRoute.hold).toMatchObject({ legTime: 2.5, speed: 150 })
 })
