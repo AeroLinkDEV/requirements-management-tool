@@ -1,5 +1,5 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { FlightSimulator, angleDiff, legGeometry, racetrackOutline, sarTrack } from '../src/fmsCdu/flight'
+import { FlightSimulator, SAR_SEARCH_WAYPOINTS, angleDiff, legGeometry, racetrackOutline, sarTrack } from '../src/fmsCdu/flight'
 import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
 import { HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
@@ -325,13 +325,13 @@ test('the helicopter hold defaults to its holding speed limit and leg time for t
   expect(unit.recallList.some(m => m.text === 'HIGH HOLDING SPEED')).toBe(true)
 })
 
-test('a search pattern is flown along its geometry from the start point, then the route continues', () => {
+test('a search pattern is flown along its geometry to its 80th search waypoint, then END OF SEARCH and the route continues (M300 11-15)', () => {
   const { unit, sim, fly } = setup()
-  press(unit, 'TACT', 'LSK2L', 'LSK6R', 'EXEC')
-  expect(unit.sar.active).toBe('SQUARE')
+  press(unit, 'TACT', 'LSK4L', 'LSK6R', 'EXEC')
+  expect(unit.sar.active).toBe('SECTOR')
   fly(600, () => unit.sar.status === 'IN PROGRESS')
   const path = sim.sarPath!
-  expect(path).toHaveLength(13)
+  expect(path).toHaveLength(81)
   let worst = 0
   const seconds = fly(4 * 3600, () => {
     const nearest = Math.min(...path.slice(0, -1).map((p, i) => Math.abs(legGeometry(p, path[i + 1], unit.position).crossTrack)))
@@ -340,25 +340,104 @@ test('a search pattern is flown along its geometry from the start point, then th
   })
   expect(seconds).toBeLessThan(4 * 3600)
   expect(worst).toBeLessThan(0.6)
+  expect(screenText(unit.screen())[13].trim()).toBe('END OF SEARCH')
   expect(activeIdent(unit)).toBe('MUN')
 })
 
-test('search pattern geometry: the expanding square grows by one spacing every two legs; the sector closes on its datum', () => {
+test('search pattern geometry to 80 search waypoints: the square grows by one spacing every two legs turning right; the ladder alternates legs and steps; the sector closes on its datum, turned by the angle (M300 11-1, 11-15)', () => {
   const start = { lat: 45, lon: -75 }
   const unit = new ScriptedFms()
-  const square = sarTrack(start, unit.sar, 'SQUARE')
-  expect(distanceNm(square[0], square[1])).toBeCloseTo(2, 1)
-  expect(distanceNm(square[2], square[3])).toBeCloseTo(4, 1)
-  expect(distanceNm(square[11], square[12])).toBeCloseTo(12, 1)
-  // First leg on the search bearing, then right turns.
-  expect(courseDeg(square[0], square[1])).toBe(90)
-  expect(courseDeg(square[1], square[2])).toBe(180)
-  expect(courseDeg(square[2], square[3])).toBe(270)
-  const sector = sarTrack(start, unit.sar, 'SECTOR')
-  expect(sector).toHaveLength(10)
-  for (const i of [3, 6, 9]) expect(distanceNm(sector[i], start)).toBeLessThan(0.05)
-  const ladder = sarTrack(start, unit.sar, 'LADDER')
-  expect(ladder).toHaveLength(16)
+  const sar = unit.sar
+  for (const pattern of ['SQUARE', 'LADDER', 'SECTOR'] as const) expect(sarTrack(start, sar, pattern), pattern).toHaveLength(81)
+  const square = sarTrack(start, sar, 'SQUARE')
+  for (let k = 0; k < SAR_SEARCH_WAYPOINTS; k += 4) {
+    expect(distanceNm(square[k], square[k + 1]) / sar.trackSpacing, `square leg ${k}`).toBeCloseTo(Math.floor(k / 2) + 1, 1)
+    expect(Math.abs(angleDiff(courseDeg(square[k], square[k + 1]), sar.sarBearing + 90 * k)), `square leg ${k}`).toBeLessThan(0.5)
+  }
+  const ladder = sarTrack(start, sar, 'LADDER')
+  for (let k = 0; k < 8; k += 1) {
+    const long = k % 2 === 0
+    expect(distanceNm(ladder[k], ladder[k + 1]), `ladder leg ${k}`).toBeCloseTo(long ? sar.legLength : sar.trackSpacing, 1)
+    expect(Math.abs(angleDiff(courseDeg(ladder[k], ladder[k + 1]), long ? sar.sarBearing + (k % 4 === 0 ? 0 : 180) : sar.sarBearing + 90)), `ladder leg ${k}`).toBeLessThan(0.5)
+  }
+  const sector = sarTrack(start, sar, 'SECTOR')
+  for (let i = 3; i <= SAR_SEARCH_WAYPOINTS; i += 3) expect(distanceNm(sector[i], start), `sector point ${i}`).toBeLessThan(0.05)
+  for (let t = 0; t < 26; t += 1) expect(Math.abs(angleDiff(courseDeg(sector[3 * t], sector[3 * t + 1]), sar.sarBearing + t * sar.angle)), `sector triangle ${t}`).toBeLessThan(0.5)
+})
+
+test('the search pages take the M300 field ranges, refuse changes once the search is engaged, and offer PPOS only with no other search waypoint in the route (M300 11-5, 11-6, 11-15, A-157…A-176)', () => {
+  const { unit, fly } = setup()
+  press(unit, 'INIT_REF', 'LSK5L', 'LSK1L') // Explicit TRUE input for numeric field-boundary assertions.
+  expect(unit.angleReference).toBe('TRUE')
+  const scratch = () => screenText(unit.screen())[13].trim()
+  const enter = (text: string, lsk: CduFunction) => { typeText(unit, text); unit.press(lsk) }
+  // CLR takes the message first, then the entry a character at a time.
+  const clearAll = () => { for (let i = 0; i < 30 && scratch() !== ''; i++) unit.press('CLR') }
+  press(unit, 'TACT', 'LSK3L')
+  // The ladder: leg length and track spacing 0.1 to 40 NM; SAR bearing 000 to 360.
+  enter('0.1', 'LSK3R')
+  expect(unit.sar.legLength).toBe(0.1)
+  enter('40', 'LSK3R')
+  expect(unit.sar.legLength).toBe(40)
+  enter('41', 'LSK3R')
+  expect(unit.sar.legLength).toBe(40)
+  expect(scratch()).toBe('INVALID ENTRY')
+  clearAll()
+  enter('0', 'LSK2R')
+  expect(unit.sar.sarBearing).toBe(0)
+  enter('360', 'LSK2R')
+  expect(unit.sar.sarBearing).toBe(0)
+  enter('4', 'LSK3R')
+  // The sector: diameter 0.1 to 40 NM, angle 5 to 90 degrees.
+  press(unit, 'TACT', 'LSK4L')
+  enter('0.1', 'LSK3R')
+  expect(unit.sar.diameter).toBe(0.1)
+  enter('4', 'LSK3R')
+  for (const [text, ok] of [['4', false], ['5', true], ['90', true], ['91', false]] as const) {
+    const before = unit.sar.angle
+    enter(text, 'LSK4R')
+    expect(unit.sar.angle, `angle ${text}`).toBe(ok ? Number(text) : before)
+    if (!ok) clearAll()
+  }
+  // Engaged at present position: the parameters no longer change, and PPOS is not offered again.
+  press(unit, 'TACT', 'LSK2L', 'LSK6R', 'EXEC')
+  fly(600, () => unit.sar.status === 'IN PROGRESS')
+  expect(unit.sar.status).toBe('IN PROGRESS')
+  const spacing = unit.sar.trackSpacing
+  enter('3', 'LSK1R')
+  expect(unit.sar.trackSpacing).toBe(spacing)
+  expect(scratch()).toBe('NOT ALLOWED')
+  clearAll()
+  press(unit, 'TACT', 'LSK3L')
+  unit.sar.refId = 'MUN'
+  unit.press('LSK6L')
+  expect(unit.sar.refId).toBe('MUN')
+  expect(scratch()).toBe('NOT ALLOWED')
+})
+
+test('the square and sector searches are joined fly-by onto their first leg, the ladder entry waypoint is flown over (M300 11-2, 11-4)', () => {
+  const closest: Record<string, number> = {}
+  for (const [pattern, lsk] of [['SQUARE', 'LSK2L'], ['LADDER', 'LSK3L'], ['SECTOR', 'LSK4L']] as const) {
+    const { unit, fly } = setup()
+    press(unit, 'INIT_REF', 'LSK5L', 'LSK1L') // The geometric bearing below is TRUE.
+    fly(10)
+    // A search fix 5 NM ahead on the present track, its first leg 90 degrees to the right.
+    const fix = offset(unit.position, unit.track, 5)
+    unit.definePoint('SRCH1', fix)
+    press(unit, 'TACT', lsk)
+    typeText(unit, 'SRCH1')
+    unit.press('LSK2L')
+    typeText(unit, String(Math.round((unit.track + 90) % 360)).padStart(3, '0'))
+    unit.press('LSK2R')
+    press(unit, 'LSK6R', 'EXEC')
+    let nearest = Infinity
+    fly(900, () => { nearest = Math.min(nearest, distanceNm(unit.position, fix)); return unit.sar.status === 'IN PROGRESS' && distanceNm(unit.position, fix) > 1 })
+    closest[pattern] = nearest
+  }
+  // Fly-by: the turn starts before the fix, so the aircraft passes inside it; fly-over: it crosses the fix itself.
+  expect(closest.SQUARE).toBeGreaterThan(0.1)
+  expect(closest.SECTOR).toBeGreaterThan(0.1)
+  expect(closest.LADDER).toBeLessThan(0.05)
 })
 
 test('the racetrack outline starts and ends at the fix and reaches one leg length outbound', () => {
