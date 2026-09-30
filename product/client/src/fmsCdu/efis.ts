@@ -1,4 +1,5 @@
 import type { FlightSimulator, VerticalMode } from "./flight";
+import { formatSetting } from "./baro";
 import { courseDeg, distanceNm, offset, type LatLon, type Route } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
 import { formatConstraint } from "./vnav";
@@ -93,7 +94,15 @@ export type AircraftData = {
   track: number;
   airspeed: number;
   groundSpeed: number;
+  /** What the altimeter indicates with the crew's setting (baro.ts): the PFD's altitude. */
   altitude: number;
+  /** The crew's altimeter setting as the PFD writes it: STD, or QNH and hPa. */
+  baroSetting: string;
+  /**
+   * Truth: the physical height above MSL, where the out-the-window view and synthetic vision place the eye (the world as
+   * it is, not as a mis-set or erroneous altimeter would put it).
+   */
+  physicalAltitude: number;
   verticalSpeed: number;
   wind: { direction: number; speed: number };
   position: LatLon;
@@ -234,7 +243,7 @@ export function aircraftData(fms: ScriptedFms, sim: FlightSimulator): AircraftDa
   const pitch = fms.groundSpeed > 1 ? (Math.atan(fms.verticalSpeed / (fms.groundSpeed * 101.27)) * 180) / Math.PI : 0;
   return {
     pitch, bank: sim.bankAngle, heading: fms.heading, track, airspeed, groundSpeed: fms.groundSpeed,
-    altitude: fms.altitude, verticalSpeed: fms.verticalSpeed, wind: fms.wind, position: fms.truePosition,
+    altitude: fms.indicatedAltitude, baroSetting: formatSetting(fms.baro.setting), physicalAltitude: fms.physicalAltitude, verticalSpeed: fms.verticalSpeed, wind: fms.wind, position: fms.truePosition,
     selectedAltitude: sim.advisory ? sim.selectedAltitude : null, selectedSpeed: sim.advisory ? sim.selectedSpeed : null,
     missedAltitudeConflict: sim.missedAltitudeConflict ? formatConstraint(sim.missedAltitudeConflict.target) : null,
     ias: sim.iasReliable ? sim.indicatedAirspeed : null,

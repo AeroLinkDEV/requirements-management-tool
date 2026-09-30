@@ -647,3 +647,43 @@ test('C.10: the executed 87N approach shows its chart notes on the Nav data tab,
   await expect(items.nth(5)).toHaveText('Limit final and missed approach to 70K.')
   await expect(items.nth(8)).toHaveText('LNAV MDA 560-1.')
 })
+
+test('B1.1: the PFD writes the altimeter setting beside the altitude; setting STD or injecting an error changes the reading, never the radio or physical height', async ({ page }) => {
+  await open(page)
+  const efis = page.getByRole('region', { name: 'EFIS' })
+  const pfdBaro = efis.getByTestId('pfd-baro')
+  await expect(pfdBaro).toHaveText('QNH 1013')
+  await tab(page, 'Conditions')
+  const card = page.getByRole('region', { name: 'Barometric altitude' })
+  const readout = card.getByTestId('baro-readout')
+  const heights = async () => {
+    const text = (await readout.textContent()) ?? ''
+    const [, physical, baro, indicated] = /Physical height (-?\d+) ft, barometric (-?\d+) ft,\s*indicated (-?\d+) ft/.exec(text.replace(/\s+/g, ' '))!
+    return { physical: Number(physical), baro: Number(baro), indicated: Number(indicated) }
+  }
+  const before = await heights()
+  expect(before.baro).toBe(before.physical)
+  expect(before.indicated).toBe(before.physical)
+  // A low declared: the altimeter, still set to 1013, reads high by about 27 ft a hectopascal.
+  await card.getByLabel('Declared QNH (hPa)').fill('1003')
+  await card.getByRole('button', { name: 'Declare the QNH' }).click()
+  await expect.poll(async () => (await heights()).indicated - before.physical).toBeGreaterThan(260)
+  await card.getByLabel('Altimeter setting (QNH, hPa)').fill('1003')
+  await card.getByRole('button', { name: 'Set QNH' }).click()
+  await expect(pfdBaro).toHaveText('QNH 1003')
+  await expect.poll(async () => (await heights()).indicated).toBe(before.physical)
+  await card.getByRole('button', { name: 'STD' }).click()
+  await expect(pfdBaro).toHaveText('STD')
+  await expect(card.getByRole('button', { name: 'STD' })).toHaveAttribute('aria-pressed', 'true')
+  // An injected error: the barometric reading moves by it, the physical height does not.
+  await card.getByLabel('Baro error (ft)').fill('-200')
+  await card.getByRole('button', { name: 'Inject the error' }).click()
+  const after = await heights()
+  expect(after.physical).toBe(before.physical)
+  expect(after.baro).toBe(before.physical - 200)
+  // Out of range: the buttons stay disabled.
+  await card.getByLabel('Altimeter setting (QNH, hPa)').fill('800')
+  await expect(card.getByRole('button', { name: 'Set QNH' })).toBeDisabled()
+  await card.getByLabel('Baro error (ft)').fill('3000')
+  await expect(card.getByRole('button', { name: 'Inject the error' })).toBeDisabled()
+})

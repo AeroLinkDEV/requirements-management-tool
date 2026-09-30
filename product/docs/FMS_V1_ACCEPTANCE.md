@@ -27,7 +27,7 @@ Each was checked against `main` on 30 September 2026 (bab18a38). The test titles
 
 ## Summary
 
-140 rows: **74 Met, 52 Partial, 13 Open, 1 Deferred** (Stage F only).
+140 rows: **75 Met, 51 Partial, 13 Open, 1 Deferred** (Stage F only).
 
 v1 is **not complete**: the §10 completion row stays Open until the Partial and Open rows are closed or explicitly deferred by Sean.
 
@@ -58,7 +58,7 @@ Several Partial rows are being addressed tonight by Astra/Sol under Sean's 29 Se
 
 | ID | Requirement | Source | Implementation | Owner test | Status |
 |---|---|---|---|---|---|
-| B1.1 | Truth state with physical height; sensors derived from truth, never feeding back | rev3 B1.1 | flight.ts state; surface.ts radioHeight; GPS from truth (#1254) | fms-tactical-maint: "the radio altimeter reads height above the declared surface" | Partial: baro altitude equals physical height (no baro error model); no test that a baro setting never moves the aircraft |
+| B1.1 | Truth state with physical height; sensors derived from truth, never feeding back | rev3 B1.1; rev3.1 B1.1 wording | flight.ts state (integrates the physical height); baro.ts (injectable error, QNH/STD setting, ISA pressure altitude); ScriptedFms physicalAltitude, altitude, indicatedAltitude; surface.ts radioHeight; GPS from truth (#1254) | fms-tactical-maint: "the radio altimeter reads height above the declared surface"; fms-baro: "changing the setting in flight never moves the aircraft …", "an injected baro error changes nothing physical at once …", "in ALT the autopilot holds the barometric altitude …", "the indicated altitude follows the crew's setting …"; fms-cdu-rendered: "B1.1: the PFD writes the altimeter setting …" | Met (the setting changes what is indicated only; the autopilot and FMS use the barometric altitude referenced to the declared QNH, a declared laboratory simplification) |
 | B1.2 | Air data: TAS = \|ground velocity − wind\|; IAS from ISA; a hover in wind has TAS = wind | rev2 B1.2 | flight.ts; kinematics.ts tasFromIas/iasFromTas (#1254) | fms-flight: "HOV holds position in a 20 kt wind: … airspeed about the wind"; fms-efis: "… no IAS below 30 kt (B4)" | Met |
 | B1.3 | Heading independent of track; coordinated and low-speed regimes with 40/45 kt hysteresis | rev2 B1.3; rev3 | flight.ts integrateLowSpeed, leaveLowSpeed (#1254, #1257) | fms-flight: "in a crosswind the aircraft crabs"; "in HOV a heading selection yaws … 360 degrees"; "TU from an exact hover …"; fms-out-the-window: "the cameras follow the heading, not the track" | Partial: no test of 10 kt sideways flight (rev2 test list) |
 | B1.4 | Wind triangle everywhere; infeasible, never clamped | rev2 B1.4 | kinematics.ts holdTrack/groundVelocity (#1254) | fms-flight: "the wind triangle gives the crab angle … refuses a track the airspeed cannot hold" | Met |
