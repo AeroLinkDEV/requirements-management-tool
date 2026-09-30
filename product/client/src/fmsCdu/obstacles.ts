@@ -22,6 +22,9 @@ export type Obstacle = {
   marking: string;
 };
 
+/** The SHA-256 of the served extract (public/fms-cdu/obstacles/dof-bench-extract.csv), as its provenance records it. */
+export const OBSTACLE_EXTRACT_SHA256 = "ff1ff3950f1972fd66ed17e7b539efc37f52f9801241dee333886ca4c215ca8a";
+
 const HEADER = ["OAS", "VERIFIED STATUS", "COUNTRY", "STATE", "CITY", "LATDEC", "LONDEC", "DMSLAT", "DMSLON", "TYPE", "QUANTITY", "AGL", "AMSL", "LIGHTING", "ACCURACY", "MARKING", "FAA STUDY", "ACTION", "JDATE"];
 
 /**

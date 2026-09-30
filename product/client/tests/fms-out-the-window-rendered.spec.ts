@@ -300,3 +300,12 @@ test('the chase view flies the glTF helicopter model, its rotors turning, in pla
   expect(Buffer.compare(first, second)).not.toBe(0)
   await expect(view).toHaveAttribute('data-status', 'ready')
 })
+
+// Brief C: the FAA Digital Obstacle File extract near the bench areas (public/fms-cdu/obstacles, with its provenance)
+// is loaded from the bench's own origin and drawn in the view; the scene element records how many.
+test('the FAA obstacles near the bench areas are loaded and drawn in the view (Brief C)', async ({ page }) => {
+  test.setTimeout(120_000)
+  await open(page, 'off')
+  const view = await show(page)
+  await expect(view.locator('.fmsOtwScene')).toHaveAttribute('data-obstacles', '11973', { timeout: 60_000 })
+})

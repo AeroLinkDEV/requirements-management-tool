@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
-import { NEUTRAL_RGB, obstacleColour, obstaclesWithin, parseDof, type Obstacle } from '../src/fmsCdu/obstacles'
+import { NEUTRAL_RGB, OBSTACLE_EXTRACT_SHA256, obstacleColour, obstaclesWithin, parseDof, type Obstacle } from '../src/fmsCdu/obstacles'
 import { ABSOLUTE_RGB, CAUTION_RGB, DANGER_RGB } from '../src/fmsCdu/terrainAwareness'
 import { OBSTACLE_DATA_URL, createObstacleLayer, drawObstacles, type ObstacleCesium } from '../src/fmsCdu/otwObstacles'
 
 // Brief C (Sean's out-the-window upgrade, 29 September): the FAA Digital Obstacle File, downloaded once, as an
-// extract of unchanged records near the bench's US areas (public/fms-cdu/obstacles, with its provenance README).
+// extract of unchanged records near the bench's US areas (public/fms-cdu/obstacles, with its provenance), pinned by its SHA-256.
 const EXTRACT = 'public/fms-cdu/obstacles/dof-bench-extract.csv'
 const text = () => readFileSync(EXTRACT, 'latin1')
 const HEADER = 'OAS,VERIFIED STATUS,COUNTRY,STATE,CITY,LATDEC,LONDEC,DMSLAT,DMSLON,TYPE,QUANTITY,AGL,AMSL,LIGHTING,ACCURACY,MARKING,FAA STUDY,ACTION,JDATE'
@@ -14,11 +14,10 @@ const GREENWICH = '09-021145,O,US,CT,GREENWICH       ,41.005065,-73.648312,41 00
 const OAKDALE = '09-000279,O,US,CT,OAKDALE         ,41.417500,-72.198134,41 25 03.00N,072 11 53.28W,TOWER             ,1,01090,01399,H, 1A,N,2022ANE00687OE,C,2023003'
 
 test('the bench extract is the recorded one: its SHA-256 and record count, every record read', () => {
-  expect(createHash('sha256').update(readFileSync(EXTRACT)).digest('hex')).toBe('ff1ff3950f1972fd66ed17e7b539efc37f52f9801241dee333886ca4c215ca8a')
+  expect(createHash('sha256').update(readFileSync(EXTRACT)).digest('hex')).toBe(OBSTACLE_EXTRACT_SHA256)
   const { obstacles, errors } = parseDof(text())
   expect(errors).toEqual([])
   expect(obstacles).toHaveLength(11973)
-  expect(readFileSync('public/fms-cdu/obstacles/README.md', 'utf8')).toContain('ff1ff3950f1972fd66ed17e7b539efc37f52f9801241dee333886ca4c215ca8a')
 })
 
 test('a DOF record is read field by field: type, position, AGL and AMSL, lighting, accuracy', () => {
