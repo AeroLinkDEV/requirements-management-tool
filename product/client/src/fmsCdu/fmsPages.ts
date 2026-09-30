@@ -7,7 +7,7 @@ import {
 import { HAL_NM, MODE_TEXT, shownReceiver } from "./gpsSensors";
 import { makingProgress } from "./kinematics";
 import { gpsSummary, navModeText, sbasSummary } from "./navPages";
-import type { Line } from "./screen";
+import type { Line, Segment } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
 
 /** The core CMA-9000 pages: index, identification, route, legs, progress, radio, fuel, hold, VNAV and timer. */
@@ -128,26 +128,10 @@ function vnavCruiseLsk(fms: ScriptedFms, side: "L" | "R", row: number, scratch: 
   }
 }
 
-/**
- * The prediction at the endpoint (plan C.11, R3-03): the MAP ("CRANN (MAP)") or arrival over the landing site ("RW15
- * (THR)", "87N"), its ETA and fuel on board there (amber below the reserve), and its basis: the endpoint kind and the
- * status, with the assumption of a CONDITIONAL prediction or why an UNKNOWN one is not computed. No landing is modelled,
- * so the landing reserve is never shown as met: LANDING NOT MODELLED.
- */
-function destinationPrediction(fms: ScriptedFms): (Line | undefined)[] {
-  const profile = fms.profile(), endpoint = profile.endpoint, point = endpoint?.point;
-  const basis = basisText(fms);
-  const timed = point && point.eta !== null && point.fuel !== null ? point : null;
-  const short = timed !== null && timed.fuel! < fms.fuelState.reserve;
-  return [
-    caption(` ${endpoint ? endpoint.label : fms.activeRoute.dest}`, "EFOB "),
-    { left: medium(timed ? eta(timed.eta!) : "-----"), right: medium(timed ? `${Math.max(0, Math.round(timed.fuel!))}KG` : "-----KG", short ? "amber" : "white") },
-    caption(` ${basis.kind}`, `${basis.status} `),
-    basis.reason ? { left: small(basis.reason, basis.status === "UNKNOWN" ? "amber" : "white") } : undefined,
-    caption(" LDG RESERVE"),
-    { left: medium(profile.reserve.reason.toUpperCase()) },
-  ];
-}
+/** Fuel quantities are kilograms inside; the FUEL pages show and read them in the unit selected (UNIT, 5R). */
+const KG_TO_LB = 2.20462;
+const fuelIn = (unit: "KG" | "LB", kg: number) => (unit === "LB" ? kg * KG_TO_LB : kg);
+const fuelOut = (unit: "KG" | "LB", value: number) => (unit === "LB" ? value / KG_TO_LB : value);
 
 /** VNAV DES: the end of descent, the path, the deviation from it and DES NOW. */
 function vnavDescent(fms: ScriptedFms): (Line | undefined)[] {
@@ -503,12 +487,14 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         return [
           title("PROGRESS", "2/4", "ACT"),
           caption(" FUEL QTY", "FUEL FLOW "),
-          { left: medium(`${fms.fuelState.quantity}KG`), right: medium(`${fms.fuelState.flow}KG/H`) },
+          { left: medium(`${Math.round(fms.fuelState.quantity)}KG`), right: medium(`${fms.fuelState.flow}KG/H`) },
           // The endpoint of the predictions (the MAP, or over the landing site), its EFOB and its basis (plan C.11, R3-03).
           caption(` ${basisText(fms).kind}`, "EFOB "),
           { left: { text: fms.profile().endpoint?.label ?? fms.activeRoute.dest, color: "green" }, right: medium(efobText(fms)) },
           caption(" BASIS"),
-          { left: medium(basisText(fms).status), right: basisText(fms).reason ? small(basisText(fms).reason!) : undefined },
+          { left: medium(basisText(fms).status) },
+          // The assumption or reason on a line of its own: beside the status, a long one overprinted it.
+          basisText(fms).reason ? { left: small(basisText(fms).reason!, basisText(fms).status === "UNKNOWN" ? "amber" : "white") } : undefined,
         ];
       if (index === 2) {
         // The receiver navigated on (or the one chosen, or GPS1) as its bus reports it: mode, satellites used, HIL (3a.6).
@@ -674,23 +660,83 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     },
   },
 
+  // The FUEL pages to the operator's manual (S300 14-1…14-4; plan E3), with the FUEL+WEIGHTS option. 1/2: MAX RANGE,
+  // GROSS WT, ENDURANCE, FUEL WT, FUEL FLOW, MILEAGE, FUEL REMAINING AT a FIX with its basis (R3-03), UNIT. FUEL WT and
+  // FUEL FLOW take what-if entries (EST); the fuel computer's values come back on each new access. 2/2: FUEL+RES and
+  // RESERVE, the crew weights, and the landing reserve basis (no landing is modelled).
   FUEL: {
-    pages: () => 1,
-    render: fms => [
-      title("FUEL", "1/1"),
-      caption(" FUEL QTY", "FLOW "),
-      { left: { text: `${Math.round(fms.fuelState.quantity)}KG` }, right: medium(`${fms.fuelState.flow}KG/H`) },
-      caption(" RESERVE", "ENDURANCE "),
-      { left: { text: `${fms.fuelState.reserve}KG` }, right: medium(`${fixed(Math.max(0, fms.fuelState.quantity - fms.fuelState.reserve) / fms.fuelState.flow, 1)}H`) },
-      ...destinationPrediction(fms),
-    ],
-    lsk: (fms, side, row, scratch) => {
-      const key = side === "L" ? (row === 1 ? "quantity" : row === 2 ? "reserve" : null) : row === 1 ? "flow" : null;
-      if (!key) return;
-      if (!scratch) { fms.setScratch(String(fms.fuelState[key])); return; }
-      if (!/^\d{1,5}$/.test(scratch) || Number(scratch) <= 0) return "invalid";
-      fms.setFuel(key, Number(scratch));
-      fms.setScratch("");
+    pages: () => 2,
+    render: (fms, index) => {
+      const unit = fms.fuelPage.unit, perf = fms.fuelPerformance();
+      const w = (kg: number | null, dashes = "-----") => `${kg === null ? dashes : Math.round(fuelIn(unit, kg))}${unit}`;
+      const heading = title("RTE 1 FUEL", `${index + 1}/2`, "ACT");
+      if (perf.estimated) (heading.left as Segment[]).push({ text: " " }, { text: "EST", color: "white", inverse: true });
+      const unitToggle: Segment = { text: `${unit}<`, color: "cyan" };
+      if (index === 1) {
+        const { empty, equip, crew, cargo } = fms.weights;
+        return [
+          heading,
+          caption(" FUEL+RES", "EMPTY WT "),
+          { left: { text: w(fms.fuelState.quantity) }, right: { text: w(empty) } },
+          caption(" RESERVE", "EQUIP WT "),
+          { left: { text: w(fms.fuelState.reserve) }, right: { text: w(equip) } },
+          caption(undefined, "CREW WT "),
+          { right: { text: w(crew) } },
+          caption(undefined, "CARGO WT "),
+          { right: { text: w(cargo) } },
+          // No landing is modelled, so no landing reserve is claimed as met (R3-03).
+          caption(" LDG RESERVE", "UNIT "),
+          { left: medium(fms.profile().reserve.reason.toUpperCase()), right: unitToggle },
+          undefined,
+          { left: prompt("<INIT/REF") },
+        ];
+      }
+      const point = perf.point;
+      const status = point ? (point.status === "CONDITIONAL" ? "COND" : point.status) : "UNKNOWN";
+      const reason = point ? point.reason : perf.fix === null ? "NO FIX" : "NOT PREDICTED";
+      const hoursMinutes = (hours: number) => { const m = Math.floor(hours * 60); return `${String(Math.floor(m / 60)).padStart(2, "0")}+${String(m % 60).padStart(2, "0")}`; };
+      const mileage = perf.mileage === null ? "---" : fuelIn(unit, perf.mileage) < 10 ? fixed(fuelIn(unit, perf.mileage), 1) : String(Math.round(fuelIn(unit, perf.mileage)));
+      return [
+        heading,
+        caption(" MAX RANGE", "GROSS WT "),
+        { left: medium(perf.maxRange === null ? "---NM" : `${Math.round(perf.maxRange)}NM`), right: medium(w(perf.grossWeight)) },
+        caption(" ENDURANCE", "FUEL WT "),
+        { left: medium(perf.endurance === null ? "--+--" : hoursMinutes(perf.endurance)), right: { text: w(perf.usable) } },
+        caption(" FUEL FLOW", "MILEAGE "),
+        { left: { text: `${Math.round(fuelIn(unit, perf.flow))}${unit}/HR` }, right: medium(`${mileage}${unit}/NM`) },
+        caption(" FUEL REMAINING AT", "FIX "),
+        { left: medium(w(perf.remaining), perf.remaining !== null && perf.remaining < 0 ? "amber" : "white"), right: { text: perf.fix ?? "-----", color: "green" } },
+        caption(` ${status}`, "UNIT "),
+        { left: reason ? small(reason, status === "UNKNOWN" ? "amber" : "white") : undefined, right: { text: `${unit}<`, color: "cyan" } },
+      ];
+    },
+    lsk: (fms, side, row, scratch, index) => {
+      const unit = fms.fuelPage.unit;
+      const weight = (min: number) => { const value = /^\d{1,6}$/.test(scratch) ? Number(scratch) : NaN; return value >= min ? fuelOut(unit, value) : null; };
+      if (side === "R" && row === 5) { fms.fuelPage.unit = unit === "KG" ? "LB" : "KG"; return; }
+      if (index === 1) {
+        if (side === "L" && row === 6) { fms.open("INIT_REF", 1); return; }
+        if (!scratch) return;
+        // FUEL+RES takes an entry only when the fuel computer cannot give the fuel on board; in v1 it always can.
+        if (side === "L" && row === 1) return "invalid";
+        if (side === "L" && row === 2) { const kg = weight(0); if (kg === null) return "invalid"; fms.setFuel("reserve", kg); fms.setScratch(""); return; }
+        const key = side === "R" ? (["empty", "equip", "crew", "cargo"] as const)[row - 1] : undefined;
+        if (!key) return;
+        const kg = weight(key === "empty" ? 1 : 0);
+        if (kg === null) return "invalid";
+        fms.weights[key] = kg;
+        fms.setScratch("");
+        return;
+      }
+      if (!scratch) return;
+      if (side === "R" && row === 2) { const kg = weight(0); if (kg === null) return "invalid"; fms.fuelPage.whatIfUsable = kg; fms.setScratch(""); return; }
+      if (side === "L" && row === 3) { const kg = weight(1); if (kg === null) return "invalid"; fms.fuelPage.whatIfFlow = kg; fms.setScratch(""); return; }
+      if (side === "R" && row === 4) {
+        if (!WAYPOINT.test(scratch)) return "invalid";
+        if (!fms.activeRoute.legs.some(leg => leg.kind === "wpt" && leg.ident === scratch)) { fms.advisory("NOT IN ROUTE"); return; }
+        fms.fuelPage.fix = scratch;
+        fms.setScratch("");
+      }
     },
   },
 

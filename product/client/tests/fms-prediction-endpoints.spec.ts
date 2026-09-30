@@ -24,6 +24,8 @@ const typeText = (unit: ScriptedFms, text: string) => {
 }
 const enter = (unit: ScriptedFms, text: string, lsk: CduFunction) => { typeText(unit, text); unit.press(lsk) }
 const lines = (unit: ScriptedFms) => screenText(unit.screen())
+/** PROGRESS 2/4: the prediction endpoint, its EFOB and its basis (plan C.11, R3-03). */
+const progressTwo = (unit: ScriptedFms) => { unit.press('PROG'); unit.press('NEXT') }
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
 
 /** The FMS with the Copter fixture active, the route to 87N and its point-in-space approach R190 executed. */
@@ -48,10 +50,13 @@ test('R3-03: the point-in-space approach predicts to CRANN as INSTRUMENT END, ne
   expect(endpoint).toMatchObject({ kind: 'INSTRUMENT END', label: 'CRANN (MAP)', point: { ident: 'CRANN', status: 'KNOWN' } })
   expect(endpoint!.point.eta).not.toBeNull()
   expect(endpoint!.point.fuel).not.toBeNull()
+  // PROGRESS 2/4 states the endpoint, its EFOB and its basis; FUEL 2/2 that no landing reserve is claimed.
+  progressTwo(unit)
+  expect(lines(unit)[3]).toMatch(/^ INSTR END\s+EFOB $/)
+  expect(lines(unit)[4]).toMatch(/^CRANN \(MAP\)\s+\d+KG$/)
+  expect(lines(unit)[6]).toMatch(/^KNOWN\s*$/)
   unit.press('FUEL')
-  expect(lines(unit)[5]).toMatch(/^ CRANN \(MAP\)\s+EFOB $/)
-  expect(lines(unit)[6]).toMatch(/^\d{4}Z\s+\d+KG$/)
-  expect(lines(unit)[7]).toMatch(/^ INSTR END\s+KNOWN $/)
+  unit.press('NEXT')
   expect(lines(unit)[10]).toMatch(/^LANDING NOT MODELLED/)
 })
 
@@ -100,9 +105,10 @@ test('R3-03: a MANUAL hold makes its fix and everything after it CONDITIONAL (ET
   expect(status('FERDI')).toMatchObject({ status: 'CONDITIONAL', reason: 'HOLD EXIT NEXT CROSSING' })
   expect(status('FERDI').eta).not.toBeNull()
   expect(profile.endpoint!.point).toMatchObject({ status: 'CONDITIONAL', reason: 'HOLD EXIT NEXT CROSSING' })
-  unit.press('FUEL')
-  expect(lines(unit)[7]).toMatch(/^ SITE ARR\s+COND $/)
-  expect(lines(unit)[8]).toMatch(/^HOLD EXIT NEXT CROSSING/)
+  progressTwo(unit)
+  expect(lines(unit)[3]).toMatch(/^ SITE ARR\s+EFOB $/)
+  expect(lines(unit)[6]).toMatch(/^COND\s*$/)
+  expect(lines(unit)[7]).toMatch(/^HOLD EXIT NEXT CROSSING\s*$/)
   // The RTA past the hold is computed, and CONDITIONAL; one before it is KNOWN.
   Object.assign(unit.rndz, { wpt: 'FERDI', time: unit.now.getTime() + 60 * 60_000 })
   expect(unit.rendezvous()).toMatchObject({ status: 'CONDITIONAL', reason: 'HOLD EXIT NEXT CROSSING' })
@@ -193,10 +199,11 @@ test('B1.7: held stationary off the plan, there is NO PROGRESS: no ETA or EFOB a
   // And an RTA across NO PROGRESS computes no speed (plan E4): the reason is shown instead.
   Object.assign(unit.rndz, { wpt: 'RDG', time: unit.now.getTime() + 20 * 60_000 })
   expect(unit.rendezvous()).toMatchObject({ required: null, status: 'UNKNOWN', reason: 'NO PROGRESS' })
-  unit.press('FUEL')
-  expect(lines(unit)[6]).toMatch(/^-----\s+-----KG$/)
-  expect(lines(unit)[7]).toMatch(/^ SITE ARR\s+UNKNOWN $/)
-  expect(lines(unit)[8]).toMatch(/^NO PROGRESS/)
+  progressTwo(unit)
+  expect(lines(unit)[3]).toMatch(/^ SITE ARR\s+EFOB $/)
+  expect(lines(unit)[4]).toMatch(/\s-----KG$/)
+  expect(lines(unit)[6]).toMatch(/^UNKNOWN\s*$/)
+  expect(lines(unit)[7]).toMatch(/^NO PROGRESS\s*$/)
 })
 
 test('B1.7: a leg the planned airspeed cannot make progress along (headwind at least the TAS) is UNKNOWN from there', () => {
@@ -340,9 +347,10 @@ test('D-H/R3-03: an AT TGT ALT hold is KNOWN plus a racetrack when the altitude 
   for (const ident of ['TIDUE', 'STAYS', 'CRANN']) expect(point(met, ident)).toMatchObject({ status: 'CONDITIONAL', reason: 'HOLD EXIT AT ALTITUDE' })
   expect(point(met, 'CRANN').eta).not.toBeNull()
   expect(met.profile().endpoint!.point).toMatchObject({ status: 'CONDITIONAL', reason: 'HOLD EXIT AT ALTITUDE' })
-  met.press('FUEL')
-  expect(lines(met)[7]).toMatch(/^ INSTR END\s+COND $/)
-  expect(lines(met)[8]).toMatch(/^HOLD EXIT AT ALTITUDE/)
+  progressTwo(met)
+  expect(lines(met)[3]).toMatch(/^ INSTR END\s+EFOB $/)
+  expect(lines(met)[6]).toMatch(/^COND\s*$/)
+  expect(lines(met)[7]).toMatch(/^HOLD EXIT AT ALTITUDE\s*$/)
   // At or below 2,000 is met too; a target that cannot be read is never predicted met.
   hold.altitude = '2500B'
   expect(point(met, 'STAYS').status).toBe('KNOWN')

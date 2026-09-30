@@ -52,6 +52,7 @@
     "fms-kbtv-demo.spec.ts",
     "fms-heliport-procedures.spec.ts",
     "fms-user-database.spec.ts",
+    "fms-fuel-pages.spec.ts",
     "fms-route-load.spec.ts",
     "fms-pins-approach.spec.ts",
     "fms-gps-scenario.spec.ts",
