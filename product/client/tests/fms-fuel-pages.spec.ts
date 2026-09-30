@@ -147,6 +147,23 @@ test('FUEL 2/2 (FUEL+WEIGHTS): the crew weights give the gross weight on 1/2, wh
   expect(lines(unit)[0]).toMatch(/^INIT\/REF INDEX/)
 })
 
+// Rev 2 B1.6: a hovering aircraft is airborne, whatever its ground speed; v1 has no ground state (ground operations are
+// Later). So a hover never brings ground planning: no ETEs from PLAN DATA's CRZ TAS and CRZ WIND where the airborne
+// predictions have none (NO PROGRESS), and no EST on the FUEL page, which the manual shows on the ground.
+test('a hover at zero ground speed stays airborne: no PLAN DATA ground planning, and FUEL is not EST (B1.6)', () => {
+  const { unit } = setup()
+  unit.setAircraft({ groundSpeed: 0 })
+  Object.assign(unit.planData, { cruiseTas: 140, cruiseWind: { direction: 300, speed: 25 } })
+  const points = unit.profile().points
+  expect(points.length).toBeGreaterThan(0)
+  expect(points.every(point => point.eta === null && point.reason === 'NO PROGRESS')).toBe(true)
+  unit.press('FUEL')
+  expect(lines(unit)[0]).toMatch(/^ACT RTE 1 FUEL\s+1\/2$/)
+  // The endurance stands; only the range and mileage, which need progress, are blank.
+  expect(lines(unit)[4]).toMatch(/^\d\d\+\d\d\s+\d+KG$/)
+  expect(lines(unit)[2]).toMatch(/^---NM/)
+})
+
 test('UNIT toggles KG and LB on both pages, and entries are read in the unit shown', () => {
   const { unit } = setup()
   const { quantity, flow, reserve } = unit.fuelState
