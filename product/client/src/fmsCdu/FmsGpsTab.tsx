@@ -46,10 +46,10 @@ const rejection = (a: ReceiverAssessment) => (a.reason === "INTEGRITY" && a.hil 
 function RoutingStrip({ view, fms }: { view: GpsView; fms: ScriptedFms }) {
   const [one, two] = view.receivers;
   const apart = view.difference();
-  const nav = fms.navState, chosen = fms.gpsStatus.chosen;
+  const nav = fms.navState, chosen = nav.gpsSource === null ? null : nav.gpsSource - 1;
   const source = chosen === null ? nav.mode : `GPS${chosen + 1}`;
   // The source as selected: "AUTO — FMS on GPS2", or the receiver chosen by hand.
-  const sourceText = `${fms.gpsNavSelected && fms.gpsReceiverChoice === "AUTO" ? "AUTO — " : ""}FMS on ${source}`;
+  const sourceText = `${fms.gpsNavSelected && fms.gpsReceiverChoice === "AUTO" ? "AUTO — " : ""}FMS on ${source}${nav.uncertain ? " (uncertain)" : ""}`;
   const lastTransfer = fms.gpsSelectionLog.find(event => event.kind === "TRANSFER");
   const box = (x: number, y: number, w: number, title: string, detail: string, tone: string, id: string) => (
     <g data-testid={id}>
@@ -59,8 +59,8 @@ function RoutingStrip({ view, fms }: { view: GpsView; fms: ScriptedFms }) {
     </g>
   );
   const assessed = fms.gpsStatus.assessed;
-  const tone = (index: 0 | 1) => (chosen === index ? "ok" : assessed[index].usable ? "standby" : assessed[index].reason === "SILENT" ? "fail" : "warn");
-  const role = (index: 0 | 1) => (chosen === index ? "in use" : assessed[index].usable ? "available / standby" : `not usable · ${rejection(assessed[index])}`);
+  const tone = (index: 0 | 1) => (chosen === index ? nav.uncertain ? "warn" : "ok" : assessed[index].usable ? "standby" : assessed[index].reason === "SILENT" ? "fail" : "warn");
+  const role = (index: 0 | 1) => (chosen === index ? nav.uncertain ? "in use · uncertain" : "in use" : assessed[index].usable ? "available / standby" : `not usable · ${rejection(assessed[index])}`);
   return (
     <section className="fmsBenchCard fmsGpsRouting" aria-label="Sensor routing">
       <h2>Sensor routing</h2>
@@ -68,7 +68,7 @@ function RoutingStrip({ view, fms }: { view: GpsView; fms: ScriptedFms }) {
         aria-label={`Sensor routing: GPS 1 ${modeText(one)} ${role(0)}, GPS 2 ${modeText(two)} ${role(1)}, ${sourceText}`}>
         {box(8, 8, 200, `GPS 1 · ${modeText(one)}`, role(0), tone(0), "route-gps1")}
         {box(8, 72, 200, `GPS 2 · ${modeText(two)}`, role(1), tone(1), "route-gps2")}
-        {box(280, 40, 170, "FMS nav solution", `${source} · ANP ${nav.anp.toFixed(2)}/RNP ${fms.requiredRnp.toFixed(2)}`, chosen === null && nav.mode === "DR" ? "warn" : "ok", "route-fms")}
+        {box(280, 40, 170, "FMS nav solution", `${source}${nav.uncertain ? " ?" : ""} · ANP ${nav.anp.toFixed(2)}/RNP ${fms.requiredRnp.toFixed(2)}`, nav.uncertain || nav.mode === "DR" ? "warn" : "ok", "route-fms")}
         {box(512, 40, 120, "EFIS", "PFD · ND", "ok", "route-efis")}
         <path d="M208 30 C 245 30, 245 62, 280 62" className={`fmsGpsLink ${chosen === 0 ? "" : "dashed"}`} data-testid="route-link-gps1" />
         <path d="M208 94 C 245 94, 245 62, 280 62" className={`fmsGpsLink ${chosen === 1 ? "" : "dashed"}`} data-testid="route-link-gps2" />
@@ -102,7 +102,7 @@ function ReceiverColumn({ name, rx, view, index, fms }: { name: string; rx: GpsR
   const raw = rx.rawBus();
   return (
     <div className="fmsGpsColumn">
-      <ReceiverCard name={name} raw={raw} transmitting={bus !== null} faults={faults} phase={fms.flightPhase} inUse={fms.gpsStatus.chosen === index} />
+      <ReceiverCard name={name} raw={raw} transmitting={bus !== null} faults={faults} phase={fms.flightPhase} inUse={fms.navState.gpsSource === index + 1} />
       <FaultControls name={name} raw={raw} faults={faults} stimulus={view.stimulus} index={index} held={view.integrityHeld} />
       <BusMonitor name={name} rx={rx} stimulus={view.stimulus} index={index} />
     </div>

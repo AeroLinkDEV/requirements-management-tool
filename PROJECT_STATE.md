@@ -411,6 +411,12 @@ display unit for engineers.
   helicopter low-speed/hover modes; it is not an installed aircraft's flight-dynamics model. Military tactical
   approaches are unavailable under the civil configuration.
 
+- **Civil measured navigation.** Timestamped sensor ports separate the FMS estimate from aircraft truth. GPS,
+  measured DME/DME and VOR/DME feed the estimate; DR uses heading, TAS and last-valid computed wind. Stale input
+  cannot navigate. S300 uncertain GPS retention is separate from stronger approach/hover authority. Predictive RAIM
+  and its PRN exclusions use visibly simulated sky geometry; real almanac prediction and physical avionics adapters
+  remain unavailable. The applicability matrix records radio, uncertainty and freshness assumptions.
+
 - The faceplate is rendered in Blender from `product/tools/AeroLink.FmsCduModel`, which uses the public CMC
   datasheet dimensions and the Operator's Manual front-panel figures. No manufacturer logo is shown.
 - The user selects one of nine hardware variations. Each variation relabels the seven annunciators and the second

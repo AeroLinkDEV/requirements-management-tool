@@ -476,7 +476,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           caption(`RNP/ANP ${forced ? "TEST" : nav.rnpManual === null ? fms.flightPhase : "MANUAL"}`),
           { left: medium(`${fixed(rnp, 2)}/${fixed(anp, 2)}NM`, anp > rnp ? "amber" : "white") },
           caption("NAV MODE"),
-          { left: { text: navModeText(fms), color: nav.mode === "DR" ? "amber" : "cyan" }, right: prompt("NAV STATUS>") },
+          { left: { text: navModeText(fms, true), color: nav.mode === "DR" || nav.uncertain ? "amber" : "cyan" }, right: prompt("NAV STATUS>") },
         ];
       }
       if (index === 1)

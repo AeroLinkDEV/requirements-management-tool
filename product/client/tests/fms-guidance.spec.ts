@@ -35,7 +35,7 @@ const active = (unit: ScriptedFms) => {
 
 test('a course-to-altitude leg holds its course until the altitude, then the direct-to-fix leg starts from there', () => {
   const { unit, fly } = setup()
-  unit.setAircraft({ altitude: 400, track: 251 })
+  unit.placeAircraft({ position: unit.truePosition, altitude: 400, track: 251 }, 'course-to-altitude start fixture')
   unit.selectProcedure('SID', 'RIDEA3', 'MUN')
   unit.press('EXEC')
   expect(active(unit)).toBe('(CA)')

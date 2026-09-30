@@ -5,6 +5,7 @@ import { ACTIVE_PROFILE, fmsBankLimit, type AircraftProfile } from "./profile";
 import type { ScriptedFms } from "./scriptedFms";
 import { speedCommandIas, verticalArrived, verticalCommand } from "./transition";
 import { altitudeMeets, type AltitudeConstraint, type ProfilePoint, type VerticalPhase } from "./vnav";
+import type { GuidanceOutputPort } from "./sensorPorts";
 
 /**
  * A simple flight model for the test bench: an aircraft that flies what the scripted FMS asks for, the way an
@@ -190,6 +191,8 @@ export type VerticalPath = { altitude: number; source: "VNAV" | "APPR"; coupled:
 
 export class FlightSimulator {
   private readonly fms: ScriptedFms;
+  private outputSequence = 0;
+  private readonly outputPort: GuidanceOutputPort<Guidance> | null;
   private readonly profile: AircraftProfile["parameters"];
   private get bankLimit() { return this.profile.afcsBankLimit.value; }
   private get steeringLimit() { return fmsBankLimit(this.fms.aircraftProfile); }
@@ -243,7 +246,7 @@ export class FlightSimulator {
   private sarPlan: { points: LatLon[]; index: number } | null = null;
   private last: Guidance;
 
-  constructor(fms: ScriptedFms) {
+  constructor(fms: ScriptedFms, outputPort?: GuidanceOutputPort<Guidance>) {
     this.fms = fms;
     // The FMS times the manual hold's next crossing along the path flown here: where the aircraft is in the entry or the
     // racetrack, and which segment ends at the fix passage (Astra F1). In this bench the flight builds the hold path the
@@ -252,6 +255,7 @@ export class FlightSimulator {
       const plan = this.holdPlan;
       return plan ? { segments: plan.segments, index: plan.index, passageAt: plan.index <= plan.entryEnd ? plan.entryEnd : plan.segments.length - 1 } : null;
     });
+    this.outputPort = outputPort ?? null;
     this.profile = fms.aircraftProfile.parameters;
     this.hoverHeightFt = this.profile.hoverHeightDefault.value;
     this.airspeed = fms.targetSpeed;
@@ -585,6 +589,7 @@ export class FlightSimulator {
 
   private integrate(dt: number) {
     const fms = this.fms;
+    fms.refreshSensorInput();
     this.watchFailure();
     this.watchGoAround();
     this.watchGpsLateral();
@@ -595,6 +600,9 @@ export class FlightSimulator {
     // target the hold flies from this first step, not the approach's.
     const guidance = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;
     this.last = guidance;
+    this.outputPort?.write({ at: fms.now.getTime(), sequence: ++this.outputSequence,
+      status: fms.hasCondition("fmsFail") ? "FAIL" : guidance.desiredTrack === null ? "NCD" : "NORMAL",
+      value: fms.hasCondition("fmsFail") ? null : structuredClone(guidance) });
     // The airspeed moves toward the target at the acceleration limit. Bank toward the command at the roll-rate limit,
     // then the heading turns at the rate that bank gives through the air; the wind makes the track and ground speed.
     // Under the ADVISORY policy the crew's selected speed; otherwise the FMS speed (cruise, constraints, rendezvous).
@@ -656,7 +664,7 @@ export class FlightSimulator {
     // Over the ground it would be meaningless at low speed: a helicopter climbing out of a hover at 1 kt of ground speed
     // is nearly level, not pointing its antennas at the horizon.
     const pitch = clamp(deg(Math.atan(verticalSpeed / 60 / (Math.max(this.airspeed, PITCH_SPEED_FLOOR) * 1.68781))), -PITCH_LIMIT, PITCH_LIMIT);
-    fms.setAircraft({ position, track, heading, groundSpeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError, bank: this.bank, pitch });
+    fms.setAircraft({ position, track, heading, groundSpeed, tas: this.airspeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError, bank: this.bank, pitch });
     // The path for the deviation display: the final approach path on final (coupled only when captured), otherwise the
     // descent path. None while the FMS has failed: it computes nothing to show.
     const final = this.fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
@@ -1231,7 +1239,7 @@ export class FlightSimulator {
       this.lateral = "HDG";
       this.heading = Math.round(norm360(this.fms.heading));
       this.held = true;
-      if (dt > 0) this.record("LNAV LOST", `no active leg; HDG HOLD ${String(this.heading).padStart(3, "0")}°T`);
+      if (dt > 0) this.record("LNAV LOST", `${this.fms.navState.mode === "DR" && !this.fms.navState.airValid ? "position input unavailable" : "no active leg"}; HDG HOLD ${String(this.heading).padStart(3, "0")}°T`);
     }
     if (this.lateral === "LNAV") return managed;
     // Capture when the managed path is close and the aircraft is not heading away from it.
@@ -1249,6 +1257,8 @@ export class FlightSimulator {
     const route = fms.activeRoute;
     const leg = route.legs[0];
     const base = { targetAltitude: this.targetAltitude() };
+    const none = { mode: "LNAV" as const, legFrom: null, legTo: null, desiredTrack: null, crossTrack: 0, distanceToGo: null, bankCommand: 0, ...base };
+    if (fms.navState.mode === "DR" && !fms.navState.airValid) return { ...none, mode: "HDG" };
     const sequencing = dt > 0 && this.lateral === "LNAV";
     this.lead = 0;
 
@@ -1265,7 +1275,6 @@ export class FlightSimulator {
     if (!this.joinPlan && onJoin) this.joinPlan = { segments: join!.segments, index: 0, id: procedure! };
     if (this.joinPlan) return { ...this.flyJoin(sequencing ? dt : 0), ...base, mode: "LNAV" };
 
-    const none = { mode: "LNAV" as const, legFrom: null, legTo: null, desiredTrack: null, crossTrack: 0, distanceToGo: null, bankCommand: 0, ...base };
     if (!leg || leg.kind === "disco") return { ...none, mode: "HDG" };
     if (leg.kind === "cond") return { ...this.flyConditional(leg, route.legs[1], sequencing), ...base };
 

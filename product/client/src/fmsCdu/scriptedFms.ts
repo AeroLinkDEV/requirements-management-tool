@@ -10,15 +10,18 @@ import {
   type SarPattern, type Uplink,
 } from "./fmsModel";
 import { Constellation } from "./gnss";
-import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput } from "./gps";
+import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus } from "./gps";
 import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas } from "./kinematics";
 import {
   ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, fasRequirement, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
   type GpsChoice,
 } from "./gpsSensors";
-import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type ProcedureHold, type StoredRoute } from "./navData";
+import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type Navaid, type ProcedureHold, type StoredRoute } from "./navData";
 import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
-import { LAB_DR_ERROR_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
+import { RNP_DEFAULTS, type FlightPhase, type NavMode } from "./navigation";
+import { CivilNavigation, type PositionMeasurement } from "./civilNavigation";
+import { BenchRadioReceiver, solveRadio } from "./radioNavigation";
+import { sampled, type SensorFrame, type SensorInputPort } from "./sensorPorts";
 import { NAV_PAGES } from "./navPages";
 import { holdAllowance, holdPathToPassage, piecesHours, predictionEndpoint, type HoldPathReport, type PathPiece } from "./predictions";
 import { MAX_BANK } from "./flight";
@@ -160,10 +163,16 @@ export class ScriptedFms implements CduBackend {
   private here: LatLon = { ...START_POSITION };
   /** Where the aircraft really is; here is where the FMS believes it is. */
   private truth: LatLon = { ...START_POSITION };
-  /** The FMS position error, NM east and north of the true position. */
-  private error = { x: 0, y: 0 };
+  private readonly navigation: CivilNavigation;
+  private readonly radioReceiver: BenchRadioReceiver;
+  private readonly sensorPort: SensorInputPort | null;
+  private sensorSequence = 0;
+  private sensorFrame: SensorFrame | null = null;
+  readonly predictiveRaim = { ident: null as string | null, eta: null as number | null, requestedAt: null as number | null };
+  private readonly raimExcluded = new Set<number>();
+  private automaticRaimFor: string | null = null;
   private nav = {
-    mode: "GPS" as NavMode, anp: 0.05, dmes: [] as string[], vor: null as string | null, rnpManual: null as number | null,
+    mode: "GPS" as NavMode, anp: 0.05, dmes: [] as string[], vor: null as string | null, rnpManual: null as number | null, uncertain: false, airValid: true,
     unableSince: null as number | null, unableAlerted: false, integrityAlerted: false, approachIntegrityAlerted: false, armAlerted: false,
     /** The RNAV approach had vertical guidance from the GPS while in the approach phase (to catch its loss, 3b). */
     approachVerticalSeen: false,
@@ -264,7 +273,7 @@ export class ScriptedFms implements CduBackend {
   /** The ident shown on REF NAV DATA, and an airway chosen on RTE 2 waiting for its TO fix. */
   navDataQuery: string | null = null;
   pendingVia: string | null = null;
-  private aircraft = { track: courseDeg(START_POSITION, { lat: 45.2150, lon: -75.3900 }), groundSpeed: 120, altitude: 3000, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0, heading: null as number | null };
+  private aircraft = { track: courseDeg(START_POSITION, { lat: 45.2150, lon: -75.3900 }), groundSpeed: 120, tas: 120, altitude: 3000, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0, heading: null as number | null };
   /** Whether each receiver has its baro altitude input (the bench can take it from one). */
   private gpsBaro: [boolean, boolean] = [true, true];
   /** Where the active leg starts: the last waypoint passed, or present position when a direct-to was executed. */
@@ -290,7 +299,14 @@ export class ScriptedFms implements CduBackend {
    * The radio altimeter: the aircraft's physical height above the declared surface, NCD off it or above its range,
    * FAIL when failed. Independent of the barometric altitude setting.
    */
-  get radioHeight() { return radioHeight(this.declaredSurface, this.truth, this.altitude, this.hasCondition("raFail")); }
+  get radioHeight() {
+    if (!this.sensorPort) return radioHeight(this.declaredSurface, this.truth, this.altitude, this.hasCondition("raFail"));
+    const sample = this.sensorFrame?.radioHeight;
+    const value = sampled(sample, this.now.getTime(), this.sensorMaxAge);
+    return sample?.status === "FAIL" ? { status: "FAIL" as const, value: null }
+      : value !== null && Number.isFinite(value) && value >= 0 && value <= 2500
+        ? { status: "NORMAL" as const, value } : { status: "NCD" as const, value: null };
+  }
   /**
    * The heading the aircraft flies (degrees true). With wind it differs from the track by the crab angle (kinematics.ts);
    * before the flight simulation first reports it, the track stands in.
@@ -389,18 +405,32 @@ export class ScriptedFms implements CduBackend {
   /** The aircraft profile this FMS and its flight simulation fly (profile.ts); the helicopter profile unless given. */
   readonly aircraftProfile: AircraftProfile;
 
-  constructor(clock: () => Date = () => new Date(), options: { profile?: AircraftProfile; userDatabase?: { store: UserDatabaseStore; scope: UserScope } } = {}) {
+  constructor(clock: () => Date = () => new Date(), options: { profile?: AircraftProfile; sensors?: SensorInputPort; userDatabase?: { store: UserDatabaseStore; scope: UserScope } } = {}) {
     this.clock = clock;
+    this.sensorPort = options.sensors ?? null;
     this.aircraftProfile = options.profile ?? ACTIVE_PROFILE;
+    this.navigation = new CivilNavigation(START_POSITION, this.aircraftProfile.parameters);
+    this.radioReceiver = new BenchRadioReceiver(this.aircraftProfile.parameters);
     this.userStore = options.userDatabase?.store ?? this.userStore;
     this.userScope = options.userDatabase?.scope ?? { userId: "local", profileId: this.aircraftProfile.id };
     this.loadUserDatabase();
     this.planData.cruiseTas = this.aircraftProfile.parameters.planningCruiseTas.value;
     this.vnav.cruiseSpeed = this.aircraftProfile.parameters.cruiseSpeed.value;
+    // The warm airborne seed's ground velocity and air data must describe the same plant. The previous seed treated
+    // ground speed as TAS despite a nonzero wind, making the first computed wind spuriously zero.
+    const track = this.aircraft.track * Math.PI / 180, toward = (this.wind.direction + 180) * Math.PI / 180;
+    const north = this.aircraft.groundSpeed * Math.cos(track) - this.wind.speed * Math.cos(toward);
+    const east = this.aircraft.groundSpeed * Math.sin(track) - this.wind.speed * Math.sin(toward);
+    this.aircraft.tas = Math.hypot(north, east);
+    this.aircraft.heading = (Math.atan2(east, north) * 180 / Math.PI + 360) % 360;
     this.pinActive();
     // The receivers start warm: powered a minute before the session, past self-test, first fix and SBAS acquisition.
     const start = this.now.getTime();
     for (const offset of [60_000, 40_000]) for (const receiver of this.receivers) receiver.step(this.gpsInput(start - offset));
+    // The default airborne demonstration also starts with its radios already acquired. Later tuning changes and
+    // reacquisition after loss observe the declared delay; cold start uses the initialization workflow.
+    this.radioReceiver.tune(this.autoRadioStations(), start - 40_000);
+    this.radioReceiver.sample(this.truth, this.altitude, start - 40_000);
     this.updateNavigation(0);
   }
 
@@ -523,7 +553,7 @@ export class ScriptedFms implements CduBackend {
     if (!leg) return "end";
     if (leg.kind === "disco") return "discontinuity";
     const at = leg.kind === "wpt" ? this.coordinates(leg.ident) : undefined;
-    if (at) { this.truth = { ...at }; this.here = this.withError(this.truth); }
+    if (at) { this.truth = { ...at }; this.updateNavigation(0); }
     this.arrive();
     this.emit();
     return "jumped";
@@ -557,7 +587,7 @@ export class ScriptedFms implements CduBackend {
   placeAircraft(state: { position: LatLon; track: number; altitude: number }, reason: string) {
     // Crabbed into the wind so the given track is the one flown (the heading when the track cannot be held is the track).
     const hold = holdTrack(this.targetSpeed, state.track, this.wind);
-    this.setAircraft({ ...state, heading: hold.feasible ? hold.heading : state.track, groundSpeed: hold.feasible ? hold.groundSpeed : 0, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0 });
+    this.setAircraft({ ...state, tas: this.targetSpeed, heading: hold.feasible ? hold.heading : state.track, groundSpeed: hold.feasible ? hold.groundSpeed : 0, verticalSpeed: 0, crossTrack: 0, trackError: 0, bank: 0, pitch: 0 });
     this.engineering = [...this.engineering, {
       at: this.now, action: "PLACE AIRCRAFT",
       detail: `${reason}: ${formatPosition(state.position)}, track ${Math.round(state.track)}°, ${Math.round(state.altitude)} FT`,
@@ -646,61 +676,126 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** The flight simulation reports the aircraft's state after each step. */
-  setAircraft(state: Partial<{ position: LatLon; track: number; heading: number; groundSpeed: number; altitude: number; verticalSpeed: number; crossTrack: number; trackError: number; bank: number; pitch: number }>) {
-    // The simulation reports where the aircraft really is; the FMS position is that plus its navigation error.
-    if (state.position) { this.truth = state.position; this.here = this.withError(this.truth); }
+  setAircraft(state: Partial<{ position: LatLon; track: number; heading: number; groundSpeed: number; tas: number; altitude: number; verticalSpeed: number; crossTrack: number; trackError: number; bank: number; pitch: number }>) {
+    // Plant state feeds the bench's sensor generators. Only measured navigation may change the FMS position.
+    if (state.position) this.truth = state.position;
     const { position: _position, ...rest } = state;
     Object.assign(this.aircraft, rest);
   }
 
   // ------------------------------------------------------------------ navigation sensors (navigation.ts)
 
-  private withError(at: LatLon) {
-    const nm = Math.hypot(this.error.x, this.error.y);
-    if (nm < 1e-6) return { ...at };
-    return offset(at, (Math.atan2(this.error.x, this.error.y) * 180) / Math.PI, nm);
+  private autoRadioStations() {
+    return this.db.nearby(this.here, 160).filter((entry): entry is Navaid => entry.kind === "navaid" && entry.type !== "NDB"
+      && !this.inhibited.includes(entry.ident)).sort((a, b) => distanceNm(this.here, a.position) - distanceNm(this.here, b.position)).slice(0, 6);
+  }
+
+  private sampleSensors(): SensorFrame | null {
+    if (this.sensorPort) return this.sensorPort.read();
+    const now = this.now.getTime(), sequence = ++this.sensorSequence;
+    const input = this.gpsInput(now);
+    if (this.injected.has("gpsIntegrity")) this.applyGpsIntegrityCondition(input);
+    this.sendApproach();
+    this.receivers.forEach((receiver, i) => receiver.step(this.gpsBaro[i] ? input : { ...input, baroAltitude: null }));
+    this.radioReceiver.tune(this.autoRadioStations(), now);
+    const gpsWord = (index: number) => ({ at: now, sequence, status: "NORMAL" as const, value: this.receivers[index].bus() });
+    const gps: SensorFrame["gps"] = [gpsWord(0), gpsWord(1)];
+    const ra = radioHeight(this.declaredSurface, this.truth, this.altitude, this.hasCondition("raFail"));
+    return { air: { at: now, sequence, status: "NORMAL", value: { headingTrue: this.heading, tasKt: this.aircraft.tas, altitudeFt: this.altitude } },
+      attitude: { at: now, sequence, status: "NORMAL", value: { bank: this.aircraft.bank, pitch: this.aircraft.pitch } },
+      radioHeight: { at: now, sequence, status: ra.status, value: ra.value },
+      gps, radios: this.radioReceiver.sample(this.truth, this.altitude, now, this.injected.has("dmeOutage")) };
+  }
+
+  /** Last input as published, for replay/adapter diagnostics. This is separate from the computed position. */
+  get navigationInputs(): SensorFrame | null { return this.sensorFrame ? structuredClone(this.sensorFrame) : null; }
+
+  /** Read a connected simulator before computing guidance so an expired input cannot command one extra step. */
+  refreshSensorInput() { this.updateNavigation(0); }
+
+  get raimDeselectedSatellites() { return [...this.raimExcluded].sort((a, b) => a - b); }
+  deselectRaimSatellite(prn: number, deselected: boolean) {
+    if (!Number.isInteger(prn) || prn < 1 || prn > 32) return;
+    if (deselected) this.raimExcluded.add(prn); else this.raimExcluded.delete(prn);
+    this.predictiveRaim.requestedAt = this.now.getTime();
+  }
+  private raimPosition(ident: string): LatLon | undefined {
+    const airport = this.db.airport(ident);
+    const approach = this.executedApproach;
+    const map = approach?.instrumentEnd ?? approach?.runway;
+    return airport && ident === this.active.dest && map ? this.coordinates(map) : this.coordinates(ident);
+  }
+  predictRaimAt(ident: string, automatic = false): boolean {
+    if (!this.raimPosition(ident)) return false;
+    const airport = this.db.airport(ident);
+    const map = airport && ident === this.active.dest ? this.executedApproach?.instrumentEnd ?? this.executedApproach?.runway : null;
+    const point = this.profile().points.find(p => p.ident === (map ?? ident));
+    this.predictiveRaim.ident = ident;
+    this.predictiveRaim.eta = point?.eta ?? null;
+    this.predictiveRaim.requestedAt = this.now.getTime();
+    if (!automatic) this.setScratch("");
+    return true;
+  }
+  predictRaimEta(text: string): boolean {
+    const match = /^(\d{2})(\d{2})Z?$/.exec(text);
+    if (!match || Number(match[1]) > 23 || Number(match[2]) > 59 || !this.predictiveRaim.ident) return false;
+    const now = this.now, at = new Date(now);
+    at.setUTCHours(Number(match[1]), Number(match[2]), 0, 0);
+    this.predictiveRaim.eta = at.getTime() < now.getTime() ? at.getTime() + 86_400_000 : at.getTime();
+    this.predictiveRaim.requestedAt = now.getTime();
+    this.setScratch("");
+    return true;
+  }
+  get predictedRaim(): { at: number; hil: number | null; phase: "APPR" | "TERM" | "ENRT" | "NONE" | "****" }[] {
+    const request = this.predictiveRaim;
+    const position = request.ident ? this.raimPosition(request.ident) : undefined;
+    if (request.eta === null || request.requestedAt === null || !position || this.now.getTime() - request.requestedAt < 1000) return [];
+    return [-15, -10, -5, 0, 5, 10, 15].map(minutes => {
+      const at = request.eta! + minutes * 60_000;
+      const index = this.gpsChoice === "GPS2" ? 1 : this.nav.gpsSource === 2 ? 1 : 0;
+      const hil = this.receivers[index].predictRaim(at, position, this.raimDeselectedSatellites);
+      const phase = hil === null || this.sensorPort !== null ? "****" : hil <= 0.3 ? "APPR" : hil <= 1 ? "TERM" : hil <= 2 ? "ENRT" : "NONE";
+      return { at, hil: this.sensorPort !== null ? null : hil, phase };
+    });
   }
 
   /**
-   * Chooses the navigation source and updates the FMS position error and ANP, then checks ANP against RNP. In
-   * dead reckoning the temporary laboratory error grows; when a better source returns the position jumps back,
-   * which the FMS reports as a POSITION SHIFT.
+   * Chooses measured navigation, propagates DR from measured air data and the last computed wind, and checks ANP
+   * against RNP. A returning position source can cause a reported POSITION SHIFT.
    */
   updateNavigation(dt: number) {
-    const gps = this.updateGps();
-    const chosen = gps.chosen === null ? null : gps.assessed[gps.chosen];
-    const inputs = {
-      gpsAvailable: chosen !== null,
-      gpsIntegrity: true,
-      dmeAvailable: !this.injected.has("dmeOutage"),
-      inhibited: this.inhibited,
-    };
+    this.sensorFrame = this.sampleSensors();
+    const gps = this.updateGps(this.sensorFrame);
     const previous = this.nav.mode, previousSource = this.nav.gpsSource;
-    const selection = selectSources(this.db.nearby(this.truth, 160), this.truth, this.altitude, inputs);
-    const next = (target: { nm: number; bearing: number }) =>
-      ({ x: target.nm * Math.sin((target.bearing * Math.PI) / 180), y: target.nm * Math.cos((target.bearing * Math.PI) / 180) });
-    if (selection.mode === "DR") {
-      const drift = sourceError("DR");
-      const grow = (LAB_DR_ERROR_NM_PER_HOUR * dt) / 3600;
-      this.error = { x: this.error.x + grow * Math.sin((drift.bearing * Math.PI) / 180), y: this.error.y + grow * Math.cos((drift.bearing * Math.PI) / 180) };
-      this.here = this.withError(this.truth);
-    } else {
-      // In GPS mode the position is the chosen receiver's fix (110/120, 111/121); the error is kept from it, so dead
-      // reckoning continues from where GPS left the FMS (3a.3). Radio updating keeps its synthetic error.
-      const fix = selection.mode === "GPS" && chosen?.fix ? chosen.fix : null;
-      const target = fix ? next({ nm: distanceNm(this.truth, fix), bearing: bearingDeg(this.truth, fix) }) : next(sourceError(selection.mode));
-      if (Math.hypot(target.x - this.error.x, target.y - this.error.y) > 0.5) this.alert(alert("POSITION SHIFT"));
-      this.error = target;
-      this.here = fix ? { ...fix } : this.withError(this.truth);
-    }
-    const errorNm = Math.hypot(this.error.x, this.error.y);
-    const gpsSource = selection.mode === "GPS" && gps.chosen !== null ? (gps.chosen + 1) as 1 | 2 : null;
-    this.nav = {
-      ...this.nav, mode: selection.mode, dmes: selection.dmes.map(d => d.ident), vor: selection.vor?.ident ?? null, gpsSource,
-      // ANP from the receiver's HFOM (247), floored; its HIL when HFOM is not valid (3a.3).
-      anp: selection.mode === "DR" ? Math.max(0.1, errorNm * 1.3 + 0.05)
-        : gpsSource !== null ? Math.max(ANP_FLOOR_NM, chosen?.hfom ?? chosen?.hil ?? 0.3) : selection.baseAnp,
+    const now = this.now.getTime();
+    const air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
+    const radio = air ? solveRadio((this.sensorFrame?.radios ?? []).filter(observation => !this.inhibited.includes(observation.station.ident)), this.here, air.altitudeFt, now, this.aircraftProfile.parameters) : null;
+    const measurement = (index: number, uncertain = false): PositionMeasurement | null => {
+      const assessed = gps.assessed[index], bus = gps.buses[index];
+      if (!assessed?.fix || !bus) return null;
+      const velocity = (label: "166" | "174") => bus[label].ssm === "NORMAL" && Number.isFinite(bus[label].value) ? bus[label].value : null;
+      return { position: assessed.fix, receiver: (index + 1) as 1 | 2,
+        anp: uncertain ? Math.max(assessed.hil ?? 0, assessed.hfom ?? 0) : Math.max(ANP_FLOOR_NM, assessed.hfom ?? assessed.hil ?? 0.3),
+        northKt: velocity("166"), eastKt: velocity("174") };
     };
+    const uncertainOrder = candidates(this.gpsChoice, this.gpsSelected);
+    if (previousSource !== null && uncertainOrder.includes(previousSource - 1)) uncertainOrder.sort(index => index === previousSource - 1 ? -1 : 1);
+    const uncertainIndex = uncertainOrder.find(index => gps.assessed[index].reason === "INTEGRITY" && gps.assessed[index].fix !== null);
+    const predicted = this.navigation.current.position;
+    const selection = this.navigation.update({ dt, air, gps: gps.chosen === null ? null : measurement(gps.chosen),
+      uncertainGps: uncertainIndex === undefined ? null : measurement(uncertainIndex, true), radio,
+      radioApproved: this.flightPhase !== "APPROACH", rnp: this.requiredRnp });
+    if (selection.mode !== "DR" && distanceNm(predicted, selection.position) > 0.5) this.alert(alert("POSITION SHIFT"));
+    this.here = selection.position;
+    const gpsSource = selection.gpsSource;
+    this.nav = {
+      ...this.nav, mode: selection.mode, dmes: selection.dmes, vor: selection.vor, gpsSource,
+      anp: selection.anp, uncertain: selection.uncertain, airValid: selection.airValid,
+    };
+    const choice = this.gpsSelected ? this.gpsChoice : "OFF";
+    for (const index of this.selectionLog.update(this.now, gps.assessed, gpsSource === null ? null : gpsSource - 1, choice, gps.transferred)) {
+      if (this.gpsSelected && !(selection.uncertain && gpsSource === index + 1)) this.alert(alert(`GPS${index + 1} NOT USABLE`));
+    }
     if (selection.mode !== previous || gpsSource !== previousSource) {
       this.sourceLog = [{ at: this.now, source: gpsSource !== null ? `GPS${gpsSource}` : selection.mode }, ...this.sourceLog].slice(0, 50);
     }
@@ -716,7 +811,6 @@ export class ScriptedFms implements CduBackend {
 
     // ANP above RNP for longer than the time to alert of the phase: CHECK ANP, once per episode. It reads the same
     // effective values as the pages and the lamp (R11).
-    const now = this.now.getTime();
     const { alertSeconds } = RNP_DEFAULTS[this.flightPhase];
     const performance = this.navPerformance;
     if (performance.anp > performance.rnp) {
@@ -728,6 +822,12 @@ export class ScriptedFms implements CduBackend {
     const first = this.active.legs[0];
     const fafPosition = faf ? this.coordinates(faf) : undefined;
     const nearFaf = first?.kind === "wpt" && first.ident === faf && fafPosition !== undefined && distanceNm(this.here, fafPosition) <= 2;
+    const automaticRaim = first?.kind === "wpt" && first.ident === faf && fafPosition !== undefined && distanceNm(this.here, fafPosition) <= 6;
+    const raimKey = this.executedApproach ? `${this.planRevision}:${this.executedApproach.ident}` : null;
+    if (automaticRaim && raimKey && this.automaticRaimFor !== raimKey) {
+      this.automaticRaimFor = raimKey;
+      this.predictRaimAt(this.active.dest, true);
+    }
     if (nearFaf && !this.armedApproach) {
       if (!this.nav.armAlerted) { this.nav.armAlerted = true; this.alert(alert("ARM APPROACH")); }
     } else if (!nearFaf) this.nav.armAlerted = false;
@@ -757,17 +857,16 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** Steps both receivers and judges each bus against the phase's alert limit; chooses the one to navigate on. */
-  private updateGps() {
-    const input = this.gpsInput(this.now.getTime());
-    if (this.injected.has("gpsIntegrity")) this.applyGpsIntegrityCondition(input);
-    this.sendApproach();
-    this.receivers.forEach((receiver, i) => receiver.step(this.gpsBaro[i] ? input : { ...input, baroAltitude: null }));
+  private updateGps(frame: SensorFrame | null) {
+    const time = this.now.getTime();
+    const buses = [sampled(frame?.gps[0], time, this.sensorMaxAge), sampled(frame?.gps[1], time, this.sensorMaxAge)];
     const hal = HAL_NM[this.flightPhase];
-    const assessed = this.receivers.map(receiver => assessReceiver(receiver.bus(), hal));
+    const assessed = buses.map(bus => assessReceiver(bus, hal));
     const order = candidates(this.gpsChoice, this.gpsSelected);
     const selection = this.autoSelection.choose({
-      choice: this.gpsChoice, selected: this.gpsSelected, assessed, buses: this.receivers.map(receiver => receiver.bus()), time: input.time,
-      position: this.truth, executedCrc: this.pinnedFas?.fas.crc ?? null, sentCrc: this.sentFas?.crc ?? null, approachArmed: this.armedApproach,
+      choice: this.gpsChoice, selected: this.gpsSelected, assessed, buses, time,
+      position: assessed[this.nav.gpsSource === 2 ? 1 : 0]?.fix ?? this.here, positionSource: this.nav.gpsSource === null ? null : this.nav.gpsSource - 1,
+      executedCrc: this.pinnedFas?.fas.crc ?? null, sentCrc: this.sentFas?.crc ?? null, approachArmed: this.armedApproach,
     });
     const chosen = selection.chosen;
     this.gpsSelection = { qualified: selection.qualified, refused: selection.refused };
@@ -775,10 +874,8 @@ export class ScriptedFms implements CduBackend {
     if (selection.transferred && chosen !== null) this.alert(alert(`APPR ON GPS${chosen + 1}`));
     // A receiver lost is annunciated whether or not the other takes over: a transfer never hides the failure or the lost
     // redundancy. Its recovery is logged, and by itself changes nothing.
-    const choice = this.gpsSelected ? this.gpsChoice : "OFF";
-    for (const index of this.selectionLog.update(this.now, assessed, chosen, choice, selection.transferred)) if (this.gpsSelected) this.alert(alert(`GPS${index + 1} NOT USABLE`));
     this.gpsAssessment = { assessed, chosen };
-    return { assessed, chosen, integrityLost: order.some(index => assessed[index].reason === "INTEGRITY") };
+    return { assessed, chosen, buses, transferred: selection.transferred, integrityLost: order.some(index => assessed[index].reason === "INTEGRITY") };
   }
 
   /**
@@ -826,6 +923,8 @@ export class ScriptedFms implements CduBackend {
 
   /** GPS1 and GPS2, for the bench to read and to inject faults into; call gpsUpdated after changing one. */
   get gps(): readonly GpsReceiver[] { return this.receivers; }
+  private get sensorMaxAge() { return this.aircraftProfile.parameters.sensorMaxAge.value * 1000; }
+  private gpsBus(index: number): GpsBus | null { return sampled(this.sensorFrame?.gps[index], this.now.getTime(), this.sensorMaxAge); }
   /**
    * The feedback a hover hold may use (plan R3-02): the receiver the preserved navigation policy has selected as usable
    * (the #1243 assessment with #1251's AUTO or manual selection; the FMS in GPS mode), with a valid fix and both
@@ -836,7 +935,7 @@ export class ScriptedFms implements CduBackend {
     if (source === null) return null;
     const assessed = this.gpsAssessment.assessed[source - 1];
     if (!assessed?.usable || !assessed.fix) return null;
-    const bus = this.receivers[source - 1].bus();
+    const bus = this.gpsBus(source - 1);
     const north = bus?.["166"], east = bus?.["174"];
     if (!north || !east || north.ssm !== "NORMAL" || east.ssm !== "NORMAL") return null;
     if (typeof north.value !== "number" || typeof east.value !== "number" || !Number.isFinite(north.value) || !Number.isFinite(east.value)) return null;
@@ -895,10 +994,14 @@ export class ScriptedFms implements CduBackend {
   get fafAltitudeCorrected() { return this.vnav.fafAltitude + this.coldCorrection; }
 
   /**
-   * Valid barometric altitude, or null when it is not valid. No air data failure is modelled yet, so it is always the
-   * altitude; the procedure speed release reads null as invalid (R3-04).
+   * Valid barometric altitude, or null without fresh connected air data. The default bench's ideal air-data generator
+   * has no failure injection; the procedure speed release reads null as invalid (R3-04).
    */
-  get validBaroAltitude(): number | null { return this.altitude; }
+  get validBaroAltitude(): number | null {
+    if (!this.sensorPort) return this.altitude;
+    const altitude = sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge)?.altitudeFt;
+    return altitude !== undefined && Number.isFinite(altitude) ? altitude : null;
+  }
 
   /** The procedure speed limit in force on the executed approach (C.5, procedureSpeed.ts), knots indicated; or null. */
   get procedureSpeed(): ProcedureSpeed | null {
@@ -1422,7 +1525,7 @@ export class ScriptedFms implements CduBackend {
     const chosen = this.gpsAssessment.chosen;
     if (!this.gpsSelection.qualified) return { annunciation: "NO APPR", lateral: false, vertical: false, reason: "GPS SOURCE CHANGE NOT QUALIFIED" };
     // Only an approach the data declares LNAV only is flown without a FAS block; a missing or unreadable one is NO APPR.
-    return approachAuthority(chosen === null ? null : this.receivers[chosen].bus(), chosen === null ? null : this.gpsAssessment.assessed[chosen],
+    return approachAuthority(chosen === null ? null : this.gpsBus(chosen), chosen === null ? null : this.gpsAssessment.assessed[chosen],
       fasRequirement(approach!, this.pinnedFas?.fas ?? null));
   }
 
@@ -1433,7 +1536,7 @@ export class ScriptedFms implements CduBackend {
   get gpsApproach(): GpsApproachWords | null {
     if (findProcedure(this.db, this.active, "APPROACH")?.approachType !== "RNAV" || this.nav.mode !== "GPS") return null;
     const chosen = this.gpsAssessment.chosen;
-    return chosen === null ? null : approachWords(this.receivers[chosen].bus());
+    return chosen === null ? null : approachWords(this.gpsBus(chosen));
   }
 
   /** The final approach course of the FAS block sent (LTP to FPAP), degrees true; null without one. */
@@ -1551,15 +1654,14 @@ export class ScriptedFms implements CduBackend {
 
   /**
    * SET POS on POS INIT (R26). The entry is recorded as the position reference. In dead reckoning, with no sensor to
-   * correct it, it also resets the position estimate to the entry, from where inertial drift continues. It never moves
+   * correct it, it also resets the position estimate to the entry, from where heading/TAS/wind DR continues. It never moves
    * the aircraft itself. With GPS or DME navigating, the sensors keep setting the position.
    */
   initializePosition(position: LatLon) {
     this.positionReference = { position, at: this.now };
     if (this.nav.mode === "DR") {
-      const nm = distanceNm(this.truth, position), bearing = bearingDeg(this.truth, position);
-      this.error = { x: nm * Math.sin((bearing * Math.PI) / 180), y: nm * Math.cos((bearing * Math.PI) / 180) };
-      this.here = this.withError(this.truth);
+      this.navigation.initialize(position);
+      this.here = { ...position };
     }
     this.emit();
   }
@@ -1910,6 +2012,7 @@ export class ScriptedFms implements CduBackend {
   // ------------------------------------------------------------------ state changed by pages
 
   open(page: PageId, index = 0) {
+    if (page === "PREDICT_RAIM" && this.predictiveRaim.ident === null) this.predictRaimAt(this.active.dest);
     if (page === "TACT_APPR" && !this.aircraftProfile.configuration.options.tacticalApproach.configured) {
       this.advisory("NOT CONFIGURED");
       return;

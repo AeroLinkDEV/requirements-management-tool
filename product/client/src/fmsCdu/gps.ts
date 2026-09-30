@@ -230,6 +230,18 @@ export class GpsReceiver {
   /** The error seed, and the seed of the constellation it sees: with the start time, they fix the run. */
   get seed() { return this.o.seed; }
   get constellationSeed() { return this.o.constellation.seed; }
+
+  /** Predictive RAIM from the bench's seeded orbit geometry, not a live almanac or SBAS prediction. It does not
+   * mutate tracking, faults, deselection or approach state. Zero residuals leave only geometry and the error model. */
+  predictRaim(time: number, position: LatLon, excluded: readonly number[]): number | null {
+    if (!this.ephemeris || this.faults.has("RECEIVER") || this.faults.has("RF_INPUT") || this.faults.has("STOP_TRANSMITTING")) return null;
+    const sky = this.o.constellation.sky(time, position, 0, { bank: 0, pitch: 0, heading: 0 }, this.o.maskDeg)
+      .filter(satellite => satellite.visible && satellite.cn0 >= this.o.trackCn0 && !excluded.includes(satellite.prn));
+    if (sky.length < 5) return Infinity;
+    const fit = leastSquares(sky.map(satellite => ({ h: [-satellite.los[0], -satellite.los[1], -satellite.los[2], 1], e: 0 })));
+    const hil = fit.hslope * this.o.sigmaUere * (this.threshold(fit.dof) + K_MISSED) / 1852;
+    return Number.isFinite(hil) && hil >= 0 ? hil : Infinity;
+  }
   /** The 28 V fault discrete: active in Fault mode. */
   get faultDiscrete() { return this.currentMode === "FAULT"; }
 

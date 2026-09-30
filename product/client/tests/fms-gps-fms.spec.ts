@@ -109,7 +109,7 @@ test('the GPS lost condition takes the RF input from both receivers: GPS NAV LOS
   expect(unit.navState.mode).toBe('GPS')
 })
 
-test('the GPS integrity condition is a satellite fault neither receiver can exclude: GPS POS UNCERTAIN and no GPS (3a.4, 3a.5)', () => {
+test('the GPS integrity condition is a satellite fault neither receiver can exclude: GPS POS UNCERTAIN, retained position without authority (3a.4, S300 1-7)', () => {
   const { unit } = setup()
   unit.setCondition('gpsIntegrity', true)
   for (const index of [0, 1]) {
@@ -118,7 +118,9 @@ test('the GPS integrity condition is a satellite fault neither receiver can excl
     expect(bus(unit, index)?.['130'].ssm, `GPS${index + 1}`).toBe('FW')
   }
   expect(recalled(unit, 'GPS POS UNCERTAIN')).toBe(true)
-  expect(unit.navState.mode).not.toBe('GPS')
+  expect(unit.navState).toMatchObject({ mode: 'GPS', uncertain: true })
+  expect(unit.gpsStatus.chosen).toBeNull()
+  expect(unit.hoverFeedback).toBeNull()
   // The GPS line on NAV STATUS reads the RAIM state from 273, not a fixed text.
   expect(navStatus(unit)[6]).toMatch(/\b5 SAT NO RAIM$/)
   unit.setCondition('gpsIntegrity', false)
@@ -140,7 +142,8 @@ test('the GPS integrity condition holds through a whole flight as the sky moves:
     unit.gpsStatus.assessed.forEach((a, index) => { if (a.usable || a.integrity !== 'DETECTED') passed.push(`GPS${index + 1} at ${t} s: ${a.integrity}`) })
   }
   expect(passed.slice(0, 5)).toEqual([])
-  expect(unit.navState.mode).not.toBe('GPS')
+  expect(unit.gpsStatus.chosen).toBeNull()
+  expect(unit.navState.uncertain).toBe(true)
 })
 
 test('GPS NAV on NAV OPTIONS selects AUTO, GPS1, GPS2 or off, and a manual choice does not fall to the other receiver (3a.2)', () => {

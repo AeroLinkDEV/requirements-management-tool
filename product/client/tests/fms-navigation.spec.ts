@@ -1,15 +1,19 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
-import { distanceNm } from '../src/fmsCdu/fmsModel'
-import { RNP_DEFAULTS, radioRange, selectSources } from '../src/fmsCdu/navigation'
-import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
+import { bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
+import { RNP_DEFAULTS } from '../src/fmsCdu/navigation'
+import { HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
+import { BenchRadioReceiver, solveRadio } from '../src/fmsCdu/radioNavigation'
+import { BufferedSensorPort, type RadioObservation, type SensorFrame } from '../src/fmsCdu/sensorPorts'
+import type { Navaid } from '../src/fmsCdu/navData'
+import { CivilNavigation } from '../src/fmsCdu/civilNavigation'
+import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
-// Navigation sensors and RNP, per ICAO Doc 9613 and airline FMS practice (the FMS test bench research roadmap): the
-// GPS > DME/DME > VOR/DME > inertial priority with automatic reversion, ANP from the sources, RNP by phase with its
-// time to alert, dead-reckoning drift and the position shift when a sensor returns, NAV OPTIONS, and the approach.
+// Civil measured navigation: S300 uncertain GPS and heading/TAS/last-computed-wind DR, measured radios, phase RNP,
+// sensor-port freshness and predictive RAIM. Radio noise, age/acquisition limits and uncertainty are bench policy.
 const setup = () => {
   let now = Date.UTC(2026, 8, 27, 14, 0, 0)
   const unit = new ScriptedFms(() => new Date(now))
@@ -34,6 +38,159 @@ const scratch = (unit: ScriptedFms) => lines(unit)[SCRATCHPAD_LINE].trimEnd()
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
 const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : leg?.kind === 'cond' ? `(${leg.path})` : null }
 
+test('an external sensor mailbox refuses a receiver replay even when its air-data packet is newer', () => {
+  const template = new ScriptedFms().navigationInputs!
+  const port = new BufferedSensorPort()
+  expect(port.publish(template)).toBe(true)
+  const replay = structuredClone(template)
+  replay.air.sequence += 1
+  replay.air.at += 1000
+  replay.gps[0].sequence -= 1
+  replay.gps[0].at -= 1000
+  expect(port.publish(replay)).toBe(false)
+  expect(port.read()).toEqual(template)
+})
+
+test('radio AUTO acquisition restarts at the first sample in range after a loss', () => {
+  const at = { lat: 45, lon: -75 }
+  const station: Navaid = { kind: 'navaid', ident: 'TEST', type: 'VORDME', name: 'Test fixture', frequency: '115.00', position: offset(at, 90, 10) }
+  const receiver = new BenchRadioReceiver()
+  receiver.tune([station], 0)
+  expect(receiver.sample(at, 3000, 3000)[0].slantRangeNm.status).toBe('NORMAL')
+  receiver.sample(at, 3000, 4000, true)
+  expect(receiver.sample(at, 3000, 5000)[0].slantRangeNm.status).toBe('NCD')
+  expect(receiver.sample(at, 3000, 7000)[0].slantRangeNm.status).toBe('NCD')
+  expect(receiver.sample(at, 3000, 8000)[0].slantRangeNm.status).toBe('NORMAL')
+})
+
+test('DME/DME and VOR/DME solve measured ranges and bearings rather than substitute a prior or truth position', () => {
+  const at = { lat: 45, lon: -75 }, altitude = 3000, now = 10000
+  const stations: Navaid[] = [90, 0, 225].map((course, i) => ({ kind: 'navaid', ident: `T${i}`, type: 'VORDME', name: 'Test fixture', frequency: '115.00', position: offset(at, course, 10) }))
+  const observations: RadioObservation[] = stations.map(station => ({ station,
+    slantRangeNm: { at: now, sequence: 1, status: 'NORMAL', value: Math.hypot(distanceNm(at, station.position), altitude / 6076.12) },
+    bearingTrue: { at: now, sequence: 1, status: 'NORMAL', value: bearingDeg(station.position, at) } }))
+  const prior = offset(at, 220, 2)
+  const dme = solveRadio(observations, prior, altitude, now)!
+  expect(dme.mode).toBe('DME/DME')
+  expect(distanceNm(dme.position, at)).toBeLessThan(0.03)
+  expect(distanceNm(dme.position, prior)).toBeGreaterThan(1.9)
+  expect(solveRadio(observations, prior, altitude, now + 2001)).toBeNull()
+  const vor = solveRadio(observations.slice(1), prior, altitude, now)!
+  expect(vor.mode).toBe('VOR/DME')
+  expect(distanceNm(vor.position, at)).toBeLessThan(0.01)
+})
+
+test('stale external position and air data hold the last estimate and withdraw managed guidance', () => {
+  let now = Date.UTC(2026, 8, 27, 14)
+  const template = new ScriptedFms(() => new Date(now)).navigationInputs!
+  template.radioHeight = { at: now, sequence: template.air.sequence, status: 'NORMAL', value: 75 }
+  const port = new BufferedSensorPort()
+  expect(port.publish(template)).toBe(true)
+  const profile = structuredClone(HELICOPTER_PROFILE)
+  profile.parameters.sensorMaxAge.value = 1.5
+  const unit = new ScriptedFms(() => new Date(now), { sensors: port, profile })
+  const output: { status: string; value: unknown }[] = []
+  const sim = new FlightSimulator(unit, { write: frame => output.push(frame) })
+  expect(unit.radioHeight).toEqual({ status: 'NORMAL', value: 75 })
+  const lastFix = { ...unit.position }
+  now += 1600
+  sim.step(1)
+  expect(unit.navState).toMatchObject({ mode: 'DR', airValid: false })
+  expect(unit.radioHeight).toEqual({ status: 'NCD', value: null })
+  expect(unit.validBaroAltitude).toBeNull()
+  expect(distanceNm(unit.position, lastFix)).toBeLessThan(1e-8)
+  expect(output.at(-1)?.status).toBe('NCD')
+  expect(sim.modeEvents.some(event => event.event === 'LNAV LOST')).toBe(true)
+  const fresh: SensorFrame = structuredClone(template)
+  fresh.air.at = now
+  fresh.air.sequence += 1
+  fresh.air.value = { headingTrue: 90, tasKt: 120, altitudeFt: 3000 }
+  expect(port.publish(fresh)).toBe(true)
+  unit.updateNavigation(10)
+  expect(unit.navState).toMatchObject({ mode: 'DR', airValid: true })
+  expect(distanceNm(unit.position, lastFix)).toBeGreaterThan(0.3)
+})
+
+test('dead reckoning cannot read a changed truth position when every position sensor is unavailable', () => {
+  const { unit } = setup()
+  unit.setCondition('dmeOutage', true)
+  unit.setCondition('gpsLost', true)
+  const lastFix = { ...unit.position }
+  // The plant can move or be repositioned independently of its failed sensors. No new measurement means no
+  // position update at zero elapsed time; a truth-relative synthetic error would move the estimated fix 50 NM.
+  unit.setAircraft({ position: offset(unit.truePosition, 180, 50) })
+  unit.updateNavigation(0)
+  expect(unit.navState.mode).toBe('DR')
+  expect(distanceNm(unit.position, lastFix)).toBeLessThan(1e-8)
+})
+
+test('DR retains the wind computed from successive radio fixes when no GPS velocity is available', () => {
+  const start = { lat: 45, lon: -75 }
+  const navigation = new CivilNavigation(start)
+  const input = { dt: 1, air: { headingTrue: 90, tasKt: 120, altitudeFt: 3000 }, gps: null, uncertainGps: null, radioApproved: true, rnp: 1 }
+  navigation.update({ ...input, radio: { position: start, at: 1000, mode: 'DME/DME', anp: 0.2, dmes: ['A', 'B'], vor: null } })
+  const next = offset(start, 90, 140 / 3600)
+  navigation.update({ ...input, radio: { position: next, at: 2000, mode: 'DME/DME', anp: 0.2, dmes: ['A', 'B'], vor: null } })
+  const dr = navigation.update({ ...input, dt: 60, radio: null })
+  expect(dr.mode).toBe('DR')
+  expect(distanceNm(next, dr.position)).toBeCloseTo(140 / 60, 2)
+})
+
+test('GPS-only integrity loss retains GPS2 position without granting hover authority or switching back on recovery', () => {
+  const { unit, fly } = setup()
+  unit.setCondition('dmeOutage', true)
+  const stimulus = stimulusFor(unit)
+  stimulus.apply(0, { op: 'fault', fault: 'RECEIVER', on: true })
+  expect(unit.navState.gpsSource).toBe(2)
+  unit.setCondition('gpsIntegrity', true)
+  expect(unit.navState).toMatchObject({ mode: 'GPS', gpsSource: 2, uncertain: true })
+  expect(unit.hoverFeedback).toBeNull()
+  expect(recalled(unit, 'GPS NAV LOST')).toBe(false)
+  unit.open('NAV_STATUS')
+  expect(lines(unit).join('\n')).toContain('GPS2 UNCERTAIN')
+  unit.setCondition('gpsIntegrity', false)
+  stimulus.apply(0, { op: 'fault', fault: 'RECEIVER', on: false })
+  fly(5)
+  expect(unit.navState).toMatchObject({ mode: 'GPS', gpsSource: 2, uncertain: false })
+  expect(unit.navSourceLog.map(entry => entry.source)).toEqual(['GPS2', 'GPS1'])
+})
+
+test('predictive RAIM uses the destination MAP and seven ETA intervals; PRN exclusion affects predictions alone', () => {
+  let now = Date.UTC(2026, 8, 27, 14)
+  const unit = new ScriptedFms(() => new Date(now))
+  unit.selectProcedure('APPROACH', 'R24R')
+  unit.press('EXEC')
+  unit.open('PREDICT_RAIM')
+  expect(unit.predictiveRaim.ident).toBe('CYUL')
+  expect(unit.predictiveRaim.eta).toBe(unit.profile().points.find(point => point.ident === 'RW24R')!.eta)
+  expect(unit.predictedRaim).toEqual([])
+  now += 1000
+  unit.updateNavigation(0)
+  const live = structuredClone(unit.navigationInputs!.gps)
+  const prediction = unit.predictedRaim
+  expect(prediction).toHaveLength(7)
+  expect(prediction.map(row => (row.at - unit.predictiveRaim.eta!) / 60000)).toEqual([-15, -10, -5, 0, 5, 10, 15])
+  expect(prediction.some(row => row.phase !== 'NONE' && row.phase !== '****')).toBe(true)
+  unit.open('SAT_DESELECT')
+  enter(unit, '33', 'LSK1L')
+  expect(scratch(unit)).toBe('INVALID ENTRY')
+  for (let prn = 1; prn <= 32; prn++) unit.deselectRaimSatellite(prn, true)
+  now += 1000
+  expect(unit.predictedRaim.every(row => row.phase === 'NONE')).toBe(true)
+  expect(unit.navigationInputs!.gps).toEqual(live)
+  expect(unit.predictRaimAt('HWK')).toBe(true)
+  expect(unit.predictiveRaim.eta).toBeNull()
+  expect(unit.predictRaimEta('2460')).toBe(false)
+  expect(unit.predictRaimEta('1430Z')).toBe(true)
+  now += 1000
+  expect(unit.predictedRaim).toHaveLength(7)
+  for (let prn = 1; prn <= 32; prn++) unit.deselectRaimSatellite(prn, false)
+  expect(stimulusFor(unit).apply(0, { op: 'fault', fault: 'STOP_TRANSMITTING', on: true })).toBe(true)
+  expect(stimulusFor(unit).apply(1, { op: 'fault', fault: 'STOP_TRANSMITTING', on: true })).toBe(true)
+  now += 1000
+  expect(unit.predictedRaim.every(row => row.phase === '****')).toBe(true)
+})
+
 test('civil NAV STATUS reports available navigation without claiming an unconfigured IRS', () => {
   const { unit } = setup()
   unit.open('NAV_STATUS')
@@ -46,25 +203,6 @@ test('civil NAV STATUS reports available navigation without claiming an unconfig
   expect(lines(unit).join('\n')).not.toMatch(/\bIRS\b/)
 })
 
-test('sources are chosen in the airline order, and DME/DME needs two stations crossing at a usable angle', () => {
-  const unit = new ScriptedFms()
-  const entries = unit.navdb.nearby(unit.coordinates('RDG')!, 160)
-  const at = unit.coordinates('RDG')!
-  const all = { gpsAvailable: true, gpsIntegrity: true, dmeAvailable: true, inhibited: [] }
-  expect(selectSources(entries, at, 4500, all).mode).toBe('GPS')
-  const dmeDme = selectSources(entries, at, 4500, { ...all, gpsAvailable: false })
-  expect(dmeDme.mode).toBe('DME/DME')
-  // HWK, south of the airway, crosses well with either YOW or YUL; the FMS takes the pair nearest 90 degrees.
-  expect(dmeDme.dmes.map(d => d.ident)).toContain('HWK')
-  expect(dmeDme.baseAnp).toBeLessThan(0.3)
-  // Without HWK the only DMEs in range are nearly in line with the aircraft: no fix, so VOR/DME.
-  expect(selectSources(entries, at, 4500, { ...all, gpsAvailable: false, inhibited: ['HWK'] }).mode).toBe('VOR/DME')
-  expect(selectSources(entries, at, 4500, { ...all, gpsAvailable: false, dmeAvailable: false }).mode).toBe('DR')
-  // Radio line of sight grows with altitude.
-  expect(radioRange(3000)).toBeCloseTo(67, 0)
-  expect(radioRange(40000)).toBe(160)
-})
-
 test('GPS loss reverts to radio updating automatically as stations come into range', () => {
   const { unit, fly } = setup()
   unit.setCondition('gpsLost', true)
@@ -75,19 +213,21 @@ test('GPS loss reverts to radio updating automatically as stations come into ran
   expect(modes.has('DR')).toBe(false)
 })
 
-test('in dead reckoning the FMS position drifts from the aircraft, ANP grows with it, and POS lights', () => {
+test('dead reckoning uses measured motion and grows its uncertainty independently of aircraft truth', () => {
   const { unit, fly } = setup()
+  fly(20)
+  const initialAnp = unit.navState.anp
   // DME first, then GPS: the aircraft goes straight from a GPS fix to dead reckoning.
   unit.setCondition('dmeOutage', true)
   unit.setCondition('gpsLost', true)
   expect(unit.navState.mode).toBe('DR')
   expect(unit.lamps().has('POS')).toBe(true)
   fly(30 * 60)
-  // Two NM an hour of inertial drift: about a mile after half an hour, and ANP bounds it.
+  // Perfect heading/TAS and a steady last-valid wind remain close to the plant. An uncertainty allowance still grows;
+  // it is not computed by secretly comparing the estimate with truth, nor an invented inertial drift.
   const error = distanceNm(unit.truePosition, unit.position)
-  expect(error).toBeGreaterThan(0.9)
-  expect(error).toBeLessThan(1.1)
-  expect(unit.navState.anp).toBeGreaterThan(error)
+  expect(error).toBeLessThan(0.1)
+  expect(unit.navState.anp).toBeGreaterThan(initialAnp + 1)
 })
 
 test('when GPS returns after dead reckoning the position jumps back, and the FMS reports POSITION SHIFT', () => {
@@ -95,6 +235,8 @@ test('when GPS returns after dead reckoning the position jumps back, and the FMS
   // DME first, then GPS: the aircraft goes straight from a GPS fix to dead reckoning.
   unit.setCondition('dmeOutage', true)
   unit.setCondition('gpsLost', true)
+  // A changed wind cannot be computed without a valid position/velocity source: DR keeps its last measured wind.
+  unit.wind.speed += 6
   fly(30 * 60)
   expect(recalled(unit, 'POSITION SHIFT')).toBe(false)
   unit.setCondition('gpsLost', false)
@@ -108,6 +250,7 @@ test('the aircraft flies the FMS position, so in dead reckoning it really is off
   // DME first, then GPS: the aircraft goes straight from a GPS fix to dead reckoning.
   unit.setCondition('dmeOutage', true)
   unit.setCondition('gpsLost', true)
+  unit.wind.speed += 6
   let offAtRdg = 0
   fly(3600, () => {
     if (active(unit) === 'TOLGU') { offAtRdg = distanceNm(unit.truePosition, unit.coordinates('RDG')!); return true }
@@ -177,8 +320,10 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, larger ANP, and no RNAV approach
   expect(unit.approachType).toBe('LNAV/VNAV')
   unit.setCondition('gpsIntegrity', true)
   expect(scratch(unit)).toBe('GPS POS UNCERTAIN')
-  // Neither receiver can be used (GPS phase 3a): the FMS navigates on the radios, with their larger ANP.
-  expect(unit.navState.mode).not.toBe('GPS')
+  // The independent radio comparison is adequate here (M300 1-7). The position is retained as uncertain, without
+  // granting approach or hover authority to either integrity-rejected receiver.
+  expect(unit.navState.mode).toBe('GPS')
+  expect(unit.navState.uncertain).toBe(true)
   expect(unit.navState.anp).toBeGreaterThan(0.3)
   expect(unit.approachType).toBe('NO APPR')
   for (let i = 0; i < 3; i += 1) unit.sequence()
@@ -191,7 +336,7 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, larger ANP, and no RNAV approach
 })
 
 test('NAV OPTIONS inhibits a navaid from updating, and GPS can be selected out', () => {
-  const unit = new ScriptedFms()
+  const { unit, fly } = setup()
   press(unit, 'INIT_REF', 'NEXT', 'LSK5R')
   expect(lines(unit)[0]).toMatch(/^NAV STATUS/)
   expect(lines(unit)[2]).toMatch(/^GPS/)
@@ -213,6 +358,8 @@ test('NAV OPTIONS inhibits a navaid from updating, and GPS can be selected out',
   expect(lines(unit)[10]).toMatch(/^YOW HWK/)
   press(unit, 'LSK6R', 'CLR', 'LSK1L', 'CLR', 'LSK1L')
   expect(unit.inhibitedNavaids).toEqual([])
+  expect(unit.navState.mode).toBe('DR')
+  fly(4)
   expect(unit.navState.mode).toBe('VOR/DME')
 })
 
