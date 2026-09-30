@@ -78,6 +78,8 @@ const PAGES: Record<PageId, Page> = { ...CORE_PAGES, ...PLANNING_PAGES, ...NAV_P
 export type WaypointResolution = { ident: string } | { select: string } | "invalid" | "not-in-database";
 
 const wpt = (ident: string, altitude?: string): Leg => ({ kind: "wpt", ident, altitude });
+/** Below this airspeed the aircraft is held stationary in the air (a hover, the speed selected to zero): laboratory value. */
+const HELD_AIRSPEED_KT = 10;
 
 const demoRoute = (): Route => ({
   origin: "CYOW", dest: "CYUL", coRoute: "OWUL1", flightNo: "LIFE21",
@@ -1517,16 +1519,42 @@ export class ScriptedFms implements CduBackend {
     return computeProfile({
       waypoints: this.predictionLegs(route).waypoints, altitude: this.altitude, cruiseAltitude: this.vnav.cruiseAltitude, climbRate: 1000,
       pathAngle: this.vnav.pathAngle, phase: this.vphase.phase, fuel: this.fuel.quantity, fuelFlow: this.fuel.flow, now: this.utcTime.getTime(),
-      // Held stationary off the plan (the ground speed below measurable progress): no ETA or EFOB ahead (plan B1.7).
-      noProgress: !makingProgress(this.groundSpeed),
+      noProgress: this.heldOffPlan,
     });
   }
 
   /**
-   * The time at the fix of the active route's leg `index`, `miles` ahead, as the pages and the output bus show it. In a
-   * manual hold being flown, the prediction's time along the pattern still to fly, so the hold fix is its next crossing
-   * (S300 5-17, Astra F1): turning away from the fix does not make it unknown. Elsewhere the distance at the closure
-   * speed, with no time without progress toward the fix (C8, C9). Null when there is no time.
+   * NO PROGRESS (plan B1.7): the aircraft is held stationary off the plan, so nothing ahead has a time. Either it is
+   * stopped over the ground, or it is held stationary in the air (the airspeed of a hover, the speed selected to zero)
+   * and not closing on the active waypoint, as when a wind carries a stopped helicopter backwards at 40 kt. A turn at
+   * flying speed that points away from the waypoint for a while is not held off the plan: it keeps its predictions.
+   */
+  get heldOffPlan() {
+    return !makingProgress(this.groundSpeed) || (this.aircraft.tas < HELD_AIRSPEED_KT && !makingProgress(this.closureSpeed));
+  }
+
+  /**
+   * The time the planned path reaches a point `miles` ahead (rev 3 B1.7): between the profile's predicted times, each
+   * flown at the planned speed through the wind on its leg, never from the present closure speed. Null without progress
+   * or where the path's time is unknown.
+   */
+  etaAlongPath(miles: number): number | null {
+    let previous = { distance: 0, eta: this.utcTime.getTime() };
+    for (const point of this.profile().points) {
+      if (point.distance === null || point.eta === null) return null;
+      if (point.distance >= miles - 1e-9) {
+        const span = point.distance - previous.distance;
+        return span <= 1e-9 ? point.eta : previous.eta + ((miles - previous.distance) / span) * (point.eta - previous.eta);
+      }
+      previous = { distance: point.distance, eta: point.eta };
+    }
+    return null;
+  }
+
+  /**
+   * The time at the fix of the active route's leg `index`, `miles` ahead, as the pages and the output bus show it: the
+   * planned path's time (rev 3 B1.7), none without progress. In a manual hold being flown, the prediction's time along
+   * the pattern still to fly, so the hold fix is its next crossing (S300 5-17, Astra F1).
    */
   shownEta(index: number, miles: number): number | null {
     const hold = this.active.hold, legs = this.active.legs, leg = legs[index];
@@ -1535,7 +1563,7 @@ export class ScriptedFms implements CduBackend {
       const point = this.profile().points[legs.slice(0, index).filter(l => l.kind === "wpt").length];
       return point?.ident === leg.ident ? point.eta : null;
     }
-    return makingProgress(this.closureSpeed) ? this.utcTime.getTime() + (miles / this.closureSpeed) * 3_600_000 : null;
+    return this.etaAlongPath(miles);
   }
 
   /**
