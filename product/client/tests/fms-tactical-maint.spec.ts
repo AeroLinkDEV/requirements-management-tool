@@ -42,6 +42,33 @@ const scratch = (unit: ScriptedFms) => lines(unit)[SCRATCHPAD_LINE].trimEnd()
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
 const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : null }
 
+// Integration owner: a manual 500-NM travel bound cannot be shortened by assuming the fastest wind-assisted speed.
+test('a reachable moving waypoint inside 500 NM remains achievable against a headwind', () => {
+  const { unit } = setup()
+  Object.assign(unit.wind, { direction: 0, speed: 60 })
+  unit.setAircraft({ tas: 140, groundSpeed: 80, track: 0, heading: 0 })
+  expect(unit.trueAirspeed).toBeCloseTo(140, 6)
+  unit.defineMoving('SHIP1', offset(unit.position, 0, 400), 0, 0)
+  unit.replaceLegs([{ kind: 'wpt', ident: 'SHIP1' }]); unit.press('EXEC')
+  const rendezvous = unit.rendezvousFor(unit.activeRoute, 0)!
+  expect(rendezvous.achievable).toBe(true)
+  expect(rendezvous.distanceNm).toBeCloseTo(400, 5)
+  expect(rendezvous.ttg).toBeCloseTo(400 / 80 * 3600, 1)
+})
+
+// Owner: the closed 500-NM airborne boundary uses measured airspeed and system wind, not entered ground planning.
+test('airborne moving rendezvous uses measured TAS and wind and includes the exact 500 NM boundary', () => {
+  const { unit } = setup()
+  unit.setAircraft({ tas: 100, groundSpeed: 80, track: 0, heading: 0 })
+  unit.planData.cruiseTas = 140; unit.planData.cruiseWind = { direction: 180, speed: 50 }
+  Object.assign(unit.wind, { direction: 0, speed: 20 })
+  unit.defineMoving('SHIP1', offset(unit.position, 0, 500), 0, 0)
+  unit.replaceLegs([{ kind: 'wpt', ident: 'SHIP1' }]); unit.press('EXEC')
+  const rendezvous = unit.rendezvousFor(unit.activeRoute, 0)!
+  expect(rendezvous.achievable).toBe(true)
+  expect(rendezvous.ttg).toBeCloseTo(500 / 80 * 3600, 1)
+})
+
 test('a rendezvous flies the speed that arrives on time, within the speed limits', () => {
   const { unit, fly } = setup(START, LAB_AIRLINE_VNAV_PROFILE)
   press(unit, 'INIT_REF', 'NEXT', 'LSK6R')

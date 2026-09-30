@@ -16,6 +16,34 @@ const screenLines = async (page: Page) => ((await page.locator('.fmsCduScreen').
 const expectLine = async (page: Page, line: number, pattern: RegExp) =>
   expect.poll(async () => (await screenLines(page))[line] ?? '').toMatch(pattern)
 
+// Pointer owner: real ACT RTE 5L opens airborne MOD LEGS; ERASE leaves guidance alone and only EXEC activates it.
+test('BACKTRACK on the actual CDU reviews airborne history before EXEC', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Jump to next waypoint' }).click()
+  const flight = page.getByRole('region', { name: 'Flight', exact: true })
+  // Jump changes the route immediately; the paused quarter-second tick refreshes its guidance sample.
+  // MUN to RDG is 21.6 NM in this demonstration. Capture the post-jump state before testing MOD isolation.
+  await expect(flight.locator('.fmsBenchReadout').first()).toHaveText('Active waypoint RDG, 21.6 NM')
+  const activeBefore = await flight.locator('.fmsBenchReadout').first().innerText()
+  await key(page, 'RTE').click()
+  await expectLine(page, 10, /^<BACKTRACK/)
+  await key(page, 'LSK5L').click()
+  await expectLine(page, 0, /^MOD RTE 1 LEGS/)
+  await expect(page.locator('.fmsCduScreen')).toHaveAttribute('aria-label', /BT001/)
+  await expect(flight.locator('.fmsBenchReadout').first()).toHaveText(activeBefore)
+  await key(page, 'LSK6L').click()
+  await expectLine(page, 0, /^ACT RTE 1 LEGS/)
+  await expect(page.locator('.fmsCduLamp[data-lamp="EXEC_LIGHT"]')).not.toHaveClass(/\blit\b/)
+  await expect(page.getByLabel('On ground (live bench input)', { exact: true })).toHaveCount(0) // DEC-148.
+  await key(page, 'RTE').click(); await key(page, 'LSK5L').click()
+  await expectLine(page, 0, /^MOD RTE 1 LEGS/)
+  await expect(page.locator('.fmsCduScreen')).toHaveAttribute('aria-label', /BT001/)
+  await page.locator('.fmsCdu').screenshot({ path: 'C:/Sean Project/fms-research/Astra-backtrack-CDU.png' })
+  await key(page, 'EXEC').click()
+  await expectLine(page, 0, /^ACT RTE 1 LEGS/)
+  await expect(page.locator('.fmsCduLamp[data-lamp="EXEC_LIGHT"]')).not.toHaveClass(/\blit\b/)
+})
+
 test('keys on the rendered panel enter data, make a modification and execute it', async ({ page }) => {
   await open(page)
   await expectLine(page, 0, /^IDENT/)
@@ -951,6 +979,41 @@ test('C.10: the executed 87N approach shows its chart notes on the Nav data tab,
   await expect(items.nth(8)).toHaveText('LNAV MDA 560-1.')
 })
 
+test('D-R: the Nav data tab shows each moving waypoint\'s age as a bench aid; it never expires', async ({ page }) => {
+  await open(page)
+  // This owner checks age and the simulation clock; enter the trajectory explicitly in TRUE.
+  await key(page, 'INIT_REF').click()
+  await key(page, 'LSK5L').click()
+  await key(page, 'LSK1L').click()
+  await expectLine(page, 2, /^>TRUE$/)
+  await key(page, 'INIT_REF').click()
+  await key(page, 'NEXT').click()
+  await key(page, 'LSK6L').click()
+  await expectLine(page, 0, /^MOVING WPT/)
+  await page.locator('.fmsCdu').focus()
+  for (const [text, lsk] of [['SHIP1', 'LSK1L'], ['RDG180/5', 'LSK2L'], ['270/20', 'LSK1R']]) {
+    await page.keyboard.type(text)
+    await key(page, lsk).click()
+  }
+  await key(page, 'LSK6R').click()
+  await tab(page, 'Nav data')
+  const card = page.getByRole('region', { name: 'Moving waypoints' })
+  await expect(card).toContainText('Bench aid')
+  const item = card.getByTestId('fms-moving-waypoints').getByRole('listitem')
+  await expect(item).toHaveText(/^SHIP1 270T\/20 kt, age 0:00:\d\d$/)
+  // Flying on, it ages on the simulation clock (64 times real time): minutes, not seconds.
+  await page.getByLabel('Simulation rate').selectOption('64')
+  await page.getByRole('button', { name: 'Fly' }).click()
+  await expect(item).toHaveText(/age 0:0[1-9]:\d\d|age 0:[1-5]\d:\d\d/, { timeout: 15_000 })
+  await page.getByRole('button', { name: 'Pause' }).click()
+  // The same stored 270 TRUE trajectory is 283 MAG at the fixture's declared WMM2025 position (~12.5 W).
+  await key(page, 'INIT_REF').click()
+  await key(page, 'LSK5L').click()
+  await key(page, 'LSK1L').click()
+  await expectLine(page, 2, /^>MAG$/)
+  await expect(item).toHaveText(/^SHIP1 283°\/20 kt, age 0:\d\d:\d\d$/)
+})
+
 test('B1.1: the PFD writes the altimeter setting beside the altitude; setting STD or injecting an error changes the reading, never the radio or physical height', async ({ page }) => {
   await open(page)
   const efis = page.getByRole('region', { name: 'EFIS' })
@@ -990,31 +1053,6 @@ test('B1.1: the PFD writes the altimeter setting beside the altitude; setting ST
   await card.getByLabel('Baro error (ft)').fill('3000')
   await expect(card.getByRole('button', { name: 'Inject the error' })).toBeDisabled()
 })
-
-test('D-R: the Nav data tab shows each moving waypoint\'s age as a bench aid; it never expires', async ({ page }) => {
-  await open(page)
-  await key(page, 'INIT_REF').click()
-  await key(page, 'NEXT').click()
-  await key(page, 'LSK6L').click()
-  await expectLine(page, 0, /^MOVING WPT/)
-  await page.locator('.fmsCdu').focus()
-  for (const [text, lsk] of [['SHIP1', 'LSK1L'], ['RDG180/5', 'LSK2L'], ['270/20', 'LSK1R']]) {
-    await page.keyboard.type(text)
-    await key(page, lsk).click()
-  }
-  await key(page, 'LSK6R').click()
-  await tab(page, 'Nav data')
-  const card = page.getByRole('region', { name: 'Moving waypoints' })
-  await expect(card).toContainText('Bench aid')
-  const item = card.getByTestId('fms-moving-waypoints').getByRole('listitem')
-  await expect(item).toHaveText(/^SHIP1 270°\/20 kt, age 0:00:\d\d$/)
-  // Flying on, it ages on the simulation clock (64 times real time): minutes, not seconds.
-  await page.getByLabel('Simulation rate').selectOption('64')
-  await page.getByRole('button', { name: 'Fly' }).click()
-  await expect(item).toHaveText(/age 0:0[1-9]:\d\d|age 0:[1-5]\d:\d\d/, { timeout: 15_000 })
-  await page.getByRole('button', { name: 'Pause' }).click()
-})
-
 test('B1.7: a paused run stops its clock: the predictions and the fuel on FUEL and PROGRESS read the same after a wait', async ({ page }) => {
   await open(page)
   const readout = page.locator('.fmsBench').getByText(/^Active waypoint/)

@@ -538,6 +538,7 @@ test('the search pages take the M300 field ranges, refuse changes once the searc
   // CLR takes the message first, then the entry a character at a time.
   const clearAll = () => { for (let i = 0; i < 30 && scratch() !== ''; i++) unit.press('CLR') }
   press(unit, 'TACT', 'LSK3L')
+  expect(screenText(unit.screen())[12]).toContain('<PPOS')
   // The ladder: leg length and track spacing 0.1 to 40 NM; SAR bearing 000 to 360.
   enter('0.1', 'LSK3R')
   expect(unit.sar.legLength).toBe(0.1)

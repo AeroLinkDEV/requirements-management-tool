@@ -122,6 +122,8 @@ export type Leg =
     kind: "wpt"; ident: string; altitude?: string; qualifier?: "/H" | "/S" | "/O"; via?: string; source?: LegSource;
     path?: FixPath; course?: number; arc?: { centre: LatLon; turn: "L" | "R" };
     position?: LatLon; turnDirection?: "LEFT" | "RIGHT";
+    /** Immutable backtrack PPOS, or an internal tactical/hover fix excluded from flown history. */
+    temporary?: boolean; special?: "TACTICAL" | "HOVER";
     procedureTurn?: { reference: string; role: "REFERENCE" | "OUTBOUND" | "INBOUND" };
     /** A speed constraint at the fix, knots. */
     speed?: number;

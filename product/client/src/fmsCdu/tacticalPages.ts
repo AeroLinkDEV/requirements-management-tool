@@ -142,7 +142,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
       if (row === 6) {
         if (side === "L") {
           if (sar.pending) fms.eraseModification();
-          // PPOS: only with no other search pattern waypoint in the active route (A-157; the bench is always airborne).
+          // PPOS: airborne v1, with no other search waypoint in the active route (M300 A-157; DEC-148).
           else if (fms.activeRoute.legs.some(leg => leg.kind === "wpt" && leg.qualifier === "/S")) return "not-allowed";
           else { sar.refId = null; sar.relativeBearing = null; sar.distance = null; }
           return;
@@ -223,7 +223,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
           ["TIAF", a.iafDistance, String(a.iafAltitude)], ["TFAF", a.fafDistance, `${tactApprFafAltitude(fms)}A`], ["TMAP", a.mapDistance, undefined],
         ];
         for (const [ident, distance] of points) fms.definePoint(ident, offset(ref, a.bearing, distance));
-        const legs: Leg[] = points.map(([ident, , altitude]) => ({ kind: "wpt", ident, altitude }));
+        const legs: Leg[] = points.map(([ident, , altitude]) => ({ kind: "wpt", ident, altitude, special: "TACTICAL" }));
         fms.replaceLegs([...legs, { kind: "disco" }, ...fms.route.legs]);
         fms.open("LEGS");
         return;

@@ -86,7 +86,7 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
           caption(" RUNWAY"),
           { left: route.runway ? { text: route.runway } : dashes(5) },
           undefined, { left: fms.dualOperation?.mode === "INDEPENDENT" ? prompt("<XFILL") : undefined, right: prompt("CO ROUTES>") }, undefined,
-          { right: prompt("SAVE ROUTE>") },
+          { left: fms.routeStatus === "ACT" ? prompt("<BACKTRACK") : undefined, right: prompt("SAVE ROUTE>") },
           { left: dashes(24) },
           footer,
         ];
@@ -110,6 +110,7 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
         return;
       }
       if (index === 0) {
+        if (side === "L" && row === 5 && fms.routeStatus === "ACT") return scratch ? "not-allowed" : fms.loadBacktrack();
         if (side === "L" && row === 4 && fms.dualOperation) {
           if (scratch && scratch !== "ACT" && scratch !== "SEC") return "invalid";
           if (fms.dualOperation.crossfill(scratch === "SEC")) { fms.setScratch(""); fms.advisory("XFILL SENT AS MOD"); }
