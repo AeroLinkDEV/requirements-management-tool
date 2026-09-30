@@ -21,6 +21,7 @@ import { KBTV_SOURCE, START_STATES, loadKbtvDemonstration, type StartStateId } f
 import { ACTIVE_PROFILE, PROFILES, profileById, profileFingerprint } from "./profile";
 import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, scenarioStart, type Scenario } from "./scenario";
 import { ScriptedFms } from "./scriptedFms";
+import { browserUserDatabaseStore } from "./userDatabase";
 import { screenText } from "./screen";
 import { CDU_VARIANTS, DEFAULT_VARIANT_ID, variantById } from "./variants";
 import "./FmsCduTestBench.css";
@@ -73,7 +74,7 @@ const formatLuminance = (fl: number) => (fl < 10 ? fl.toFixed(1) : String(Math.r
  * aircraft along its route, and sets the cockpit lighting. Scenarios run scripted steps against a restarted
  * simulation and check the screen, can be recorded from the bench, and are written out as test procedure text.
  */
-export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource } = {}) {
+export default function FmsCduTestBench({ terrain, userName }: { terrain?: TerrainSource; userName?: string } = {}) {
   const { layout, failed } = useCduLayout();
   const [variantId, setVariantId] = useState(storedVariant);
   const [session, setSession] = useState(0);
@@ -89,7 +90,11 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
   const { backend, sim, runner, recorder, started } = useMemo(() => {
     simTime.current = (pendingScenario.current && scenarioStart(pendingScenario.current)) ?? Date.now();
     const profile = profileById(pendingScenario.current?.profile) ?? profileById(profileChoice.current) ?? ACTIVE_PROFILE;
-    const fms = new ScriptedFms(() => new Date(simTime.current), { profile });
+    // The user database (E5) is kept per signed-in user and profile; a scenario run starts from an empty one in memory,
+    // so its outcome does not depend on what a user has stored.
+    const userDatabase = pendingScenario.current || !userName ? undefined
+      : { store: browserUserDatabaseStore(window.localStorage), scope: { userId: userName, profileId: profile.id } };
+    const fms = new ScriptedFms(() => new Date(simTime.current), { profile, ...(userDatabase ? { userDatabase } : {}) });
     const flight = new FlightSimulator(fms);
     const start = pendingStart.current;
     const started = start ? START_STATES[start].setUp(fms, flight) : null;
@@ -103,7 +108,7 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
     pendingRecording.current = false;
     pendingStart.current = null;
     return { backend: fms, sim: flight, runner, recorder, started: start && started ? { id: start, outcome: started } : null };
-  }, [session]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [session, userName]); // eslint-disable-line react-hooks/exhaustive-deps
   const [recording, setRecording] = useState(false);
   const recordTo = recording ? recorder : null;
   // While recording, what the GPS sensors tab applies is recorded as scenario steps, when it is applied.
@@ -126,6 +131,7 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
   const [lowerDisplay, setLowerDisplay] = useState<"nd" | "map">("nd");
   const [navLoad, setNavLoad] = useState<string | null>(null);
   const [navAirports, setNavAirports] = useState("");
+  const [userDbStatus, setUserDbStatus] = useState<string | null>(null);
   const [headingInput, setHeadingInput] = useState("090");
   // The crew's autopilot selections under the helicopter profile: preselected altitude, vertical speed and speed.
   const [altInput, setAltInput] = useState("");
@@ -572,6 +578,39 @@ export default function FmsCduTestBench({ terrain }: { terrain?: TerrainSource }
                 {backend.datasetLog.map((entry, index) => <li key={index}><b>{entry.action}</b> {entry.detail}</li>)}
               </ul>
             ) : null}
+          </section>
+          <section className="fmsBenchCard" aria-label="User database">
+            <h2>User database</h2>
+            <p className="fmsBenchReadout">
+              {userName ? <>Kept in this browser for <strong>{userName}</strong>, profile {backend.aircraftProfile.id}: </> : <>Not signed in: kept for this session only: </>}
+              <strong data-testid="fms-user-db-count">{backend.userWaypoints.length} user waypoints, {backend.userRoutes.length} user routes</strong>.
+              Store a waypoint on the CDU (REF NAV DATA or PREDEF WPT 2/2, NEW USER WPT) or save a route on RTE.
+            </p>
+            {backend.userDatabaseProblem ? <p className="fmsBenchHint" role="alert">{backend.userDatabaseProblem}; it is left as it was and nothing is saved over it.</p> : null}
+            <p className="fmsBenchReadout">
+              <button type="button" onClick={() => {
+                const url = URL.createObjectURL(new Blob([backend.exportUserDatabase()], { type: "application/json" }));
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `fms-user-database-${backend.aircraftProfile.id}.json`;
+                link.click();
+                URL.revokeObjectURL(url);
+              }}>Export user database</button>
+            </p>
+            <label className="fmsBenchFile">
+              <span>Import a user database (all of it or nothing: a malformed file or a clash with a stored waypoint or route changes nothing)</span>
+              <input type="file" accept=".json,application/json" aria-label="User database file"
+                onChange={async event => {
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  const outcome = backend.importUserDatabase(await file.text());
+                  setUserDbStatus("refused" in outcome
+                    ? `Refused, nothing changed: ${outcome.refused.join("; ")}.`
+                    : `${file.name}: ${outcome.imported.waypoints} user waypoints and ${outcome.imported.routes} user routes added.`);
+                  event.target.value = "";
+                }} />
+            </label>
+            {userDbStatus ? <p className="fmsBenchHint" role="status">{userDbStatus}</p> : null}
           </section>
         </div>
         <div className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-lighting" aria-labelledby="fms-bench-tabbutton-lighting" hidden={tab !== "lighting"}>
