@@ -2,6 +2,7 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { ALERTS, alert } from '../src/fmsCdu/alerts'
 import { holdEntry } from '../src/fmsCdu/fmsModel'
 import { LIGHTING_MODES, LUMINANCE_RANGE, displayLuminance } from '../src/fmsCdu/lighting'
+import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { COLUMNS, SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import { CDU_VARIANTS, type CduFunction } from '../src/fmsCdu/variants'
@@ -193,8 +194,24 @@ test('a search pattern is defined on its page, activated as a modification, and 
   expect(idents(unit)[0]).toBe('MUN')
 })
 
-test('the tactical approach puts IAF, FAF and MAP ahead of the route, the FAF altitude following the path angle', () => {
+test('the civil SAR configuration keeps military tactical approaches off while civil hover remains available', () => {
   const { unit } = fms()
+  press(unit, 'TACT', 'LSK3R')
+  expect(titleLine(unit)).toMatch(/^DES\+SAR/)
+  expect(scratch(unit)).toBe('NOT CONFIGURED')
+  expect(unit.lamps().has('EXEC')).toBe(false)
+  press(unit, 'CLR', 'LSK1R')
+  expect(titleLine(unit)).toMatch(/^HOVER/)
+})
+
+test('an explicitly configured laboratory tactical approach puts IAF, FAF and MAP ahead of the route', () => {
+  const profile = structuredClone(HELICOPTER_PROFILE)
+  profile.id = 'lab-tactical-approach'
+  profile.title = 'Laboratory tactical approach'
+  profile.configuration.id = 'lab-tactical-approach'
+  profile.configuration.options.tacticalApproach.configured = true
+  profile.configuration.options.tacticalApproach.implementation = 'partial'
+  const unit = new ScriptedFms(() => new Date(Date.UTC(2026, 8, 27, 14)), { profile })
   press(unit, 'TACT', 'LSK3R')
   expect(lines(unit)[12]).not.toContain('ACTIVATE>')
   enter(unit, 'FERDI', 'LSK1L')

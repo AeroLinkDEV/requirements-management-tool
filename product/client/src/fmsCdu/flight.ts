@@ -1,7 +1,7 @@
 import { bearingDeg, courseDeg, distanceNm, longitudeDelta, offset, type Hold, type LatLon, type Leg, type Sar, type SarPattern } from "./fmsModel";
 import { defaultLegMinutes, entrySegments, holdGeometry, type HoldSegment } from "./holds";
 import { groundVelocity, iasFromTas, tasFromIas } from "./kinematics";
-import { ACTIVE_PROFILE } from "./profile";
+import { ACTIVE_PROFILE, fmsBankLimit, type AircraftProfile } from "./profile";
 import type { ScriptedFms } from "./scriptedFms";
 import { speedCommandIas, verticalArrived, verticalCommand } from "./transition";
 import { altitudeMeets, type AltitudeConstraint, type ProfilePoint, type VerticalPhase } from "./vnav";
@@ -20,31 +20,15 @@ import { altitudeMeets, type AltitudeConstraint, type ProfilePoint, type Vertica
 /** Navigation map ranges in NM. */
 export const MAP_RANGES = [2, 5, 10, 20, 40, 80] as const;
 
-export const MAX_BANK = 25;
-const ROLL_RATE = 5;
-const MAX_VS = 1000;
-/** Vertical acceleration limit, fpm per second: the vertical speed changes over seconds, not in one step. */
-const VS_RATE = 600;
+export const MAX_BANK = fmsBankLimit(ACTIVE_PROFILE);
 /** The modelled pitch (the air-relative flight-path angle) is taken over at least this airspeed, kt, and held within this many degrees. */
 const PITCH_SPEED_FLOOR = 30;
 const PITCH_LIMIT = 20;
 const G_TURN = 1091; // turn rate (deg/s) = 1091 * tan(bank) / TAS (kt)
-/** Longitudinal acceleration and deceleration limit, kt/s (the profile's). */
-const SPEED_RATE = ACTIVE_PROFILE.parameters.longitudinalAccel.value;
-/** The go-around climb rate, fpm (the profile's), and the band in which a selected altitude is captured, feet. */
-const GA_RATE = ACTIVE_PROFILE.parameters.goAroundClimbRate.value;
+/** The band in which a selected altitude is captured, feet. */
 const ALT_CAPTURE_FT = 20;
-const PROFILE = ACTIVE_PROFILE.parameters;
-/** Low-speed rates (the profile's): yaw, the TD/H deceleration (nominal and closed-loop bounds), the departure. */
-const YAW_RATE = PROFILE.lowSpeedYawRate.value;
-const TDH_RATE = PROFILE.tdhDeceleration.value, TDH_MIN = 0.5, TDH_MAX = 1.25;
-const DEPARTURE_RATE = PROFILE.departureAccel.value;
-const LATERAL_RATE = PROFILE.lateralAccel.value;
 /** The radio-height datum hold, fpm per foot of error (a firm hold; the vertical-acceleration limit shapes it). */
 const RHT_GAIN = 10;
-const TD_SPEED_RATE = PROFILE.tdDeceleration.value;
-/** A receiver change keeps HOV only within these (laboratory limits, Astra rev 3.1): one tick, 10 m, 1 kt. */
-const TRANSFER_TICK_S = PROFILE.hoverTransferTick.value, TRANSFER_POSITION_M = PROFILE.hoverTransferPosition.value, TRANSFER_VELOCITY_KT = PROFILE.hoverTransferVelocity.value;
 
 export type GuidanceMode = "LNAV" | "HOLD" | "SAR" | "HDG";
 export type Guidance = {
@@ -102,8 +86,8 @@ export function arcGeometry(arc: { centre: LatLon; turn: "L" | "R" }, to: LatLon
 export const turnRadius = (tas: number, bank = MAX_BANK) => (tas * tas) / (11.26 * Math.tan(rad(bank))) / 6076.12;
 
 /** The distance before a fly-by waypoint at which the turn onto the next leg begins. */
-export const turnLead = (tas: number, courseChange: number) =>
-  turnRadius(tas) * Math.tan(rad(Math.min(Math.abs(courseChange), 150) / 2));
+export const turnLead = (tas: number, courseChange: number, bank = MAX_BANK) =>
+  turnRadius(tas, bank) * Math.tan(rad(Math.min(Math.abs(courseChange), 150) / 2));
 
 /** A leg's altitude constraint as feet: "4500", "1500A" and "5000B" all give their number. */
 export const constraintAltitude = (text: string | undefined) => {
@@ -201,7 +185,10 @@ export type VerticalPath = { altitude: number; source: "VNAV" | "APPR"; coupled:
 
 export class FlightSimulator {
   private readonly fms: ScriptedFms;
-  /** True airspeed in knots. It approaches the FMS target speed (cruise, or a speed constraint) at SPEED_RATE. */
+  private readonly profile: AircraftProfile["parameters"];
+  private get bankLimit() { return this.profile.afcsBankLimit.value; }
+  private get steeringLimit() { return fmsBankLimit(this.fms.aircraftProfile); }
+  /** True airspeed in knots. It approaches the FMS target speed (cruise, or a speed constraint) at this.profile.longitudinalAccel.value. */
   private airspeed: number;
   get tas() { return this.airspeed; }
   private bank = 0;
@@ -260,6 +247,8 @@ export class FlightSimulator {
       const plan = this.holdPlan;
       return plan ? { segments: plan.segments, index: plan.index, passageAt: plan.index <= plan.entryEnd ? plan.entryEnd : plan.segments.length - 1 } : null;
     });
+    this.profile = fms.aircraftProfile.parameters;
+    this.hoverHeightFt = this.profile.hoverHeightDefault.value;
     this.airspeed = fms.targetSpeed;
     this.selectedAlt = Math.round(fms.altitude);
     this.selectedTas = fms.vnav.cruiseSpeed;
@@ -499,7 +488,7 @@ export class FlightSimulator {
     this.lowCollective = null;
     this.tdSpeed = false;
     if (this.lowHorizontal) this.startDeparture();
-    this.record("GO AROUND", `${cause}; GA climbs at ${GA_RATE} FPM to ${this.selectedAlt} FT`);
+    this.record("GO AROUND", `${cause}; GA climbs at ${this.profile.goAroundClimbRate.value} FPM to ${this.selectedAlt} FT`);
   }
 
   /** VNAV: managed vertical guidance again, after an altitude hold. Refused while the FMS has failed. */
@@ -547,7 +536,7 @@ export class FlightSimulator {
    */
   engageVerticalSpeed(fpm: number) {
     if (!this.advisory || !Number.isFinite(fpm)) return false;
-    this.vsTarget = clamp(Math.round(fpm), -MAX_VS, MAX_VS);
+    this.vsTarget = clamp(Math.round(fpm), -this.profile.maxVerticalSpeed.value, this.profile.maxVerticalSpeed.value);
     this.altitudeHold = null;
     this.lowCollective = null;
     this.goingAround = false;
@@ -569,7 +558,7 @@ export class FlightSimulator {
   /** SPD: the speed the autopilot holds under the ADVISORY policy (knots TAS until IAS is modelled). */
   selectSpeed(knots: number) {
     if (!Number.isFinite(knots)) return false;
-    this.selectedTas = clamp(Math.round(knots), 0, ACTIVE_PROFILE.parameters.maximumSpeed.value);
+    this.selectedTas = clamp(Math.round(knots), 0, this.profile.maximumSpeed.value);
     this.record("SPD SELECTED", `${this.selectedTas} KT`);
     return true;
   }
@@ -608,18 +597,18 @@ export class FlightSimulator {
     let heading: number, track: number, groundSpeed: number, position: LatLon;
     if (this.lowHorizontal) {
       ({ heading, track, groundSpeed, position } = this.integrateLowSpeed(dt));
-      this.bank += clamp(-this.bank, -ROLL_RATE * dt, ROLL_RATE * dt);
+      this.bank += clamp(-this.bank, -this.profile.rollRate.value * dt, this.profile.rollRate.value * dt);
     } else {
       // The crew selects indicated airspeed (the helicopter profile); the aircraft flies the true airspeed it means here.
       const speedTarget = this.advisory ? tasFromIas(this.selectedTas, fms.altitude) : fms.targetSpeed;
       if (this.tdSpeed) {
         // TD brings the indicated airspeed back to the gate speed at the TD rate, in IAS (the shared command law); the
         // aircraft flies the true airspeed that IAS means at its altitude.
-        this.tdIas = speedCommandIas(this.tdIas, this.selectedTas, TD_SPEED_RATE, dt);
+        this.tdIas = speedCommandIas(this.tdIas, this.selectedTas, this.profile.tdDeceleration.value, dt);
         this.airspeed = tasFromIas(this.tdIas, fms.altitude);
         if (this.tdIas <= this.selectedTas + 1e-9) this.tdSpeed = false;
-      } else this.airspeed += clamp(speedTarget - this.airspeed, -SPEED_RATE * dt, SPEED_RATE * dt);
-      this.bank += clamp(guidance.bankCommand - this.bank, -ROLL_RATE * dt, ROLL_RATE * dt);
+      } else this.airspeed += clamp(speedTarget - this.airspeed, -this.profile.longitudinalAccel.value * dt, this.profile.longitudinalAccel.value * dt);
+      this.bank += clamp(guidance.bankCommand - this.bank, -this.profile.rollRate.value * dt, this.profile.rollRate.value * dt);
       heading = norm360(fms.heading + (this.airspeed > 1 ? G_TURN * Math.tan(rad(this.bank)) / this.airspeed : 0) * dt);
       const ground = groundVelocity(this.airspeed, heading, fms.wind);
       // With no ground motion there is no track: the last one stands.
@@ -628,7 +617,7 @@ export class FlightSimulator {
       // The aircraft moves from where it really is; guidance above steered it from where the FMS believes it is.
       position = offset(fms.truePosition, track, (groundSpeed * dt) / 3600);
     }
-    const vs = clamp((guidance.targetAltitude - fms.altitude) * 2, -MAX_VS, MAX_VS);
+    const vs = clamp((guidance.targetAltitude - fms.altitude) * 2, -this.profile.maxVerticalSpeed.value, this.profile.maxVerticalSpeed.value);
     // The final approach path first, then the VNAV descent path, then climbing or holding the target altitude. A hold
     // or an altitude-terminated leg keeps its own altitude.
     const ownAltitude = this.holdPlan || fms.activeRoute.legs[0]?.kind === "cond";
@@ -643,7 +632,7 @@ export class FlightSimulator {
     // from it; otherwise a latched hold is the only vertical authority.
     if (low !== null) verticalSpeed = low;
     else if (this.advisory && tdn !== null && !fms.hasCondition("fmsFail")) { verticalSpeed = tdn; this.vertical = "TDN"; this.altitudeHold = null; this.vsTarget = null; this.goingAround = false; }
-    else if (this.altitudeHold !== null) { verticalSpeed = clamp((this.altitudeHold - fms.altitude) * 2, -MAX_VS, MAX_VS); this.vertical = "ALT HOLD"; }
+    else if (this.altitudeHold !== null) { verticalSpeed = clamp((this.altitudeHold - fms.altitude) * 2, -this.profile.maxVerticalSpeed.value, this.profile.maxVerticalSpeed.value); this.vertical = "ALT HOLD"; }
     else if (tdn !== null) { verticalSpeed = tdn; this.vertical = "TDN"; }
     else if (this.advisory) verticalSpeed = this.advisoryVerticalSpeed(groundSpeed);
     else {
@@ -654,7 +643,7 @@ export class FlightSimulator {
       else { verticalSpeed = vs; this.vertical = guidance.targetAltitude > fms.altitude + 50 ? "VNAV CLB" : guidance.targetAltitude < fms.altitude - 50 ? "VNAV DES" : "VNAV ALT"; }
     }
     // The commanded vertical speed is reached at the vertical acceleration limit, so captures have a transient.
-    verticalSpeed = fms.verticalSpeed + clamp(verticalSpeed - fms.verticalSpeed, -VS_RATE * dt, VS_RATE * dt);
+    verticalSpeed = fms.verticalSpeed + clamp(verticalSpeed - fms.verticalSpeed, -this.profile.verticalAccel.value * dt, this.profile.verticalAccel.value * dt);
     const altitude = fms.altitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
     // Bank and pitch too: they tilt the GPS antennas. The point-mass model has no attitude of its own, so pitch is the
@@ -674,8 +663,8 @@ export class FlightSimulator {
     fms.updatePerformance(dt);
     // The airspeed indication and what the autopilot publishes to the FMS.
     const ias = this.indicatedAirspeed;
-    if (this.iasOk && ias < PROFILE.unreliableIasBelow.value) this.iasOk = false;
-    else if (!this.iasOk && ias >= PROFILE.reliableIasAgainAt.value) this.iasOk = true;
+    if (this.iasOk && ias < this.profile.unreliableIasBelow.value) this.iasOk = false;
+    else if (!this.iasOk && ias >= this.profile.reliableIasAgainAt.value) this.iasOk = true;
     fms.afcs = { hoverHeight: this.hoverHeightFt, ias, ...this.groundVelocityAxes };
     if (fms.verticalPhase !== this.phase && !this.advisory) { this.phase = fms.verticalPhase; this.record(`VNAV ${this.phase}`, fms.verticalPhaseReason); }
     // DES NOW ends once the aircraft is on the descent path: the path, rising behind the active fix, has come down to it.
@@ -695,7 +684,7 @@ export class FlightSimulator {
     const final = this.pathVerticalSpeed(groundSpeed);
     if (final !== null) { this.vertical = "APPR"; return final; }
     const alt = this.fms.altitude;
-    const rate = this.goingAround ? GA_RATE : this.vsTarget;
+    const rate = this.goingAround ? this.profile.goAroundClimbRate.value : this.vsTarget;
     if (rate === null) {
       // Nothing commands the axis (a tactical descent has ended level, or nothing was selected): hold there.
       this.altitudeHold = this.fms.tdn.level ? this.fms.tdn.targetAltitude : Math.round(alt);
@@ -709,7 +698,7 @@ export class FlightSimulator {
       this.vsTarget = null;
       this.goingAround = false;
       this.vertical = "ALT HOLD";
-      return clamp((this.selectedAlt - alt) * 2, -MAX_VS, MAX_VS);
+      return clamp((this.selectedAlt - alt) * 2, -this.profile.maxVerticalSpeed.value, this.profile.maxVerticalSpeed.value);
     }
     this.vertical = this.goingAround ? "GA" : "VS";
     // Capture: close to the preselection in the direction of flight, the rate eases toward it.
@@ -730,7 +719,7 @@ export class FlightSimulator {
     const tan = Math.tan(rad(fms.vnav.pathAngle));
     // DES NOW: 1000 fpm down to the planned altitude at the active fix, levelling there, until the path comes down to
     // the aircraft (integrate ends DES NOW there). Never upward.
-    if (fms.vnav.desNow) return clamp((first.altitude - fms.altitude) * 2, -MAX_VS, 0);
+    if (fms.vnav.desNow) return clamp((first.altitude - fms.altitude) * 2, -this.profile.maxVerticalSpeed.value, 0);
     const path = this.descentPath(first)!;
     const above = fms.altitude - path.altitude;
     if (above < -50) return 0;
@@ -758,7 +747,7 @@ export class FlightSimulator {
   private steer(desiredTrack: number, crossTrack: number) {
     // Intercept at up to 45 degrees, proportional to the cross-track error, then bank toward that track.
     const commanded = desiredTrack - clamp(crossTrack * 40, -45, 45);
-    return clamp(angleDiff(this.fms.track, commanded) * 1.0, -MAX_BANK, MAX_BANK);
+    return clamp(angleDiff(this.fms.track, commanded) * 1.0, -this.steeringLimit, this.steeringLimit);
   }
 
   private targetAltitude() {
@@ -813,7 +802,7 @@ export class FlightSimulator {
   private airVelocity: { north: number; east: number } | null = null;
   /** The heading the low-speed regime holds, turned at the yaw-rate limit toward a selection. */
   private hoverHeading = 0;
-  private hoverHeightFt = PROFILE.hoverHeightDefault.value;
+  private hoverHeightFt: number;
   /** The TD pitch axis: decelerating toward the gate speed at the TD rate until it gets there. */
   private tdSpeed = false;
   /** TD's speed command, in indicated airspeed: it decreases at the TD rate in IAS, as the planner assumes (transition.ts). */
@@ -853,7 +842,7 @@ export class FlightSimulator {
     const collective = c ? (c.mode === "TDH" ? "TD/H" : c.mode) : this.vertical === "ALT HOLD" ? "ALT" : this.vertical;
     const pitch = h ? (h.mode === "TDH" ? "TD/H" : h.mode === "TU" ? (this.goingAround ? "GA" : "TU") : h.mode) : this.tdSpeed ? "TD" : this.advisory ? "IAS" : "SPD";
     // TU: heading hold shows on the roll axis from 40 kt (the low-speed controller flies it until 45 kt).
-    const tuRoll = this.indicatedAirspeed >= PROFILE.coordinatedLeaveBelow.value ? "HDG" : this.lvlLost ? "ATT" : "LVL";
+    const tuRoll = this.indicatedAirspeed >= this.profile.coordinatedLeaveBelow.value ? "HDG" : this.lvlLost ? "ATT" : "LVL";
     const roll = h ? (h.mode === "TU" ? tuRoll : h.mode === "TDH" ? "TD/H" : h.mode) : this.lateral === "LNAV" ? "NAV" : "HDG";
     return { collective, pitch, roll };
   }
@@ -872,9 +861,9 @@ export class FlightSimulator {
       const data = hover.requestData;
       if (data) {
         const ra = this.radio;
-        const above = ra.status === "NORMAL" && ra.value! > PROFILE.gateHeight.value + ALT_CAPTURE_FT;
+        const above = ra.status === "NORMAL" && ra.value! > this.profile.gateHeight.value + ALT_CAPTURE_FT;
         this.fmsTransition = data.id;
-        if (above || this.indicatedAirspeed > PROFILE.gateSpeed.value + 2) { this.engageTransitionDown(); this.pendingTdh = data.mrk; }
+        if (above || this.indicatedAirspeed > this.profile.gateSpeed.value + 2) { this.engageTransitionDown(); this.pendingTdh = data.mrk; }
         else this.engageTransitionDownToHover(data.mrk);
       }
     }
@@ -912,7 +901,7 @@ export class FlightSimulator {
   /** RHT: holds the present radio height (at least the minimum use height). Needs a valid radio height. */
   engageRadioHeight() {
     const ra = this.radio;
-    if (!this.advisory || ra.status !== "NORMAL" || ra.value! < PROFILE.minimumUseHeight.value) return false;
+    if (!this.advisory || ra.status !== "NORMAL" || ra.value! < this.profile.minimumUseHeight.value) return false;
     this.lowCollective = { mode: "RHT", datum: Math.round(ra.value!), rate: null };
     this.altitudeHold = null; this.vsTarget = null; this.goingAround = false;
     this.record("RHT", `${this.lowCollective.datum} FT RA`);
@@ -921,7 +910,7 @@ export class FlightSimulator {
 
   /** The hover height the AFCS selects (the CMA HOVER page reads it): 30 to 200 ft, or refused. */
   selectHoverHeight(feet: number) {
-    if (!(feet >= PROFILE.hoverHeightMin.value && feet <= PROFILE.hoverHeightMax.value)) return false;
+    if (!(feet >= this.profile.hoverHeightMin.value && feet <= this.profile.hoverHeightMax.value)) return false;
     this.hoverHeightFt = Math.round(feet);
     this.record("HOVER HEIGHT", `${this.hoverHeightFt} FT`);
     return true;
@@ -930,7 +919,7 @@ export class FlightSimulator {
   /** HOV: holds the present position (entry below the coordinated-flight speed, with eligible hover feedback). */
   engageHover() {
     const feedback = this.fms.hoverFeedback;
-    if (!this.advisory || !feedback || this.indicatedAirspeed >= PROFILE.coordinatedLeaveBelow.value) return false;
+    if (!this.advisory || !feedback || this.indicatedAirspeed >= this.profile.coordinatedLeaveBelow.value) return false;
     this.enterLowSpeed();
     this.lowHorizontal = { mode: "HOV", target: feedback.position, speed: 0, track: this.fms.track, captured: true };
     this.noteFeedback(feedback);
@@ -942,13 +931,13 @@ export class FlightSimulator {
   /** TD: from cruise, down to the gate height (200 ft RA, never climbing) and back to the gate speed (80). */
   engageTransitionDown() {
     const ra = this.radio;
-    if (!this.advisory || ra.status !== "NORMAL" || ra.value! < PROFILE.minimumUseHeight.value || this.lowHorizontal) return false;
-    this.lowCollective = { mode: "TD", datum: Math.min(PROFILE.gateHeight.value, Math.round(ra.value!)), rate: -PROFILE.tdDescentRate.value };
+    if (!this.advisory || ra.status !== "NORMAL" || ra.value! < this.profile.minimumUseHeight.value || this.lowHorizontal) return false;
+    this.lowCollective = { mode: "TD", datum: Math.min(this.profile.gateHeight.value, Math.round(ra.value!)), rate: -this.profile.tdDescentRate.value };
     this.altitudeHold = null; this.vsTarget = null; this.goingAround = false;
-    this.selectedTas = PROFILE.gateSpeed.value;
-    this.tdIas = Math.max(this.indicatedAirspeed, PROFILE.gateSpeed.value);
+    this.selectedTas = this.profile.gateSpeed.value;
+    this.tdIas = Math.max(this.indicatedAirspeed, this.profile.gateSpeed.value);
     this.tdSpeed = true;
-    this.record("TD", `to ${this.lowCollective.datum} FT RA and ${PROFILE.gateSpeed.value} KT`);
+    this.record("TD", `to ${this.lowCollective.datum} FT RA and ${this.profile.gateSpeed.value} KT`);
     return true;
   }
 
@@ -960,13 +949,13 @@ export class FlightSimulator {
   engageTransitionDownToHover(target: LatLon | null = null) {
     const ra = this.radio, feedback = this.fms.hoverFeedback;
     if (!this.advisory || ra.status !== "NORMAL" || !feedback) return false;
-    if (ra.value! < PROFILE.tdhMinHeight.value || ra.value! > PROFILE.tdhMaxHeight.value || this.indicatedAirspeed >= PROFILE.tdhMaxSpeedBelow.value) return false;
+    if (ra.value! < this.profile.tdhMinHeight.value || ra.value! > this.profile.tdhMaxHeight.value || this.indicatedAirspeed >= this.profile.tdhMaxSpeedBelow.value) return false;
     const groundSpeed = Math.hypot(feedback.north, feedback.east);
     this.enterLowSpeed();
     const hoverDatum = Math.min(this.hoverHeightFt, Math.round(ra.value!));
     // Toward a target the gate segment comes first: the height is held there until the deceleration starts.
     this.lowHorizontal = { mode: "TDH", target, speed: groundSpeed, track: target ? courseDeg(feedback.position, target) : this.fms.track, holding: target !== null, hoverDatum };
-    this.lowCollective = target ? { mode: "RHT", datum: Math.round(ra.value!), rate: null } : { mode: "TDH", datum: hoverDatum, rate: -PROFILE.tdhDescentRate.value };
+    this.lowCollective = target ? { mode: "RHT", datum: Math.round(ra.value!), rate: null } : { mode: "TDH", datum: hoverDatum, rate: -this.profile.tdhDescentRate.value };
     this.altitudeHold = null; this.vsTarget = null; this.goingAround = false; this.tdSpeed = false;
     this.noteFeedback(feedback);
     this.record("TD/H", `to ${this.lowCollective.datum} FT RA and 0 KT${target ? " at the target" : ""}`);
@@ -981,12 +970,12 @@ export class FlightSimulator {
   engageTransitionUp() {
     const ra = this.radio;
     const from = this.lowHorizontal?.mode === "HOV" || this.lowHorizontal?.mode === "TDH" || this.lowCollective?.mode === "RHT";
-    if (!this.advisory || !from || this.indicatedAirspeed >= PROFILE.coordinatedLeaveBelow.value || ra.status !== "NORMAL" || ra.value! < PROFILE.minimumUseHeight.value) return false;
+    if (!this.advisory || !from || this.indicatedAirspeed >= this.profile.coordinatedLeaveBelow.value || ra.status !== "NORMAL" || ra.value! < this.profile.minimumUseHeight.value) return false;
     this.startDeparture();
     // Above the gate height already, TU climbs no further and never descends: it holds the height it has.
-    const datum = Math.max(PROFILE.gateHeight.value, Math.round(ra.value!));
-    this.lowCollective = { mode: "TU", datum, rate: datum > ra.value! ? PROFILE.departureClimbRate.value : null };
-    this.record("TU", `to ${datum} FT RA and ${PROFILE.climbSpeed.value} KT`);
+    const datum = Math.max(this.profile.gateHeight.value, Math.round(ra.value!));
+    this.lowCollective = { mode: "TU", datum, rate: datum > ra.value! ? this.profile.departureClimbRate.value : null };
+    this.record("TU", `to ${datum} FT RA and ${this.profile.climbSpeed.value} KT`);
     return true;
   }
 
@@ -994,7 +983,7 @@ export class FlightSimulator {
     this.enterLowSpeed();
     this.lvlLost = false;
     this.lowHorizontal = { mode: "TU", target: null, speed: 0, track: this.fms.track };
-    this.selectedTas = PROFILE.climbSpeed.value;
+    this.selectedTas = this.profile.climbSpeed.value;
     // The departure starts from the aircraft's feedback as it is: no stale sample carried over.
     const feedback = this.fms.hoverFeedback;
     this.lastFeedback = feedback ? { at: this.fms.now.getTime(), ...feedback } : null;
@@ -1031,13 +1020,13 @@ export class FlightSimulator {
     if (!feedback) return { feedback: null, reason: "no eligible hover feedback" };
     if (!last || last.source === feedback.source) return { feedback, reason: null };
     const seconds = (this.fms.now.getTime() - last.at) / 1000;
-    if (seconds > Math.max(dt, TRANSFER_TICK_S) + 1e-6) return { feedback: null, reason: `GPS${feedback.source} took over ${seconds.toFixed(2)} s after the last sample` };
+    if (seconds > Math.max(dt, this.profile.hoverTransferTick.value) + 1e-6) return { feedback: null, reason: `GPS${feedback.source} took over ${seconds.toFixed(2)} s after the last sample` };
     const speed = Math.hypot(last.north, last.east);
     const predicted = speed > 1e-9 ? offset(last.position, deg(Math.atan2(last.east, last.north)), (speed * seconds) / 3600) : last.position;
     const jump = distanceNm(predicted, feedback.position) * 1852;
     const velocityStep = Math.hypot(feedback.north - last.north, feedback.east - last.east);
-    if (jump > TRANSFER_POSITION_M) return { feedback: null, reason: `GPS${feedback.source} position ${jump.toFixed(1)} m from the last sample` };
-    if (velocityStep > TRANSFER_VELOCITY_KT) return { feedback: null, reason: `GPS${feedback.source} velocity ${velocityStep.toFixed(1)} kt from the last sample` };
+    if (jump > this.profile.hoverTransferPosition.value) return { feedback: null, reason: `GPS${feedback.source} position ${jump.toFixed(1)} m from the last sample` };
+    if (velocityStep > this.profile.hoverTransferVelocity.value) return { feedback: null, reason: `GPS${feedback.source} velocity ${velocityStep.toFixed(1)} kt from the last sample` };
     return { feedback, reason: null };
   }
 
@@ -1071,7 +1060,7 @@ export class FlightSimulator {
     }
     // The heading: toward the held heading (a crew selection in HDG turns it), at the yaw-rate limit.
     if (this.lateral === "HDG" && !this.held) this.hoverHeading = this.heading;
-    const heading = norm360(fms.heading + clamp(angleDiff(fms.heading, this.hoverHeading), -YAW_RATE * dt, YAW_RATE * dt));
+    const heading = norm360(fms.heading + clamp(angleDiff(fms.heading, this.hoverHeading), -this.profile.lowSpeedYawRate.value * dt, this.profile.lowSpeedYawRate.value * dt));
     const hx = Math.cos(rad(heading)), hy = Math.sin(rad(heading));
     let command = { north: air.north, east: air.east };
     const fb = this.lvlLost && this.lowHorizontal!.mode === "TU" ? null : this.lastFeedback;
@@ -1096,12 +1085,12 @@ export class FlightSimulator {
         // the target, the upper bound; without a target, the nominal rate.
         // With a target further than the nominal stopping distance, the speed is held (the gate segment) until the
         // stopping distance is reached; then the closed loop.
-        const nominalStop = (now.speed * now.speed) / (2 * TDH_RATE * 3600);
-        const rate = remaining === null ? TDH_RATE : remaining <= 0 ? TDH_MAX : now.holding && remaining > nominalStop ? 0 : clamp((now.speed * now.speed) / (2 * remaining * 3600), TDH_MIN, TDH_MAX);
+        const nominalStop = (now.speed * now.speed) / (2 * this.profile.tdhDeceleration.value * 3600);
+        const rate = remaining === null ? this.profile.tdhDeceleration.value : remaining <= 0 ? 1.25 : now.holding && remaining > nominalStop ? 0 : clamp((now.speed * now.speed) / (2 * remaining * 3600), 0.5, 1.25);
         // The end of the gate segment: the deceleration starts, and with it the descent to the hover height.
         if (now.holding && rate > 0) {
           now.holding = false;
-          this.lowCollective = { mode: "TDH", datum: now.hoverDatum!, rate: -PROFILE.tdhDescentRate.value };
+          this.lowCollective = { mode: "TDH", datum: now.hoverDatum!, rate: -this.profile.tdhDescentRate.value };
           this.record("TD/H", "the gate segment ends: decelerating to MRK and descending to the hover height");
         }
         now.speed = Math.max(0, now.speed - rate * dt);
@@ -1126,19 +1115,19 @@ export class FlightSimulator {
       // ground velocity driven to zero (LVL) while there is feedback; without it, the lateral air velocity is held (ATT).
       const alongAir = air.north * hx + air.east * hy;
       const crossAir = -air.north * hy + air.east * hx;
-      const climbTas = tasFromIas(PROFILE.climbSpeed.value, fms.altitude);
-      const alongCmd = Math.min(climbTas, alongAir + DEPARTURE_RATE * dt);
+      const climbTas = tasFromIas(this.profile.climbSpeed.value, fms.altitude);
+      const alongCmd = Math.min(climbTas, alongAir + this.profile.departureAccel.value * dt);
       const crossCmd = fb ? crossAir - (-fb.north * hy + fb.east * hx) : crossAir;
       command = { north: alongCmd * hx - crossCmd * hy, east: alongCmd * hy + crossCmd * hx };
     }
     // Sideways and rearward limits in the heading frame, then the acceleration limits per axis (along the heading, and
     // across it at the profile's lateral limit).
     let along = command.north * hx + command.east * hy, cross = -command.north * hy + command.east * hx;
-    along = Math.max(along, -PROFILE.rearwardLimit.value);
-    cross = clamp(cross, -PROFILE.sidewaysLimit.value, PROFILE.sidewaysLimit.value);
+    along = Math.max(along, -this.profile.rearwardLimit.value);
+    cross = clamp(cross, -this.profile.sidewaysLimit.value, this.profile.sidewaysLimit.value);
     const airAlong = air.north * hx + air.east * hy, airCross = -air.north * hy + air.east * hx;
-    const newAlong = airAlong + clamp(along - airAlong, -SPEED_RATE * dt, SPEED_RATE * dt);
-    const newCross = airCross + clamp(cross - airCross, -LATERAL_RATE * dt, LATERAL_RATE * dt);
+    const newAlong = airAlong + clamp(along - airAlong, -this.profile.longitudinalAccel.value * dt, this.profile.longitudinalAccel.value * dt);
+    const newCross = airCross + clamp(cross - airCross, -this.profile.lateralAccel.value * dt, this.profile.lateralAccel.value * dt);
     air.north = newAlong * hx - newCross * hy; air.east = newAlong * hy + newCross * hx;
     this.airspeed = Math.hypot(air.north, air.east);
     const groundNorth = air.north + windNorth, groundEast = air.east + windEast;
@@ -1147,7 +1136,7 @@ export class FlightSimulator {
     const position = offset(fms.truePosition, track, (groundSpeed * dt) / 3600);
     // TU: heading hold captures on the roll axis through 40 kt, but the low-speed heading controller keeps the aircraft
     // until the coordinated regime at 45 kt (the profile's hysteresis); from there IAS flies on to 80.
-    if (this.lowHorizontal?.mode === "TU" && this.indicatedAirspeed >= PROFILE.coordinatedEnterAt.value) this.leaveLowSpeed("coordinated flight on the departure");
+    if (this.lowHorizontal?.mode === "TU" && this.indicatedAirspeed >= this.profile.coordinatedEnterAt.value) this.leaveLowSpeed("coordinated flight on the departure");
     return { position, track, groundSpeed, heading };
   }
 
@@ -1182,12 +1171,12 @@ export class FlightSimulator {
     const travel = (this.fms.verticalSpeed * dt) / 60;
     const reaching = Math.sign(travel) === Math.sign(toGo) && Math.abs(travel) >= Math.abs(toGo);
     if (c.rate !== null && !verticalArrived(toGo, this.fms.verticalSpeed) && !reaching) vs = verticalCommand(toGo - travel, c.rate);
-    else { vs = clamp(toGo * RHT_GAIN, -MAX_VS, MAX_VS); if (c.rate !== null) this.lowCollective = { ...c, rate: null }; }
+    else { vs = clamp(toGo * RHT_GAIN, -this.profile.maxVerticalSpeed.value, this.profile.maxVerticalSpeed.value); if (c.rate !== null) this.lowCollective = { ...c, rate: null }; }
     if (c.mode !== "RHT" && Math.abs(toGo) <= ALT_CAPTURE_FT && Math.abs(this.fms.verticalSpeed) <= 200) {
       this.lowCollective = { mode: "RHT", datum: c.datum, rate: this.lowCollective!.rate };
       this.record("RHT", `${c.datum} FT RA`);
     }
-    const floor = this.lowHorizontal !== null ? PROFILE.lowHeightHover.value : PROFILE.lowHeightCruise.value;
+    const floor = this.lowHorizontal !== null ? this.profile.lowHeightHover.value : this.profile.lowHeightCruise.value;
     if (height < floor) { this.lowHeight = "ACTIVE"; vs = Math.max(vs, (floor - height) * 2 + 100); }
     else this.lowHeight = null;
     this.vertical = "ALT HOLD";
@@ -1228,7 +1217,7 @@ export class FlightSimulator {
     if (this.fms.hasCondition("fmsFail")) {
       return {
         mode: "HDG", legFrom: null, legTo: null, desiredTrack: null, crossTrack: 0, distanceToGo: null,
-        bankCommand: clamp(angleDiff(this.fms.heading, this.heading), -MAX_BANK, MAX_BANK), targetAltitude: this.altitudeHold ?? this.fms.altitude,
+        bankCommand: clamp(angleDiff(this.fms.heading, this.heading), -this.bankLimit, this.bankLimit), targetAltitude: this.altitudeHold ?? this.fms.altitude,
       };
     }
     const managed = this.managedGuidance(dt);
@@ -1246,7 +1235,7 @@ export class FlightSimulator {
       this.lnavArmed = false;
       return managed;
     }
-    return { ...managed, mode: "HDG", bankCommand: clamp(angleDiff(this.fms.heading, this.heading), -MAX_BANK, MAX_BANK) };
+    return { ...managed, mode: "HDG", bankCommand: clamp(angleDiff(this.fms.heading, this.heading), -this.bankLimit, this.bankLimit) };
   }
 
   /** The guidance LNAV would fly. With dt > 0 (and LNAV engaged) it also sequences what the aircraft has reached. */
@@ -1294,7 +1283,7 @@ export class FlightSimulator {
     const nextTo = next?.kind === "wpt" ? fms.coordinates(next.ident) : undefined;
     const flyOver = leg.qualifier !== undefined || !nextTo || next?.kind === "wpt" && next.path === "RF";
     const outbound = next?.kind === "wpt" && next.path === "CF" && next.course !== undefined ? next.course : nextTo ? courseDeg(to, nextTo) : g.track;
-    const lead = flyOver ? 0 : turnLead(this.tas, angleDiff(g.track, outbound));
+    const lead = flyOver ? 0 : turnLead(this.tas, angleDiff(g.track, outbound), this.steeringLimit);
     this.lead = lead;
     if (sequencing && (g.toGo <= lead || g.toGo <= 0.02)) {
       // The altitude planned at the fix becomes the start of the next leg's path.
@@ -1311,7 +1300,7 @@ export class FlightSimulator {
       : 0;
     return {
       mode: "LNAV", legFrom: leg.path === "RF" ? null : from, legTo: to, desiredTrack, crossTrack, distanceToGo: g.toGo,
-      bankCommand: clamp(feedForward + this.steer(desiredTrack, crossTrack), -MAX_BANK - 5, MAX_BANK + 5), ...base,
+      bankCommand: clamp(feedForward + this.steer(desiredTrack, crossTrack), -this.steeringLimit, this.steeringLimit), ...base,
     };
   }
 
@@ -1321,7 +1310,7 @@ export class FlightSimulator {
     const headingLeg = leg.path[0] === "V";
     // A heading leg flies its heading and drifts with the wind; a course or track leg flies its course over the ground.
     const flown = headingLeg ? fms.heading : fms.track;
-    const result = { mode: "LNAV" as const, legFrom: null, legTo: null, desiredTrack: headingLeg ? fms.track : leg.course, crossTrack: 0, distanceToGo: null, bankCommand: clamp(angleDiff(flown, leg.course), -MAX_BANK, MAX_BANK) };
+    const result = { mode: "LNAV" as const, legFrom: null, legTo: null, desiredTrack: headingLeg ? fms.track : leg.course, crossTrack: 0, distanceToGo: null, bankCommand: clamp(angleDiff(flown, leg.course), -this.steeringLimit, this.steeringLimit) };
     if (!sequencing) return result;
     let done = false;
     if ((leg.path === "CA" || leg.path === "FA" || leg.path === "VA") && leg.altitude !== undefined) done = fms.altitude >= leg.altitude - 20;
@@ -1355,7 +1344,7 @@ export class FlightSimulator {
     if (!fix) return null;
     const tas = Math.max(this.tas, tasFromIas(hold.speed, this.fms.altitude));
     const legNm = hold.legDistance ?? ((hold.legTime ?? defaultLegMinutes(this.fms.altitude)) * tas) / 60;
-    return holdGeometry(fix, hold.inbound, hold.turn, tas, this.fms.wind.speed, legNm, MAX_BANK);
+    return holdGeometry(fix, hold.inbound, hold.turn, tas, this.fms.wind.speed, legNm, this.steeringLimit);
   }
 
   /**
@@ -1402,7 +1391,7 @@ export class FlightSimulator {
       const g = arcGeometry({ centre: segment.centre, turn: segment.turn }, segment.to, fms.position);
       if (dt > 0 && g.toGo <= 0.02) plan.index += 1;
       const feedForward = (segment.turn === "R" ? 1 : -1) * deg(Math.atan(((fms.groundSpeed * 1.68781) ** 2) / (32.174 * segment.radius * 6076.12)));
-      return { legFrom: null, legTo: segment.to, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: clamp(feedForward + this.steer(g.track, g.crossTrack), -MAX_BANK - 5, MAX_BANK + 5) };
+      return { legFrom: null, legTo: segment.to, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: clamp(feedForward + this.steer(g.track, g.crossTrack), -this.steeringLimit, this.steeringLimit) };
     }
     const g = legGeometry(segment.from, segment.to, fms.position);
     if (dt > 0 && g.toGo <= 0.02) {
@@ -1443,7 +1432,7 @@ export class FlightSimulator {
       const g = arcGeometry({ centre: segment.centre, turn: segment.turn }, segment.to, fms.position);
       if (dt > 0 && g.toGo <= 0.02) next();
       const feedForward = (segment.turn === "R" ? 1 : -1) * deg(Math.atan(((fms.groundSpeed * 1.68781) ** 2) / (32.174 * segment.radius * 6076.12)));
-      return { legFrom: null, legTo: segment.to, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: clamp(feedForward + this.steer(g.track, g.crossTrack), -MAX_BANK - 5, MAX_BANK + 5) };
+      return { legFrom: null, legTo: segment.to, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: clamp(feedForward + this.steer(g.track, g.crossTrack), -this.steeringLimit, this.steeringLimit) };
     }
     const g = legGeometry(segment.from, segment.to, fms.position);
     if (dt > 0 && g.toGo <= 0.02) next();
@@ -1462,7 +1451,7 @@ export class FlightSimulator {
     const from = plan.points[plan.index - 1], to = plan.points[plan.index];
     const g = legGeometry(from, to, fms.position);
     const after = plan.points[plan.index + 1];
-    const lead = after ? turnLead(this.tas, angleDiff(g.track, courseDeg(to, after))) : 0;
+    const lead = after ? turnLead(this.tas, angleDiff(g.track, courseDeg(to, after)), this.steeringLimit) : 0;
     if (dt > 0 && (g.toGo <= lead || g.toGo <= 0.02)) {
       plan.index += 1;
       if (plan.index >= plan.points.length) {

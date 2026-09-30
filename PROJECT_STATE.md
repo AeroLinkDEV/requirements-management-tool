@@ -399,13 +399,17 @@ See [FMS Live Showcase Dataset](docs/showcase/FMS_LIVE_SHOWCASE_DATASET.md) and 
 Every project has an **FMS Test Bench** (`…/fms-test-bench`): a photorealistic, touchable CMA-9000 FMS control
 display unit for engineers.
 
-- **Target aircraft ([DEC-146](DECISIONS_AND_OPEN_QUESTIONS.md#dec-146---the-fms-test-bench-targets-the-helicopter-cma-9000-first)).**
+- **Target aircraft ([DEC-146](DECISIONS_AND_OPEN_QUESTIONS.md#dec-146---the-fms-test-bench-targets-the-helicopter-cma-9000-first), [DEC-147](DECISIONS_AND_OPEN_QUESTIONS.md#dec-147---the-helicopter-bench-targets-a-full-civil-sar-configuration)).**
   The bench simulates a rotorcraft CMA-9000, with the helicopter operational program S/W 169-614876-300 as its
   behavioural baseline. The aircraft profile is versioned data (`product/client/src/fmsCdu/profile.ts`, named with a
   fingerprint in every run report), and which source governs each behaviour is recorded in
-  [`product/docs/FMS_APPLICABILITY.md`](product/docs/FMS_APPLICABILITY.md). The profile is declared ahead of the
-  behaviour: parameters the simulation does not yet fly are marked for later stages, and the flight model below is
-  still the point-mass model until the rotorcraft foundation lands.
+  [`product/docs/FMS_APPLICABILITY.md`](product/docs/FMS_APPLICABILITY.md). The civil SAR profile separately records
+  target options and their implemented, partial or pending status in `configuration.ts`, with all 87 optional-function
+  occurrences mapped to explicit dispositions. Run reports identify both active parameters and remaining target gaps.
+  The controller consumes its selected computer's declared limits; join/hold geometry and FMS commands share the bank
+  envelope, with corrections saturated inside it. Coordinated flight remains a point-mass model with representative
+  helicopter low-speed/hover modes; it is not an installed aircraft's flight-dynamics model. Military tactical
+  approaches are unavailable under the civil configuration.
 
 - The faceplate is rendered in Blender from `product/tools/AeroLink.FmsCduModel`, which uses the public CMC
   datasheet dimensions and the Operator's Manual front-panel figures. No manufacturer logo is shown.
@@ -436,10 +440,11 @@ display unit for engineers.
     PTS; holds with their standard entry and status (including a one-turn exit); a lateral offset flown between
     start and end waypoints; search patterns flown along their geometry; and selected heading versus LNAV with
     arm and capture.
-  - **Navigation sensors** (`navigation.ts`): GPS, DME/DME, VOR/DME and inertial position in the airline priority
+  - **Navigation sensors** (`navigation.ts`): GPS, DME/DME, VOR/DME and a temporary laboratory DR estimate in the existing priority
     order with automatic reversion; the FMS position drifts from the true position in dead reckoning and shifts
     back when a sensor returns (POSITION SHIFT); ANP from the sources, RNP by phase of flight or crew entry, and
-    CHECK ANP after the phase's time to alert; NAV STATUS and NAV OPTIONS (navaid inhibit, GPS deselect).
+    CHECK ANP after the phase's time to alert; NAV STATUS and NAV OPTIONS (navaid inhibit, GPS deselect). IRS is not
+    configured and is not reported as available. Measured radio navigation and heading/TAS/wind DR remain target work.
   - **Vertical guidance**: under the default helicopter profile the crew flies the vertical axis and the speed
     through the autopilot (ALT SEL, VS, ALT, SPD, and GA on TOGA), and the FMS constraints are advisories; the
     airline-style VNAV below is a selectable laboratory profile (`lab-airline-vnav`).

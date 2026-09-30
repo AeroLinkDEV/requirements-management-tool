@@ -248,7 +248,9 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
     { when: S, action: { kind: "expectActive", waypoint: "TDN" } },
     { when: S, action: { kind: "autopilot", heading: 50 } },
     { when: after(120), action: { kind: "autopilot", heading: 140 } },
-    { when: after(35), action: { kind: "autopilot", heading: 230 } },
+    // Profile v2 permits the declared 30-degree heading bank rather than the old hard-coded 25. The shorter
+    // crosswind leg establishes the same off-track witness; its refusal-distance acceptance bounds stay unchanged.
+    { when: after(25), action: { kind: "autopilot", heading: 230 } },
     // NAV armed late, within 0.6 NM of TDN while still about 0.4 NM off the final track: it captures and is still correcting.
     { when: { kind: "distance", waypoint: "TDN", nm: 0.6 }, action: { kind: "autopilot", lnav: true } },
     { when: S, action: { kind: "expectAlert", text: "TDN NOT POSSIBLE", fresh: true }, within: 60 },

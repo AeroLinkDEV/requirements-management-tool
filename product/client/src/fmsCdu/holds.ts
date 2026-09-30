@@ -12,7 +12,7 @@
  */
 
 import { offset, type LatLon } from "./fmsModel";
-import { ACTIVE_PROFILE, type AircraftProfile } from "./profile";
+import { ACTIVE_PROFILE, fmsBankLimit, type AircraftProfile } from "./profile";
 
 const rad = (deg: number) => (deg * Math.PI) / 180;
 const deg = (r: number) => (r * 180) / Math.PI;
@@ -53,7 +53,7 @@ export const radiusAt = (groundSpeed: number, bank: number) => ((groundSpeed * K
  * Null when the pattern cannot be flown (the wind at least the airspeed).
  */
 export function holdGeometry(fix: LatLon, inbound: number, turn: "LEFT" | "RIGHT", tas: number, windSpeed: number, legNm: number,
-  bankLimit = ACTIVE_PROFILE.parameters.afcsBankLimit.value): HoldGeometry | null {
+  bankLimit = fmsBankLimit(ACTIVE_PROFILE)): HoldGeometry | null {
   if (windSpeed >= tas || tas <= 0) return null;
   const fastest = tas + windSpeed;
   const bank = designBank(fastest, bankLimit);

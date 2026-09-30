@@ -18,7 +18,7 @@ import {
 } from "./gpsSensors";
 import { DEMO_COMPANY_ROUTES, DEMO_NAV_DATA, NavDatabase, type NavData, type NavEntry, type ProcedureHold, type StoredRoute } from "./navData";
 import { coldTemperatureCorrection, computeProfile, parseConstraint, type PredictionBasis, type Profile, type ProfileInput, type VerticalPhase } from "./vnav";
-import { IRS_DRIFT_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
+import { LAB_DR_ERROR_NM_PER_HOUR, RNP_DEFAULTS, selectSources, sourceError, type FlightPhase, type NavMode } from "./navigation";
 import { NAV_PAGES } from "./navPages";
 import { holdAllowance, holdPathToPassage, piecesHours, predictionEndpoint, type HoldPathReport, type PathPiece } from "./predictions";
 import { MAX_BANK } from "./flight";
@@ -38,7 +38,7 @@ export type Rendezvous = {
 import { PLANNING_PAGES } from "./planningPages";
 import { composeRoute, enrouteLegs, findProcedure } from "./procedures";
 import { lowestProcedureLimit, procedureSpeedLimit, type ProcedureSpeed } from "./procedureSpeed";
-import { ACTIVE_PROFILE, type AircraftProfile } from "./profile";
+import { ACTIVE_PROFILE, fmsBankLimit, type AircraftProfile } from "./profile";
 import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line } from "./screen";
 import { NO_SURFACE, radioHeight, surfaceById, type Surface } from "./surface";
 import {
@@ -396,6 +396,7 @@ export class ScriptedFms implements CduBackend {
     this.userScope = options.userDatabase?.scope ?? { userId: "local", profileId: this.aircraftProfile.id };
     this.loadUserDatabase();
     this.planData.cruiseTas = this.aircraftProfile.parameters.planningCruiseTas.value;
+    this.vnav.cruiseSpeed = this.aircraftProfile.parameters.cruiseSpeed.value;
     this.pinActive();
     // The receivers start warm: powered a minute before the session, past self-test, first fix and SBAS acquisition.
     const start = this.now.getTime();
@@ -662,7 +663,7 @@ export class ScriptedFms implements CduBackend {
 
   /**
    * Chooses the navigation source and updates the FMS position error and ANP, then checks ANP against RNP. In
-   * dead reckoning the error grows with inertial drift; when a better source returns the position jumps back,
+   * dead reckoning the temporary laboratory error grows; when a better source returns the position jumps back,
    * which the FMS reports as a POSITION SHIFT.
    */
   updateNavigation(dt: number) {
@@ -680,7 +681,7 @@ export class ScriptedFms implements CduBackend {
       ({ x: target.nm * Math.sin((target.bearing * Math.PI) / 180), y: target.nm * Math.cos((target.bearing * Math.PI) / 180) });
     if (selection.mode === "DR") {
       const drift = sourceError("DR");
-      const grow = (IRS_DRIFT_NM_PER_HOUR * dt) / 3600;
+      const grow = (LAB_DR_ERROR_NM_PER_HOUR * dt) / 3600;
       this.error = { x: this.error.x + grow * Math.sin((drift.bearing * Math.PI) / 180), y: this.error.y + grow * Math.cos((drift.bearing * Math.PI) / 180) };
       this.here = this.withError(this.truth);
     } else {
@@ -1908,7 +1909,14 @@ export class ScriptedFms implements CduBackend {
 
   // ------------------------------------------------------------------ state changed by pages
 
-  open(page: PageId, index = 0) { this.page = page; this.index = index; }
+  open(page: PageId, index = 0) {
+    if (page === "TACT_APPR" && !this.aircraftProfile.configuration.options.tacticalApproach.configured) {
+      this.advisory("NOT CONFIGURED");
+      return;
+    }
+    this.page = page;
+    this.index = index;
+  }
 
   /** Starts (or continues) a modification of the active route. */
   modify(change: (route: Route) => void) {
@@ -2043,7 +2051,7 @@ export class ScriptedFms implements CduBackend {
   private joinFromHere(join: LatLon, finalTrack: number): JoinPath {
     const tas = tasFromIas(Math.max(this.afcs?.ias ?? 0, 1), this.altitude);
     const fastest = tas + this.wind.speed;
-    const radius = radiusAt(fastest, designBank(fastest, this.aircraftProfile.parameters.afcsBankLimit.value));
+    const radius = radiusAt(fastest, designBank(fastest, fmsBankLimit(this.aircraftProfile)));
     return joiningPath(this.here, this.track, join, finalTrack, radius);
   }
 

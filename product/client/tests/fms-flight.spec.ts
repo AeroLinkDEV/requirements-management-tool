@@ -2,7 +2,7 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator, angleDiff, legGeometry, racetrackOutline, sarTrack } from '../src/fmsCdu/flight'
 import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
-import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
+import { HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { stimulusFor, type GpsOp } from '../src/fmsCdu/gpsStimulus'
 import { checkAtTdn, planTransition } from '../src/fmsCdu/transition'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
@@ -38,6 +38,33 @@ const typeText = (unit: ScriptedFms, text: string) => {
   for (const ch of text) unit.press(ch === '.' ? 'DOT' : ch === '/' ? 'SLASH' : `CHAR_${ch}`)
 }
 const activeIdent = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : null }
+
+test('the declared bank envelope and roll rate govern the selected computer, without an extra five degrees', () => {
+  const profile = structuredClone(HELICOPTER_PROFILE)
+  profile.parameters.afcsBankLimit.value = 8
+  profile.parameters.fmsRollSteeringLimit.value = 6
+  profile.parameters.rollRate.value = 2
+  const { unit, sim, ticks } = setup(profile)
+  sim.selectHeading(unit.heading + 90)
+  ticks(0.25)
+  expect(Math.abs(sim.guidance.bankCommand)).toBe(8)
+  expect(Math.abs(sim.bankAngle)).toBeCloseTo(0.5, 8)
+  ticks(8)
+  expect(Math.abs(sim.bankAngle)).toBeCloseTo(8, 8)
+
+  // FMS steering has its own configured cap within the AFCS envelope. This second computer does not inherit the
+  // default profile's controller constants. A ninety-degree intercept saturates the real guidance output.
+  const second = new ScriptedFms(() => new Date(Date.UTC(2026, 8, 29)), { profile })
+  const target = second.coordinates(activeIdent(second)!)!
+  const heading = courseDeg(second.position, target) + 90
+  second.setAircraft({ heading, track: heading })
+  const other = new FlightSimulator(second)
+  expect(Math.abs(other.guidance.bankCommand)).toBe(6)
+  expect(HELICOPTER_PROFILE.parameters.afcsBankLimit.inForce).toBe(true)
+  expect(HELICOPTER_PROFILE.parameters.fmsRollSteeringLimit.inForce).toBe(true)
+  expect(HELICOPTER_PROFILE.parameters.rollRate.inForce).toBe(true)
+  expect(HELICOPTER_PROFILE.parameters.settlingTime.inForce).toBe(false)
+})
 
 test('the aircraft flies the demonstration route leg by leg, on track, and reports END OF ROUTE', () => {
   const { unit, sim, fly } = setup()
