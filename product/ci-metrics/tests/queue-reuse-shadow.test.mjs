@@ -24,7 +24,7 @@ function fixture() {
     client: 'Client lint, type-check, and build', 'script-contracts': 'Operator and recovery script contracts',
     'browser-production': 'Browser journeys on the production build', 'postgresql-smoke': 'PostgreSQL migrations and secure bootstrap',
     gate: 'Full Product evidence aggregate' }
-  const name = j => fixedNames[j.instance] ?? (j.group === 'backend-api' ? `API test suite (${j.instance.at(-1)}/3)` : `Browser journeys (${j.instance.at(-1)}/4)`)
+  const name = j => fixedNames[j.instance] ?? (j.group === 'backend-api' ? `API test suite (${j.instance.at(-1)}/3)` : `Browser journeys (${j.instance.at(-1)}/6)`)
   const fragments = topology.expectedJobs.map(j => buildFragment({ run: topology.expectedRun,
     job: { ...j, name: name(j), result: 'success', matrix: null },
     timings: { jobStartMs: now - 100_000, setupEndMs: now - 90_000, testEndMs: now - 80_000, jobEndMs: now - 70_000,

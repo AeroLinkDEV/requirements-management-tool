@@ -11,7 +11,7 @@ import { trustedMaintenanceContext } from '../lib/maintenance-runtime.mjs'
 
 const sha = character => character.repeat(40)
 const root = `/repos/${repository}`
-function fixture(browserShards = 4) {
+function fixture(browserShards = 6) {
   const names = [...REQUIRED_JOBS, CLASSIFIER_JOB_NAME, AGGREGATE_JOB_NAME,
     ...[1, 2, 3].map(n => `API test suite (${n}/3)`), ...Array.from({ length: browserShards }, (_, i) => `Browser journeys (${i + 1}/${browserShards})`)]
   const evidence = {
@@ -83,11 +83,12 @@ test('exact authenticated owner environment approval permits only the current re
   assert.equal(review.packet.assessment.ordinaryDecision.decision, 'REFUSE')
 })
 
-test('a review of a 6-shard browser run is approvable like a 4-shard one; a 5-shard run is not reviewable (#1358)', () => {
-  for (const shards of [4, 6]) {
+test('a review of a 6-shard browser run is approvable; a 4- or 5-shard run is not reviewable (#1358 step 2)', () => {
+  for (const shards of [6]) {
     const review = createMaintenanceReview(fixture(shards))
     assert.deepEqual(evaluateMaintenanceApproval({ review, expectedDigest: review.digest, approvals: approval(review) }), { decision: 'PASS', reasons: [] }, `${shards} shards`)
   }
+  assert.throws(() => createMaintenanceReview(fixture(4)), /maintenance-preflight-not-reviewable/)
   const drifted = fixture(5)
   assert.ok(drifted.packet.assessment.reasons.some(reason => reason.startsWith('shard-count-drift: Browser journeys')))
   assert.throws(() => createMaintenanceReview(drifted), /maintenance-preflight-not-reviewable/)

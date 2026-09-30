@@ -9,7 +9,7 @@ import { REQUIRED_JOBS, CLASSIFIER_JOB_NAME, AGGREGATE_JOB_NAME } from '../lib/m
 const sha = character => character.repeat(40)
 const runId = 42
 const prNumber = 946
-function fixture(browserShards = 4) {
+function fixture(browserShards = 6) {
   const names = [...REQUIRED_JOBS, CLASSIFIER_JOB_NAME, AGGREGATE_JOB_NAME,
     ...[1, 2, 3].map(n => `API test suite (${n}/3)`), ...Array.from({ length: browserShards }, (_, i) => `Browser journeys (${i + 1}/${browserShards})`)]
   return {
@@ -47,13 +47,14 @@ test('a complete maintenance packet still grants no publishing or merging permis
   assert.match(result.ordinaryDecision.reasons[0], /^trusted-surface-modified:/)
 })
 
-test('a maintenance packet from a 6-shard browser run is reviewable, as a 4-shard one is; other sizes and gaps refuse (#1358)', () => {
-  for (const shards of [4, 6]) {
+test('a maintenance packet from a 6-shard browser run is reviewable; 4 and other sizes, and gaps, refuse (#1358 step 2)', () => {
+  for (const shards of [6]) {
     const result = evaluateMaintenancePreflight(fixture(shards))
     assert.equal(result.disposition, 'REVIEW_REQUIRED', `${shards} shards`)
     assert.deepEqual(result.reasons, [], `${shards} shards`)
   }
   for (const [name, evidence, reason] of [
+    ['4 shards', fixture(4), 'shard-count-drift:'],
     ['5 shards', fixture(5), 'shard-count-drift:'],
     ['8 shards', fixture(8), 'shard-count-drift:'],
     ['6 shards, one missing', (e => { e.jobs = e.jobs.filter(j => j.name !== 'Browser journeys (6/6)'); return e })(fixture(6)), 'shard-set-incomplete:'],
@@ -79,7 +80,7 @@ for (const [name, mutate, reason] of [
   ['missing job', e => { e.jobs = e.jobs.filter(j => j.name !== 'Infrastructure test suite') }, 'missing-job:'],
   ['failed job', e => { e.jobs[0].conclusion = 'failure' }, 'job-not-success:'],
   ['duplicate aggregate', e => { e.jobs.push(e.jobs.find(j => j.name === AGGREGATE_JOB_NAME)) }, 'ambiguous-aggregate:'],
-  ['incomplete shards', e => { e.jobs = e.jobs.filter(j => j.name !== 'Browser journeys (4/4)') }, 'shard-set-incomplete:'],
+  ['incomplete shards', e => { e.jobs = e.jobs.filter(j => j.name !== 'Browser journeys (6/6)') }, 'shard-set-incomplete:'],
   ['active newer attempt', e => { e.run.status = 'in_progress' }, 'run-not-completed:'],
   ['future job attempt', e => { e.jobs[0].runAttempt = 3 }, 'job-attempt-mismatch:'],
   ['diagnostic evidence', e => { e.run.event = 'workflow_dispatch' }, 'event-not-merge-group:'],

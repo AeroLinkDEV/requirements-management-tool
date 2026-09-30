@@ -41,10 +41,12 @@ function allJobsSuccess(runId = RUN_ID, runAttempt = RUN_ATTEMPT) {
     { name: 'Infrastructure test suite', conclusion: 'success', runId, runAttempt },
     { name: 'Client lint, type-check, and build', conclusion: 'success', runId, runAttempt },
     { name: 'Operator and recovery script contracts', conclusion: 'success', runId, runAttempt },
-    { name: 'Browser journeys (1/4)', conclusion: 'success', runId, runAttempt },
-    { name: 'Browser journeys (2/4)', conclusion: 'success', runId, runAttempt },
-    { name: 'Browser journeys (3/4)', conclusion: 'success', runId, runAttempt },
-    { name: 'Browser journeys (4/4)', conclusion: 'success', runId, runAttempt },
+    { name: 'Browser journeys (1/6)', conclusion: 'success', runId, runAttempt },
+    { name: 'Browser journeys (2/6)', conclusion: 'success', runId, runAttempt },
+    { name: 'Browser journeys (3/6)', conclusion: 'success', runId, runAttempt },
+    { name: 'Browser journeys (4/6)', conclusion: 'success', runId, runAttempt },
+    { name: 'Browser journeys (5/6)', conclusion: 'success', runId, runAttempt },
+    { name: 'Browser journeys (6/6)', conclusion: 'success', runId, runAttempt },
     { name: 'Browser journeys on the production build', conclusion: 'success', runId, runAttempt },
     { name: 'PostgreSQL migrations and secure bootstrap', conclusion: 'success', runId, runAttempt },
     { name: AGGREGATE_JOB_NAME, conclusion: 'success', runId, runAttempt },
@@ -263,7 +265,7 @@ test('refuses missing, skipped, failed, or cancelled expected jobs', () => {
 })
 
 test('refuses a failed or skipped shard while other shards succeeded', () => {
-  const jobs = allJobsSuccess().map((job) => (job.name === 'Browser journeys (3/4)' ? { ...job, conclusion: 'skipped' } : job))
+  const jobs = allJobsSuccess().map((job) => (job.name === 'Browser journeys (3/6)' ? { ...job, conclusion: 'skipped' } : job))
   const result = reasonsFor({ jobs })
   assert.equal(result.decision, 'REFUSE')
   assert.ok(result.reasons.some((reason) => reason.includes('Browser journeys shard 3')))
@@ -344,19 +346,19 @@ test('binds the trusted run attempt; retained earlier attempts bind, later attem
 
   // A record from a LATER attempt than the one being bound cannot belong to this validation.
   const futureJob = reasonsFor({
-    jobs: allJobsSuccess().map((job) => (job.name === 'Browser journeys (2/4)' ? { ...job, runAttempt: RUN_ATTEMPT + 1 } : job)),
+    jobs: allJobsSuccess().map((job) => (job.name === 'Browser journeys (2/6)' ? { ...job, runAttempt: RUN_ATTEMPT + 1 } : job)),
   })
   assert.equal(futureJob.decision, 'REFUSE')
-  assert.ok(futureJob.reasons.some((reason) => reason.startsWith('job-attempt-mismatch') && reason.includes('Browser journeys (2/4)')))
+  assert.ok(futureJob.reasons.some((reason) => reason.startsWith('job-attempt-mismatch') && reason.includes('Browser journeys (2/6)')))
 
   const attemptlessJob = reasonsFor({
     jobs: allJobsSuccess().map((job) => {
       const { runAttempt, ...rest } = job
-      return job.name === 'Browser journeys (2/4)' ? rest : job
+      return job.name === 'Browser journeys (2/6)' ? rest : job
     }),
   })
   assert.equal(attemptlessJob.decision, 'REFUSE')
-  assert.ok(attemptlessJob.reasons.some((reason) => reason.startsWith('job-attempt-missing') && reason.includes('Browser journeys (2/4)')))
+  assert.ok(attemptlessJob.reasons.some((reason) => reason.startsWith('job-attempt-missing') && reason.includes('Browser journeys (2/6)')))
 
   const noExpectedAttempt = evaluateMergeGroupCandidate({
     run: legitimateRun(),
@@ -396,8 +398,8 @@ function withBrowserShards(jobs, total, shards = Array.from({ length: total }, (
     .concat(shards.map((shard) => ({ name: `Browser journeys (${shard}/${total})`, conclusion, runId: RUN_ID, runAttempt: RUN_ATTEMPT })))
 }
 
-test('accepts a complete browser shard set of 4 or of 6, on the full and the FMS topologies (#1358)', () => {
-  for (const total of [4, 6]) {
+test('accepts a complete browser shard set of 6, on the full and the FMS topologies (#1358 step 2)', () => {
+  for (const total of [6]) {
     assert.deepEqual(reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), total) }), { decision: 'PASS', reasons: [] }, `${total} shards`)
     assert.deepEqual(
       evaluateMergeGroupCandidate({ ...legitimateCandidate(), jobs: withBrowserShards(fmsTopologyJobs(), total), fmsOnlyCandidate: true }),
@@ -408,7 +410,7 @@ test('accepts a complete browser shard set of 4 or of 6, on the full and the FMS
 })
 
 test('refuses any other browser shard count, an incomplete or mixed 6-shard set, and a failed sixth shard (#1358)', () => {
-  for (const total of [1, 3, 5, 7, 8]) {
+  for (const total of [1, 3, 4, 5, 7, 8]) {
     const drifted = reasonsFor({ jobs: withBrowserShards(allJobsSuccess(), total) })
     assert.equal(drifted.decision, 'REFUSE', `${total} shards`)
     assert.ok(drifted.reasons.some((reason) => reason.startsWith('shard-count-drift: Browser journeys')), `${total} shards`)
@@ -642,7 +644,7 @@ test('a documentation-only candidate binds on the documentation topology, and on
   // base) and passed the complete gate set still binds: the derivation relaxes, never tightens.
   assert.deepEqual(evaluateMergeGroupCandidate({ ...legitimateCandidate(), documentationOnlyCandidate: true }), { decision: 'PASS', reasons: [] })
   // A broad run with one failed shard is neither topology, and says so for both.
-  const failedShard = legitimateCandidate().jobs.map((job) => (job.name === 'Browser journeys (2/4)' ? { ...job, conclusion: 'failure' } : job))
+  const failedShard = legitimateCandidate().jobs.map((job) => (job.name === 'Browser journeys (2/6)' ? { ...job, conclusion: 'failure' } : job))
   const mixed = evaluateMergeGroupCandidate({ ...legitimateCandidate(), jobs: failedShard, documentationOnlyCandidate: true })
   assert.equal(mixed.decision, 'REFUSE')
   assert.ok(mixed.reasons.some((reason) => reason.startsWith('docs-topology-')))
@@ -657,7 +659,7 @@ test('the documentation topology refuses any gate job that is not exactly skippe
     'a required job is missing': (jobs) => jobs.filter((job) => job.name !== 'Operator and recovery script contracts'),
     'a skipped group is missing': (jobs) => jobs.filter((job) => job.name !== unexpandedShardJobName(SHARDED_JOB_GROUPS[1])),
     'a skipped group timed out': (jobs) => jobs.map((job) => (job.name === unexpandedShardJobName(SHARDED_JOB_GROUPS[0]) ? { ...job, conclusion: 'timed_out' } : job)),
-    'a shard ran': (jobs) => [...jobs, { name: 'Browser journeys (1/4)', conclusion: 'success', runId: RUN_ID, runAttempt: RUN_ATTEMPT }],
+    'a shard ran': (jobs) => [...jobs, { name: 'Browser journeys (1/6)', conclusion: 'success', runId: RUN_ID, runAttempt: RUN_ATTEMPT }],
     'the aggregate failed': (jobs) => jobs.map((job) => (job.name === AGGREGATE_JOB_NAME ? { ...job, conclusion: 'failure' } : job)),
     'a job is from a later attempt': (jobs) => jobs.map((job) => (job.name === 'Domain test suite' ? { ...job, runAttempt: RUN_ATTEMPT + 1 } : job)),
     'a required job appears twice': (jobs) => [...jobs, jobs.find((job) => job.name === 'Domain test suite')],
@@ -687,7 +689,7 @@ function fmsTopologyJobs(runId = RUN_ID, runAttempt = RUN_ATTEMPT) {
     { name: CLASSIFIER_JOB_NAME, conclusion: 'success', runId, runAttempt },
     ...REQUIRED_JOBS.map((name) => ({ name, conclusion: runs.has(name) ? 'success' : 'skipped', runId, runAttempt })),
     { name: unexpandedShardJobName(SHARDED_JOB_GROUPS.find((group) => group.name === 'API test suite')), conclusion: 'skipped', runId, runAttempt },
-    ...[1, 2, 3, 4].map((shard) => ({ name: `Browser journeys (${shard}/4)`, conclusion: 'success', runId, runAttempt })),
+    ...[1, 2, 3, 4, 5, 6].map((shard) => ({ name: `Browser journeys (${shard}/6)`, conclusion: 'success', runId, runAttempt })),
     { name: 'Full browser journeys (${{ matrix.shard }}/${{ strategy.job-total }})', conclusion: 'skipped', runId, runAttempt },
     { name: AGGREGATE_JOB_NAME, conclusion: 'success', runId, runAttempt },
   ]
@@ -713,9 +715,9 @@ test('the FMS topology requires its three gates to pass and every other gate to 
     'the client gate failed': (jobs) => jobs.map((job) => (job.name === 'Client lint, type-check, and build' ? { ...job, conclusion: 'failure' } : job)),
     'the client gate was skipped': (jobs) => jobs.map((job) => (job.name === 'Client lint, type-check, and build' ? { ...job, conclusion: 'skipped' } : job)),
     'the production journeys were skipped': (jobs) => jobs.map((job) => (job.name === 'Browser journeys on the production build' ? { ...job, conclusion: 'skipped' } : job)),
-    'a browser shard failed': (jobs) => jobs.map((job) => (job.name === 'Browser journeys (3/4)' ? { ...job, conclusion: 'failure' } : job)),
-    'a browser shard is missing': (jobs) => jobs.filter((job) => job.name !== 'Browser journeys (4/4)'),
-    'the browser group was skipped': (jobs) => [...jobs.filter((job) => !/^Browser journeys \(\d\/4\)$/.test(job.name)),
+    'a browser shard failed': (jobs) => jobs.map((job) => (job.name === 'Browser journeys (3/6)' ? { ...job, conclusion: 'failure' } : job)),
+    'a browser shard is missing': (jobs) => jobs.filter((job) => job.name !== 'Browser journeys (4/6)'),
+    'the browser group was skipped': (jobs) => [...jobs.filter((job) => !/^Browser journeys \(\d\/6\)$/.test(job.name)),
       { name: unexpandedShardJobName(SHARDED_JOB_GROUPS.find((group) => group.name === 'Browser journeys')), conclusion: 'skipped', runId: RUN_ID, runAttempt: RUN_ATTEMPT }],
     'a backend job succeeded': (jobs) => jobs.map((job) => (job.name === 'Domain test suite' ? { ...job, conclusion: 'success' } : job)),
     'a backend job failed': (jobs) => jobs.map((job) => (job.name === 'Infrastructure test suite' ? { ...job, conclusion: 'failure' } : job)),

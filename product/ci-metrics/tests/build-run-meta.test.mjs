@@ -64,7 +64,7 @@ test('full pull-request topology has every product instance, exact gate needs, a
       'changes', 'metrics-tooling',
       'backend-api-1', 'backend-api-2', 'backend-api-3', 'backend-core-domain', 'backend-core-infrastructure',
       'client', 'script-contracts',
-      'browser-pr-1', 'browser-pr-2', 'browser-pr-3', 'browser-pr-4',
+      'browser-pr-1', 'browser-pr-2', 'browser-pr-3', 'browser-pr-4', 'browser-pr-5', 'browser-pr-6',
       'browser-production', 'postgresql-smoke', 'gate',
     ])
     const gate = meta.expectedJobs.find((job) => job.instance === 'gate')
@@ -306,8 +306,8 @@ function withBrowserMatrix(shards) {
   return { directory, path }
 }
 
-test('the browser-pr instances follow the workflow matrix: 4 today, 6 after #1358, selected and skipped alike', () => {
-  for (const total of [4, 6]) {
+test('the browser-pr instances follow the workflow matrix: 6 since #1358, selected and skipped alike', () => {
+  for (const total of [6]) {
     const workflow = withBrowserMatrix(Array.from({ length: total }, (_, index) => index + 1))
     const names = Array.from({ length: total }, (_, index) => `browser-pr-${index + 1}`)
     try {
@@ -326,7 +326,7 @@ test('the browser-pr instances follow the workflow matrix: 4 today, 6 after #135
 })
 
 test('a browser-pr matrix the verifier does not accept, or cannot be read, fails closed', () => {
-  for (const shards of [[1, 2, 3, 4, 5], [1, 2, 4, 5, 6, 7], [2, 3, 4, 5]]) {
+  for (const shards of [[1, 2, 3, 4], [1, 2, 3, 4, 5], [1, 2, 4, 5, 6, 7], [2, 3, 4, 5]]) {
     const workflow = withBrowserMatrix(shards)
     try {
       const { directory, result } = build({ ...ALL_TRUE, METRICS_WORKFLOW_PATH: workflow.path })
@@ -338,9 +338,9 @@ test('a browser-pr matrix the verifier does not accept, or cannot be read, fails
     }
   }
   // Two shard lists in the job (a second axis or a stray edit): which one GitHub expands is not the script's to guess.
-  const doubled = withBrowserMatrix([1, 2, 3, 4])
+  const doubled = withBrowserMatrix([1, 2, 3, 4, 5, 6])
   try {
-    const text = readFileSync(doubled.path, 'utf8').replace('        shard: [1, 2, 3, 4]', '        shard: [1, 2, 3, 4]\n        shard: [1, 2, 3, 4, 5, 6]')
+    const text = readFileSync(doubled.path, 'utf8').replace('        shard: [1, 2, 3, 4, 5, 6]', '        shard: [1, 2, 3, 4, 5, 6]\n        shard: [1, 2, 3, 4]')
     writeFileSync(doubled.path, text)
     const { directory, result } = build({ ...ALL_TRUE, METRICS_WORKFLOW_PATH: doubled.path })
     assert.notEqual(result.status, 0, 'two shard lists must fail')
