@@ -236,6 +236,12 @@ export type Page = {
 export const pad = (value: string, length: number) => value.padEnd(length);
 export const fixed = (value: number, digits: number) => value.toFixed(digits);
 export const three = (value: number) => String(Math.round(value)).padStart(3, "0");
+/**
+ * A value in a field of fixed range: formatted when it is within the range, and asterisks the width of the field when
+ * it is beyond it (M300 2-18: "the data exceeds the maximum value for that field"), never a clipped or plausible number.
+ */
+export const ranged = (value: number, max: number, format: (value: number) => string) =>
+  value > max ? "*".repeat(format(max).length) : format(value);
 export const hhmm = (date: Date) =>
   `${String(date.getUTCHours()).padStart(2, "0")}${String(date.getUTCMinutes()).padStart(2, "0")}.${Math.floor(date.getUTCSeconds() / 6)}Z`;
 

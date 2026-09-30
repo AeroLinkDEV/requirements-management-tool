@@ -164,12 +164,12 @@ test('PROGRESS 2/4 shows the landing EFOB, and dashes when the route is not pred
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
   press(unit, 'PROG', 'NEXT')
-  expect(lines(unit)[4]).toMatch(new RegExp(`${Math.round(unit.profile().destination!.fuel!)}KG$`))
+  expect(lines(unit)[6]).toMatch(new RegExp(`${Math.round(unit.profile().destination!.fuel!)}KG$`))
   unit.press('LEGS')
   enter(unit, 'ELIBA', 'LSK1L')
   unit.press('EXEC')
   press(unit, 'PROG', 'NEXT')
-  expect(lines(unit)[4]).toMatch(/-----KG$/)
+  expect(lines(unit)[6]).toMatch(/-----KG$/)
 })
 
 test('constraints beyond an unresolved gap are not evaluated and do not command the connected segment (R08, second review C11)', () => {

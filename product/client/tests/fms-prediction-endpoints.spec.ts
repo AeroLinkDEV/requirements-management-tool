@@ -78,9 +78,9 @@ test('R3-03: a direct-to 87N, still airborne, is SITE ARRIVAL at the heliport, a
   expect(profile.reserve).toEqual({ available: false, reason: 'landing not modelled' })
   unit.press('PROG')
   unit.press('NEXT')
-  expect(lines(unit)[3]).toMatch(/^ SITE ARR\s+EFOB $/)
-  expect(lines(unit)[4]).toMatch(/^87N\s+\d+KG$/)
-  expect(lines(unit)[6]).toMatch(/^KNOWN/)
+  expect(lines(unit)[5]).toMatch(/^ SITE ARR\s+EFOB $/)
+  expect(lines(unit)[6]).toMatch(/^87N\s+\d+KG$/)
+  expect(lines(unit)[8]).toMatch(/^KNOWN/)
 })
 
 test('R3-03: the KBTV threshold prediction is SITE ARRIVAL (threshold): the label changes, the value does not', () => {
@@ -733,4 +733,58 @@ test('B1.7 (general): VNAV CRZ shows the planned path\'s time at the T/D, and da
   expect(lines(unit)[6]).toMatch(new RegExp(`^${tod.toFixed(1)}NM ${hhmm(new Date(at)).slice(0, 4)}Z\\s+RW24R$`))
   unit.setAircraft({ groundSpeed: 0 })
   expect(lines(unit)[6]).toMatch(new RegExp(`^${unit.profile().topOfDescent!.toFixed(1)}NM -----\\s+RW24R$`))
+})
+
+// ---------------------------------------------------------------------------------------------- ATA and asterisks (B1.7)
+
+test('B1.7: each fix overflown is recorded with its crossing altitude and ATA, shown on PROGRESS 2/4; in a hold, the ATA is the entry', () => {
+  let now = Date.UTC(2026, 8, 27, 14, 0, 0)
+  const unit = new ScriptedFms(() => new Date(now))
+  const sim = new FlightSimulator(unit)
+  const active = () => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : null }
+  const fly = (seconds: number, until: () => boolean) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1); if (until()) return true } return false }
+  const progress2 = () => { unit.press('PROG'); unit.press('NEXT'); return lines(unit) }
+  // Nothing overflown yet: dashes.
+  expect(unit.fromWaypoint).toBeNull()
+  expect(progress2()[2]).toMatch(/^-----\s+----\.-$/)
+  // The first fix sequenced: its ident, the altitude crossed and the time, as the pages show them.
+  const first = active()!
+  expect(fly(3600, () => active() !== first)).toBe(true)
+  expect(unit.fromWaypoint).toMatchObject({ ident: first, ata: now })
+  expect(Math.abs(unit.fromWaypoint!.altitude - unit.altitude)).toBeLessThan(50)
+  expect(progress2()[2]).toMatch(new RegExp(`^${first}\\s+${Math.round(unit.fromWaypoint!.altitude)}\\s+${hhmm(new Date(now)).replace('.', '\\.')}$`))
+  // A manual hold at the next fix: the ATA is the first crossing, the entry, and stays so while the aircraft holds.
+  const fix = active()!
+  expect(unit.defineHold(fix)).toBeUndefined()
+  unit.press('EXEC')
+  expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')).toBe(true)
+  const entry = now
+  expect(unit.fromWaypoint).toMatchObject({ ident: fix, ata: entry })
+  expect(fly(1800, () => (unit.activeRoute.hold?.circuits ?? 0) >= 1)).toBe(true)
+  expect(unit.fromWaypoint).toMatchObject({ ident: fix, ata: entry })
+  expect(progress2()[2]).toMatch(new RegExp(`${hhmm(new Date(entry)).replace('.', '\\.')}$`))
+})
+
+test('B1.7: a time-to-go beyond its field shows asterisks, never a clipped or plausible number (M300 2-18)', () => {
+  const unit = new ScriptedFms(() => new Date(Date.UTC(2026, 8, 27, 14, 0, 0)))
+  // TIMER: minutes and seconds to go fit 99:59; a 120 minute countdown is beyond the field.
+  unit.press('INIT_REF'); unit.press('LSK5R')
+  expect(lines(unit)[0]).toMatch(/^TIMER/)
+  enter(unit, '99', 'LSK1R')
+  expect(lines(unit)[2]).toMatch(/99:00$/)
+  enter(unit, '120', 'LSK1R')
+  expect(lines(unit)[2]).toMatch(/\*{5}$/)
+  expect(lines(unit)[2]).not.toMatch(/\d{3}:\d{2}/)
+  // FUEL 1/2: the endurance, in hours and minutes, fits 99+59; beyond, asterisks.
+  unit.setFuel('flow', 500)
+  unit.press('FUEL')
+  expect(lines(unit)[3]).toMatch(/^ ENDURANCE/)
+  expect(lines(unit)[4]).toMatch(/^\d{2}\+\d{2}\s/)
+  unit.setFuel('flow', 1)
+  expect(lines(unit)[4]).toMatch(/^\*{5}\s/)
+  // PROGRESS 1/4: a distance to go beyond 9999.9 NM (the aircraft placed opposite the active waypoint on the globe).
+  const to = unit.coordinates((unit.activeRoute.legs[0] as { ident: string }).ident)!
+  unit.placeAircraft({ position: { lat: -to.lat, lon: to.lon + 180 - 1 }, track: 0, altitude: 3000 }, 'test: across the globe')
+  unit.press('PROG')
+  expect(lines(unit)[2]).toMatch(/\*{6}NM/)
 })
