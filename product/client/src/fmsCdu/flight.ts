@@ -4,7 +4,7 @@ import { groundVelocity, iasFromTas, tasFromIas } from "./kinematics";
 import { ACTIVE_PROFILE } from "./profile";
 import type { ScriptedFms } from "./scriptedFms";
 import { speedCommandIas, verticalArrived, verticalCommand } from "./transition";
-import type { ProfilePoint, VerticalPhase } from "./vnav";
+import { altitudeMeets, type AltitudeConstraint, type ProfilePoint, type VerticalPhase } from "./vnav";
 
 /**
  * A simple flight model for the test bench: an aircraft that flies what the scripted FMS asks for, the way an
@@ -506,6 +506,22 @@ export class FlightSimulator {
   /** Under the ADVISORY policy the crew commands the vertical axis and the speed; the FMS constraints are advisories. */
   get advisory() { return this.fms.aircraftProfile.verticalPolicy === "ADVISORY"; }
   get selectedAltitude() { return this.selectedAlt; }
+
+  /**
+   * Under the ADVISORY policy, where the crew's selected altitude does not meet the missed approach altitude the FMS
+   * plans (Astra F4): shown on the PFD for the crew to reselect, never flown instead of the selection. Only on the
+   * approach, going around or on the missed approach, where it is the altitude a go-around levels at; null otherwise,
+   * and when the FMS has failed (its missed approach data is then unavailable).
+   */
+  get missedAltitudeConflict(): { target: AltitudeConstraint; selected: number } | null {
+    if (!this.advisory || this.fms.hasCondition("fmsFail")) return null;
+    const leg = this.fms.activeRoute.legs[0];
+    const onMissed = leg !== undefined && leg.kind !== "disco" && leg.source === "MISSED";
+    if (!onMissed && !this.goingAround && this.fms.flightPhase !== "APPROACH") return null;
+    const target = this.fms.profile().missedTarget;
+    return target && !altitudeMeets(target, this.selectedAlt) ? { target, selected: this.selectedAlt } : null;
+  }
+
   get selectedSpeed() { return this.selectedTas; }
   get verticalSpeedTarget() { return this.vsTarget; }
 

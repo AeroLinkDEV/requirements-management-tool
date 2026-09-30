@@ -202,6 +202,10 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
           {bus.targetAltitude.status === "NORMAL" ? Math.round(bus.targetAltitude.value!) : air.selectedAltitude !== null ? air.selectedAltitude : bus.verticalMode === "ALT HOLD" ? "HOLD" : "----"}
         </text>
       </g>
+      {/* The missed approach altitude the selected altitude does not meet (helicopter profile): shown, never flown. */}
+      {air.missedAltitudeConflict ? (
+        <text x="369" y="318" textAnchor="middle" fontSize="12" fill={AMBER} data-testid="pfd-missed-altitude">{`MA ${air.missedAltitudeConflict}`}</text>
+      ) : null}
       {/* Vertical speed. */}
       <g>
         <rect x="404" y="90" width="14" height="180" fill="#2a2f38" />

@@ -2,6 +2,7 @@ import type { FlightSimulator, VerticalMode } from "./flight";
 import { courseDeg, distanceNm, offset, type LatLon, type Route } from "./fmsModel";
 import { makingProgress } from "./kinematics";
 import type { ScriptedFms } from "./scriptedFms";
+import { formatConstraint } from "./vnav";
 
 // The FMS output bus and the aircraft data an EFIS draws from.
 //
@@ -103,6 +104,11 @@ export type AircraftData = {
    */
   selectedAltitude: number | null;
   selectedSpeed: number | null;
+  /**
+   * The missed approach altitude the selected altitude does not meet, as the CDU writes it ("5600A"), for the PFD to
+   * show amber (FlightSimulator.missedAltitudeConflict); null when there is no conflict to show.
+   */
+  missedAltitudeConflict: string | null;
   /** Indicated airspeed (ISA from the true airspeed), or null where it is unreliable (below 30 kt, again from 33). */
   ias: number | null;
   /**
@@ -230,6 +236,7 @@ export function aircraftData(fms: ScriptedFms, sim: FlightSimulator): AircraftDa
     pitch, bank: sim.bankAngle, heading: fms.heading, track, airspeed, groundSpeed: fms.groundSpeed,
     altitude: fms.altitude, verticalSpeed: fms.verticalSpeed, wind: fms.wind, position: fms.truePosition,
     selectedAltitude: sim.advisory ? sim.selectedAltitude : null, selectedSpeed: sim.advisory ? sim.selectedSpeed : null,
+    missedAltitudeConflict: sim.missedAltitudeConflict ? formatConstraint(sim.missedAltitudeConflict.target) : null,
     ias: sim.iasReliable ? sim.indicatedAirspeed : null,
     helicopter: sim.advisory ? {
       axes: sim.axisModes, radioHeight: fms.radioHeight, hoverHeight: sim.hoverHeight, lowHeight: sim.lowHeightCaption,
