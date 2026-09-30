@@ -616,6 +616,7 @@ test('D-R: a restarted scenario restores the moving waypoint\'s epoch from its o
   const scenario: Scenario = {
     id: 'moving-restart', title: 'moving restart', objective: 'epoch', maxSeconds: 600, startTime: '2026-09-27T14:00:00Z',
     steps: [
+      { when: { kind: 'start' }, action: { kind: 'keys', keys: ['INIT_REF', 'LSK5L', 'LSK1L'] } }, // TRUE geometry, independent of MAGVAR.
       { when: { kind: 'time', seconds: 60 }, action: { kind: 'keys', keys: ['INIT_REF', 'NEXT', 'LSK6L'] } },
       { when: { kind: 'start' }, action: { kind: 'type', text: 'SHIP1' } },
       { when: { kind: 'start' }, action: { kind: 'keys', keys: ['LSK1L'] } },
