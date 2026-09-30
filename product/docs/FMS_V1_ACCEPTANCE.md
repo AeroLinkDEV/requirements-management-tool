@@ -27,17 +27,14 @@ Each was checked against `main` on 30 September 2026 (bab18a38). The test titles
 
 ## Summary
 
-140 rows: **91 Met, 38 Partial, 10 Open, 1 Deferred** (Stage F only).
+140 rows: **120 Met, 13 Partial, 5 Open, 2 Deferred** (Stage F; and E1's on-ground ETEs, DEC-148).
 
 v1 is **not complete**: the §10 completion row stays Open until the Partial and Open rows are closed or explicitly deferred by Sean.
 
 The Open rows:
-- the ATA at a fix;
-- time-to-go asterisks;
-- F4 (RA valid again);
-- the ND ground-velocity vector;
-- PROGRESS showing TDN and MRK;
-- the D-R recompute, 500 NM rule, expiry and tactical review.
+- the ATA at a fix (B1.7 (a)) and time-to-go asterisks (B1.7 (i)): session 3's #1314, in review;
+- the ND ground-velocity vector (B4.5) and PROGRESS showing TDN and MRK (T8): session 4's #1319, in review;
+- §10 completion, which closes when every other row is Met or Deferred.
 
 The summary line and this list are recounted from the table in batches, by the last cell of each row; pull requests edit only their own rows (agreed 30 September), because one shared line made every ledger PR conflict with every other.
 
