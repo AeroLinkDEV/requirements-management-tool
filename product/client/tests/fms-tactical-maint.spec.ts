@@ -56,12 +56,12 @@ test('a reachable moving waypoint inside 500 NM remains achievable against a hea
   expect(rendezvous.ttg).toBeCloseTo(400 / 80 * 3600, 1)
 })
 
-// Owner: M300 11-37 ground calculation consumes PLAN DATA, independent of the frozen aircraft's airspeed/wind.
-test('ground moving rendezvous uses entered cruise TAS and wind and includes the exact 500 NM boundary', () => {
+// Owner: the closed 500-NM airborne boundary uses measured airspeed and system wind, not entered ground planning.
+test('airborne moving rendezvous uses measured TAS and wind and includes the exact 500 NM boundary', () => {
   const { unit } = setup()
-  unit.setAircraft({ onGround: true, tas: 0, groundSpeed: 0, track: 0, heading: 0 })
-  unit.planData.cruiseTas = 100; unit.planData.cruiseWind = { direction: 0, speed: 20 }
-  Object.assign(unit.wind, { direction: 180, speed: 50 })
+  unit.setAircraft({ tas: 100, groundSpeed: 80, track: 0, heading: 0 })
+  unit.planData.cruiseTas = 140; unit.planData.cruiseWind = { direction: 180, speed: 50 }
+  Object.assign(unit.wind, { direction: 0, speed: 20 })
   unit.defineMoving('SHIP1', offset(unit.position, 0, 500), 0, 0)
   unit.replaceLegs([{ kind: 'wpt', ident: 'SHIP1' }]); unit.press('EXEC')
   const rendezvous = unit.rendezvousFor(unit.activeRoute, 0)!

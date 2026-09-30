@@ -46,7 +46,6 @@ export class DualFmsSystem {
   get guidanceSide() { return this.driver; }
   get navigationSide() { return this.navSide; }
   get simulator() { return this.flights[this.driver - 1]; }
-  setOnGround(onGround: boolean) { this.computers.forEach(unit => unit.setAircraft({ onGround })); this.notify(); }
   private notify() { this.computers.forEach(unit => unit.notifyComputerState()); }
   private unit(side: FmsSide) { return this.computers[side - 1]; }
   private peer(side: FmsSide) { return this.computers[2 - side]; }

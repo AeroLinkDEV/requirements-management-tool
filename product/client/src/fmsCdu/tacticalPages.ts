@@ -100,7 +100,6 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
     render: (fms, index) => {
       const pattern = SAR_PATTERNS[index];
       const sar = fms.sar;
-      const pposAllowed = !fms.onGround && !fms.activeRoute.legs.some(leg => leg.kind === "wpt" && leg.qualifier === "/S");
       const status = sar.pending === pattern ? "MOD" : sar.active === pattern ? "ACT" : undefined;
       const third: Line = pattern === "LADDER"
         ? { left: sar.relativeBearing === null ? dashes(4) : { text: `${fms.angleText(sar.relativeBearing)}` }, right: { text: `${fixed(sar.legLength, 1)}NM` } }
@@ -122,8 +121,8 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         { left: medium(active, sar.active ? "green" : "white"), right: medium(`${maxSarGroundSpeed(sar, pattern)}KT`) },
         { left: dashes(24) },
         {
-          left: sar.pending ? prompt("<CANCEL") : pposAllowed ? prompt("<PPOS") : undefined,
-          right: sar.active ? prompt("INTERRUPT>") : sar.pending || fms.onGround && !sar.refId ? undefined : prompt("ACTIVATE>"),
+          left: prompt(sar.pending ? "<CANCEL" : "<PPOS"),
+          right: sar.active ? prompt("INTERRUPT>") : sar.pending ? undefined : prompt("ACTIVATE>"),
         },
       ];
     },
@@ -143,16 +142,13 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
       if (row === 6) {
         if (side === "L") {
           if (sar.pending) fms.eraseModification();
-          // PPOS: active route, airborne, with no other search waypoint (M300 A-157).
-          else if (fms.onGround || fms.activeRoute.legs.some(leg => leg.kind === "wpt" && leg.qualifier === "/S")) return "not-allowed";
+          // PPOS: airborne v1, with no other search waypoint in the active route (M300 A-157; DEC-148).
+          else if (fms.activeRoute.legs.some(leg => leg.kind === "wpt" && leg.qualifier === "/S")) return "not-allowed";
           else { sar.refId = null; sar.relativeBearing = null; sar.distance = null; }
           return;
         }
         if (sar.active) fms.interruptSar();
-        else if (!sar.pending) {
-          if (fms.onGround && !sar.refId) return "not-allowed";
-          fms.activateSar(pattern);
-        }
+        else if (!sar.pending) fms.activateSar(pattern);
         return;
       }
       if (!scratch) return;

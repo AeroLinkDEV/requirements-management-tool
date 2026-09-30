@@ -537,25 +537,6 @@ test('the search pages take the M300 field ranges, refuse changes once the searc
   // CLR takes the message first, then the entry a character at a time.
   const clearAll = () => { for (let i = 0; i < 30 && scratch() !== ''; i++) unit.press('CLR') }
   press(unit, 'TACT', 'LSK3L')
-  // The live ground input must not turn REF ID into PPOS or activate a default PPOS search (A-157).
-  unit.setAircraft({ onGround: true })
-  unit.sar.refId = 'MUN'
-  unit.press('LSK6L')
-  expect(unit.sar.refId).toBe('MUN')
-  expect(scratch()).toBe('NOT ALLOWED')
-  clearAll()
-  expect(screenText(unit.screen())[12]).not.toContain('<PPOS')
-  press(unit, 'LSK6R') // A referenced ground plan remains permitted.
-  expect(unit.routeStatus).toBe('MOD')
-  unit.press('LSK6L') // CANCEL still works on the ground.
-  expect(unit.routeStatus).toBe('ACT')
-  unit.sar.refId = null
-  unit.press('LSK6R')
-  expect(unit.routeStatus).toBe('ACT')
-  expect(unit.sar.active).toBeNull()
-  expect(scratch()).toBe('NOT ALLOWED')
-  clearAll()
-  unit.setAircraft({ onGround: false })
   expect(screenText(unit.screen())[12]).toContain('<PPOS')
   // The ladder: leg length and track spacing 0.1 to 40 NM; SAR bearing 000 to 360.
   enter('0.1', 'LSK3R')

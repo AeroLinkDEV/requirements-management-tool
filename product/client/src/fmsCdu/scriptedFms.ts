@@ -176,7 +176,6 @@ export class ScriptedFms implements CduBackend {
   private historyOrigin = "";
   private backtrackPending = false;
   private backtrackGeneration = 0;
-  private onGroundInput = false;
   private radios = { ...DEFAULT_RADIOS };
   private crossTalk: CrossTalkPort | null = null;
   private rms: RadioManagementPort | null = null;
@@ -949,11 +948,10 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** The flight simulation reports the aircraft's state after each step. */
-  setAircraft(state: Partial<{ position: LatLon; track: number; heading: number; groundSpeed: number; tas: number; altitude: number; verticalSpeed: number; crossTrack: number; trackError: number; bank: number; pitch: number; onGround: boolean }>) {
+  setAircraft(state: Partial<{ position: LatLon; track: number; heading: number; groundSpeed: number; tas: number; altitude: number; verticalSpeed: number; crossTrack: number; trackError: number; bank: number; pitch: number }>) {
     // Plant state feeds the bench's sensor generators. Only measured navigation may change the FMS position.
     if (state.position) this.truth = state.position;
-    if (state.onGround !== undefined) this.onGroundInput = state.onGround;
-    const { position: _position, onGround: _onGround, ...rest } = state;
+    const { position: _position, ...rest } = state;
     Object.assign(this.aircraft, rest);
   }
 
@@ -1846,8 +1844,8 @@ export class ScriptedFms implements CduBackend {
   private solveRendezvous(route: Route, index: number, ident: string): MovingRendezvous {
     const now = this.now.getTime();
     const condition = this.rendezvousCondition(route, index);
-    const tas = this.onGround ? this.planData.cruiseTas : this.trueAirspeed ?? this.plannedSpeed;
-    const wind = this.onGround ? this.planData.cruiseWind : this.systemWind;
+    const tas = this.trueAirspeed ?? this.plannedSpeed;
+    const wind = this.systemWind;
     const groundspeed = (course: number) => predictedGroundSpeed(tas, course, wind);
     const unachievable = (): MovingRendezvous => ({ position: null, achievable: false, condition, computedAt: now, ttg: null, distanceNm: null });
     if (!(tas > 0) || !Number.isFinite(tas) || !Number.isFinite(wind.speed) || !Number.isFinite(wind.direction)) return unachievable();
@@ -2244,7 +2242,7 @@ export class ScriptedFms implements CduBackend {
     this.updateAngleReference();
   }
   /** A second navigation computer observes the same physical aircraft; it never integrates another aircraft. */
-  observeAircraft(source: ScriptedFms) { this.setAircraft({ ...source.aircraft, heading: source.heading, position: { ...source.truePosition }, onGround: source.onGround }); Object.assign(this.wind, source.wind); }
+  observeAircraft(source: ScriptedFms) { this.setAircraft({ ...source.aircraft, heading: source.heading, position: { ...source.truePosition } }); Object.assign(this.wind, source.wind); }
 
   // ------------------------------------------------------------------ maintenance and dual operation
 
@@ -3077,8 +3075,8 @@ export class ScriptedFms implements CduBackend {
     }
   }
   definePoint(ident: string, position: LatLon) { this.points[ident] = position; }
-  /** Explicit bench input; no unmodelled weight-on-wheels or altitude inference. */
-  get onGround() { return this.onGroundInput; }
+  /** DEC-148: v1 is airborne even in the hover; ground operations follow v1. */
+  get onGround() { return false; }
 
   private seedHistoryOrigin() {
     if (this.flownHistory.length > 1) return;
@@ -3122,11 +3120,11 @@ export class ScriptedFms implements CduBackend {
     const reversed: Leg[] = [...this.flownHistory].reverse().map(fix => ({ kind: "wpt", ident: fix.ident, position: { ...fix.position },
       path: "TF", ...(fix.flyOver ? { qualifier: "/O" as const } : {}), ...(fix.temporary ? { temporary: true } : {}) }));
     const active = this.active.legs[0];
-    const currentTo = !this.onGround && active?.kind === "wpt" ? { ...structuredClone(active), path: "TF" as const,
+    const currentTo = active?.kind === "wpt" ? { ...structuredClone(active), path: "TF" as const,
       course: undefined, arc: undefined, hold: undefined, qualifier: active.qualifier ? "/O" as const : undefined } : null;
-    const ppos = this.onGround ? null : this.historyPpos();
+    const ppos = this.historyPpos();
     const legs: Leg[] = [...(currentTo ? [currentTo, { kind: "disco" as const }] : []),
-      ...(ppos ? [{ kind: "wpt" as const, ident: ppos.ident, position: ppos.position, temporary: true, path: "TF" as const }] : []), ...reversed];
+      { kind: "wpt" as const, ident: ppos.ident, position: ppos.position, temporary: true, path: "TF" as const }, ...reversed];
     const first = legs[0];
     if (first?.kind === "wpt" && !currentTo) first.path = "DF";
     if (legs.filter(leg => leg.kind === "wpt" && (leg.temporary || this.points[leg.ident] || this.pilot.some(point => point.ident === leg.ident))).length > 50) {
@@ -3519,7 +3517,7 @@ export class ScriptedFms implements CduBackend {
     const hover = this.hover.status === "MOD" && route.legs.some(leg => leg.kind === "wpt" && leg.ident === "TDN");
     const crossfillHover = this.crossfillPending?.hover && route.legs.some(leg => leg.kind === "wpt" && leg.ident === "TDN");
     if ((hover || crossfillHover) && this.radioHeight.status !== "NORMAL") { this.alert(alert("RALT FAILED")); return; }
-    if (this.directPending && !this.onGround && !this.specialProcedureActive()) this.flownHistory.push(this.historyPpos());
+    if (this.directPending && !this.specialProcedureActive()) this.flownHistory.push(this.historyPpos());
     if (hover) {
       const h = this.hover;
       const joinPoint = this.pendingHoverPoints!.JN;
