@@ -1319,6 +1319,8 @@ test('D-H: a crew hold takes its default leg time and speed from the altitude wh
   unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 5000 }, 'test: low when the entry begins')
   expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')).toBeLessThan(3600)
   expect(unit.activeRoute.hold).toMatchObject({ legTime: 1, speed: 100 })
+  // HIGH HOLDING SPEED, judged a minute before the fix, judges the hold as its entry will begin: 100 kt, not 170.
+  expect(unit.recallList.some(m => m.text === 'HIGH HOLDING SPEED')).toBe(false)
   // Fixed from the entry on: climbing through 14,000 ft does not change them (M300 10-9).
   unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 15000 }, 'test: climbing in the hold')
   fly(30)

@@ -747,8 +747,7 @@ export class ScriptedFms implements CduBackend {
         // The defaults are for the altitude at which the entry begins (M300 10-9: leg time 1 or 1.5 minutes "depending on
         // aircraft altitude at the time the hold entry is initiated"; the holding speed by altitude, 10-8), and are not
         // changed again automatically, even across 14,000 ft. Crew entries and coded values are kept as they are.
-        if (hold.defaults?.legTime !== undefined && hold.legDistance === null && hold.legTime === hold.defaults.legTime) hold.legTime = this.defaultHoldLegTime();
-        if (hold.defaults?.speed !== undefined && hold.speed === hold.defaults.speed) hold.speed = this.defaultHoldSpeed();
+        Object.assign(hold, this.entryDefaults(hold));
         delete hold.defaults;
         // Entered without the minute's notice (the hold made within it): checked at the fix.
         if (this.holdSpeedChecked !== hold && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
@@ -2480,7 +2479,19 @@ export class ScriptedFms implements CduBackend {
     const fix = this.coordinates(hold.fix);
     if (!fix || this.groundSpeed <= 1 || (distanceNm(this.here, fix) / this.groundSpeed) * 3600 > 60) return;
     this.holdSpeedChecked = hold;
-    if (this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
+    // Judged as the entry will begin, with its defaults taken from the altitude now (M300 10-9).
+    if (this.holdExceedsProtection({ ...hold, ...this.entryDefaults(hold) })) this.alert(alert("HIGH HOLDING SPEED"));
+  }
+
+  /**
+   * The leg time and speed a hold's entry begins with: a value still at the default it was given is taken again from
+   * the altitude now (M300 10-8, 10-9); crew entries and coded values are kept.
+   */
+  private entryDefaults(hold: Hold): Pick<Hold, "legTime" | "speed"> {
+    return {
+      legTime: hold.defaults?.legTime !== undefined && hold.legDistance === null && hold.legTime === hold.defaults.legTime ? this.defaultHoldLegTime() : hold.legTime,
+      speed: hold.defaults?.speed !== undefined && hold.speed === hold.defaults.speed ? this.defaultHoldSpeed() : hold.speed,
+    };
   }
 
   /**
