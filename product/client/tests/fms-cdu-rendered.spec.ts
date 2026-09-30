@@ -375,6 +375,16 @@ test('shared sensor faults from CDU 2 affect both computers actual observations'
   await page.getByLabel('GPS 1 Baro lost').uncheck()
   await page.getByLabel('CDU inspected', { exact: true }).selectOption('2')
   await expect(page.getByLabel('GPS 1 Baro lost')).not.toBeChecked()
+  await tab(page, 'Conditions')
+  await page.getByLabel('Baro error (ft)').fill('1000')
+  await page.getByRole('button', { name: 'Inject the error' }).click()
+  await expect(page.getByTestId('baro-readout')).toContainText('barometric 1500 ft')
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('1')
+  await expect(page.getByTestId('baro-readout')).toContainText('baro error +1000 ft')
+  await page.getByLabel('Baro error (ft)').fill('0')
+  await page.getByRole('button', { name: 'Inject the error' }).click()
+  await page.getByLabel('CDU inspected', { exact: true }).selectOption('2')
+  await expect(page.getByTestId('baro-readout')).toContainText('barometric 500 ft')
 })
 
 test('a built-in scenario runs on the bench with its steps checked live, and gives a report and procedure text', async ({ page }) => {

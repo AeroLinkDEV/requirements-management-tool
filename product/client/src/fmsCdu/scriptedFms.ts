@@ -329,12 +329,14 @@ export class ScriptedFms implements CduBackend {
    * The barometric altitude the FMS and the autopilot use (baro.ts): the physical height plus the injected baro error,
    * referenced to the declared QNH. The crew's setting does not change it; it changes what is indicated.
    */
-  get altitude() { return this.aircraft.altitude + this.baroSystem.errorFt; }
+  get altitude() { return this.measuredBaro?.altitudeFt ?? this.aircraft.altitude + this.baroSystem.errorFt; }
   /** What the altimeter indicates with the crew's setting: the barometric altitude, corrected to the setting (baro.ts). */
-  get indicatedAltitude() { return indicatedAltitudeFt(this.altitude, this.baroSystem.declaredQnhHpa, this.baroSystem.setting); }
+  get indicatedAltitude() { return indicatedAltitudeFt(this.altitude, this.measuredBaro?.indicationQnhHpa ?? this.baroSystem.declaredQnhHpa, this.baroSystem.setting); }
   /** The barometric altitude system: the injected error (ft), the declared QNH (hPa) and the crew's setting. */
   get baro(): { errorFt: number; declaredQnhHpa: number; setting: BaroSetting } { return { ...this.baroSystem, setting: { ...this.baroSystem.setting } }; }
   private baroSystem: { errorFt: number; declaredQnhHpa: number; setting: BaroSetting } = { errorFt: 0, declaredQnhHpa: STANDARD_HPA, setting: { kind: "QNH", hPa: STANDARD_HPA } };
+  // An externally fed computer retains its last connected measurement. validBaroAltitude separately vetoes stale data.
+  private measuredBaro: { altitudeFt: number; indicationQnhHpa?: number } | null = null;
   /** The crew sets the altimeter: STD, or a QNH in hPa. Refused (false) outside the altimeter's range. Never moves the aircraft. */
   setBaroSetting(setting: BaroSetting): boolean {
     if (settingProblem(setting) !== null) return false;
@@ -925,7 +927,7 @@ export class ScriptedFms implements CduBackend {
     const gpsWord = (index: number) => ({ at: now, sequence, status: "NORMAL" as const, value: this.receivers[index].bus() });
     const gps: SensorFrame["gps"] = [gpsWord(0), gpsWord(1)];
     const ra = radioHeight(this.declaredSurface, this.truth, this.physicalAltitude, this.hasCondition("raFail"));
-    return { air: { at: now, sequence, status: "NORMAL", value: { headingTrue: this.heading, tasKt: this.aircraft.tas, altitudeFt: this.altitude } },
+    return { air: { at: now, sequence, status: "NORMAL", value: { headingTrue: this.heading, tasKt: this.aircraft.tas, altitudeFt: this.altitude, indicationQnhHpa: this.baroSystem.declaredQnhHpa } },
       attitude: { at: now, sequence, status: "NORMAL", value: { bank: this.aircraft.bank, pitch: this.aircraft.pitch } },
       radioHeight: { at: now, sequence, status: ra.status, value: ra.value },
       gps, radios: this.radioReceiver.sample(this.truth, this.physicalAltitude, now, this.injected.has("dmeOutage")) };
@@ -990,6 +992,12 @@ export class ScriptedFms implements CduBackend {
   updateNavigation(dt: number) {
     this.sensorFrame = this.sampleSensors();
     if (!this.powered) return;
+    const connectedAir = sampled(this.sensorFrame?.air, this.now.getTime(), this.sensorMaxAge);
+    if (this.sensorPort && connectedAir && Number.isFinite(connectedAir.altitudeFt)) {
+      const qnh = connectedAir.indicationQnhHpa;
+      this.measuredBaro = { altitudeFt: connectedAir.altitudeFt,
+        ...(qnh !== undefined && settingProblem({ kind: "QNH", hPa: qnh }) === null ? { indicationQnhHpa: qnh } : {}) };
+    }
     const gps = this.updateGps(this.sensorFrame);
     const previous = this.nav.mode, previousSource = this.nav.gpsSource;
     const now = this.now.getTime();

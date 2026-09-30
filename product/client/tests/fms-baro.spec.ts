@@ -5,6 +5,7 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { setUp87nOffshoreSar } from '../src/fmsCdu/heliDemo'
 import { ScenarioRunner, advanceTicks, scenarioProblems, type Scenario } from '../src/fmsCdu/scenario'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { DualFmsSystem } from '../src/fmsCdu/dualFms'
 
 // Plan rev 3 B1.1: the truth is the physical height; the barometric altitude is derived from it (plus an injectable
 // error) and never written back; the crew's setting (QNH or STD) changes what is indicated. Neither the setting nor the
@@ -12,6 +13,26 @@ import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 // through a controller that holds a barometric altitude).
 
 const START = Date.UTC(2026, 8, 30, 15, 0, 0)
+
+// Owner: the second controller must consume the common measured barometric altitude, not its copied physical height.
+test('both FMSs consume the shared barometric error and FMS 2 ALT changes physical height only through flight', () => {
+  let now = START
+  const system = new DualFmsSystem(() => new Date(now))
+  const [one, two] = system.computers
+  one.setBaroError(1000, 'test: common air data error'); system.tick()
+  expect(one.physicalAltitude).toBe(3000); expect(two.physicalAltitude).toBe(3000)
+  expect(one.altitude).toBe(4000); expect(two.altitude).toBe(4000)
+  expect(two.validBaroAltitude).toBe(4000)
+  one.declareQnh(1000, 'test: common atmosphere'); two.setBaroSetting({ kind: 'QNH', hPa: 1000 }); system.tick()
+  expect(two.indicatedAltitude).toBeCloseTo(4000, 6)
+  system.selectGuidance(2)
+  expect(two.physicalAltitude).toBe(3000)
+  for (let i = 0; i < 180; i++) { now += 1000; system.step(1) }
+  expect(two.physicalAltitude).toBeLessThan(2100)
+  expect(two.physicalAltitude).toBeGreaterThan(1900)
+  expect(one.physicalAltitude).toBe(two.physicalAltitude)
+  expect(two.altitude).toBeCloseTo(3000, -1)
+})
 
 /** The 87N mission start (500 ft over the declared sea, ALT, NAV), stepped by quarter seconds. */
 function offshore() {

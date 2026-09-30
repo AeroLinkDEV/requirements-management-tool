@@ -560,7 +560,7 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
             </p>
           </section>
 
-          <BaroCard backend={backend} recordTo={recordTo} />
+          <BaroCard backend={backend} sensorOwner={system.computers[0]} recordTo={recordTo} />
 
           <section className="fmsBenchCard">
             <h2>Alerts</h2>
@@ -812,11 +812,12 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
  * injected baro error. The readout shows the physical height beside what the altimeter reads, so an error or a mis-set
  * altimeter is visible for what it is. None of these moves the aircraft directly or changes the radio height.
  */
-function BaroCard({ backend, recordTo }: { backend: ScriptedFms; recordTo: ScenarioRecorder | null }) {
+function BaroCard({ backend, sensorOwner, recordTo }: { backend: ScriptedFms; sensorOwner: ScriptedFms; recordTo: ScenarioRecorder | null }) {
   const [setting, setSetting] = useState("");
   const [qnh, setQnh] = useState("");
   const [error, setError] = useState("");
   const baro = backend.baro;
+  const environment = sensorOwner.baro;
   const hpa = (text: string) => Number(text);
   const settingValid = /^\d{3,4}$/.test(setting) && hpa(setting) >= SETTING_RANGE_HPA.min && hpa(setting) <= SETTING_RANGE_HPA.max;
   const qnhValid = /^\d{3,4}$/.test(qnh) && hpa(qnh) >= SETTING_RANGE_HPA.min && hpa(qnh) <= SETTING_RANGE_HPA.max;
@@ -826,8 +827,8 @@ function BaroCard({ backend, recordTo }: { backend: ScriptedFms; recordTo: Scena
       <h2>Barometric altitude</h2>
       <p className="fmsBenchReadout" data-testid="baro-readout">
         Physical height <strong>{Math.round(backend.physicalAltitude)} ft</strong>, barometric <strong>{Math.round(backend.altitude)} ft</strong>,
-        indicated <strong>{Math.round(backend.indicatedAltitude)} ft</strong> ({formatSetting(baro.setting)}; declared QNH {baro.declaredQnhHpa} hPa;
-        baro error {baro.errorFt >= 0 ? "+" : ""}{baro.errorFt} ft).
+        indicated <strong>{Math.round(backend.indicatedAltitude)} ft</strong> ({formatSetting(baro.setting)}; declared QNH {environment.declaredQnhHpa} hPa;
+        baro error {environment.errorFt >= 0 ? "+" : ""}{environment.errorFt} ft).
       </p>
       <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!settingValid) return; recordTo?.baro({ setting: hpa(setting) }); backend.setBaroSetting({ kind: "QNH", hPa: hpa(setting) }); setSetting(""); }}>
         <input inputMode="numeric" value={setting} maxLength={4} placeholder="QNH hPa" aria-label="Altimeter setting (QNH, hPa)"
@@ -836,12 +837,12 @@ function BaroCard({ backend, recordTo }: { backend: ScriptedFms; recordTo: Scena
         <button type="button" aria-pressed={baro.setting.kind === "STD"} onClick={() => { recordTo?.baro({ setting: "STD" }); backend.setBaroSetting({ kind: "STD" }); }}>STD</button>
       </form>
       <p className="fmsBenchHint">The crew's setting changes what the altimeter indicates; the autopilot and the FMS work on the barometric altitude referenced to the declared QNH.</p>
-      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!qnhValid) return; recordTo?.baro({ declaredQnh: hpa(qnh) }); backend.declareQnh(hpa(qnh), "bench"); setQnh(""); }}>
+      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!qnhValid) return; recordTo?.baro({ declaredQnh: hpa(qnh) }); sensorOwner.declareQnh(hpa(qnh), "bench"); setQnh(""); }}>
         <input inputMode="numeric" value={qnh} maxLength={4} placeholder="QNH hPa" aria-label="Declared QNH (hPa)"
           onChange={event => setQnh(event.target.value.replace(/\D/g, ""))} />
         <button type="submit" disabled={!qnhValid}>Declare the QNH</button>
       </form>
-      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!errorValid) return; recordTo?.baro({ errorFt: Number(error) }); backend.setBaroError(Number(error), "bench"); setError(""); }}>
+      <form className="fmsBenchAlert" onSubmit={event => { event.preventDefault(); if (!errorValid) return; recordTo?.baro({ errorFt: Number(error) }); sensorOwner.setBaroError(Number(error), "bench"); setError(""); }}>
         <input inputMode="numeric" value={error} maxLength={5} placeholder="Error ft" aria-label="Baro error (ft)"
           onChange={event => setError(event.target.value.replace(/[^\d-]/g, ""))} />
         <button type="submit" disabled={!errorValid}>Inject the error</button>
