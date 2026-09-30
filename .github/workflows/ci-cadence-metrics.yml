@@ -1,11 +1,11 @@
 name: CI cadence metrics
 
+# Hourly, not after every Product and Fast run (#1318). Each collection pages through the repository's whole run
+# and pull-request history, about 52 API calls, and it fired after every completed run: about 24 times an hour on a
+# busy day, most of them cancelled after spending their calls. With the requesters, the rolling collector and PR
+# overlap, that exhausted the repository's 5,000-an-hour workflow-token budget on 30 September, and the merge
+# binder then refused green candidates. Cadence is measured over days, so an hourly observation loses nothing.
 on:
-  workflow_run:
-    workflows:
-      - Product quality gate
-      - Fast PR feedback (advisory)
-    types: [completed]
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:

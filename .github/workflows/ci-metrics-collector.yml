@@ -5,16 +5,14 @@ name: CI metrics rolling collector
 # candidates. It is a separate non-authoritative workflow: the required check remains
 # `Report what this run validated`, and this collector can never influence merge authority.
 #
-# workflow_run fires for completed quality-gate runs (including PR runs). This workflow file and the
-# collector code it executes always come from the default branch, never from PR-controlled content;
-# downloaded run records are validated as untrusted data and their identity is cross-checked against the
-# GitHub API.
+# Hourly, not after every completed quality gate (#1318). Each collection pages through every Product run and
+# closed pull request, then reads artifacts, a commit and jobs for its 50-run window: a couple of hundred API calls. Queued
+# after every gate (it never cancels), that was over a thousand calls an hour of the repository's 5,000-an-hour
+# workflow-token budget, which ran out repeatedly on 30 September and made the merge binder refuse green
+# candidates. Rolling medians over 50 runs lose nothing by being refreshed hourly. This workflow file and the
+# collector code it executes come from the default branch, never from PR-controlled content; downloaded run
+# records are validated as untrusted data and their identity is cross-checked against the GitHub API.
 on:
-  workflow_run:
-    workflows:
-      - Product quality gate
-    types:
-      - completed
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
@@ -24,7 +22,7 @@ permissions:
   contents: read
   issues: write
 
-# This workflow fires on every completed quality gate and hourly, so executions can overlap. They all
+# This workflow fires hourly and on manual dispatch, so executions can still overlap. They all
 # write the same tracker issue, and an older execution finishing last would publish a staler view than
 # the one already there. Serialising them removes the overlap; `cancel-in-progress` stays false because
 # a superseded collection is still a complete, valid observation and there is nothing to gain by
