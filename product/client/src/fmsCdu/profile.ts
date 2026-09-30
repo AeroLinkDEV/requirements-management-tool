@@ -170,6 +170,11 @@ export const LATER_SBAS_PROFILE: AircraftProfile = {
   title: "Later CMA software + CMA-5024 SBAS helicopter (representative simulation)",
   operationalProgram: "later SBAS-capable CMA family; exact OEM software baseline unqualified",
   approachPolicy: "SBAS_COUPLED",
+  parameters: {
+    ...HELICOPTER_PROFILE.parameters,
+    advisoryMinimumProgress: { ...HELICOPTER_PROFILE.parameters.advisoryMinimumProgress, inForce: false },
+    temperatureLapseRate: { ...HELICOPTER_PROFILE.parameters.temperatureLapseRate, inForce: false },
+  },
   verticalGuidance: {
     ...HELICOPTER_PROFILE.verticalGuidance,
     approach: "coupled GPS LPV/LNAV-VNAV from the accepted FAS and receiver guidance; generic simulated AFCS",
@@ -187,6 +192,7 @@ export const LAB_AIRLINE_VNAV_PROFILE: AircraftProfile = {
   title: "Laboratory: generic airline-style VNAV (not a CMA installation)",
   verticalPolicy: "AIRLINE_VNAV",
   approachPolicy: "SBAS_COUPLED",
+  parameters: LATER_SBAS_PROFILE.parameters,
   verticalGuidance: {
     ...HELICOPTER_PROFILE.verticalGuidance,
     enRoute: "generic airline-style VNAV: top of descent, VNAV PTH, DES NOW and the FMS speed schedule (laboratory)",
