@@ -260,18 +260,19 @@ test('over the two-minute hover the fuel falls at the flow, and the FUEL page EN
     expect(window[i - 1].fuel - window[i].fuel, `burn at ${window[i].t} s`).toBeCloseTo((flow * 0.25) / 3600, 9)
   }
   expect(window[0].fuel - window.at(-1)!.fuel).toBeCloseTo((flow * 120) / 3600, 6)
-  // The FUEL page read at the end of the hover: quantity and flow, then reserve and endurance.
-  const quantityLine = lineRead(/KG\/H/)!, enduranceLine = lineRead(/\\\.\\dH/)!
-  expect(quantityLine).not.toBeNull()
+  // FUEL 1/2 read at the end of the hover (S300 manual 14-2): ENDURANCE and FUEL WT (usable: the fuel on board less the
+  // reserve), then FUEL FLOW, with no MILEAGE while stationary.
+  const enduranceLine = lineRead(/\\\+/)!, flowLine = lineRead(/KG\/HR/)!
   expect(enduranceLine).not.toBeNull()
-  const [, quantity, shownFlow] = /^(\d+)KG\s+(\d+)KG\/H$/.exec(quantityLine.text)!.map(Number)
-  const [, reserve, endurance] = /^(\d+)KG\s+(\d+\.\d)H$/.exec(enduranceLine.text)!.map(Number)
-  const read = ticks.find(k => Math.abs(k.t - quantityLine.at) < 1e-9)!
+  expect(flowLine).not.toBeNull()
+  const [, hours, minutes, usable] = /^(\d\d)\+(\d\d)\s+(\d+)KG$/.exec(enduranceLine.text)!.map(Number)
+  const [, shownFlow] = /^(\d+)KG\/HR\s+---KG\/NM$/.exec(flowLine.text)!.map(Number)
+  const read = ticks.find(k => Math.abs(k.t - enduranceLine.at) < 1e-9)!
   expect(read.t).toBeGreaterThanOrEqual(capture + 120)
-  expect(quantity).toBe(Math.round(read.fuel))
+  const reserve = fms.fuelState.reserve
+  expect(usable).toBe(Math.round(read.fuel - reserve))
   expect(shownFlow).toBe(flow)
-  expect(reserve).toBe(fms.fuelState.reserve)
-  expect(endurance).toBeCloseTo((read.fuel - reserve) / flow, 1)
+  expect(hours * 60 + minutes).toBe(Math.floor(((read.fuel - reserve) / flow) * 60))
 })
 
 test('the missed approach at 70 KIAS until 2,000 ft, then 90: the procedure limit in force and the crew selection (plan §10 step 9, MA-SPD-90)', () => {

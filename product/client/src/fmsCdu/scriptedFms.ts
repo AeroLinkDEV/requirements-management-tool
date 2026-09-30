@@ -149,6 +149,13 @@ export class ScriptedFms implements CduBackend {
   private modified: Route | null = null;
   private radios = { com1: "121.500", com1Stby: "126.700", com2: "119.100", com2Stby: "133.600", nav1: "113.90", nav2: "116.70", adf: "0350", tpdr: "1200" };
   private fuel = { quantity: 1850, flow: 540, reserve: 400 };
+  /**
+   * The FUEL pages (S300 manual 14-1…14-4): the crew's "what if" FUEL WT (usable, excluding the reserve) and FUEL FLOW,
+   * which the fuel computer's values replace on each new access of the page; the FIX; the unit shown. KG throughout inside.
+   */
+  readonly fuelPage = { whatIfUsable: null as number | null, whatIfFlow: null as number | null, fix: null as string | null, unit: "KG" as "KG" | "LB" };
+  /** The FUEL+WEIGHTS option's crew weights (FUEL 2/2), kilograms; the gross weight is their sum plus the fuel on board. */
+  readonly weights = { empty: null as number | null, equip: null as number | null, crew: null as number | null, cargo: null as number | null };
   private marks: { ident: string; position: LatLon }[] = [];
   private points: Record<string, LatLon> = {};
   /**
@@ -2054,6 +2061,33 @@ export class ScriptedFms implements CduBackend {
   get position(): LatLon { return this.here; }
   get radioState() { return this.radios; }
   get fuelState() { return this.fuel; }
+
+  /**
+   * FUEL 1/2 (S300 manual 14-2): from the usable fuel (the fuel on board less the reserve, or the crew's what-if) and the
+   * flow (or the what-if), the endurance (hours) and, making progress, the maximum range at the present ground speed and
+   * the mileage (kg per NM); the fuel remaining at the FIX (by default the last waypoint of the active route) after the
+   * predicted time to it; the gross weight once the crew weights are entered. EST when a what-if is in use.
+   */
+  fuelPerformance() {
+    const usable = this.fuelPage.whatIfUsable ?? Math.max(0, this.fuel.quantity - this.fuel.reserve);
+    const flow = this.fuelPage.whatIfFlow ?? this.fuel.flow;
+    const endurance = flow > 0 ? usable / flow : null;
+    const moving = makingProgress(this.groundSpeed);
+    const lastWaypoint = [...this.active.legs].reverse().find(leg => leg.kind === "wpt");
+    const fix = this.fuelPage.fix ?? (lastWaypoint?.kind === "wpt" ? lastWaypoint.ident : null);
+    const point = fix === null ? undefined : [...this.profile().points].reverse().find(p => p.ident === fix);
+    const hours = point?.eta != null ? (point.eta - this.now.getTime()) / 3_600_000 : null;
+    const { empty, equip, crew, cargo } = this.weights;
+    const fuelOnBoard = this.fuelPage.whatIfUsable === null ? this.fuel.quantity : this.fuelPage.whatIfUsable + this.fuel.reserve;
+    return {
+      usable, flow, endurance, fix, point: point ?? null,
+      maxRange: endurance !== null && moving ? endurance * this.groundSpeed : null,
+      mileage: moving && flow > 0 ? flow / this.groundSpeed : null,
+      remaining: hours === null ? null : usable - flow * hours,
+      grossWeight: empty === null ? null : empty + (equip ?? 0) + (crew ?? 0) + (cargo ?? 0) + fuelOnBoard,
+      estimated: this.fuelPage.whatIfUsable !== null || this.fuelPage.whatIfFlow !== null,
+    };
+  }
   get markList() { return this.marks; }
   get recallList() { return this.recall; }
   get squawkIdent() { return this.clock().getTime() < this.squawkIdentUntil; }
@@ -2425,6 +2459,8 @@ export class ScriptedFms implements CduBackend {
       this.advisory("NOT CONFIGURED");
       return;
     }
+    // A new access of the FUEL pages replaces the crew's what-if entries by the fuel computer's values (14-1).
+    if (page === "FUEL" && this.page !== "FUEL") Object.assign(this.fuelPage, { whatIfUsable: null, whatIfFlow: null });
     this.page = page;
     this.index = index;
   }
