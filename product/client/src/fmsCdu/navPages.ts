@@ -80,8 +80,8 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
         // LSK3R opens GPS STATUS for both receivers; the GPS line describes the one navigated on (or GPS1).
         caption(" VOR", "GPS STATUS> "),
         { left: nav.vor ? medium(`${nav.vor} ${frequency(fms, nav.vor)}`) : dashes(4), right: medium(gps.text, gps.ok ? "white" : "amber") },
-        caption(" IRS", "SBAS "),
-        { left: medium(nav.mode === "DR" ? "DR ONLY" : "NAV"), right: medium(fms.gpsNavSelected ? sbasSummary(shown) : "----") },
+        caption(" DR ESTIMATE", "SBAS "),
+        { left: medium(nav.mode === "DR" ? "LAB DR" : "STBY"), right: medium(fms.gpsNavSelected ? sbasSummary(shown) : "----") },
         caption(" INHIBITED"),
         { left: medium(fms.inhibitedNavaids.length ? fms.inhibitedNavaids.join(" ") : "NONE") },
         { left: dashes(24) },

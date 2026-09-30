@@ -34,6 +34,18 @@ const scratch = (unit: ScriptedFms) => lines(unit)[SCRATCHPAD_LINE].trimEnd()
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
 const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : leg?.kind === 'cond' ? `(${leg.path})` : null }
 
+test('civil NAV STATUS reports available navigation without claiming an unconfigured IRS', () => {
+  const { unit } = setup()
+  unit.open('NAV_STATUS')
+  expect(lines(unit).join('\n')).not.toMatch(/\bIRS\b/)
+  expect(lines(unit).join('\n')).toContain('GPS')
+  unit.setCondition('dmeOutage', true)
+  unit.setCondition('gpsLost', true)
+  expect(unit.navState.mode).toBe('DR')
+  expect(lines(unit).join('\n')).toContain('DR')
+  expect(lines(unit).join('\n')).not.toMatch(/\bIRS\b/)
+})
+
 test('sources are chosen in the airline order, and DME/DME needs two stations crossing at a usable angle', () => {
   const unit = new ScriptedFms()
   const entries = unit.navdb.nearby(unit.coordinates('RDG')!, 160)

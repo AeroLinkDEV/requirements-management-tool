@@ -43,7 +43,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
       undefined,
       { left: prompt("<LADDER"), right: prompt("HOLD>") },
       undefined,
-      { left: prompt("<SECTOR"), right: prompt("TACT APPR>") },
+      { left: prompt("<SECTOR"), right: fms.aircraftProfile.configuration.options.tacticalApproach.configured ? prompt("TACT APPR>") : undefined },
       undefined,
       { left: prompt("<FLY OVER"), right: prompt("TACTICAL DTO>") },
       undefined,

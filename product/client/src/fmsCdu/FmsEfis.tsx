@@ -8,6 +8,7 @@ import type { TerrainTiles } from "./terrainTiles";
 import "./FmsEfis.css";
 
 /** The coordinated-flight speed (knots): below it a bank does not give the coordinated turn rate. */
+const FMA_BOX_MS = ACTIVE_PROFILE.parameters.fmaCaptureBox.value * 1000;
 const COORDINATED_BELOW = ACTIVE_PROFILE.parameters.coordinatedLeaveBelow.value;
 
 // A generic EFIS for the bench: a primary flight display and a navigation display, drawn only from the FMS output bus
@@ -31,8 +32,8 @@ function useModeChangeBoxes(modes: Record<string, string>, now: number) {
   const boxed: Record<string, boolean> = {};
   for (const [slot, mode] of Object.entries(modes)) {
     const previous = seen.current[slot];
-    if (!previous || previous.mode !== mode) seen.current[slot] = { mode, since: previous ? now : now - 10_000 };
-    boxed[slot] = now - seen.current[slot].since < 10_000;
+    if (!previous || previous.mode !== mode) seen.current[slot] = { mode, since: previous ? now : now - FMA_BOX_MS };
+    boxed[slot] = now - seen.current[slot].since < FMA_BOX_MS;
   }
   return boxed;
 }

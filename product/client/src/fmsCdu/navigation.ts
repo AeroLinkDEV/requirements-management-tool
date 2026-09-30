@@ -3,8 +3,9 @@ import type { NavEntry, Navaid } from "./navData";
 
 /**
  * How the FMS works out where it is. Airline FMSs blend GPS, DME/DME, VOR/DME and inertial position in a fixed
- * priority (GPS first, then two or more DMEs with good geometry, then a VOR with collocated DME, then the inertial
- * reference alone) and estimate their own accuracy as ANP: the radius the aircraft is 95% sure to be within. RNP is
+ * priority. This bench currently selects GPS, two DMEs with good geometry, a VOR with collocated DME, then a
+ * laboratory dead-reckoning estimate; it has no configured inertial equipment. ANP is the estimated 95% position
+ * error radius. RNP is
  * the accuracy required for the phase of flight; ANP above RNP for longer than the phase's time to alert raises an
  * alert. (ICAO Doc 9613 RNAV/RNP functional requirements; Boeing 737 FCOM 11.31, Navigation Performance.)
  *
@@ -21,8 +22,8 @@ export const RNP_DEFAULTS: Record<FlightPhase, { rnp: number; alertSeconds: numb
   APPROACH: { rnp: 0.3, alertSeconds: 10 },
 };
 
-/** Inertial drift once no radio or satellite update is available, NM per hour. */
-export const IRS_DRIFT_NM_PER_HOUR = 2.0;
+/** Temporary laboratory DR error growth, NM/h; not an inertial sensor. Replaced by measured DR in the navigation phase. */
+export const LAB_DR_ERROR_NM_PER_HOUR = 2.0;
 
 export type SensorInputs = {
   gpsAvailable: boolean;

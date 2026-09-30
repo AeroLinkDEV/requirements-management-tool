@@ -2,7 +2,7 @@
 
 *Stage A of the helicopter-first plan, 29 September 2026. Kept current as behaviour is built.*
 
-The FMS Test Bench simulates a **rotorcraft CMA-9000**. This file records, for each behaviour, where the behaviour comes from, what it applies to, what the bench does, and where the bench deliberately differs. It replaces any single "which source wins" ladder: each row stands on its own source and applicability. The aircraft profile the bench flies is data in `product/client/src/fmsCdu/profile.ts` (`cma9000-s300-heli-civil`, version 1); its parameters, with their basis and whether each is in force yet, are listed there and named in every run report.
+The FMS Test Bench simulates a **rotorcraft CMA-9000**. This file records, for each behaviour, where the behaviour comes from, what it applies to, what the bench does, and where the bench deliberately differs. It replaces any single "which source wins" ladder: each row stands on its own source and applicability. The aircraft profile the bench flies is data in `product/client/src/fmsCdu/profile.ts` (`cma9000-s300-heli-civil`, version 2); its parameters, their basis and operational status are named in every run report. `configuration.ts` separately records target options, their implementation status and all 87 optional-function occurrences. Enabled target functions are not automatically implemented or qualified.
 
 The bench is a demonstrator. Nothing here is an OEM conformance claim or qualification evidence.
 
@@ -24,7 +24,9 @@ The manuals are copyrighted. They are cited by page and paraphrased here; no man
 
 ## Default configuration
 
-One default profile, not a matrix of every CMA option: aircraft type ROTOR, civil navigation option, error limit by RNP (M300 1-3 allows phase of flight or RNP), two CMA-5024 receivers, one radio altimeter and a representative rotorcraft autopilot (the last two declared for Stage B), with HOVER, MARK ON TOP, SAR SQUARE/LADDER/SECTOR, moving waypoints and rendezvous configured. Not configured: CARP/HARP, COSPAS-SARSAT, EGI/IRS, DVS, the military navigation option; the tactical approach is not changed until its applicability is reviewed.
+The default is the full civil SAR **target** adopted in [DEC-147](../../DECISIONS_AND_OPEN_QUESTIONS.md#dec-147---the-helicopter-bench-targets-a-full-civil-sar-configuration): ROTOR, civil navigation, RNP error limit, two CMA-5024 receivers, a radio altimeter and a representative rotorcraft AFCS. Search, mark, hover, PREDEF, moving rendezvous, flown-history backtrack, predictive RAIM, satellite deselection, dual FMS and RMS are configured. Their actual implementation status is recorded per option; the existing cross-loaded route is not two independent computers. Military navigation, military tactical approach, CARP/HARP, COSPAS/SARSAT, UHF/VUHF, EGI/IRS and Doppler are off. Other equipment-specific options carry individual dispositions rather than being inferred from the mission name. The civil CDU refuses the military tactical approach; the existing construction is retained only when explicitly configured in a laboratory profile.
+
+The bank design and FMS command limit are the lesser of the selected profile's AFCS envelope and FMS roll-steering limit. Heading mode uses the AFCS envelope. Feed-forward/cross-track corrections do not add an extra five degrees outside either cap. The declared representative roll rate is 5 degrees/s. Fly-by anticipation includes a laboratory allowance for finite roll-in; holding entry reversals use the pattern's design bank so they do not silently fly a tighter radius than the prediction assumes. These are bench controller choices, not recovered OEM control laws. The controller reads its selected profile; declared-only acceptance allowances remain distinct from controller parameters. NAV STATUS reports a laboratory DR estimate, never an available IRS. The current truth-relative DR error model is temporary laboratory behavior, pending the measured navigation core.
 
 ## Vertical-guidance policy (decision D1)
 
@@ -33,7 +35,7 @@ One default profile, not a matrix of every CMA option: aircraft type ROTOR, civi
 | En route | **No airline-style en-route VNAV** (no top of descent, no VNAV PTH or DES NOW coupling). Altitude constraints are advisories, flown with autopilot altitude and vertical-speed modes | Built (Stage B3): ALT SEL, VS, ALT HOLD, SPD and GA; the airline-style VNAV is the selectable `lab-airline-vnav` profile |
 | Approach | The S300 advisory approach VNAV (M300 7-22…7-27) where it can be constructed: a database vertical path angle, or a threshold to build one from | Declared |
 | Point-in-space approaches without a published vertical path | No advisory path is built; flown LNAV with advisory step-downs | Declared (Stage C) |
-| SBAS finals | Coupled LPV and LNAV/VNAV finals under the existing receiver and approach-authority checks | **Deliberate deviation**: a bench capability for a modern CMA-5024 SBAS installation, not S300 behaviour |
+| SBAS finals | Target: a separate later-CMA/CMA-5024-SBAS profile | The existing coupled LPV/LNAV-VNAV implementation remains a **deliberate deviation** until profile separation is delivered; it is not S300 advisory VNAV |
 
 The airline-style VNAV stays as an intentional, selectable laboratory profile later (the seed of a fixed-wing profile). Its tests own that profile's behaviour; they are not the reason for keeping it.
 

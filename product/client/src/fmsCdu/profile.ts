@@ -1,3 +1,5 @@
+import { CIVIL_SAR_CONFIGURATION, configurationSummary, type AircraftConfiguration } from "./configuration";
+
 /**
  * The aircraft profile the bench simulates: one versioned, declared configuration of the CMA-9000 and the aircraft
  * around it, so every run names what it was a run of.
@@ -7,9 +9,9 @@
  * "M300 <page>". Which behaviour comes from which source, and where the bench deliberately differs, is in
  * product/docs/FMS_APPLICABILITY.md.
  *
- * Stage A declares the profile; it does not yet change behaviour. Each parameter says whether the simulation already
- * flies that value (`inForce`) or whether it is declared for a later stage, so the bench and the run report never
- * claim a value the simulation does not use. A parameter's basis is "sourced" (a CMA manual page or a regulation),
+ * Each parameter says whether the simulation uses that value (`inForce`) or whether it is declared only, so the
+ * bench and run report distinguish operational parameters from declarations. Configured target options separately
+ * state whether their behavior is implemented, partial or pending. A parameter's basis is "sourced" (a CMA manual page or a regulation),
  * "borrowed" (a value from a cited public AW189 description, used as representative and not as an installed
  * controller) or "lab" (a laboratory choice).
  */
@@ -52,6 +54,7 @@ export type AircraftProfile = {
   };
   /** Configurable CMA functions deliberately off (plan D6). */
   notConfigured: readonly string[];
+  configuration: AircraftConfiguration;
   parameters: Readonly<Record<string, ProfileParameter>>;
 };
 
@@ -60,73 +63,74 @@ const p = (value: number, unit: string, basis: ParameterBasis, source: string, i
 
 export const HELICOPTER_PROFILE: AircraftProfile = {
   id: "cma9000-s300-heli-civil",
-  version: 1,
-  title: "CMA-9000 helicopter, civil navigation (S/W -300 baseline)",
+  version: 2,
+  title: "CMA-9000 helicopter, civil SAR target (S/W -300 baseline)",
   aircraftType: "ROTOR",
   operationalProgram: "169-614876-300 (M300, Pub. 9000-GEN-0150 Rev 2)",
   navigationOption: "CIVIL",
   errorLimit: "RNP",
   verticalPolicy: "ADVISORY",
-  equipment: ["2 × CMA-5024 GPS/SBAS", "1 radio altimeter (height above a declared flat surface)", "representative rotorcraft AFCS (declared; Stage B)"],
+  equipment: ["2 × CMA-5024 GPS/SBAS", "1 radio altimeter (height above a declared flat surface)", "representative rotorcraft AFCS (laboratory)"],
   missionFunctions: ["HOVER", "MARK ON TOP", "SAR SQUARE, LADDER, SECTOR", "moving waypoints", "rendezvous"],
   verticalGuidance: {
     enRoute: "no airline-style en-route VNAV; constraints advisory, flown with AFCS ALT/VS (Stage B)",
     approach: "S300 advisory approach VNAV where it can be constructed (M300 7-22…7-27); none on no-VPA point-in-space approaches",
     sbasFinals: "coupled LPV and LNAV/VNAV finals: bench capability for a modern CMA-5024 SBAS installation, not S300 behaviour",
   },
-  notConfigured: ["CARP/HARP", "COSPAS-SARSAT", "EGI/IRS", "DVS (Doppler)", "military navigation option", "tactical approach changes (review first)"],
+  notConfigured: ["CARP/HARP", "COSPAS-SARSAT", "EGI/IRS", "DVS (Doppler)", "military navigation option", "military tactical approach"],
+  configuration: CIVIL_SAR_CONFIGURATION,
   parameters: {
     // Speeds and regimes
-    cruiseSpeed: p(120, "kt", "lab", "the bench's existing cruise speed (TAS today; IAS from Stage B)", true),
+    cruiseSpeed: p(120, "kt", "lab", "crew-selected cruise speed (KIAS for the helicopter AFCS)", true),
     planningCruiseTas: p(130, "kt TAS", "sourced", "M300 3-19 PLAN DATA CRZ TAS default for ROTOR (planning data; v1 predicts only in the air)", true),
     maximumSpeed: p(150, "KIAS", "lab", "RTA feasibility upper bound (the required TAS in IAS at each leg, R3-04)", true),
-    climbSpeed: p(80, "KIAS", "borrowed", "AAIB-27532 (AW189 TU target)", false, "B"),
+    climbSpeed: p(80, "KIAS", "borrowed", "AAIB-27532 (AW189 TU target)", true),
     vmini: p(50, "KIAS", "lab", "the RTA feasibility lower bound (R3-04); procedure limits below it refuse coupled IFR activation (Stage C)", true),
-    unreliableIasBelow: p(30, "KIAS", "lab", "airspeed shown as dashes below it", false, "B"),
-    reliableIasAgainAt: p(33, "KIAS", "lab", "3 kt hysteresis", false, "B"),
-    coordinatedEnterAt: p(45, "KIAS", "lab", "coordinated-flight regime entry", false, "B"),
-    coordinatedLeaveBelow: p(40, "KIAS", "lab", "5 kt hysteresis; the ND turn trend is drawn only at or above it", false, "B"),
-    sidewaysLimit: p(35, "kt", "lab", "low-speed air-relative sideways limit", false, "B"),
-    rearwardLimit: p(30, "kt", "lab", "low-speed air-relative rearward limit", false, "B"),
+    unreliableIasBelow: p(30, "KIAS", "lab", "airspeed shown as dashes below it", true),
+    reliableIasAgainAt: p(33, "KIAS", "lab", "3 kt hysteresis", true),
+    coordinatedEnterAt: p(45, "KIAS", "lab", "coordinated-flight regime entry", true),
+    coordinatedLeaveBelow: p(40, "KIAS", "lab", "5 kt hysteresis; the ND turn trend is drawn only at or above it", true),
+    sidewaysLimit: p(35, "kt", "lab", "low-speed air-relative sideways limit", true),
+    rearwardLimit: p(30, "kt", "lab", "low-speed air-relative rearward limit", true),
     // Accelerations and rates
     longitudinalAccel: p(2.0, "kt/s", "lab", "longitudinal acceleration and deceleration limit", true),
-    lateralAccel: p(1.5, "kt/s", "lab", "low-speed lateral acceleration limit", false, "B"),
-    maxVerticalSpeed: p(1000, "fpm", "lab", "existing MAX_VS", true),
-    verticalAccel: p(600, "fpm/s", "lab", "existing VS_RATE", true),
-    rollRate: p(10, "deg/s", "lab", "today 5 deg/s", false, "B"),
-    afcsBankLimit: p(30, "deg", "lab", "today 25 deg", false, "B"),
-    fmsRollSteeringLimit: p(30, "deg", "sourced", "M300 4-3, 7-16: up to 30 deg bank in roll steering", false, "B"),
-    lowSpeedYawRate: p(15, "deg/s", "lab", "hover heading rate", false, "B"),
+    lateralAccel: p(1.5, "kt/s", "lab", "low-speed lateral acceleration limit", true),
+    maxVerticalSpeed: p(1000, "fpm", "lab", "AFCS vertical-speed limit", true),
+    verticalAccel: p(600, "fpm/s", "lab", "AFCS vertical-acceleration limit", true),
+    rollRate: p(5, "deg/s", "lab", "representative AFCS roll-rate limit", true),
+    afcsBankLimit: p(30, "deg", "lab", "final AFCS bank envelope; no extra correction allowance", true),
+    fmsRollSteeringLimit: p(30, "deg", "sourced", "M300 4-3, 7-16: up to 30 deg bank in roll steering", true),
+    lowSpeedYawRate: p(15, "deg/s", "lab", "hover heading rate", true),
     // Transition and mode values
-    tdDescentRate: p(500, "fpm", "lab", "TD descent to the gate", false, "D"),
-    tdDeceleration: p(1.0, "kt/s", "lab", "TD deceleration to the gate speed", false, "D"),
-    gateHeight: p(200, "ft RA", "borrowed", "AAIB-27585 (AW189 TD)", false, "D"),
-    gateSpeed: p(80, "KIAS", "borrowed", "AAIB-27585 (AW189 TD)", false, "D"),
-    gateSegmentMinimum: p(0.2, "NM", "lab", "the only slack in the transition trajectory", false, "D"),
-    tdhMinHeight: p(30, "ft RA", "borrowed", "AAIB-27532 (AW189 TD/H window)", false, "D"),
-    tdhMaxHeight: p(210, "ft RA", "borrowed", "AAIB-27532 (AW189 TD/H window)", false, "D"),
-    tdhMaxSpeedBelow: p(85, "KIAS", "borrowed", "AAIB-27532 (AW189 TD/H window, exclusive)", false, "D"),
-    tdhDeceleration: p(0.75, "kt/s", "lab", "nominal; closed loop within 0.5-1.25 kt/s", false, "D"),
-    tdhDescentRate: p(150, "fpm", "lab", "TD/H descent to hover height", false, "D"),
-    hoverHeightDefault: p(50, "ft RA", "borrowed", "AAIB-27532 (AW189 TD/H)", false, "B"),
-    hoverHeightMin: p(30, "ft RA", "lab", "selectable range", false, "B"),
-    hoverHeightMax: p(200, "ft RA", "lab", "selectable range", false, "B"),
-    departureAccel: p(1.0, "kt/s", "lab", "TU-LAB departure from hover", false, "B"),
-    departureClimbRate: p(500, "fpm", "lab", "TU-LAB climb to the gate height", false, "B"),
-    goAroundClimbRate: p(800, "fpm", "lab", "GA; 400 ft/NM at 120 kt GS (AIM 5-4-21 Copter)", false, "B"),
-    minimumUseHeight: p(30, "ft RA", "lab", "derived from the TD/H window", false, "B"),
-    lowHeightCruise: p(75, "ft RA", "borrowed", "AAIB-27585 (AW189 low-height protection, cruise)", false, "B"),
-    lowHeightHover: p(17, "ft RA", "borrowed", "AAIB-27585 (AW189 low-height protection, hover)", false, "B"),
+    tdDescentRate: p(500, "fpm", "lab", "TD descent to the gate", true),
+    tdDeceleration: p(1.0, "kt/s", "lab", "TD deceleration to the gate speed", true),
+    gateHeight: p(200, "ft RA", "borrowed", "AAIB-27585 (AW189 TD)", true),
+    gateSpeed: p(80, "KIAS", "borrowed", "AAIB-27585 (AW189 TD)", true),
+    gateSegmentMinimum: p(0.2, "NM", "lab", "the only slack in the transition trajectory", true),
+    tdhMinHeight: p(30, "ft RA", "borrowed", "AAIB-27532 (AW189 TD/H window)", true),
+    tdhMaxHeight: p(210, "ft RA", "borrowed", "AAIB-27532 (AW189 TD/H window)", true),
+    tdhMaxSpeedBelow: p(85, "KIAS", "borrowed", "AAIB-27532 (AW189 TD/H window, exclusive)", true),
+    tdhDeceleration: p(0.75, "kt/s", "lab", "nominal; closed loop within 0.5-1.25 kt/s", true),
+    tdhDescentRate: p(150, "fpm", "lab", "TD/H descent to hover height", true),
+    hoverHeightDefault: p(50, "ft RA", "borrowed", "AAIB-27532 (AW189 TD/H)", true),
+    hoverHeightMin: p(30, "ft RA", "lab", "selectable range", true),
+    hoverHeightMax: p(200, "ft RA", "lab", "selectable range", true),
+    departureAccel: p(1.0, "kt/s", "lab", "TU-LAB departure from hover", true),
+    departureClimbRate: p(500, "fpm", "lab", "TU-LAB climb to the gate height", true),
+    goAroundClimbRate: p(800, "fpm", "lab", "GA; 400 ft/NM at 120 kt GS (AIM 5-4-21 Copter)", true),
+    minimumUseHeight: p(30, "ft RA", "lab", "derived from the TD/H window", true),
+    lowHeightCruise: p(75, "ft RA", "borrowed", "AAIB-27585 (AW189 low-height protection, cruise)", true),
+    lowHeightHover: p(17, "ft RA", "borrowed", "AAIB-27585 (AW189 low-height protection, hover)", true),
     radioAltimeterRange: p(2500, "ft", "lab", "NCD above", true),
     // Holding (M300 Table 10-1, helicopter rows; the rows overlap at 6,000 ft and the bench gives 6,000 to the lower)
-    holdingSpeedLow: p(100, "KIAS", "sourced", "M300 10-8 Table 10-1, helicopter, at or below 6,000 ft", false, "D"),
-    holdingSpeedHigh: p(170, "KIAS", "sourced", "M300 10-8 Table 10-1, helicopter, above 6,000 to 14,000 ft", false, "D"),
+    holdingSpeedLow: p(100, "KIAS", "sourced", "M300 10-8 Table 10-1, helicopter, at or below 6,000 ft", true),
+    holdingSpeedHigh: p(170, "KIAS", "sourced", "M300 10-8 Table 10-1, helicopter, above 6,000 to 14,000 ft", true),
     // Timing and display
     hoverTransferTick: p(0.25, "s", "lab", "a receiver change keeps HOV only within one tick of the last sample (Astra rev 3.1)", true),
     hoverTransferPosition: p(10, "m", "lab", "a receiver change keeps HOV only within this of the last sample propagated", true),
     hoverTransferVelocity: p(1, "kt", "lab", "a receiver change keeps HOV only within this velocity step", true),
     fmaCaptureBox: p(10, "s", "lab", "existing boxed-mode time", true),
-    settlingTime: p(20, "s", "lab", "before hover tolerances apply", false, "B"),
+    settlingTime: p(20, "s", "lab", "acceptance settling allowance; not a controller parameter", false),
     noProgressBelow: p(1, "kt", "lab", "ground speed below which there is no measurable progress", true),
   },
 };
@@ -167,5 +171,9 @@ export function profileFingerprint(profile: AircraftProfile) {
 export function profileSummary(profile: AircraftProfile) {
   const values = Object.values(profile.parameters);
   const inForce = values.filter(parameter => parameter.inForce).length;
-  return `${profile.id} v${profile.version} (${profileFingerprint(profile)}): ${profile.title}; ${inForce} of ${values.length} parameters in force, the rest declared for later stages`;
+  const declared = Object.entries(profile.parameters).filter(([, parameter]) => !parameter.inForce).map(([name]) => name);
+  return `${profile.id} v${profile.version} (${profileFingerprint(profile)}): ${profile.title}; ${inForce} of ${values.length} parameters in force${declared.length ? `; declared only: ${declared.join(", ")}` : ""}; ${configurationSummary(profile.configuration)}`;
 }
+
+/** Bank geometry and FMS commands share the configured limit inside the AFCS envelope. */
+export const fmsBankLimit = (profile: AircraftProfile) => Math.min(profile.parameters.afcsBankLimit.value, profile.parameters.fmsRollSteeringLimit.value);
