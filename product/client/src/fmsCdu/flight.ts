@@ -633,6 +633,8 @@ export class FlightSimulator {
     this.airspeed = this.fms.trueAirspeed ?? this.airspeed;
     this.bank = this.fms.navigationInputs?.attitude?.value?.bank ?? 0;
     if (previous) {
+      this.attitude = { ...previous.attitude };
+      this.lastGround = previous.lastGround ? { ...previous.lastGround } : null;
       this.adoptAfcsSelections(previous);
       // Laboratory source change cancels a captured approach; the crew must re-arm against the new computer's authority.
       this.approach = "OFF"; this.gpsLateral = false; this.fms.armApproach(false);
