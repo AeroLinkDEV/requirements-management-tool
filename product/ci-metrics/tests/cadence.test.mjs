@@ -117,9 +117,10 @@ const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 test('cadence workflow is trusted, read-only, and non-authoritative', () => {
   const workflow = readFileSync(join(repoRoot, '.github/workflows/ci-cadence-metrics.yml'), 'utf8')
   assert.match(workflow, /^name: CI cadence metrics$/m)
-  assert.match(workflow, /workflow_run:/)
-  assert.match(workflow, /Product quality gate/)
-  assert.match(workflow, /Fast PR feedback \(advisory\)/)
+  // Hourly, not after every completed run: each collection spends about 52 API calls (#1318).
+  assert.match(workflow, /^ {2}schedule:$/m)
+  assert.match(workflow, /^ {2}workflow_dispatch:$/m)
+  assert.doesNotMatch(workflow, /workflow_run:/)
   assert.match(workflow, /contents: read/)
   assert.match(workflow, /actions: read/)
   assert.match(workflow, /pull-requests: read/)
