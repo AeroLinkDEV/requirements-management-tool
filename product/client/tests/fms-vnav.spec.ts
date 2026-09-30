@@ -303,9 +303,9 @@ test('fuel burns as the aircraft flies: FUEL RESERVE when it reaches the reserve
   // no reserve is shown as met (FUEL 2/2; plan C.11, R3-03).
   unit.press('PROG')
   unit.press('NEXT')
-  expect(lines(unit)[3]).toMatch(/^ SITE ARR\s+EFOB $/)
-  expect(lines(unit)[4]).toMatch(/^RW24R \(THR\)\s+\d+KG$/)
-  expect(lines(unit)[6]).toMatch(/^KNOWN\s*$/)
+  expect(lines(unit)[5]).toMatch(/^ SITE ARR\s+EFOB $/)
+  expect(lines(unit)[6]).toMatch(/^RW24R \(THR\)\s+\d+KG$/)
+  expect(lines(unit)[8]).toMatch(/^KNOWN\s*$/)
   unit.press('FUEL')
   unit.press('NEXT')
   expect(lines(unit)[9]).toMatch(/^ LDG RESERVE/)
