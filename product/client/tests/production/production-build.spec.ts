@@ -391,6 +391,10 @@ test('every workspace chunk arrives and keeps the design contract in both densit
         const current = (document.querySelector('main')?.textContent || '').trim()
         return current.length > 0 && current !== previous
       }, previousMain.trim(), { timeout: 15_000 }).catch(() => {})
+      // Both lazy loading and context loading are user-visible opening states. Their heading is not the
+      // destination's readiness signal and must not be measured as a missing or unstyled workspace.
+      await expect(page.getByRole('main', { name: 'Opening workspace', exact: true })).toHaveCount(0)
+      await expect(page.getByRole('heading', { name: 'Opening workspace', exact: true })).toHaveCount(0)
       await page.locator('main h1, main h2, main h3').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
       const where = `${route.replace(/^.*\/releases\/[^/]+/, '')} [${density}]`
 

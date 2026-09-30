@@ -96,13 +96,16 @@ export function parseUserDatabase(text: string): { data: UserDatabase; scope: Us
     if (!ROUTE_NAME.test(name)) { errors.push(`route ${i + 1}: name ${JSON.stringify(r?.name)} is not 1-10 letters or digits`); return; }
     if (names.has(name)) { errors.push(`route ${i + 1}: ${name} appears twice`); return; }
     if (typeof r.origin !== "string" || typeof r.dest !== "string") { errors.push(`route ${name}: origin and destination are required`); return; }
-    if (!Array.isArray(r.legs) || !r.legs.every((l: Record<string, unknown>) => typeof l?.ident === "string" && IDENT.test(l.ident as string))) {
+    if (!Array.isArray(r.legs) || !r.legs.every((l: Record<string, unknown>) => typeof l?.ident === "string" && IDENT.test(l.ident as string) && (l.position === undefined || onGlobe(l.position)))) {
       errors.push(`route ${name}: legs must each name a waypoint`); return;
     }
     names.add(name);
     outRoutes.push({
       name, origin: r.origin, dest: r.dest,
-      legs: (r.legs as Record<string, unknown>[]).map(l => ({ ident: l.ident as string, ...(typeof l.via === "string" ? { via: l.via } : {}), ...(typeof l.altitude === "string" ? { altitude: l.altitude } : {}) })),
+      legs: (r.legs as Record<string, unknown>[]).map(l => ({
+        ident: l.ident as string, ...(typeof l.via === "string" ? { via: l.via } : {}), ...(typeof l.altitude === "string" ? { altitude: l.altitude } : {}),
+        ...(onGlobe(l.position) ? { position: { lat: l.position.lat, lon: l.position.lon } } : {}),
+      })),
     });
   });
   if (errors.length) return { errors };

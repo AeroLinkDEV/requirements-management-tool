@@ -13,6 +13,8 @@ import { TerrainTiles, type TerrainSource } from "./terrainTiles";
 import type { Layout, View } from "./outTheWindow";
 import FmsScenarioCard from "./FmsScenarioCard";
 import { conditionalLabel } from "./fmsModel";
+import { PROCEDURE_CHARTS } from "./procedureCharts";
+import { findProcedure } from "./procedures";
 import { fmsGpsView } from "./gpsBench";
 import { stimulusFor } from "./gpsStimulus";
 import { useCduLayout, type CduKeyEvent } from "./layout";
@@ -236,6 +238,10 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
   const signed = (value: number, digits = 0) => `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(digits)}`;
 
   const next = backend.activeRoute.legs[0];
+  // The executed approach's chart notes (C.10): restrictions, speed notes and minima the coded data does not carry,
+  // shown for reference and never enforced.
+  const approach = findProcedure(backend.navdb, backend.activeRoute, "APPROACH");
+  const approachChart = approach ? PROCEDURE_CHARTS[`${backend.activeRoute.dest} ${approach.ident}`] : undefined;
   // The approach as the controller has it: the capability (ILS, or the GPS level: LPV, LNAV/VNAV, LNAV) is annunciated
   // armed until captured, engaged after.
   const approachLabel = backend.approachType && backend.approachType !== "NO APPR" ? backend.approachType : "APPR";
@@ -593,6 +599,10 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
                   title="Restarts the simulation, loads the KBTV data and places the aircraft 8 NM before STAEV at 3200 ft, cleared direct STAEV, approach armed">
                   Set up KBTV RNAV RWY 15
                 </button>
+                <button type="button" onClick={() => startDemonstration("87n-rnav190-final")}
+                  title="Restarts the simulation under the helicopter profile, loads the FAA CIFP 2609 Copter point-in-space data and places the aircraft 3 NM before STAYS at 1700 ft, NAV and the approach armed">
+                  Set up 87N COPTER RNAV 190 final
+                </button>
               </div>
               {started ? (
                 <p className="fmsBenchHint" role="status">
@@ -638,6 +648,18 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
               </ul>
             ) : null}
           </section>
+          {approach?.notes?.length ? (
+            <section className="fmsBenchCard" aria-label="Procedure notes">
+              <h2>Procedure notes</h2>
+              <p className="fmsBenchHint">
+                {backend.activeRoute.dest} {approach.ident}, from the chart{approachChart ? ` (${approachChart.source})` : ""}: shown for
+                reference, never enforced by the bench.
+              </p>
+              <ul className="fmsBenchReadout" data-testid="fms-procedure-notes">
+                {approach.notes.map(note => <li key={note}>{note}</li>)}
+              </ul>
+            </section>
+          ) : null}
           <section className="fmsBenchCard" aria-label="User database">
             <h2>User database</h2>
             <p className="fmsBenchReadout">

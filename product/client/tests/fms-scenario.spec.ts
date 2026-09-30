@@ -408,3 +408,31 @@ test('below triggers, expectAircraft ranges and expectHover are validated', () =
   expect(problems({ kind: 'expectActive', waypoint: 'MUN' }, { kind: 'below', feet: 350 })).toEqual([])
   expect(problems({ kind: 'expectActive', waypoint: 'MUN' }, { kind: 'below' })).toEqual(['step 1: a below trigger needs feet between -1500 and 60000'])
 })
+
+test('an above trigger fires when the altimeter reads the altitude, to the foot; expectAfcs checks the low-height caption', () => {
+  const problems = (action: unknown, when: unknown = { kind: 'start' }) => scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 5, steps: [{ when, action }] })
+  expect(problems({ kind: 'expectActive', waypoint: 'MUN' }, { kind: 'above', feet: 2000 })).toEqual([])
+  expect(problems({ kind: 'expectActive', waypoint: 'MUN' }, { kind: 'above' })).toEqual(['step 1: an above trigger needs feet between -1500 and 60000'])
+  expect(problems({ kind: 'expectAfcs', lowHeight: 'LOW HT OFF' })).toEqual([])
+  expect(problems({ kind: 'expectAfcs', lowHeight: 'OFF' })).toEqual(['step 1: expectAfcs lowHeight must be LOW HT, LOW HT OFF or NONE'])
+  expect(problems({ kind: 'expectAfcs' })).toEqual(['step 1: expectAfcs needs at least one of collective, pitch, roll and lowHeight'])
+  // The trigger: 1,999.4 ft reads 1,999; 1,999.5 reads 2,000 (a capture settles onto its altitude without reaching it).
+  const unit = new ScriptedFms(() => new Date(START))
+  const place = (altitude: number) => unit.placeAircraft({ position: unit.truePosition, track: 0, altitude }, 'test: altitude')
+  place(1999.4)
+  const runner = new ScenarioRunner({ id: 'x', title: 'x', objective: '', maxSeconds: 5, steps: [{ when: { kind: 'above', feet: 2000 }, action: { kind: 'keys', keys: ['PROG'] } }] }, unit)
+  runner.poll()
+  expect(runner.results[0].status).toBe('pending')
+  place(1999.5)
+  runner.poll()
+  expect(runner.results[0].status).toBe('done')
+  // The caption: none in level flight, so a step expecting LOW HT OFF fails there; LOW HT OFF once the radio height is
+  // lost under a radio-height mode.
+  const wrong = new ScenarioRunner({ id: 'x', title: 'x', objective: '', maxSeconds: 5, steps: [{ when: { kind: 'start' }, action: { kind: 'expectAfcs', lowHeight: 'LOW HT OFF' } }] }, unit, undefined, new FlightSimulator(unit))
+  wrong.poll()
+  expect(wrong.results[0]).toMatchObject({ status: 'fail', actual: expect.stringContaining('low height NONE') })
+  const { runner: a4 } = runHeadless(library('87n-a4-ra-lost-in-hover'))
+  expect(a4.outcome).toBe('passed')
+  const caption = library('87n-a4-ra-lost-in-hover').steps.findIndex(step => step.action.kind === 'expectAfcs' && step.action.lowHeight === 'LOW HT OFF')
+  expect(a4.results[caption]).toMatchObject({ status: 'pass', actual: 'ALT | HOV | HOV, low height LOW HT OFF' })
+})
