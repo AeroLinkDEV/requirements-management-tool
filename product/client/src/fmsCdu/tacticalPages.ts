@@ -31,6 +31,9 @@ function tactApprFafAltitude(fms: ScriptedFms) {
 /** A velocity as the HOVER page shows it: signed, one decimal. */
 const signed = (kt: number) => `${kt < 0 ? "-" : "+"}${Math.abs(kt).toFixed(1)}`;
 
+/** A wind as the RTA page shows it: direction true and speed, as 020T/ 45KT. */
+const windText = (wind: { direction: number; speed: number }) => `${three(wind.direction)}T/${String(wind.speed).padStart(3)}KT`;
+
 export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
   TACT: {
     pages: () => 1,
@@ -299,9 +302,15 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         caption(" MIN IAS", "MAX IAS "),
         { left: { text: `${r.minSpeed}KT` }, right: { text: `${r.maxSpeed}KT` } },
         caption(" STATUS", plan?.status === "CONDITIONAL" ? "COND " : undefined),
-        { left: medium(!plan ? "-----" : plan.achievable ? "ON TIME" : plan.reason ?? "UNACHIEVABLE", plan && !plan.achievable ? "amber" : "green") },
-        // A CONDITIONAL prediction to the fix names its assumption (a MANUAL hold exited at its next crossing).
-        plan?.status === "CONDITIONAL" && plan.reason ? { left: small(plan.reason) } : undefined, undefined,
+        {
+          left: medium(!plan ? "-----" : plan.achievable ? "ON TIME" : plan.reason ?? "UNACHIEVABLE", plan && !plan.achievable ? "amber" : "green"),
+          // A CONDITIONAL prediction to the fix names its assumption (a MANUAL hold exited at its next crossing).
+          right: plan?.status === "CONDITIONAL" && plan.reason ? small(plan.reason) : undefined,
+        },
+        // RTA WIND (M300 A-141): the wind the RTA is computed in, the system wind unless the crew enters one (large), which
+        // never changes the system wind; DELETE brings the default back.
+        r.wpt ? caption(" RTA WIND") : undefined,
+        r.wpt ? { left: r.wind ? { text: windText(r.wind), color: "cyan" } : medium(windText(fms.rtaWind)) } : undefined,
         { left: dashes(24) },
         { left: prompt("<INDEX"), right: plan ? prompt(r.active ? "CANCEL>" : "ACTIVATE>") : undefined },
       ];
@@ -329,6 +338,14 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         const at = new Date(now);
         at.setUTCHours(Number(shape[1]), Number(shape[2]), 0, 0);
         r.time = at.getTime() <= now ? at.getTime() + 86_400_000 : at.getTime();
+        return void fms.setScratch("");
+      }
+      if (side === "L" && row === 5 && r.wpt) {
+        if (scratch === "DELETE") { r.wind = null; return void fms.setScratch(""); }
+        // Direction true and speed: 0 to 360 degrees and 0 to 200 kt (M300 A-141).
+        const wind = /^(\d{3})\/(\d{1,3})$/.exec(scratch);
+        if (!wind || Number(wind[1]) > 360 || Number(wind[2]) > 200) return "invalid";
+        r.wind = { direction: Number(wind[1]) % 360, speed: Number(wind[2]) };
         return void fms.setScratch("");
       }
       if (row === 3) {
