@@ -369,9 +369,11 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         { left: fms.movingDraft.position ? medium(formatPosition(fms.movingDraft.position)) : boxes(15) },
         caption(" MOVING"),
       ];
-      moving.slice(0, 3).forEach(([ident, motion], i) => {
+      // Two lines each, the motion then where it is now: side by side they need 30 columns and overprinted each other.
+      moving.slice(0, 2).forEach(([ident, motion], i) => {
         const at = fms.coordinates(ident);
-        lines[6 + i] = { left: medium(`${ident} ${fms.angleText(motion.track)}/${motion.speed}KT`, "green"), right: at ? small(formatPosition(at)) : undefined };
+        lines[6 + i * 2] = { left: medium(`${ident} ${fms.angleText(motion.track)}/${motion.speed}KT`, "green") };
+        lines[7 + i * 2] = at ? { left: small(formatPosition(at)) } : undefined;
       });
       lines[11] = { left: dashes(24) };
       lines[12] = { left: prompt("<INDEX"), right: fms.movingDraft.ident && fms.movingDraft.position && fms.movingDraft.motion ? prompt("CREATE>") : undefined };

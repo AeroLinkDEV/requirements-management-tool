@@ -448,6 +448,8 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
                   onChange={event => setSpdInput(event.target.value.replace(/\D/g, ""))} />
               </label>
               <button type="button" disabled={!spdInput} onClick={() => { const speed = Number(spdInput); recordTo?.autopilot({ speed }); sim.selectSpeed(speed); setSpdInput(""); }}>SET SPD</button>
+              {/* The cyclic force-trim release, pressed and let go: the hover references re-datum where the aircraft is. */}
+              <button type="button" title="Cyclic force-trim release" onClick={() => { recordTo?.autopilot({ forceTrimRelease: true }); sim.releaseForceTrim(); }}>FTR</button>
             </form>
           ) : null}
           <dl className="fmsBenchGuidance" aria-label="Guidance">
