@@ -21,6 +21,9 @@ test('BACKTRACK on the actual CDU reviews airborne and ground histories before E
   await open(page)
   await page.getByRole('button', { name: 'Jump to next waypoint' }).click()
   const flight = page.getByRole('region', { name: 'Flight', exact: true })
+  // Jump changes the route immediately; the paused quarter-second tick refreshes its guidance sample.
+  // MUN to RDG is 21.6 NM in this demonstration. Capture the post-jump state before testing MOD isolation.
+  await expect(flight.locator('.fmsBenchReadout').first()).toHaveText('Active waypoint RDG, 21.6 NM')
   const activeBefore = await flight.locator('.fmsBenchReadout').first().innerText()
   await key(page, 'RTE').click()
   await expectLine(page, 10, /^<BACKTRACK/)
