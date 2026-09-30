@@ -115,6 +115,17 @@ export type Procedure = {
    * absent (gpsSensors.buildFas).
    */
   publishedFas?: PublishedFas;
+  /**
+   * An RNAV approach intentionally flown LNAV only, and why the data says so (Astra Q4): no path point record, and no
+   * vertical path published (vertical angle 000 at the MAP), as 87N COPTER RNAV 190. Only this makes an approach without
+   * a FAS data block LNAV only; a required FAS block that is missing or unreadable does not (gpsSensors approachAuthority).
+   */
+  lnavOnly?: { source: string };
+  /**
+   * A path point record the data publishes for this approach but that could not be read, and why: the approach needs a
+   * FAS data block and has none usable, so none is derived in its place (gpsSensors buildFas).
+   */
+  fasInvalid?: string;
 };
 
 /** The FAS data block fields as a path point record publishes them, with the published CRC (hexadecimal). */

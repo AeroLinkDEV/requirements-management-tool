@@ -29,10 +29,13 @@ import type { FlightPhase } from "./navigation";
  *      only, annunciated LNAV (the LPV-to-LNAV downgrade).
  * The ability to navigate laterally (a usable receiver) is separate from permission to descend on an approach.
  *
- * An RNAV approach with no FAS data block (LNAV only, such as the 87N COPTER RNAV 190 point-in-space approach, whose only
- * minimum is LNAV) selects nothing in the receiver: 156, 116 and 117 belong to FAS approaches. It is flown on the FMS's
- * lateral guidance, annunciated LNAV (lateral, no vertical), with only step 1: the selected receiver usable in the
- * approach phase, which judges its HIL against the approach HAL of 0.3 NM (AC 20-138, TSO-C146 practice).
+ * An RNAV approach that is intentionally LNAV only (its data says so: no path point record and no vertical path
+ * published, such as the 87N COPTER RNAV 190 point-in-space approach, whose only minimum is LNAV) selects nothing in the
+ * receiver: 156, 116 and 117 belong to FAS approaches. It is flown on the FMS's lateral guidance, annunciated LNAV
+ * (lateral, no vertical), with only step 1: the selected receiver usable in the approach phase, which judges its HIL
+ * against the approach HAL of 0.3 NM (AC 20-138, TSO-C146 practice). An approach whose required FAS data block is
+ * missing, or published but unreadable, is not LNAV only: it is NO APPR (FAS DATA MISSING, FAS DATA INVALID), and every
+ * FAS check above still applies to a FAS approach (Astra Q4).
  */
 
 /**
@@ -184,6 +187,8 @@ export function buildFas(approach: Procedure, runway: Runway | undefined, airpor
     const { publishedCrc: _published, ...fields } = approach.publishedFas;
     return { ...fields, crc: fasCrc(fields) };
   }
+  // A published block that could not be read is not replaced by a derived one, and an LNAV-only approach has none.
+  if (approach.fasInvalid !== undefined || approach.lnavOnly) return null;
   if (!runway || !fafPosition || !approach.faf) return null;
   const altitudeAt = (ident: string) => {
     const leg = approach.legs.find(entry => "ident" in entry && entry.ident === ident);
@@ -248,14 +253,29 @@ export type ApproachAuthority = {
 };
 
 /**
+ * What an RNAV approach needs of a FAS data block: one (FAS), none because it is intentionally LNAV only (the data says
+ * so: navData Procedure.lnavOnly), or one it should have and does not (missing, or published but unreadable).
+ */
+export type FasRequirement = "FAS" | "LNAV ONLY" | "FAS DATA MISSING" | "FAS DATA INVALID";
+
+/** An approach's FAS requirement, from its data and the FAS block derived for it (null when none could be). */
+export function fasRequirement(approach: Procedure, fas: FasDataBlock | null): FasRequirement {
+  if (approach.fasInvalid !== undefined) return "FAS DATA INVALID";
+  if (approach.lnavOnly) return "LNAV ONLY";
+  return fas ? "FAS" : "FAS DATA MISSING";
+}
+
+/**
  * May the approach be flown on the selected receiver: the approach half of the precedence table at the top of this file.
  * `receiver` is that receiver's assessment (null when none is selected).
  */
-export function approachAuthority(bus: GpsBus | null, receiver: ReceiverAssessment | null, fasApproach = true): ApproachAuthority {
+export function approachAuthority(bus: GpsBus | null, receiver: ReceiverAssessment | null, fas: FasRequirement = "FAS"): ApproachAuthority {
   const none = (reason: string): ApproachAuthority => ({ annunciation: "NO APPR", lateral: false, vertical: false, reason });
   if (!bus || !receiver?.usable) return none(receiver ? `GPS ${receiver.detail}` : "NO GPS SELECTED");
+  // A FAS the approach needs but does not have is not LNAV only: it may not be flown (Astra Q4).
+  if (fas === "FAS DATA MISSING" || fas === "FAS DATA INVALID") return none(fas);
   // LNAV only: the FMS steers the approach laterally; the receiver's 116 is not used, and nothing is descended on.
-  if (!fasApproach) return { annunciation: "LNAV", lateral: false, vertical: false, reason: "NO FAS: LNAV ONLY" };
+  if (fas === "LNAV ONLY") return { annunciation: "LNAV", lateral: false, vertical: false, reason: "NO FAS: LNAV ONLY" };
   if (bus["156"].ssm !== "NORMAL") return none(`156 ${bus["156"].ssm}`);
   const approach = bus["156"].value!;
   if (!approach.selected) return none("156 NOT SELECTED");

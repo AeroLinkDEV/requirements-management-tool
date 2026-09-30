@@ -78,6 +78,8 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
   const airwayFixes = new Map<string, { sequence: number; fix: string }[]>();
   const procedureRecords = new Map<string, ProcedureRecord[]>();
   const pathPoints = new Map<string, PublishedFas>();
+  // Path point records that were present but unreadable, by procedure: the approach they belong to has no usable FAS.
+  const invalidPathPoints = new Map<string, string>();
   const msa: Msa[] = [];
   const departures = new Set<string>();
   const errors: string[] = [];
@@ -263,7 +265,7 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
         const icao = ident(7, 10, "airport ident");
         if (!icao) return;
         const fas = pathPoint(line, icao);
-        if (typeof fas === "string") { impossible(fas); return; }
+        if (typeof fas === "string") { impossible(fas); invalidPathPoints.set(`${icao} ${col(line, 14, 19)}`, fas); return; }
         pathPoints.set(`${icao} ${col(line, 14, 19)}`, fas);
         read += 1;
         return;
@@ -294,7 +296,7 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
   for (const entry of entries) if (!positions.has(entry.ident)) positions.set(entry.ident, entry.position);
   for (const [key, records] of procedureRecords) {
     const [icao, ident] = key.split(" ");
-    const built = buildApproach(icao, ident, records, airports.get(icao), pathPoints.get(key), ident => positions.get(ident));
+    const built = buildApproach(icao, ident, records, airports.get(icao), pathPoints.get(key), ident => positions.get(ident), invalidPathPoints.get(key));
     if (typeof built === "string") errors.push(`${icao} ${ident}: ${built}`);
     else if (built) procedures.push(built);
   }
@@ -355,7 +357,7 @@ function constraintText(record: ProcedureRecord): string | undefined {
  * (procedures.ts), never by collapsing records that share a name.
  */
 function buildApproach(icao: string, ident: string, records: ProcedureRecord[], site: Airport | undefined, fas: PublishedFas | undefined,
-  place: (ident: string) => { lat: number; lon: number } | undefined): Procedure | string | null {
+  place: (ident: string) => { lat: number; lon: number } | undefined, fasInvalid?: string): Procedure | string | null {
   const final = records.filter(r => r.routeType === "R").sort((a, b) => a.sequence - b.sequence);
   if (!final.length) return null;
   const variation = site?.magneticVariation ?? 0;
@@ -473,6 +475,10 @@ function buildApproach(icao: string, ident: string, records: ProcedureRecord[], 
       },
     } : {}),
     ...(fas ? { publishedFas: fas } : {}),
+    // Intentionally LNAV only only when the data says there is no vertical path: no path point record and vertical angle
+    // 000 at the MAP. A missing FAS with a vertical path coded, or an unreadable one, is not LNAV only (Astra Q4).
+    ...(!fas && !fasInvalid && mapAngle === 0 ? { lnavOnly: { source: "no path point record, and vertical angle 000 at the MAP (no vertical path published)" } } : {}),
+    ...(fasInvalid ? { fasInvalid } : {}),
     endpoint,
     ...(pointInSpace ? { pointInSpace: true } : {}),
     ...(chart ? { notes: chart.notes } : {}),
