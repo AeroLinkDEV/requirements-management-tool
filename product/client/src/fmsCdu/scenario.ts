@@ -643,7 +643,7 @@ export class ScenarioRunner {
           && (action.near === undefined || (metres !== null && metres <= (action.nearMetres ?? 50) && metres >= (action.minNearMetres ?? 0)))
           && (action.maxCrossTrack === undefined || Math.abs(fms.crossTrack) <= action.maxCrossTrack);
         const parts = [
-          `GS ${fms.groundSpeed.toFixed(1)} kt`, `TRK ${Math.round(fms.track)}°`, `RA ${ra.status === "NORMAL" ? `${Math.round(ra.value!)} ft` : ra.status}`, `ALT ${Math.round(fms.altitude)} ft`,
+          `GS ${fms.groundSpeed.toFixed(1)} kt`, `TRK ${Math.round(fms.track)}°T`, `RA ${ra.status === "NORMAL" ? `${Math.round(ra.value!)} ft` : ra.status}`, `ALT ${Math.round(fms.altitude)} ft`,
           ...(action.near ? [metres === null ? `${action.near} unknown` : `${Math.round(metres)} m from ${action.near}`] : []),
           ...(action.maxCrossTrack !== undefined ? [`XTK ${fms.crossTrack.toFixed(2)} NM`] : []),
         ];

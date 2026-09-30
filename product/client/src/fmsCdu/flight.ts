@@ -311,7 +311,11 @@ export class FlightSimulator {
     this.last = this.guide();
   }
 
-  get guidance() { return this.last; }
+  get guidance() {
+    // Power/table failure is observable even while the plant is paused; reading outputs cannot retain stale LNAV.
+    if (this.fms.hasCondition("fmsFail") !== this.fmsFailed) { this.watchFailure(); this.last = this.guide(); }
+    return this.last;
+  }
   get verticalMode() { return this.vertical; }
   get approachMode() { return this.approach; }
   /** The vertical path here, or null where there is none (climb, cruise, or no computable path). */
@@ -1484,7 +1488,7 @@ export class FlightSimulator {
     const leg = route.legs[0];
     const base = { targetAltitude: this.targetAltitude() };
     const none = { mode: "LNAV" as const, legFrom: null, legTo: null, desiredTrack: null, crossTrack: 0, distanceToGo: null, bankCommand: 0, ...base };
-    if (fms.navState.mode === "DR" && !fms.navState.airValid || !fms.approachSteeringValid || !fms.departureInstrumentReady || fms.pinsContinuation?.active) return { ...none, mode: "HDG" };
+    if (fms.needsActiveLeg || fms.navState.mode === "DR" && !fms.navState.airValid || !fms.approachSteeringValid || !fms.departureInstrumentReady || fms.pinsContinuation?.active) return { ...none, mode: "HDG" };
     const sequencing = dt > 0 && this.lateral === "LNAV";
     this.lead = 0;
 

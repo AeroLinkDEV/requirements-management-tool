@@ -325,13 +325,14 @@ test('SET POS in dead reckoning resets the position estimate to the entry and sh
   expect(scratch(unit)).toBe('')
 })
 
-test('SET POS with GPS navigating records the reference without moving the sensor position (R26)', () => {
+test('SET POS with GPS navigating is refused without recording a reference or moving the sensor position (M300 A-110)', () => {
   const unit = fms()
   const before = { ...unit.position }
   press(unit, 'INIT_REF', 'LSK2L')
   typeText(unit, 'N4000.0W07000.0')
   press(unit, 'LSK3R')
-  expect(lines(unit)[6]).toMatch(/N4000\.0W07000\.0\s*$/)
+  expect(scratch(unit)).toBe('NOT ALLOWED')
+  expect(unit.positionReferenceEntry).toBeNull()
   expect(unit.position).toEqual(before)
 })
 

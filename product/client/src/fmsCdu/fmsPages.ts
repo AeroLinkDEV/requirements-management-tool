@@ -86,7 +86,7 @@ function vnavApproachPage(fms: ScriptedFms): (Line | undefined)[] {
   const geometry = fms.legGeometry(fms.activeRoute);
   const legs = fms.activeRoute.legs;
   const ident = (i: number) => { const leg = legs[i]; return leg?.kind === "wpt" ? leg.ident : leg?.kind === "cond" ? conditionalLabel(leg) : "-----"; };
-  const crsDist = (i: number) => { const leg = geometry[i]; return leg ? `${three(leg.course)}°/${fixed(leg.distance, 1).padStart(5)}NM` : "---°/--.-NM"; };
+  const crsDist = (i: number) => { const leg = geometry[i]; return leg ? `${fms.angleText(leg.course)}/${fixed(leg.distance, 1).padStart(5)}NM` : "---°/--.-NM"; };
   const tan = Math.tan((path.vpa * Math.PI) / 180);
   // Vertical deviation is shown once the aircraft is on the final approach: FAF or runway active.
   const toThreshold = distanceNm(fms.position, path.runwayPos);
@@ -110,7 +110,7 @@ function vnavApproachPage(fms: ScriptedFms): (Line | undefined)[] {
       right: fms.vnav.qnh === null ? boxes(4) : { text: fms.vnav.qnh },
     },
     caption(" WIND/GS", "VPA "),
-    { left: medium(`${three(fms.wind.direction)}°/${fms.wind.speed}KT ${Math.round(fms.groundSpeed)}KT`), right: medium(`-${fixed(path.vpa, 2)}°`, outside ? "amber" : "white") },
+    { left: medium(`${three(fms.wind.direction)}T/${fms.wind.speed}KT ${Math.round(fms.groundSpeed)}KT`), right: medium(`-${fixed(path.vpa, 2)}°`, outside ? "amber" : "white") },
     caption(" VDEV", "TGT VS "),
     { left: medium(onFinal ? `${vdev >= 0 ? "+" : ""}${vdev}FT` : "-----"), right: medium(`-${targetVs}FPM`) },
   ];
@@ -120,7 +120,7 @@ function vnavApproachPage(fms: ScriptedFms): (Line | undefined)[] {
 function vnavCruise(fms: ScriptedFms): (Line | undefined)[] {
   const profile = fms.profile();
   const tod = profile.topOfDescent;
-  const todEta = tod === null || !makingProgress(fms.closureSpeed) ? null : fms.now.getTime() + (tod / fms.closureSpeed) * 3_600_000;
+  const todEta = tod === null || !makingProgress(fms.closureSpeed) ? null : fms.utcTime.getTime() + (tod / fms.closureSpeed) * 3_600_000;
   const next = profile.points.find(p => { const leg = fms.activeRoute.legs.find(l => l.kind === "wpt" && l.ident === p.ident); return leg?.kind === "wpt" && leg.altitude; });
   const nextLeg = next ? fms.activeRoute.legs.find(l => l.kind === "wpt" && l.ident === next.ident) : undefined;
   return [
@@ -128,7 +128,7 @@ function vnavCruise(fms: ScriptedFms): (Line | undefined)[] {
     caption(" CRZ ALT", "CRZ SPD "),
     { left: { text: formatConstraint({ kind: "AT", altitude: fms.vnav.cruiseAltitude }) }, right: { text: `${fms.vnav.cruiseSpeed}KT` } },
     caption(" PATH ANGLE", "WIND "),
-    { left: { text: `${fixed(fms.vnav.pathAngle, 1)}°` }, right: { text: `${three(fms.wind.direction)}°/${fms.wind.speed}KT` } },
+    { left: { text: `${fixed(fms.vnav.pathAngle, 1)}°` }, right: { text: `${three(fms.wind.direction)}T/${fms.wind.speed}KT` } },
     caption(" T/D", "E/D "),
     { left: medium(tod === null ? (profile.descending ? "PASSED" : "-----") : `${fixed(tod, 1)}NM ${eta(todEta!)}`), right: medium(profile.endOfDescent ?? "-----") },
     caption(" NEXT RESTR"),
@@ -250,7 +250,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         undefined,
         { left: prompt("<RTE"), right: prompt("RADIO>") },
         undefined,
-        { left: prompt("<HOLD"), right: prompt("TIMER>") },
+        { left: prompt("<SETUP"), right: prompt("TIMER>") },
         undefined,
         // M300 reaches PLAN DATA from INIT/REF 2/2 at 4L, where the bench has FIX INFO; here it is the free 6R.
         { left: prompt("<MAINT"), right: prompt("PLAN DATA>") },
@@ -272,7 +272,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       ],
     lsk: (fms, side, row, _scratch, index) => {
       const target: Record<string, PageId> = index === 0
-        ? { L1: "IDENT", L2: "POS", L3: "FUEL", L4: "RTE", L5: "HOLD", R1: "NAV_DATA", R2: "PREDEF", R3: "MSG_RECALL", R4: "RADIO", R5: "TIMER", L6: "MAINT", R6: "PLAN_DATA" }
+        ? { L1: "IDENT", L2: "POS", L3: "FUEL", L4: "RTE", L5: "SETUP", R1: "NAV_DATA", R2: "PREDEF", R3: "MSG_RECALL", R4: "RADIO", R5: "TIMER", L6: "MAINT", R6: "PLAN_DATA" }
         : { L1: "TACT", L2: "TACT_APPR", L3: "HOVER", L4: "FIX", L5: "SEC_FPLN", R1: "VNAV", R2: "ATC", R3: "FMC_COMM", R4: "ANS", R5: "NAV_STATUS", L6: "MOVING_WPT", R6: "RNDZ" };
       const page = target[`${side}${row}`];
       if (page === "HOLD" && !fms.route.hold) { fms.open("LEGS"); fms.setScratch("/H"); return; }
@@ -281,13 +281,22 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
   },
 
   IDENT: {
-    pages: () => 1,
-    render: fms => [
-      title("IDENT", "1/1"),
+    pages: () => 2,
+    render: (fms, index) => index === 1 ? [
+      title("IDENT", "2/2"), caption(" MAGVAR MODEL", "EPOCH "),
+      { left: medium(fms.magvar.database.name), right: medium(String(fms.magvar.database.epoch)) },
+      caption(" RELEASED", "CRC-32Q "),
+      { left: medium(fms.magvar.database.released), right: medium(fms.magvar.database.crc, fms.magvar.valid ? "white" : "amber") },
+      caption(" VALID YEARS"), { left: medium(`${fms.magvar.database.epoch}-${fms.magvar.database.epoch + 5}`) },
+      caption(" TABLE STATUS"), { left: medium(!fms.magvar.valid ? "CRC FAILED" : fms.magvar.outOfDate(fms.utcTime) ? "OUT OF DATE" : fms.magvar.withinEpoch(fms.utcTime) ? "CURRENT" : "BEFORE EPOCH", fms.magvar.withinEpoch(fms.utcTime) ? "white" : "amber") },
+      undefined, { center: small("SIMULATOR TABLE FORMAT", "amber") }, { left: dashes(24) },
+      { left: back("INDEX"), right: prompt("POS INIT>") },
+    ] : [
+      title("IDENT", "1/2"),
       caption(" MODEL", "OP PROGRAM "),
-      { left: medium("CMA-9000"), right: medium("AEROLINK SIM") },
+      { left: medium("CMA-9000"), right: medium(`SIM ${fms.s300Advisory ? "S300" : "SBAS"} v${fms.aircraftProfile.version}`) },
       caption(" NAV DATA", "ACTIVE "),
-      { left: medium(fms.activeCycle.id), right: medium(cycleDates(fms.activeCycle), fms.activeCycle.to !== null && fms.now.getTime() > fms.activeCycle.to ? "amber" : "white") },
+      { left: medium(fms.activeCycle.id), right: medium(cycleDates(fms.activeCycle), fms.activeCycle.to !== null && fms.utcTime.getTime() > fms.activeCycle.to ? "amber" : "white") },
       caption(undefined, fms.inactiveCycle ? "INACTIVE " : undefined),
       fms.inactiveCycle ? { left: small(fms.inactiveCycle.id), right: prompt(cycleDates(fms.inactiveCycle)) } : undefined,
       undefined,
@@ -297,40 +306,97 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       { left: dashes(24) },
       { left: back("INDEX"), right: prompt("POS INIT>") },
     ],
-    lsk: (fms, side, row) => {
+    lsk: (fms, side, row, _scratch, index) => {
       if (row === 6) fms.open(side === "L" ? "INIT_REF" : "POS");
-      if (side === "R" && row === 3 && fms.inactiveCycle) fms.swapCycles();
+      if (index === 0 && side === "R" && row === 3 && fms.inactiveCycle) fms.swapCycles();
     },
   },
 
   POS: {
-    pages: () => 1,
-    render: fms => [
-      title("POS INIT", "1/1"),
+    pages: () => 2,
+    render: (fms, index) => index === 1 ? [
+      title("POS INIT", "2/2"), caption(" NAV MODE", "RNP/ANP NM "),
+      { left: medium(navModeText(fms)), right: medium(`${fixed(fms.navPerformance.rnp, 2)}/${fixed(fms.navPerformance.anp, 2)}`) },
+      caption(" TRUE WIND", "TAS "), { left: medium(`${three(fms.wind.direction)}T/${Math.round(fms.wind.speed)}KT`), right: medium(`${fms.trueAirspeed === null ? "---" : Math.round(fms.trueAirspeed)}KT`) },
+      caption(" HDG/DA", "TK/GS "), { left: medium(`${fms.angleText(fms.heading)}/${fixed(fms.track - fms.heading, 1)}°`), right: medium(`${fms.angleText(fms.track)}/${Math.round(fms.groundSpeed)}KT`) },
+      caption(" MAGVAR", "TKE/XTK "), { left: fms.magneticField ? medium(`${fms.magneticField.declination < 0 ? "W" : "E"}${fixed(Math.abs(fms.magneticField.declination), 1)}°`) : dashes(5), right: medium(`${fixed(fms.trackError, 0)}°/${fixed(fms.crossTrack, 2)}NM`) },
+      caption(fms.validBaroAltitude !== null ? " ALT (CORR)" : " ALT (STD)"), { left: (fms.validBaroAltitude ?? fms.pressureAltitude) !== null ? medium(`${Math.round((fms.validBaroAltitude ?? fms.pressureAltitude)!)}FT`) : dashes(6) },
+      caption(fms.manualQnhAvailable ? ` QNH SET ${fms.qnhUnits}` : undefined), { left: fms.manualQnhAvailable ? fms.qnhText === null ? boxes(5) : medium(`>${fms.qnhText}`) : undefined },
+    ] : [
+      title("POS INIT", "1/2"),
       caption(" FMS POS"),
       { left: medium(formatPosition(fms.position)) },
       caption(" GPS POS"),
       // The fix of the receiver navigated on, which in GPS mode is the FMS position (3a.3).
       { left: gpsFix(fms) ? medium(formatPosition(gpsFix(fms)!)) : dashes(15) },
-      caption(" UTC", "SET POS "),
+      caption(fms.gpsTimeAvailable ? " GPS UTC" : " RTC UTC", "SET POS "),
       // The crew's last SET POS entry, or boxes until there is one (R26).
-      { left: medium(hhmm(fms.now)), right: fms.positionReferenceEntry ? medium(formatPosition(fms.positionReferenceEntry.position)) : boxes(15) },
-      undefined, undefined, undefined, undefined,
+      { left: medium(hhmm(fms.utcTime)), right: fms.positionReferenceEntry ? medium(formatPosition(fms.positionReferenceEntry.position)) : boxes(15) },
+      undefined, undefined,
+      caption(fms.setup.localTime ? " LOCAL" : " UTC", "DATE "),
+      { left: medium(fms.displayTime.toISOString().slice(11, 19)), right: medium(fms.utcTime.toISOString().slice(0, 10)) },
       { left: dashes(24) },
-      { left: back("INDEX"), right: prompt("RTE>") },
+      { left: back("SETUP"), right: prompt("RTE>") },
     ],
-    lsk: (fms, side, row, scratch) => {
-      if (row === 6) { fms.open(side === "L" ? "INIT_REF" : "RTE"); return; }
+    lsk: (fms, side, row, scratch, index) => {
+      if (index === 1) {
+        if (side !== "L" || row !== 6) return;
+        const result = fms.enterQnh(scratch);
+        if (!result) fms.setScratch("");
+        return result;
+      }
+      if (row === 6) { fms.open(side === "L" ? "SETUP" : "RTE"); return; }
       // SET POS: a real position-reference initialisation, or a refusal that changes nothing (R26).
-      if (side === "R" && row === 3) {
+      if (side === "R" && (row === 1 || row === 3)) {
         const position = parsePosition(scratch);
         if (!position) return "invalid";
-        fms.initializePosition(position);
+        if (!fms.initializePosition(position)) return "not-allowed";
         fms.setScratch("");
         return;
       }
+      if (row === 5 && scratch) {
+        const value = fms.utcTime;
+        if (side === "L") {
+          const match = /^(\d{2})(\d{2})(\d{2})$/.exec(scratch);
+          if (!match || Number(match[1]) > 23 || Number(match[2]) > 59 || Number(match[3]) > 59) return "invalid";
+          value.setUTCHours(Number(match[1]), Number(match[2]), Number(match[3]), 0);
+          if (fms.setup.localTime) value.setTime(value.getTime() - fms.setup.localOffsetHours * 3600000);
+        } else {
+          const match = /^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})\/(\d{2})$/.exec(scratch);
+          if (!match) return "invalid";
+          const month = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"].indexOf(match[1]);
+          value.setUTCFullYear(2000 + Number(match[3]), month, Number(match[2]));
+          if (value.getUTCMonth() !== month || value.getUTCDate() !== Number(match[2])) return "invalid";
+        }
+        if (!fms.setUtcTime(value)) return "not-allowed";
+        fms.setScratch(""); return;
+      }
       if (side === "L" && row === 1 && !scratch) fms.setScratch(formatPosition(fms.position));
       if (side === "L" && row === 2 && !scratch && gpsFix(fms)) fms.setScratch(formatPosition(gpsFix(fms)!));
+    },
+  },
+
+  SETUP: {
+    pages: () => 1,
+    render: fms => [
+      title("SETUP", "1/1"), caption(" DISPLAY"),
+      { left: medium(`${fms.position.lat > 73 || fms.position.lat < -60 ? "" : ">"}${fms.angleReference}`) },
+      caption(" TIME", "OFFSET "),
+      { left: medium(`>${fms.setup.localTime ? "LOCAL" : "UTC"}`), right: medium(`${fms.setup.localOffsetHours >= 0 ? "+" : ""}${fms.setup.localOffsetHours.toFixed(1)}HRS`) },
+      caption(" COORD", "DATUM "), { left: medium("LAT_LONG"), right: medium("WGS84") },
+      caption(" MAGVAR", "AT PPOS "), { left: medium(fms.magvar.database.name), right: medium(fms.magneticField ? `${Math.abs(fms.magneticField.declination).toFixed(1)}${fms.magneticField.declination < 0 ? "W" : "E"}` : "-----") },
+      caption(" FMS OPERATION"), { left: small("DUAL FMS PENDING", "amber") },
+      { left: dashes(24) }, { left: back("POS INIT"), right: prompt("ROUTE>") },
+    ],
+    lsk: (fms, side, row, scratch) => {
+      if (row === 6) { fms.open(side === "L" ? "POS" : "RTE"); return; }
+      if (side === "L" && row === 1) { if (!fms.toggleAngleReference()) return "not-allowed"; }
+      if (side === "L" && row === 2) fms.setup.localTime = !fms.setup.localTime;
+      if (side === "R" && row === 2 && scratch) {
+        const offset = numberIn(scratch, -12, 12);
+        if (offset === null || offset * 2 !== Math.round(offset * 2)) return "invalid";
+        fms.setup.localOffsetHours = offset; fms.setScratch("");
+      }
     },
   },
 
@@ -363,7 +429,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         const active = at === 0;
         if (leg.kind === "cond") {
           // A conditional leg: its course or heading, and the event that ends it.
-          lines[1 + i * 2] = { left: small(` ${three(leg.course)}° ${leg.path[0] === "V" ? "HDG" : "CRS"}`) };
+          lines[1 + i * 2] = { left: small(` ${fms.angleText(leg.course)} ${leg.path[0] === "V" ? "HDG" : "CRS"}`) };
           lines[2 + i * 2] = { left: { text: conditionalLabel(leg), color: active ? "magenta" : "green", inverse: active } };
           return;
         }
@@ -371,7 +437,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         const marker = leg.qualifier === "/H" ? `HOLD ${route.hold?.turn === "LEFT" ? "L" : "R"}` : leg.qualifier === "/S" ? "SAR"
           : leg.arc ? `${leg.arc.turn} ARC` : leg.procedureTurn?.role === "OUTBOUND" ? "P-T" : undefined;
         lines[1 + i * 2] = {
-          left: small(leg3 ? ` ${three(leg3.course)}°` : " ---°"),
+          left: small(leg3 ? ` ${fms.angleText(leg3.course)}` : " ---°"),
           center: small(leg3 ? `${fixed(leg3.distance, 1)}NM` : "--.-NM"),
           right: marker ? small(`${marker} `, "cyan") : undefined,
         };
@@ -389,7 +455,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         const first = route.legs[0];
         const course = first?.kind === "wpt" && first.path === "CF" && first.course !== undefined ? first.course : geometry[0]?.course;
         lines[11] = { left: dashes(13), right: small("INTC CRS ", "green") };
-        lines[12] = { left: back("ERASE"), right: { text: course === undefined ? "---" : three(course), color: first?.kind === "wpt" && first.path === "CF" ? "white" : "cyan" } };
+        lines[12] = { left: back("ERASE"), right: { text: fms.angleText(course), color: first?.kind === "wpt" && first.path === "CF" ? "white" : "cyan" } };
         if (fms.bypassedByDirect.length) lines[10] = { ...lines[10], right: prompt("ABEAM PTS>") };
       }
       return lines;
@@ -400,7 +466,9 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         if (row === 6) {
           const course = scratch ? numberIn(scratch, 0, 360, /^\d{1,3}$/) : fms.legGeometry(fms.route)[0]?.course ?? null;
           if (course === null) return "invalid";
-          fms.interceptCourse(course === 0 ? 360 : course);
+          const trueCourse = scratch ? fms.angleFromEntry(course) : course;
+          if (trueCourse === null) return "not-allowed";
+          fms.interceptCourse(trueCourse);
           fms.setScratch("");
           return;
         }
@@ -524,13 +592,13 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         const hover = hoverLines(legs, geometry);
         const waypointLines = hover
           ? hover.flatMap(line => [
-            { left: small(` ${three(line.course)}°`), ...(line === hover[0] ? { center: small("DTG", "green"), right: small("ETA ", "green") } : {}) },
+            { left: small(` ${fms.angleText(line.course)}`), ...(line === hover[0] ? { center: small("DTG", "green"), right: small("ETA ", "green") } : {}) },
             { left: { text: pad(line.ident, 5), color: line.at === 0 ? "magenta" as const : "green" as const, inverse: line.at === 0 }, right: medium(`${fixed(line.distance, 1)}NM ${eta(line.at, line.distance)}`) },
           ])
           : [
-            { left: small(` ${toLeg ? three(toLeg.course) : "---"}°`), center: small("DTG", "green"), right: small("ETA ", "green") },
+            { left: small(` ${fms.angleText(toLeg?.course)}`), center: small("DTG", "green"), right: small("ETA ", "green") },
             { left: { text: pad(ident(to), 5), color: "magenta" as const, inverse: true }, right: medium(toLeg ? `${fixed(toDistance, 1)}NM ${eta(0, toDistance)}` : "") },
-            { left: small(` ${nextLeg ? three(nextLeg.course) : "---"}°`) },
+            { left: small(` ${fms.angleText(nextLeg?.course)}`) },
             { left: { text: pad(ident(next), 5), color: "green" as const }, right: medium(nextLeg ? `${fixed(toDistance + nextLeg.distance, 1)}NM ${eta(1, toDistance + nextLeg.distance)}` : "") },
           ];
         // XTK blanked in the hover procedure (M300 A-127): on a CF leg, more than 0.2 NM off it and more than 20° off its
@@ -540,13 +608,12 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           title("PROGRESS", "1/4", "ACT"),
           ...waypointLines,
           caption("TRUE WIND", "TK/GS "),
-          // The system wind: in medium font while the FMS computes it; in large font, and open to a manual entry, while it
-          // cannot (M300 12-22, 11-19).
+          // Preserve the system-wind computation/manual-entry rule and the TRUE wind reference.
           {
             left: fms.windComputed
-              ? medium(` ${three(fms.systemWind.direction)}°/ ${fms.systemWind.speed}KT`)
-              : { text: ` ${three(fms.systemWind.direction)}°/ ${fms.systemWind.speed}KT`, color: fms.manualWindEntered ? "cyan" : "white" },
-            right: medium(`${three(fms.track)}°/${Math.round(fms.groundSpeed)}KT`),
+              ? medium(` ${three(fms.systemWind.direction)}T/ ${fms.systemWind.speed}KT`)
+              : { text: ` ${three(fms.systemWind.direction)}T/ ${fms.systemWind.speed}KT`, color: fms.manualWindEntered ? "cyan" : "white" },
+            right: medium(`${fms.angleText(fms.track)}/${Math.round(fms.groundSpeed)}KT`),
           },
           caption(undefined, "TKE/XTK "),
           { right: medium(`${fms.trackError < 0 ? "L" : "R"}${three(Math.abs(fms.trackError))}°/${xtkBlank ? "       " : `${fms.crossTrack < 0 ? "L" : "R"}${fixed(Math.abs(fms.crossTrack), 2)}NM`}`) },
@@ -836,7 +903,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         caption(" TURN DIR", "FIX ETA "),
         { left: { text: `>${hold.turn}`, color: "cyan" }, right: medium(at >= 0 ? eta : "-----") },
         caption(" INBD CRS", "STATUS "),
-        { left: { text: `${three(hold.inbound)}°` }, right: medium(hold.status, hold.status === "INACTIVE" ? "white" : "green") },
+        { left: { text: `${fms.angleText(hold.inbound)}` }, right: medium(hold.status, hold.status === "INACTIVE" ? "white" : "green") },
         caption(" LEG TIME/DIS", "ENTRY "),
         { left: { text: `${hold.legTime === null ? "-.-" : fixed(hold.legTime, 1)}MIN/${hold.legDistance === null ? "--.-" : fixed(hold.legDistance, 1)}NM` }, right: medium(entry ?? "-----") },
         caption(" EXIT TYPE"),
@@ -874,7 +941,9 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           case 3: {
             const course = numberIn(scratch, 1, 360, /^\d{1,3}$/);
             if (course === null) return "invalid";
-            fms.changeHold(h => { h.inbound = course; });
+            const trueCourse = fms.angleFromEntry(course);
+            if (trueCourse === null) return "not-allowed";
+            fms.changeHold(h => { h.inbound = trueCourse; });
             return done();
           }
           case 4: {
@@ -1049,7 +1118,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           const leg = legs[at], g = geometry[at];
           const ident = leg?.kind === "wpt" ? leg.ident : leg?.kind === "cond" ? conditionalLabel(leg) : "-----";
           return { left: medium(`${ident} ${leg && leg.kind !== "disco" && leg.altitude !== undefined ? fms.compensatedConstraint(String(leg.altitude)) : ""}`.trim(), at === 0 ? "magenta" : "green"),
-            right: medium(g ? `${three(g.course)}° ${fixed(g.distance, 1)}NM` : "---° --.-NM") };
+            right: medium(g ? `${fms.angleText(g.course)} ${fixed(g.distance, 1)}NM` : "---° --.-NM") };
         };
         const temp = fms.shownApproachTemperature;
         return [
@@ -1059,7 +1128,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
             right: fms.approachMdaEntered ? medium(`${fms.compensatedAltitude(fms.vnav.mda)}FT`) : dashes(5) },
           caption(" ACT WPT"), row(0), caption(" NEXT WPT"), row(1),
           caption(" WIND/GS", "VDEV "),
-          { left: medium(`${three(fms.wind.direction)}°/${fms.wind.speed} ${Math.round(fms.groundSpeed)}KT`),
+          { left: medium(`${three(fms.wind.direction)}T/${fms.wind.speed} ${Math.round(fms.groundSpeed)}KT`),
             right: v.available ? medium(`${Math.round(v.deviationFt!)}FT`) : dashes(5) },
           caption(` ${fms.activeRoute.dest} TEMP`, "TGT VS "),
           { left: temp === null ? fms.aircraftProfile.temperatureEntry === "MANDATORY" ? boxes(3) : dashes(3) : medium(`${temp}°C`),
@@ -1092,10 +1161,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           if (value === null && scratch !== "DELETE") return "invalid";
           fms.setApproachTemperature(value);
         } else if (side === "L" && row === 6 && !fms.baroCorrectedAvailable) {
-          const normalized = /^\d{4}$/.test(scratch) && Number(scratch) > 2000 ? (Number(scratch) / 100).toFixed(2) : scratch;
-          const hpa = numberIn(normalized, 945, 1050, /^\d{3,4}$/), inHg = numberIn(normalized, 28, 31, /^\d{2}\.\d{2}$/);
-          if (hpa === null && inHg === null) return "invalid";
-          fms.vnav.qnh = normalized;
+          const result = fms.enterQnh(scratch);
+          if (result) return result;
         } else return "not-allowed";
         fms.setScratch(""); return;
       }
@@ -1170,7 +1237,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const { alarmAt, countdownEnd } = fms.timer;
       const remaining = countdownEnd === null ? null : Math.max(0, Math.ceil((countdownEnd - now) / 1000));
       const utc = (ms: number) => { const d = new Date(ms); return `${String(d.getUTCHours()).padStart(2, "0")}${String(d.getUTCMinutes()).padStart(2, "0")}`; };
-      const seconds = String(fms.now.getUTCSeconds()).padStart(2, "0");
+      const seconds = String(fms.utcTime.getUTCSeconds()).padStart(2, "0");
       return [
         title("TIMER", "1/1"),
         caption(" ALARM TIME", "COUNTDOWN "),
@@ -1179,7 +1246,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           right: remaining === null ? { text: "--:--" } : { text: `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`, color: "green" },
         },
         caption(" UTC"),
-        { left: medium(`${utc(now)}:${seconds}Z`) },
+        { left: medium(`${utc(fms.utcTime.getTime())}:${seconds}Z`) },
         undefined,
         { left: prompt("<ADD 5 MIN") },
         undefined,
@@ -1201,10 +1268,10 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       if (side === "L" && row === 1) {
         const shape = /^([01]\d|2[0-3])([0-5]\d)Z?$/.exec(scratch);
         if (!shape) return "invalid";
-        const at = new Date(now);
+        const utcNow = fms.utcTime.getTime(), at = new Date(utcNow);
         at.setUTCHours(Number(shape[1]), Number(shape[2]), 0, 0);
         // An alarm time already past today is tomorrow's.
-        fms.timer.alarmAt = at.getTime() <= now ? at.getTime() + 86_400_000 : at.getTime();
+        fms.timer.alarmAt = at.getTime() <= utcNow ? at.getTime() + 86_400_000 : at.getTime();
         return void fms.setScratch("");
       }
       if (side === "R" && row === 1) {

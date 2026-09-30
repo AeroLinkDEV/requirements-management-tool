@@ -16,7 +16,7 @@ import type { TerrainTiles } from "./terrainTiles";
 import "./FmsOutTheWindow.css";
 
 /** The modes on the flight mode annunciator, as the bench's Flight card shows them. */
-export type HudModes = { lateral: string; vertical: string; armed: string[] };
+export type HudModes = { lateral: string; vertical: string; armed: string[]; angleReference?: "MAG" | "TRUE"; magneticVariation?: number };
 
 /** What the ground shows: aerial imagery where there is some (the United States), relief elsewhere; or relief only. */
 export type Ground = "imagery" | "relief";
@@ -142,13 +142,15 @@ export default function FmsOutTheWindow({ air, route, modes, layout, view, tiles
 const sameSample = (a: AircraftSample, b: AircraftSample) =>
   a.position.lat === b.position.lat && a.position.lon === b.position.lon && a.altitude === b.altitude && a.heading === b.heading && a.bank === b.bank && a.pitch === b.pitch && a.hoverData === b.hoverData;
 
-const three = (degrees: number) => String(Math.round(degrees) % 360 || 360).padStart(3, "0");
+const three = (degrees: number) => String(((Math.round(degrees) % 360) + 360) % 360 || 360).padStart(3, "0");
 
 /** The head-up symbology: modes, speed, altitude, heading and bank. The flight path marker moves every frame, in the scene. */
 function Hud({ air, modes }: { air: AircraftData; modes: HudModes }) {
   const ticks = [];
+  const angularAvailable = modes.angleReference !== "MAG" || typeof modes.magneticVariation === "number" && Number.isFinite(modes.magneticVariation);
+  const heading = air.heading - (modes.angleReference === "MAG" ? modes.magneticVariation ?? 0 : 0);
   for (let offset = -30; offset <= 30; offset += 5) {
-    const value = Math.round(air.heading / 5) * 5 + offset, x = ((((value - air.heading) % 360) + 540) % 360 - 180) * 4;
+    const value = Math.round(heading / 5) * 5 + offset, x = ((((value - heading) % 360) + 540) % 360 - 180) * 4;
     ticks.push(<line key={offset} x1={x} x2={x} y1={0} y2={value % 10 === 0 ? 10 : 6} />);
   }
   return (
@@ -167,8 +169,8 @@ function Hud({ air, modes }: { air: AircraftData; modes: HudModes }) {
       <div className="fmsOtwTape speed"><small>IAS</small><strong>{Math.round(air.airspeed)}</strong><small>GS {Math.round(air.groundSpeed)}</small></div>
       <div className="fmsOtwTape altitude"><small>ALT</small><strong>{Math.round(air.altitude / 10) * 10}</strong><small>VS {Math.round(air.verticalSpeed / 50) * 50}</small></div>
       <div className="fmsOtwHeading">
-        <svg viewBox="-120 0 240 12" preserveAspectRatio="none" aria-hidden="true">{ticks}</svg>
-        <strong>{three(air.heading)}</strong>
+        <svg viewBox="-120 0 240 12" preserveAspectRatio="none" aria-hidden="true">{angularAvailable ? ticks : null}</svg>
+        <strong>{angularAvailable ? three(heading) : "---"}{modes.angleReference === "MAG" ? "°" : "T"}</strong>
       </div>
     </div>
   );

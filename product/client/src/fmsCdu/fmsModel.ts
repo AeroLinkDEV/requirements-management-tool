@@ -4,7 +4,7 @@ import type { ProcedureHold, SpeedLimit } from "./navData";
 
 /**
  * Shared state shapes, geometry and screen helpers for the scripted CMA-9000. The navigation database is in
- * navData.ts. Bearings are true: the simulation applies no magnetic variation.
+ * navData.ts. Geometry uses true bearings; ScriptedFms converts crew entry/display through the consumed MAGVAR model.
  */
 
 export type LatLon = { lat: number; lon: number };
@@ -215,7 +215,7 @@ export const isOutstanding = (uplink: Uplink) => uplink.response === "OPEN" || u
 
 export type CorePageId =
   | "MENU" | "INIT_REF" | "IDENT" | "POS" | "MSG_RECALL" | "LEGS" | "PROG" | "RADIO" | "FUEL" | "HOLD" | "FIX" | "PREDEF"
-  | "VNAV" | "TIMER" | "MAINT" | "PLAN_DATA" | "USER_WPT";
+  | "VNAV" | "TIMER" | "MAINT" | "PLAN_DATA" | "USER_WPT" | "SETUP";
 export type PlanningPageId = "RTE" | "DEP_ARR" | "DEPARTURES" | "ARRIVALS" | "NAV_DATA" | "SELECT_WPT" | "SEC_FPLN" | "CO_ROUTES";
 export type NavPageId = "NAV_STATUS" | "NAV_OPTIONS" | "GPS_STATUS" | "POS_SENSORS" | "PREDICT_RAIM" | "SAT_DESELECT";
 export type TacticalPageId = "TACT" | "SAR" | "TACT_APPR" | "HOVER" | "RNDZ" | "MOVING_WPT" | "TDN";

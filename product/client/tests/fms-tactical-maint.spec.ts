@@ -78,6 +78,7 @@ test('a rendezvous that needs more than the maximum speed is RENDEZVOUS UNACHIEV
 
 test('a moving waypoint advances on its track and the aircraft closes on it', () => {
   const { unit, fly } = setup()
+  unit.toggleAngleReference() // This propagation fixture specifies a physical TRUE westbound track.
   press(unit, 'INIT_REF', 'NEXT', 'LSK6L')
   expect(lines(unit)[0]).toMatch(/^MOVING WPT/)
   enter(unit, 'SHIP1', 'LSK1L')
@@ -369,6 +370,7 @@ test('D-R: a restarted scenario restores the moving waypoint\'s epoch from its o
   const scenario: Scenario = {
     id: 'moving-restart', title: 'moving restart', objective: 'epoch', maxSeconds: 600, startTime: '2026-09-27T14:00:00Z',
     steps: [
+      { when: { kind: 'start' }, action: { kind: 'keys', keys: ['INIT_REF', 'LSK5L', 'LSK1L'] } }, // TRUE geometry, independent of MAGVAR.
       { when: { kind: 'time', seconds: 60 }, action: { kind: 'keys', keys: ['INIT_REF', 'NEXT', 'LSK6L'] } },
       { when: { kind: 'start' }, action: { kind: 'type', text: 'SHIP1' } },
       { when: { kind: 'start' }, action: { kind: 'keys', keys: ['LSK1L'] } },

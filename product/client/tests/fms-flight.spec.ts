@@ -341,6 +341,8 @@ test('the entries flown in a 30 kt wind from four azimuths: the teardrop on a 40
   for (const kind of ['TEARDROP', 'PARALLEL'] as const) {
     for (const from of [0, 90, 180, 270]) {
       const { unit, sim, fly } = setup()
+      press(unit, 'INIT_REF', 'LSK5L', 'LSK1L') // The declared entry geometry uses inbound 263 degrees TRUE.
+      expect(unit.angleReference).toBe('TRUE')
       Object.assign(unit.wind, { direction: from, speed: 30 })
       holdAtRdg(unit, ['263', 'LSK3L'], ...(kind === 'PARALLEL' ? [['', 'LSK2L'] as [string, CduFunction]] : []))
       const label = `${kind}, wind ${from}/30`
@@ -529,6 +531,8 @@ test('search pattern geometry to 80 search waypoints: the square grows by one sp
 
 test('the search pages take the M300 field ranges, refuse changes once the search is engaged, and offer PPOS only with no other search waypoint in the route (M300 11-5, 11-6, 11-15, A-157…A-176)', () => {
   const { unit, fly } = setup()
+  press(unit, 'INIT_REF', 'LSK5L', 'LSK1L') // Explicit TRUE input for numeric field-boundary assertions.
+  expect(unit.angleReference).toBe('TRUE')
   const scratch = () => screenText(unit.screen())[13].trim()
   const enter = (text: string, lsk: CduFunction) => { typeText(unit, text); unit.press(lsk) }
   // CLR takes the message first, then the entry a character at a time.
@@ -544,6 +548,8 @@ test('the search pages take the M300 field ranges, refuse changes once the searc
   expect(scratch()).toBe('INVALID ENTRY')
   clearAll()
   enter('0', 'LSK2R')
+  expect(unit.sar.sarBearing).toBe(0)
+  enter('360', 'LSK2R')
   expect(unit.sar.sarBearing).toBe(0)
   enter('4', 'LSK3R')
   // The sector: diameter 0.1 to 40 NM, angle 5 to 90 degrees.
@@ -577,6 +583,7 @@ test('the square and sector searches are joined fly-by onto their first leg, the
   const closest: Record<string, number> = {}
   for (const [pattern, lsk] of [['SQUARE', 'LSK2L'], ['LADDER', 'LSK3L'], ['SECTOR', 'LSK4L']] as const) {
     const { unit, fly } = setup()
+    press(unit, 'INIT_REF', 'LSK5L', 'LSK1L') // The geometric bearing below is TRUE.
     fly(10)
     // A search fix 5 NM ahead on the present track, its first leg 90 degrees to the right.
     const fix = offset(unit.position, unit.track, 5)

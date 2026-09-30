@@ -32,6 +32,7 @@ export type ProfileParameter = {
 export type AircraftProfile = {
   id: string;
   version: number;
+  defaultAngleReference: "MAG" | "TRUE";
   title: string;
   aircraftType: "ROTOR" | "FIX";
   operationalProgram: string;
@@ -65,7 +66,8 @@ const p = (value: number, unit: string, basis: ParameterBasis, source: string, i
 
 export const HELICOPTER_PROFILE: AircraftProfile = {
   id: "cma9000-s300-heli-civil",
-  version: 5,
+  version: 6,
+  defaultAngleReference: "MAG",
   title: "CMA-9000 helicopter, civil SAR target (S/W -300 baseline)",
   aircraftType: "ROTOR",
   operationalProgram: "169-614876-300 (M300, Pub. 9000-GEN-0150 Rev 2)",
@@ -84,6 +86,7 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
   notConfigured: ["CARP/HARP", "COSPAS-SARSAT", "EGI/IRS", "DVS (Doppler)", "military navigation option", "military tactical approach"],
   configuration: CIVIL_SAR_CONFIGURATION,
   parameters: {
+    fmsPowerTestTime: p(5, "s", "lab", "FMS power-up and maintenance self-test display duration; OEM timing unpublished", true),
     sensorMaxAge: p(2, "s", "lab", "maximum sensor age for the internal simulator port", true),
     radioAcquisition: p(3, "s", "lab", "AUTO facility acquisition after tuning or signal return", true),
     radioRangeBias: p(0.02, "NM", "lab", "deterministic radio slant-range bias", true),
@@ -166,7 +169,7 @@ export const ACTIVE_PROFILE = HELICOPTER_PROFILE;
 export const LATER_SBAS_PROFILE: AircraftProfile = {
   ...HELICOPTER_PROFILE,
   id: "cma9000-later-sbas-heli",
-  version: 1,
+  version: 2,
   title: "Later CMA software + CMA-5024 SBAS helicopter (representative simulation)",
   operationalProgram: "later SBAS-capable CMA family; exact OEM software baseline unqualified",
   approachPolicy: "SBAS_COUPLED",
@@ -189,6 +192,7 @@ export const LATER_SBAS_PROFILE: AircraftProfile = {
 export const LAB_AIRLINE_VNAV_PROFILE: AircraftProfile = {
   ...HELICOPTER_PROFILE,
   id: "lab-airline-vnav",
+  defaultAngleReference: "TRUE",
   title: "Laboratory: generic airline-style VNAV (not a CMA installation)",
   verticalPolicy: "AIRLINE_VNAV",
   approachPolicy: "SBAS_COUPLED",
