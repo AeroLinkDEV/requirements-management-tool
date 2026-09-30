@@ -802,6 +802,52 @@ test('radio height lost during TD/H: ALT on the barometric altitude, the horizon
   expect(metres(unit.truePosition, mark)).toBeLessThan(50)
 })
 
+test('the cyclic force-trim release ends the TD/H plan the autopilot kept after the FMS withdrew its request: HOV where it is, not at MRK (R3-02.5, F2)', () => {
+  const { unit, sim, fly, mark } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  // Into TD/H toward MRK, then every radio altimeter fails: TDN FUNCTION LOST withdraws the request; the plan is kept.
+  fly(900, () => sim.axisModes.pitch === 'TD/H' && sim.indicatedAirspeed < 50)
+  expect(sim.axisModes.pitch).toBe('TD/H')
+  unit.setCondition('raFail', true)
+  fly(2)
+  expect(unit.hover.requestData).toBeNull()
+  expect(sim.axisModes).toMatchObject({ collective: 'ALT', pitch: 'TD/H', roll: 'TD/H' })
+  const released = unit.truePosition
+  expect(sim.releaseForceTrim()).toBe(true)
+  expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED' && /force-trim release/.test(e.detail))).toBe(true)
+  expect(sim.axisModes).toMatchObject({ pitch: 'HOV', roll: 'HOV' })
+  fly(90)
+  // It stops near where the release was made, short of MRK; without the release the plan would have taken it to MRK.
+  expect(unit.groundSpeed).toBeLessThan(1)
+  expect(metres(unit.truePosition, mark)).toBeGreaterThan(100)
+  expect(metres(unit.truePosition, released)).toBeLessThan(metres(released, mark))
+})
+
+test('the cyclic force-trim release in HOV takes the present position as the hover target: moved off it, HOV no longer returns (laboratory)', () => {
+  const run = offshore()
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(30)
+  const first = unit.truePosition
+  // Displaced 40 m (the pilot moves the aircraft on the cyclic): without the release HOV brings it back.
+  unit.placeAircraft({ position: offset(first, 320, 40 / 1852), track: 230, altitude: unit.altitude }, 'test: moved on the cyclic')
+  fly(60)
+  expect(metres(unit.truePosition, first)).toBeLessThan(5)
+  // Displaced again, and the force trim released there: HOV holds the new position.
+  const second = offset(first, 320, 40 / 1852)
+  unit.placeAircraft({ position: second, track: 230, altitude: unit.altitude }, 'test: moved on the cyclic')
+  fly(1)
+  expect(sim.releaseForceTrim()).toBe(true)
+  fly(60)
+  expect(metres(unit.truePosition, second)).toBeLessThan(5)
+  expect(sim.axisModes).toMatchObject({ pitch: 'HOV', roll: 'HOV' })
+  expect(sim.modeEvents.at(-1)).toMatchObject({ event: 'FTR' })
+  // The laboratory airline profile has no force-trim release.
+  const lab = setup(LAB_AIRLINE_VNAV_PROFILE)
+  expect(lab.sim.releaseForceTrim()).toBe(false)
+})
+
 test('a direct-to during the transition ends the procedure and cancels the retained TD/H: HOV where it is (Stage D, F2)', () => {
   const { unit, sim, fly } = hoverProcedure()
   unit.press('LSK6R')
