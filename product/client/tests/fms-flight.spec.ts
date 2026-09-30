@@ -339,6 +339,8 @@ test('the entries flown in a 30 kt wind from four azimuths: the teardrop on a 40
   for (const kind of ['TEARDROP', 'PARALLEL'] as const) {
     for (const from of [0, 90, 180, 270]) {
       const { unit, sim, fly } = setup()
+      press(unit, 'INIT_REF', 'LSK5L', 'LSK1L') // The declared entry geometry uses inbound 263 degrees TRUE.
+      expect(unit.angleReference).toBe('TRUE')
       Object.assign(unit.wind, { direction: from, speed: 30 })
       holdAtRdg(unit, ['263', 'LSK3L'], ...(kind === 'PARALLEL' ? [['', 'LSK2L'] as [string, CduFunction]] : []))
       const label = `${kind}, wind ${from}/30`
