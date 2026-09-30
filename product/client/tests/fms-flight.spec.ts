@@ -934,3 +934,35 @@ test('CANCEL of a new mark over an active procedure keeps the active one flying 
   expect(sim.hoverCaptured).toBe(true)
   expect(sim.modeEvents.some(e => e.event === 'TD/H CANCELLED')).toBe(false)
 })
+
+test('D-H: a crew hold takes its default leg time and speed from the altitude when the entry begins, not when it is made (M300 10-9)', () => {
+  const { unit, fly } = setup()
+  const fix = activeIdent(unit)!
+  // Made at 16,000 ft: the defaults shown then are for above 14,000 ft (1.5 minutes, the high holding speed).
+  unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 16000 }, 'test: high when the hold is made')
+  expect(unit.defineHold(fix)).toBeUndefined()
+  expect(unit.route.hold).toMatchObject({ legTime: 1.5, speed: 170 })
+  unit.press('EXEC')
+  // Down to 5,000 ft before the fix: the entry begins there, so the defaults become 1.0 minute and 100 kt.
+  unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 5000 }, 'test: low when the entry begins')
+  expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')).toBeLessThan(3600)
+  expect(unit.activeRoute.hold).toMatchObject({ legTime: 1, speed: 100 })
+  // Fixed from the entry on: climbing through 14,000 ft does not change them (M300 10-9).
+  unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 15000 }, 'test: climbing in the hold')
+  fly(30)
+  expect(unit.activeRoute.hold).toMatchObject({ legTime: 1, speed: 100 })
+})
+
+test('D-H: a leg time or speed the crew entered is kept at the entry, whatever the altitude', () => {
+  const { unit, fly } = setup()
+  unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 16000 }, 'test: high when the hold is made')
+  press(unit, 'HOLD', 'LSK2L')
+  expect(unit.route.hold).toBeDefined()
+  typeText(unit, '2.5'); unit.press('LSK4L')
+  typeText(unit, '150'); unit.press('LSK1R')
+  expect(unit.route.hold).toMatchObject({ legTime: 2.5, speed: 150 })
+  unit.press('EXEC')
+  unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 5000 }, 'test: low when the entry begins')
+  expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')).toBeLessThan(3600)
+  expect(unit.activeRoute.hold).toMatchObject({ legTime: 2.5, speed: 150 })
+})

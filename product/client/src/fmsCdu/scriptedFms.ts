@@ -1,4 +1,5 @@
 import { alert } from "./alerts";
+import { STANDARD_HPA, errorProblem, formatSetting, indicatedAltitudeFt, settingProblem, type BaroSetting } from "./baro";
 import { parseArinc424, type Arinc424Result } from "./arinc424";
 import type { ConditionId } from "./conditions";
 import { DATALINK_PAGES, DEMO_SMS, DEMO_UPLINKS } from "./datalinkPages";
@@ -257,7 +258,17 @@ export class ScriptedFms implements CduBackend {
   /** The MOVING WPT page's entries before CREATE. */
   movingDraft = { ident: null as string | null, position: null as LatLon | null, motion: null as string | null };
   /** RNDZ: arrive at a waypoint at a time, flying the speed that needs within the limits. */
-  readonly rndz = { wpt: null as string | null, time: null as number | null, minSpeed: 60, maxSpeed: 160, active: false, alerted: false };
+  /**
+   * The rendezvous (RTA) the crew has set: the fix, the time, the speed limits, and the RTA WIND entered, which is used
+   * only for the RTA computation and never changes the system wind; null is the default (M300 A-141, plan E4).
+   */
+  readonly rndz = { wpt: null as string | null, time: null as number | null, minSpeed: 60, maxSpeed: 160, active: false, alerted: false, wind: null as Wind | null };
+
+  /**
+   * The wind the RTA is computed in (M300 A-141 RTA WIND): the crew's entry, else in flight the system wind. On the
+   * ground it would be PLAN DATA CRZ WIND; v1 predicts only in the air (plan E1).
+   */
+  get rtaWind(): Wind { return this.rndz.wind ?? this.systemWind; }
   /** TDN: a tactical descent to an altitude a distance before a reference, if the angle is flyable. */
   readonly tdn = { targetAltitude: 500, refId: null as string | null, distanceBefore: 1.0, maxAngle: 6, active: false, level: false };
   private perf = { notEnoughAlerted: false, unableAlertedFor: null as string | null };
@@ -306,7 +317,45 @@ export class ScriptedFms implements CduBackend {
   private directBypassed: string[] = [];
 
   get groundSpeed() { return this.aircraft.groundSpeed; }
-  get altitude() { return this.aircraft.altitude; }
+  /** Truth: the physical height above MSL (rev 3 B1.1). Only the flight simulation and engineering placement write it. */
+  get physicalAltitude() { return this.aircraft.altitude; }
+  /**
+   * The barometric altitude the FMS and the autopilot use (baro.ts): the physical height plus the injected baro error,
+   * referenced to the declared QNH. The crew's setting does not change it; it changes what is indicated.
+   */
+  get altitude() { return this.aircraft.altitude + this.baroSystem.errorFt; }
+  /** What the altimeter indicates with the crew's setting: the barometric altitude, corrected to the setting (baro.ts). */
+  get indicatedAltitude() { return indicatedAltitudeFt(this.altitude, this.baroSystem.declaredQnhHpa, this.baroSystem.setting); }
+  /** The barometric altitude system: the injected error (ft), the declared QNH (hPa) and the crew's setting. */
+  get baro(): { errorFt: number; declaredQnhHpa: number; setting: BaroSetting } { return { ...this.baroSystem, setting: { ...this.baroSystem.setting } }; }
+  private baroSystem: { errorFt: number; declaredQnhHpa: number; setting: BaroSetting } = { errorFt: 0, declaredQnhHpa: STANDARD_HPA, setting: { kind: "QNH", hPa: STANDARD_HPA } };
+  /** The crew sets the altimeter: STD, or a QNH in hPa. Refused (false) outside the altimeter's range. Never moves the aircraft. */
+  setBaroSetting(setting: BaroSetting): boolean {
+    if (settingProblem(setting) !== null) return false;
+    this.baroSystem.setting = setting.kind === "STD" ? { kind: "STD" } : { kind: "QNH", hPa: setting.hPa };
+    this.emit();
+    return true;
+  }
+  /**
+   * Injects a barometric altitude error, feet (an engineering action, logged with the reason): the altimeter reads the
+   * physical height plus it. It never moves the aircraft directly nor changes the radio height; the autopilot holding a
+   * barometric altitude flies with it, as it would in an aircraft. Refused (false) beyond the bench's range.
+   */
+  setBaroError(errorFt: number, reason: string): boolean {
+    if (errorProblem(errorFt) !== null) return false;
+    this.baroSystem.errorFt = errorFt;
+    this.engineering = [...this.engineering, { at: this.now, action: "BARO ERROR", detail: `${reason}: ${errorFt >= 0 ? "+" : ""}${Math.round(errorFt)} FT` }];
+    this.emit();
+    return true;
+  }
+  /** Declares the scenario atmosphere's QNH, hPa (an engineering action, logged with the reason). Refused out of range. */
+  declareQnh(hPa: number, reason: string): boolean {
+    if (settingProblem({ kind: "QNH", hPa }) !== null) return false;
+    this.baroSystem.declaredQnhHpa = hPa;
+    this.engineering = [...this.engineering, { at: this.now, action: "DECLARE QNH", detail: `${reason}: ${hPa} HPA (the altimeter is set to ${formatSetting(this.baroSystem.setting)})` }];
+    this.emit();
+    return true;
+  }
   get track() { return this.aircraft.track; }
   /** The surface the radio altimeter measures against (surface.ts): none unless a scenario or the bench declares one. */
   private declaredSurface: Surface = NO_SURFACE;
@@ -324,7 +373,7 @@ export class ScriptedFms implements CduBackend {
    * FAIL when failed. Independent of the barometric altitude setting.
    */
   get radioHeight() {
-    if (!this.sensorPort) return radioHeight(this.declaredSurface, this.truth, this.altitude, this.hasCondition("raFail"));
+    if (!this.sensorPort) return radioHeight(this.declaredSurface, this.truth, this.physicalAltitude, this.hasCondition("raFail"));
     const sample = this.sensorFrame?.radioHeight;
     const value = sampled(sample, this.now.getTime(), this.sensorMaxAge);
     return sample?.status === "FAIL" ? { status: "FAIL" as const, value: null }
@@ -482,7 +531,7 @@ export class ScriptedFms implements CduBackend {
     // The default airborne demonstration also starts with its radios already acquired. Later tuning changes and
     // reacquisition after loss observe the declared delay; cold start uses the initialization workflow.
     this.radioReceiver.tune(this.autoRadioStations(), start - 40_000);
-    this.radioReceiver.sample(this.truth, this.altitude, start - 40_000);
+    this.radioReceiver.sample(this.truth, this.physicalAltitude, start - 40_000);
     this.updateNavigation(0);
   }
 
@@ -684,6 +733,12 @@ export class ScriptedFms implements CduBackend {
       if (hold.status === "ARMED") {
         this.enteredHold = this.holdEntryFor(route);
         hold.status = "IN PROGRESS";
+        // The defaults are for the altitude at which the entry begins (M300 10-9: leg time 1 or 1.5 minutes "depending on
+        // aircraft altitude at the time the hold entry is initiated"; the holding speed by altitude, 10-8), and are not
+        // changed again automatically, even across 14,000 ft. Crew entries and coded values are kept as they are.
+        if (hold.defaults?.legTime !== undefined && hold.legDistance === null && hold.legTime === hold.defaults.legTime) hold.legTime = this.defaultHoldLegTime();
+        if (hold.defaults?.speed !== undefined && hold.speed === hold.defaults.speed) hold.speed = this.defaultHoldSpeed();
+        delete hold.defaults;
         const limit = holdingSpeedLimit(this.altitude, this.aircraftProfile);
         if (limit !== null && hold.speed > limit) this.alert(alert("HIGH HOLDING SPEED"));
       }
@@ -760,11 +815,11 @@ export class ScriptedFms implements CduBackend {
     this.radioReceiver.tune(this.autoRadioStations(), now);
     const gpsWord = (index: number) => ({ at: now, sequence, status: "NORMAL" as const, value: this.receivers[index].bus() });
     const gps: SensorFrame["gps"] = [gpsWord(0), gpsWord(1)];
-    const ra = radioHeight(this.declaredSurface, this.truth, this.altitude, this.hasCondition("raFail"));
+    const ra = radioHeight(this.declaredSurface, this.truth, this.physicalAltitude, this.hasCondition("raFail"));
     return { air: { at: now, sequence, status: "NORMAL", value: { headingTrue: this.heading, tasKt: this.aircraft.tas, altitudeFt: this.altitude } },
       attitude: { at: now, sequence, status: "NORMAL", value: { bank: this.aircraft.bank, pitch: this.aircraft.pitch } },
       radioHeight: { at: now, sequence, status: ra.status, value: ra.value },
-      gps, radios: this.radioReceiver.sample(this.truth, this.altitude, now, this.injected.has("dmeOutage")) };
+      gps, radios: this.radioReceiver.sample(this.truth, this.physicalAltitude, now, this.injected.has("dmeOutage")) };
   }
 
   /** Last input as published, for replay/adapter diagnostics. This is separate from the computed position. */
@@ -932,7 +987,7 @@ export class ScriptedFms implements CduBackend {
   /** What the receivers are given: the aircraft's true state, the antenna tilted with its bank and pitch. */
   private gpsInput(time: number): GpsInput {
     return {
-      time, position: this.truth, altitude: this.altitude, baroAltitude: this.altitude, track: this.track,
+      time, position: this.truth, altitude: this.physicalAltitude, baroAltitude: this.altitude, track: this.track,
       groundSpeed: this.groundSpeed, verticalSpeed: this.verticalSpeed, attitude: { bank: this.aircraft.bank, pitch: this.aircraft.pitch, heading: this.heading },
     };
   }
@@ -1487,7 +1542,7 @@ export class ScriptedFms implements CduBackend {
     const held = waypoints.slice(0, at).reduce((sum, w) => sum + (w.hold?.hours ?? 0), 0);
     const time = (tas: number) => held + pieces.reduce((sum, leg) => {
       if (leg.distance === 0) return sum;
-      const gs = predictedGroundSpeed(tas, leg.course, this.systemWind);
+      const gs = predictedGroundSpeed(tas, leg.course, this.rtaWind);
       return gs === null ? Infinity : sum + leg.distance / gs;
     }, 0);
     let low = 1, high = 400;
@@ -2656,7 +2711,9 @@ export class ScriptedFms implements CduBackend {
       if (leg.kind === "wpt") leg.qualifier = "/H";
       // The inbound course defaults to the course of the leg into the fix.
       const inbound = this.legGeometry(route)[at]?.course ?? 360;
-      route.hold = { fix, turn: "RIGHT", inbound, legTime: this.defaultHoldLegTime(), legDistance: null, exit: "MANUAL", speed: this.defaultHoldSpeed(), altitude: "5000A", status: "INACTIVE" };
+      // The leg time and speed shown now are the defaults for the altitude now; they are taken again when the entry begins.
+      const legTime = this.defaultHoldLegTime(), speed = this.defaultHoldSpeed();
+      route.hold = { fix, turn: "RIGHT", inbound, legTime, legDistance: null, exit: "MANUAL", speed, altitude: "5000A", status: "INACTIVE", defaults: { legTime, speed } };
     });
   }
 
@@ -2672,10 +2729,16 @@ export class ScriptedFms implements CduBackend {
   /** A coded procedure hold as the route's hold: its coded exit, leg, speed limit (or the default) and altitude. */
   private holdFromProcedure(fix: string, coded: ProcedureHold, status: HoldStatus): Hold {
     const legDistance = coded.legDistanceNm ?? null;
+    // A coded leg or speed limit is the chart's; what the coding leaves out is a default, taken again at the entry.
+    const defaults: Hold["defaults"] = {
+      ...(legDistance === null && coded.legTimeMin === undefined ? { legTime: this.defaultHoldLegTime() } : {}),
+      ...(coded.speedLimit === undefined ? { speed: this.defaultHoldSpeed() } : {}),
+    };
     return {
-      fix, turn: coded.turn, inbound: coded.inbound, legDistance, legTime: legDistance === null ? coded.legTimeMin ?? this.defaultHoldLegTime() : null,
+      fix, turn: coded.turn, inbound: coded.inbound, legDistance, legTime: legDistance === null ? coded.legTimeMin ?? defaults.legTime ?? null : null,
       exit: coded.exit === "ONCE" ? "ONCE" : coded.exit === "AT ALT" ? "AT TGT ALT" : "MANUAL",
-      speed: coded.speedLimit?.kt ?? this.defaultHoldSpeed(), altitude: coded.altitude ?? "", status,
+      speed: coded.speedLimit?.kt ?? defaults.speed ?? this.defaultHoldSpeed(), altitude: coded.altitude ?? "", status,
+      ...(Object.keys(defaults).length ? { defaults } : {}),
     };
   }
 

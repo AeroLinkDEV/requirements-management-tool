@@ -41,6 +41,7 @@
     "fms-tdn-flight.spec.ts",
     "fms-87n-mission.spec.ts",
     "fms-hover-join.spec.ts",
+    "fms-baro.spec.ts",
     "fms-applicability.spec.ts",
     "fms-register-corrections.spec.ts",
     "fms-output-tags.spec.ts",
