@@ -99,8 +99,13 @@ jobs:
           # (curl exit 22), forcing a manual re-run of a gate that had not failed (#987). Reads retry curl's
           # transient set (timeouts, 408, 429, 500, 502, 503, 504) within a bounded budget. The dispatch and
           # check-run POSTs are deliberately not retried, so a retry can never duplicate either.
+          # A failed read reports its status and GitHub's rate-limit headers, so a refusal (403) says whether the
+          # repository's API budget was spent (#1318) instead of only "curl: (22)".
           read_api() {
-            curl --retry 4 --retry-delay 5 --retry-max-time 90 --fail-with-body --silent --show-error "${headers[@]}" "$@"
+            curl --retry 4 --retry-delay 5 --retry-max-time 90 --fail-with-body --silent --show-error --dump-header "$RUNNER_TEMP/read-api-headers" "${headers[@]}" "$@" && return 0
+            local failed=$?
+            echo "::warning::GitHub API read failed: $(grep -iE '^(HTTP/|x-ratelimit-(limit|remaining|used|reset|resource):|retry-after:)' "$RUNNER_TEMP/read-api-headers" 2>/dev/null | tr -d '\r' | tr '\n' ' ')"
+            return "$failed"
           }
 
           verify_live_pr() {
@@ -221,14 +226,18 @@ jobs:
           # cost of the headroom is that a truly hung gate takes longer to be declared dead.
           #
           # Polls are 10s apart for the first two minutes, where a quick failure or a dispatch that has not
-          # registered yet shows up, then 30s. A passing gate takes 15-55 minutes, and a 10s cadence spent two
-          # reads every 10s waiting on it. The 30s cap cuts those reads by about two thirds and adds at most 30s
-          # to readiness after the gate finishes. Every poll still revalidates the live PR, and publication
-          # still rechecks it and the queue immediately beforehand.
+          # registered yet shows up, then 30s to ten minutes, then 120s. A passing gate takes 15-55 minutes, and
+          # every poll is two reads against the repository's shared GITHUB_TOKEN budget (about 1,000 requests an
+          # hour). At a steady 30s one requester spent about 300 reads an hour, so four at once exhausted it: on
+          # 30 September every requester failed its first read with 403 in three windows while eight to ten pull
+          # requests waited (#1318). The 120s tail brings a requester to about 116 reads an hour and adds at most
+          # two minutes to readiness after a gate that ran for forty. Every poll still revalidates the live PR, and
+          # publication still rechecks it and the queue immediately beforehand.
           wait_started=$SECONDS
           wait_deadline=$((wait_started + 4200))
           poll_pause() {
-            if [ $((SECONDS - wait_started)) -lt 120 ]; then sleep 10; else sleep 30; fi
+            local waited=$((SECONDS - wait_started))
+            if [ "$waited" -lt 120 ]; then sleep 10; elif [ "$waited" -lt 600 ]; then sleep 30; else sleep 120; fi
           }
           while [ "$SECONDS" -lt "$wait_deadline" ]; do
             verify_live_pr
