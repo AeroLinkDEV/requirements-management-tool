@@ -12,7 +12,7 @@ import {
 } from "./fmsModel";
 import { Constellation } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus } from "./gps";
-import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas } from "./kinematics";
+import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas, type Wind } from "./kinematics";
 import {
   ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, fasRequirement, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
   type GpsChoice,
@@ -46,8 +46,8 @@ import { ACTIVE_PROFILE, fmsBankLimit, type AircraftProfile } from "./profile";
 import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line } from "./screen";
 import { NO_SURFACE, radioHeight, surfaceById, type Surface } from "./surface";
 import {
-  EMPTY_USER_DATABASE, USER_WAYPOINT_CAPACITY, memoryUserDatabaseStore, mergeUserDatabase, parseUserDatabase, serializeUserDatabase,
-  type UserDatabase, type UserDatabaseStore, type UserScope,
+  EMPTY_USER_DATABASE, USER_WAYPOINT_CAPACITY, memoryUserDatabaseStore, mergeUserDatabase, movingPosition, parseUserDatabase, serializeUserDatabase,
+  userWaypointPosition, type UserDatabase, type UserDatabaseStore, type UserScope, type UserWaypoint,
 } from "./userDatabase";
 import { TACTICAL_PAGES } from "./tacticalPages";
 import { checkAtTdn, planTransition } from "./transition";
@@ -173,7 +173,7 @@ export class ScriptedFms implements CduBackend {
   private readonly raimExcluded = new Set<number>();
   private automaticRaimFor: string | null = null;
   private nav = {
-    mode: "GPS" as NavMode, anp: 0.05, dmes: [] as string[], vor: null as string | null, rnpManual: null as number | null, uncertain: false, airValid: true,
+    mode: "GPS" as NavMode, anp: 0.05, dmes: [] as string[], vor: null as string | null, rnpManual: null as number | null, uncertain: false, airValid: true, windComputed: true,
     unableSince: null as number | null, unableAlerted: false, integrityAlerted: false, approachIntegrityAlerted: false, armAlerted: false,
     /** The RNAV approach had vertical guidance from the GPS while in the approach phase (to catch its loss, 3b). */
     approachVerticalSeen: false,
@@ -209,7 +209,8 @@ export class ScriptedFms implements CduBackend {
   private sourceLog: { at: Date; source: string }[] = [];
   private armedApproach = false;
   /** Waypoints that move (a ship, a formation lead): position advanced by track and speed as time passes. */
-  private moving: Record<string, { track: number; speed: number }> = {};
+  /** Pilot moving waypoints: where each was at its epoch (simulation milliseconds), and its track and speed. */
+  private moving: Record<string, { track: number; speed: number; origin: LatLon; epoch: number }> = {};
   private faults: { at: Date; text: string }[] = [];
   private selfTest: { startedAt: number | null; result: "PASS" | "FAIL" | null } = { startedAt: null, result: null };
   /** The other FMS: in dual operation every executed route is cross-loaded to it; in independent operation not. */
@@ -269,7 +270,11 @@ export class ScriptedFms implements CduBackend {
   /** Why the stored user database could not be read at start (it is then left as it was, and not overwritten), or null. */
   userDatabaseProblem: string | null = null;
   /** A NEW USER WPT being entered on USER WPT 1/2: its ident and position, and the reference it was made from. */
-  userWaypointDraft: { ident: string | null; position: LatLon | null; ref: { ident: string; position: LatLon } | null } | null = null;
+  userWaypointDraft: {
+    ident: string | null; position: LatLon | null; ref: { ident: string; position: LatLon } | null;
+    /** TYPE MOVING (M300 11-25), with the track and ground speed entered at 2R. */
+    moving?: boolean; motion?: { track: number; speed: number } | null;
+  } | null = null;
   private secondaryRoute: Route | null = null;
   /** The ident shown on REF NAV DATA, and an airway chosen on RTE 2 waiting for its TO fix. */
   navDataQuery: string | null = null;
@@ -356,9 +361,9 @@ export class ScriptedFms implements CduBackend {
    * null when the aircraft is not moving through the air measurably (below 1 kt).
    */
   get trueAirspeed(): number | null {
-    const toward = ((this.wind.direction + 180) * Math.PI) / 180, track = (this.track * Math.PI) / 180;
-    const north = this.groundSpeed * Math.cos(track) - this.wind.speed * Math.cos(toward);
-    const east = this.groundSpeed * Math.sin(track) - this.wind.speed * Math.sin(toward);
+    const toward = ((this.systemWind.direction + 180) * Math.PI) / 180, track = (this.track * Math.PI) / 180;
+    const north = this.groundSpeed * Math.cos(track) - this.systemWind.speed * Math.cos(toward);
+    const east = this.groundSpeed * Math.sin(track) - this.systemWind.speed * Math.sin(toward);
     const tas = Math.hypot(north, east);
     return tas >= 1 ? tas : null;
   }
@@ -412,7 +417,35 @@ export class ScriptedFms implements CduBackend {
   /** The active route, whatever a pending modification shows on the pages. Guidance flies this one. */
   get activeRoute(): Route { return this.active; }
 
+  /**
+   * The wind of the simulated air mass, which the flight flies in. The FMS reads `systemWind`: while it computes the
+   * wind, its measurement is taken to equal this one (laboratory: no wind-estimation error is modelled).
+   */
   readonly wind = { direction: 270, speed: 12 };
+  /** The wind last computed, carried while the FMS cannot compute one (dead reckoning, invalid air data). */
+  private lastComputedWind: Wind = { ...this.wind };
+  /** A wind the crew entered on PROGRESS 1/4 while the FMS could not compute one (M300 12-22, 11-19). */
+  private manualWind: Wind | null = null;
+  /**
+   * Whether the FMS computes the wind now (civilNavigation.ts): valid air data and a measured ground velocity. When it
+   * cannot, PROGRESS 1/4 takes a manual entry.
+   */
+  get windComputed() { return this.nav.windComputed; }
+  /**
+   * The wind the FMS uses (M300 5-14 "measured wind"): the computed wind; while none can be computed, the crew's
+   * PROGRESS 1/4 entry, or else the last computed wind. Predictions, the RTA, holds and the hover procedure read it.
+   */
+  get systemWind(): Wind { return this.nav.windComputed ? this.wind : this.manualWind ?? this.lastComputedWind; }
+  get manualWindEntered() { return this.manualWind !== null; }
+  /**
+   * PROGRESS 1/4 WIND: a manual entry, or null (DELETE) to clear it. Refused while the FMS computes the wind (M300 12-22:
+   * "Otherwise the value is displayed in medium font and manual entries are not permitted").
+   */
+  enterManualWind(wind: Wind | null): boolean {
+    if (this.nav.windComputed) return false;
+    this.manualWind = wind ? { ...wind } : null;
+    return true;
+  }
   /** Entries on the VNAV approach page. The FAF altitude sets the vertical path angle to the threshold. */
   /**
    * PLAN DATA (M300 3-19): the transition altitude and level, and the cruise wind and cruise true airspeed used for
@@ -829,8 +862,10 @@ export class ScriptedFms implements CduBackend {
     const gpsSource = selection.gpsSource;
     this.nav = {
       ...this.nav, mode: selection.mode, dmes: selection.dmes, vor: selection.vor, gpsSource,
-      anp: selection.anp, uncertain: selection.uncertain, airValid: selection.airValid,
+      anp: selection.anp, uncertain: selection.uncertain, airValid: selection.airValid, windComputed: selection.windComputed,
     };
+    // A computed wind is the system wind again: kept as the last one, and any manual entry gives way to it.
+    if (this.nav.windComputed) { this.lastComputedWind = { ...this.wind }; this.manualWind = null; }
     const choice = this.gpsSelected ? this.gpsChoice : "OFF";
     for (const index of this.selectionLog.update(this.now, gps.assessed, gpsSource === null ? null : gpsSource - 1, choice, gps.transferred)) {
       if (this.gpsSelected && !(selection.uncertain && gpsSource === index + 1)) this.alert(alert(`GPS${index + 1} NOT USABLE`));
@@ -1021,7 +1056,7 @@ export class ScriptedFms implements CduBackend {
    * the course cannot be flown with progress at that airspeed: the prediction is then unknown, not given a floor.
    */
   groundSpeedOn(course: number, tas = this.plannedSpeed) {
-    return predictedGroundSpeed(tas, course, this.wind);
+    return predictedGroundSpeed(tas, course, this.systemWind);
   }
 
   /** The cold temperature correction to the FAF altitude, from the destination temperature on VNAV (0 at or above ISA). */
@@ -1183,7 +1218,7 @@ export class ScriptedFms implements CduBackend {
     if (report) return holdPathToPassage(report, this.here);
     const holdTas = Math.max(tas, tasFromIas(hold.speed, this.altitude));
     const legNm = hold.legDistance ?? ((hold.legTime ?? defaultLegMinutes(this.altitude)) * holdTas) / 60;
-    const geometry = holdGeometry(fix, hold.inbound, hold.turn, holdTas, this.wind.speed, legNm, MAX_BANK);
+    const geometry = holdGeometry(fix, hold.inbound, hold.turn, holdTas, this.systemWind.speed, legNm, MAX_BANK);
     return geometry ? holdPathToPassage({ segments: geometry.racetrack, index: 0, passageAt: geometry.racetrack.length - 1 }, fix) : [];
   }
 
@@ -1197,7 +1232,7 @@ export class ScriptedFms implements CduBackend {
     // Sized at the hold altitude (its target), or the present altitude when it has none.
     const target = parseConstraint(hold.altitude);
     const altitude = target === null ? this.altitude : target.kind === "WINDOW" ? target.lower : target.altitude;
-    const allowance = holdAllowance(hold, fix, arrivalTrack, tas, this.wind, altitude);
+    const allowance = holdAllowance(hold, fix, arrivalTrack, tas, this.systemWind, altitude);
     if (!allowance) return {};
     return { hold: { hours: allowance.hours, ...(hold.exit === "AT TGT ALT" && !hold.missed ? { target } : {}) } };
   }
@@ -1240,10 +1275,8 @@ export class ScriptedFms implements CduBackend {
    * the alert list, so the advisory is used) when a climb constraint cannot be made.
    */
   updatePerformance(dt: number) {
-    for (const [ident, motion] of Object.entries(this.moving)) {
-      const at = this.points[ident];
-      if (at) this.points[ident] = offset(at, motion.track, (motion.speed * dt) / 3600);
-    }
+    // Moving waypoints follow the simulation clock from their epochs (rev 2 D-R epoch), not the ticks.
+    for (const ident of Object.keys(this.moving)) this.points[ident] = this.movingAt(ident)!;
     const rendezvous = this.rndz.active ? this.rendezvous() : null;
     if (rendezvous && rendezvous.required !== null && !rendezvous.achievable && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE")); }
     if (rendezvous?.achievable) this.rndz.alerted = false;
@@ -1311,7 +1344,7 @@ export class ScriptedFms implements CduBackend {
     const held = waypoints.slice(0, at).reduce((sum, w) => sum + (w.hold?.hours ?? 0), 0);
     const time = (tas: number) => held + pieces.reduce((sum, leg) => {
       if (leg.distance === 0) return sum;
-      const gs = predictedGroundSpeed(tas, leg.course, this.wind);
+      const gs = predictedGroundSpeed(tas, leg.course, this.systemWind);
       return gs === null ? Infinity : sum + leg.distance / gs;
     }, 0);
     let low = 1, high = 400;
@@ -1323,11 +1356,25 @@ export class ScriptedFms implements CduBackend {
   /** Defines a moving waypoint at a position, moving on a track at a speed. */
   defineMoving(ident: string, position: LatLon, track: number, speed: number) {
     this.points[ident] = position;
-    this.moving[ident] = { track, speed };
+    this.moving[ident] = { track, speed, origin: { ...position }, epoch: this.now.getTime() };
     this.pilot = [...this.pilot.filter(p => p.ident !== ident), { ident, position, definition: `MOVING ${String(track).padStart(3, "0")}/${speed}KT` }];
   }
 
-  get movingWaypoints() { return this.moving; }
+  /** Every moving waypoint, pilot and stored user ones, with its track and speed. */
+  get movingWaypoints(): Record<string, { track: number; speed: number }> {
+    const all: Record<string, { track: number; speed: number }> = {};
+    for (const w of this.userDb.waypoints) if (w.type === "MOVING") all[w.ident] = { track: w.trackDeg, speed: w.groundSpeedKt };
+    for (const [ident, { track, speed }] of Object.entries(this.moving)) all[ident] = { track, speed };
+    return all;
+  }
+
+  isMoving(ident: string) { return ident in this.moving || this.userDb.waypoints.some(w => w.ident === ident && w.type === "MOVING"); }
+
+  /** A pilot moving waypoint where the simulation clock has taken it since its epoch. */
+  private movingAt(ident: string): LatLon | undefined {
+    const m = this.moving[ident];
+    return m && movingPosition(m.origin, m.track, m.speed, m.epoch, this.now.getTime());
+  }
 
   /** The TDN path angle from present altitude to the target altitude at the point before the reference. */
   tdnAngle(): number | null {
@@ -1771,7 +1818,8 @@ export class ScriptedFms implements CduBackend {
   }
 
   private ownPoint(ident: string) {
-    return this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position ?? this.userDb.waypoints.find(w => w.ident === ident)?.position;
+    const user = this.userDb.waypoints.find(w => w.ident === ident);
+    return this.movingAt(ident) ?? this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position ?? (user && userWaypointPosition(user, this.now));
   }
 
   /** A database position in the active cycle, looked up now: a runway in the context of the route's airports. */
@@ -1821,11 +1869,16 @@ export class ScriptedFms implements CduBackend {
    * already in use (a navigation database, pilot or user waypoint: the bench does not store duplicate idents, where the
    * CMA allows them with SELECT WPT), or the database is full (460).
    */
-  createUserWaypoint(ident: string, position: LatLon): "invalid" | "in-use" | "full" | "not-saved" | undefined {
+  createUserWaypoint(ident: string, position: LatLon, motion?: { track: number; speed: number }): "invalid" | "in-use" | "full" | "not-saved" | undefined {
     if (!/^[A-Z0-9]{1,5}$/.test(ident)) return "invalid";
+    if (motion && !(motion.track >= 0 && motion.track <= 360 && motion.speed >= 0 && motion.speed <= 999)) return "invalid";
     if (this.coordinates(ident)) return "in-use";
     if (this.userWaypointsFree <= 0) return "full";
-    if (!this.saveUserDatabase({ ...this.userDb, waypoints: [...this.userDb.waypoints, { ident, position: { ...position }, type: "FIXED" }] })) return "not-saved";
+    // A moving one holds this position now: its epoch is the present simulation time.
+    const waypoint: UserWaypoint = motion
+      ? { ident, position: { ...position }, type: "MOVING", trackDeg: motion.track, groundSpeedKt: motion.speed, epoch: this.now.toISOString() }
+      : { ident, position: { ...position }, type: "FIXED" };
+    if (!this.saveUserDatabase({ ...this.userDb, waypoints: [...this.userDb.waypoints, waypoint] })) return "not-saved";
     return undefined;
   }
 
@@ -2178,7 +2231,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   designateHoverMarkIdent(ident: string) {
-    if (ident in this.moving) return false;
+    if (this.isMoving(ident)) return false;
     const position = this.coordinates(ident);
     return position ? this.designateHoverMark({ ident, position, label: null }) : false;
   }
@@ -2195,10 +2248,10 @@ export class ScriptedFms implements CduBackend {
     if (this.hover.status === "MOD" || (this.hover.active && this.hover.active.mark === mark)) return "NOT ALLOWED";
     const ra = this.radioHeight;
     if (ra.status !== "NORMAL") return "RALT FAILED";
-    const finalTrack = this.wind.speed >= 5 ? this.wind.direction : courseDeg(this.here, mark.position);
+    const finalTrack = this.systemWind.speed >= 5 ? this.systemWind.direction : courseDeg(this.here, mark.position);
     const plan = planTransition({
       ias: this.afcs?.ias ?? 0, radioHeight: ra.value, verticalSpeed: this.verticalSpeed,
-      headwind: this.wind.speed * Math.cos(((this.wind.direction - finalTrack) * Math.PI) / 180),
+      headwind: this.systemWind.speed * Math.cos(((this.systemWind.direction - finalTrack) * Math.PI) / 180),
       hoverHeight: this.afcs?.hoverHeight ?? 50, elevation: this.altitude - ra.value!,
     });
     if (plan.refused) return plan.reason.toUpperCase();
@@ -2239,7 +2292,7 @@ export class ScriptedFms implements CduBackend {
    */
   private joinFromHere(join: LatLon, finalTrack: number): JoinPath {
     const tas = tasFromIas(Math.max(this.afcs?.ias ?? 0, 1), this.altitude);
-    const fastest = tas + this.wind.speed;
+    const fastest = tas + this.systemWind.speed;
     const radius = radiusAt(fastest, designBank(fastest, fmsBankLimit(this.aircraftProfile)));
     return joiningPath(this.here, this.track, join, finalTrack, radius);
   }
@@ -2285,7 +2338,7 @@ export class ScriptedFms implements CduBackend {
     const ra = this.radioHeight;
     const decision = checkAtTdn({
       ias: this.afcs?.ias ?? 0, radioHeight: ra.status === "NORMAL" ? ra.value : null, verticalSpeed: this.verticalSpeed,
-      headwind: this.wind.speed * Math.cos(((this.wind.direction - finalTrack) * Math.PI) / 180),
+      headwind: this.systemWind.speed * Math.cos(((this.systemWind.direction - finalTrack) * Math.PI) / 180),
       hoverHeight: this.afcs?.hoverHeight ?? 50, elevation: ra.status === "NORMAL" ? this.altitude - ra.value! : 0,
     }, distanceNm(this.here, mark.position));
     if (!decision.engage) {
@@ -2298,7 +2351,7 @@ export class ScriptedFms implements CduBackend {
       this.alert(alert(text));
       return;
     }
-    this.hover.windSpeed = this.wind.speed;
+    this.hover.windSpeed = this.systemWind.speed;
     this.hover.requestData = { id, mrk: mark.position, finalTrack };
     this.hover.request += 1;
   }

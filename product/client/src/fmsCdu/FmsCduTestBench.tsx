@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ALERTS } from "./alerts";
-import { CONDITIONS } from "./conditions";
+import { CONDITIONS, UNMODELLED_CONDITIONS } from "./conditions";
 import { FlightSimulator, MAP_RANGES } from "./flight";
 import FmsCduPanel from "./FmsCduPanel";
 import { aircraftData, fmsOutputs } from "./efis";
@@ -493,6 +493,10 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
                 </li>
               ))}
             </ul>
+            {/* Rev 3 B3.5 F10: not modelled in v1, so not offered; a scenario that injects one is refused at admission. */}
+            <p className="fmsBenchHint" data-testid="fms-unmodelled-conditions">
+              Not modelled in v1: {UNMODELLED_CONDITIONS.map(condition => condition.label.toLowerCase()).join(", ")}. A scenario that injects one is refused.
+            </p>
           </section>
 
           <BaroCard backend={backend} recordTo={recordTo} />

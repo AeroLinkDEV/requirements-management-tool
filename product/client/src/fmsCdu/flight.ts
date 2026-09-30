@@ -30,6 +30,15 @@ const G_TURN = 1091; // turn rate (deg/s) = 1091 * tan(bank) / TAS (kt)
 const ALT_CAPTURE_FT = 20;
 /** The radio-height datum hold, fpm per foot of error (a firm hold; the vertical-acceleration limit shapes it). */
 const RHT_GAIN = 10;
+/**
+ * The barometric altitude capture and hold, fpm per foot of error: the same firm law as the radio-height hold (a 6 s
+ * time constant). Approaching a preselection the rate eases once it exceeds this times the distance to go, so an
+ * 800 fpm climb starts its level-off 80 ft out and settles within the foot about 25 s later, about 0.07 g, well inside
+ * the vertical-acceleration limit; the earlier 2 fpm/ft (30 s) left the aircraft short of a captured altitude for
+ * minutes. Laboratory value: no published AFCS altitude-loop figure (ADS-33E-PRF heave response, T <= 5 s, is the
+ * inner axis; an outer altitude loop is slower).
+ */
+const ALT_HOLD_GAIN = 10;
 
 export type GuidanceMode = "LNAV" | "HOLD" | "SAR" | "HDG";
 export type Guidance = {
@@ -630,7 +639,7 @@ export class FlightSimulator {
       // The aircraft moves from where it really is; guidance above steered it from where the FMS believes it is.
       position = offset(fms.truePosition, track, (groundSpeed * dt) / 3600);
     }
-    const vs = clamp((guidance.targetAltitude - fms.altitude) * 2, -this.profile.maxVerticalSpeed.value, this.profile.maxVerticalSpeed.value);
+    const vs = clamp((guidance.targetAltitude - fms.altitude) * ALT_HOLD_GAIN, -this.profile.maxVerticalSpeed.value, this.profile.maxVerticalSpeed.value);
     // The final approach path first, then the VNAV descent path, then climbing or holding the target altitude. A hold
     // or an altitude-terminated leg keeps its own altitude.
     const ownAltitude = this.holdPlan || fms.activeRoute.legs[0]?.kind === "cond";
@@ -645,7 +654,7 @@ export class FlightSimulator {
     // from it; otherwise a latched hold is the only vertical authority.
     if (low !== null) verticalSpeed = low;
     else if (this.advisory && tdn !== null && !fms.hasCondition("fmsFail")) { verticalSpeed = tdn; this.vertical = "TDN"; this.altitudeHold = null; this.vsTarget = null; this.goingAround = false; }
-    else if (this.altitudeHold !== null) { verticalSpeed = clamp((this.altitudeHold - fms.altitude) * 2, -this.profile.maxVerticalSpeed.value, this.profile.maxVerticalSpeed.value); this.vertical = "ALT HOLD"; }
+    else if (this.altitudeHold !== null) { verticalSpeed = clamp((this.altitudeHold - fms.altitude) * ALT_HOLD_GAIN, -this.profile.maxVerticalSpeed.value, this.profile.maxVerticalSpeed.value); this.vertical = "ALT HOLD"; }
     else if (tdn !== null) { verticalSpeed = tdn; this.vertical = "TDN"; }
     else if (this.advisory) verticalSpeed = this.advisoryVerticalSpeed(groundSpeed);
     else {
@@ -712,11 +721,11 @@ export class FlightSimulator {
       this.vsTarget = null;
       this.goingAround = false;
       this.vertical = "ALT HOLD";
-      return clamp((this.selectedAlt - alt) * 2, -this.profile.maxVerticalSpeed.value, this.profile.maxVerticalSpeed.value);
+      return clamp((this.selectedAlt - alt) * ALT_HOLD_GAIN, -this.profile.maxVerticalSpeed.value, this.profile.maxVerticalSpeed.value);
     }
     this.vertical = this.goingAround ? "GA" : "VS";
     // Capture: close to the preselection in the direction of flight, the rate eases toward it.
-    return Math.sign(rate) === toward && Math.abs(this.selectedAlt - alt) < Math.abs(rate) / 4 ? (this.selectedAlt - alt) * 4 : rate;
+    return Math.sign(rate) === toward && Math.abs(this.selectedAlt - alt) < Math.abs(rate) / ALT_HOLD_GAIN ? (this.selectedAlt - alt) * ALT_HOLD_GAIN : rate;
   }
 
   /**
@@ -733,7 +742,7 @@ export class FlightSimulator {
     const tan = Math.tan(rad(fms.vnav.pathAngle));
     // DES NOW: 1000 fpm down to the planned altitude at the active fix, levelling there, until the path comes down to
     // the aircraft (integrate ends DES NOW there). Never upward.
-    if (fms.vnav.desNow) return clamp((first.altitude - fms.altitude) * 2, -this.profile.maxVerticalSpeed.value, 0);
+    if (fms.vnav.desNow) return clamp((first.altitude - fms.altitude) * ALT_HOLD_GAIN, -this.profile.maxVerticalSpeed.value, 0);
     const path = this.descentPath(first)!;
     const above = fms.altitude - path.altitude;
     if (above < -50) return 0;
@@ -1359,7 +1368,7 @@ export class FlightSimulator {
     if (!fix) return null;
     const tas = Math.max(this.tas, tasFromIas(hold.speed, this.fms.altitude));
     const legNm = hold.legDistance ?? ((hold.legTime ?? defaultLegMinutes(this.fms.altitude)) * tas) / 60;
-    return holdGeometry(fix, hold.inbound, hold.turn, tas, this.fms.wind.speed, legNm, this.steeringLimit);
+    return holdGeometry(fix, hold.inbound, hold.turn, tas, this.fms.systemWind.speed, legNm, this.steeringLimit);
   }
 
   /**
@@ -1396,7 +1405,7 @@ export class FlightSimulator {
     const plan = this.holdPlan!;
     const fms = this.fms;
     // The wind rising to the airspeed mid-circuit: no pattern can be flown from here either.
-    if (fms.wind.speed >= this.tas) {
+    if (fms.systemWind.speed >= this.tas) {
       this.unableHold();
       return { legFrom: null, legTo: fms.coordinates(hold.fix) ?? null, desiredTrack: fms.track, crossTrack: 0, distanceToGo: 0, bankCommand: 0 };
     }

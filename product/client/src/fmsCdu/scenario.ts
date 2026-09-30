@@ -1,4 +1,4 @@
-import { CONDITIONS, type ConditionId } from "./conditions";
+import { CONDITIONS, UNMODELLED_CONDITIONS, type ConditionId } from "./conditions";
 import { MAX_BARO_ERROR_FT, SETTING_RANGE_HPA, errorProblem, settingProblem } from "./baro";
 import { FlightSimulator } from "./flight";
 import { distanceNm } from "./fmsModel";
@@ -270,7 +270,11 @@ function actionProblem(action: unknown): string | null {
   switch (a.kind) {
     case "keys": return Array.isArray(a.keys) && a.keys.length > 0 && a.keys.every(key => typeof key === "string" && KEY.test(key)) ? null : "keys must be a non-empty list of CDU functions";
     case "type": return text(a.text, /^[A-Z0-9 ./-]{1,24}$/) ? null : "type needs up to 24 scratchpad characters";
-    case "condition": return typeof a.condition === "string" && CONDITION_IDS.has(a.condition) && typeof a.on === "boolean" ? null : "condition needs a known condition and on true or false";
+    case "condition": {
+      const unmodelled = UNMODELLED_CONDITIONS.find(condition => condition.id === a.condition);
+      if (unmodelled) return `${unmodelled.label.toLowerCase()} is not modelled in v1, so a scenario that injects it is refused (rev 3 B3.5 F10)`;
+      return typeof a.condition === "string" && CONDITION_IDS.has(a.condition) && typeof a.on === "boolean" ? null : "condition needs a known condition and on true or false";
+    }
     case "alert":
     case "expectAlert":
     case "expectNoAlert":

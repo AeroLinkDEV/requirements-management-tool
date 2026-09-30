@@ -125,6 +125,15 @@ test('an alert raised from the bench lights MSG until CLR on the panel acknowled
   await expect(msg).not.toHaveClass(/\blit\b/)
 })
 
+test('the Conditions tab says which sensor failures v1 does not model, and offers none of them (F10)', async ({ page }) => {
+  await open(page)
+  await tab(page, 'Conditions')
+  await expect(page.getByTestId('fms-unmodelled-conditions')).toHaveText(
+    'Not modelled in v1: barometric altitude invalid, heading invalid, attitude invalid. A scenario that injects one is refused.',
+  )
+  for (const name of [/barometric/i, /^heading invalid/i, /attitude/i]) await expect(page.getByRole('checkbox', { name })).toHaveCount(0)
+})
+
 test('every physical key on the rendered panel can be clicked and reaches the simulation', async ({ page }) => {
   await open(page)
   await page.getByRole('combobox', { name: 'Hardware variation' }).selectOption('050')
@@ -610,6 +619,8 @@ test('the helicopter autopilot fields keep only what they accept: digits, and a 
 })
 
 test('the 87N mission: after ACTIVATE and EXEC over the mark, the map draws the FMS joining path to JN (Phase 1)', async ({ page }) => {
+  // The scenario plays at 16× to the join, which takes 28-29 s alone: over the 30 s default, and longer under load (#1305).
+  test.setTimeout(120_000)
   await open(page)
   // The moving map as the lower display (it draws the route, holds, search patterns and the join).
   await page.getByRole('radiogroup', { name: 'Lower display' }).getByText('Engineering map', { exact: true }).click()
