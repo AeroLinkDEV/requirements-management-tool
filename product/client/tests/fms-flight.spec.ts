@@ -1342,6 +1342,38 @@ test('the transition is flown to a hover at MRK: TD, the gate segment, TD/H, the
   expect(sim.axisModes).toEqual({ collective: 'RHT', pitch: 'HOV', roll: 'HOV' })
 })
 
+test('the transition request carries MRK, the final track, the remaining distance and the planned trajectory, and the autopilot flies it: TD/H starts at the planned distance even at another gate speed (B3.3)', () => {
+  const { unit, sim, fly, ticks, mark } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(900, () => unit.hover.request > 0)
+  const request = unit.hover.requestData!
+  expect(request.mrk).toEqual(mark)
+  expect(request.finalTrack).toBe(230)
+  expect(request.remainingNm).toBeCloseTo(distanceNm(unit.position, mark), 1)
+  // The shared plan, whole: TD, the gate segment and TD/H fill the remaining distance.
+  expect(request.plan.td.distanceNm + request.gateNm + request.plan.tdh.distanceNm).toBeCloseTo(request.remainingNm, 9)
+  expect(request.gateNm).toBeGreaterThanOrEqual(0)
+  // The autopilot takes the request on its next step.
+  fly(1)
+  expect(sim.modeEvents.find(e => e.event === 'TRANSITION REQUEST')?.detail).toBe(
+    `MRK ${request.remainingNm.toFixed(3)} NM on 230°T: TD ${request.plan.td.distanceNm.toFixed(3)} NM, gate ${request.gateNm.toFixed(3)} NM, TD/H ${request.plan.tdh.distanceNm.toFixed(3)} NM`)
+  // The wind drops after the request: the gate is reached faster over the ground than planned (within the gate
+  // segment's slack). The autopilot still starts decelerating where the plan put TD/H, not where its own nominal rate
+  // from the faster gate speed would (about 0.09 NM earlier), and the closed loop takes it to MRK.
+  unit.wind.speed = 16
+  // Measured as the autopilot measures it (the navigation position, which lags truth), in the bench's quarter seconds.
+  let decelAt: number | null = null
+  ticks(600, () => {
+    if (decelAt === null && sim.modeEvents.some(e => e.event === 'TD/H' && /gate segment ends/.test(e.detail))) decelAt = distanceNm(unit.position, mark)
+    return sim.hoverCaptured
+  })
+  expect(decelAt).not.toBeNull()
+  expect(Math.abs(decelAt! - request.plan.tdh.distanceNm)).toBeLessThan(0.01)
+  expect(sim.hoverCaptured).toBe(true)
+  expect(metres(unit.truePosition, mark)).toBeLessThan(50)
+})
+
 test('ACTIVATE needs a valid radio height; losing it between ACTIVATE and EXEC is RALT FAILED, and the modification stays (Stage D, E-27)', () => {
   const noRa = hoverProcedure()
   noRa.unit.setCondition('raFail', true)
