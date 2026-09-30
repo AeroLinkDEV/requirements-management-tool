@@ -257,7 +257,17 @@ export class ScriptedFms implements CduBackend {
   /** The MOVING WPT page's entries before CREATE. */
   movingDraft = { ident: null as string | null, position: null as LatLon | null, motion: null as string | null };
   /** RNDZ: arrive at a waypoint at a time, flying the speed that needs within the limits. */
-  readonly rndz = { wpt: null as string | null, time: null as number | null, minSpeed: 60, maxSpeed: 160, active: false, alerted: false };
+  /**
+   * The rendezvous (RTA) the crew has set: the fix, the time, the speed limits, and the RTA WIND entered, which is used
+   * only for the RTA computation and never changes the system wind; null is the default (M300 A-141, plan E4).
+   */
+  readonly rndz = { wpt: null as string | null, time: null as number | null, minSpeed: 60, maxSpeed: 160, active: false, alerted: false, wind: null as Wind | null };
+
+  /**
+   * The wind the RTA is computed in (M300 A-141 RTA WIND): the crew's entry, else in flight the system wind. On the
+   * ground it would be PLAN DATA CRZ WIND; v1 predicts only in the air (plan E1).
+   */
+  get rtaWind(): Wind { return this.rndz.wind ?? this.systemWind; }
   /** TDN: a tactical descent to an altitude a distance before a reference, if the angle is flyable. */
   readonly tdn = { targetAltitude: 500, refId: null as string | null, distanceBefore: 1.0, maxAngle: 6, active: false, level: false };
   private perf = { notEnoughAlerted: false, unableAlertedFor: null as string | null };
@@ -1487,7 +1497,7 @@ export class ScriptedFms implements CduBackend {
     const held = waypoints.slice(0, at).reduce((sum, w) => sum + (w.hold?.hours ?? 0), 0);
     const time = (tas: number) => held + pieces.reduce((sum, leg) => {
       if (leg.distance === 0) return sum;
-      const gs = predictedGroundSpeed(tas, leg.course, this.systemWind);
+      const gs = predictedGroundSpeed(tas, leg.course, this.rtaWind);
       return gs === null ? Infinity : sum + leg.distance / gs;
     }, 0);
     let low = 1, high = 400;
