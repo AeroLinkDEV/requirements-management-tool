@@ -691,6 +691,69 @@ try { Clear-AeroLinkStalePostmasterPid -Bin $helperBin -Data $helperData -Logs $
 Assert-True $emptyThrew 'An unparseable postmaster.pid must fail closed rather than be treated as absent.'
 Remove-Item -LiteralPath $foreignPidFile -Force -ErrorAction SilentlyContinue
 
+# --- DEC-149: Monday-Friday 08:00-18:00 Eastern, production is redeployed only on a manual request ---
+# Instants are UTC, as production passes them, and CI runs in UTC while HOME runs in Eastern: a window computed in
+# host-local time, or at a fixed -4 offset that ignores daylight saving, fails the winter rows below on one of them.
+function New-UtcInstant([string]$Iso) { [datetime]::Parse($Iso, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal -bor [Globalization.DateTimeStyles]::AssumeUniversal) }
+$holdRows = @(
+    @{ At = '2026-09-30T11:59:59Z'; Held = $false; Why = 'Wednesday 07:59:59 EDT is before the hold' },
+    @{ At = '2026-09-30T12:00:00Z'; Held = $true;  Why = 'Wednesday 08:00 EDT starts the hold' },
+    @{ At = '2026-09-30T21:59:59Z'; Held = $true;  Why = 'Wednesday 17:59:59 EDT is still held' },
+    @{ At = '2026-09-30T22:00:00Z'; Held = $false; Why = 'Wednesday 18:00 EDT ends the hold' },
+    @{ At = '2026-10-02T22:00:00Z'; Held = $false; Why = 'Friday 18:00 EDT ends the hold for the weekend' },
+    @{ At = '2026-10-03T16:00:00Z'; Held = $false; Why = 'Saturday noon is not work hours' },
+    @{ At = '2026-10-04T16:00:00Z'; Held = $false; Why = 'Sunday noon is not work hours' },
+    @{ At = '2026-10-05T12:30:00Z'; Held = $true;  Why = 'Monday 08:30 EDT is held' },
+    @{ At = '2026-01-14T12:30:00Z'; Held = $false; Why = 'Wednesday 07:30 EST in winter is before the hold (12:30Z would be 08:30 at a fixed -4)' },
+    @{ At = '2026-01-14T13:00:00Z'; Held = $true;  Why = 'Wednesday 08:00 EST in winter starts the hold' },
+    @{ At = '2026-01-14T22:30:00Z'; Held = $true;  Why = 'Wednesday 17:30 EST in winter is still held (22:30Z would be 18:30 at a fixed -4)' },
+    @{ At = '2026-01-14T23:00:00Z'; Held = $false; Why = 'Wednesday 18:00 EST in winter ends the hold' }
+)
+foreach ($row in $holdRows) {
+    $window = Get-AeroLinkDeployHoldWindow -UtcNow (New-UtcInstant $row.At)
+    Assert-True ($window.Held -eq $row.Held) "DEC-149 window: $($row.Why) ($($row.At) gave Held=$($window.Held), $($window.Detail))."
+}
+
+$heldNow = New-UtcInstant '2026-09-30T14:00:00Z'   # Wednesday 10:00 EDT
+$freeNow = New-UtcInstant '2026-09-30T23:00:00Z'   # Wednesday 19:00 EDT
+$validRequest = { param([datetime]$At) [pscustomobject]@{ Valid = $true; RequestedAtUtc = $At } }
+$decisionRows = @(
+    @{ Now = $freeNow; Request = $null; Proceed = $true; Why = 'outside work hours a pass redeploys without a request' },
+    @{ Now = $heldNow; Request = $null; Proceed = $false; Why = 'inside work hours a pass without a request holds' },
+    @{ Now = $heldNow; Request = (& $validRequest $heldNow.AddMinutes(-10)); Proceed = $true; Why = 'a ten-minute-old request is honoured' },
+    @{ Now = $heldNow; Request = (& $validRequest $heldNow.AddMinutes(-121)); Proceed = $false; Why = 'a request older than two hours is not honoured' },
+    @{ Now = $heldNow; Request = (& $validRequest $heldNow.AddMinutes(10)); Proceed = $false; Why = 'a request dated ten minutes in the future is not believed' },
+    @{ Now = $heldNow; Request = [pscustomobject]@{ Valid = $false; RequestedAtUtc = $null }; Proceed = $false; Why = 'an unreadable request is not honoured' }
+)
+foreach ($row in $decisionRows) {
+    $decision = Get-AeroLinkScheduledRedeployDecision -UtcNow $row.Now -Request $row.Request
+    Assert-True ($decision.Proceed -eq $row.Proceed) "DEC-149 decision: $($row.Why) (Proceed=$($decision.Proceed): $($decision.Detail))."
+}
+
+# The request crosses a process boundary as a file (the launcher writes it; the task's pass takes it), under Windows
+# PowerShell on both sides. One request lets exactly one pass through.
+$requestConfig = New-TestConfig
+$requestFile = Join-Path $requestConfig.StatePath 'redeploy-request.json'
+Assert-True ($null -eq (Receive-AeroLinkRedeployRequest -Config $requestConfig)) 'DEC-149: with no request file, no request is received.'
+$written = Write-AeroLinkRedeployRequest -Config $requestConfig -UtcNow $heldNow.AddMinutes(-3)
+$taken = Receive-AeroLinkRedeployRequest -Config $requestConfig
+Assert-True ($taken.Valid -and $taken.RequestedAtUtc -eq $written.RequestedAtUtc) "DEC-149: a written request must be received with its exact time (wrote $($written.RequestedAtUtc.ToString('o')), took $(if ($taken) { $taken.RequestedAtUtc } else { 'nothing' }))."
+Assert-True ((Get-AeroLinkScheduledRedeployDecision -UtcNow $heldNow -Request $taken).Proceed) 'DEC-149: a request received through the file must let the in-hours pass through.'
+Assert-True (-not (Test-Path -LiteralPath $requestFile)) 'DEC-149: taking a request must remove it.'
+Assert-True ($null -eq (Receive-AeroLinkRedeployRequest -Config $requestConfig)) 'DEC-149: a request must let only one pass through.'
+Set-Content -LiteralPath $requestFile -Value 'not json' -Encoding ASCII
+$garbled = Receive-AeroLinkRedeployRequest -Config $requestConfig
+Assert-True ($garbled -and -not $garbled.Valid) 'DEC-149: an unreadable request must be received as invalid, not as absent.'
+Assert-True (-not (Test-Path -LiteralPath $requestFile)) 'DEC-149: an unreadable request must be removed so it is reported once.'
+
+# Start runs the revision on disk inside the hold rather than advance; every other inspection passes through.
+$behind = [pscustomobject]@{ Action = 'UpdateAvailable'; Canonical = $true; HeadSha = ('a' * 40); TargetSha = ('b' * 40); RemoteReachable = $true; Reason = 'origin/main has moved to bbbbbbbb; the production source is still aaaaaaaa. Nothing was changed.' }
+$heldStart = Get-AeroLinkHeldSourceInspection -Inspect $behind -UtcNow $heldNow
+Assert-True ($heldStart.Action -eq 'HeldForWorkHours' -and $heldStart.Canonical -and $heldStart.HeadSha -eq ('a' * 40)) "DEC-149: inside the hold a start must keep the revision on disk (got $($heldStart.Action) at $($heldStart.HeadSha))."
+Assert-True ((Get-AeroLinkHeldSourceInspection -Inspect $behind -UtcNow $freeNow).Action -eq 'UpdateAvailable') 'DEC-149: outside the hold a start must still advance.'
+$refused = [pscustomobject]@{ Action = 'Refused'; Canonical = $false; HeadSha = ('a' * 40); TargetSha = $null; RemoteReachable = $true; Reason = 'not canonical' }
+Assert-True ((Get-AeroLinkHeldSourceInspection -Inspect $refused -UtcNow $heldNow).Action -eq 'Refused') 'DEC-149: the hold must never turn a refusal into a runnable source.'
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Host "FAIL: $_" -ForegroundColor Red }
     Write-Host "Remote-demo recovery regression FAILED ($($failures.Count) failure(s))." -ForegroundColor Red

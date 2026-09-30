@@ -11,6 +11,10 @@
                  AEROLINK REMOTE DEMO READY / NOT READY verdict.
       Configure  Scheduled-recovery task management:
                  Preview | Install | Status | Remove.
+      RequestRedeploy
+                 Ask for production to be redeployed to origin/main now, inside the
+                 Monday-Friday 08:00-18:00 Eastern hold (DEC-149), and start the
+                 installed reconciliation task to do it.
 #>
 [CmdletBinding()]
 param(
@@ -20,7 +24,7 @@ param(
     # exact topology it took down and the policy that governs putting it back. Handing off to Start instead
     # meant the child could only guess, and its guess was "start the whole demo" - which republished a tunnel
     # an operator had deliberately stopped.
-    [ValidateSet('Start', 'Stop', 'Status', 'Configure', 'Reconcile', 'Continue')]
+    [ValidateSet('Start', 'Stop', 'Status', 'Configure', 'Reconcile', 'Continue', 'RequestRedeploy')]
     [string]$Action,
     [ValidateSet('Preview', 'Install', 'Status', 'Remove')]
     [string]$ConfigureAction = 'Preview',
@@ -134,13 +138,33 @@ switch ($Action) {
         try {
             Assert-AeroLinkDedicatedProductionSource -SourceRoot $config.AeroLinkRoot | Out-Null
             $inspect = Update-AeroLinkProductionSource -SourceRoot $config.AeroLinkRoot -InspectOnly
+            # One redeploy request lets one pass through, so every pass that finds a request takes it, whatever that
+            # pass then decides (DEC-149).
+            $redeployRequest = Receive-AeroLinkRedeployRequest -Config $config
             if (-not $inspect.Canonical -or $inspect.Action -ne 'UpdateAvailable') {
                 # Deliberately does NOTHING when the source has not moved, including when the demo is down: this is a
                 # bounded SOURCE reconciler, and an operator's explicit Stop must stay stopped.
+                if ($redeployRequest) {
+                    Write-AeroLinkRemoteDemoLog -Config $config -Run (New-AeroLinkRemoteDemoRun -Scheduled:$Scheduled) -Message "Manual redeploy request taken with nothing to redeploy: $($inspect.Action) - $($inspect.Reason)"
+                }
                 Write-Host "AEROLINK PRODUCTION SOURCE $($inspect.Action.ToUpperInvariant())"
                 Write-Host $inspect.Reason
                 if ($inspect.Action -notin @('AlreadyCurrent', 'CachedCanonical')) { exit 1 }
                 exit 0
+            }
+            if ($Scheduled) {
+                # DEC-149: Monday-Friday 08:00-18:00 Eastern a timed pass redeploys only on a manual request. Decided
+                # here, before the transition, so a held pass stops nothing; the inspection above has still refreshed
+                # the main-currency observation the instance badge reads.
+                $redeploy = Get-AeroLinkScheduledRedeployDecision -UtcNow (Get-Date).ToUniversalTime() -Request $redeployRequest
+                if (-not $redeploy.Proceed -or $redeployRequest) {
+                    Write-AeroLinkRemoteDemoLog -Config $config -Run (New-AeroLinkRemoteDemoRun -Scheduled:$Scheduled) -Message "$($inspect.Reason) $($redeploy.Detail)"
+                }
+                if (-not $redeploy.Proceed) {
+                    Write-Host 'AEROLINK PRODUCTION SOURCE HELD'
+                    Write-Host "$($inspect.Reason) $($redeploy.Detail)"
+                    exit 0
+                }
             }
             $transition = Invoke-AeroLinkHomeTransitionOuter -InstallationRoot $activeInstallation.InstallationRoot -Lease $transitionLease -Operation Reconcile `
                 -SourceRoot $config.AeroLinkRoot -Config $config -Policy KeepReady -Scheduled:$Scheduled -StreamToHost `
@@ -154,6 +178,27 @@ switch ($Action) {
             Write-Host $_.Exception.Message
             exit 1
         }
+    }
+    'RequestRedeploy' {
+        # DEC-149: inside the work-hours hold a timed pass redeploys only when asked, and this is the asking. It records
+        # the request and runs the installed reconciliation task now rather than wait up to 30 minutes for it. The
+        # task, not this console, carries the transition, so the attested launch context is the one it always was.
+        $config = Get-AeroLinkRemoteDemoConfig
+        $request = Write-AeroLinkRedeployRequest -Config $config -UtcNow (Get-Date).ToUniversalTime()
+        Write-AeroLinkRemoteDemoLog -Config $config -Run (New-AeroLinkRemoteDemoRun) -Message 'Manual redeploy requested; the reconciliation task takes the request on its next pass.'
+        Write-Host 'AEROLINK REDEPLOY REQUESTED'
+        Write-Host "Request recorded at $($request.RequestedAtUtc.ToString('o')) ($($request.Path)); it is honoured for two hours."
+        try {
+            Start-ScheduledTask -TaskName 'AeroLinkProductionSourceReconcile' -ErrorAction Stop
+            Write-Host 'The reconciliation task was started. If origin/main has moved, AeroLink and the protected tunnel are down'
+            Write-Host 'for about six to eight minutes while it redeploys. If a pass was already running, the next pass takes the'
+            Write-Host 'request. AEROLINK_REMOTE_DEMO_STATUS.bat and remote-demo.log show the outcome.'
+        }
+        catch {
+            Write-Host "The reconciliation task could not be started now: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host 'The request stands, and the next scheduled pass (within 30 minutes) takes it.'
+        }
+        exit 0
     }
     'Status' {
         $config = Get-AeroLinkRemoteDemoConfig
