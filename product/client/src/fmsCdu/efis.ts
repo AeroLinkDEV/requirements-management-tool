@@ -138,6 +138,8 @@ export type AircraftData = {
     /** Measured ground velocity in aircraft axes (knots), or null without eligible feedback. */
     vx: number | null;
     vy: number | null;
+    /** The ground velocity HOV or GSPD holds, in the same axes (drawn cyan beside VX/VY), or null in neither. */
+    selectedVelocity: { vx: number; vy: number } | null;
     hoverData: boolean;
   } | null;
 };
@@ -261,7 +263,7 @@ export function aircraftData(fms: ScriptedFms, sim: FlightSimulator): AircraftDa
     helicopter: sim.advisory ? {
       axes: sim.axisModes, armed: sim.axisArmed, degraded: sim.axisDegraded(ACTIVE_PROFILE.parameters.fmaCaptureBox.value), lowSpeed: sim.inLowSpeedRegime,
       radioHeight: fms.radioHeight, hoverHeight: sim.hoverHeight, lowHeight: sim.lowHeightCaption,
-      ...sim.groundVelocityAxes,
+      ...sim.groundVelocityAxes, selectedVelocity: sim.selectedGroundVelocity,
       hoverData: sim.inLowSpeedRegime || ["RHT", "TD", "TD/H", "TU"].includes(sim.axisModes.collective),
     } : null,
   };

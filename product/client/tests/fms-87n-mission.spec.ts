@@ -12,6 +12,8 @@ import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
 import { ScenarioRunner, advanceTicks, runHeadless, scenarioProblems } from '../src/fmsCdu/scenario'
 import { SCENARIO_LIBRARY } from '../src/fmsCdu/scenarioLibrary'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { screenText } from '../src/fmsCdu/screen'
+import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
 import { memoryUserDatabaseStore } from '../src/fmsCdu/userDatabase'
 
 // The helicopter acceptance mission (helicopter-first plan §10, "87N offshore SAR"): its bundled real data, its start
@@ -410,4 +412,95 @@ test('C.5a: the missed approach CA (190, to 439 ft) completes at once at the MAP
   expect(seen.slice(ca)).toEqual(['(CA)', 'BEADS'])
   // No descent toward 439 ft.
   expect(lowest).toBeGreaterThan(550)
+})
+
+// ---------------------------------------------------------------------------------------------- C.3 on the final
+// The FMS missed-approach request as its own event (plan C.3.1; M300 7-15, 7-16): MISSED APPR (configured, LSK 6R on
+// LEGS 1/X, VNAV 1/3 and PROGRESS 1/4), without the autopilot's GA; and with the FMS failed, GA alone (C.3.4).
+
+function onTheFinal() {
+  let now = START
+  const fms = new ScriptedFms(() => new Date(now))
+  const sim = new FlightSimulator(fms)
+  expect(setUp87nRnav190Final(fms, sim)).toEqual({ ready: true })
+  const fly = (seconds: number, until?: () => boolean) => { for (let i = 0; i < seconds * 4; i++) { now += 250; sim.step(0.25); if (until?.()) return } }
+  const line = (n: number) => screenText(fms.screen())[n]
+  return { fms, sim, fly, line }
+}
+
+test('MISSED APPR on the final: the FMS request alone reverts to TERMINAL at RNP 1.0, withdraws NO APPR INTEGRITY and the prompt, keeps NAV to the MAP, and engages no GA (C.3.1, M300 7-15, 7-16)', () => {
+  const { fms, sim, fly, line } = onTheFinal()
+  // The armed approach enters the approach phase within 2 NM of the FAF (M300 7-10), and there is no prompt before it.
+  expect(fms.flightPhase).toBe('TERMINAL')
+  expect(fms.missedPromptShown).toBe(false)
+  fly(120, () => fms.flightPhase === 'APPROACH')
+  // In the approach phase the prompt is on PROGRESS 1/4, LEGS 1/X and VNAV 1/3 at LSK 6R.
+  expect(fms.flightPhase).toBe('APPROACH')
+  for (const key of ['LEGS', 'VNAV', 'PROG'] as const) {
+    fms.press(key)
+    expect(line(12), key).toMatch(/MISSED APPR>$/)
+  }
+  expect(line(9)).toMatch(/RNP\/ANP APPROACH/)
+  expect(line(10)).toMatch(/^0\.30\//)
+  // On the final segment, HDOP above 4 on both receivers cancels the approach at once (M300 7-12): NO APPR INTEGRITY
+  // on the scratchpad, MSG lit. The cancelled approach is still armed and flown, so the prompt stays.
+  fly(300, () => fms.onFinalSegment)
+  expect(fms.onFinalSegment).toBe(true)
+  for (const index of [0, 1]) {
+    stimulusFor(fms).apply(index, { op: 'override', label: '130', kind: 'FORCE', amount: 1 })
+    stimulusFor(fms).apply(index, { op: 'override', label: '101', kind: 'FORCE', amount: 4.01 })
+  }
+  fly(15, () => fms.recallList.some(m => m.text === 'NO APPR INTEGRITY'))
+  expect(fms.recallList.map(m => m.text)).toContain('NO APPR INTEGRITY')
+  fms.press('PROG')
+  expect(screenText(fms.screen())[13].trim()).toBe('NO APPR INTEGRITY')
+  expect(line(12)).toMatch(/MISSED APPR>$/)
+  fms.press('LSK6R')
+  expect(fms.missedApproachRequested).toBe(true)
+  expect(fms.flightPhase).toBe('TERMINAL')
+  expect(fms.requiredRnp).toBe(1)
+  expect(screenText(fms.screen())[13].trim()).toBe('')
+  expect(fms.lamps().has('MSG')).toBe(false)
+  expect(line(12)).toMatch(/NAV STATUS>$/)
+  expect(line(9)).toMatch(/RNP\/ANP TERMINAL/)
+  // The cancellation withdrew the approach steering, and NAV with it (M300 7-12). The request restores terminal
+  // guidance: the final course to the MAP, then the missed approach legs, under NAV once the crew re-selects it, and
+  // no autopilot go-around.
+  expect(fms.goArounds).toBe(0)
+  expect(fms.approachSteeringValid).toBe(true)
+  sim.armLnav()
+  fly(30, () => sim.lateralMode === 'LNAV')
+  expect(sim.lateralMode).toBe('LNAV')
+  expect(sim.axisModes.collective).not.toBe('GA')
+  const leg = fms.activeRoute.legs[0]
+  expect(leg.kind === 'wpt' && leg.ident).toBe('CRANN')
+  fly(600, () => { const l = fms.activeRoute.legs[0]; return l.kind !== 'disco' && l.source === 'MISSED' })
+  expect(fms.activeRoute.legs[0].kind !== 'disco' && fms.activeRoute.legs[0].source).toBe('MISSED')
+  // The request stands until another approach is loaded; the missed approach legs are terminal by themselves.
+  expect(fms.missedApproachRequested).toBe(true)
+  expect(fms.flightPhase).toBe('TERMINAL')
+  expect(fms.activeRoute.hold).toMatchObject({ fix: 'BEADS', missed: true })
+  // Not offered again on the missed approach.
+  expect(fms.missedPromptShown).toBe(false)
+})
+
+test('with the FMS failed on the final, TOGA is the autopilot GA alone: the roll axis HDG, no missed approach route, no MISSED APPR (C.3.4)', () => {
+  const { fms, sim, fly, line } = onTheFinal()
+  fly(2)
+  fms.setCondition('fmsFail', true)
+  fly(2)
+  const legs = fms.activeRoute.legs.map(l => (l.kind === 'wpt' ? l.ident : l.kind))
+  expect(fms.goAround()).toBe(false)
+  expect(fms.requestMissedApproach()).toBe(false)
+  expect(fms.missedPromptShown).toBe(false)
+  sim.selectAltitude(2000)
+  expect(sim.engageGoAround()).toBe(true)
+  fly(10)
+  expect(sim.axisModes.collective).toBe('GA')
+  expect(sim.axisModes.roll).toBe('HDG')
+  expect(fms.verticalSpeed).toBeGreaterThan(600)
+  expect(fms.activeRoute.legs.map(l => (l.kind === 'wpt' ? l.ident : l.kind))).toEqual(legs)
+  expect(fms.activeRoute.hold ?? null).toBeNull()
+  fms.press('PROG')
+  expect(line(12)).not.toMatch(/MISSED APPR/)
 })

@@ -126,6 +126,17 @@ test('B3.4, B4.1: the altitude capture is no longer armed once a hover takes the
   expect(heli().armed.collective).toEqual([])
 })
 
+test('B3.5, B4.1: hover feedback lost in GSPD shows GSPD degraded on pitch and LVL on roll, as the FMA showed them', () => {
+  const { unit, sim, fly, heli } = hovering()
+  expect(sim.engageGroundSpeed(5)).toBe(true)
+  fly(5)
+  expect(heli().axes).toMatchObject({ pitch: 'GSPD', roll: 'LVL' })
+  unit.setCondition('gpsIntegrity', true)
+  fly(1)
+  expect(heli().axes).toMatchObject({ pitch: 'ATT', roll: 'ATT' })
+  expect(heli().degraded).toMatchObject({ pitch: ['GSPD'], roll: ['LVL'] })
+})
+
 test('B3.5, B4.1: the radio height lost in the hover shows RHT degraded on the collective beside ALT', () => {
   const { unit, fly, heli } = hovering()
   unit.setCondition('raFail', true)

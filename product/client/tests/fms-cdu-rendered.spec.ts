@@ -659,6 +659,16 @@ test('the helicopter autopilot fields keep only what they accept: digits, and a 
   await expect(page.getByLabel('Vertical speed')).toHaveValue('-800')
   await page.getByLabel('Selected speed').fill('9z0')
   await expect(page.getByLabel('Selected speed')).toHaveValue('90')
+  // GSPD: a ground speed, digits only; in cruise it is refused and the pitch axis stays IAS (B3.1).
+  const gspd = page.getByRole('button', { name: 'GSPD', exact: true })
+  await expect(gspd).toBeDisabled()
+  await page.getByLabel('Selected ground speed').fill('x5')
+  await expect(page.getByLabel('Selected ground speed')).toHaveValue('5')
+  await page.getByLabel('Selected ground speed').fill('15')
+  await expect(page.getByLabel('Selected ground speed')).toHaveValue('15')
+  await gspd.click()
+  await expect(page.getByRole('region', { name: 'EFIS' }).getByTestId('fma-pitch')).toHaveText('IAS')
+  await expect(page.getByLabel('Selected ground speed')).toHaveValue('15')
 })
 
 test('the PinS crew continuation requires MAP passage and the actual chart condition, then leaves instrument guidance', async ({ page }) => {

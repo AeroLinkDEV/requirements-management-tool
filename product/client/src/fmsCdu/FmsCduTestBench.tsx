@@ -149,6 +149,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const pinsContext = `${session}:${backend.pinsContinuation?.revision ?? 0}`;
   const [pinsDeclaration, setPinsDeclaration] = useState({ context: "", basicVfr: false, landingAreaVisible: false, publishedVisibility: false });
   const crewConditions = pinsDeclaration.context === pinsContext ? pinsDeclaration : { context: pinsContext, basicVfr: false, landingAreaVisible: false, publishedVisibility: false };
+  const [gsInput, setGsInput] = useState("");
   const [jumpNote, setJumpNote] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(storedTab);
   // One set of height tiles for the out-the-window view and the PFD's synthetic vision.
@@ -462,6 +463,14 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                   onChange={event => setSpdInput(event.target.value.replace(/\D/g, ""))} />
               </label>
               <button type="button" disabled={!spdInput} onClick={() => { const speed = Number(spdInput); recordTo?.autopilot({ speed }); sim.selectSpeed(speed); setSpdInput(""); }}>SET SPD</button>
+              {/* GSPD: a ground speed held along the heading in the low-speed regime, on the hover feedback (plan B3.1). */}
+              <label>
+                <span>GS</span>
+                <input inputMode="numeric" value={gsInput} maxLength={2} aria-label="Selected ground speed"
+                  onChange={event => setGsInput(event.target.value.replace(/\D/g, ""))} />
+              </label>
+              <button type="button" aria-pressed={sim.axisModes.pitch === "GSPD"} disabled={!gsInput}
+                onClick={() => { const groundSpeed = Number(gsInput); if (sim.engageGroundSpeed(groundSpeed)) { recordTo?.autopilot({ groundSpeed }); setGsInput(""); } }}>GSPD</button>
               {/* The cyclic force-trim release, pressed and let go: the hover references re-datum where the aircraft is. */}
               <button type="button" title="Cyclic force-trim release" onClick={() => { recordTo?.autopilot({ forceTrimRelease: true }); sim.releaseForceTrim(); }}>FTR</button>
             </form>
