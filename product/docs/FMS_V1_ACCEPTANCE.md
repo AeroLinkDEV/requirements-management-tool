@@ -1,4 +1,4 @@
-# FMS Test Bench helicopter-first v1: acceptance ledger
+|||| verticalPolicy ADVISORY and approachPolicy S300_ADVISORY in the helicopter profile; SBAS_COUPLED (coupled LPV) only in the laboratory profiles; LAB_AIRLINE_VNAV_PROFILE (#1252, #1254, #1309) | fms-efis: "under the helicopter profile the FMS commands no altitude or speed"; fms-vnav: "S300 runway VNAV is a barometric advisory with FAF plus 50 feet …"; "S300 VNAV construction priority, corridor and input validity …"; fms-kbtv-demo: "the default KBTV mission flies LNAV with advisory VNAV and crew VS …"; fms-cifp: "the aircraft flies the published KBTV RNAV RWY 15 LPV …" (the laboratory profile) | Met (#1309) |||| profile.ts HELICOPTER_PROFILE (versioned, fingerprinted), profileSummary; implemented parameters told apart from declared acceptance allowances, and one bank envelope the flight uses (#1252, #1284) | fms-scenario: "the profile fingerprint changes when any profile value changes"; "a scenario becomes test procedure text, and its run a Markdown report …" (66 of 67 parameters in force); fms-flight: "the declared bank envelope and roll rate govern the selected computer, without an extra five degrees" | Met (#1284) # FMS Test Bench helicopter-first v1: acceptance ledger
 
 This ledger replaces the claim that "every Stage A–E exit condition is met" (Claude's summary of 29 September 2026). Astra's implementation review of that summary rejected the claim (finding F5): it asked for a row per requirement, giving:
 
@@ -27,7 +27,7 @@ Each was checked against `main` on 30 September 2026 (bab18a38). The test titles
 
 ## Summary
 
-140 rows: **89 Met, 40 Partial, 10 Open, 1 Deferred** (Stage F only).
+140 rows: **91 Met, 38 Partial, 10 Open, 1 Deferred** (Stage F only).
 
 v1 is **not complete**: the §10 completion row stays Open until the Partial and Open rows are closed or explicitly deferred by Sean.
 
@@ -41,16 +41,16 @@ The Open rows:
 
 The summary line and this list are recounted from the table in batches, by the last cell of each row; pull requests edit only their own rows (agreed 30 September), because one shared line made every ledger PR conflict with every other.
 
-Astra/Sol's work under Sean's 29 September night decisions has landed for the profile's in-force flags and bank limit (#1284), the civil navigation core (#1287) and S300 advisory VNAV with the LPV profile split (#1309); rows A2, A4 and B1.7 (general) still read Partial until their owner tests are named.
+Astra/Sol's work under Sean's 29 September night decisions has landed for the profile's in-force flags and bank limit (#1284), the civil navigation core (#1287) and S300 advisory VNAV with the LPV profile split (#1309); A2 and A4 are Met with their owner tests; B1.7 (general) still reads Partial.
 
 ## Stage A: profile, applicability and vertical-guidance policy
 
 | ID | Requirement | Source | Implementation | Owner test | Status |
 |---|---|---|---|---|---|
 | A1 | Applicability matrix in product/docs, referenced from the register | rev2 A1 | FMS_APPLICABILITY.md (#1252; reconciled #1269, #1271) | none (document) | Partial: document only; no guard ties its rows to code |
-| A2 | Default profile cma9000-s300-heli-civil v1 as versioned data, fingerprinted, named in every evidence record | rev2 A2; rev3 A2, §3a | profile.ts HELICOPTER_PROFILE, profileSummary; scenario RunContext (#1252) | fms-scenario: "the profile fingerprint changes when any profile value changes"; "a scenario names its aircraft profile" | Partial: all 34 parameters are inForce:false although many are flown, so reports say "0 of 34 in force"; the profile's bank limit is 30 while the flight uses 25 (Astra/Sol's first item, 29 Sep night) |
+| A2 | Default profile cma9000-s300-heli-civil v1 as versioned data, fingerprinted, named in every evidence record | rev2 A2; rev3 A2, §3a | profile.ts HELICOPTER_PROFILE (versioned, fingerprinted), profileSummary; implemented parameters told apart from declared acceptance allowances, and one bank envelope the flight uses (#1252, #1284) | fms-scenario: "the profile fingerprint changes when any profile value changes"; "a scenario becomes test procedure text, and its run a Markdown report …" (66 of 67 parameters in force); fms-flight: "the declared bank envelope and roll rate govern the selected computer, without an extra five degrees" | Met (#1284) |
 | A3 | Register corrections C1–C16 | rev2 A3; rev3 | FMS_TEST_BENCH.md (#1252 onward) | none (document) | Partial: document only |
-| A4 | Vertical policy: no airline VNAV by default; constraints advisory; the crew flies ALT/VS/preselect; S300 advisory approach VNAV where constructible; airline VNAV behind a lab profile | rev2 A4 | verticalPolicy ADVISORY; LAB_AIRLINE_VNAV_PROFILE; flight.ts crew modes (#1252, #1254) | fms-efis: "under the helicopter profile the FMS commands no altitude or speed"; fms-modes: "under the helicopter profile TOGA climbs in GA" | Partial: S300 advisory approach VNAV not built, and coupled LPV is still in the helicopter profile. Sean (29 Sep night): S300 advisory only, with LPV in a separate profile; Astra/Sol implementing |
+| A4 | Vertical policy: no airline VNAV by default; constraints advisory; the crew flies ALT/VS/preselect; S300 advisory approach VNAV where constructible; airline VNAV behind a lab profile | rev2 A4 | verticalPolicy ADVISORY and approachPolicy S300_ADVISORY in the helicopter profile; SBAS_COUPLED (coupled LPV) only in the laboratory profiles; LAB_AIRLINE_VNAV_PROFILE (#1252, #1254, #1309) | fms-efis: "under the helicopter profile the FMS commands no altitude or speed"; fms-vnav: "S300 runway VNAV is a barometric advisory with FAF plus 50 feet …"; "S300 VNAV construction priority, corridor and input validity …"; fms-kbtv-demo: "the default KBTV mission flies LNAV with advisory VNAV and crew VS …"; fms-cifp: "the aircraft flies the published KBTV RNAV RWY 15 LPV …" (the laboratory profile) | Met (#1309) |
 | A5 | Provenance, validity, selection and engagement kept distinct | rev3 A5 | profile basis field; bus word SSM; EFIS bus | fms-efis: "the bus says so, and the crew selections are aircraft data" | Partial: not every output is tagged; no systematic owner test |
 
 ## Stage B: rotorcraft foundation
