@@ -1,10 +1,10 @@
 import type { LatLon } from "./fmsModel";
+import { awarenessColour, type TerrainColouring } from "./terrainAwareness";
 
 /**
  * Obstacles from the FAA Digital Obstacle File (DOF, daily CSV), as the out-the-window view draws them. The bench
  * serves an extract of unchanged records near its US areas (public/fms-cdu/obstacles, with its provenance); this
- * module reads it, answers a query by bounds, and colours an obstacle by its clearance, to match the terrain
- * colouring modes. Public domain data, for demonstration only, not for navigation.
+ * module reads it, answers a query by bounds, and colours an obstacle as the terrain colouring would colour its top. Public domain data, for demonstration only, not for navigation.
  */
 export type Obstacle = {
   oas: string;
@@ -57,28 +57,13 @@ export function obstaclesWithin(obstacles: readonly Obstacle[], bounds: Bounds):
   return obstacles.filter(o => o.position.lat >= bounds.south && o.position.lat <= bounds.north && o.position.lon >= bounds.west && o.position.lon <= bounds.east);
 }
 
-export type ObstacleColouring = "relative" | "absolute";
-export type ObstacleBand = "danger" | "caution" | "clear" | "band0" | "band1" | "band2" | "band3";
+/** An uncoloured obstacle (the mode off, or relative mode below the caution threshold): a neutral light grey. */
+export const NEUTRAL_RGB: readonly [number, number, number] = [225, 228, 232];
 
 /**
- * The colour band of an obstacle, matching the terrain colouring modes:
- * - relative to the aircraft: danger when its top is at or above 100 ft below the aircraft, caution within 500 ft
- *   below, clear otherwise;
- * - absolute: by the height of its top above mean sea level, in bands of below 500 ft, 500 to 1,000, 1,000 to 2,000,
- *   and 2,000 ft and above.
- * The thresholds are laboratory choices, matching the terrain colouring.
+ * An obstacle's colour: its top (AMSL) coloured exactly as the terrain would be at that height (terrainAwareness.ts,
+ * shared with the terrain shader, so the two agree), drawn opaque; neutral where the mode leaves it uncoloured.
  */
-export function obstacleBand(obstacle: Obstacle, aircraftAltitudeFt: number, mode: ObstacleColouring): ObstacleBand {
-  if (mode === "relative") {
-    const below = aircraftAltitudeFt - obstacle.amslFt;
-    return below <= 100 ? "danger" : below <= 500 ? "caution" : "clear";
-  }
-  const top = obstacle.amslFt;
-  return top < 500 ? "band0" : top < 1000 ? "band1" : top < 2000 ? "band2" : "band3";
+export function obstacleColour(obstacle: Obstacle, aircraftAltitudeFt: number, mode: TerrainColouring): readonly [number, number, number] {
+  return awarenessColour(mode, obstacle.amslFt, aircraftAltitudeFt) ?? NEUTRAL_RGB;
 }
-
-/** The colour of each band, RGB 0-255. */
-export const BAND_COLOURS: Record<ObstacleBand, [number, number, number]> = {
-  danger: [230, 40, 40], caution: [245, 170, 20], clear: [150, 160, 170],
-  band0: [120, 190, 120], band1: [210, 200, 90], band2: [220, 140, 60], band3: [200, 70, 70],
-};

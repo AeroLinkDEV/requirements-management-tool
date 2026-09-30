@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
-import { obstacleBand, obstaclesWithin, parseDof, type Obstacle } from '../src/fmsCdu/obstacles'
+import { NEUTRAL_RGB, obstacleColour, obstaclesWithin, parseDof, type Obstacle } from '../src/fmsCdu/obstacles'
+import { ABSOLUTE_RGB, CAUTION_RGB, DANGER_RGB } from '../src/fmsCdu/terrainAwareness'
 import { OBSTACLE_DATA_URL, createObstacleLayer, drawObstacles, type ObstacleCesium } from '../src/fmsCdu/otwObstacles'
 
 // Brief C (Sean's out-the-window upgrade, 29 September): the FAA Digital Obstacle File, downloaded once, as an
@@ -50,16 +51,19 @@ test('a query by bounds gives the obstacles inside the box', () => {
   expect(obstaclesWithin(obstacles, { south: 0, west: 0, north: 1, east: 1 })).toEqual([])
 })
 
-test('the clearance colouring: relative to the aircraft, and by absolute height band', () => {
+test('an obstacle is coloured as the terrain colouring colours its top: relative, absolute, or neutral', () => {
   const tower = { amslFt: 1399 } as Obstacle
-  // Relative: danger at or above 100 ft below the aircraft, caution within 500 ft, clear otherwise.
-  expect(obstacleBand(tower, 1499, 'relative')).toBe('danger')
-  expect(obstacleBand(tower, 1500, 'relative')).toBe('caution')
-  expect(obstacleBand(tower, 1899, 'relative')).toBe('caution')
-  expect(obstacleBand(tower, 1900, 'relative')).toBe('clear')
-  expect(obstacleBand(tower, 1000, 'relative')).toBe('danger')
-  // Absolute: below 500, 500-1,000, 1,000-2,000, 2,000 and above.
-  expect([499, 500, 999, 1000, 1999, 2000].map(amslFt => obstacleBand({ amslFt } as Obstacle, 0, 'absolute'))).toEqual(['band0', 'band1', 'band1', 'band2', 'band2', 'band3'])
+  // Relative (terrainAwareness.ts): red at or above 100 ft below the aircraft, amber within 500 ft, else neutral.
+  expect(obstacleColour(tower, 1499, 'relative')).toEqual(DANGER_RGB)
+  expect(obstacleColour(tower, 1500, 'relative')).toEqual(CAUTION_RGB)
+  expect(obstacleColour(tower, 1899, 'relative')).toEqual(CAUTION_RGB)
+  expect(obstacleColour(tower, 1900, 'relative')).toEqual(NEUTRAL_RGB)
+  expect(obstacleColour(tower, 1000, 'relative')).toEqual(DANGER_RGB)
+  // Absolute: the shared AMSL bands.
+  expect([499, 500, 999, 1000, 1999, 2000, 2999, 3000].map(amslFt => obstacleColour({ amslFt } as Obstacle, 0, 'absolute')))
+    .toEqual([ABSOLUTE_RGB[0], ABSOLUTE_RGB[1], ABSOLUTE_RGB[1], ABSOLUTE_RGB[2], ABSOLUTE_RGB[2], ABSOLUTE_RGB[3], ABSOLUTE_RGB[3], ABSOLUTE_RGB[4]])
+  // Off: neutral whatever the height.
+  expect(obstacleColour(tower, 1400, 'off')).toEqual(NEUTRAL_RGB)
 })
 
 /** A stand-in for the parts of Cesium the layer uses, recording what is drawn. */
@@ -87,16 +91,16 @@ test('the scene layer draws each obstacle from its base to its top at true heigh
   // Oakdale: its top 1,399 ft AMSL, its base 1,090 ft below (309 ft), in metres.
   expect(line.positions[0].height).toBeCloseTo(309 * 0.3048, 6)
   expect(line.positions[1].height).toBeCloseTo(1399 * 0.3048, 6)
-  // At 1,450 ft the Oakdale tower is danger (red); Greenwich (137 ft) is clear.
+  // At 1,450 ft the Oakdale tower (1,399 ft) is red; Greenwich (137 ft) stays neutral.
   layer.update(1450, 'relative')
   const points = (layer.tops as unknown as { items: { color: string }[] }).items
-  expect(points.map(p => p.color)).toEqual(['rgb(150,160,170)', 'rgb(230,40,40)'])
+  expect(points.map(p => p.color)).toEqual([`rgb(${NEUTRAL_RGB})`, `rgb(${DANGER_RGB})`])
   expect(renders()).toBe(1)
   // A change of less than 10 ft recolours nothing; a new mode does.
   layer.update(1455, 'relative')
   expect(renders()).toBe(1)
   layer.update(1455, 'absolute')
-  expect(points.map(p => p.color)).toEqual(['rgb(120,190,120)', 'rgb(220,140,60)'])
+  expect(points.map(p => p.color)).toEqual([`rgb(${ABSOLUTE_RGB[0]})`, `rgb(${ABSOLUTE_RGB[2]})`])
   layer.destroy()
   expect(removed).toHaveLength(2)
 })
