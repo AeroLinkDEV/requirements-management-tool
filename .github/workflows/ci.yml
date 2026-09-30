@@ -42,14 +42,15 @@ permissions:
   contents: read
   pull-requests: read
 
-# A pull request groups by its number, so a new push cancels the run it supersedes. Everything else groups by
-# ref — and a merge-queue entry's ref is its own `gh-readonly-queue/...` branch, unique per candidate. Queue
+# A pull request groups by its number, so a new push cancels the run it supersedes. Main pushes group by
+# immutable SHA: event delivery order must not let an older commit cancel a newer commit's diagnostics.
+# A merge-queue entry's ref is its own `gh-readonly-queue/...` branch, unique per candidate. Queue
 # entries therefore cannot cancel each other, and a pull request's own run cannot cancel its queue run. That
 # matters more than it looks: a queue whose runs cancel one another does not fail, it deadlocks.
 # Scheduled and manual diagnostic proofs have their own group; an ordinary main
 # push must not cancel the weekly environment-drift check.
 concurrency:
-  group: quality-${{ github.event_name == 'schedule' && 'scheduled' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && format('diagnostics-{0}', github.ref)) || inputs.pull_request_number || github.event.pull_request.number || github.ref }}
+  group: quality-${{ github.event_name == 'schedule' && 'scheduled' || (github.event_name == 'workflow_dispatch' && inputs.pull_request_number == '' && format('diagnostics-{0}', github.ref)) || (github.event_name == 'push' && format('push-{0}', github.sha)) || inputs.pull_request_number || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
