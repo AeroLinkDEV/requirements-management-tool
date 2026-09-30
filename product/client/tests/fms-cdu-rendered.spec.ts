@@ -896,6 +896,11 @@ test('C.10: the executed 87N approach shows its chart notes on the Nav data tab,
 
 test('D-R: the Nav data tab shows each moving waypoint\'s age as a bench aid; it never expires', async ({ page }) => {
   await open(page)
+  // This owner checks age and the simulation clock; enter the trajectory explicitly in TRUE.
+  await key(page, 'INIT_REF').click()
+  await key(page, 'LSK5L').click()
+  await key(page, 'LSK1L').click()
+  await expectLine(page, 2, /^>TRUE$/)
   await key(page, 'INIT_REF').click()
   await key(page, 'NEXT').click()
   await key(page, 'LSK6L').click()
