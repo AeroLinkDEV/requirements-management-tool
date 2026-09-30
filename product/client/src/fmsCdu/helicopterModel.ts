@@ -8,7 +8,7 @@
  * Axes: +x forward, +y left, +z up, metres, the origin at the main rotor mast's foot (the same frame as the
  * boxes-and-ellipsoids fallback, outTheWindow.ts AIRCRAFT_PARTS); the scene loads it with those axes declared. The
  * main rotor and the tail fan are separate nodes ("main_rotor" about +z, "tail_rotor" about +y), so the view can turn
- * them. The output is deterministic: the same code gives the same bytes (scripts/build-helicopter-model.mjs writes
+ * them. The output is deterministic: the same code gives the same bytes (buildHelicopterModel.mjs writes
  * public/fms-cdu/models/helicopter-light-twin.glb, and a test checks the committed file against it).
  */
 

@@ -23,7 +23,7 @@ function readGlb(bytes: Uint8Array) {
   return { json, bin: bytes.subarray(binAt + 8, binAt + 8 + binLength), view, binAt: binAt + 8 }
 }
 
-test('the committed model is exactly what the generator writes (regenerate with scripts/build-helicopter-model.mjs)', () => {
+test('the committed model is exactly what the generator writes (regenerate with src/fmsCdu/buildHelicopterModel.mjs)', () => {
   const committed = readFileSync(FILE)
   const generated = buildHelicopterGlb()
   expect(createHash('sha256').update(committed).digest('hex')).toBe(createHash('sha256').update(generated).digest('hex'))

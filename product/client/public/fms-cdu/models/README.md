@@ -15,7 +15,7 @@
   - an airfoil fin and stabiliser with end plates;
   - bent skid tubes with steps;
   - a landing light and antennas.
-- **How it was made:** generated from simple solids by `src/fmsCdu/helicopterModel.ts`, and written by `scripts/build-helicopter-model.mjs`. `tests/fms-helicopter-model.spec.ts` checks that this file is exactly what the generator writes, so change the generator, never the file.
+- **How it was made:** generated from simple solids by `src/fmsCdu/helicopterModel.ts`, and written by `src/fmsCdu/buildHelicopterModel.mjs`. `tests/fms-helicopter-model.spec.ts` checks that this file is exactly what the generator writes, so change the generator, never the file.
 - **Why an original:** Sean decided on 29 September 2026 that the bench builds its own model. No open-licence (CC0 or CC-BY) Airbus Helicopters model could be downloaded without signing in, and the bench does not create accounts or sign in anywhere.
 - **Licence:** part of the AeroLink project, like the rest of the repository. No third-party geometry, textures or images.
 - **Trademarks:** none. It is not an Airbus Helicopters asset or a model of a real aircraft's exact shape, and has no livery or logos.
