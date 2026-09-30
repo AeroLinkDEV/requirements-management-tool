@@ -255,7 +255,8 @@ export class FlightSimulator {
   private sarPlan: { points: LatLon[]; index: number } | null = null;
   private last: Guidance;
 
-  constructor(fms: ScriptedFms, outputPort?: GuidanceOutputPort<Guidance>) {
+  private readonly beforeGuidance: (() => void) | null;
+  constructor(fms: ScriptedFms, outputPort?: GuidanceOutputPort<Guidance>, beforeGuidance?: () => void) {
     this.fms = fms;
     // The FMS times the manual hold's next crossing along the path flown here: where the aircraft is in the entry or the
     // racetrack, and which segment ends at the fix passage (Astra F1). In this bench the flight builds the hold path the
@@ -265,6 +266,7 @@ export class FlightSimulator {
       return plan ? { segments: plan.segments, index: plan.index, passageAt: plan.index <= plan.entryEnd ? plan.entryEnd : plan.segments.length - 1 } : null;
     });
     this.outputPort = outputPort ?? null;
+    this.beforeGuidance = beforeGuidance ?? null;
     this.profile = fms.aircraftProfile.parameters;
     this.hoverHeightFt = this.profile.hoverHeightDefault.value;
     this.airspeed = fms.targetSpeed;
@@ -611,7 +613,7 @@ export class FlightSimulator {
   /** An unselected computer computes its own route guidance against the common aircraft, without integrating physics. */
   observe(dt: number) {
     const fms = this.fms;
-    fms.refreshSensorInput(); this.watchFailure(); this.watchGoAround(); this.watchGpsLateral(); this.watchHover();
+    fms.refreshSensorInput(); this.beforeGuidance?.(); this.watchFailure(); this.watchGoAround(); this.watchGpsLateral(); this.watchHover();
     const computed = this.guide(dt); this.updateApproach(computed.crossTrack);
     this.last = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;
     this.outputPort?.write({ at: fms.now.getTime(), sequence: ++this.outputSequence,
@@ -620,6 +622,14 @@ export class FlightSimulator {
     const final = fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
     this.path = final === null ? null : { altitude: final, source: "APPR", coupled: this.approach === "CAPTURED" };
     this.adoptAircraftMotion(); fms.tick();
+  }
+
+  /** Publish current adopted navigation while paused, without integrating or sequencing another aircraft. */
+  refreshGuidance() {
+    this.watchFailure(); this.last = this.guide();
+    this.outputPort?.write({ at: this.fms.now.getTime(), sequence: ++this.outputSequence,
+      status: this.fms.hasCondition("fmsFail") ? "FAIL" : this.last.desiredTrack === null ? "NCD" : "NORMAL",
+      value: this.fms.hasCondition("fmsFail") ? null : structuredClone(this.last) });
   }
 
   /** Flies for dt seconds of simulated time, in steps of at most one second. */
@@ -636,6 +646,7 @@ export class FlightSimulator {
   private integrate(dt: number) {
     const fms = this.fms;
     fms.refreshSensorInput();
+    this.beforeGuidance?.();
     this.watchFailure();
     this.watchGoAround();
     this.watchGpsLateral();

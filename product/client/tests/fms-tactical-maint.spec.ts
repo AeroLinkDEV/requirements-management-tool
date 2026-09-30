@@ -1,5 +1,5 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { FlightSimulator } from '../src/fmsCdu/flight'
+import { FlightSimulator, legGeometry } from '../src/fmsCdu/flight'
 import { DualFmsSystem } from '../src/fmsCdu/dualFms'
 import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
 import { setUp87nRnav190Final } from '../src/fmsCdu/heliDemo'
@@ -312,6 +312,11 @@ test('synchronized navigation retains its sensor until the peer is 100 metres be
   stimulus.apply(1, { op: 'override', label: '247', kind: 'FORCE', amount: 0.14 }); tick()
   expect(system.navigationSide).toBe(2) // 111.12 m improvement.
   expect(one.navState.gpsSource).toBe(2); expect(two.navState.gpsSource).toBe(2)
+  stimulus.apply(1, { op: 'spoof', northM: 1852, driftEastMps: 0 }); tick()
+  // Geometry has its own owner; this protects delivery of the selected estimate into both controllers.
+  expect(system.flights[0].guidance.distanceToGo).toBeCloseTo(legGeometry(one.activeLegStart, one.coordinates('MUN')!, one.position).toGo, 6)
+  expect(system.flights[1].guidance.distanceToGo).toBeCloseTo(legGeometry(two.activeLegStart, two.coordinates('MUN')!, two.position).toGo, 6)
+  stimulus.apply(1, { op: 'clearSpoof' }); tick()
   stimulus.apply(0, { op: 'override', label: '247', kind: 'FORCE', amount: 0.10 }); tick()
   expect(system.navigationSide).toBe(2)
   stimulus.apply(0, { op: 'override', label: '247', kind: 'FORCE', amount: 0.08 }); tick()

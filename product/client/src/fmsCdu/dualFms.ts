@@ -30,7 +30,7 @@ export class DualFmsSystem {
       receivers: one.gps as readonly [GpsReceiver, GpsReceiver], ...(options.userDatabase ? { userDatabase: {
         store: options.userDatabase.store, scope: { ...options.userDatabase.scope, profileId: `${options.userDatabase.scope.profileId}:fms2` },
       } } : {}) });
-    this.computers = [one, two]; this.flights = [new FlightSimulator(one), new FlightSimulator(two)];
+    this.computers = [one, two]; this.flights = [new FlightSimulator(one, undefined, () => this.prepareGuidance(1)), new FlightSimulator(two, undefined, () => this.prepareGuidance(2))];
     const parameters = profile.parameters;
     this.rms = new RadioManagementSystem(() => clock().getTime(), () => this.link, () => this.notify(),
       parameters.rmsFeedbackDelay.value, parameters.rmsFeedbackTimeout.value);
@@ -195,6 +195,10 @@ export class DualFmsSystem {
       this.disagreement = disagree;
     }
   }
+  private prepareGuidance(side: FmsSide) {
+    // Each guidance computation consumes the selected system measurement, not a transient local estimate.
+    this.peer(side).refreshSensorInput(); this.reconcile();
+  }
   /** Only the selected flight controller integrates physics. The other computes guidance/sequence against that aircraft. */
   step(dt: number) {
     let remaining = dt;
@@ -203,7 +207,7 @@ export class DualFmsSystem {
       if (this.driver === 2) { this.unit(1).observeAircraft(selected); this.unit(1).refreshSensorInput(); }
       this.simulator.step(h);
       other.observeAircraft(selected); this.flights[2 - this.driver].observe(h);
-      this.reconcile(); remaining -= h;
+      this.reconcile(); this.flights.forEach(flight => flight.refreshGuidance()); remaining -= h;
     }
     this.notify();
   }
@@ -212,6 +216,7 @@ export class DualFmsSystem {
     if (this.driver === 2) this.unit(1).observeAircraft(selected);
     this.unit(1).refreshSensorInput(); this.unit(1).tick();
     this.unit(2).observeAircraft(selected); this.unit(2).refreshSensorInput(); this.unit(2).tick();
-    other.observeAircraft(selected); this.settingsChanged(1); this.settingsChanged(2); this.reconcile(); this.notify();
+    other.observeAircraft(selected); this.settingsChanged(1); this.settingsChanged(2); this.reconcile();
+    this.flights.forEach(flight => flight.refreshGuidance()); this.notify();
   }
 }
