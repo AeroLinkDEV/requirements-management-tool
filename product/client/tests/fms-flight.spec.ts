@@ -299,6 +299,126 @@ test('the hold is a ground racetrack in any wind, either turn: the inbound leg i
   }
 })
 
+test('the hold entry advisories: DIRECT, TEARDROP and PARALLEL HOLD ENTRY a minute before the fix on track inbound; DIRECT leaves at the fix, the others at the second passage (D-H, M300 10-2, 10-4, 10-6)', () => {
+  const cases: { changes: [string, CduFunction][]; text: string; passes: number }[] = [
+    { changes: [], text: 'DIRECT HOLD ENTRY', passes: 1 },
+    { changes: [['263', 'LSK3L']], text: 'TEARDROP HOLD ENTRY', passes: 2 },
+    { changes: [['263', 'LSK3L'], ['', 'LSK2L']], text: 'PARALLEL HOLD ENTRY', passes: 2 },
+  ]
+  for (const c of cases) {
+    const { unit, fly } = setup()
+    holdAtRdg(unit, ...c.changes)
+    const rdg = unit.coordinates('RDG')!
+    const scratch = () => screenText(unit.screen())[13].trim()
+    let toFix: number | null = null
+    fly(3600, () => { if (scratch() === c.text) { toFix = (distanceNm(unit.position, rdg) / unit.groundSpeed) * 3600; return true } })
+    // On track inbound: shown one minute before the fix (the first one-second step inside it).
+    expect(toFix, c.text).not.toBeNull()
+    expect(toFix!, c.text).toBeLessThanOrEqual(60)
+    expect(toFix!, c.text).toBeGreaterThan(58)
+    // An advisory: MSG stays dark.
+    expect(unit.lamps().has('MSG'), c.text).toBe(false)
+    // Passages of the fix: local minima of the distance to it within a mile.
+    let passes = 0, before = Infinity, last = Infinity
+    const shownAtPass: boolean[] = []
+    fly(1800, () => {
+      const d = distanceNm(rdg, unit.position)
+      if (last < before && last <= d && last < 1) { passes += 1; shownAtPass.push(scratch() === c.text) }
+      before = last
+      last = d
+      return passes >= 2
+    })
+    // Still shown after each passage before the last it waits for, gone after that one.
+    expect(shownAtPass, c.text).toEqual(c.passes === 1 ? [false, false] : [true, false])
+  }
+})
+
+test('the entries flown in a 30 kt wind from four azimuths: the teardrop on a 40 degree ground track for the leg, the parallel outbound for 2.6 turn radii, each on its side (D-H, M300 10-2, 10-4)', () => {
+  for (const kind of ['TEARDROP', 'PARALLEL'] as const) {
+    for (const from of [0, 90, 180, 270]) {
+      const { unit, sim, fly } = setup()
+      Object.assign(unit.wind, { direction: from, speed: 30 })
+      holdAtRdg(unit, ['263', 'LSK3L'], ...(kind === 'PARALLEL' ? [['', 'LSK2L'] as [string, CduFunction]] : []))
+      const label = `${kind}, wind ${from}/30`
+      expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS'), label).toBeLessThan(3600)
+      expect(unit.holdEntryFlown, label).toBe(kind)
+      const hold = unit.activeRoute.hold!, rdg = unit.coordinates('RDG')!
+      const s = hold.turn === 'RIGHT' ? 1 : -1
+      const outbound = (hold.inbound + 180) % 360
+      fly(1)
+      const progress = sim.holdProgress!
+      const leg = progress.segments[0]
+      if (leg.kind !== 'line') throw new Error('entry leg')
+      const radius = progress.segments.find(seg => seg.kind === 'arc')!
+      if (radius.kind !== 'arc') throw new Error('arc')
+      const length = distanceNm(leg.from, leg.to), track = courseDeg(leg.from, leg.to)
+      // The construction.
+      if (kind === 'TEARDROP') {
+        expect(Math.abs(angleDiff(track, outbound - 40 * s)), label).toBeLessThan(0.01)
+        expect(length, label).toBeCloseTo(sim.holdLegNm!, 6)
+      } else {
+        expect(Math.abs(angleDiff(track, outbound)), label).toBeLessThan(0.01)
+        expect(length / radius.radius, label).toBeCloseTo(2.6, 6)
+      }
+      // Flown: the ground track on the latter part of the leg, whatever the wind, and the side of the inbound course.
+      const tracks: number[] = []
+      let worstSide = 0
+      fly(900, () => {
+        if (sim.holdProgress?.index !== 0) return true
+        const along = distanceNm(leg.from, unit.position)
+        if (along > (kind === 'TEARDROP' ? 0.6 : 0.75) * length && along < 0.95 * length) tracks.push(unit.track)
+        const side = s * sideOfInbound(rdg, hold.inbound, unit.position)
+        worstSide = kind === 'TEARDROP' ? Math.min(worstSide, side) : Math.max(worstSide, side)
+      })
+      expect(tracks.length, label).toBeGreaterThan(5)
+      // The parallel leg is short (2.6 radii) and begins with the turn off the arrival track: its last quarter within 5°.
+      for (const t of tracks) expect(Math.abs(angleDiff(t, track)), label).toBeLessThan(kind === 'TEARDROP' ? 3 : 5)
+      // The teardrop leg is on the holding side, the parallel leg not on it (a hair either way at the fix).
+      if (kind === 'TEARDROP') expect(worstSide, label).toBeGreaterThan(-0.05)
+      else expect(worstSide, label).toBeLessThan(0.05)
+    }
+  }
+})
+
+test('every circuit, in a 30 kt wind from four azimuths and both turns: the outbound leg flown for its length, and the inbound leg within 0.1 NM from its capture to the fix (D-H oracles)', () => {
+  for (const turn of ['RIGHT', 'LEFT'] as const) {
+    for (const from of [0, 90, 180, 270]) {
+      const { unit, sim, fly } = setup()
+      Object.assign(unit.wind, { direction: from, speed: 30 })
+      holdAtRdg(unit, ...(turn === 'LEFT' ? [['', 'LSK2L'] as [string, CduFunction]] : []))
+      const label = `${turn} turns, wind ${from}/30`
+      expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS'), label).toBeLessThan(3600)
+      const hold = unit.activeRoute.hold!, rdg = unit.coordinates('RDG')!
+      // Two whole circuits of the racetrack (outbound turn, outbound leg, inbound turn, inbound leg).
+      let circuits = 0, previous = -1, outboundFlown = 0, lastAt = unit.position
+      let captured = false, inboundWorst = 0
+      const outboundLengths: number[] = [], inboundWorsts: number[] = []
+      fly(3600, () => {
+        const p = sim.holdProgress
+        if (!p || p.entryEnd >= 0) { lastAt = unit.position; return false }
+        if (p.index === 1) outboundFlown += distanceNm(lastAt, unit.position)
+        if (p.index === 3) {
+          const xtk = Math.abs(sideOfInbound(rdg, hold.inbound, unit.position))
+          if (!captured && xtk < 0.05) captured = true
+          if (captured) inboundWorst = Math.max(inboundWorst, xtk)
+        }
+        if (previous === 3 && p.index === 0) {
+          circuits += 1
+          outboundLengths.push(outboundFlown)
+          inboundWorsts.push(captured ? inboundWorst : Infinity)
+          outboundFlown = 0; captured = false; inboundWorst = 0
+        }
+        previous = p.index
+        lastAt = unit.position
+        return circuits >= 2
+      })
+      expect(circuits, label).toBe(2)
+      for (const flown of outboundLengths) expect(Math.abs(flown - sim.holdLegNm!), label).toBeLessThan(0.05)
+      for (const worst of inboundWorsts) expect(worst, label).toBeLessThan(0.1)
+    }
+  }
+})
+
 test('a wind at or above the true airspeed cannot be held: UNABLE HOLD (D-H, laboratory)', () => {
   const { unit, sim, fly } = setup()
   holdAtRdg(unit)

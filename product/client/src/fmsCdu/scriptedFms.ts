@@ -730,6 +730,11 @@ export class ScriptedFms implements CduBackend {
       if (leg.source === "MISSED") route.hold.missed = true;
     }
     const hold = route.hold;
+    // The hold entry advisory counts the passages of the holding fix, and leaves when its entry is flown.
+    if (hold && hold.fix === leg.ident && this.holdEntryAdvisory && ++this.holdEntryAdvisory.seen >= this.holdEntryAdvisory.passes) {
+      this.withdrawAlert(this.holdEntryAdvisory.text);
+      this.holdEntryAdvisory = null;
+    }
     // A fix crossing in the hold: at the end of the entry (the first crossing after it), or after a whole racetrack.
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && completedCircuit) hold.circuits = (hold.circuits ?? 0) + 1;
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExitReached(hold)) hold.status = "EXIT ARMED";
@@ -1232,6 +1237,7 @@ export class ScriptedFms implements CduBackend {
   /** M300 1-11/7-10: loading an approach grants no approach phase, NPA or 0.3-NM RNP. */
   get flightPhase(): FlightPhase {
     const leg = this.active.legs[0];
+    // A missed approach request disarms the approach, so the final it continues along is flown in the terminal phase (M300 7-15).
     const approach = this.approachPhaseActive && this.armedApproach && leg?.kind !== "disco" && leg?.source === "APPR";
     return s300Phase(this.here, this.validBaroAltitude, this.db.airport(this.active.origin), this.db.airport(this.active.dest), approach);
   }
@@ -1939,35 +1945,61 @@ export class ScriptedFms implements CduBackend {
   }
 
   /**
-   * TOGA or MISSED APPR before the MAP: the missed approach is requested, but lateral guidance continues along the
-   * approach to the MAP, which then sequences the missed approach legs (M300 7-16 item 4; plan R2-03 MA-EARLY and
-   * TOGA-EARLY). The approach is disarmed (no descent on its path) and the missed-approach hold armed. The laboratory
-   * airline profile, whose VNAV climbs on the missed approach legs, drops the rest of the approach at once instead.
+   * The FMS missed-approach request (M300 7-15, 7-16; plan C.3.1), from MISSED APPR or TOGA: the FMS reverts to the
+   * terminal phase (RNP 1.0), NO APPR INTEGRITY is withdrawn, the approach is disarmed (no descent on its path) and the
+   * missed-approach hold armed. Before the MAP guidance continues along the approach to the MAP, which then sequences
+   * the missed approach legs (7-16 item 4; plan R2-03 MA-EARLY). Refused with the FMS failed, or with no missed
+   * approach ahead (once it is being flown there is nothing left to go around from).
    */
-  goAround() {
+  requestMissedApproach() {
     if (this.injected.has("fmsFail")) return false;
-    const route = this.active;
-    const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
-    // Only from the approach: once the missed approach is being flown there is nothing left to go around from.
+    const missed = this.active.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
     if (missed <= 0) return false;
     this.missedRequested = true;
     this.approachCancelled = false;
     this.approachIntegrityLostAt = null;
     this.visualContinuation = false;
     if (this.mapPassed && this.aircraftProfile.verticalPolicy === "ADVISORY") this.passLeg(this.instrumentEnd);
+    this.armedApproach = false;
+    this.armMissedHold(this.active);
+    this.withdrawAlert("NO APPR INTEGRITY");
+    this.emit();
+    return true;
+  }
+
+  /**
+   * MISSED APPR> (LSK 6R on LEGS 1/X, VNAV and PROGRESS 1/4), when configured: in the approach phase, until pressed.
+   * An approach that NO APPR INTEGRITY cancelled has left the approach phase but is still armed and flown, and the
+   * request is what withdraws that alert (C.3.1), so the prompt stays until the request is made or the approach disarmed.
+   */
+  get missedPromptShown() {
+    const flown = this.flightPhase === "APPROACH" || this.approachCancelled && this.armedApproach;
+    return this.aircraftProfile.configuration?.options.missedPrompt.configured === true && !this.injected.has("fmsFail") && flown
+      && this.active.legs.some((leg, i) => i > 0 && leg.kind !== "disco" && leg.source === "MISSED");
+  }
+
+  /**
+   * TOGA: the FMS missed-approach request, with the autopilot's go-around (the flight simulation takes it from
+   * goArounds). TOGA before the MAP keeps the lateral path to the MAP as MISSED APPR does (TOGA-EARLY, inferred). The
+   * laboratory airline profile, whose VNAV climbs on the missed approach legs, drops the rest of the approach at once.
+   */
+  goAround() {
+    const route = this.active;
+    const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
+    if (!this.requestMissedApproach()) return false;
     if (this.aircraftProfile.verticalPolicy !== "ADVISORY") {
       route.legs.splice(0, missed);
       this.legStart = { ...this.here };
     }
-    this.armedApproach = false;
     this.goArounds += 1;
-    this.armMissedHold(route);
     this.emit();
     return true;
   }
 
   /** Accepted go-arounds, so the flight simulation takes the go-around transition however TOGA was pressed. */
   goArounds = 0;
+  /** A missed approach requested (MISSED APPR or TOGA), until another approach is loaded. */
+  get missedApproachRequested() { return this.missedRequested; }
   /** The active plan's revision and fingerprint, as the engineering record states them. */
   get planIdentity() { return { revision: this.planRevision, fingerprint: planFingerprint(this.active.legs) }; }
 
@@ -2040,6 +2072,7 @@ export class ScriptedFms implements CduBackend {
   tick() {
     const now = this.now.getTime();
     this.watchHover();
+    this.watchHoldEntry();
     // A database past the end of its cycle is flagged once; swapping to the next cycle clears it.
     // A cycle whose data gives no dates is never out of date: its end is unknown, not past.
     if (this.activeCycle.to !== null && now > this.activeCycle.to && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE")); }
@@ -2409,6 +2442,30 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** The entry the aircraft will fly (or flew) into the hold, from the track that arrives at the holding fix. */
+  /** The hold entry advisory on show, and the passages of the holding fix that remove it. */
+  private holdEntryAdvisory: { text: string; passes: number; seen: number } | null = null;
+
+  /**
+   * PARALLEL, TEARDROP or DIRECT HOLD ENTRY (M300 10-2, 10-4, 10-6), for the entry the FMS will fly: shown one minute
+   * before the holding fix when the aircraft is on track inbound to it, otherwise one minute before above 250 kt of
+   * ground speed and ten seconds before below it; removed at the fix for a direct entry, and at the second passage of
+   * the fix (the end of the entry) for the others. "On track" is laboratory: within 0.1 NM and 10 degrees of the leg.
+   */
+  private watchHoldEntry() {
+    const route = this.active, hold = route.hold, leg = route.legs[0];
+    // The hold gone (erased, exited, replaced) takes its advisory with it.
+    if (this.holdEntryAdvisory && (!hold || hold.status === "EXIT ARMED")) { this.withdrawAlert(this.holdEntryAdvisory.text); this.holdEntryAdvisory = null; }
+    if (this.holdEntryAdvisory || !hold || hold.status !== "ARMED" || leg?.kind !== "wpt" || leg.ident !== hold.fix) return;
+    const fix = this.coordinates(hold.fix);
+    const entry = this.holdEntryFor(route);
+    if (!fix || !entry || this.groundSpeed <= 1) return;
+    const seconds = (distanceNm(this.here, fix) / this.groundSpeed) * 3600;
+    const onTrack = Math.abs(this.crossTrack) <= 0.1 && Math.abs(this.trackError) <= 10;
+    if (seconds > (onTrack || this.groundSpeed > 250 ? 60 : 10)) return;
+    this.holdEntryAdvisory = { text: `${entry} HOLD ENTRY`, passes: entry === "DIRECT" ? 1 : 2, seen: 0 };
+    this.advisory(this.holdEntryAdvisory.text);
+  }
+
   holdEntryFor(route: Route): HoldEntry | null {
     const hold = route.hold;
     if (!hold) return null;
