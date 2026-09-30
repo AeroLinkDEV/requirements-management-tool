@@ -379,7 +379,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
       ];
       // Two lines each, the motion then where it is now: side by side they need 30 columns and overprinted each other.
       moving.slice(0, 2).forEach(([ident, motion], i) => {
-        const at = fms.coordinates(ident);
+        const at = fms.movingPositionNow(ident);
         lines[6 + i * 2] = { left: medium(`${ident} ${three(motion.track)}°/${motion.speed}KT`, "green") };
         lines[7 + i * 2] = at ? { left: small(formatPosition(at)) } : undefined;
       });

@@ -612,6 +612,7 @@ export class FlightSimulator {
     this.watchGoAround();
     this.watchGpsLateral();
     this.watchHover();
+    this.watchRendezvous();
     const computed = this.guide(dt);
     this.updateApproach(computed.crossTrack);
     // An approach that ended this step (cancelled or lost) latched a hold after the guidance was built: publish the
@@ -916,6 +917,22 @@ export class FlightSimulator {
    * SHORT) withdraws roll steering, so NAV gives way to HDG (F8); the request withdrawn (TDN FUNCTION LOST, the
    * procedure ended by a direct-to or a new route) cancels a retained TD/H toward MRK: HOV where it is, or ATT.
    */
+  /**
+   * M300 11-37 condition 1: the active waypoint is a moving one whose rendezvous is unachievable, and the FMS roll
+   * command is invalid. NAV gives way to a held heading (F8), as for any roll steering withdrawn.
+   */
+  private watchRendezvous() {
+    const invalid = this.fms.rendezvousRollInvalid;
+    if (invalid && !this.rendezvousRollInvalid && this.lateral === "LNAV") {
+      this.lateral = "HDG";
+      this.heading = Math.round(norm360(this.fms.heading));
+      this.held = true;
+      this.record("NAV REMOVED", "RENDEZVOUS UNACHIEVABLE: the roll command is invalid; HDG HOLD " + String(this.heading).padStart(3, "0") + "°T");
+    }
+    this.rendezvousRollInvalid = invalid;
+  }
+  private rendezvousRollInvalid = false;
+
   private watchHover() {
     const hover = this.fms.hover;
     if (!this.advisory) return;
@@ -1355,13 +1372,14 @@ export class FlightSimulator {
     // Along the FAS course, from which 116 is measured, not the leg from the FAF.
     const desiredTrack = gpsLateral !== null ? fms.finalApproachCourse ?? g.track : g.track;
 
-    // Fly-by: start the turn onto the next leg early; fly-over for holding fixes, search starts and /O waypoints.
+    // Fly-by: start the turn onto the next leg early; fly-over for holding fixes, search starts, /O waypoints and moving
+    // waypoints (M300 11-37: a moving waypoint in the route is a fly-over).
     const next = route.legs[1];
     const nextTo = next?.kind === "wpt" ? fms.coordinates(next.ident) : undefined;
     // Search waypoints are fly-by (M300 11-2), but the ladder's entry waypoint is fly-over (11-4): a square or sector
     // search is joined turning early onto its first leg, on the SAR bearing.
     const sarEntry = leg.qualifier === "/S" && fms.sar.active !== null && fms.sar.active !== "LADDER";
-    const flyOver = !sarEntry && (leg.qualifier !== undefined || leg.path === "RF" || leg.path === "AF" || !nextTo || next?.kind === "wpt" && (next.path === "RF" || next.path === "AF"));
+    const flyOver = !sarEntry && (leg.qualifier !== undefined || fms.isMoving(leg.ident) || leg.path === "RF" || leg.path === "AF" || !nextTo || next?.kind === "wpt" && (next.path === "RF" || next.path === "AF"));
     const outbound = sarEntry ? fms.sar.sarBearing : next?.kind === "wpt" && next.path === "CF" && next.course !== undefined ? next.course : nextTo ? courseDeg(to, nextTo) : g.track;
     const lead = flyOver ? 0 : turnLead(this.tas, angleDiff(g.track, outbound), this.steeringLimit, this.profile.rollRate.value);
     this.lead = lead;
