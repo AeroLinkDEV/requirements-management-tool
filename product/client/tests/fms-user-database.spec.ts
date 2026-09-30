@@ -1,9 +1,9 @@
 import { expect, logicTest as test } from './isolated-client-test'
-import { formatPosition } from '../src/fmsCdu/fmsModel'
+import { distanceNm, formatPosition, offset } from '../src/fmsCdu/fmsModel'
 import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
 import { screenText, SCRATCHPAD_LINE } from '../src/fmsCdu/screen'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
-import { USER_WAYPOINT_CAPACITY, memoryUserDatabaseStore, type UserDatabaseStore } from '../src/fmsCdu/userDatabase'
+import { USER_WAYPOINT_CAPACITY, memoryUserDatabaseStore, movingUserWaypointPosition, type MovingUserWaypoint, type UserDatabaseStore } from '../src/fmsCdu/userDatabase'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
 // E5, the user database (plan rev 2 E5, kept by rev 3; DEC-146 D3; M300 11-23…11-31): user waypoints, among them one
@@ -144,7 +144,7 @@ test('a collision is reported and nothing is overwritten: the same ident at anot
   const before = [...store.entries.values()][0]
   const doc = JSON.parse(unit.exportUserDatabase())
   doc.waypoints = [{ ident: 'ALPHA', position: { lat: 41.5, lon: -72.4 }, type: 'FIXED' }, { ident: 'NEW', position: { lat: 41, lon: -72 }, type: 'FIXED' }]
-  expect(unit.importUserDatabase(JSON.stringify(doc))).toEqual({ refused: ['user waypoint ALPHA is already stored at another position'] })
+  expect(unit.importUserDatabase(JSON.stringify(doc))).toEqual({ refused: ['user waypoint ALPHA is already stored with another position or motion'] })
   doc.waypoints = [{ ident: 'YOW', position: { lat: 41, lon: -72 }, type: 'FIXED' }]
   expect(unit.importUserDatabase(JSON.stringify(doc))).toEqual({ refused: ['YOW is already a navigation database or pilot waypoint'] })
   expect(unit.userWaypoints).toEqual([{ ident: 'ALPHA', position: { lat: 40.9, lon: -72.4 }, type: 'FIXED' }])
@@ -168,4 +168,84 @@ test('a store that refuses the write (quota) keeps the database as it was', () =
   expect(unit.createUserWaypoint('ALPHA', { lat: 40, lon: -72 })).toBe('not-saved')
   expect(unit.userWaypoints).toEqual([])
   expect(scratch(unit)).toBe('USER DB NOT SAVED')
+})
+
+// M300 11-25: TYPE toggled to MOVING, with the track and ground speed at 2R. The stored record carries the epoch, the
+// simulation time at which its position held (rev 2 D-R epoch; rev 3 D-R restart), so a restart places it on the
+// simulation clock, never the wall clock.
+test('a moving user waypoint is stored with its track, ground speed and epoch, and a restart places it by the simulation clock', () => {
+  const store = memoryUserDatabaseStore()
+  let now = Date.UTC(2026, 8, 30, 12, 0, 0)
+  const at = () => new Date(now)
+  const session = () => new ScriptedFms(at, { userDatabase: { store, scope } })
+  const unit = session()
+  unit.press('INIT_REF')
+  unit.press('LSK1R')
+  unit.press('LSK6R')
+  expect(lines(unit)[3]).toMatch(/TRK\/GS/)
+  // TRK/GS is taken only once the type is MOVING.
+  type(unit, '111/22')
+  unit.press('LSK2R')
+  expect(scratch(unit)).toBe('INVALID ENTRY')
+  unit.press('CLR')
+  unit.press('CLR', { held: true })
+  unit.press('LSK3L')
+  expect(lines(unit)[6]).toMatch(/^>MOVING/)
+  type(unit, 'N4050.0W07230.0')
+  unit.press('LSK1R')
+  type(unit, 'SHIP')
+  unit.press('LSK1L')
+  // Not complete without the motion.
+  expect(lines(unit)[11] ?? '').not.toMatch(/SAVE\?/)
+  type(unit, '361/22')
+  unit.press('LSK2R')
+  expect(scratch(unit)).toBe('INVALID ENTRY')
+  unit.press('CLR')
+  unit.press('CLR', { held: true })
+  type(unit, '111/22')
+  unit.press('LSK2R')
+  expect(lines(unit)[4]).toMatch(/111°T\/ 22KT\s*$/)
+  unit.press('LSK6R')
+  expect(scratch(unit)).toBe('SHIP STORED')
+  const origin = { lat: 40 + 50 / 60, lon: -(72 + 30 / 60) }
+  const record = { ident: 'SHIP', position: origin, type: 'MOVING', trackDeg: 111, groundSpeedKt: 22, epoch: '2026-09-30T12:00:00.000Z' }
+  expect(unit.userWaypoints).toEqual([record])
+  expect(movingUserWaypointPosition(record as MovingUserWaypoint, new Date(now))).toEqual(origin)
+  // Half an hour of simulation time later it is 11 NM along 111°, and it is a moving waypoint wherever it is used.
+  now += 30 * 60_000
+  expect(distanceNm(origin, unit.coordinates('SHIP')!)).toBeCloseTo(11, 6)
+  expect(unit.coordinates('SHIP')).toEqual(offset(origin, 111, 11))
+  expect(unit.movingWaypoints.SHIP).toEqual({ track: 111, speed: 22 })
+  expect(unit.designateHoverMarkIdent('SHIP')).toBe(false)
+  unit.press('NEXT')
+  expect(lines(unit)[2]).toMatch(/^SHIP\s+MOVING$/)
+  // A restart an hour after the epoch reads the same record and places it 22 NM along; the record is unchanged.
+  now += 30 * 60_000
+  const again = session()
+  expect(again.userWaypoints).toEqual([record])
+  expect(again.coordinates('SHIP')).toEqual(offset(origin, 111, 22))
+  // Round-trips through export and import, and an identical record is not a collision.
+  const text = again.exportUserDatabase()
+  const into = fms(memoryUserDatabaseStore(), 'pilot.two')
+  expect(into.importUserDatabase(text)).toEqual({ imported: { waypoints: 1, routes: 0 } })
+  expect(into.userWaypoints).toEqual([record])
+  expect(into.importUserDatabase(text)).toEqual({ imported: { waypoints: 0, routes: 0 } })
+})
+
+test('an import refuses a moving waypoint without a readable track, speed or epoch, and one with another epoch collides', () => {
+  const unit = fms(memoryUserDatabaseStore())
+  expect(unit.createUserWaypoint('SHIP', { lat: 40, lon: -72 }, { track: 90, speed: 20 })).toBeUndefined()
+  const doc = JSON.parse(unit.exportUserDatabase())
+  const good = doc.waypoints[0]
+  expect(good).toEqual({ ident: 'SHIP', position: { lat: 40, lon: -72 }, type: 'MOVING', trackDeg: 90, groundSpeedKt: 20, epoch: '2026-09-30T12:00:00.000Z' })
+  const bad = (change: Record<string, unknown>) => JSON.stringify({ ...doc, waypoints: [{ ...good, ident: 'OTHER', ...change }] })
+  expect(unit.importUserDatabase(bad({ trackDeg: 361 }))).toEqual({ refused: ['waypoint OTHER: track 361 is not 0-360 degrees'] })
+  expect(unit.importUserDatabase(bad({ groundSpeedKt: -1 }))).toEqual({ refused: ['waypoint OTHER: ground speed -1 is not 0-999 kt'] })
+  expect(unit.importUserDatabase(bad({ epoch: 'yesterday' }))).toEqual({ refused: ['waypoint OTHER: epoch "yesterday" is not a time'] })
+  expect(unit.importUserDatabase(bad({ type: 'DRIFTING' }))).toEqual({ refused: ['waypoint OTHER: type "DRIFTING" is not FIXED or MOVING'] })
+  expect(unit.importUserDatabase(JSON.stringify({ ...doc, waypoints: [{ ...good, epoch: '2026-09-30T13:00:00.000Z' }] })))
+    .toEqual({ refused: ['user waypoint SHIP is already stored with another position or motion'] })
+  expect(unit.importUserDatabase(JSON.stringify({ ...doc, waypoints: [{ ident: 'SHIP', position: good.position, type: 'FIXED' }] })))
+    .toEqual({ refused: ['user waypoint SHIP is already stored with another position or motion'] })
+  expect(unit.userWaypoints).toEqual([good])
 })

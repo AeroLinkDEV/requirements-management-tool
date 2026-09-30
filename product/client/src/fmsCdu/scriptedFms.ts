@@ -45,8 +45,8 @@ import { ACTIVE_PROFILE, fmsBankLimit, type AircraftProfile } from "./profile";
 import { COLUMNS, compose, type CduBackend, type CduScreen, type Lamp, type Line } from "./screen";
 import { NO_SURFACE, radioHeight, surfaceById, type Surface } from "./surface";
 import {
-  EMPTY_USER_DATABASE, USER_WAYPOINT_CAPACITY, memoryUserDatabaseStore, mergeUserDatabase, parseUserDatabase, serializeUserDatabase,
-  type UserDatabase, type UserDatabaseStore, type UserScope,
+  EMPTY_USER_DATABASE, USER_WAYPOINT_CAPACITY, memoryUserDatabaseStore, mergeUserDatabase, movingPosition, parseUserDatabase, serializeUserDatabase,
+  userWaypointPosition, type UserDatabase, type UserDatabaseStore, type UserScope, type UserWaypoint,
 } from "./userDatabase";
 import { TACTICAL_PAGES } from "./tacticalPages";
 import { checkAtTdn, planTransition } from "./transition";
@@ -208,7 +208,8 @@ export class ScriptedFms implements CduBackend {
   private sourceLog: { at: Date; source: string }[] = [];
   private armedApproach = false;
   /** Waypoints that move (a ship, a formation lead): position advanced by track and speed as time passes. */
-  private moving: Record<string, { track: number; speed: number }> = {};
+  /** Pilot moving waypoints: where each was at its epoch (simulation milliseconds), and its track and speed. */
+  private moving: Record<string, { track: number; speed: number; origin: LatLon; epoch: number }> = {};
   private faults: { at: Date; text: string }[] = [];
   private selfTest: { startedAt: number | null; result: "PASS" | "FAIL" | null } = { startedAt: null, result: null };
   /** The other FMS: in dual operation every executed route is cross-loaded to it; in independent operation not. */
@@ -268,7 +269,11 @@ export class ScriptedFms implements CduBackend {
   /** Why the stored user database could not be read at start (it is then left as it was, and not overwritten), or null. */
   userDatabaseProblem: string | null = null;
   /** A NEW USER WPT being entered on USER WPT 1/2: its ident and position, and the reference it was made from. */
-  userWaypointDraft: { ident: string | null; position: LatLon | null; ref: { ident: string; position: LatLon } | null } | null = null;
+  userWaypointDraft: {
+    ident: string | null; position: LatLon | null; ref: { ident: string; position: LatLon } | null;
+    /** TYPE MOVING (M300 11-25), with the track and ground speed entered at 2R. */
+    moving?: boolean; motion?: { track: number; speed: number } | null;
+  } | null = null;
   private secondaryRoute: Route | null = null;
   /** The ident shown on REF NAV DATA, and an airway chosen on RTE 2 waiting for its TO fix. */
   navDataQuery: string | null = null;
@@ -1197,10 +1202,8 @@ export class ScriptedFms implements CduBackend {
    * the alert list, so the advisory is used) when a climb constraint cannot be made.
    */
   updatePerformance(dt: number) {
-    for (const [ident, motion] of Object.entries(this.moving)) {
-      const at = this.points[ident];
-      if (at) this.points[ident] = offset(at, motion.track, (motion.speed * dt) / 3600);
-    }
+    // Moving waypoints follow the simulation clock from their epochs (rev 2 D-R epoch), not the ticks.
+    for (const ident of Object.keys(this.moving)) this.points[ident] = this.movingAt(ident)!;
     const rendezvous = this.rndz.active ? this.rendezvous() : null;
     if (rendezvous && rendezvous.required !== null && !rendezvous.achievable && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE")); }
     if (rendezvous?.achievable) this.rndz.alerted = false;
@@ -1280,11 +1283,25 @@ export class ScriptedFms implements CduBackend {
   /** Defines a moving waypoint at a position, moving on a track at a speed. */
   defineMoving(ident: string, position: LatLon, track: number, speed: number) {
     this.points[ident] = position;
-    this.moving[ident] = { track, speed };
+    this.moving[ident] = { track, speed, origin: { ...position }, epoch: this.now.getTime() };
     this.pilot = [...this.pilot.filter(p => p.ident !== ident), { ident, position, definition: `MOVING ${String(track).padStart(3, "0")}/${speed}KT` }];
   }
 
-  get movingWaypoints() { return this.moving; }
+  /** Every moving waypoint, pilot and stored user ones, with its track and speed. */
+  get movingWaypoints(): Record<string, { track: number; speed: number }> {
+    const all: Record<string, { track: number; speed: number }> = {};
+    for (const w of this.userDb.waypoints) if (w.type === "MOVING") all[w.ident] = { track: w.trackDeg, speed: w.groundSpeedKt };
+    for (const [ident, { track, speed }] of Object.entries(this.moving)) all[ident] = { track, speed };
+    return all;
+  }
+
+  isMoving(ident: string) { return ident in this.moving || this.userDb.waypoints.some(w => w.ident === ident && w.type === "MOVING"); }
+
+  /** A pilot moving waypoint where the simulation clock has taken it since its epoch. */
+  private movingAt(ident: string): LatLon | undefined {
+    const m = this.moving[ident];
+    return m && movingPosition(m.origin, m.track, m.speed, m.epoch, this.now.getTime());
+  }
 
   /** The TDN path angle from present altitude to the target altitude at the point before the reference. */
   tdnAngle(): number | null {
@@ -1728,7 +1745,8 @@ export class ScriptedFms implements CduBackend {
   }
 
   private ownPoint(ident: string) {
-    return this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position ?? this.userDb.waypoints.find(w => w.ident === ident)?.position;
+    const user = this.userDb.waypoints.find(w => w.ident === ident);
+    return this.movingAt(ident) ?? this.points[ident] ?? this.marks.find(mark => mark.ident === ident)?.position ?? (user && userWaypointPosition(user, this.now));
   }
 
   /** A database position in the active cycle, looked up now: a runway in the context of the route's airports. */
@@ -1778,11 +1796,16 @@ export class ScriptedFms implements CduBackend {
    * already in use (a navigation database, pilot or user waypoint: the bench does not store duplicate idents, where the
    * CMA allows them with SELECT WPT), or the database is full (460).
    */
-  createUserWaypoint(ident: string, position: LatLon): "invalid" | "in-use" | "full" | "not-saved" | undefined {
+  createUserWaypoint(ident: string, position: LatLon, motion?: { track: number; speed: number }): "invalid" | "in-use" | "full" | "not-saved" | undefined {
     if (!/^[A-Z0-9]{1,5}$/.test(ident)) return "invalid";
+    if (motion && !(motion.track >= 0 && motion.track <= 360 && motion.speed >= 0 && motion.speed <= 999)) return "invalid";
     if (this.coordinates(ident)) return "in-use";
     if (this.userWaypointsFree <= 0) return "full";
-    if (!this.saveUserDatabase({ ...this.userDb, waypoints: [...this.userDb.waypoints, { ident, position: { ...position }, type: "FIXED" }] })) return "not-saved";
+    // A moving one holds this position now: its epoch is the present simulation time.
+    const waypoint: UserWaypoint = motion
+      ? { ident, position: { ...position }, type: "MOVING", trackDeg: motion.track, groundSpeedKt: motion.speed, epoch: this.now.toISOString() }
+      : { ident, position: { ...position }, type: "FIXED" };
+    if (!this.saveUserDatabase({ ...this.userDb, waypoints: [...this.userDb.waypoints, waypoint] })) return "not-saved";
     return undefined;
   }
 
@@ -2135,7 +2158,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   designateHoverMarkIdent(ident: string) {
-    if (ident in this.moving) return false;
+    if (this.isMoving(ident)) return false;
     const position = this.coordinates(ident);
     return position ? this.designateHoverMark({ ident, position, label: null }) : false;
   }
