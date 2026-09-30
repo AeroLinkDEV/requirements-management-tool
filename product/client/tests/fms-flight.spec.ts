@@ -443,16 +443,45 @@ test('a wind at or above the true airspeed cannot be held: UNABLE HOLD (D-H, lab
   expect(activeIdent(unit)).toBe('RDG')
 })
 
-test('the helicopter hold defaults to its holding speed limit and leg time for the altitude, and warns above the limit (D-H, M300 10-8, 10-9)', () => {
-  const { unit, fly } = setup()
+test('the helicopter hold defaults to its holding speed limit and leg time for the altitude (D-H, M300 10-9)', () => {
+  const { unit } = setup()
   press(unit, 'HOLD', 'LSK2L')
   const hold = unit.route.hold!
   expect(hold.speed).toBe(unit.altitude <= 6000 ? 100 : 170)
   expect(hold.legTime).toBe(unit.altitude <= 14000 ? 1 : 1.5)
-  unit.changeHold(h => { h.speed = unit.altitude <= 6000 ? 120 : 190 })
-  unit.press('EXEC')
-  fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')
-  expect(unit.recallList.some(m => m.text === 'HIGH HOLDING SPEED')).toBe(true)
+})
+
+test('HIGH HOLDING SPEED: the pattern at the speed and wind now against the ICAO protected area for the table speed and the maximum wind, a minute before the fix and at each fly-over (D-H, M300 10-8)', () => {
+  // Above the table speed (120 against 100 KIAS) in calm air: the pattern still fits the area built for the table
+  // speed in the ICAO maximum wind (2h + 47 kt): no alert.
+  const calm = setup()
+  press(calm.unit, 'HOLD', 'LSK2L')
+  calm.unit.changeHold(h => { h.speed = 120 })
+  calm.unit.press('EXEC')
+  calm.fly(3600, () => calm.unit.activeRoute.hold?.status === 'IN PROGRESS')
+  calm.fly(600)
+  expect(calm.unit.recallList.map(m => m.text)).not.toContain('HIGH HOLDING SPEED')
+  expect(calm.unit.holdExceedsProtection(calm.unit.activeRoute.hold!)).toBe(false)
+  // The same hold in a 70 kt wind: its turns, sized for 190 kt over the ground, pass the area's: HIGH HOLDING SPEED a
+  // minute before the fix, and again at a fly-over in the hold.
+  const windy = setup()
+  Object.assign(windy.unit.wind, { direction: 90, speed: 70 })
+  press(windy.unit, 'HOLD', 'LSK2L')
+  windy.unit.changeHold(h => { h.speed = 120 })
+  windy.unit.press('EXEC')
+  const rdg = windy.unit.coordinates('RDG')!
+  let toFix: number | null = null
+  windy.fly(3600, () => {
+    if (toFix === null && windy.unit.recallList.some(m => m.text === 'HIGH HOLDING SPEED')) toFix = (distanceNm(windy.unit.position, rdg) / windy.unit.groundSpeed) * 3600
+    return windy.unit.activeRoute.hold?.status === 'IN PROGRESS'
+  })
+  expect(toFix).not.toBeNull()
+  expect(toFix!).toBeLessThanOrEqual(60)
+  expect(toFix!).toBeGreaterThan(55)
+  const alerts = () => windy.unit.recallList.filter(m => m.text === 'HIGH HOLDING SPEED').length
+  const before = alerts()
+  windy.fly(1800, () => alerts() > before)
+  expect(alerts()).toBeGreaterThan(before)
 })
 
 test('a search pattern is flown along its geometry to its 80th search waypoint, then END OF SEARCH and the route continues (M300 11-15)', () => {

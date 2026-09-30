@@ -737,6 +737,8 @@ export class ScriptedFms implements CduBackend {
     }
     // A fix crossing in the hold: at the end of the entry (the first crossing after it), or after a whole racetrack.
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && completedCircuit) hold.circuits = (hold.circuits ?? 0) + 1;
+    // HIGH HOLDING SPEED at each fly-over of the fix after the first (M300 10-8), the pattern rebuilt at the speed now.
+    if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExitReached(hold)) hold.status = "EXIT ARMED";
     if (hold && hold.fix === leg.ident && hold.status !== "EXIT ARMED") {
       if (hold.status === "ARMED") {
@@ -748,8 +750,9 @@ export class ScriptedFms implements CduBackend {
         if (hold.defaults?.legTime !== undefined && hold.legDistance === null && hold.legTime === hold.defaults.legTime) hold.legTime = this.defaultHoldLegTime();
         if (hold.defaults?.speed !== undefined && hold.speed === hold.defaults.speed) hold.speed = this.defaultHoldSpeed();
         delete hold.defaults;
-        const limit = holdingSpeedLimit(this.altitude, this.aircraftProfile);
-        if (limit !== null && hold.speed > limit) this.alert(alert("HIGH HOLDING SPEED"));
+        // Entered without the minute's notice (the hold made within it): checked at the fix.
+        if (this.holdSpeedChecked !== hold && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
+        this.holdSpeedChecked = hold;
       }
       return "hold";
     }
@@ -2073,6 +2076,7 @@ export class ScriptedFms implements CduBackend {
     const now = this.now.getTime();
     this.watchHover();
     this.watchHoldEntry();
+    this.watchHoldSpeed();
     // A database past the end of its cycle is flagged once; swapping to the next cycle clears it.
     // A cycle whose data gives no dates is never out of date: its end is unknown, not past.
     if (this.activeCycle.to !== null && now > this.activeCycle.to && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE")); }
@@ -2464,6 +2468,49 @@ export class ScriptedFms implements CduBackend {
     if (seconds > (onTrack || this.groundSpeed > 250 ? 60 : 10)) return;
     this.holdEntryAdvisory = { text: `${entry} HOLD ENTRY`, passes: entry === "DIRECT" ? 1 : 2, seen: 0 };
     this.advisory(this.holdEntryAdvisory.text);
+  }
+
+  /** The hold whose entry HIGH HOLDING SPEED has been judged for, a minute before its fix. */
+  private holdSpeedChecked: Hold | null = null;
+
+  /** HIGH HOLDING SPEED on entry: judged once, one minute before the holding fix (M300 10-8). */
+  private watchHoldSpeed() {
+    const route = this.active, hold = route.hold, leg = route.legs[0];
+    if (!hold || hold.status !== "ARMED" || this.holdSpeedChecked === hold || leg?.kind !== "wpt" || leg.ident !== hold.fix) return;
+    const fix = this.coordinates(hold.fix);
+    if (!fix || this.groundSpeed <= 1 || (distanceNm(this.here, fix) / this.groundSpeed) * 3600 > 60) return;
+    this.holdSpeedChecked = hold;
+    if (this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
+  }
+
+  /**
+   * HIGH HOLDING SPEED (M300 10-8; a bench heuristic, plan D-H, not a containment proof): the hold's pattern at the
+   * present true airspeed (or its holding speed, if faster) and computed wind against the ICAO protected area for the maximum holding speed of Table
+   * 10-1 and the maximum wind at the altitude, less a buffer. Both are built as the flight builds a hold (holds.ts,
+   * rate-one bank or the limit), the ICAO one at the table speed's true airspeed in the omnidirectional wind of
+   * PANS-OPS (Doc 8168): 2h + 47 kt, h the altitude in thousands of feet, its timed leg stretched by that wind. Exceeded when its
+   * length (the leg and the turn diameter) or its width (the turn diameter) passes the protected area's less 5 percent
+   * (a laboratory buffer), or it cannot be flown at all. No table speed (the helicopter above 14,000 ft): no check.
+   */
+  holdExceedsProtection(hold: Hold) {
+    const maxIas = holdingSpeedLimit(this.altitude, this.aircraftProfile);
+    const fix = this.coordinates(hold.fix);
+    if (maxIas === null || !fix) return false;
+    const minutes = hold.legTime ?? defaultLegMinutes(this.altitude);
+    // The leg as flown is the timed leg at the true airspeed (a ground racetrack); the protected area allows the maximum
+    // wind to stretch it, a timed outbound leg flown with the wind behind (a leg distance stays what it is).
+    const size = (tas: number, wind: number, legNm: number) => {
+      const g = holdGeometry(fix, hold.inbound, hold.turn, tas, wind, legNm, MAX_BANK);
+      return g ? { length: g.legNm + 2 * g.radius, width: 2 * g.radius } : null;
+    };
+    // Flown as the bench flies a hold: at the present true airspeed, or the hold's speed if faster.
+    const tas = Math.max(this.aircraft.tas, tasFromIas(hold.speed, this.altitude));
+    const flown = size(tas, this.systemWind.speed, hold.legDistance ?? (minutes * tas) / 60);
+    const maxTas = tasFromIas(maxIas, this.altitude), maxWind = (2 * this.altitude) / 1000 + 47;
+    const area = size(maxTas, maxWind, hold.legDistance ?? (minutes * (maxTas + maxWind)) / 60);
+    if (!area) return false;
+    if (!flown) return true;
+    return flown.length > 0.95 * area.length || flown.width > 0.95 * area.width;
   }
 
   holdEntryFor(route: Route): HoldEntry | null {
