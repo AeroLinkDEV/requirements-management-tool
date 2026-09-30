@@ -475,6 +475,15 @@ test('selecting FMS 2 guidance never creates or resets another aircraft and FMS 
   expect(system.flights[0].guidance.desiredTrack).toBeNull()
   expect(one.truePosition).toEqual(two.truePosition)
   expect(distanceNm(before, two.truePosition)).toBeGreaterThan(0.1)
+  // The observer must use the one AFCS's recovered HDG selection, not keep an independently engaged LNAV.
+  const recovered = dualSetup()
+  recovered.one.powerOff(); recovered.fly(1)
+  recovered.one.powerOn('COLD', true); recovered.fly(6)
+  expect(recovered.system.mode).toBe('INDEPENDENT')
+  mode(recovered.one); expect(recovered.system.mode).toBe('SYNC')
+  expect(recovered.system.simulator.guidance.mode).toBe('HDG')
+  recovered.fly(600)
+  expect(recovered.two.activeRoute).toEqual(recovered.one.activeRoute)
 })
 
 // Stage B2 of the helicopter-first plan: the radio altimeter measures the aircraft's physical height above a declared

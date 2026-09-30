@@ -211,8 +211,8 @@ export class DualFmsSystem {
       const h = Math.min(1, remaining), selected = this.unit(this.driver), other = this.peer(this.driver);
       if (this.driver === 2) { this.unit(1).observeAircraft(selected); this.unit(1).refreshSensorInput(); }
       this.simulator.step(h);
-      other.observeAircraft(selected); this.flights[2 - this.driver].observe(h);
-      this.reconcile(); this.flights.forEach(flight => flight.refreshGuidance()); remaining -= h;
+      other.observeAircraft(selected); this.flights[2 - this.driver].observe(h, this.simulator);
+      this.reconcile(); this.flights.forEach((flight, index) => flight.refreshGuidance(index === this.driver - 1 ? undefined : this.simulator)); remaining -= h;
     }
     this.notify();
   }
@@ -222,6 +222,6 @@ export class DualFmsSystem {
     this.unit(1).refreshSensorInput(); this.unit(1).tick();
     this.unit(2).observeAircraft(selected); this.unit(2).refreshSensorInput(); this.unit(2).tick();
     other.observeAircraft(selected); this.settingsChanged(1); this.settingsChanged(2); this.reconcile();
-    this.flights.forEach(flight => flight.refreshGuidance()); this.notify();
+    this.flights.forEach((flight, index) => flight.refreshGuidance(index === this.driver - 1 ? undefined : this.simulator)); this.notify();
   }
 }
