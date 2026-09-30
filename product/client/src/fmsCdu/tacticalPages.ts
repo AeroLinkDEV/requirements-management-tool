@@ -136,9 +136,14 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         set(n);
         done();
       };
+      // Engaged, the search is flown as defined: its parameters change only before (M300 11-15 NOTE); to change it, a
+      // direct-to the search waypoint, and define it again.
+      const engaged = sar.status === "IN PROGRESS";
       if (row === 6) {
         if (side === "L") {
           if (sar.pending) fms.eraseModification();
+          // PPOS: only with no other search pattern waypoint in the active route (A-157; the bench is always airborne).
+          else if (fms.activeRoute.legs.some(leg => leg.kind === "wpt" && leg.qualifier === "/S")) return "not-allowed";
           else { sar.refId = null; sar.relativeBearing = null; sar.distance = null; }
           return;
         }
@@ -147,6 +152,7 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
         return;
       }
       if (!scratch) return;
+      if (engaged) return "not-allowed";
       if (side === "L") {
         switch (row) {
           case 1:
@@ -165,20 +171,22 @@ export const TACTICAL_PAGES: Record<TacticalPageId, Page> = {
             return numeric(0, 360, n => { sar.relativeBearing = n; });
           case 4:
             if (scratch === "DELETE") { sar.distance = null; return done(); }
-            return numeric(0, 99.9, n => { sar.distance = n; });
+            return numeric(0.1, 99.9, n => { sar.distance = n; });
         }
         return;
       }
       switch (row) {
-        // TRACK SPACING is 0.1 to 40 NM (manual, search patterns).
+        // The field ranges of M300 A-153…A-176: track spacing, leg length and diameter 0.1 to 40 NM (chapter 11-6 gives
+        // the ladder's track spacing as 0.1 to 4.0; the field definition, A-157, 0.1 to 40, is taken), the SAR bearing
+        // 000 to 360, the sector angle 5 to 90 degrees.
         case 1: return numeric(0.1, 40, n => { sar.trackSpacing = n; });
-        case 2: return numeric(1, 360, n => { sar.sarBearing = n; });
+        case 2: return numeric(0, 360, n => { sar.sarBearing = n % 360; });
         case 3:
-          if (pattern === "LADDER") return numeric(0.5, 99, n => { sar.legLength = n; });
-          if (pattern === "SECTOR") return numeric(0.5, 40, n => { sar.diameter = n; });
+          if (pattern === "LADDER") return numeric(0.1, 40, n => { sar.legLength = n; });
+          if (pattern === "SECTOR") return numeric(0.1, 40, n => { sar.diameter = n; });
           return;
         case 4:
-          if (pattern === "SECTOR") return numeric(10, 90, n => { sar.angle = n; });
+          if (pattern === "SECTOR") return numeric(5, 90, n => { sar.angle = n; });
       }
     },
   },
