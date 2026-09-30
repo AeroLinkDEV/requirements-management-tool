@@ -327,7 +327,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           return;
         }
         const leg3 = geometry[at];
-        const marker = leg.qualifier === "/H" ? `HOLD ${route.hold?.turn === "LEFT" ? "L" : "R"}` : leg.qualifier === "/S" ? "SAR" : undefined;
+        const marker = leg.qualifier === "/H" ? `HOLD ${route.hold?.turn === "LEFT" ? "L" : "R"}` : leg.qualifier === "/S" ? "SAR"
+          : leg.arc ? `${leg.arc.turn} ARC` : leg.procedureTurn?.role === "OUTBOUND" ? "P-T" : undefined;
         lines[1 + i * 2] = {
           left: small(leg3 ? ` ${three(leg3.course)}°` : " ---°"),
           center: small(leg3 ? `${fixed(leg3.distance, 1)}NM` : "--.-NM"),
@@ -335,7 +336,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         };
         lines[2 + i * 2] = {
           left: { text: pad(leg.ident, 5), color: active ? "magenta" : "green", inverse: active },
-          right: medium(altitudeText(leg)),
+          right: fms.s300Advisory && leg.source === "APPR" && fms.vnav.destTemp !== null
+            ? { ...medium(altitudeText({ ...leg, altitude: fms.compensatedConstraint(leg.altitude) })), inverse: true } : medium(altitudeText(leg)),
         };
       });
       lines[11] = { left: dashes(24) };
@@ -394,10 +396,21 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const at = index * 5 + row - 1;
       const legs = fms.route.legs;
       const leg = legs[at];
-      if (!scratch) { if (leg?.kind === "wpt") fms.setScratch(leg.ident); return; }
+      if (!scratch) {
+        if (leg?.kind === "wpt" && leg.procedureTurn?.role === "OUTBOUND") return "not-allowed";
+        if (leg?.kind === "wpt") fms.setScratch(leg.ident); return;
+      }
       if (scratch === "DELETE") {
         if (!leg || at === legs.length - 1) return "not-allowed";
-        fms.modify(route => { route.legs.splice(at, 1); });
+        const turn = leg.kind === "wpt" ? leg.procedureTurn : undefined;
+        if (turn && turn.role !== "INBOUND") {
+          const firstOutbound = legs.findIndex(l => l.kind === "wpt" && l.procedureTurn?.reference === turn.reference && l.procedureTurn.role === "OUTBOUND");
+          if (turn.role === "OUTBOUND" && at !== firstOutbound) return "not-allowed";
+          fms.modify(route => {
+            route.legs = route.legs.filter(l => l.kind !== "wpt" || l.procedureTurn?.reference !== turn.reference || l.procedureTurn.role === "INBOUND");
+            for (const l of route.legs) if (l.kind === "wpt" && l.procedureTurn?.reference === turn.reference) { delete l.procedureTurn; delete l.turnDirection; }
+          });
+        } else fms.modify(route => { route.legs.splice(at, 1); });
         fms.setScratch("");
         return;
       }
@@ -903,8 +916,39 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
   },
 
   VNAV: {
-    pages: () => 3,
+    pages: fms => fms.s300Advisory ? 1 : 3,
     render: (fms, index) => {
+      if (fms.s300Advisory) {
+        const v = fms.advisoryVertical!, choice = fms.activeRoute.approach;
+        if (!choice || v.reason === "NO RUNWAY THRESHOLD") return [title("VNAV", "1/1"), undefined,
+          { center: medium(choice ? "NO VERTICAL PATH (LNAV)" : "NO APPROACH IN ROUTE") }, undefined,
+          choice ? { center: medium(`TO ${fms.instrumentEnd ?? "-----"} (MAP)`) } : undefined,
+          undefined, undefined, undefined, undefined, undefined, undefined, undefined, { left: back("INDEX") }];
+        const legs = fms.activeRoute.legs, geometry = fms.legGeometry(fms.activeRoute);
+        const row = (at: number) => {
+          const leg = legs[at], g = geometry[at];
+          const ident = leg?.kind === "wpt" ? leg.ident : leg?.kind === "cond" ? conditionalLabel(leg) : "-----";
+          return { left: medium(`${ident} ${leg && leg.kind !== "disco" && leg.altitude !== undefined ? fms.compensatedConstraint(String(leg.altitude)) : ""}`.trim(), at === 0 ? "magenta" : "green"),
+            right: medium(g ? `${three(g.course)}° ${fixed(g.distance, 1)}NM` : "---° --.-NM") };
+        };
+        const temp = fms.shownApproachTemperature;
+        return [
+          title(`VNAV ${choice?.ident ?? ""}`.trim(), "1/1", fms.routeStatus === "MOD" ? "MOD" : v.available ? "ACT" : undefined),
+          caption(" ADVISORY ONLY", "MDA-DA "),
+          { left: medium(v.available ? `VPA -${fixed(v.angleDeg!, 2)}°` : "VNAV UNAVAIL", v.available ? "green" : "white"),
+            right: fms.approachMdaEntered ? medium(`${fms.compensatedAltitude(fms.vnav.mda)}FT`) : dashes(5) },
+          caption(" ACT WPT"), row(0), caption(" NEXT WPT"), row(1),
+          caption(" WIND/GS", "VDEV "),
+          { left: medium(`${three(fms.wind.direction)}°/${fms.wind.speed} ${Math.round(fms.groundSpeed)}KT`),
+            right: v.available ? medium(`${Math.round(v.deviationFt!)}FT`) : dashes(5) },
+          caption(` ${fms.activeRoute.dest} TEMP`, "TGT VS "),
+          { left: temp === null ? fms.aircraftProfile.temperatureEntry === "MANDATORY" ? boxes(3) : dashes(3) : medium(`${temp}°C`),
+            right: v.available ? medium(`${Math.round(v.targetVsFpm!)}FPM`) : dashes(5) },
+          caption(fms.baroCorrectedAvailable ? " BARO: ADC" : " QNH", v.angleDeg === null ? "" : `VPA -${fixed(v.angleDeg, 2)}° `),
+          { left: fms.baroCorrectedAvailable ? undefined : fms.vnav.qnh === null ? boxes(4) : medium(fms.vnav.qnh),
+            right: fms.onFinalSegment ? prompt("MISSED APPR>") : fms.routeStatus === "MOD" ? undefined : back("INDEX") },
+        ];
+      }
       if (index === 1) return vnavCruise(fms);
       if (index === 2) return vnavDescent(fms);
       const path = approach(fms);
@@ -950,6 +994,27 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       ];
     },
     lsk: (fms, side, row, scratch, index) => {
+      if (fms.s300Advisory) {
+        if (side === "R" && row === 6) { if (fms.onFinalSegment) fms.goAround(); else fms.open("INIT_REF"); return; }
+        if (!scratch) return;
+        if (!fms.activeRoute.approach || fms.advisoryVertical?.reason === "NO RUNWAY THRESHOLD") return "not-allowed";
+        if (side === "R" && row === 1) {
+          const value = scratch === "DELETE" ? null : numberIn(scratch, 0, 20000, /^\d{1,5}$/);
+          if (value === null && scratch !== "DELETE") return "invalid";
+          fms.approachMdaEntered = value !== null;
+          if (value !== null) fms.vnav.mda = value;
+        } else if (side === "L" && row === 5) {
+          const value = scratch === "DELETE" ? null : numberIn(scratch, -55, 55, /^[+-]?\d{1,2}$/);
+          if (value === null && scratch !== "DELETE") return "invalid";
+          fms.setApproachTemperature(value);
+        } else if (side === "L" && row === 6 && !fms.baroCorrectedAvailable) {
+          const normalized = /^\d{4}$/.test(scratch) && Number(scratch) > 2000 ? (Number(scratch) / 100).toFixed(2) : scratch;
+          const hpa = numberIn(normalized, 945, 1050, /^\d{3,4}$/), inHg = numberIn(normalized, 28, 31, /^\d{2}\.\d{2}$/);
+          if (hpa === null && inHg === null) return "invalid";
+          fms.vnav.qnh = normalized;
+        } else return "not-allowed";
+        fms.setScratch(""); return;
+      }
       if (index === 1) return vnavCruiseLsk(fms, side, row, scratch);
       if (index === 2) {
         if (side === "L" && row === 6 && !fms.profile().descending) { fms.vnav.desNow = true; fms.advisory("DES NOW"); }

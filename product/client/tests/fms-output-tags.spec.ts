@@ -4,7 +4,7 @@ import { FlightSimulator } from '../src/fmsCdu/flight'
 import { setUp87nOffshoreSar } from '../src/fmsCdu/heliDemo'
 import { setUpKbtvRnav15 } from '../src/fmsCdu/kbtvDemo'
 import { AIRCRAFT_DATA_TAGS, FMS_OUTPUT_TAGS, HELICOPTER_DATA_TAGS, outputEngagement, type OutputTag } from '../src/fmsCdu/outputTags'
-import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
+import { LAB_AIRLINE_VNAV_PROFILE, LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
 // Plan rev 3 A5: provenance, validity, selection and engagement kept distinct, for every output the displays take. The
@@ -120,19 +120,20 @@ test('A5: the FMS transition request is coupled while the autopilot flies it (TD
   expect(heli.sim.transitionInProgress).toBeNull()
 })
 
-test('A5: the vertical deviation\'s coupling, derived from the engaged mode, agrees with the bus at every step of the KBTV approach, advisory before capture and coupled after', () => {
-  const kbtv = run(setUpKbtvRnav15)
-  const seen = new Set<string>()
-  let disagreements: string[] = []
-  const check = (label: string, snapshot: ReturnType<typeof kbtv.snapshot>) => {
-    const e = snapshot.engagement.verticalDeviation
-    seen.add(e)
-    if (e !== 'no data' && snapshot.outputs.verticalCoupled !== (e === 'coupled')) disagreements = [...disagreements, `${label}: ${e} but the bus says coupled=${snapshot.outputs.verticalCoupled}`]
+test('A5: the vertical deviation\'s coupling, derived from the engaged mode, agrees with the bus at every step of the KBTV approach: advisory only under S300, coupled after capture under the later-SBAS profile', () => {
+  for (const [label, profile, expected] of [['S300', undefined, ['advisory']], ['later SBAS', LATER_SBAS_PROFILE, ['advisory', 'coupled']]] as const) {
+    const kbtv = run(setUpKbtvRnav15, profile ? { profile } : {})
+    const seen = new Set<string>()
+    let disagreements: string[] = []
+    for (let t = 0; t < 4 * 900 && kbtv.unit.activeRoute.legs[0]; t++) {
+      kbtv.step()
+      const snapshot = kbtv.snapshot(), e = snapshot.engagement.verticalDeviation
+      seen.add(e)
+      if (e !== 'no data' && snapshot.outputs.verticalCoupled !== (e === 'coupled')) disagreements = [...disagreements, `${label} t=${t / 4}: ${e}, bus coupled=${snapshot.outputs.verticalCoupled}`]
+    }
+    expect(disagreements, label).toEqual([])
+    expect([...seen].filter(e => e !== 'no data').sort(), label).toEqual([...expected])
   }
-  for (let t = 0; t < 4 * 900 && kbtv.unit.activeRoute.legs[0]; t++) { kbtv.step(); check(`KBTV t=${t / 4}`, kbtv.snapshot()) }
-  expect(disagreements).toEqual([])
-  // The approach was both advisory (a path shown before capture) and coupled (APPR).
-  expect([...seen]).toEqual(expect.arrayContaining(['advisory', 'coupled']))
 })
 
 test('A5: on the airline profile the vertical deviation is advisory in DES NOW and coupled once VNAV PTH flies the path, as the bus says', () => {

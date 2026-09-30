@@ -61,12 +61,14 @@ test('a STAR and approach replace the end of the route, and the approach is foll
   expect(idents(unit)).toContain('UL501')
 })
 
-test('passing the runway on the approach starts the missed approach and arms its hold', () => {
+test('passing the runway holds the final extension until the crew selects the missed approach and arms its hold', () => {
   const unit = fms()
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
   // Jump through MUN, RDG, TOLGU, the approach's DEMEL, ALNIT, ULIDA and FERDI, and the runway.
   for (let i = 0; i < 8; i += 1) unit.sequence()
+  expect(idents(unit)[0]).toBe('RW24R')
+  expect(unit.goAround()).toBe(true)
   // The missed approach climbs straight ahead to 1000 ft (a CA leg) before turning for UL501.
   expect(idents(unit)[0]).toBe('(CA)')
   unit.sequence()

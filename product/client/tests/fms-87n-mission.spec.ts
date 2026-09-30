@@ -391,6 +391,8 @@ test('C.5a: the missed approach CA (190, to 439 ft) completes at once at the MAP
   const course = courseDeg(stays, crann)
   unit.placeAircraft({ position: offset(crann, course + 180, 0.3), track: course, altitude: 560 }, 'test: 0.3 NM before CRANN at the MDA')
   sim.engageAltitudeHold()
+  // S300 retains the final-course extension at the MAP until the crew requests MISSED APPR (M300 7-11/7-16).
+  expect(unit.goAround()).toBe(true)
   const seen: (string | null)[] = []
   let lowest = Infinity
   for (let tick = 0; tick < 240 && active() !== 'BEADS'; tick += 1) {
