@@ -27,7 +27,7 @@ Each was checked against `main` on 30 September 2026 (bab18a38). The test titles
 
 ## Summary
 
-140 rows: **78 Met, 51 Partial, 10 Open, 1 Deferred** (Stage F only).
+140 rows: **89 Met, 40 Partial, 10 Open, 1 Deferred** (Stage F only).
 
 v1 is **not complete**: the §10 completion row stays Open until the Partial and Open rows are closed or explicitly deferred by Sean.
 
@@ -39,7 +39,9 @@ The Open rows:
 - PROGRESS showing TDN and MRK;
 - the D-R recompute, 500 NM rule, expiry and tactical review.
 
-Several Partial rows are being addressed tonight by Astra/Sol under Sean's 29 September night decisions: the profile's in-force flags and bank limit, S300 advisory VNAV and the LPV profile split, the civil navigation core, and backtrack.
+The summary line and this list are recounted from the table in batches, by the last cell of each row; pull requests edit only their own rows (agreed 30 September), because one shared line made every ledger PR conflict with every other.
+
+Astra/Sol's work under Sean's 29 September night decisions has landed for the profile's in-force flags and bank limit (#1284), the civil navigation core (#1287) and S300 advisory VNAV with the LPV profile split (#1309); rows A2, A4 and B1.7 (general) still read Partial until their owner tests are named.
 
 ## Stage A: profile, applicability and vertical-guidance policy
 
