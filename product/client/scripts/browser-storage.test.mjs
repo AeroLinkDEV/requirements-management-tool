@@ -16,10 +16,25 @@ test('a Windows deletion failure retains ownership and can be retried after the 
 }, async t => {
   const runId = randomUUID(); const state = createBrowserStorage(runId)
   writeFileSync(state.database, 'owned database')
+  const started = performance.now()
+  const phases = []
+  const phase = message => {
+    const entry = `${Math.round(performance.now() - started)}ms ${message}`
+    phases.push(entry)
+    process.stderr.write(`[native handle ${runId}] ${entry}\n`)
+  }
   const holder = spawn('powershell.exe', ['-NoProfile', '-Command',
     '$f=[IO.File]::Open($env:LOCKED_FILE,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite); try { [Console]::WriteLine("locked"); Start-Sleep -Seconds 20 } finally { $f.Dispose() }'],
   { windowsHide: true, env: { ...process.env, LOCKED_FILE: state.database }, stdio: ['ignore', 'pipe', 'pipe'] })
+  phase(`spawn requested, pid ${holder.pid ?? 'unavailable'}`)
   let stderr = ''; holder.stderr.on('data', chunk => { stderr += chunk })
+  holder.on('error', error => phase(`helper error: ${error.message}`))
+  holder.on('exit', (code, signal) => phase(`helper exited: ${code ?? signal}${stderr ? `; stderr: ${stderr}` : ''}`))
+  const abortHolder = () => {
+    phase(`test aborted; phases: ${phases.join(' | ')}${stderr ? `; stderr: ${stderr}` : ''}`)
+    holder.kill()
+  }
+  t.signal.addEventListener('abort', abortHolder, { once: true })
   const closed = once(holder, 'exit')
   // Observe early spawn failures even while waiting for the readiness message.
   void closed.catch(() => {})
@@ -31,16 +46,19 @@ test('a Windows deletion failure retains ownership and can be retried after the 
       closed.then(([code, signal]) => { throw new Error(`Handle holder exited before readiness (${code ?? signal}): ${stderr}`) }),
     ])
     assert.match(ready.toString(), /locked/)
-    t.diagnostic('exclusive-delete handle acquired')
+    phase('exclusive-delete handle acquired')
     assert.throws(() => removeBrowserStorage(runId), { code: 'EPERM' })
+    phase('native EPERM observed; ownership retained')
     assert.equal(readFileSync(join(state.root, '.owner'), 'utf8'), runId)
     assert.equal(readFileSync(state.database, 'utf8'), 'owned database')
     // The reporter starts while the OS handle is still held. Its await must cover
     // release and complete cleanup, rather than fail a run with passing assertions.
-    const release = setTimeout(() => holder.kill(), 1_000)
+    const release = setTimeout(() => { phase('release timer fired'); holder.kill() }, 1_000)
     try {
+      phase('reporter cleanup started')
       assert.equal(await new BrowserStorageReporter({ runId }).onEnd({ status: 'passed' }), undefined)
       assert.equal(existsSync(state.root), false)
+      phase('reporter cleanup finished; storage removed')
     } finally {
       clearTimeout(release)
     }
@@ -49,7 +67,7 @@ test('a Windows deletion failure retains ownership and can be retried after the 
     // Console.ReadLine accepting redirected stdin on a headless Windows runner.
     holder.kill()
     await closed
-    t.diagnostic(`handle holder exited${stderr ? `: ${stderr}` : ''}`)
+    t.signal.removeEventListener('abort', abortHolder)
     // Restore only this fixture's marker after exercising the pre-fix regression.
     if (existsSync(state.root) && !existsSync(join(state.root, '.owner'))) writeFileSync(join(state.root, '.owner'), runId, { flag: 'wx' })
     removeBrowserStorage(runId)
