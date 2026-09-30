@@ -294,16 +294,20 @@ test('a wind entered on VNAV CRZ changes the ground speed the predictions use', 
 
 test('fuel burns as the aircraft flies: FUEL RESERVE when it reaches the reserve, NOT ENOUGH FUEL from the prediction', () => {
   const { unit, fly } = setup()
-  unit.press('FUEL')
-  enter(unit, '700', 'LSK1L')
+  // The fuel computer reports 700 kg (FUEL page entries are what-ifs, S300 manual 14-1).
+  unit.setFuel('quantity', 700)
   // 700 kg now, about 450 kg to Montreal at 540 kg/h: arriving below the 400 kg reserve.
   fly(1)
   expect(recalled(unit, 'NOT ENOUGH FUEL')).toBe(true)
-  // The prediction ends over the landing site, the threshold, and says so; no landing is modelled, so no reserve is
-  // shown as met (plan C.11, R3-03).
-  expect(lines(unit)[5]).toMatch(/^ RW24R \(THR\)\s+EFOB $/)
-  expect(lines(unit)[6]).toMatch(/^\d{4}Z\s+\d+KG$/)
-  expect(lines(unit)[7]).toMatch(/^ SITE ARR\s+KNOWN $/)
+  // The prediction ends over the landing site, the threshold, and says so (PROGRESS 2/4); no landing is modelled, so
+  // no reserve is shown as met (FUEL 2/2; plan C.11, R3-03).
+  unit.press('PROG')
+  unit.press('NEXT')
+  expect(lines(unit)[3]).toMatch(/^ SITE ARR\s+EFOB $/)
+  expect(lines(unit)[4]).toMatch(/^RW24R \(THR\)\s+\d+KG$/)
+  expect(lines(unit)[6]).toMatch(/^KNOWN\s*$/)
+  unit.press('FUEL')
+  unit.press('NEXT')
   expect(lines(unit)[9]).toMatch(/^ LDG RESERVE/)
   expect(lines(unit)[10]).toMatch(/^LANDING NOT MODELLED/)
   expect(recalled(unit, 'FUEL RESERVE')).toBe(false)

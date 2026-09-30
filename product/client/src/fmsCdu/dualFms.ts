@@ -87,7 +87,7 @@ export class DualFmsSystem {
         if (system.operation === "SYNC" && system.link) system.peer(side).acknowledgeComputerMessage(text);
       },
       missedApproachRequested() {
-        if (system.operation === "SYNC" && system.link) system.peer(side).goAround(true);
+        if (system.operation === "SYNC" && system.link) system.peer(side).requestMissedApproach(true);
       },
       setIndependent(on) {
         // Bench injection is a link failure; clearing the fault restores communications, never silently overwrites a route.
