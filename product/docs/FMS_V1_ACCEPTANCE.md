@@ -27,13 +27,12 @@ Each was checked against `main` on 30 September 2026 (bab18a38). The test titles
 
 ## Summary
 
-140 rows: **75 Met, 52 Partial, 12 Open, 1 Deferred** (Stage F only).
+140 rows: **78 Met, 51 Partial, 10 Open, 1 Deferred** (Stage F only).
 
 v1 is **not complete**: the §10 completion row stays Open until the Partial and Open rows are closed or explicitly deferred by Sean.
 
 The Open rows:
 - the ATA at a fix;
-- the aircraft freeze;
 - time-to-go asterisks;
 - F4 (RA valid again);
 - the ND ground-velocity vector;
@@ -71,7 +70,7 @@ Several Partial rows are being addressed tonight by Astra/Sol under Sean's 29 Se
 | B1.7 (e) | An unresolved discontinuity: unknown beyond it | rev3 B1.7 (R08) | vnav.ts status (#1222, #1258) | fms-predictions: "a leg of unknown length makes it and everything after it unknown (R08)" | Met |
 | B1.7 (f) | Planned GS ≤ 0 on a leg: infeasible, unknown from that leg, with the reason | rev3 B1.7 | kinematics.ts; vnav.ts (#1258) | fms-prediction-endpoints: "B1.7: a leg the planned airspeed cannot make progress along" | Met |
 | B1.7 (g) | A paused run: the clock stops; predictions and fuel frozen | rev3 B1.7 | FmsCduTestBench pause | fms-cdu-rendered: "Fly moves the aircraft … and Pause stops it" (position only) | Partial: frozen predictions and fuel not asserted |
-| B1.7 (h) | An aircraft freeze: the clock runs; the aircraft and fuel frozen; moving waypoints move | rev3 B1.7 | none | none | Open: no aircraft-freeze control exists |
+| B1.7 (h) | An aircraft freeze: the clock runs; the aircraft and fuel frozen; moving waypoints move | rev3 B1.7 | the bench: not flying and with no run, the clock runs (backend.tick) and the flight is not stepped ("Aircraft frozen: the clock runs."); moving waypoints are placed by the simulation clock from their epoch (#1306) | fms-cdu-rendered: "the aircraft freeze: the clock runs, the fuel and aircraft stand still, and a moving waypoint keeps moving (B1.7 h)" | Met |
 | B1.7 (i) | Time-to-go beyond the field range: asterisks | rev3 B1.7; M300 2-18 | none | none | Open |
 | B1.7 (general) | ETAs from the remaining planned path, never from instantaneous closure | rev3 B1.7 | profile ETAs (vnav.ts) | as the rows above | Partial: the VNAV CRZ T/D ETA (fmsPages.ts) is still closure-based; left for the Astra/Sol work |
 | B2.1 | Radio height from physical height; NORMAL / NCD / FAIL | rev3 B2.1 | surface.ts radioHeight (#1254) | fms-tactical-maint: "the radio altimeter reads height above the declared surface, NCD off it or above its range, FAIL when failed" | Met |
@@ -180,7 +179,7 @@ Several Partial rows are being addressed tonight by Astra/Sol under Sean's 29 Se
 | D-R epoch | The epoch is the simulation time of entry; propagation on the simulation clock along the track at the GS | rev2 D-R | moving waypoints: pilot ones placed from their epoch by the simulation clock, stored user ones from their E5 record | fms-tactical-maint: "a moving waypoint is placed from its epoch by the simulation clock alone" (paused, nothing moves; the same place however the time was ticked); fms-user-database: "a moving user waypoint is stored with its track, ground speed and epoch …" | Met |
 | D-R recompute | Recompute every 10 s while time-to-go > 1 min; stop at 1 min | rev2 D-R; M300 11-37 | not verified | none | Open |
 | D-R 500 NM | The 500 NM unachievable rule and its four cases; alert and invalid roll command when active | rev2 D-R | a speed-based RENDEZVOUS UNACHIEVABLE only | fms-tactical-maint: "a rendezvous that needs more than the maximum speed …" | Open: the 500 NM rule not implemented |
-| D-R clock | Paused: nothing moves; aircraft freeze: waypoints move; the rate never changes the timeline | rev3 D-R | the 0.25 s tick contract | fms-scenario: "the same scenario gives the same timeline however the ticks are grouped" | Partial: rate independence Met; pause and freeze not tested for moving waypoints; no aircraft freeze |
+| D-R clock | Paused: nothing moves; aircraft freeze: waypoints move; the rate never changes the timeline | rev3 D-R | the 0.25 s tick contract | fms-scenario: "the same scenario gives the same timeline however the ticks are grouped"; fms-tactical-maint: "a moving waypoint is placed from its epoch by the simulation clock alone" (paused, nothing moves); fms-cdu-rendered: "the aircraft freeze …" (waypoints move) | Met |
 | D-R restart | A restart restores the epoch from the scenario or E5 record, never the wall clock | rev3 D-R | E5 stores a moving user waypoint with its epoch in simulation time (userDatabase.ts MovingUserWaypoint: trackDeg, groundSpeedKt, epoch), placed on the simulation clock after a restart | fms-user-database: "a moving user waypoint is stored … and a restart places it by the simulation clock" | Partial: the E5 record restores its epoch; the scenario record does not yet (session 3) |
 | D-R expiry | No expiry; the propagated age shown as a bench aid | rev2 D-R | not verified | none | Open |
 | D-R tactical | Tactical approach and direct-to not in v1; an applicability review against M300 11-39…11-58 before changes | rev2 D-R | the tactical approach exists from before v1 | fms-cdu-simulation: "the tactical approach puts IAF, FAF and MAP ahead of the route" | Open: the review is not done (Sean's 29 Sep configuration decision will set it) |
