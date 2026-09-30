@@ -708,6 +708,7 @@ const FMS_PATH_REFERENCES = {
   'product/client/tests/primary-navigation-alignment.spec.ts': 'an FMS journey (FMS_OBSERVING_SPECS)',
   'product/client/tests/routing-contract.spec.ts': 'an FMS journey (FMS_OBSERVING_SPECS)',
   'product/client/vite.config.ts': 'aliases meshoptimizer to a bench file; the client gate and the production journeys build with it',
+  'product/src/AeroLink.Api/FmsBenchImageryEndpoints.cs': 'names the bench in comments only; it reads no bench path',
   'product/src/AeroLink.Api/FmsBenchTerrainEndpoints.cs': 'names the bench in comments only; it reads no bench path',
   'product/ci-metrics/README.md': 'documents the FMS topology the binder accepts; tests read it for command lists, not bench paths',
   'product/test-planner/README.md': 'documents the FMS topology; tests read it for command lists, not bench paths',
@@ -715,6 +716,7 @@ const FMS_PATH_REFERENCES = {
   'product/test-planner/lib/classify.mjs': 'defines the bench set',
   'product/test-planner/tests/classify.test.mjs': 'this guard',
   'product/test-planner/tools/filter-fms-journeys.mjs': 'filters the journey listing to the bench set',
+  'product/tests/AeroLink.Api.Tests/FmsBenchImageryApiTests.cs': 'names the bench in comments only; it reads no bench path',
   'product/tests/AeroLink.Api.Tests/FmsBenchTerrainApiTests.cs': 'names the bench in comments only; it reads no bench path',
   'product/tools/AeroLink.FmsCduModel/README.md': 'documents the offline Blender tool that renders the bench faceplate; no gate reads it',
 }
