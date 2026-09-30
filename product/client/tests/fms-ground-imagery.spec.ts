@@ -116,6 +116,20 @@ test('an installation with imagery off says so, stops asking, and that sticks; a
   expect(changes).toBe(2)
 })
 
+test('outside the coverage, where every answer is "none here", an earlier failure does not stay reported', async () => {
+  // Flying near Montreal every tile is a 404: no tile ever arrives to end a failure, so the answer itself must.
+  let fail = true
+  const imagery = new GroundImagery(async () => {
+    if (fail) throw new TypeError('network')
+    return new Response(null, { status: 404 })
+  }, decoder)
+  expect(await imagery.load(14, 4834, 5863)).toBeNull()
+  expect(imagery.status).toBe('unreachable')
+  fail = false
+  expect(await imagery.load(14, 4834, 5862)).toBeNull()
+  expect(imagery.status).toBe('waiting')
+})
+
 test('a blank filler tile is flat near-white; real imagery, snow included, has texture', () => {
   expect(isBlankTile(sample([255, 255, 255]))).toBe(true)
   expect(isBlankTile(sample([250, 251, 249]))).toBe(true)

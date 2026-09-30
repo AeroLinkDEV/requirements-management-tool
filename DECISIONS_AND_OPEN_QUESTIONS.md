@@ -2778,3 +2778,14 @@ choices are created as focused issues only when their trigger and acceptance bou
 - **Decision:** The helicopter bench has no air/ground state in v1. Scenarios start airborne, and the FMS is airborne whatever the ground speed: a hover never brings ground planning (plan revision 2 B1.6, which Astra accepted). A pad start, weight on skids, lift-off, and the FMS's ground behaviour follow v1. That behaviour includes on-ground ETEs from PLAN DATA CRZ TAS and CRZ WIND (M300 5-14, 3-19) and the FUEL page's on-ground EST condition.
 - **Ledger:** row E1's ground-ETE clause is recorded as Deferred under this decision; its airborne clauses stay Met. B1.6 stays Met as airborne whatever the ground speed.
 - **Boundaries:** No simulator result is OEM conformance or operational qualification. DEC-146 and DEC-147 remain in force.
+
+### DEC-149 - Production Redeploys Only on Request During Work Hours
+
+- **Date:** 2026-09-30
+- **Status:** Accepted owner decision.
+- **Authority:** Sean, 2026-09-30, after a scheduled redeploy took the protected tunnel down for seven and a half minutes while he was reaching HOME from his work laptop: "within work hours (8am EST to 6pm EST, Monday to Friday), the redeploy only occurs if I manually ask for a redeployment. Outside of those hours, the automatic redeployment activity can occur just as it is today." He added that development, merging and the merge queue continue at full speed; only what the HOME tunnel serves is held.
+- **Supersedes:** for Monday to Friday 08:00-18:00 US Eastern only, the timed production-source reconciler's unconditional advance to a moved `origin/main`, and the statement that an explicit remote-demo Start reconciles the source before READY. Outside that window both behave as before.
+- **Window:** Eastern wall-clock time, following daylight saving; `[08:00, 18:00)` Monday to Friday. Public holidays are not special.
+- **Held pass:** the timed pass still inspects `origin/main` (so the main-currency observation and the instance badge stay truthful), logs that it is holding, and stops nothing. A Start - the operator launcher or the boot/logon recovery task - runs the revision already on disk instead of advancing.
+- **Manual redeploy:** `REDEPLOY_AEROLINK_PRODUCTION.bat` records a request and starts the installed reconciliation task, which carries the transition under its attested launch context. One request lets one pass through; the next pass takes it whatever it decides, and a request older than two hours is not honoured. Explicit operator operations that already advance the source on purpose (Configure `Update`, runtime update, first deployment) are unaffected.
+- **Not affected:** merging, the merge queue, CI and development checkouts. `main` moves as fast as ever; HOME production catches up at the first pass after 18:00 Eastern, or earlier on request.
