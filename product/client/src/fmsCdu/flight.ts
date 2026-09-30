@@ -118,21 +118,28 @@ export const constraintAltitude = (text: string | undefined) => {
  * stepping one spacing each time); SECTOR flies three triangles of 120-degree turns through the datum, each turned
  * by the sector angle.
  */
+/**
+ * The search pattern from its start, to its 80th search waypoint: after it the FMS sequences to the next waypoint of
+ * the plan and says END OF SEARCH (M300 11-15). The expanding square turns right through 90 degrees, its legs one,
+ * one, two, two, … track spacings; the ladder alternates legs of the leg length with steps of the track spacing to the
+ * right; the sector flies triangles of the radius, each turned by the angle from the one before.
+ */
+export const SAR_SEARCH_WAYPOINTS = 80;
 export function sarTrack(start: LatLon, sar: Sar, pattern: SarPattern): LatLon[] {
   const points = [start];
   let at = start;
-  const go = (bearing: number, nm: number) => { at = offset(at, norm360(bearing), nm); points.push(at); };
+  const go = (bearing: number, nm: number) => { if (points.length <= SAR_SEARCH_WAYPOINTS) { at = offset(at, norm360(bearing), nm); points.push(at); } };
   const b = sar.sarBearing;
   if (pattern === "SQUARE") {
-    for (let leg = 0; leg < 12; leg += 1) go(b + 90 * leg, sar.trackSpacing * (Math.floor(leg / 2) + 1));
+    for (let leg = 0; points.length <= SAR_SEARCH_WAYPOINTS; leg += 1) go(b + 90 * leg, sar.trackSpacing * (Math.floor(leg / 2) + 1));
   } else if (pattern === "LADDER") {
-    for (let track = 0; track < 8; track += 1) {
+    for (let track = 0; points.length <= SAR_SEARCH_WAYPOINTS; track += 1) {
       go(track % 2 === 0 ? b : b + 180, sar.legLength);
-      if (track < 7) go(b + 90, sar.trackSpacing);
+      go(b + 90, sar.trackSpacing);
     }
   } else {
     const r = sar.diameter / 2;
-    for (let k = 0; k < 3; k += 1) {
+    for (let k = 0; points.length <= SAR_SEARCH_WAYPOINTS; k += 1) {
       const heading = b + k * sar.angle;
       go(heading, r);
       go(heading + 120, r);
@@ -1328,8 +1335,11 @@ export class FlightSimulator {
     // Fly-by: start the turn onto the next leg early; fly-over for holding fixes, search starts and /O waypoints.
     const next = route.legs[1];
     const nextTo = next?.kind === "wpt" ? fms.coordinates(next.ident) : undefined;
-    const flyOver = leg.qualifier !== undefined || leg.path === "RF" || leg.path === "AF" || !nextTo || next?.kind === "wpt" && (next.path === "RF" || next.path === "AF");
-    const outbound = next?.kind === "wpt" && next.path === "CF" && next.course !== undefined ? next.course : nextTo ? courseDeg(to, nextTo) : g.track;
+    // Search waypoints are fly-by (M300 11-2), but the ladder's entry waypoint is fly-over (11-4): a square or sector
+    // search is joined turning early onto its first leg, on the SAR bearing.
+    const sarEntry = leg.qualifier === "/S" && fms.sar.active !== null && fms.sar.active !== "LADDER";
+    const flyOver = !sarEntry && (leg.qualifier !== undefined || leg.path === "RF" || leg.path === "AF" || !nextTo || next?.kind === "wpt" && (next.path === "RF" || next.path === "AF"));
+    const outbound = sarEntry ? fms.sar.sarBearing : next?.kind === "wpt" && next.path === "CF" && next.course !== undefined ? next.course : nextTo ? courseDeg(to, nextTo) : g.track;
     const lead = flyOver ? 0 : turnLead(this.tas, angleDiff(g.track, outbound), this.steeringLimit, this.profile.rollRate.value);
     this.lead = lead;
     if (sequencing && (g.toGo <= lead || g.toGo <= 0.02)) {
