@@ -29,7 +29,8 @@ const terrain: TerrainSource = async () => terrainOff
 
 // The ground imagery, made here too: every tile a checkerboard of two colours no relief or sky uses (teal and
 // violet), so a rendered test can tell imagery on the ground. `?imagery=off` answers as an installation with the relay
-// off, `none` as outside the coverage (404), `blank` as the service's white filler tile.
+// off, `none` as outside the coverage (404), `blank` as the service's white filler tile, `edge` as the service's PNG
+// along the edge of its coverage (the checkerboard in the west half, transparent in the east).
 const tileImage = (paint: (pen: CanvasRenderingContext2D) => void) => new Promise<Blob>(resolve => {
   const canvas = Object.assign(document.createElement('canvas'), { width: 256, height: 256 })
   paint(canvas.getContext('2d')!)
@@ -42,10 +43,16 @@ const checker = (() => {
   })
 })()
 const blank = (() => { let tile: Promise<Blob> | null = null; return () => tile ??= tileImage(pen => { pen.fillStyle = '#ffffff'; pen.fillRect(0, 0, 256, 256) }) })()
+const edge = (() => {
+  let tile: Promise<Blob> | null = null
+  return () => tile ??= tileImage(pen => {
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 4; x++) { pen.fillStyle = (x + y) % 2 ? '#1fb5a8' : '#7a3fd0'; pen.fillRect(x * 32, y * 32, 32, 32) }
+  })
+})()
 const imageryMode = new URLSearchParams(window.location.search).get('imagery')
 const imagery: ImagerySource = async () =>
   imageryMode === 'off' ? new Response(JSON.stringify({ code: 'imagery_relay_disabled' }), { status: 404, headers: { 'content-type': 'application/json' } })
     : imageryMode === 'none' ? new Response(null, { status: 404 })
-      : new Response(await (imageryMode === 'blank' ? blank() : checker()), { status: 200, headers: { 'content-type': 'image/png' } })
+      : new Response(await (imageryMode === 'blank' ? blank() : imageryMode === 'edge' ? edge() : checker()), { status: 200, headers: { 'content-type': 'image/png' } })
 
 createRoot(document.getElementById('root')!).render(<FmsCduTestBench terrain={terrain} imagery={imagery} />)

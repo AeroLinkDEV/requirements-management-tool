@@ -213,6 +213,20 @@ async function startScene(
     image.getContext("2d")!.putImageData(new ImageData(rgba, TILE_PIXELS, TILE_PIXELS), 0, 0);
     return image;
   };
+  // Under a partial imagery tile (the edge of the coverage, transparent beyond it): its relief, or past the relief's
+  // depth the part of its ancestor's relief that it covers. The layer is drawn opaque, so without this the far side of
+  // a coast or of the border would be black.
+  const underRelief = async (photo: ImageBitmap, x: number, y: number, level: number) => {
+    const source = ancestorOf(level, x, y, RELIEF_MAX_ZOOM);
+    const relief = await reliefImage(source.x, source.y, source.z);
+    const image = canvas();
+    const context = image.getContext("2d")!;
+    const side = source.span * TILE_PIXELS;
+    context.drawImage(relief, source.offsetX * TILE_PIXELS, source.offsetY * TILE_PIXELS, side, side, 0, 0, TILE_PIXELS, TILE_PIXELS);
+    context.drawImage(photo, 0, 0);
+    photo.close();
+    return image;
+  };
   const groundProvider = (ground: Ground) => {
     const errorEvent = new Cesium.Event();
     // A refused tile is expected (no imagery past the relief's depth): Cesium draws the parent, and nothing is retried.
@@ -226,7 +240,7 @@ async function startScene(
       requestImage: async (x: number, y: number, level: number) => {
         if (ground === "imagery") {
           const photo = await imagery.load(level, x, y);
-          if (photo) return photo;
+          if (photo) return photo.partial ? underRelief(photo.image, x, y, level) : photo.image;
         }
         if (level > RELIEF_MAX_ZOOM) throw new Error("no imagery here: the parent tile's relief is drawn");
         return reliefImage(x, y, level);

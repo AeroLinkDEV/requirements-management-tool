@@ -716,6 +716,7 @@ const FMS_PATH_REFERENCES = {
   'product/test-planner/README_FAST_PHASE1.md': 'documents the Fast manifest; nothing reads it',
   'product/test-planner/lib/classify.mjs': 'defines the bench set',
   'product/test-planner/tests/classify.test.mjs': 'this guard',
+  'product/test-planner/tests/fast-ci-workflow.test.mjs': 'reads the Fast manifest to check the advisory Fast lane splits its rendered tier without losing a spec (#1313)',
   'product/test-planner/tools/filter-fms-journeys.mjs': 'filters the journey listing to the bench set',
   'product/tests/AeroLink.Api.Tests/FmsBenchImageryApiTests.cs': 'names the bench in comments only; it reads no bench path',
   'product/tests/AeroLink.Api.Tests/FmsBenchTerrainApiTests.cs': 'names the bench in comments only; it reads no bench path',

@@ -7,7 +7,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 /// browser asks here, and this relays exactly one upstream, the USGS National Map "USGS Imagery Only" tile cache
 /// (USDA NAIP and USGS orthoimagery, US federal public-domain data, 6 inches to 1 metre, covering the United States).
 /// The upstream URL is fixed in code and built from three validated integers, so this can reach nothing else. Tiles
-/// are JPEG, bounded in size and time, and marked cacheable.
+/// are JPEG, or PNG along the edge of the coverage (see <see cref="TileTypes"/>), bounded in size and time, and marked
+/// cacheable.
 ///
 /// Outside the United States the service answers 404 (and, at low zoom levels near its edge, a blank white tile); the
 /// view then draws its elevation relief instead. This is a separate outbound destination from the terrain source, so
@@ -23,6 +24,12 @@ public static class FmsBenchImageryEndpoints
     public const int MaxZoom = 16;
     public const long MaxTileBytes = 1_048_576;
     internal const string Upstream = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile";
+    /// <summary>
+    /// What the upstream serves a tile as. Its cache is "mixed": JPEG where a tile is fully covered, PNG along the edge of
+    /// the coverage (coastlines and the border). Measured on HOME on 2026-09-30, 66 of the 223 tiles it served over the
+    /// bench's area were PNG; treating those as failures held every tile back for a minute at a time.
+    /// </summary>
+    private static readonly string[] TileTypes = ["image/jpeg", "image/png"];
 
     public static IEndpointRouteBuilder MapFmsBenchImageryEndpoints(this IEndpointRouteBuilder app)
     {
@@ -65,11 +72,12 @@ public static class FmsBenchImageryEndpoints
             // The ArcGIS tile cache is addressed level/row/column: z, then y, then x.
             using var response = await clients.CreateClient(ClientName).GetAsync($"{Upstream}/{z}/{y}/{x}", ct);
             if (response.StatusCode == HttpStatusCode.NotFound) return Results.NotFound();
-            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentType?.MediaType != "image/jpeg")
+            var type = response.Content.Headers.ContentType?.MediaType;
+            if (!response.IsSuccessStatusCode || type is null || !TileTypes.Contains(type))
                 return health.Failed(StatusCodes.Status502BadGateway);
             var bytes = await response.Content.ReadAsByteArrayAsync(ct);
             http.Response.Headers.CacheControl = "private, max-age=604800";
-            return Results.File(bytes, "image/jpeg");
+            return Results.File(bytes, type);
         }
         catch (HttpRequestException) { return health.Failed(StatusCodes.Status502BadGateway); }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested) { return health.Failed(StatusCodes.Status504GatewayTimeout); }
