@@ -27,8 +27,8 @@ export type GpsView = {
   stimulus: GpsStimulus;
 };
 
-export function fmsGpsView(fms: ScriptedFms): GpsView {
-  const stimulus = stimulusFor(fms), integrityHeld = fms.hasCondition("gpsIntegrity");
+export function fmsGpsView(fms: ScriptedFms, sensorOwner: ScriptedFms = fms): GpsView {
+  const stimulus = stimulusFor(sensorOwner), integrityHeld = sensorOwner.hasCondition("gpsIntegrity");
   // The condition replaces the bench's masking, and clears it when it ends: the record says so rather than keep it.
   if (integrityHeld) stimulus.clearMasking();
   return {
@@ -38,7 +38,7 @@ export function fmsGpsView(fms: ScriptedFms): GpsView {
       return a && b ? distanceNm(a, b) * 1852 : null;
     },
     setBaroLost: (index, lost) => stimulus.setBaroLost(index, lost),
-    updated: () => fms.gpsUpdated(),
+    updated: () => { sensorOwner.gpsUpdated(); if (sensorOwner !== fms) fms.gpsUpdated(); },
     select: choice => fms.selectGpsReceiver(choice),
     choice: fms.gpsNavSelected ? fms.gpsReceiverChoice : "OFF",
     integrityHeld,
