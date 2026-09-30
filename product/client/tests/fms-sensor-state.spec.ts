@@ -4,6 +4,7 @@ import { offset } from '../src/fmsCdu/fmsModel'
 import type { GpsBus, GpsReceiver } from '../src/fmsCdu/gps'
 import { assessReceiver } from '../src/fmsCdu/gpsSensors'
 import type { RadioFix } from '../src/fmsCdu/radioNavigation'
+import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 
 // Stage F plan F2: each sensor solution carries its availability, its 95% accuracy, its integrity bound (NP) and its
@@ -75,4 +76,30 @@ test('F2: every candidate the update weighed is reported, the selected one among
   now += 60_000; unit.updateNavigation(60)
   expect(unit.navPerformance.sensor.mode).toBe(unit.navState.mode)
   expect(unit.sensorSolutions.some(sensor => sensor.mode === unit.navState.mode)).toBe(true)
+})
+
+test('F2: the selected candidate need not be the first weighed: a GPS rejected against a radio fix reverts to it (M300 1-4)', () => {
+  // The estimator: an uncertain GPS 2 NM from an approved DME/DME fix fails the comparison, so the fix is navigated on
+  // while GPS stays listed first. F3's hysteresis will make the same order common.
+  const nav = new CivilNavigation(HERE)
+  const rejected = update(nav, { uncertainGps: gpsFix({ position: offset(HERE, 0, 2), hilNm: 3, anp: 3 }), radio: radioFix('DME/DME', 0.4) })
+  expect(rejected.sensors.map(sensor => sensor.mode)).toEqual(['GPS', 'DME/DME', 'DR'])
+  expect(rejected.mode).toBe('DME/DME')
+  expect(rejected.selected).toEqual(rejected.sensors[1])
+  expect(rejected.sensors[0]).toMatchObject({ mode: 'GPS', available: true, integrity: false })
+  // The FMS: both receivers flag their integrity and carry a position bias; the radio fix takes over, and
+  // navPerformance reports that selected sensor, not the first candidate.
+  let now = Date.UTC(2026, 8, 30, 14)
+  const unit = new ScriptedFms(() => new Date(now))
+  const step = (seconds: number) => { for (let i = 0; i < seconds; i++) { now += 1000; unit.updateNavigation(1) } }
+  step(60)
+  for (const index of [0, 1]) {
+    stimulusFor(unit).apply(index, { op: 'override', label: '130', kind: 'FORCE', amount: 3 })
+    stimulusFor(unit).apply(index, { op: 'override', label: '110', kind: 'BIAS', amount: 0.05 })
+  }
+  step(20)
+  expect(unit.navState.mode).not.toBe('GPS')
+  expect(unit.sensorSolutions[0].mode).toBe('GPS')
+  expect(unit.navPerformance.sensor.mode).toBe(unit.navState.mode)
+  expect(unit.navPerformance.sensor).toEqual(unit.sensorSolutions.find(sensor => sensor.mode === unit.navState.mode))
 })
