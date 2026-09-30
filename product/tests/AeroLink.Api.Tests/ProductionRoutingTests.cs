@@ -136,22 +136,22 @@ public sealed class ProductionRoutingTests
     }
 
     /// <summary>
-    /// The FMS Test Bench's chase view loads its helicopter as a binary glTF from public/. The default content-type
-    /// map has no .glb, so the served shape handed out the entry document for it and the bench fell back to its
-    /// placeholder shapes in production while the dev server showed the model.
+    /// The client ships 3D models as binary glTF in public/. The default content-type map has no .glb, so the served
+    /// shape handed out the entry document for one, and the 3D view fell back to placeholder shapes in production
+    /// while the dev server showed the model.
     /// </summary>
     [Fact]
-    public async Task The_served_client_hands_out_the_bench_model_as_binary_gltf_not_the_entry_document()
+    public async Task The_served_client_hands_out_a_model_as_binary_gltf_not_the_entry_document()
     {
         using var directory = new TemporaryClientDirectory();
-        var models = System.IO.Path.Combine(directory.Path, "fms-cdu", "models");
+        var models = System.IO.Path.Combine(directory.Path, "models");
         Directory.CreateDirectory(models);
         byte[] glb = [0x67, 0x6C, 0x54, 0x46, 0x02, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00];
-        File.WriteAllBytes(System.IO.Path.Combine(models, "helicopter-light-twin.glb"), glb);
+        File.WriteAllBytes(System.IO.Path.Combine(models, "aircraft.glb"), glb);
         using var factory = new AeroLinkApiFactory(staticFilesRoot: directory.Path);
         using var client = factory.CreateClient();
 
-        using var response = await client.GetAsync("/fms-cdu/models/helicopter-light-twin.glb");
+        using var response = await client.GetAsync("/models/aircraft.glb");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("model/gltf-binary", response.Content.Headers.ContentType?.MediaType);
