@@ -270,3 +270,34 @@ test('variant (f): DIRECT 87N at CRANN moves the prediction endpoint to SITE ARR
   expect(fms.profile().endpoint).toMatchObject({ kind: 'SITE ARRIVAL', label: '87N' })
   expect(fms.approachVertical).toBe(false)
 })
+
+test('C.5a: the missed approach CA (190, to 439 ft) completes at once at the MAP when already above 439: DF BEADS next, no descent', () => {
+  // At the MDA (560 ft), 0.3 NM before CRANN on the final, NAV engaged and the altitude held: the aircraft is already
+  // above the CA's 439 ft ("at or above"), so the CA completes on the tick after the MAP, and BEADS follows.
+  const unit = new ScriptedFms(() => new Date(START))
+  const sim = new FlightSimulator(unit)
+  expect(setUp87nRnav190Final(unit, sim)).toEqual({ ready: true })
+  unit.sequence()
+  const active = () => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : leg?.kind === 'cond' ? `(${leg.path})` : null }
+  expect(active()).toBe('CRANN')
+  const stays = unit.coordinates('STAYS')!, crann = unit.coordinates('CRANN')!
+  const course = courseDeg(stays, crann)
+  unit.placeAircraft({ position: offset(crann, course + 180, 0.3), track: course, altitude: 560 }, 'test: 0.3 NM before CRANN at the MDA')
+  sim.engageAltitudeHold()
+  const seen: (string | null)[] = []
+  let lowest = Infinity
+  for (let tick = 0; tick < 240 && active() !== 'BEADS'; tick += 1) {
+    sim.step(0.25)
+    seen.push(active())
+    lowest = Math.min(lowest, unit.altitude)
+  }
+  expect(active()).toBe('BEADS')
+  expect(sim.lateralMode).toBe('LNAV')
+  // CRANN, then the CA for the one tick that passes the MAP, then BEADS: the CA is complete the first tick it is flown.
+  const ca = seen.indexOf('(CA)')
+  expect(ca).toBeGreaterThan(0)
+  expect(seen.slice(0, ca).every(ident => ident === 'CRANN')).toBe(true)
+  expect(seen.slice(ca)).toEqual(['(CA)', 'BEADS'])
+  // No descent toward 439 ft.
+  expect(lowest).toBeGreaterThan(550)
+})
