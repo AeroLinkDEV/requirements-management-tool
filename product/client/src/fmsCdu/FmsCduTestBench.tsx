@@ -23,6 +23,7 @@ import { KBTV_SOURCE, START_STATES, loadKbtvDemonstration, type StartStateId } f
 import { ACTIVE_PROFILE, PROFILES, profileById, profileFingerprint } from "./profile";
 import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, scenarioStart, type Scenario } from "./scenario";
 import { DualFmsSystem } from "./dualFms";
+import type { ScriptedFms } from "./scriptedFms";
 import type { FmsSide } from "./crossTalk";
 import { WMM2025_DATABASE } from "./wmm2025";
 import { MAX_BARO_ERROR_FT, SETTING_RANGE_HPA, formatSetting } from "./baro";
