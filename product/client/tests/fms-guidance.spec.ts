@@ -35,12 +35,13 @@ const active = (unit: ScriptedFms) => {
 
 test('a course-to-altitude leg holds its course until the altitude, then the direct-to-fix leg starts from there', () => {
   const { unit, fly } = setup()
+  unit.toggleAngleReference() // This fixture qualifies the coded true course; MAG conversion has its navigation owner.
   unit.placeAircraft({ position: unit.truePosition, altitude: 400, track: 251 }, 'course-to-altitude start fixture')
   unit.selectProcedure('SID', 'RIDEA3', 'MUN')
   unit.press('EXEC')
   expect(active(unit)).toBe('(CA)')
   press(unit, 'LEGS')
-  expect(lines(unit)[1]).toMatch(/^ 251° CRS/)
+  expect(lines(unit)[1]).toMatch(/^ 251T CRS/)
   expect(lines(unit)[2]).toMatch(/^\(1200\)/)
   const tracks: number[] = []
   fly(600, () => { if (active(unit) === '(CA)') tracks.push(unit.track); return active(unit) === 'OW501' })
@@ -102,11 +103,12 @@ test('a radius-to-fix leg is flown as its arc, at its radius, onto the final app
 
 test('INTC CRS turns a direct-to into a course into the fix, which the aircraft intercepts and holds', () => {
   const { unit, fly } = setup()
+  unit.toggleAngleReference() // The independent 045-degree intercept geometry below is TRUE.
   press(unit, 'LEGS')
   enter(unit, 'TOLGU', 'LSK1L')
   expect(lines(unit)[11]).toMatch(/INTC CRS $/)
   enter(unit, '045', 'LSK6R')
-  expect(lines(unit)[12]).toMatch(/045$/)
+  expect(lines(unit)[12]).toMatch(/045T$/)
   unit.press('EXEC')
   const tolgu = unit.coordinates('TOLGU')!
   let onCourse = false

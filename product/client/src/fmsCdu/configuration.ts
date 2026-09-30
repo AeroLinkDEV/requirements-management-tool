@@ -19,7 +19,7 @@ const options = {
   efis: on("EFIS outputs and symbol selection", "M300 3-22", "partial", "generic bench EFIS, not an installed display"),
   satelliteDeselection: on("GPS satellite deselection", "M300 3-23, 5-28", "implemented", "predictive RAIM exclusions only; live receiver tracking is independent"),
   fuelKey: on("Fuel function key", "M300 3-20, 14-2", "implemented"),
-  magTrue: on("MAG/TRUE reference selection", "M300 3-9", "pending", "WMM2025 and consistent reference conversion required"),
+  magTrue: on("MAG/TRUE reference selection", "M300 3-9", "implemented", "consumed NOAA WMM2025; true internal geometry and wind; simulator table format"),
   backtrack: on("Backtrack of flown history", "M300 11-35", "pending"),
   rotorEndpoints: on("Rotorcraft waypoint endpoints", "M300 3-14, A-107", "implemented"),
   fixedWing: off("Fixed-wing configuration", "M300 A-107", "helicopter first; fixed wing deferred"),

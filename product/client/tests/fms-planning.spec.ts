@@ -138,6 +138,7 @@ test('a latitude/longitude entry creates WPTnn, listed on PREDEF WPT 1/2', () =>
 
 test('place/bearing/distance and place-bearing/place-bearing entries create waypoints named after the place', () => {
   const unit = fms()
+  unit.toggleAngleReference() // Preserve this fixture's independent north/south TRUE-bearing intersection.
   unit.press('LEGS')
   enter(unit, 'RDG090/10', 'LSK3L')
   expect(idents(unit)[2]).toBe('RDG01')

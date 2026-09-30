@@ -1,13 +1,14 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { aircraftData } from '../src/fmsCdu/efis'
-import { FlightSimulator, SAR_SEARCH_WAYPOINTS, angleDiff, legGeometry, racetrackOutline, sarTrack } from '../src/fmsCdu/flight'
+import { FlightSimulator, SAR_SEARCH_WAYPOINTS, angleDiff, legGeometry, racetrackOutline, sarTrack, trimPitch } from '../src/fmsCdu/flight'
+import { cameraPose } from '../src/fmsCdu/outTheWindow'
 import { courseDeg, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { groundVelocity, holdTrack, predictedGroundSpeed } from '../src/fmsCdu/kinematics'
 import { HELICOPTER_PROFILE, LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
 import { stimulusFor, type GpsOp } from '../src/fmsCdu/gpsStimulus'
 import { radiusAt } from '../src/fmsCdu/holds'
 import { BufferedSensorPort, type SensorFrame } from '../src/fmsCdu/sensorPorts'
-import { checkAtTdn, planTransition } from '../src/fmsCdu/transition'
+import { checkAtTdn, planTransition, transitionSecondsToGo } from '../src/fmsCdu/transition'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
@@ -340,6 +341,8 @@ test('the entries flown in a 30 kt wind from four azimuths: the teardrop on a 40
   for (const kind of ['TEARDROP', 'PARALLEL'] as const) {
     for (const from of [0, 90, 180, 270]) {
       const { unit, sim, fly } = setup()
+      press(unit, 'INIT_REF', 'LSK5L', 'LSK1L') // The declared entry geometry uses inbound 263 degrees TRUE.
+      expect(unit.angleReference).toBe('TRUE')
       Object.assign(unit.wind, { direction: from, speed: 30 })
       holdAtRdg(unit, ['263', 'LSK3L'], ...(kind === 'PARALLEL' ? [['', 'LSK2L'] as [string, CduFunction]] : []))
       const label = `${kind}, wind ${from}/30`
@@ -528,6 +531,8 @@ test('search pattern geometry to 80 search waypoints: the square grows by one sp
 
 test('the search pages take the M300 field ranges, refuse changes once the search is engaged, and offer PPOS only with no other search waypoint in the route (M300 11-5, 11-6, 11-15, A-157…A-176)', () => {
   const { unit, fly } = setup()
+  press(unit, 'INIT_REF', 'LSK5L', 'LSK1L') // Explicit TRUE input for numeric field-boundary assertions.
+  expect(unit.angleReference).toBe('TRUE')
   const scratch = () => screenText(unit.screen())[13].trim()
   const enter = (text: string, lsk: CduFunction) => { typeText(unit, text); unit.press(lsk) }
   // CLR takes the message first, then the entry a character at a time.
@@ -543,6 +548,8 @@ test('the search pages take the M300 field ranges, refuse changes once the searc
   expect(scratch()).toBe('INVALID ENTRY')
   clearAll()
   enter('0', 'LSK2R')
+  expect(unit.sar.sarBearing).toBe(0)
+  enter('360', 'LSK2R')
   expect(unit.sar.sarBearing).toBe(0)
   enter('4', 'LSK3R')
   // The sector: diameter 0.1 to 40 NM, angle 5 to 90 degrees.
@@ -576,6 +583,7 @@ test('the square and sector searches are joined fly-by onto their first leg, the
   const closest: Record<string, number> = {}
   for (const [pattern, lsk] of [['SQUARE', 'LSK2L'], ['LADDER', 'LSK3L'], ['SECTOR', 'LSK4L']] as const) {
     const { unit, fly } = setup()
+    press(unit, 'INIT_REF', 'LSK5L', 'LSK1L') // The geometric bearing below is TRUE.
     fly(10)
     // A search fix 5 NM ahead on the present track, its first leg 90 degrees to the right.
     const fix = offset(unit.position, unit.track, 5)
@@ -1342,6 +1350,38 @@ test('the transition is flown to a hover at MRK: TD, the gate segment, TD/H, the
   expect(sim.axisModes).toEqual({ collective: 'RHT', pitch: 'HOV', roll: 'HOV' })
 })
 
+test('the transition request carries MRK, the final track, the remaining distance and the planned trajectory, and the autopilot flies it: TD/H starts at the planned distance even at another gate speed (B3.3)', () => {
+  const { unit, sim, fly, ticks, mark } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  fly(900, () => unit.hover.request > 0)
+  const request = unit.hover.requestData!
+  expect(request.mrk).toEqual(mark)
+  expect(request.finalTrack).toBe(230)
+  expect(request.remainingNm).toBeCloseTo(distanceNm(unit.position, mark), 1)
+  // The shared plan, whole: TD, the gate segment and TD/H fill the remaining distance.
+  expect(request.plan.td.distanceNm + request.gateNm + request.plan.tdh.distanceNm).toBeCloseTo(request.remainingNm, 9)
+  expect(request.gateNm).toBeGreaterThanOrEqual(0)
+  // The autopilot takes the request on its next step.
+  fly(1)
+  expect(sim.modeEvents.find(e => e.event === 'TRANSITION REQUEST')?.detail).toBe(
+    `MRK ${request.remainingNm.toFixed(3)} NM on 230°T: TD ${request.plan.td.distanceNm.toFixed(3)} NM, gate ${request.gateNm.toFixed(3)} NM, TD/H ${request.plan.tdh.distanceNm.toFixed(3)} NM`)
+  // The wind drops after the request: the gate is reached faster over the ground than planned (within the gate
+  // segment's slack). The autopilot still starts decelerating where the plan put TD/H, not where its own nominal rate
+  // from the faster gate speed would (about 0.09 NM earlier), and the closed loop takes it to MRK.
+  unit.wind.speed = 16
+  // Measured as the autopilot measures it (the navigation position, which lags truth), in the bench's quarter seconds.
+  let decelAt: number | null = null
+  ticks(600, () => {
+    if (decelAt === null && sim.modeEvents.some(e => e.event === 'TD/H' && /gate segment ends/.test(e.detail))) decelAt = distanceNm(unit.position, mark)
+    return sim.hoverCaptured
+  })
+  expect(decelAt).not.toBeNull()
+  expect(Math.abs(decelAt! - request.plan.tdh.distanceNm)).toBeLessThan(0.01)
+  expect(sim.hoverCaptured).toBe(true)
+  expect(metres(unit.truePosition, mark)).toBeLessThan(50)
+})
+
 test('ACTIVATE needs a valid radio height; losing it between ACTIVATE and EXEC is RALT FAILED, and the modification stays (Stage D, E-27)', () => {
   const noRa = hoverProcedure()
   noRa.unit.setCondition('raFail', true)
@@ -1699,4 +1739,105 @@ test('D-H: a leg time or speed the crew entered is kept at the entry, whatever t
   unit.placeAircraft({ position: unit.position, track: unit.track, altitude: 5000 }, 'test: low when the entry begins')
   expect(fly(3600, () => unit.activeRoute.hold?.status === 'IN PROGRESS')).toBeLessThan(3600)
   expect(unit.activeRoute.hold).toMatchObject({ legTime: 2.5, speed: 150 })
+})
+
+test('the helicopter attitude: the trim pitch for the forward airspeed, not raised by a climb, down to accelerate and up to decelerate; the PFD, the cockpit camera and the GPS antennas share it (B1.5, B4.7)', () => {
+  const deg = (a: number) => (Math.atan((a * 0.514444) / 9.80665) * 180) / Math.PI
+  const same = (unit: ScriptedFms, sim: FlightSimulator) => {
+    const air = aircraftData(unit, sim)
+    expect(air.pitch).toBe(unit.attitude.pitch)
+    expect(air.bank).toBe(unit.attitude.bank)
+    const pose = cameraPose({ position: air.position, altitude: air.altitude, heading: air.heading, pitch: air.pitch, bank: air.bank }, 'cockpit', 'panel')
+    expect(pose.roll).toBeCloseTo((unit.attitude.bank * Math.PI) / 180, 12)
+  }
+  // Level cruise at 100 KIAS: the trim for it; a 500 fpm climb at the same speed leaves the nose where it was.
+  const cruise = offshore(1000)
+  cruise.sim.selectSpeed(100)
+  cruise.fly(90)
+  expect(Math.abs(cruise.unit.attitude.pitch - trimPitch(cruise.sim.tas))).toBeLessThan(0.2)
+  const level = cruise.unit.attitude.pitch
+  cruise.sim.selectAltitude(3000)
+  expect(cruise.sim.engageVerticalSpeed(500)).toBe(true)
+  cruise.fly(30)
+  expect(cruise.unit.verticalSpeed).toBeCloseTo(500, 0)
+  expect(Math.abs(cruise.unit.attitude.pitch - level)).toBeLessThan(0.2)
+  same(cruise.unit, cruise.sim)
+  // The hover in a 20 kt headwind: the trim for 20 kt of forward airspeed.
+  const hover = offshore()
+  slowToHover(hover)
+  hover.fly(30)
+  expect(Math.abs(hover.unit.attitude.pitch - trimPitch(20))).toBeLessThan(0.3)
+  same(hover.unit, hover.sim)
+  // TD/H decelerates at 0.75 kt/s: the nose up by atan(a/g) on the trim for the airspeed.
+  const tdh = offshore(150)
+  tdh.unit.wind.speed = 0
+  tdh.sim.selectSpeed(60)
+  tdh.fly(40)
+  expect(tdh.sim.engageTransitionDownToHover()).toBe(true)
+  tdh.fly(10)
+  expect(Math.abs(tdh.unit.attitude.pitch - (trimPitch(tdh.sim.indicatedAirspeed) + deg(0.75)))).toBeLessThan(0.3)
+  expect(tdh.unit.attitude.pitch).toBeGreaterThan(trimPitch(tdh.sim.indicatedAirspeed))
+  same(tdh.unit, tdh.sim)
+})
+
+test('B1.7: MRK is predicted along the planned transition, TD, the gate segment and TD/H, and the flown hover capture meets it; nothing is predicted past MRK', () => {
+  const { unit, sim, ticks } = hoverProcedure()
+  unit.press('LSK6R')
+  unit.press('EXEC')
+  const point = (ident: string) => unit.profile().points.find(p => p.ident === ident)!
+  const plan = unit.hover.active!.plan!
+  const dtra = distanceNm(unit.coordinates('TDN')!, unit.coordinates('MRK')!)
+  // Before TDN: TDN to MRK is the whole transition, far longer than the same distance at the planned speed.
+  const planned = transitionSecondsToGo(plan, dtra, dtra)
+  const predictedLeg = (point('MRK').eta! - point('TDN').eta!) / 1000
+  expect(predictedLeg).toBeCloseTo(planned, 3)
+  expect(predictedLeg).toBeGreaterThan((dtra / 100) * 3600 * 1.5)
+  expect(point('MRK')).toMatchObject({ status: 'KNOWN' })
+  // The route ends at MRK: past the discontinuity nothing is predicted.
+  const after = unit.profile().points.slice(unit.profile().points.findIndex(p => p.ident === 'MRK') + 1)
+  expect(after.length).toBeGreaterThan(0)
+  expect(after.every(p => p.eta === null && p.status === 'UNKNOWN')).toBe(true)
+  // Flown: the MRK time predicted at TDN, and again halfway through, against the tick the hover is captured at MRK.
+  const atTdn = { predicted: 0 }, halfway = { predicted: 0, at: 0 }
+  ticks(900, () => {
+    const active = unit.activeRoute.legs[0]
+    if (active?.kind === 'wpt' && active.ident === 'MRK') {
+      if (!atTdn.predicted) atTdn.predicted = point('MRK').eta!
+      const toGo = distanceNm(unit.truePosition, unit.coordinates('MRK')!)
+      if (!halfway.predicted && toGo < dtra / 2) Object.assign(halfway, { predicted: point('MRK').eta!, at: unit.now.getTime() })
+    }
+    return sim.hoverCaptured
+  })
+  expect(sim.hoverCaptured).toBe(true)
+  const captured = unit.now.getTime()
+  // Within 3 s over the 129 s transition, from TDN; within 2 s from halfway.
+  expect(Math.abs(atTdn.predicted - captured) / 1000).toBeLessThan(3)
+  expect(Math.abs(halfway.predicted - captured) / 1000).toBeLessThan(2)
+})
+
+test('E3: in the hover the fuel burns at the current flow, and the FUEL page endurance follows it', () => {
+  const run = offshore(100)
+  const { unit, sim, fly } = run
+  slowToHover(run)
+  fly(20)
+  expect(sim.axisModes.pitch).toBe('HOV')
+  expect(unit.groundSpeed).toBeLessThan(1)
+  // Stopped over the sea: no progress, and still the fuel burns at the flow in force.
+  unit.setFuel('flow', 480)
+  const before = unit.fuel.quantity
+  fly(120)
+  expect(sim.axisModes.pitch).toBe('HOV')
+  expect(unit.fuel.quantity).toBeCloseTo(before - (480 * 120) / 3600, 6)
+  // A new flow applies from when it is entered.
+  unit.setFuel('flow', 600)
+  const later = unit.fuel.quantity
+  fly(60)
+  expect(unit.fuel.quantity).toBeCloseTo(later - (600 * 60) / 3600, 6)
+  unit.press('FUEL')
+  // FUEL 1/2 (#1343, M300 14-2): the flow, and the endurance in hours and minutes of the usable fuel at that flow.
+  const text = screenText(unit.screen())
+  expect(text[5]).toMatch(/^ FUEL FLOW/)
+  expect(text[6]).toMatch(/^600KG\/HR/)
+  const minutes = Math.floor(((unit.fuel.quantity - unit.fuel.reserve) / 600) * 60)
+  expect(text[4]).toMatch(new RegExp(`^${String(Math.floor(minutes / 60)).padStart(2, '0')}\\+${String(minutes % 60).padStart(2, '0')}\\s`))
 })

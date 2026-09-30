@@ -25,6 +25,20 @@ export const MAX_BANK = fmsBankLimit(ACTIVE_PROFILE);
 /** The modelled pitch (the air-relative flight-path angle) is taken over at least this airspeed, kt, and held within this many degrees. */
 const PITCH_SPEED_FLOOR = 30;
 const PITCH_LIMIT = 20;
+/**
+ * The rotorcraft's fuselage pitch in steady level flight against its forward airspeed (knots, negative rearward):
+ * nose up in the hover and flying backwards, nose down with speed. A laboratory table (plan B1.5), not a type's data.
+ */
+const TRIM_PITCH: readonly [number, number][] = [[-30, 7], [0, 3], [20, 2], [40, 0], [60, -1], [80, -2], [100, -3], [120, -4], [140, -5], [160, -6]];
+/** How fast the displayed attitude follows its derivation, degrees per second (laboratory). */
+const ATTITUDE_RATE = 10;
+const KT_TO_MS = 0.514444, G_MS2 = 9.80665;
+export function trimPitch(forwardKt: number) {
+  const t = TRIM_PITCH;
+  if (forwardKt <= t[0][0]) return t[0][1];
+  for (let i = 1; i < t.length; i += 1) if (forwardKt <= t[i][0]) return t[i - 1][1] + ((t[i][1] - t[i - 1][1]) * (forwardKt - t[i - 1][0])) / (t[i][0] - t[i - 1][0]);
+  return t[t.length - 1][1];
+}
 const G_TURN = 1091; // turn rate (deg/s) = 1091 * tan(bank) / TAS (kt)
 /** The band in which a selected altitude is captured, feet. */
 const ALT_CAPTURE_FT = 20;
@@ -288,7 +302,11 @@ export class FlightSimulator {
     this.last = this.guide();
   }
 
-  get guidance() { return this.last; }
+  get guidance() {
+    // Power/table failure is observable even while the plant is paused; reading outputs cannot retain stale LNAV.
+    if (this.fms.hasCondition("fmsFail") !== this.fmsFailed) { this.watchFailure(); this.last = this.guide(); }
+    return this.last;
+  }
   get verticalMode() { return this.vertical; }
   get approachMode() { return this.approach; }
   /** The vertical path here, or null where there is none (climb, cruise, or no computable path). */
@@ -684,12 +702,9 @@ export class FlightSimulator {
     // Truth integrates from the physical height, never from what the altimeter reads (B1.1).
     const altitude = fms.physicalAltitude + (verticalSpeed * dt) / 60;
     const trackError = guidance.desiredTrack === null ? 0 : angleDiff(guidance.desiredTrack, track);
-    // Bank and pitch too: they tilt the GPS antennas. The point-mass model has no attitude of its own, so pitch is the
-    // air-relative flight-path angle, over at least PITCH_SPEED_FLOOR of airspeed and within PITCH_LIMIT (laboratory).
-    // Over the ground it would be meaningless at low speed: a helicopter climbing out of a hover at 1 kt of ground speed
-    // is nearly level, not pointing its antennas at the horizon.
-    const pitch = clamp(deg(Math.atan(verticalSpeed / 60 / (Math.max(this.airspeed, PITCH_SPEED_FLOOR) * 1.68781))), -PITCH_LIMIT, PITCH_LIMIT);
-    fms.setAircraft({ position, track, heading, groundSpeed, tas: this.airspeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError, bank: this.bank, pitch });
+    // Bank and pitch too: the displays and the cameras show them, and they tilt the GPS antennas.
+    const { pitch, bank } = this.attitudeFor(heading, track, groundSpeed, verticalSpeed, dt);
+    fms.setAircraft({ position, track, heading, groundSpeed, tas: this.airspeed, altitude, verticalSpeed, crossTrack: guidance.crossTrack, trackError, bank, pitch });
     // The path for the deviation display: the final approach path on final (coupled only when captured), otherwise the
     // descent path. None while the FMS has failed: it computes nothing to show.
     const final = this.fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
@@ -838,7 +853,9 @@ export class FlightSimulator {
    * distance). `captured`: HOV has the capture conditions (GS within 1 kt and within 50 m of its target); until then a
    * HOV after a stop short of or past the target is a recovery, not an arrival.
    */
-  private lowHorizontal: { mode: "HOV" | "TDH" | "TU" | "GSPD" | "ATT"; target: LatLon | null; speed: number; track: number; holding?: boolean; captured?: boolean; hoverDatum?: number } | null = null;
+  private lowHorizontal: { mode: "HOV" | "TDH" | "TU" | "GSPD" | "ATT"; target: LatLon | null; speed: number; track: number; holding?: boolean; captured?: boolean; hoverDatum?: number; plannedStop?: number | null } | null = null;
+  /** The TD/H distance of the trajectory the FMS planned at TDN (its transition request), until TD/H is engaged on it. */
+  private plannedTdhNm: number | null = null;
   /** The FMS transition request being flown: TD first, then TD/H to this MRK (watchHover). */
   private pendingTdh: LatLon | null = null;
   private hoverRequest = 0;
@@ -957,8 +974,12 @@ export class FlightSimulator {
         const ra = this.radio;
         const above = ra.status === "NORMAL" && ra.value! > this.profile.gateHeight.value + ALT_CAPTURE_FT;
         this.fmsTransition = data.id;
+        // The planned trajectory flown: TD, the gate segment held to the planned TD/H distance from MRK, then TD/H.
+        const plan = data.plan;
+        this.plannedTdhNm = plan.tdh.distanceNm;
+        this.record("TRANSITION REQUEST", `MRK ${data.remainingNm.toFixed(3)} NM on ${String(Math.round(data.finalTrack)).padStart(3, "0")}°T: TD ${plan.td.distanceNm.toFixed(3)} NM, gate ${data.gateNm.toFixed(3)} NM, TD/H ${plan.tdh.distanceNm.toFixed(3)} NM`);
         if (above || this.indicatedAirspeed > this.profile.gateSpeed.value + 2) { this.engageTransitionDown(); this.pendingTdh = data.mrk; }
-        else this.engageTransitionDownToHover(data.mrk);
+        else this.engageTransitionDownToHover(data.mrk, this.plannedTdhNm);
       }
     }
     if (hover.refused && hover.refused !== this.hoverRefusal && this.lateral === "LNAV") {
@@ -986,7 +1007,7 @@ export class FlightSimulator {
     if (this.pendingTdh && this.lowCollective?.mode === "RHT" && this.lowCollective.rate === null && !this.tdSpeed) {
       const mrk = this.pendingTdh;
       this.pendingTdh = null;
-      if (!this.engageTransitionDownToHover(mrk)) this.record("TD/H REFUSED", "outside its window at the end of TD");
+      if (!this.engageTransitionDownToHover(mrk, this.plannedTdhNm)) this.record("TD/H REFUSED", "outside its window at the end of TD");
     }
   }
 
@@ -1073,7 +1094,7 @@ export class FlightSimulator {
    * nominal rate along the track, or to a target when one is given (closed loop), and descends to the hover height,
    * never climbing; then RHT and HOV. Needs a valid radio height and eligible hover feedback.
    */
-  engageTransitionDownToHover(target: LatLon | null = null) {
+  engageTransitionDownToHover(target: LatLon | null = null, plannedStop: number | null = null) {
     const ra = this.radio, feedback = this.fms.hoverFeedback;
     if (!this.advisory || ra.status !== "NORMAL" || !feedback) return false;
     if (ra.value! < this.profile.tdhMinHeight.value || ra.value! > this.profile.tdhMaxHeight.value || this.indicatedAirspeed >= this.profile.tdhMaxSpeedBelow.value) return false;
@@ -1081,7 +1102,7 @@ export class FlightSimulator {
     this.enterLowSpeed();
     const hoverDatum = Math.min(this.hoverHeightFt, Math.round(ra.value!));
     // Toward a target the gate segment comes first: the height is held there until the deceleration starts.
-    this.lowHorizontal = { mode: "TDH", target, speed: groundSpeed, track: target ? courseDeg(feedback.position, target) : this.fms.track, holding: target !== null, hoverDatum };
+    this.lowHorizontal = { mode: "TDH", target, speed: groundSpeed, track: target ? courseDeg(feedback.position, target) : this.fms.track, holding: target !== null, hoverDatum, plannedStop: target ? plannedStop : null };
     this.lowCollective = target ? { mode: "RHT", datum: Math.round(ra.value!), rate: null } : { mode: "TDH", datum: hoverDatum, rate: -this.profile.tdhDescentRate.value };
     this.altitudeHold = null; this.vsTarget = null; this.goingAround = false; this.tdSpeed = false;
     this.noteFeedback(feedback);
@@ -1212,7 +1233,8 @@ export class FlightSimulator {
         // the target, the upper bound; without a target, the nominal rate.
         // With a target further than the nominal stopping distance, the speed is held (the gate segment) until the
         // stopping distance is reached; then the closed loop.
-        const nominalStop = (now.speed * now.speed) / (2 * this.profile.tdhDeceleration.value * 3600);
+        // Toward MRK on the FMS's request, the planned TD/H distance (B3.3); otherwise the nominal rate from the speed now.
+        const nominalStop = now.plannedStop ?? (now.speed * now.speed) / (2 * this.profile.tdhDeceleration.value * 3600);
         const rate = remaining === null ? this.profile.tdhDeceleration.value : remaining <= 0 ? 1.25 : now.holding && remaining > nominalStop ? 0 : clamp((now.speed * now.speed) / (2 * remaining * 3600), 0.5, 1.25);
         // The end of the gate segment: the deceleration starts, and with it the descent to the hover height.
         if (now.holding && rate > 0) {
@@ -1279,6 +1301,40 @@ export class FlightSimulator {
    * at the vertical-acceleration limit), and below it a climb back to it; LOW HT while it limits the mode's command.
    * It needs a valid radio height.
    */
+  private lastGround: { north: number; east: number; heading: number } | null = null;
+  private attitude = { pitch: 0, bank: 0 };
+  /**
+   * The attitude for display (plan B1.5; a derivation, not rotor dynamics). The helicopter: pitch from the trim for its
+   * forward airspeed (TRIM_PITCH) less the longitudinal acceleration, atan(a/g), since the rotor and the nose tilt to
+   * accelerate; roll the bank of a coordinated turn, or at low speed atan(lateral acceleration / g); each following at
+   * ATTITUDE_RATE. The laboratory airline profile: the air-relative flight-path angle, over at least PITCH_SPEED_FLOOR
+   * of airspeed and within PITCH_LIMIT, and the bank.
+   */
+  private attitudeFor(heading: number, track: number, groundSpeed: number, verticalSpeed: number, dt: number) {
+    if (!this.advisory) {
+      const pitch = clamp(deg(Math.atan(verticalSpeed / 60 / (Math.max(this.airspeed, PITCH_SPEED_FLOOR) * 1.68781))), -PITCH_LIMIT, PITCH_LIMIT);
+      return { pitch, bank: this.bank };
+    }
+    const ground = { north: groundSpeed * Math.cos(rad(track)), east: groundSpeed * Math.sin(rad(track)), heading };
+    const previous = this.lastGround ?? ground;
+    this.lastGround = ground;
+    const accel = dt > 0 ? { north: (ground.north - previous.north) / dt, east: (ground.east - previous.east) / dt } : { north: 0, east: 0 };
+    // Resolved on the heading halfway through the step: in a turn the velocity's chord is then all centripetal.
+    const mid = rad(heading + angleDiff(heading, previous.heading) / 2), mx = Math.cos(mid), my = Math.sin(mid);
+    const along = accel.north * mx + accel.east * my, across = -accel.north * my + accel.east * mx;
+    const h = rad(heading), hx = Math.cos(h), hy = Math.sin(h);
+    const air = this.airVelocity;
+    const forward = air ? air.north * hx + air.east * hy : this.airspeed;
+    const pitchWanted = trimPitch(forward) - deg(Math.atan((along * KT_TO_MS) / G_MS2));
+    const bankWanted = air ? deg(Math.atan((across * KT_TO_MS) / G_MS2)) : this.bank;
+    const step = ATTITUDE_RATE * dt;
+    this.attitude = {
+      pitch: dt > 0 ? this.attitude.pitch + clamp(pitchWanted - this.attitude.pitch, -step, step) : pitchWanted,
+      bank: dt > 0 ? this.attitude.bank + clamp(bankWanted - this.attitude.bank, -step, step) : bankWanted,
+    };
+    return { ...this.attitude };
+  }
+
   private lowCollectiveSpeed(dt: number): number | null {
     const c = this.lowCollective;
     const ra = this.radio;
@@ -1396,7 +1452,7 @@ export class FlightSimulator {
     const leg = route.legs[0];
     const base = { targetAltitude: this.targetAltitude() };
     const none = { mode: "LNAV" as const, legFrom: null, legTo: null, desiredTrack: null, crossTrack: 0, distanceToGo: null, bankCommand: 0, ...base };
-    if (fms.navState.mode === "DR" && !fms.navState.airValid || !fms.approachSteeringValid || !fms.departureInstrumentReady || fms.pinsContinuation?.active) return { ...none, mode: "HDG" };
+    if (fms.needsActiveLeg || fms.navState.mode === "DR" && !fms.navState.airValid || !fms.approachSteeringValid || !fms.departureInstrumentReady || fms.pinsContinuation?.active) return { ...none, mode: "HDG" };
     const sequencing = dt > 0 && this.lateral === "LNAV";
     this.lead = 0;
 

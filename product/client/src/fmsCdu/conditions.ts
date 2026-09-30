@@ -8,12 +8,13 @@ import type { Lamp } from "./screen";
  */
 export type ConditionId =
   | "fmsFail" | "gpsLost" | "gpsIntegrity" | "dmeOutage" | "rnpExceeded" | "npa" | "offset" | "independent"
-  | "gsmCall" | "sms" | "atcUplink" | "tx1" | "tx2" | "vuhf" | "hf" | "menuRequest" | "raFail";
+  | "gsmCall" | "sms" | "atcUplink" | "tx1" | "tx2" | "vuhf" | "hf" | "menuRequest" | "raFail" | "magvarCrc";
 
 export type Condition = { id: ConditionId; label: string; description: string; lamp?: Lamp };
 
 export const CONDITIONS: readonly Condition[] = [
   { id: "fmsFail", label: "FMS failure", lamp: "FAIL", description: "The display goes blank and keys are ignored." },
+  { id: "magvarCrc", label: "MAGVAR checksum fault", description: "Corrupt the consumed coefficient package: MAG VAR CRC FAILED, SYSTEM FAILED and withdrawn navigation." },
   { id: "gpsLost", label: "GPS lost", description: "GPS NAV LOST; the FMS reverts to DME/DME, VOR/DME or dead reckoning (POS)." },
   { id: "gpsIntegrity", label: "GPS integrity lost (RAIM)", description: "GPS POS UNCERTAIN; ANP grows; no RNAV approach integrity." },
   { id: "dmeOutage", label: "DME outage", description: "No DME updating; with GPS lost too, the FMS dead reckons and drifts." },

@@ -148,16 +148,17 @@ const shares = async (page: Page) => {
     const canvas = Object.assign(document.createElement('canvas'), { width: image.width, height: image.height }), pen = canvas.getContext('2d')!
     pen.drawImage(image, 0, 0)
     const data = pen.getImageData(0, 0, canvas.width, canvas.height).data
-    let imagery = 0, red = 0, n = 0
+    let imagery = 0, red = 0, dark = 0, n = 0
     for (let i = 0; i < data.length; i += 4 * 5) {
       const r = data[i], g = data[i + 1], b = data[i + 2]
       n++
       if ((g > r + 60 && b > r + 40) || (b > g + 60 && r > g + 20)) imagery++
+      if (r + g + b < 60) dark++
       // The danger red blended over the ground: strongly red, green and blue under half of it (the absolute top band's
       // firebrick, lighter over the ground, is not).
       if (r > 160 && g < 0.45 * r && b < 0.4 * r) red++
     }
-    return { imagery: imagery / n, red: red / n }
+    return { imagery: imagery / n, red: red / n, dark: dark / n }
   }, png.toString('base64'))
 }
 // The share of the view that looks different from an earlier screenshot of it (a colour change of more than 40 in sum).
@@ -245,6 +246,23 @@ test('with no imagery (outside the coverage, or the service\'s blank filler) the
   await choose(page, 'Window view', 'Map')
   await expect(view).toHaveAttribute('data-imagery', 'off', { timeout: 60_000 })
   await expect(view.locator('.fmsOtwNote')).toContainText('Imagery is off on this installation')
+})
+
+test('along the edge of the coverage an imagery tile\'s transparent part shows the relief beneath it, not black', async ({ page }) => {
+  // The service sends PNG along coastlines and the border, transparent beyond its coverage; the ground layer is drawn
+  // opaque, so a tile passed through as it came drew the far side black.
+  test.setTimeout(300_000)
+  await page.setViewportSize({ width: 480, height: 360 })
+  await page.goto('/tests/fixtures/fms-cdu.html?imagery=edge')
+  const view = await show(page)
+  await choose(page, 'Window view', 'Map')
+  await expect(view).toHaveAttribute('data-imagery', 'live', { timeout: 60_000 })
+  await drawn(page)
+  const { imagery, dark } = await shares(page)
+  expect(imagery, 'the imagery half of each tile').toBeGreaterThan(0.2)
+  expect(imagery, 'and only that half').toBeLessThan(0.8)
+  expect(dark, 'nothing drawn black where the tiles are transparent').toBeLessThan(0.03)
+  await expect(view.locator('.fmsOtwNote')).toHaveCount(0)
 })
 
 test('terrain colouring: red where the ground reaches the aircraft (relative), height bands (absolute), none when off; remembered', async ({ page }) => {

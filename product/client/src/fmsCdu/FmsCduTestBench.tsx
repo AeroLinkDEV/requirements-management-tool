@@ -25,6 +25,7 @@ import { KBTV_SOURCE, START_STATES, loadKbtvDemonstration, type StartStateId } f
 import { ACTIVE_PROFILE, PROFILES, profileById, profileFingerprint } from "./profile";
 import { ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, scenarioStart, type Scenario } from "./scenario";
 import { ScriptedFms } from "./scriptedFms";
+import { WMM2025_DATABASE } from "./wmm2025";
 import { MAX_BARO_ERROR_FT, SETTING_RANGE_HPA, formatSetting } from "./baro";
 import { browserUserDatabaseStore } from "./userDatabase";
 import { screenText } from "./screen";
@@ -148,6 +149,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   const [navAirports, setNavAirports] = useState("");
   const [userDbStatus, setUserDbStatus] = useState<string | null>(null);
   const [headingInput, setHeadingInput] = useState("090");
+  const [restartOnGround, setRestartOnGround] = useState(false);
+  const [magvarLoad, setMagvarLoad] = useState<string | null>(null);
   // The crew's autopilot selections under the helicopter profile: preselected altitude, vertical speed and speed.
   const [altInput, setAltInput] = useState("");
   const [vsInput, setVsInput] = useState("-500");
@@ -260,6 +263,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
   // The flight mode annunciator shows the modes the controller is in (flight.ts), not a reading of the motion: engaged
   // modes, then armed ones. The Flight card and the head-up display both show it.
   const modes: HudModes = {
+    angleReference: backend.hasCondition("fmsFail") ? "TRUE" : backend.angleReference,
+    magneticVariation: backend.magneticField?.declination,
     lateral: sim.lateralMode === "LNAV" ? (sim.approachMode === "CAPTURED" ? approachLabel : guidance.mode) : sim.headingHeld ? "HDG HOLD" : "HDG SEL",
     vertical: sim.verticalMode,
     armed: [...(sim.lnavIsArmed ? ["LNAV"] : []), ...(sim.approachMode === "ARMED" ? [approachLabel] : [])],
@@ -431,9 +436,15 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             <span className="engaged">{modes.vertical}</span>
           </div>
           {sim.modeEvents.length ? <p className="fmsBenchHint">Last mode change: {sim.modeEvents.at(-1)!.event}, {sim.modeEvents.at(-1)!.detail}</p> : null}
-          <form className="fmsBenchAutopilot" onSubmit={event => { event.preventDefault(); sim.selectHeading(Number(headingInput) || 0); }}>
+          <form className="fmsBenchAutopilot" onSubmit={event => {
+            event.preventDefault();
+            const entry = Number(headingInput);
+            if (!headingInput || entry < 0 || entry > 360) return;
+            const heading = failedFms ? entry : backend.angleFromEntry(entry);
+            if (heading !== null) sim.selectHeading(heading);
+          }}>
             <label>
-              <span>Heading</span>
+              <span>Heading {failedFms ? "TRUE" : backend.angleReference}</span>
               <input inputMode="numeric" value={headingInput} maxLength={3} aria-label="Selected heading"
                 onChange={event => setHeadingInput(event.target.value.replace(/\D/g, ""))} />
             </label>
@@ -487,8 +498,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
               {backend.pinsContinuation.active ? " — crew flying the visual segment" : ""}
             </dd></> : null}
             <dt>Mode</dt><dd>{guidance.mode}</dd>
-            <dt>DTK</dt><dd>{guidance.desiredTrack === null ? "---" : `${String(Math.round(guidance.desiredTrack) || 360).padStart(3, "0")}°`}</dd>
-            <dt>TRK</dt><dd>{String(Math.round(backend.track) || 360).padStart(3, "0")}°</dd>
+            <dt>DTK</dt><dd>{guidance.desiredTrack === null ? "---" : backend.angleText(guidance.desiredTrack)}</dd>
+            <dt>TRK</dt><dd>{backend.angleText(backend.track)}</dd>
             <dt>XTK</dt><dd>{guidance.crossTrack >= 0 ? "R" : "L"}{Math.abs(guidance.crossTrack).toFixed(2)} NM</dd>
             <dt>Bank</dt><dd>{guidance.mode === "HDG" ? "—" : `${sim.bankAngle >= 0 ? "R" : "L"}${Math.abs(sim.bankAngle).toFixed(0)}°`}</dd>
             <dt>GS</dt><dd>{Math.round(backend.groundSpeed)} kt</dd>
@@ -581,6 +592,35 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
           {tab === "gps" ? <FmsGpsTab view={fmsGpsView(backend)} fms={backend} /> : null}
         </div>
         <div className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-navdata" aria-labelledby="fms-bench-tabbutton-navdata" hidden={tab !== "navdata"}>
+          <section className="fmsBenchCard" aria-label="FMS initialization and preflight">
+            <h2>FMS initialization and preflight</h2>
+            <p className="fmsBenchReadout">FMS power: {backend.powerState}. Receiver power is controlled on GPS sensors.</p>
+            <label><input type="checkbox" checked={restartOnGround} onChange={event => setRestartOnGround(event.target.checked)} /> On ground at power-up (bench input)</label>
+            <div className="fmsBenchActions">
+              <button type="button" onClick={() => backend.powerOff()}>FMS power off</button>
+              <button type="button" onClick={() => backend.powerOn("COLD", restartOnGround)}>Cold start FMS</button>
+              <button type="button" onClick={() => backend.powerOn("WARM", restartOnGround)}>Warm start FMS</button>
+            </div>
+            <p>Review the active data and aircraft configuration, frequencies, position and UTC, route and leg geometry, angle reference, fuel, and satellite deselection before using the demonstration.</p>
+            <div className="fmsBenchActions" aria-label="Preflight pages">
+              {([['IDENT', 'IDENT'], ['RADIO', 'RADIO'], ['POS', 'POS INIT'], ['RTE', 'ROUTE'], ['LEGS', 'LEGS'], ['SETUP', 'SETUP'], ['FUEL', 'FUEL'], ['SAT_DESELECT', 'SAT DESELECT']] as const).map(([page, label]) => <button type="button" key={page} disabled={failedFms} onClick={() => backend.open(page)}>{label}</button>)}
+            </div>
+            <p className="fmsBenchReadout">{backend.magvar.database.name}, epoch {backend.magvar.database.epoch}, released {backend.magvar.database.released}, CRC {backend.magvar.database.crc}: {backend.magvar.valid ? backend.magvar.outOfDate(backend.utcTime) ? 'OUT OF DATE' : 'valid checksum' : 'CRC FAILED'}.</p>
+            <label>Load magnetic model package <input type="file" accept=".json" aria-label="Load magnetic model package" onChange={async event => {
+              const file = event.target.files?.[0]; event.target.value = '';
+              if (!file) return;
+              try {
+                const accepted = backend.loadMagvar(JSON.parse(await file.text()));
+                setMagvarLoad(!accepted ? 'Refused: unsupported model package.' : backend.magvar.valid ? `Loaded ${backend.magvar.database.name}.` : 'MAG VAR CRC FAILED: FMS navigation withdrawn.');
+              } catch { setMagvarLoad('Refused: invalid JSON.'); }
+            }} /></label>
+            <button type="button" onClick={() => {
+              const url = URL.createObjectURL(new Blob([JSON.stringify(backend.magvar.database, null, 2)], { type: "application/json" }));
+              const link = document.createElement("a"); link.href = url; link.download = `fms-magvar-${backend.magvar.database.name}.json`; link.click(); URL.revokeObjectURL(url);
+            }}>Export MAGVAR package</button>
+            <button type="button" onClick={() => { backend.loadMagvar(WMM2025_DATABASE); setMagvarLoad('Built-in WMM2025 restored.'); }}>Restore WMM2025</button>
+            {magvarLoad ? <p role="status">{magvarLoad}</p> : null}
+          </section>
           <section className="fmsBenchCard">
             <h2>Navigation data</h2>
             <p className="fmsBenchReadout">
@@ -684,7 +724,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                   const toGo = rendezvous?.ttg == null ? null : rendezvous.ttg - (backend.now.getTime() - rendezvous.computedAt) / 1000;
                   return (
                     <li key={ident}>
-                      <strong>{ident}</strong> {String(Math.round(motion.track)).padStart(3, "0")}°/{motion.speed} kt, age {age === null ? "unknown" : clockText(age)}
+                      <strong>{ident}</strong> {backend.angleText(motion.track)}/{motion.speed} kt, age {age === null ? "unknown" : clockText(age)}
                       {rendezvous ? (rendezvous.achievable ? `; rendezvous in ${toGo === null ? "--" : clockText(Math.max(0, toGo))}, ${rendezvous.distanceNm!.toFixed(1)} NM` : "; rendezvous unachievable") : ""}
                     </li>
                   );
