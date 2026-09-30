@@ -672,7 +672,8 @@ test('the HOVER page activates the transition: TDN and MRK fly-over at the head 
   expect(unit.hover.finalTrack).toBe(230)
   expect(unit.hover.dtra!).toBeGreaterThan(1.2)
   expect(unit.hover.dtra!).toBeLessThan(2.0)
-  expect(unit.route.legs.slice(0, 3).map(leg => (leg.kind === 'wpt' ? `${leg.ident}${leg.qualifier ?? ''}` : leg.kind))).toEqual(['TDN/O', 'MRK/O', 'disco'])
+  // Phase 1: JN, the end of the joining path, on the final course before TDN.
+  expect(unit.route.legs.slice(0, 4).map(leg => (leg.kind === 'wpt' ? `${leg.ident}${leg.qualifier ?? ''}` : leg.kind))).toEqual(['JN', 'TDN/O', 'MRK/O', 'disco'])
   expect(distanceNm(unit.coordinates('TDN', unit.route)!, mark)).toBeCloseTo(unit.hover.dtra!, 6)
   expect(hoverText(unit)).toMatch(/^.*MOD.*HOVER/m)
   unit.press('EXEC')

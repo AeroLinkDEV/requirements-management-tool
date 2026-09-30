@@ -105,7 +105,7 @@ const then = { kind: "start" as const };
  * The v1 acceptance mission, nominal run (plan §10), as a scenario. The crew's actions are scripted as a crew would
  * fly them under the helicopter profile, where the FMS advises and the crew selects the vertical modes and speeds:
  * - a sector search about the datum, and the "sighting" at 7 minutes: MARK ON TOP, ACTIVATE, EXEC;
- * - downwind on heading 050, then an intercept heading onto the 230°T final track with NAV armed (Phase 1 to TDN);
+ * - Phase 1: the FMS joining path (JN, joining.ts) turns the aircraft out and back onto the 230°T final under NAV;
  * - the FMS transition to a hover at MRK (TD, gate segment, TD/H, HOV), held for two minutes;
  * - TU-LAB, then a climb to 2,000 ft at 90 KIAS; the 87N COPTER RNAV (GPS) 190 via HTO, DIRECT HTO;
  * - the HF course reversal at TIDUE (EXIT TYPE ONCE), the step-downs (1,800, 1,700, MDA 560) at 70 KIAS;
@@ -128,9 +128,10 @@ export const MISSION_87N_OFFSHORE_SAR: Scenario = {
     { when: then, action: { kind: "expectLine", line: 4, pattern: "^\\s*500FT\\s+50FT\\s*$" } },
     { when: then, action: { kind: "keys", keys: ["LSK6R", "EXEC"] } },
     { when: then, action: { kind: "expectAlert", text: "TRANSITION DOWN" } },
-    // 4. Downwind, then onto the final track into the wind with NAV armed.
-    { when: then, action: { kind: "autopilot", heading: 50 } },
-    { when: at(570), action: { kind: "autopilot", heading: 200, lnav: true } },
+    // 4. Phase 1: the FMS joining path to JN, on the final track before TDN, flown under NAV (Astra's review, Q9).
+    { when: then, action: { kind: "expectActive", waypoint: "JN" } },
+    { when: then, action: { kind: "expectAfcs", roll: "NAV" } },
+    { when: { kind: "active", waypoint: "TDN" }, action: { kind: "expectAircraft", maxCrossTrack: 0.05 } },
     // 5. The transition to the hover at MRK.
     { when: then, action: { kind: "expectAfcs", collective: "RHT", pitch: "HOV", roll: "HOV" }, within: 600 },
     { when: then, action: { kind: "expectAircraft", near: "MRK", nearMetres: 50, radioHeight: 50, heightTolerance: 5, maxGroundSpeed: 1 }, within: 60 },
@@ -196,12 +197,11 @@ export const MISSION_87N_OFFSHORE_SAR: Scenario = {
  */
 const S = then;
 const after = (seconds: number) => ({ kind: "after" as const, seconds });
-// From the mission start: MARK ON TOP at once (the sighting), ACTIVATE, EXEC, downwind, then onto the final with NAV.
+// From the mission start: MARK ON TOP at once (the sighting), ACTIVATE, EXEC; the FMS joining path onto the final.
 const markAndActivate: ScenarioStep[] = [
   { when: after(1), action: { kind: "keys", keys: ["TACT", "LSK1R", "LSK4L", "LSK6R", "EXEC"] } },
   { when: S, action: { kind: "expectAlert", text: "TRANSITION DOWN" } },
-  { when: S, action: { kind: "autopilot", heading: 50 } },
-  { when: after(150), action: { kind: "autopilot", heading: 200, lnav: true } },
+  { when: S, action: { kind: "expectActive", waypoint: "JN" } },
 ]
 const variant = (id: string, title: string, objective: string, steps: ScenarioStep[], start: StartStateId = "87n-offshore-sar", maxSeconds = 1800): Scenario => ({
   id: `87n-${id}`, title: `87N mission variant ${title}`, objective, maxSeconds, start, startTime: MISSION_87N_OFFSHORE_SAR.startTime, steps,
@@ -241,6 +241,11 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
   ]),
   variant("b-tdn-off-track", "(b) TDN reached 0.3 NM off the final track: TDN NOT POSSIBLE, NAV gives way to HDG", "(b) TDN reached 0.3 NM off the final track: TDN NOT POSSIBLE, NAV gives way to HDG. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
     { when: after(1), action: { kind: "keys", keys: ["TACT", "LSK1R", "LSK4L", "LSK6R", "EXEC"] } },
+    // The crew-vector option: JN deleted, the crew positions on headings and arms NAV onto the final course.
+    { when: S, action: { kind: "keys", keys: ["LEGS"] } },
+    { when: S, action: { kind: "type", text: "DELETE" } },
+    { when: S, action: { kind: "keys", keys: ["LSK1L", "EXEC"] } },
+    { when: S, action: { kind: "expectActive", waypoint: "TDN" } },
     { when: S, action: { kind: "autopilot", heading: 50 } },
     { when: after(120), action: { kind: "autopilot", heading: 140 } },
     { when: after(35), action: { kind: "autopilot", heading: 230 } },

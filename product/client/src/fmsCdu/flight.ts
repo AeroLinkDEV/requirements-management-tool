@@ -163,6 +163,21 @@ export function racetrackOutline(fix: LatLon, hold: Hold, _groundSpeed: number, 
   return points;
 }
 
+/** A path of hold-style segments from a start point as points for the map: each arc sampled every 15 degrees or so. */
+export function segmentsOutline(start: LatLon, segments: readonly HoldSegment[]): LatLon[] {
+  const points: LatLon[] = [start];
+  let at = start;
+  for (const segment of segments) {
+    if (segment.kind === "line") { points.push(segment.to); at = segment.to; continue; }
+    const from = bearingDeg(segment.centre, at), to = bearingDeg(segment.centre, segment.to);
+    const sweep = segment.turn === "R" ? (to - from + 360) % 360 : -((from - to + 360) % 360);
+    const steps = Math.max(1, Math.ceil(Math.abs(sweep) / 15));
+    for (let i = 1; i <= steps; i += 1) points.push(offset(segment.centre, norm360(from + (sweep * i) / steps), segment.radius));
+    at = segment.to;
+  }
+  return points;
+}
+
 // ---------------------------------------------------------------------------------------------- simulator
 
 /**
@@ -228,6 +243,8 @@ export class FlightSimulator {
   private path: VerticalPath | null = null;
   /** The hold being flown: its segments, the one being flown, the straight-leg length, and where the entry ends (-1: none). */
   private holdPlan: { segments: HoldSegment[]; index: number; legNm: number; entryEnd: number } | null = null;
+  /** Phase 1: the joining path to JN being flown (joining.ts), for the hover procedure with this id. */
+  private joinPlan: { segments: HoldSegment[]; index: number; id: number } | null = null;
   /** The straight-leg length of the hold being flown, NM (null when none). */
   get holdLegNm() { return this.holdPlan?.legNm ?? null; }
   private sarPlan: { points: LatLon[]; index: number } | null = null;
@@ -1213,6 +1230,13 @@ export class FlightSimulator {
     if (this.holdPlan && route.hold) return { ...this.flyHold(route.hold, sequencing ? dt : 0), ...base, mode: "HOLD" };
     if (this.sarPlan) return { ...this.flySar(sequencing ? dt : 0), ...base, mode: "SAR" };
 
+    // Phase 1 of the hover procedure: while JN is the active leg, the committed joining path is flown to it.
+    const join = fms.hoverJoin, procedure = fms.hover.active?.id ?? null;
+    const onJoin = leg?.kind === "wpt" && leg.ident === "JN" && join !== null;
+    if (this.joinPlan && (!onJoin || this.joinPlan.id !== procedure)) this.joinPlan = null;
+    if (!this.joinPlan && onJoin) this.joinPlan = { segments: join!.segments, index: 0, id: procedure! };
+    if (this.joinPlan) return { ...this.flyJoin(sequencing ? dt : 0), ...base, mode: "LNAV" };
+
     const none = { mode: "LNAV" as const, legFrom: null, legTo: null, desiredTrack: null, crossTrack: 0, distanceToGo: null, bankCommand: 0, ...base };
     if (!leg || leg.kind === "disco") return { ...none, mode: "HDG" };
     if (leg.kind === "cond") return { ...this.flyConditional(leg, route.legs[1], sequencing), ...base };
@@ -1363,6 +1387,32 @@ export class FlightSimulator {
         }
       } else plan.index += 1;
     }
+    return { legFrom: segment.from, legTo: segment.to, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: this.steer(g.track, g.crossTrack) };
+  }
+
+  /**
+   * Flies the joining path (Phase 1) over the ground as the holds are flown: the arcs with the bank their radius needs at
+   * the present ground speed plus the cross-track correction, the straight by cross-track steering. Its end is JN, on
+   * the final track: that passage sequences JN, and the route flies the final course to TDN.
+   */
+  private flyJoin(dt: number): Omit<Guidance, "targetAltitude" | "mode"> {
+    const plan = this.joinPlan!;
+    const fms = this.fms;
+    const segment = plan.segments[plan.index];
+    const last = plan.index === plan.segments.length - 1;
+    const next = () => {
+      if (!last) { plan.index += 1; return; }
+      this.joinPlan = null;
+      fms.arrive();
+    };
+    if (segment.kind === "arc") {
+      const g = arcGeometry({ centre: segment.centre, turn: segment.turn }, segment.to, fms.position);
+      if (dt > 0 && g.toGo <= 0.02) next();
+      const feedForward = (segment.turn === "R" ? 1 : -1) * deg(Math.atan(((fms.groundSpeed * 1.68781) ** 2) / (32.174 * segment.radius * 6076.12)));
+      return { legFrom: null, legTo: segment.to, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: clamp(feedForward + this.steer(g.track, g.crossTrack), -MAX_BANK - 5, MAX_BANK + 5) };
+    }
+    const g = legGeometry(segment.from, segment.to, fms.position);
+    if (dt > 0 && g.toGo <= 0.02) next();
     return { legFrom: segment.from, legTo: segment.to, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: this.steer(g.track, g.crossTrack) };
   }
 
