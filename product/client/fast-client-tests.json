@@ -42,6 +42,7 @@
     "fms-87n-mission.spec.ts",
     "fms-hover-join.spec.ts",
     "fms-out-the-window.spec.ts",
+    "fms-helicopter-model.spec.ts",
     "fms-synthetic-vision.spec.ts",
     "fms-terrain-tiles.spec.ts",
     "fms-relief-shader.spec.ts",

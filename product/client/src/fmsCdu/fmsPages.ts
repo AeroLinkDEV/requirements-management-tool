@@ -820,15 +820,16 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     },
   },
 
-  // The user database (E5; M300 11-23…11-31): USER WPT 1/2 enters a fixed user waypoint (an ident and a position, or
-  // the reference a mark on top gave), SAVE? CONFIRM stores it for this user and profile; 2/2 lists what is stored.
+  // The user database (E5; M300 11-23…11-31): USER WPT 1/2 enters a user waypoint (an ident and a position, or the
+  // reference a mark on top gave), fixed or, with TYPE toggled to MOVING at 3L, moving on the track and ground speed
+  // entered at 2R (11-25); SAVE? CONFIRM stores it for this user and profile; 2/2 lists what is stored.
   USER_WPT: {
     pages: () => 2,
     render: (fms, index) => {
       const lines: (Line | undefined)[] = [title("USER WPT", `${index + 1}/2`)];
       if (index === 1) {
         lines[1] = caption(" ID", "TYPE ", `FREE=${fms.userWaypointsFree}`);
-        fms.userWaypoints.slice(-5).forEach((wpt, i) => { lines[2 + i * 2] = { left: { text: wpt.ident, color: "green" }, right: medium("WAYPOINT") }; });
+        fms.userWaypoints.slice(-5).forEach((wpt, i) => { lines[2 + i * 2] = { left: { text: wpt.ident, color: "green" }, right: medium(wpt.type === "MOVING" ? "MOVING" : "WAYPOINT") }; });
         if (!fms.userWaypoints.length) lines[2] = { left: medium("NO USER WAYPOINTS") };
         lines[12] = { left: prompt("<WPT DATA") };
         return lines;
@@ -836,13 +837,16 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       const draft = fms.userWaypointDraft ?? { ident: null, position: null, ref: null };
       lines[1] = caption(" ID/POS", `FREE=${fms.userWaypointsFree} `);
       lines[2] = { left: draft.ident ? { text: draft.ident } : boxes(5), right: draft.position ? medium(formatPosition(draft.position)) : boxes(15) };
+      lines[3] = caption(undefined, "TRK/GS ");
+      const motion = draft.moving && draft.motion ? draft.motion : null;
+      lines[4] = { right: motion ? { text: `${String(motion.track).padStart(3, "0")}°T/${String(motion.speed).padStart(3, " ")}KT` } : draft.moving ? boxes(9) : medium("---°T/---KT") };
       lines[5] = caption(" TYPE");
-      lines[6] = { left: medium(">FIXED") };
+      lines[6] = { left: medium(draft.moving ? ">MOVING" : ">FIXED") };
       lines[7] = caption(" REF WPT ID");
       lines[8] = { left: medium(draft.ref ? draft.ref.ident : "-----") };
       lines[9] = caption(" REF WPT POS");
       lines[10] = { left: medium(draft.ref ? formatPosition(draft.ref.position) : "---°--.-- ----°--.--") };
-      const complete = draft.ident !== null && draft.position !== null;
+      const complete = draft.ident !== null && draft.position !== null && (!draft.moving || !!draft.motion);
       lines[11] = complete ? caption(undefined, "SAVE? ") : undefined;
       lines[12] = complete ? { left: prompt("<CANCEL"), right: prompt("CONFIRM>") } : { left: prompt("<WPT DATA"), right: prompt("WPT LIST>") };
       return lines;
@@ -850,7 +854,22 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     lsk: (fms, side, row, scratch, index) => {
       if (index === 1) { if (side === "L" && row === 6) fms.open("NAV_DATA"); return; }
       const draft = fms.userWaypointDraft ?? (fms.userWaypointDraft = { ident: null, position: null, ref: null });
-      const complete = draft.ident !== null && draft.position !== null;
+      const complete = draft.ident !== null && draft.position !== null && (!draft.moving || !!draft.motion);
+      if (row === 3 && side === "L") {
+        if (scratch) return "invalid";
+        draft.moving = !draft.moving;
+        draft.motion = null;
+        return;
+      }
+      if (row === 2 && side === "R") {
+        // TRK/GS, only for a moving waypoint: a true track 000-360 and a ground speed in knots.
+        if (!scratch) return;
+        const entry = /^(\d{3})\/(\d{1,3})$/.exec(scratch);
+        if (!draft.moving || !entry || Number(entry[1]) > 360) return "invalid";
+        draft.motion = { track: Number(entry[1]), speed: Number(entry[2]) };
+        fms.setScratch("");
+        return;
+      }
       if (row === 1 && side === "L") {
         if (!scratch) return;
         if (!/^[A-Z0-9]{1,5}$/.test(scratch)) return "invalid";
@@ -868,7 +887,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       }
       if (row === 6 && complete) {
         if (side === "L") { fms.userWaypointDraft = null; return; }
-        const refused = fms.createUserWaypoint(draft.ident!, draft.position!);
+        const refused = fms.createUserWaypoint(draft.ident!, draft.position!, draft.moving && draft.motion ? draft.motion : undefined);
         if (refused === "invalid") return "invalid";
         if (refused === "in-use") { fms.advisory("DUPLICATE IDENT"); return; }
         if (refused === "full") { fms.advisory("USER DB FULL"); return; }

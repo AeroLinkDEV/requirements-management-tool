@@ -1,4 +1,4 @@
-import type { LatLon } from "./fmsModel";
+import { offset, type LatLon } from "./fmsModel";
 import type { StoredRoute } from "./navData";
 
 /**
@@ -13,14 +13,38 @@ import type { StoredRoute } from "./navData";
  *   already used for something different is a collision: the import writes nothing and names each collision, so
  *   nothing is overwritten silently. An entry identical to one already stored is not a collision.
  *
- * Fixed user waypoints only in v1; the moving ones (M300 11-25) are not stored. At most 460 user waypoints (M300 11-24).
+ * A user waypoint is fixed, or moving (M300 11-25: a track and a ground speed). A moving one is stored with its epoch,
+ * the simulation time at which its position held, and is placed from it on the simulation clock (rev 2 D-R epoch), so a
+ * restart puts it where its motion has taken it, never by the wall clock (rev 3 D-R restart). At most 460 user
+ * waypoints (M300 11-24).
  */
 
 export const USER_WAYPOINT_CAPACITY = 460;
 export const USER_DATABASE_SCHEMA = "aerolink.fms.user-database";
 export const USER_DATABASE_VERSION = 1;
 
-export type UserWaypoint = { ident: string; position: LatLon; type: "FIXED" };
+export type FixedUserWaypoint = { ident: string; position: LatLon; type: "FIXED" };
+/** A moving user waypoint: at `position` at `epoch` (simulation time, ISO 8601), moving on `trackDeg` true at `groundSpeedKt`. */
+export type MovingUserWaypoint = { ident: string; position: LatLon; type: "MOVING"; trackDeg: number; groundSpeedKt: number; epoch: string };
+export type UserWaypoint = FixedUserWaypoint | MovingUserWaypoint;
+
+/**
+ * Where a moving user waypoint is at a simulation time: its epoch position carried along its track at its ground speed
+ * for the time since the epoch (back along it for a time before the epoch).
+ */
+export function movingUserWaypointPosition(waypoint: MovingUserWaypoint, at: Date): LatLon {
+  return movingPosition(waypoint.position, waypoint.trackDeg, waypoint.groundSpeedKt, Date.parse(waypoint.epoch), at.getTime());
+}
+
+/** A position that held at `epochMs`, moving on a true track at a ground speed, at `atMs` (simulation milliseconds). */
+export function movingPosition(origin: LatLon, trackDeg: number, groundSpeedKt: number, epochMs: number, atMs: number): LatLon {
+  const hours = (atMs - epochMs) / 3_600_000;
+  return hours === 0 ? { ...origin } : offset(origin, trackDeg, groundSpeedKt * hours);
+}
+
+/** A user waypoint's position at a simulation time: fixed where it is, moving where its motion has taken it. */
+export const userWaypointPosition = (waypoint: UserWaypoint, at: Date): LatLon =>
+  waypoint.type === "MOVING" ? movingUserWaypointPosition(waypoint, at) : waypoint.position;
 export type UserDatabase = { waypoints: UserWaypoint[]; routes: StoredRoute[] };
 export type UserScope = { userId: string; profileId: string };
 
@@ -84,9 +108,19 @@ export function parseUserDatabase(text: string): { data: UserDatabase; scope: Us
     if (!IDENT.test(ident)) { errors.push(`waypoint ${i + 1}: ident ${JSON.stringify(w?.ident)} is not 1-5 letters or digits`); return; }
     if (seen.has(ident)) { errors.push(`waypoint ${i + 1}: ${ident} appears twice`); return; }
     if (!onGlobe(w.position)) { errors.push(`waypoint ${ident}: position is not a latitude and longitude`); return; }
-    if (w.type !== "FIXED") { errors.push(`waypoint ${ident}: type ${JSON.stringify(w.type)} is not FIXED`); return; }
+    const position = { lat: w.position.lat, lon: w.position.lon };
+    if (w.type === "MOVING") {
+      const track = w.trackDeg, speed = w.groundSpeedKt, epoch = w.epoch;
+      if (typeof track !== "number" || !(track >= 0 && track <= 360)) { errors.push(`waypoint ${ident}: track ${String(track)} is not 0-360 degrees`); return; }
+      if (typeof speed !== "number" || !(speed >= 0 && speed <= 999)) { errors.push(`waypoint ${ident}: ground speed ${String(speed)} is not 0-999 kt`); return; }
+      if (typeof epoch !== "string" || !Number.isFinite(Date.parse(epoch))) { errors.push(`waypoint ${ident}: epoch ${JSON.stringify(epoch)} is not a time`); return; }
+      seen.add(ident);
+      outWaypoints.push({ ident, position, type: "MOVING", trackDeg: track, groundSpeedKt: speed, epoch: new Date(Date.parse(epoch)).toISOString() });
+      return;
+    }
+    if (w.type !== "FIXED") { errors.push(`waypoint ${ident}: type ${JSON.stringify(w.type)} is not FIXED or MOVING`); return; }
     seen.add(ident);
-    outWaypoints.push({ ident, position: { lat: w.position.lat, lon: w.position.lon }, type: "FIXED" });
+    outWaypoints.push({ ident, position, type: "FIXED" });
   });
   if (outWaypoints.length > USER_WAYPOINT_CAPACITY) errors.push(`${outWaypoints.length} waypoints is more than the ${USER_WAYPOINT_CAPACITY} the database holds`);
   const names = new Set<string>();
@@ -113,6 +147,9 @@ export function parseUserDatabase(text: string): { data: UserDatabase; scope: Us
 }
 
 const samePlace = (a: LatLon, b: LatLon) => Math.abs(a.lat - b.lat) < 1e-9 && Math.abs(a.lon - b.lon) < 1e-9;
+/** The same waypoint: the same type and position, and for a moving one the same track, ground speed and epoch. */
+const sameWaypoint = (a: UserWaypoint, b: UserWaypoint) => a.type === b.type && samePlace(a.position, b.position)
+  && (a.type === "FIXED" || (b.type === "MOVING" && a.trackDeg === b.trackDeg && a.groundSpeedKt === b.groundSpeedKt && Date.parse(a.epoch) === Date.parse(b.epoch)));
 const sameRoute = (a: StoredRoute, b: StoredRoute) => JSON.stringify(a) === JSON.stringify(b);
 
 /**
@@ -126,7 +163,7 @@ export function mergeUserDatabase(current: UserDatabase, incoming: UserDatabase)
   for (const w of incoming.waypoints) {
     const existing = current.waypoints.find(c => c.ident === w.ident);
     if (!existing) { waypoints.push(w); addedWaypoints += 1; }
-    else if (!samePlace(existing.position, w.position)) collisions.push(`user waypoint ${w.ident} is already stored at another position`);
+    else if (!sameWaypoint(existing, w)) collisions.push(`user waypoint ${w.ident} is already stored with another position or motion`);
   }
   for (const r of incoming.routes) {
     const existing = current.routes.find(c => c.name === r.name);
