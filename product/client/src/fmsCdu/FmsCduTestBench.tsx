@@ -139,6 +139,9 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
   const [altInput, setAltInput] = useState("");
   const [vsInput, setVsInput] = useState("-500");
   const [spdInput, setSpdInput] = useState("");
+  const pinsContext = `${session}:${backend.pinsContinuation?.revision ?? 0}`;
+  const [pinsDeclaration, setPinsDeclaration] = useState({ context: "", basicVfr: false, landingAreaVisible: false, publishedVisibility: false });
+  const crewConditions = pinsDeclaration.context === pinsContext ? pinsDeclaration : { context: pinsContext, basicVfr: false, landingAreaVisible: false, publishedVisibility: false };
   const [jumpNote, setJumpNote] = useState<string | null>(null);
   const [tab, setTab] = useState<TabId>(storedTab);
   // One set of height tiles for the out-the-window view and the PFD's synthetic vision.
@@ -436,6 +439,10 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
             </form>
           ) : null}
           <dl className="fmsBenchGuidance" aria-label="Guidance">
+            {backend.pinsContinuation ? <><dt>PinS continuation</dt><dd>
+              {backend.pinsContinuation.available ? backend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? "Proceed VFR" : "Proceed visually" : "Chart continuation not verified"}
+              {backend.pinsContinuation.active ? " — crew flying the visual segment" : ""}
+            </dd></> : null}
             <dt>Mode</dt><dd>{guidance.mode}</dd>
             <dt>DTK</dt><dd>{guidance.desiredTrack === null ? "---" : `${String(Math.round(guidance.desiredTrack) || 360).padStart(3, "0")}°`}</dd>
             <dt>TRK</dt><dd>{String(Math.round(backend.track) || 360).padStart(3, "0")}°</dd>
@@ -445,6 +452,17 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
             <dt>ALT</dt><dd>{Math.round(backend.altitude)} ft → {Math.round(guidance.targetAltitude)}</dd>
             <dt>VS</dt><dd>{signed(Math.round(backend.verticalSpeed / 10) * 10)} fpm</dd>
           </dl>
+          {backend.pinsContinuation?.available && !backend.pinsContinuation.active ? <fieldset>
+            <legend>{backend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? "Proceed VFR" : "Proceed visually"} from the MAP</legend>
+            {backend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? <label><input type="checkbox" checked={crewConditions.basicVfr}
+              onChange={event => setPinsDeclaration({ ...crewConditions, basicVfr: event.target.checked })} />Basic VFR conditions met</label> : <>
+              <label><input type="checkbox" checked={crewConditions.landingAreaVisible} onChange={event => setPinsDeclaration({ ...crewConditions, landingAreaVisible: event.target.checked })} />Landing area in sight</label>
+              <label><input type="checkbox" checked={crewConditions.publishedVisibility} onChange={event => setPinsDeclaration({ ...crewConditions, publishedVisibility: event.target.checked })} />Published visibility met throughout the visual segment</label>
+            </>}
+            <p className="fmsBenchHint">Crew declaration required. Follow the published chart and fly the visual segment using heading and altitude controls.</p>
+            <button type="button" disabled={failedFms || !backend.pinsContinuation.mapPassed || (backend.pinsContinuation.endpoint.visualSegment.kind === "PROCEED VFR" ? !crewConditions.basicVfr : !crewConditions.landingAreaVisible || !crewConditions.publishedVisibility)}
+              onClick={() => { if (sim.proceedFromPins(crewConditions)) recordTo?.proceedPins(crewConditions); }}>Continue from MAP</button>
+          </fieldset> : null}
         </section>
       </div>
 
@@ -531,7 +549,8 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
               <p className="fmsBenchHint">
                 Real data: the FAA CIFP cycle 2609 extract for Burlington, Vermont (KBTV), bundled with the bench. It is a
                 US Government work in the public domain, for demonstration only, not for navigation: the cycle is not kept
-                current. The invented CYUL demonstration stays the default start.
+                current. This start flies LNAV with advisory VNAV under S300, or coupled LPV under the separate later
+                CMA/SBAS profile. The invented CYUL demonstration stays the default start.
               </p>
               <div className="fmsBenchActions">
                 <button type="button" disabled={failedFms || backend.activeCycle.source === KBTV_SOURCE}
@@ -567,7 +586,7 @@ export default function FmsCduTestBench({ terrain, userName }: { terrain?: Terra
                 onChange={event => setNavAirports(event.target.value.toUpperCase().replace(/[^A-Z0-9 ,]/g, ""))} />
             </label>
             <label className="fmsBenchFile">
-              <span>Load ARINC 424 data (waypoints, navaids, airports, runways, airways, RNAV approaches with their published FAS) as the inactive cycle</span>
+              <span>Load ARINC 424 data (waypoints, navaids, airports, runways, airways, procedures and published RNAV FAS) as the inactive cycle</span>
               <input type="file" accept=".pc,.dat,.txt,.424,text/plain,*" aria-label="ARINC 424 navigation data file"
                 onChange={async event => {
                   const file = event.target.files?.[0];

@@ -2,7 +2,7 @@ import { expect, logicTest as test } from './isolated-client-test'
 import { ALERTS, alert } from '../src/fmsCdu/alerts'
 import { holdEntry } from '../src/fmsCdu/fmsModel'
 import { LIGHTING_MODES, LUMINANCE_RANGE, displayLuminance } from '../src/fmsCdu/lighting'
-import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
+import { HELICOPTER_PROFILE, LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { COLUMNS, SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import { CDU_VARIANTS, type CduFunction } from '../src/fmsCdu/variants'
@@ -10,9 +10,9 @@ import { CDU_VARIANTS, type CduFunction } from '../src/fmsCdu/variants'
 // The deeper simulation: direct-to, holds, VNAV, search patterns, the tactical approach, the timer, the injectable
 // conditions and alerts, and the lighting model. Page rules follow the CMA-9000 Operator's Manual; key rules are
 // proved in fms-cdu-engine.spec.ts.
-const fms = (start = Date.UTC(2026, 8, 27, 14, 0, 0)) => {
+const fms = (start = Date.UTC(2026, 8, 27, 14, 0, 0), profile = HELICOPTER_PROFILE) => {
   let now = start
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile })
   return { unit, advance: (ms: number) => { now += ms } }
 }
 const press = (unit: ScriptedFms, ...fns: CduFunction[]) => { for (const fn of fns) unit.press(fn) }
@@ -124,7 +124,7 @@ test('hold fields are range-checked, and entering the hold above the holding spe
 })
 
 test('VNAV derives the path angle from the FAF altitude and alerts outside 2.75 to 3.77 degrees', () => {
-  const { unit } = fms()
+  const { unit } = fms(undefined, LATER_SBAS_PROFILE)
   unit.press('VNAV')
   // The runway without RW: the title must fit its approach level beside the page number (GPS phase 3b, R19).
   expect(titleLine(unit)).toMatch(/^ACT VNAV 24R\b/)
@@ -146,7 +146,7 @@ test('VNAV derives the path angle from the FAF altitude and alerts outside 2.75 
 })
 
 test('VNAV takes a destination temperature and QNH in range, and shows VDEV once on final', () => {
-  const { unit } = fms()
+  const { unit } = fms(undefined, LATER_SBAS_PROFILE)
   unit.press('VNAV')
   enter(unit, '900', 'LSK4R')
   expect(scratch(unit)).toBe('INVALID ENTRY')

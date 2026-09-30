@@ -2,10 +2,12 @@ import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { parseArinc424 } from '../src/fmsCdu/arinc424'
 import { FlightSimulator } from '../src/fmsCdu/flight'
-import { bearingDeg } from '../src/fmsCdu/fmsModel'
+import { bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import type { GpsReceiver } from '../src/fmsCdu/gps'
 import type { Airport } from '../src/fmsCdu/navData'
+import { LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
+import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
 // Real navigation data: the FAA's Coded Instrument Flight Procedures (CIFP, ARINC 424-18, a US Government work in the
@@ -17,6 +19,103 @@ const FIXTURE = readFileSync('tests/fixtures/cifp/kbtv-2609.pc', 'latin1')
 const parsed = () => parseArinc424(FIXTURE)
 const kbtv = () => parsed().data.entries.find((e): e is Airport => e.kind === 'airport' && e.ident === 'KBTV')!
 const approach = (ident: string) => parsed().data.procedures.find(p => p.airport === 'KBTV' && p.ident === ident)
+
+// Laboratory 132-column records, independent of the decoder: positions are specified in ARINC coordinates,
+// and path fields use the published 424-17/18 columns (true T replaces the course's tenths digit).
+function labRecord(fields: [number, string][]) {
+  const row = Array<string>(132).fill(' ')
+  for (const [column, value] of fields) for (const [i, ch] of [...value].entries()) row[column - 1 + i] = ch
+  return row.join('')
+}
+const labFix = (ident: string, latitude: string, longitude: string) => labRecord([[1, 'SUSAEA'], [7, 'ENRT'], [14, ident.padEnd(5)], [20, 'K6'], [22, '0'], [33, latitude], [42, longitude]])
+const labLeg = (seq: string, fix: string, path: string, fields: [number, string][] = []) =>
+  labRecord([[1, 'SUSAP KBTVK6F'], [14, 'R99'], [20, 'R'], [27, seq], [30, fix.padEnd(5)], [35, 'K6PC0'], [48, path], ...fields])
+const labAirport = FIXTURE.split('\n').filter(line => line[4] === 'P' && (line[12] === 'A' || line[12] === 'G')).join('\n')
+
+test('imported PI is the S300 two-outbound construction followed by the coded inbound, with protected generated fixes', () => {
+  const text = [labAirport, labFix('PTREF', 'N44000000', 'W073000000'),
+    labLeg('010', 'PTREF', 'PI', [[20, 'V'], [44, 'R'], [71, '000T'], [75, '0100']]),
+    labLeg('020', 'PTREF', 'CF', [[20, 'V'], [71, '180T']]),
+    labLeg('030', 'RW15', 'TF', [[20, 'V'], [43, 'M']])].join('\n')
+  const result = parseArinc424(text), pi = result.data.procedures.find(p => p.ident === 'R99')!
+  expect(result.errors).toEqual([])
+  expect(pi.approachType).toBe('VOR')
+  expect(pi.legs.map(l => 'ident' in l ? l.ident : l.path)).toEqual(['PTREF', 'PTRPTR', 'PTRPTL', 'PTREF', 'RW15'])
+  const first = pi.legs[1], second = pi.legs[2]
+  if (!('ident' in first) || !('ident' in second) || !first.position || !second.position) throw Error('PI outbound positions missing')
+  expect(distanceNm({ lat: 44, lon: -73 }, first.position)).toBeCloseTo(3, 5)
+  expect(distanceNm(first.position, second.position)).toBeCloseTo(2.25, 5)
+  expect(bearingDeg(first.position, second.position)).toBeCloseTo(45, 5)
+  expect(pi.legs[3]).toMatchObject({ path: 'CF', course: 180, turnDirection: 'LEFT', procedureTurn: { role: 'INBOUND' } })
+  const unit = new ScriptedFms()
+  unit.loadArinc424(text, 'lab PI'); unit.swapCycles()
+  unit.modify(route => { route.dest = 'KBTV'; route.legs = [] }); unit.press('EXEC')
+  unit.selectProcedure('APPROACH', 'R99'); unit.press('EXEC')
+  unit.placeAircraft({ position: offset({ lat: 44, lon: -73 }, 180, 0.1), track: 0, altitude: 3000 }, 'lab PI inbound initial pose')
+  unit.wind = { direction: 0, speed: 0 }
+  const sim = new FlightSimulator(unit)
+  let inboundLeft = false, firstNorth = false, secondNortheast = false
+  for (let i = 0; i < 1200; i += 1) {
+    sim.step(1)
+    const leg = unit.activeRoute.legs[0]
+    if (leg?.kind !== 'wpt') break
+    if (leg.ident === 'PTRPTR' && unit.truePosition.lat > 44.04) firstNorth = true
+    if (leg.ident === 'PTRPTL' && unit.truePosition.lon > -72.975) secondNortheast = true
+    if (leg.procedureTurn?.role === 'INBOUND' && sim.bankAngle < -5) inboundLeft = true
+    if (leg.ident === 'RW15') break
+  }
+  expect(firstNorth && secondNortheast && inboundLeft).toBe(true)
+  expect(unit.activeRoute.legs[0]).toMatchObject({ ident: 'RW15' })
+  // Reload the unchanged route for the separate crew deletion check.
+  unit.selectProcedure('APPROACH', 'R99'); unit.press('EXEC')
+  unit.press('LEGS')
+  unit.press('LSK2L')
+  expect(screenText(unit.screen())[SCRATCHPAD_LINE].trim()).toBe('NOT ALLOWED')
+  unit.press('CLR'); unit.open('FIX'); unit.setScratch('PTRPTR'); unit.press('LSK1L')
+  expect(screenText(unit.screen())[SCRATCHPAD_LINE].trim()).toBe('INVALID ENTRY')
+  expect(unit.resolveWaypoint('PTRPTR')).toBe('invalid')
+  unit.press('CLR'); unit.press('LEGS')
+  // Reference plus the two private outbound fixes are one procedure-turn deletion; its inbound CF stays.
+  for (let i = 0; i < 8 && !screenText(unit.screen())[SCRATCHPAD_LINE].includes('DELETE'); i += 1) unit.press('CLR')
+  expect(screenText(unit.screen())[SCRATCHPAD_LINE]).toContain('DELETE')
+  unit.press('LSK1L')
+  expect(unit.route.legs.filter(l => l.kind === 'wpt' && l.procedureTurn?.role === 'OUTBOUND')).toEqual([])
+  expect(unit.route.legs.find(l => l.kind === 'wpt' && l.ident === 'PTREF')).toMatchObject({ path: 'CF', course: 180 })
+})
+
+test('RF and AF import use their actual centre and radius fields and fly the coded quarter-circle, refusing bad geometry', () => {
+  for (const path of ['RF', 'AF'] as const) {
+    const text = [labAirport, labFix('START', 'N44010000', 'W073000000'), labFix('CENTR', 'N44000000', 'W073000000'), labFix('ARCND', 'N44000000', 'W072583659'),
+      labLeg('010', 'START', 'IF', [[20, path === 'AF' ? 'D' : 'R']]),
+      labLeg('020', 'ARCND', path, [[20, path === 'AF' ? 'D' : 'R'], [44, 'R'], ...(path === 'RF' ? [[57, '001000'], [107, 'CENTR']] : [[51, 'CENT'], [67, '0010']]) as [number, string][]]),
+      labLeg('030', 'RW15', 'TF', [[20, path === 'AF' ? 'D' : 'R'], [43, 'M']])].join('\n').replaceAll('CENTR', path === 'AF' ? 'CENT ' : 'CENTR')
+    const result = parseArinc424(text), procedure = result.data.procedures.find(p => p.ident === 'R99')!
+    expect(result.errors).toEqual([])
+    expect(procedure.approachType).toBe(path === 'AF' ? 'VOR' : 'RNAV')
+    expect(procedure.legs[1]).toMatchObject({ path, arc: { centre: { lat: 44, lon: -73 }, turn: 'R' } })
+    expect(parseArinc424(text.replace(path === 'RF' ? '001000' : '0010', path === 'RF' ? '002000' : '0020')).errors).toContain(`KBTV R99: ${path} endpoint disagrees with coded radius`)
+    let now = Date.UTC(2026, 8, 29, 14)
+    const unit = new ScriptedFms(() => new Date(now))
+    unit.loadArinc424(text, `lab ${path}`); unit.swapCycles()
+    unit.modify(route => { route.dest = 'KBTV'; route.legs = [] }); unit.press('EXEC')
+    unit.selectProcedure('APPROACH', 'R99'); unit.press('EXEC')
+    unit.placeAircraft({ position: { lat: 44 + 1 / 60, lon: -73 }, track: 90, altitude: 3000 }, 'lab arc tangent initial pose')
+    unit.sequence()
+    const sim = new FlightSimulator(unit); unit.wind = { direction: 0, speed: 0 }
+    const radii: number[] = []
+    for (let i = 0; i < 600; i += 1) {
+      now += 1000; sim.step(1)
+      const leg = unit.activeRoute.legs[0]
+      if (leg?.kind === 'wpt' && leg.ident === 'ARCND' && sim.guidance.distanceToGo! < 1.3) radii.push(distanceNm({ lat: 44, lon: -73 }, unit.truePosition))
+      if (leg?.kind === 'wpt' && leg.ident === 'RW15') break
+    }
+    expect(unit.activeRoute.legs[0]).toMatchObject({ ident: 'RW15' })
+    expect(distanceNm(unit.truePosition, unit.coordinates('ARCND')!)).toBeLessThan(0.08)
+    expect(radii.length).toBeGreaterThan(10)
+    // Laboratory guidance tolerance; this is simulator evidence, not a protected-airspace or RNP approval.
+    expect(Math.max(...radii.slice(10).map(radius => Math.abs(radius - 1)))).toBeLessThan(0.3)
+  }
+})
 
 test('a CIFP airport gives its magnetic variation, and runway bearings are made true with it', () => {
   const result = parsed()
@@ -110,7 +209,7 @@ test('CIFP altitude descriptions become the constraints the simulation flies', (
 
 test('the FMS flies a CIFP RNAV approach with its published FAS: executed, sent to both receivers and accepted', () => {
   let now = Date.UTC(2026, 8, 27, 14, 0, 0)
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(unit)
   const fly = (seconds: number) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1) } }
   expect(unit.loadArinc424(FIXTURE, 'kbtv-2609.pc')).toMatchObject({ loaded: 'CIFP2609' })
@@ -137,7 +236,7 @@ test('the FMS flies a CIFP RNAV approach with its published FAS: executed, sent 
 
 test('the aircraft flies the published KBTV RNAV RWY 15 LPV: captured on final, on the published path to the threshold', () => {
   let now = Date.UTC(2026, 8, 27, 14, 0, 0)
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(unit)
   unit.loadArinc424(FIXTURE, 'kbtv-2609.pc')
   unit.swapCycles()

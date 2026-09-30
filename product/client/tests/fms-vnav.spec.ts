@@ -1,5 +1,9 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
+import { fmsOutputs } from '../src/fmsCdu/efis'
+import { advisoryVnav } from '../src/fmsCdu/advisoryVnav'
+import { distanceNm, offset, bearingDeg } from '../src/fmsCdu/fmsModel'
+import { BufferedSensorPort } from '../src/fmsCdu/sensorPorts'
 import { LAB_AIRLINE_VNAV_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { SCRATCHPAD_LINE, screenText } from '../src/fmsCdu/screen'
@@ -34,6 +38,126 @@ const lines = (unit: ScriptedFms) => screenText(unit.screen())
 const scratch = (unit: ScriptedFms) => lines(unit)[SCRATCHPAD_LINE].trimEnd()
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
 const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : null }
+
+test('S300 runway VNAV is a barometric advisory with FAF plus 50 feet, never an AFCS descent command (M300 7-22..27)', () => {
+  const unit = new ScriptedFms(() => new Date(Date.UTC(2026, 8, 29, 14)))
+  const sim = new FlightSimulator(unit)
+  unit.selectProcedure('APPROACH', 'R24R'); unit.press('EXEC')
+  unit.directTo('FERDI'); unit.press('EXEC')
+  const faf = unit.coordinates('FERDI')!, threshold = unit.coordinates('RW24R')!
+  const inbound = bearingDeg(faf, threshold)
+  unit.placeAircraft({ position: faf, altitude: 1500, track: inbound }, 'advisory VNAV owner at FAF')
+  unit.armApproach()
+  expect(unit.approachType).toBe('LNAV')
+  const atFaf = fmsOutputs(unit, sim)
+  expect(atFaf.verticalDeviation.status).toBe('NORMAL')
+  // 0.5 ft is a laboratory allowance for the measured GPS fix's seeded noise, not an OEM VNAV tolerance.
+  expect(atFaf.verticalDeviation.value).toBeCloseTo(-50, 0)
+  expect(atFaf.verticalSource).toBe('VNAV')
+  expect(atFaf.verticalCoupled).toBe(false)
+  expect(atFaf.verticalFullScaleFt).toBe(200)
+  const range = distanceNm(threshold, faf)
+  unit.placeAircraft({ position: offset(threshold, inbound + 180, 8), altitude: 2000, track: inbound }, 'advisory VNAV owner in terminal')
+  const terminal = fmsOutputs(unit, sim)
+  expect(terminal.verticalFullScaleFt).toBe(500)
+  expect(terminal.verticalDeviation.value).toBeCloseTo(2000 - (168 + 8 * (1500 - 118) / range), 0)
+  for (const receiver of unit.gps) receiver.override('130', { kind: 'FORCE', value: 0.5, ssm: 'NORMAL' })
+  unit.updateNavigation(0)
+  expect(fmsOutputs(unit, sim).verticalDeviation.status).toBe('NORMAL')
+  for (const receiver of unit.gps) receiver.override('130', null)
+  unit.updateNavigation(0)
+  sim.step(1)
+  expect(sim.verticalMode).not.toBe('APPR')
+  // Away from the runway or beyond the terminal corridor: advisory pointers are removed, not held stale.
+  unit.placeAircraft({ position: faf, altitude: 1500, track: inbound + 180 }, 'advisory owner outbound')
+  expect(fmsOutputs(unit, sim).verticalDeviation.status).toBe('NCD')
+  const angle = unit.advisoryVertical!.angleDeg
+  const changed = structuredClone(unit.navdb.proceduresFor('CYUL', 'APPROACH').find(p => p.ident === 'R24R')!)
+  changed.legs = changed.legs.map(leg => 'ident' in leg && leg.ident === 'RW24R' ? { ...leg, verticalAngleDeg: 4 } : leg)
+  unit.loadNavData({ cycle: { id: 'ADVISORY-CHANGE', from: '', to: '' }, entries: [], airways: [], procedures: [changed] })
+  unit.swapCycles()
+  expect(unit.advisoryVertical!.angleDeg).toBe(angle)
+  unit.modify(() => {}); unit.press('EXEC')
+  expect(unit.advisoryVertical!.angleDeg).toBe(4)
+})
+
+test('S300 VNAV construction priority, corridor and input validity remove unavailable guidance (M300 7-22..27)', () => {
+  const unit = new ScriptedFms()
+  const approach = unit.navdb.proceduresFor('CYUL', 'APPROACH').find(p => p.ident === 'R24R')!
+  const runway = unit.navdb.airport('CYUL')!.runways.find(r => r.ident === 'RW24R')!
+  const faf = unit.coordinates('FERDI')!, course = bearingDeg(faf, runway.threshold)
+  const input = { approach, runway, faf, fafAltitude: 1500, position: offset(runway.threshold, course + 180, 2),
+    track: course, groundSpeed: 120, altitude: 1500, terminal: true, approachPhase: true, gps: true, systemValid: true,
+    rateValid: true, altitudesAgree: true, temperatureRequired: false, temperature: null, thresholdPassed: false }
+  const computed = advisoryVnav(input)
+  expect(computed.source).toBe('FAF')
+  expect(computed.angleDeg).toBeCloseTo(Math.atan((1500 - runway.elevation) / (distanceNm(faf, runway.threshold) * 6076.12)) * 180 / Math.PI, 9)
+  const coded = { ...approach, endpoint: { instrumentEnd: { fix: runway.ident }, landingSite: { kind: 'RUNWAY' as const, ident: runway.ident, airport: 'CYUL' },
+    visualSegment: { kind: 'RUNWAY' as const, validated: true }, vertical: { kind: 'VPA' as const, angleDeg: 3.5 }, identification: { basis: 'RUNWAY' as const, source: 'lab' } } }
+  expect(advisoryVnav({ ...input, approach: coded })).toMatchObject({ available: true, source: 'DATABASE', angleDeg: 3.5 })
+  expect(advisoryVnav({ ...input, fafAltitude: null })).toMatchObject({ available: true, source: 'DEFAULT', angleDeg: 3 })
+  for (const change of [{ runway: undefined }, { terminal: false }, { gps: false }, { altitude: null }, { rateValid: false },
+    { altitudesAgree: false }, { systemValid: false }, { thresholdPassed: true }, { track: course + 180 }, { temperatureRequired: true },
+    { position: offset(input.position, course + 90, 0.61) }, { approach: { ...coded, endpoint: { ...coded.endpoint, vertical: { kind: 'VPA' as const, angleDeg: 10.01 } } } }]) {
+    expect(advisoryVnav({ ...input, ...change })).toMatchObject({ available: false, deviationFt: null, targetVsFpm: null })
+  }
+  expect(advisoryVnav({ ...input, position: offset(input.position, course + 90, 0.59) }).available).toBe(true)
+  const before = offset(runway.threshold, course + 180, 8)
+  expect(advisoryVnav({ ...input, position: offset(before, course + 90, 5.9) }).available).toBe(true)
+  expect(advisoryVnav({ ...input, position: offset(before, course + 90, 6.1) }).available).toBe(false)
+  const low = advisoryVnav({ ...input, approach: { ...coded, endpoint: { ...coded.endpoint, vertical: { kind: 'VPA' as const, angleDeg: 2.5 } } } })
+  expect(low).toMatchObject({ available: true, angleAlert: 'LOW GLIDEPATH ANGLE' })
+  expect(advisoryVnav({ ...input, temperature: -25 }).pathAltitudeFt!).toBeGreaterThan(computed.pathAltitudeFt!)
+  expect(advisoryVnav({ ...input, temperature: 40 }).pathAltitudeFt!).toBeLessThan(computed.pathAltitudeFt!)
+})
+
+test('S300 VNAV crew inputs need temperature EXEC and corrected altitude; adapter failures withdraw the pointer', () => {
+  let now = Date.UTC(2026, 8, 29, 14)
+  const source = new ScriptedFms(() => new Date(now))
+  const faf = source.coordinates('FERDI')!, rwy = source.coordinates('RW24R')!
+  source.placeAircraft({ position: faf, altitude: 1500, track: bearingDeg(faf, rwy) }, 'VNAV input fixture')
+  let frame = source.navigationInputs!
+  frame.air.value = { ...frame.air.value!, baroCorrected: false, pressureAltitudeFt: 1500 }
+  const port = new BufferedSensorPort(); expect(port.publish(frame)).toBe(true)
+  const unit = new ScriptedFms(() => new Date(now), { sensors: port })
+  unit.selectProcedure('APPROACH', 'R24R'); unit.press('EXEC'); unit.press('VNAV')
+  expect(unit.advisoryVertical).toMatchObject({ available: false, reason: 'INVALID BARO ALTITUDE' })
+  unit.press('CLR'); unit.setScratch('2992'); unit.press('LSK6L')
+  expect(unit.vnav.qnh).toBe('29.92')
+  expect(unit.advisoryVertical?.available).toBe(true)
+  unit.setScratch('710'); unit.press('LSK1R')
+  unit.setScratch('-25'); unit.press('LSK5L')
+  expect(unit.routeStatus).toBe('MOD')
+  expect(unit.vnav.destTemp).toBeNull()
+  unit.press('EXEC')
+  expect(unit.vnav.destTemp).toBe(-25)
+  expect(unit.compensatedAltitude(1700)).toBeGreaterThan(1700)
+  const charted = unit.activeRoute.legs.filter(leg => leg.kind === 'wpt' && leg.source === 'APPR').map(leg => ({ ident: leg.ident, altitude: leg.altitude }))
+  const fafConstraint = charted.find(leg => leg.ident === 'FERDI')!.altitude
+  expect(unit.fafAltitudeCorrected).toBe(unit.compensatedAltitude(1500))
+  expect(unit.profile().points.find(point => point.ident === 'FERDI')?.altitude).toBe(unit.fafAltitudeCorrected)
+  unit.setScratch('40'); unit.press('LSK5L'); unit.press('EXEC')
+  expect(unit.fafAltitudeCorrected).toBeLessThan(1500)
+  expect(unit.profile().points.find(point => point.ident === 'FERDI')?.altitude).toBe(unit.fafAltitudeCorrected)
+  expect(unit.activeRoute.legs.find(leg => leg.kind === 'wpt' && leg.ident === 'FERDI')).toMatchObject({ altitude: fafConstraint })
+  unit.setScratch('-25'); unit.press('LSK5L'); unit.press('EXEC')
+  unit.press('CLR'); unit.setScratch('-56'); unit.press('LSK5L')
+  expect(scratch(unit)).toBe('INVALID ENTRY')
+  expect(unit.vnav.destTemp).toBe(-25)
+  unit.selectProcedure('APPROACH', 'R24R'); unit.press('EXEC')
+  expect(unit.approachMdaEntered).toBe(true)
+  expect(unit.vnav).toMatchObject({ mda: 710, destTemp: -25, qnh: '29.92' })
+  const publish = (change: Record<string, unknown>) => {
+    frame = structuredClone(frame); now += 1000
+    frame.air.at = now; frame.air.sequence += 1; Object.assign(frame.air.value!, change)
+    for (const sample of frame.gps) { sample.at = now; sample.sequence += 1 }
+    expect(port.publish(frame)).toBe(true); unit.refreshSensorInput()
+  }
+  publish({ altitudeRateValid: false })
+  expect(unit.advisoryVertical).toMatchObject({ available: false, reason: 'ABNORMAL ALTITUDE RATE' })
+  publish({ altitudeRateValid: true, altitudesAgree: false })
+  expect(unit.advisoryVertical).toMatchObject({ available: false, reason: 'ALTITUDES DISAGREE' })
+})
 
 test('altitude entries follow the FMS rules: three digits are hundreds as an entry, flight levels, and constraint windows', () => {
   expect(parseAltitude('050', true)).toBe(5000)

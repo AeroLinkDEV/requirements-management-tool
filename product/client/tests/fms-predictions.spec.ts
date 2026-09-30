@@ -97,8 +97,7 @@ test('nothing downstream of an unresolved gap is predicted as if it were known (
 test('a slower speed constraint on a later leg makes that leg take longer, and leaves the active leg alone (R09)', () => {
   const { unit } = setup()
   // Calm wind (VNAV CRZ), so the leg time is distance over airspeed and can be worked out by hand.
-  press(unit, "VNAV", "NEXT")
-  enter(unit, "000/0", "LSK2R")
+  unit.wind = { direction: 0, speed: 0 }
   expect(unit.wind.speed).toBe(0)
   const legs = unit.activeRoute.legs.flatMap(leg => (leg.kind === 'wpt' ? [leg.ident] : []))
   expect(legs.slice(0, 3)).toEqual(['MUN', 'RDG', 'TOLGU'])

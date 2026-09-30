@@ -59,6 +59,8 @@ export type ProcedureLeg =
   | {
     ident: string; altitude?: string; overfly?: boolean; path?: FixPath; course?: number; arc?: { centre: LatLon; turn: "L" | "R" };
     turnDirection?: "LEFT" | "RIGHT"; speedLimit?: SpeedLimit; verticalAngleDeg?: number; hold?: ProcedureHold;
+    /** Generated PI outbound waypoints stay inside their procedure, never in the pilot waypoint database. */
+    position?: LatLon; procedureTurn?: { reference: string; role: "REFERENCE" | "OUTBOUND" | "INBOUND" };
   }
   | { path: ConditionalPath; course: number; altitude?: number; turnDirection?: "LEFT" | "RIGHT"; speedLimit?: SpeedLimit };
 
@@ -108,6 +110,12 @@ export type Procedure = {
   missedHold?: { fix: string; inbound: number; turn: "RIGHT" | "LEFT"; altitude: string; legDistanceNm?: number; speedLimit?: SpeedLimit };
   /** Imported approaches: where the procedure ends and what follows (C.2). */
   endpoint?: ProcedureEndpoint;
+  /** Instrument entry fixes; preceding visual/VFR portions require separate chart evidence. */
+  departure?: {
+    entries: Record<string, { fix: string; altitude?: string }>;
+    visualSegment: { kind: "PROCEED VISUALLY" | "PROCEED VFR" | "UNKNOWN"; source?: string };
+  };
+  runwayTransitions?: Record<string, ProcedureLeg[]>;
   /**
    * A point-in-space approach (a Copter procedure whose MAP is not a runway): flown to the MAP, then the visual
    * segment or the missed approach. Its `runways` is empty.
@@ -331,7 +339,8 @@ export class NavDatabase {
     const entries = [...[...this.byIdent.values()].flat().filter(e => !replaced.has(`${e.kind}:${e.ident}`)), ...other.entries];
     const airways = [...[...this.airwayByIdent.values()].filter(a => !other.airways.some(o => o.ident === a.ident)), ...other.airways];
     const msa = [...this.msa.filter(m => !(other.msa ?? []).some(o => o.airport === m.airport && o.centre === m.centre)), ...(other.msa ?? [])];
-    return new NavDatabase({ cycle: other.cycle, entries, airways, procedures: [...this.procedures, ...other.procedures], msa });
+    const procedures = [...this.procedures.filter(p => !other.procedures.some(next => next.kind === p.kind && next.airport === p.airport && next.ident === p.ident)), ...other.procedures];
+    return new NavDatabase({ cycle: other.cycle, entries, airways, procedures, msa });
   }
 }
 

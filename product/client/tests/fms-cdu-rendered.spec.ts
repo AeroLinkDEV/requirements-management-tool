@@ -583,7 +583,7 @@ test('a numeric word can be forced with a status from the bus monitor, and the F
   await expect(page.getByTestId('route-gps1')).toContainText('not usable · no fix')
 })
 
-test('the KBTV demonstration loads real FAA data from the Nav data tab, sets up RNAV RWY 15, and its LPV scenario passes on the bench', async ({ page }) => {
+test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit later-SBAS LPV scenario passes on the bench', async ({ page }) => {
   await open(page)
   await tab(page, 'Nav data')
   const demo = page.getByRole('group', { name: 'Real-data demonstration' })
@@ -598,12 +598,17 @@ test('the KBTV demonstration loads real FAA data from the Nav data tab, sets up 
   await expect(demo.getByRole('status')).toHaveText(/^Set up: KBTV RNAV \(GPS\) RWY 15/)
   await key(page, 'PROG').click()
   await expectLine(page, 2, /^STAEV\b/)
+  for (const id of ['INIT_REF', 'NEXT', 'LSK1R']) await key(page, id).click()
+  await expectLine(page, 0, /^ACT VNAV R15\s+1\/1$/)
+  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-s300-heli-civil v5')
+  await page.screenshot({ path: 'test-results/s300-kbtv-advisory.png', fullPage: true })
   // The library scenario flies it from the same start state, on a restarted simulation.
   await tab(page, 'Scenarios')
   const card = page.getByRole('region', { name: 'Scenarios' })
   await page.getByLabel('Simulation rate').selectOption('64')
   await card.getByLabel('Scenario', { exact: true }).selectOption({ label: 'KBTV RNAV (GPS) RWY 15, LPV on the published FAS' })
   await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-later-sbas-heli v1')
   await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible({ timeout: 45_000 })
   await expect(card.getByRole('list', { name: 'Scenario steps' }).locator('li[data-status="pass"]')).toHaveCount(5)
 })
@@ -616,6 +621,29 @@ test('the helicopter autopilot fields keep only what they accept: digits, and a 
   await expect(page.getByLabel('Vertical speed')).toHaveValue('-800')
   await page.getByLabel('Selected speed').fill('9z0')
   await expect(page.getByLabel('Selected speed')).toHaveValue('90')
+})
+
+test('the PinS crew continuation requires MAP passage and the actual chart condition, then leaves instrument guidance', async ({ page }) => {
+  await open(page)
+  const card = page.getByRole('region', { name: 'Scenarios' })
+  const scenario = { id: 'pins-ui', title: 'PinS crew controls', objective: 'UI wiring at the published MAP', maxSeconds: 1,
+    start: '87n-rnav190-final', steps: [{ when: { kind: 'start' }, action: { kind: 'expectActive', waypoint: 'STAYS' } }] }
+  await card.getByLabel('Scenario file').setInputFiles({ name: 'pins-ui.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(scenario)) })
+  await card.getByRole('button', { name: 'Run the scenario' }).click()
+  await expect(card.getByRole('status').filter({ hasText: /^PASS/ })).toBeVisible()
+  const continueButton = page.getByRole('button', { name: 'Continue from MAP' })
+  await expect(continueButton).toBeDisabled()
+  await expect(page.getByLabel('Landing area in sight')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Jump to next waypoint' }).click()
+  await page.getByRole('button', { name: 'Jump to next waypoint' }).click()
+  await expect(continueButton).toBeDisabled()
+  await page.getByLabel('Basic VFR conditions met').check()
+  await expect(continueButton).toBeEnabled()
+  await continueButton.locator('..').screenshot({ path: test.info().outputPath('pins-crew-conditions.png') })
+  await continueButton.click()
+  await expect(page.getByLabel('Guidance')).toContainText('crew flying the visual segment')
+  await expect(page.getByLabel('Guidance')).toContainText('HDG')
+  await page.locator('.fmsBench').screenshot({ path: test.info().outputPath('pins-crew-continuation.png') })
 })
 
 test('the 87N mission: after ACTIVATE and EXEC over the mark, the map draws the FMS joining path to JN (Phase 1)', async ({ page }) => {

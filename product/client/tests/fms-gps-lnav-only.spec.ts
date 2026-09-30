@@ -7,6 +7,7 @@ import type { GpsBus, GpsReceiver } from '../src/fmsCdu/gps'
 import { parseArinc424 } from '../src/fmsCdu/arinc424'
 import { approachAuthority, buildFas, fasRequirement } from '../src/fmsCdu/gpsSensors'
 import { KBTV_SOURCE, setUpKbtvRnav15 } from '../src/fmsCdu/kbtvDemo'
+import { LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import type { CduFunction } from '../src/fmsCdu/variants'
 
@@ -25,7 +26,7 @@ const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(messa
 /** On the 87N R190 approach (HTO transition), 2 NM before STAYS on the final course, in the approach phase. */
 function onR190() {
   let now = START
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   expect(unit.loadArinc424(COPTER, 'copter-pins-2609.pc')).toMatchObject({ loaded: 'CIFP2609' })
   unit.swapCycles()
   unit.press('RTE')
@@ -40,6 +41,7 @@ function onR190() {
   expect(unit.directTo('STAYS')).toBeUndefined()
   unit.press('EXEC')
   const sim = new FlightSimulator(unit)
+  unit.armApproach()
   const fly = (seconds: number) => { for (let t = 0; t < seconds; t += 1) { now += 1000; sim.step(1) } }
   fly(2)
   expect(unit.flightPhase).toBe('APPROACH')
@@ -91,7 +93,7 @@ test('R190: NO APPR INTEGRITY only when the selected receiver is unusable, as wi
 
 test('KBTV R15 (a FAS approach) still needs its selected approach: 156 not selected is NO APPR, as before', () => {
   let now = START
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(unit)
   expect(setUpKbtvRnav15(unit, sim)).toEqual({ ready: true })
   now += 1000
@@ -134,7 +136,7 @@ test('Q4: a point-in-space approach that codes a vertical path but has no FAS da
   // so the approach needs a FAS data block, and the data has none to give it.
   const coded = withLine(COPTER, line => line.includes('K6FR190') && line.includes('030CRANN'), line => setColumns(line, 103, 106, '-300'))
   let now = START
-  const unit = new ScriptedFms(() => new Date(now))
+  const unit = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   expect(unit.loadArinc424(coded, 'copter-pins-2609-vpa.pc')).toMatchObject({ loaded: 'CIFP2609' })
   unit.swapCycles()
   unit.press('RTE')
@@ -150,7 +152,8 @@ test('Q4: a point-in-space approach that codes a vertical path but has no FAS da
   unit.press('EXEC')
   const sim = new FlightSimulator(unit)
   for (let t = 0; t < 2; t += 1) { now += 1000; sim.step(1) }
-  expect(unit.flightPhase).toBe('APPROACH')
+  expect(unit.flightPhase).toBe('TERMINAL')
+  expect(unit.lamps().has('NPA')).toBe(false)
   expect(unit.approachType).toBe('NO APPR')
   expect(unit.gpsApproachAuthority).toEqual({ annunciation: 'NO APPR', lateral: false, vertical: false, reason: 'FAS DATA MISSING' })
 })
@@ -159,7 +162,7 @@ test('Q4: an unreadable published path point never becomes LNAV only, nor a deri
   // KBTV R15's path point record with an impossible CRC (columns 116-123).
   const broken = withLine(KBTV, line => line.startsWith('SUSAP KBTVK6PR15   RW15 001'), line => setColumns(line, 116, 123, 'ZZZZZZZZ'))
   // The loader's own validation stands: a file with an impossible record is refused whole, so nothing changes.
-  const unit = new ScriptedFms(() => new Date(START))
+  const unit = new ScriptedFms(() => new Date(START), { profile: LATER_SBAS_PROFILE })
   expect(unit.loadArinc424(broken, KBTV_SOURCE)).toEqual({ refused: expect.stringContaining('impossible path point CRC') })
   // Behind it, the approach read from such data keeps the fact: it needs a FAS and has none usable. No FAS is derived in
   // its place, and its requirement is FAS DATA INVALID, which is NO APPR on any receiver.
@@ -176,7 +179,7 @@ test('Q4: an unreadable published path point never becomes LNAV only, nor a deri
   expect(fasRequirement(r15, null)).toBe('FAS DATA INVALID')
   // On a usable receiver, as the intact approach flies: NO APPR, with the reason.
   let now = START
-  const intact = new ScriptedFms(() => new Date(now))
+  const intact = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
   const sim = new FlightSimulator(intact)
   expect(setUpKbtvRnav15(intact, sim)).toEqual({ ready: true })
   now += 1000
