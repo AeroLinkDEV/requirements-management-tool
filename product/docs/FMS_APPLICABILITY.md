@@ -91,6 +91,7 @@ Status: **sourced** (a source states it), **borrowed** (a representative public 
 | PI-CONST | Procedure-turn construction | M300 7-1 | S300 | Two outbound legs of 60 s and 45 s at 180 kt: 3.00 NM and 2.25 NM in still air, before shortening | 180 kt is a construction reference, not a speed to fly | Sourced | No (later) |
 | NO-LOC-UPD | No localizer updating | M300 1-3…1-6 | S300 | Not modelled | An airline (Boeing) feature, not a CMA mode | Sourced absence | — |
 | FUEL-FLOW | Fuel predictions from the current flow | M300 5-14, 14-1, 14-5 | S300 | Current flow; operator-entered reserve | — | Sourced | Yes |
+| WPT-WIND | Forecast waypoint winds in the ETAs | M300 5-14 (LEGS: ETAs "based on measured wind and forecast waypoint winds"); M300 11-82 | S300 | Not modelled: every leg is predicted in the system wind (measured, or the manual entry on PROGRESS); no forecast wind is entered or stored per waypoint | **Deferred** per plan rev 2 E2, kept in rev 3. The only S300 multi-level wind entry found is the CARP wind page (M300 11-82), which is military and out of scope (D6). The RRJ 4-level forecast form (M050 5-14…5-16) is a possible extension, not an S300 source | Sourced | No (deferred, E2) |
 
 ## References
 
