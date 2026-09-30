@@ -1842,7 +1842,8 @@ export class ScriptedFms implements CduBackend {
       for (let i = 0; i < index; i += 1) {
         const leg = route.legs[i];
         if (leg.kind !== "wpt") continue;
-        const to = this.isMoving(leg.ident) ? (this.rendezvousFor(route, i)?.position ?? this.movingPositionAt(leg.ident, now)) : this.coordinates(leg.ident, route);
+        const to = leg.position ?? (this.isMoving(leg.ident)
+          ? (this.rendezvousFor(route, i)?.position ?? this.movingPositionAt(leg.ident, now)) : this.coordinates(leg.ident, route));
         if (!to) continue;
         const gs = distanceNm(start, to) < 1e-6 ? tas : groundspeed(courseDeg(start, to));
         if (gs === null || gs <= 0) return unachievable();

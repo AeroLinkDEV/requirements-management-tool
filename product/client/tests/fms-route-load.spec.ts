@@ -101,6 +101,14 @@ test('BACKTRACK excludes procedure interiors, keeps holding and SAR origins once
   expect(movingHistory.coordinates('SHIP1')).toEqual(passedShip)
   expect(movingHistory.rendezvousRollInvalid).toBe(false)
   expect(movingHistory.activeRoute.legs[0]).toMatchObject({ qualifier: '/O' })
+  // A later live intercept must reach its preceding historical fix, not the ship's new 600-NM position.
+  const recordedLeg = structuredClone(movingHistory.activeRoute.legs[0])
+  movingHistory.defineMoving('MEET', offset(movingHistory.position, 0, 50), 0, 0)
+  movingHistory.planData.cruiseTas = 100; movingHistory.planData.cruiseWind = { direction: 0, speed: 0 }
+  movingHistory.replaceLegs([recordedLeg, { kind: 'wpt', ident: 'MEET' }]); movingHistory.press('EXEC')
+  expect(movingHistory.rendezvousFor(movingHistory.activeRoute, 1)).toMatchObject({ condition: 2, achievable: true })
+  // 50 NM / 100 kt = 1,800 s; allow 0.1 s for the measured GPS position refreshed on EXEC.
+  expect(Math.abs(movingHistory.rendezvousFor(movingHistory.activeRoute, 1)!.ttg! - 1800)).toBeLessThan(0.1)
   const capacity = fms(), oldActive = structuredClone(capacity.activeRoute)
   for (let i = 0; i < 50; i++) { capacity.directTo('RDG'); capacity.press('EXEC') }
   const beforeRequest = structuredClone(capacity.activeRoute)
