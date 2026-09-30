@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
-import { distanceNm, hhmm, offset, type Hold } from '../src/fmsCdu/fmsModel'
+import { courseDeg, distanceNm, hhmm, offset, type Hold } from '../src/fmsCdu/fmsModel'
 import { iasFromTas, predictedGroundSpeed, tasFromIas } from '../src/fmsCdu/kinematics'
 import type { ProcedureHold } from '../src/fmsCdu/navData'
 import { holdAllowance, holdPathToPassage, piecesHours } from '../src/fmsCdu/predictions'
@@ -679,4 +679,58 @@ test('E1: the ETAs are flown in the system wind: a headwind or crosswind changes
   const cross = (leg().eta! - unit.now.getTime()) / 1000
   expect(cross).toBeCloseTo((leg().distance! / Math.sqrt(tas * tas - 900)) * 3600, 1)
   expect(cross).toBeGreaterThan(still)
+})
+
+// Rev 3 B1.7 (general): ETAs come from the remaining planned path, never from the instantaneous closure speed. NO
+// PROGRESS is the aircraft held stationary off the plan: stopped over the ground, or held in the air (a hover, the speed
+// selected to zero) and not closing on the active waypoint. A turn at flying speed is neither.
+test('B1.7 (general): every ETA shown comes from the planned path, not the closure speed; a turn at flying speed keeps its predictions', () => {
+  const now = START
+  const unit = new ScriptedFms(() => new Date(now))
+  const sim = new FlightSimulator(unit)
+  const to = unit.activeRoute.legs.find(leg => leg.kind === 'wpt') as { ident: string }
+  const course = courseDeg(unit.position, unit.coordinates(to.ident)!)
+  // Flying 60 degrees off the course to the fix: the closure speed is half the ground speed.
+  unit.setAircraft({ track: (course + 60) % 360 })
+  const first = unit.profile().points[0]
+  expect(first.ident).toBe(to.ident)
+  expect(first.eta).not.toBeNull()
+  const closureEta = now + (first.distance! / unit.closureSpeed) * 3_600_000
+  expect(Math.abs(closureEta - first.eta!)).toBeGreaterThan(60_000)
+  // The output bus and PROGRESS 1/4 show the planned path's time at the fix.
+  expect(unit.shownEta(0, first.distance!)).toBe(first.eta)
+  const bus = fmsOutputs(unit, sim).eta
+  expect(bus.status).toBe('NORMAL')
+  expect(Math.abs((bus.value as number) - first.eta!)).toBeLessThan(1_000)
+  unit.press('PROG')
+  expect(lines(unit)[2]).toMatch(new RegExp(`^${to.ident}\\s+\\d+\\.\\dNM ${hhmm(new Date(first.eta!)).replace('.', '\\.')}$`))
+  // Turned away from the fix at flying speed: still on the plan, still timed.
+  unit.setAircraft({ track: (course + 180) % 360 })
+  expect(unit.closureSpeed).toBeLessThan(0)
+  expect(unit.heldOffPlan).toBe(false)
+  expect(unit.profile().points[0].eta).not.toBeNull()
+  // Held in the air and carried backwards by the wind at 40 kt: held off the plan, NO PROGRESS, no ETA anywhere.
+  unit.setAircraft({ tas: 0, groundSpeed: 40 })
+  expect(unit.heldOffPlan).toBe(true)
+  expect(unit.profile().points[0]).toMatchObject({ eta: null, reason: 'NO PROGRESS' })
+  expect(fmsOutputs(unit, sim).eta.status).toBe('NCD')
+})
+
+test('B1.7 (general): VNAV CRZ shows the planned path\'s time at the T/D, and dashes without progress, never 0000Z', () => {
+  const unit = new ScriptedFms(() => new Date(START), { profile: LAB_AIRLINE_VNAV_PROFILE })
+  const profile = unit.profile()
+  const tod = profile.topOfDescent!
+  expect(tod).toBeGreaterThan(0)
+  const at = unit.etaAlongPath(tod)!
+  // Between the times of the fixes either side of the T/D, in proportion to the distance.
+  const after = profile.points.findIndex(point => point.distance! >= tod)
+  const before = after > 0 ? profile.points[after - 1] : { distance: 0, eta: START }
+  const share = (tod - before.distance!) / (profile.points[after].distance! - before.distance!)
+  expect(at).toBeCloseTo(before.eta! + share * (profile.points[after].eta! - before.eta!), 0)
+  unit.press('VNAV')
+  unit.press('NEXT')
+  expect(lines(unit)[0]).toMatch(/^ACT VNAV CRZ\s+2\/3$/)
+  expect(lines(unit)[6]).toMatch(new RegExp(`^${tod.toFixed(1)}NM ${hhmm(new Date(at)).slice(0, 4)}Z\\s+RW24R$`))
+  unit.setAircraft({ groundSpeed: 0 })
+  expect(lines(unit)[6]).toMatch(new RegExp(`^${unit.profile().topOfDescent!.toFixed(1)}NM -----\\s+RW24R$`))
 })

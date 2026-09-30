@@ -5,7 +5,6 @@ import {
   small, three, title, type CorePageId, type Leg, type LskResult, type Page, type PageId,
 } from "./fmsModel";
 import { HAL_NM, MODE_TEXT, shownReceiver } from "./gpsSensors";
-import { makingProgress } from "./kinematics";
 import { gpsSummary, navModeText, sbasSummary } from "./navPages";
 import type { Line, Segment } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
@@ -120,7 +119,8 @@ function vnavApproachPage(fms: ScriptedFms): (Line | undefined)[] {
 function vnavCruise(fms: ScriptedFms): (Line | undefined)[] {
   const profile = fms.profile();
   const tod = profile.topOfDescent;
-  const todEta = tod === null || !makingProgress(fms.closureSpeed) ? null : fms.utcTime.getTime() + (tod / fms.closureSpeed) * 3_600_000;
+  // The planned path's time at the T/D (rev 3 B1.7), never the distance over the present closure speed.
+  const todEta = tod === null ? null : fms.etaAlongPath(tod);
   const next = profile.points.find(p => { const leg = fms.activeRoute.legs.find(l => l.kind === "wpt" && l.ident === p.ident); return leg?.kind === "wpt" && leg.altitude; });
   const nextLeg = next ? fms.activeRoute.legs.find(l => l.kind === "wpt" && l.ident === next.ident) : undefined;
   return [
@@ -130,7 +130,7 @@ function vnavCruise(fms: ScriptedFms): (Line | undefined)[] {
     caption(" PATH ANGLE", "WIND "),
     { left: { text: `${fixed(fms.vnav.pathAngle, 1)}°` }, right: { text: `${three(fms.wind.direction)}T/${fms.wind.speed}KT` } },
     caption(" T/D", "E/D "),
-    { left: medium(tod === null ? (profile.descending ? "PASSED" : "-----") : `${fixed(tod, 1)}NM ${eta(todEta!)}`), right: medium(profile.endOfDescent ?? "-----") },
+    { left: medium(tod === null ? (profile.descending ? "PASSED" : "-----") : `${fixed(tod, 1)}NM ${todEta === null ? "-----" : eta(todEta)}`), right: medium(profile.endOfDescent ?? "-----") },
     caption(" NEXT RESTR"),
     {
       left: nextLeg?.kind === "wpt" ? medium(`${nextLeg.ident} ${altitudeText(nextLeg)}`) : dashes(5),
