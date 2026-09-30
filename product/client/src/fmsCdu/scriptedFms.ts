@@ -57,7 +57,7 @@ import {
   userWaypointPosition, type UserDatabase, type UserDatabaseStore, type UserScope, type UserWaypoint,
 } from "./userDatabase";
 import { TACTICAL_PAGES } from "./tacticalPages";
-import { checkAtTdn, planTransition, tdnGeometry, type TdnDecision, type TransitionPlan, type TransitionStart } from "./transition";
+import { checkAtTdn, planTransition, tdnGeometry, transitionSecondsToGo, type TdnDecision, type TransitionPlan, type TransitionStart } from "./transition";
 import { defaultLegMinutes, designBank, holdGeometry, holdingSpeedLimit, radiusAt } from "./holds";
 import { JOIN_BEFORE_TDN_NM, joiningPath, type JoinPath } from "./joining";
 import type { CduFunction } from "./variants";
@@ -463,6 +463,8 @@ export class ScriptedFms implements CduBackend {
     windDirection: null as number | null,
     windSpeed: null as number | null,
     dtra: null as number | null,
+    /** The planned transition (TD, the gate segment, TD/H): at ACTIVATE, then as recomputed at TDN. It times MRK (B1.7). */
+    plan: null as TransitionPlan | null,
     request: 0,
     /**
      * The transition request at TDN (plan B3.3): MRK, the final track, the remaining distance and the planned trajectory
@@ -475,7 +477,7 @@ export class ScriptedFms implements CduBackend {
     functionLost: false,
     /** At TDN: the position against the final track, the remaining distance, the state and the recomputed decision. */
     atTdn: null as { crossTrack: number; trackError: number; remainingNm: number; start: TransitionStart | null; decision: TdnDecision | null } | null,
-    active: null as { id: number; mark: { ident: string; position: LatLon; label: string | null }; finalTrack: number; windDirection: number; dtra: number; join: JoinPath | null } | null,
+    active: null as { id: number; mark: { ident: string; position: LatLon; label: string | null }; finalTrack: number; windDirection: number; dtra: number; plan: TransitionPlan | null; join: JoinPath | null } | null,
     procedures: 0,
   };
 
@@ -1543,6 +1545,22 @@ export class ScriptedFms implements CduBackend {
     return makingProgress(this.closureSpeed) ? this.utcTime.getTime() + (miles / this.closureSpeed) * 3_600_000 : null;
   }
 
+  /**
+   * The time to MRK at leg `index` of `route` along the planned transition (hours), or null when it is not the hover
+   * procedure's MRK: after TDN in the route, the whole transition; as the active leg once the transition has been
+   * requested at TDN, what is left of it from `toGoNm` out.
+   */
+  private transitionHoursTo(route: Route, index: number, toGoNm: number | null) {
+    const plan = route === this.active ? this.hover.active?.plan : this.hover.status === "MOD" ? this.hover.plan : this.hover.active?.plan;
+    const tdn = this.coordinates("TDN", route), mrk = this.coordinates("MRK", route);
+    if (!plan || !tdn || !mrk || toGoNm === null) return null;
+    const before = route.legs[index - 1];
+    const afterTdn = before?.kind === "wpt" && before.ident === "TDN";
+    const inTransition = index === 0 && route === this.active && this.hover.requestData !== null;
+    if (!afterTdn && !inTransition) return null;
+    return transitionSecondsToGo(plan, distanceNm(tdn, mrk), toGoNm) / 3600;
+  }
+
   /** The legs the predictions fly, as computeProfile takes them, with the course of each (for the RTA's wind triangle). */
   private predictionLegs(route: Route) {
     const geometry = this.legGeometry(route);
@@ -1599,9 +1617,12 @@ export class ScriptedFms implements CduBackend {
       // Timed at the airspeed flown now: under the ADVISORY policy the crew's selected speed, not the planned one.
       const holdTas = this.trueAirspeed ?? tas;
       const pathHours = path ? piecesHours(path, c => this.groundSpeedOn(c, holdTas)) : undefined;
+      // MRK after TDN is reached along the planned transition (TD, the gate segment, TD/H to a stop), not at the planned
+      // speed (plan B1.7); the route ends there, with the discontinuity after it.
+      const transitionHours = leg.ident === "MRK" ? this.transitionHoursTo(route, i, legDistance) : null;
       waypoints.push({
         ident: leg.ident, legDistance, groundSpeed: pathHours === null ? null : this.groundSpeedOn(course ?? this.track, tas),
-        ...(pathHours !== undefined && pathHours !== null ? { hours: pathHours } : {}),
+        ...(pathHours !== undefined && pathHours !== null ? { hours: pathHours } : transitionHours !== null ? { hours: transitionHours } : {}),
         constraint, endOfDescent: i === runwayAt, basis, missed: leg.source === "MISSED",
         ...(hold && leg.ident === hold.fix ? { assumption: "HOLD EXIT NEXT CROSSING" } : {}),
         ...(end && i === end.legIndex ? { endpoint: { kind: end.kind, label: end.label } } : {}),
@@ -3232,7 +3253,7 @@ export class ScriptedFms implements CduBackend {
         ...(rest[0]?.kind === "disco" ? rest.slice(1) : rest),
       ];
     });
-    Object.assign(this.hover, { status: "MOD", finalTrack, windDirection: this.systemWind.direction, dtra: plan.dtraNm, windSpeed: null, refused: null, refusedReason: null, functionLost: false, requestData: null, atTdn: null });
+    Object.assign(this.hover, { status: "MOD", finalTrack, windDirection: this.systemWind.direction, dtra: plan.dtraNm, plan, windSpeed: null, refused: null, refusedReason: null, functionLost: false, requestData: null, atTdn: null });
     return null;
   }
 
@@ -3276,7 +3297,7 @@ export class ScriptedFms implements CduBackend {
     this.pendingJoin = null;
     if (this.hover.status !== "MOD") return;
     const active = this.hover.active;
-    Object.assign(this.hover, active ? { status: "ACT", mark: active.mark, finalTrack: active.finalTrack, windDirection: active.windDirection, dtra: active.dtra } : { status: "NONE" });
+    Object.assign(this.hover, active ? { status: "ACT", mark: active.mark, finalTrack: active.finalTrack, windDirection: active.windDirection, dtra: active.dtra, plan: active.plan } : { status: "NONE" });
   }
 
   /**
@@ -3319,6 +3340,8 @@ export class ScriptedFms implements CduBackend {
       return;
     }
     this.hover.windSpeed = this.systemWind.speed;
+    // The transition as recomputed from the state at TDN is the one flown, and the one MRK is predicted from.
+    this.hover.plan = this.hover.active!.plan = decision.plan;
     this.hover.requestData = { id, mrk: mark.position, finalTrack, remainingNm: distanceNm(this.here, mark.position), gateNm: decision.gateNm, plan: decision.plan };
     this.hover.request += 1;
   }
@@ -3531,7 +3554,7 @@ export class ScriptedFms implements CduBackend {
       // Committed on EXEC: the joining path rebuilt from the state now, if JN is still the route's next leg (the crew may
       // have deleted it, to vector onto the final with headings).
       const joins = route.legs[0]?.kind === "wpt" && route.legs[0].ident === "JN";
-      h.active = { id: ++h.procedures, mark: h.mark!, finalTrack: h.finalTrack!, windDirection: h.windDirection!, dtra: h.dtra!, join: joins ? this.joinFromHere(joinPoint, h.finalTrack!) : null };
+      h.active = { id: ++h.procedures, mark: h.mark!, finalTrack: h.finalTrack!, windDirection: h.windDirection!, dtra: h.dtra!, plan: h.plan, join: joins ? this.joinFromHere(joinPoint, h.finalTrack!) : null };
       Object.assign(h, { status: "ACT", requestData: null, refused: null, refusedReason: null, functionLost: false, atTdn: null });
       // The procedure takes the head of the route: a search pattern being flown is interrupted (its /S leg removed).
       if (this.sar.active) this.interruptSar();

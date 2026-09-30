@@ -98,6 +98,8 @@ test('LNAV with no leg to fly is lost to heading hold, and the loss is recorded 
   expect(unit.activeRoute.legs[0]).toMatchObject({ kind: 'disco' })
   expect(sim.lateralMode).toBe('HDG')
   expect(sim.modeEvents.some(e => e.event === 'LNAV LOST')).toBe(true)
+  // The FMA shows NAV lost in amber on the roll axis (B4.1).
+  expect(sim.modeEvents.find(e => e.event === 'LNAV LOST')?.lost).toEqual([{ axis: 'roll', mode: 'NAV' }])
 })
 
 

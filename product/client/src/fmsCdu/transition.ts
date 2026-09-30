@@ -151,3 +151,21 @@ export function checkAtTdn(start: TransitionStart, remainingNm: number): TdnDeci
 }
 
 
+
+/**
+ * The time to MRK along a planned transition, `toGoNm` before MRK on a TDN-to-MRK distance of `totalNm` (seconds; plan
+ * B1.7: the ETA at MRK comes from the transition profile, not from a leg at the planned speed). From TDN: TD, the gate
+ * segment at the gate ground speed (its length is what TD and TD/H leave of the distance), then TD/H, a constant
+ * deceleration to a stop (closed form). Within TD the time is taken in proportion to the distance (laboratory: TD's
+ * deceleration is integrated by the planner, not kept as a profile).
+ */
+export function transitionSecondsToGo(plan: TransitionPlan, totalNm: number, toGoNm: number): number {
+  const { td, tdh } = plan;
+  const gateNm = Math.max(0, totalNm - td.distanceNm - tdh.distanceNm);
+  const x = Math.max(0, Math.min(toGoNm, totalNm));
+  if (x <= tdh.distanceNm) return tdh.distanceNm > 0 ? tdh.seconds * Math.sqrt(x / tdh.distanceNm) : 0;
+  const gateSeconds = (nm: number) => (nm / td.groundSpeed) * 3600;
+  if (x <= tdh.distanceNm + gateNm) return tdh.seconds + gateSeconds(x - tdh.distanceNm);
+  const inTd = x - tdh.distanceNm - gateNm;
+  return tdh.seconds + gateSeconds(gateNm) + (td.distanceNm > 0 ? td.seconds * Math.min(1, inTd / td.distanceNm) : 0);
+}

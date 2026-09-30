@@ -203,6 +203,18 @@ function vnavDescent(fms: ScriptedFms): (Line | undefined)[] {
 /** The fix of the GPS receiver the FMS navigates on, or null when it navigates on none. */
 const gpsFix = (fms: ScriptedFms) => (fms.gpsStatus.chosen === null ? null : fms.gpsStatus.assessed[fms.gpsStatus.chosen].fix);
 
+/**
+ * PROGRESS 1/4's lines for a hover procedure in the active route (M300 A-124, A-129): TDN and MRK, each with the
+ * course of the leg into it, the distance to go along the route and the leg's index (for its ETA); null without one.
+ */
+function hoverLines(legs: Leg[], geometry: ReturnType<ScriptedFms["legGeometry"]>) {
+  const at = (name: string) => legs.findIndex(leg => leg.kind === "wpt" && leg.ident === name);
+  const tdn = at("TDN"), mrk = at("MRK");
+  if (tdn < 0 || mrk < 0) return null;
+  const alongTo = (index: number) => geometry.slice(0, index + 1).reduce((sum, leg) => sum + (leg?.distance ?? 0), 0);
+  return [tdn, mrk].map(index => ({ ident: (legs[index] as { ident: string }).ident, at: index, course: geometry[index]?.course ?? 0, distance: alongTo(index) }));
+}
+
 export const CORE_PAGES: Record<CorePageId, Page> = {
   MENU: {
     pages: () => 1,
@@ -582,12 +594,26 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         // RNP and ANP as every page, lamp and alert reads them; a bench-forced value is labelled TEST (R11).
         const { rnp, anp, forced } = fms.navPerformance;
         const toDistance = toLeg?.distance ?? 0;
+        // With a hover procedure in the active route the two waypoint lines are its TDN and MRK, each with the distance
+        // to go along the route and the ETA, whatever leg is active before them (M300 A-124, A-129; plan D-T T8).
+        const hover = hoverLines(legs, geometry);
+        const waypointLines = hover
+          ? hover.flatMap(line => [
+            { left: small(` ${fms.angleText(line.course)}`), ...(line === hover[0] ? { center: small("DTG", "green"), right: small("ETA ", "green") } : {}) },
+            { left: { text: pad(line.ident, 5), color: line.at === 0 ? "magenta" as const : "green" as const, inverse: line.at === 0 }, right: medium(`${fixed(line.distance, 1)}NM ${eta(line.at, line.distance)}`) },
+          ])
+          : [
+            { left: small(` ${fms.angleText(toLeg?.course)}`), center: small("DTG", "green"), right: small("ETA ", "green") },
+            { left: { text: pad(ident(to), 5), color: "magenta" as const, inverse: true }, right: medium(toLeg ? `${fixed(toDistance, 1)}NM ${eta(0, toDistance)}` : "") },
+            { left: small(` ${fms.angleText(nextLeg?.course)}`) },
+            { left: { text: pad(ident(next), 5), color: "green" as const }, right: medium(nextLeg ? `${fixed(toDistance + nextLeg.distance, 1)}NM ${eta(1, toDistance + nextLeg.distance)}` : "") },
+          ];
+        // XTK blanked in the hover procedure (M300 A-127): on a CF leg, more than 0.2 NM off it and more than 20° off its
+        // course together, the cross-track to a leg the aircraft is not flying along means nothing.
+        const xtkBlank = hover !== null && to?.kind === "wpt" && to.path === "CF" && Math.abs(fms.crossTrack) > 0.2 && Math.abs(fms.trackError) > 20;
         return [
           title("PROGRESS", "1/4", "ACT"),
-          { left: small(` ${fms.angleText(toLeg?.course)}`), center: small("DTG", "green"), right: small("ETA ", "green") },
-          { left: { text: pad(ident(to), 5), color: "magenta", inverse: true }, right: medium(toLeg ? `${fixed(toDistance, 1)}NM ${eta(0, toDistance)}` : "") },
-          { left: small(` ${fms.angleText(nextLeg?.course)}`) },
-          { left: { text: pad(ident(next), 5), color: "green" }, right: medium(nextLeg ? `${fixed(toDistance + nextLeg.distance, 1)}NM ${eta(1, toDistance + nextLeg.distance)}` : "") },
+          ...waypointLines,
           caption("TRUE WIND", "TK/GS "),
           // Preserve the system-wind computation/manual-entry rule and the TRUE wind reference.
           {
@@ -597,7 +623,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
             right: medium(`${fms.angleText(fms.track)}/${Math.round(fms.groundSpeed)}KT`),
           },
           caption(undefined, "TKE/XTK "),
-          { right: medium(`${fms.trackError < 0 ? "L" : "R"}${three(Math.abs(fms.trackError))}°/${fms.crossTrack < 0 ? "L" : "R"}${fixed(Math.abs(fms.crossTrack), 2)}NM`) },
+          { right: medium(`${fms.trackError < 0 ? "L" : "R"}${three(Math.abs(fms.trackError))}°/${xtkBlank ? "       " : `${fms.crossTrack < 0 ? "L" : "R"}${fixed(Math.abs(fms.crossTrack), 2)}NM`}`) },
           caption(`RNP/ANP ${forced ? "TEST" : nav.rnpManual === null ? fms.flightPhase : "MANUAL"}`),
           { left: medium(`${fixed(rnp, 2)}/${fixed(anp, 2)}NM`, anp > rnp ? "amber" : "white") },
           caption("NAV MODE"),
