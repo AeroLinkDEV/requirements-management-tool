@@ -13,7 +13,7 @@ import {
 } from "./fmsModel";
 import { Constellation } from "./gnss";
 import { GpsReceiver, residualShares, type FasDataBlock, type GpsInput, type GpsBus } from "./gps";
-import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas } from "./kinematics";
+import { holdTrack, iasFromTas, makingProgress, predictedGroundSpeed, tasFromIas, type Wind } from "./kinematics";
 import {
   ANP_FLOOR_NM, AutoSelection, GPS_DISAGREE_NM, SelectionLog, HAL_NM, approachAuthority, approachWords, fasRequirement, assessReceiver, buildFas, candidates, type ApproachAuthority, type GpsApproachWords, type GpsAssessment,
   type GpsChoice,
@@ -176,7 +176,7 @@ export class ScriptedFms implements CduBackend {
   private readonly raimExcluded = new Set<number>();
   private automaticRaimFor: string | null = null;
   private nav = {
-    mode: "GPS" as NavMode, anp: 0.05, dmes: [] as string[], vor: null as string | null, rnpManual: null as number | null, uncertain: false, airValid: true,
+    mode: "GPS" as NavMode, anp: 0.05, dmes: [] as string[], vor: null as string | null, rnpManual: null as number | null, uncertain: false, airValid: true, windComputed: true,
     unableSince: null as number | null, unableAlerted: false, integrityAlerted: false, approachIntegrityAlerted: false, armAlerted: false,
     /** The RNAV approach had vertical guidance from the GPS while in the approach phase (to catch its loss, 3b). */
     approachVerticalSeen: false,
@@ -343,9 +343,9 @@ export class ScriptedFms implements CduBackend {
    * null when the aircraft is not moving through the air measurably (below 1 kt).
    */
   get trueAirspeed(): number | null {
-    const toward = ((this.wind.direction + 180) * Math.PI) / 180, track = (this.track * Math.PI) / 180;
-    const north = this.groundSpeed * Math.cos(track) - this.wind.speed * Math.cos(toward);
-    const east = this.groundSpeed * Math.sin(track) - this.wind.speed * Math.sin(toward);
+    const toward = ((this.systemWind.direction + 180) * Math.PI) / 180, track = (this.track * Math.PI) / 180;
+    const north = this.groundSpeed * Math.cos(track) - this.systemWind.speed * Math.cos(toward);
+    const east = this.groundSpeed * Math.sin(track) - this.systemWind.speed * Math.sin(toward);
     const tas = Math.hypot(north, east);
     return tas >= 1 ? tas : null;
   }
@@ -399,7 +399,35 @@ export class ScriptedFms implements CduBackend {
   /** The active route, whatever a pending modification shows on the pages. Guidance flies this one. */
   get activeRoute(): Route { return this.active; }
 
+  /**
+   * The wind of the simulated air mass, which the flight flies in. The FMS reads `systemWind`: while it computes the
+   * wind, its measurement is taken to equal this one (laboratory: no wind-estimation error is modelled).
+   */
   readonly wind = { direction: 270, speed: 12 };
+  /** The wind last computed, carried while the FMS cannot compute one (dead reckoning, invalid air data). */
+  private lastComputedWind: Wind = { ...this.wind };
+  /** A wind the crew entered on PROGRESS 1/4 while the FMS could not compute one (M300 12-22, 11-19). */
+  private manualWind: Wind | null = null;
+  /**
+   * Whether the FMS computes the wind now (civilNavigation.ts): valid air data and a measured ground velocity. When it
+   * cannot, PROGRESS 1/4 takes a manual entry.
+   */
+  get windComputed() { return this.nav.windComputed; }
+  /**
+   * The wind the FMS uses (M300 5-14 "measured wind"): the computed wind; while none can be computed, the crew's
+   * PROGRESS 1/4 entry, or else the last computed wind. Predictions, the RTA, holds and the hover procedure read it.
+   */
+  get systemWind(): Wind { return this.nav.windComputed ? this.wind : this.manualWind ?? this.lastComputedWind; }
+  get manualWindEntered() { return this.manualWind !== null; }
+  /**
+   * PROGRESS 1/4 WIND: a manual entry, or null (DELETE) to clear it. Refused while the FMS computes the wind (M300 12-22:
+   * "Otherwise the value is displayed in medium font and manual entries are not permitted").
+   */
+  enterManualWind(wind: Wind | null): boolean {
+    if (this.nav.windComputed) return false;
+    this.manualWind = wind ? { ...wind } : null;
+    return true;
+  }
   /** Entries on the VNAV approach page. The FAF altitude sets the vertical path angle to the threshold. */
   /**
    * PLAN DATA (M300 3-19): the transition altitude and level, and the cruise wind and cruise true airspeed used for
@@ -919,9 +947,11 @@ export class ScriptedFms implements CduBackend {
     const gpsSource = selection.gpsSource;
     this.nav = {
       ...this.nav, mode: selection.mode, dmes: selection.dmes, vor: selection.vor, gpsSource,
-      anp: selection.anp, uncertain: selection.uncertain, airValid: selection.airValid,
+      anp: selection.anp, uncertain: selection.uncertain, airValid: selection.airValid, windComputed: selection.windComputed,
     };
     if (this.gpsTimeAvailable) this.utcOffsetMs = 0;
+    // A computed wind supersedes a crew entry; scenario UTC remains independent of display offset.
+    if (this.nav.windComputed) { this.lastComputedWind = { ...this.wind }; this.manualWind = null; }
     const choice = this.gpsSelected ? this.gpsChoice : "OFF";
     for (const index of this.selectionLog.update(this.now, gps.assessed, gpsSource === null ? null : gpsSource - 1, choice, gps.transferred)) {
       if (this.gpsSelected && !(selection.uncertain && gpsSource === index + 1)) this.alert(alert(`GPS${index + 1} NOT USABLE`));
@@ -1292,7 +1322,7 @@ export class ScriptedFms implements CduBackend {
    * the course cannot be flown with progress at that airspeed: the prediction is then unknown, not given a floor.
    */
   groundSpeedOn(course: number, tas = this.plannedSpeed) {
-    return predictedGroundSpeed(tas, course, this.wind);
+    return predictedGroundSpeed(tas, course, this.systemWind);
   }
 
   /** The cold temperature correction to the FAF altitude, from the destination temperature on VNAV (0 at or above ISA). */
@@ -1457,7 +1487,7 @@ export class ScriptedFms implements CduBackend {
     if (report) return holdPathToPassage(report, this.here);
     const holdTas = Math.max(tas, tasFromIas(hold.speed, this.altitude));
     const legNm = hold.legDistance ?? ((hold.legTime ?? defaultLegMinutes(this.altitude)) * holdTas) / 60;
-    const geometry = holdGeometry(fix, hold.inbound, hold.turn, holdTas, this.wind.speed, legNm, MAX_BANK);
+    const geometry = holdGeometry(fix, hold.inbound, hold.turn, holdTas, this.systemWind.speed, legNm, MAX_BANK);
     return geometry ? holdPathToPassage({ segments: geometry.racetrack, index: 0, passageAt: geometry.racetrack.length - 1 }, fix) : [];
   }
 
@@ -1471,7 +1501,7 @@ export class ScriptedFms implements CduBackend {
     // Sized at the hold altitude (its target), or the present altitude when it has none.
     const target = parseConstraint(hold.altitude);
     const altitude = target === null ? this.altitude : target.kind === "WINDOW" ? target.lower : target.altitude;
-    const allowance = holdAllowance(hold, fix, arrivalTrack, tas, this.wind, altitude);
+    const allowance = holdAllowance(hold, fix, arrivalTrack, tas, this.systemWind, altitude);
     if (!allowance) return {};
     return { hold: { hours: allowance.hours, ...(hold.exit === "AT TGT ALT" && !hold.missed ? { target } : {}) } };
   }
@@ -1583,7 +1613,7 @@ export class ScriptedFms implements CduBackend {
     const held = waypoints.slice(0, at).reduce((sum, w) => sum + (w.hold?.hours ?? 0), 0);
     const time = (tas: number) => held + pieces.reduce((sum, leg) => {
       if (leg.distance === 0) return sum;
-      const gs = predictedGroundSpeed(tas, leg.course, this.wind);
+      const gs = predictedGroundSpeed(tas, leg.course, this.systemWind);
       return gs === null ? Infinity : sum + leg.distance / gs;
     }, 0);
     let low = 1, high = 400;
@@ -2570,10 +2600,10 @@ export class ScriptedFms implements CduBackend {
     if (this.hover.status === "MOD" || (this.hover.active && this.hover.active.mark === mark)) return "NOT ALLOWED";
     const ra = this.radioHeight;
     if (ra.status !== "NORMAL") return "RALT FAILED";
-    const finalTrack = this.wind.speed >= 5 ? this.wind.direction : courseDeg(this.here, mark.position);
+    const finalTrack = this.systemWind.speed >= 5 ? this.systemWind.direction : courseDeg(this.here, mark.position);
     const plan = planTransition({
       ias: this.afcs?.ias ?? 0, radioHeight: ra.value, verticalSpeed: this.verticalSpeed,
-      headwind: this.wind.speed * Math.cos(((this.wind.direction - finalTrack) * Math.PI) / 180),
+      headwind: this.systemWind.speed * Math.cos(((this.systemWind.direction - finalTrack) * Math.PI) / 180),
       hoverHeight: this.afcs?.hoverHeight ?? 50, elevation: this.altitude - ra.value!,
     });
     if (plan.refused) return plan.reason.toUpperCase();
@@ -2614,7 +2644,7 @@ export class ScriptedFms implements CduBackend {
    */
   private joinFromHere(join: LatLon, finalTrack: number): JoinPath {
     const tas = tasFromIas(Math.max(this.afcs?.ias ?? 0, 1), this.altitude);
-    const fastest = tas + this.wind.speed;
+    const fastest = tas + this.systemWind.speed;
     const radius = radiusAt(fastest, designBank(fastest, fmsBankLimit(this.aircraftProfile)));
     return joiningPath(this.here, this.track, join, finalTrack, radius);
   }
@@ -2660,7 +2690,7 @@ export class ScriptedFms implements CduBackend {
     const ra = this.radioHeight;
     const decision = checkAtTdn({
       ias: this.afcs?.ias ?? 0, radioHeight: ra.status === "NORMAL" ? ra.value : null, verticalSpeed: this.verticalSpeed,
-      headwind: this.wind.speed * Math.cos(((this.wind.direction - finalTrack) * Math.PI) / 180),
+      headwind: this.systemWind.speed * Math.cos(((this.systemWind.direction - finalTrack) * Math.PI) / 180),
       hoverHeight: this.afcs?.hoverHeight ?? 50, elevation: ra.status === "NORMAL" ? this.altitude - ra.value! : 0,
     }, distanceNm(this.here, mark.position));
     if (!decision.engage) {
@@ -2673,7 +2703,7 @@ export class ScriptedFms implements CduBackend {
       this.alert(alert(text));
       return;
     }
-    this.hover.windSpeed = this.wind.speed;
+    this.hover.windSpeed = this.systemWind.speed;
     this.hover.requestData = { id, mrk: mark.position, finalTrack };
     this.hover.request += 1;
   }

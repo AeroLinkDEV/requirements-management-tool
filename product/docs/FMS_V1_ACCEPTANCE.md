@@ -35,7 +35,7 @@ The Open rows:
 - the ATA at a fix;
 - the aircraft freeze;
 - time-to-go asterisks;
-- F4 (RA valid again) and F10 (admission refusal);
+- F4 (RA valid again);
 - the ND ground-velocity vector;
 - PROGRESS showing TDN and MRK;
 - the D-R recompute, 500 NM rule, expiry and tactical review.
@@ -96,7 +96,7 @@ Several Partial rows are being addressed tonight by Astra/Sol under Sean's 29 Se
 | F7 | FMS roll command NCD or FAIL in NAV: HDG latched | rev3 B3.5 | flight.ts watchFailure | fms-modes: "on FMS failure the aircraft flies latched heading and altitude (R02)"; fms-cdu-rendered: "an FMS failure in flight reverts the flight modes" | Partial: FAIL only; roll command NCD alone not tested |
 | F8 | FMS withdraws roll steering (TDN NOT POSSIBLE, UNABLE HOLD, end of route): NAV to HDG latched | rev3 B3.5 | flight.ts (#1257, #1259, #1261) | fms-flight: "at TDN, 0.3 NM off the final track … HDG"; fms-heliport-procedures: "UNABLE HOLD at the first fix passage … (F8)"; "MISSED-HOLD … HDG" | Met |
 | F9 | FMS failure in TD or TD/H: HDG latched; TD/H decelerates to 0 and HOV holds where it stops | rev3 B3.5; R3-02.4 | flight.ts (#1257) | fms-flight: "FMS failure during TD/H … (F9)" | Met |
-| F10 | Baro, heading or attitude invalid: the scenario is refused at admission | rev3 B3.5 | none | none | Open: no admission check or test (no condition can inject these) |
+| F10 | Baro, heading or attitude invalid: the scenario is refused at admission | rev3 B3.5 | scenario.ts actionProblem refuses a condition step naming baroFail, headingFail or attitudeFail (conditions.ts UNMODELLED_CONDITIONS) with the reason; the Conditions tab lists them as not modelled and offers none | fms-scenario: "a scenario that injects baro, heading or attitude invalid is refused at admission, with the reason (F10)"; fms-cdu-rendered: "the Conditions tab says which sensor failures v1 does not model … (F10)" | Met |
 
 ### B4 displays
 
@@ -189,7 +189,7 @@ Several Partial rows are being addressed tonight by Astra/Sol under Sean's 29 Se
 
 | ID | Requirement | Source | Implementation | Owner test | Status |
 |---|---|---|---|---|---|
-| E1 | Airborne ETAs use the system wind (measured, or a PROGRESS manual entry); on the ground, ETEs use PLAN DATA CRZ TAS and CRZ WIND; the PLAN DATA page and its defaults arrive in v1 | rev2 E1; M300 5-14, 3-19 | fmsPages.ts PLAN DATA; scriptedFms planData, predictionLegs (#1258) | fms-prediction-endpoints: "E1: PLAN DATA shows … CRZ TAS 130 for ROTOR …" | Partial: the PLAN DATA page and its planning-only separation are Met; no owner test shows a manual wind entry changing an ETA; ground ETEs are not implemented (rev2 E1 scopes v1 to airborne) |
+| E1 | Airborne ETAs use the system wind (measured, or a PROGRESS manual entry); on the ground, ETEs use PLAN DATA CRZ TAS and CRZ WIND; the PLAN DATA page and its defaults arrive in v1 | rev2 E1; M300 5-14, 3-19 | fmsPages.ts PLAN DATA; scriptedFms planData, predictionLegs (#1258); civilNavigation windComputed, scriptedFms systemWind and the PROGRESS 1/4 manual wind (this PR) | fms-prediction-endpoints: "E1: PLAN DATA shows … CRZ TAS 130 for ROTOR …"; fms-navigation: "E1: the wind is computed only with valid air data and a measured ground velocity …"; "E1: PROGRESS 1/4 takes a manual wind only while the FMS cannot compute one; it drives the predictions and never the air mass" | Partial: PLAN DATA, the airborne ETAs in the system wind, and the PROGRESS 1/4 manual entry only while the wind is not computed are Met; ground ETEs: no ground state (plan rev2 B1.6: ground operations Later) |
 | E2 | Forecast waypoint winds are deferred, and labelled so | rev2 E2; M300 5-14, 11-82 | none (a deferral) | none | Partial: deferred by plan rev2 E2, kept in rev3 (Astra supports v1 A–E in rev3.1); the label is missing from FMS_APPLICABILITY.md and FMS_TEST_BENCH.md |
 | E3 | FUEL pages to the M300 14-1…14-5 field set with the EST tag; hover burns at the current flow; NOT ENOUGH FUEL excludes the missed approach; each fuel result states its endpoint basis, with no positive reserve unless the landing is modelled | rev2 E3; rev3 E3; R3-03 | fmsPages.ts FUEL; vnav.ts reserve (#1258) | fms-prediction-endpoints: "R3-03: the point-in-space approach predicts to CRANN …"; fms-predictions: "NOT ENOUGH FUEL is judged at the landing, not at the end of the missed approach (R07)"; fms-vnav: "fuel burns as the aircraft flies" | Partial: the basis, the missed-approach exclusion and no positive reserve are Met; the M300 field set (RTE FUEL 1/2 and 2/2 with weights and GWT), the EST tag and a hover-burn owner test are missing |
 | E4 | RTA: the required TAS from the wind triangle; RTA WIND; the overdue, infeasible, discontinuity and manual-hold cases; the 130 kt planning default separate; CONDITIONAL in a MANUAL hold; no TAS across NO PROGRESS or UNKNOWN | rev2 E4; rev3 E4; M300 5-17, A-141 | scriptedFms rendezvous, requiredTas; tacticalPages RNDZ (#1258, #1263) | fms-prediction-endpoints: "E4: … 67.08 kt"; "E4: an overdue RTA has no computed speed"; "R3-04: RTA feasibility compares like units"; "R3-03: an RTA to a fix ahead of an UNKNOWN segment"; "D-H/R3-04: an RTA past a hold that leaves by itself" | Partial: every computed case is Met; RTA WIND (a manual RTA wind kept apart from the system wind) is not implemented |

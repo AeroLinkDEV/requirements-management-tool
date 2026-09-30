@@ -125,6 +125,15 @@ test('an alert raised from the bench lights MSG until CLR on the panel acknowled
   await expect(msg).not.toHaveClass(/\blit\b/)
 })
 
+test('the Conditions tab says which sensor failures v1 does not model, and offers none of them (F10)', async ({ page }) => {
+  await open(page)
+  await tab(page, 'Conditions')
+  await expect(page.getByTestId('fms-unmodelled-conditions')).toHaveText(
+    'Not modelled in v1: barometric altitude invalid, heading invalid, attitude invalid. A scenario that injects one is refused.',
+  )
+  for (const name of [/barometric/i, /^heading invalid/i, /attitude/i]) await expect(page.getByRole('checkbox', { name })).toHaveCount(0)
+})
+
 test('every physical key on the rendered panel can be clicked and reaches the simulation', async ({ page }) => {
   await open(page)
   await page.getByRole('combobox', { name: 'Hardware variation' }).selectOption('050')

@@ -32,3 +32,14 @@ export const CONDITIONS: readonly Condition[] = [
   { id: "menuRequest", label: "Subsystem request", lamp: "MENU", description: "A subsystem asks for attention on MCDU MENU." },
   { id: "raFail", label: "Radio altimeter failed", description: "The radio height is a failure warning: no RADALT, and no hover procedure." },
 ];
+
+/**
+ * Sensor failures v1 does not model (rev 3 B3.5 F10): barometric altitude, heading and attitude are always valid in the
+ * simulation, and the representative autopilot has no fallback for losing them. A scenario that injects one is refused at
+ * admission with that reason, rather than run as though the aircraft had it; the bench lists them as not modelled.
+ */
+export const UNMODELLED_CONDITIONS: readonly { id: string; label: string }[] = [
+  { id: "baroFail", label: "Barometric altitude invalid" },
+  { id: "headingFail", label: "Heading invalid" },
+  { id: "attitudeFail", label: "Attitude invalid" },
+];
