@@ -78,8 +78,11 @@ jobs:
         run: |
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Fast feedback is advisory. Persistent PostgreSQL and product/.local are forbidden; the existing Product quality gate remains merge authority.'
 
+  # The client checks in three parallel parts (#1313): one job took 10.3–15 minutes serially and hit its
+  # 10-minute limit on every PR. Static and logic checks; the rendered tier without the software-WebGL
+  # out-the-window spec; and that spec alone, which takes about as long as the rest of the rendered tier.
   client-fast:
-    name: Fast client behavior and static checks
+    name: Fast client static and logic checks
     runs-on: windows-latest
     timeout-minutes: 10
     outputs:
@@ -104,7 +107,12 @@ jobs:
           $clock = [Diagnostics.Stopwatch]::StartNew()
           Push-Location $manifest.client.workingDirectory
           try {
-            foreach ($command in @($manifest.client.commands)) {
+            # This job runs one part of the client manifest (#1313); the parts together run every command, and the
+            # rendered tier's specs exactly once (fast-ci-workflow.test.mjs).
+            $part = $manifest.client.parts.'static-logic'
+            if (-not $part) { throw "Unreviewed Fast client part: static-logic" }
+            if ($part.renderedPart) { $env:AEROLINK_FAST_RENDERED_PART = $part.renderedPart }
+            foreach ($command in @($part.commands)) {
               switch ($command) {
                 'npm ci' { npm ci }
                 'npm run lint' { npm run lint }
@@ -129,7 +137,143 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: fast-client-${{ github.run_id }}-${{ github.run_attempt }}
+          name: fast-client-static-logic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            product/client/test-results/fast
+            product/client/playwright-report/fast
+          retention-days: 7
+
+      - name: State advisory resource boundary
+        if: always()
+        shell: pwsh
+        run: |
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Fast feedback is advisory. Heavy browser/PostgreSQL evidence remains in the unchanged Product quality gate.'
+
+  client-rendered-fast:
+    name: Fast client rendered checks
+    runs-on: windows-latest
+    timeout-minutes: 10
+    outputs:
+      elapsed_ms: ${{ steps.run.outputs.elapsed_ms }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+
+      - name: Run explicit Fast client manifest
+        id: run
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Get-Content -Raw -LiteralPath product/test-planner/fast-ci-manifest.json | ConvertFrom-Json -Depth 20
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          Push-Location $manifest.client.workingDirectory
+          try {
+            # This job runs one part of the client manifest (#1313); the parts together run every command, and the
+            # rendered tier's specs exactly once (fast-ci-workflow.test.mjs).
+            $part = $manifest.client.parts.'rendered-standard'
+            if (-not $part) { throw "Unreviewed Fast client part: rendered-standard" }
+            if ($part.renderedPart) { $env:AEROLINK_FAST_RENDERED_PART = $part.renderedPart }
+            foreach ($command in @($part.commands)) {
+              switch ($command) {
+                'npm ci' { npm ci }
+                'npm run lint' { npm run lint }
+                'npm run typecheck' { npm run typecheck }
+                'npm run test:fast:routes' { npm run test:fast:routes }
+                'npm run test:fast:logic' { npm run test:fast:logic }
+                'npx playwright install chromium' { npx playwright install chromium }
+                'npm run test:fast:isolation' { npm run test:fast:isolation }
+                'npm run test:fast:rendered' { npm run test:fast:rendered }
+                default { throw "Unreviewed Fast client command: $command" }
+              }
+              if ($LASTEXITCODE -ne 0) { throw "Fast client command failed: $command" }
+            }
+          }
+          finally {
+            Pop-Location
+            $clock.Stop()
+            "elapsed_ms=$([int64]$clock.ElapsedMilliseconds)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+
+      - name: Retain Fast client discovery and failure diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fast-client-rendered-standard-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            product/client/test-results/fast
+            product/client/playwright-report/fast
+          retention-days: 7
+
+      - name: State advisory resource boundary
+        if: always()
+        shell: pwsh
+        run: |
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Fast feedback is advisory. Heavy browser/PostgreSQL evidence remains in the unchanged Product quality gate.'
+
+  client-3d-fast:
+    name: Fast client 3D rendered checks
+    runs-on: windows-latest
+    timeout-minutes: 10
+    outputs:
+      elapsed_ms: ${{ steps.run.outputs.elapsed_ms }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: product/client/package-lock.json
+
+      - name: Run explicit Fast client manifest
+        id: run
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Get-Content -Raw -LiteralPath product/test-planner/fast-ci-manifest.json | ConvertFrom-Json -Depth 20
+          $clock = [Diagnostics.Stopwatch]::StartNew()
+          Push-Location $manifest.client.workingDirectory
+          try {
+            # This job runs one part of the client manifest (#1313); the parts together run every command, and the
+            # rendered tier's specs exactly once (fast-ci-workflow.test.mjs).
+            $part = $manifest.client.parts.'rendered-3d'
+            if (-not $part) { throw "Unreviewed Fast client part: rendered-3d" }
+            if ($part.renderedPart) { $env:AEROLINK_FAST_RENDERED_PART = $part.renderedPart }
+            foreach ($command in @($part.commands)) {
+              switch ($command) {
+                'npm ci' { npm ci }
+                'npm run lint' { npm run lint }
+                'npm run typecheck' { npm run typecheck }
+                'npm run test:fast:routes' { npm run test:fast:routes }
+                'npm run test:fast:logic' { npm run test:fast:logic }
+                'npx playwright install chromium' { npx playwright install chromium }
+                'npm run test:fast:isolation' { npm run test:fast:isolation }
+                'npm run test:fast:rendered' { npm run test:fast:rendered }
+                default { throw "Unreviewed Fast client command: $command" }
+              }
+              if ($LASTEXITCODE -ne 0) { throw "Fast client command failed: $command" }
+            }
+          }
+          finally {
+            Pop-Location
+            $clock.Stop()
+            "elapsed_ms=$([int64]$clock.ElapsedMilliseconds)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          }
+
+      - name: Retain Fast client discovery and failure diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fast-client-rendered-3d-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             product/client/test-results/fast
             product/client/playwright-report/fast
@@ -190,7 +334,7 @@ jobs:
   fast-feedback:
     name: Fast feedback aggregate (advisory)
     if: always()
-    needs: [backend-fast, client-fast, contracts-fast]
+    needs: [backend-fast, client-fast, client-rendered-fast, client-3d-fast, contracts-fast]
     runs-on: windows-latest
     timeout-minutes: 5
     steps:
@@ -200,16 +344,23 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $backend = '${{ needs.backend-fast.result }}'
           $client = '${{ needs.client-fast.result }}'
+          $rendered = '${{ needs.client-rendered-fast.result }}'
+          $rendered3d = '${{ needs.client-3d-fast.result }}'
           $contracts = '${{ needs.contracts-fast.result }}'
           $backendMs = [int64]('0${{ needs.backend-fast.outputs.elapsed_ms }}')
           $clientMs = [int64]('0${{ needs.client-fast.outputs.elapsed_ms }}')
+          $renderedMs = [int64]('0${{ needs.client-rendered-fast.outputs.elapsed_ms }}')
+          $rendered3dMs = [int64]('0${{ needs.client-3d-fast.outputs.elapsed_ms }}')
           $contractsMs = [int64]('0${{ needs.contracts-fast.outputs.elapsed_ms }}')
-          $commandCriticalPathMs = [Math]::Max([Math]::Max($backendMs, $clientMs), $contractsMs)
+          # The parallel jobs' longest command time; the three client parts run side by side (#1313).
+          $commandCriticalPathMs = ($backendMs, $clientMs, $renderedMs, $rendered3dMs, $contractsMs | Measure-Object -Maximum).Maximum
           @(
             '## Advisory Fast PR feedback',
             '',
             "- backend-fast: $backend ($backendMs ms command time)",
-            "- client-fast: $client ($clientMs ms command time)",
+            "- client-fast (static and logic): $client ($clientMs ms command time)",
+            "- client-rendered-fast: $rendered ($renderedMs ms command time)",
+            "- client-3d-fast: $rendered3d ($rendered3dMs ms command time)",
             "- contracts-fast: $contracts ($contractsMs ms command time)",
             "- command critical path: $commandCriticalPathMs ms",
             '- target: 240000 ms',
@@ -219,5 +370,5 @@ jobs:
             '- workflow start-to-aggregate timing must be measured from Actions job timestamps before phase 2'
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-          if ($backend -ne 'success' -or $client -ne 'success' -or $contracts -ne 'success') { throw 'Advisory Fast feedback failed.' }
+          if ($backend -ne 'success' -or $client -ne 'success' -or $rendered -ne 'success' -or $rendered3d -ne 'success' -or $contracts -ne 'success') { throw 'Advisory Fast feedback failed.' }
           if ($commandCriticalPathMs -gt 240000) { throw "Advisory Fast command critical path exceeded 240000 ms: $commandCriticalPathMs ms." }
