@@ -46,7 +46,11 @@ test('an RNAV approach is built from its CIFP legs: the final, its FAF, the miss
   expect(r15.missedHold).toEqual({ fix: 'YUNUD', inbound: 27, turn: 'RIGHT', altitude: '5600A', legDistanceNm: 5 })
   // The STAEV transition is the hold-in-lieu of a procedure turn alone (a single HF record): now kept, where it was dropped.
   expect(r15.transitions.STAEV).toEqual([{ ident: 'STAEV', altitude: '3200A', hold: { path: 'HF', inbound: expect.closeTo(130.7, 6), turn: 'RIGHT', legDistanceNm: 4, legTimeMin: null, exit: 'ONCE', altitude: '3200A' } }])
-  expect(r15.endpoint).toMatchObject({ instrumentEnd: { fix: 'RW15', altitude: '357' }, landingSite: { kind: 'RUNWAY', ident: 'RW15' }, visualSegment: { kind: 'RUNWAY' }, vertical: { kind: 'VPA', angleDeg: 3 } })
+  expect(r15.endpoint).toMatchObject({
+    instrumentEnd: { fix: 'RW15', altitude: '357' }, landingSite: { kind: 'RUNWAY', ident: 'RW15' }, visualSegment: { kind: 'RUNWAY' }, vertical: { kind: 'VPA', angleDeg: 3 },
+    // Q8: identified by its coded runway threshold, not by any ident pattern.
+    identification: { basis: 'RUNWAY', source: 'the MAP is the runway threshold (coded)' },
+  })
   expect(Object.keys(r15.transitions).sort()).toEqual(['STAEV', 'WULEB', 'YUNUD'])
   // An approach whose missed approach point is not a runway is left out, with the reason.
   expect(approach('R33-Y')).toBeUndefined()
