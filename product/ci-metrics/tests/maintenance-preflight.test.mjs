@@ -9,9 +9,9 @@ import { REQUIRED_JOBS, CLASSIFIER_JOB_NAME, AGGREGATE_JOB_NAME } from '../lib/m
 const sha = character => character.repeat(40)
 const runId = 42
 const prNumber = 946
-function fixture() {
+function fixture(browserShards = 4) {
   const names = [...REQUIRED_JOBS, CLASSIFIER_JOB_NAME, AGGREGATE_JOB_NAME,
-    ...[1, 2, 3].map(n => `API test suite (${n}/3)`), ...[1, 2, 3, 4].map(n => `Browser journeys (${n}/4)`)]
+    ...[1, 2, 3].map(n => `API test suite (${n}/3)`), ...Array.from({ length: browserShards }, (_, i) => `Browser journeys (${i + 1}/${browserShards})`)]
   return {
     repository, main: { name: 'main', sha: sha('a') },
     pr: { number: prNumber, state: 'open', draft: false, base: { ref: 'main' }, head: { sha: sha('b'), repo: { full_name: repository } } },
@@ -45,6 +45,24 @@ test('a complete maintenance packet still grants no publishing or merging permis
   assert.equal(result.canMerge, false)
   assert.equal(result.ordinaryDecision.decision, 'REFUSE')
   assert.match(result.ordinaryDecision.reasons[0], /^trusted-surface-modified:/)
+})
+
+test('a maintenance packet from a 6-shard browser run is reviewable, as a 4-shard one is; other sizes and gaps refuse (#1358)', () => {
+  for (const shards of [4, 6]) {
+    const result = evaluateMaintenancePreflight(fixture(shards))
+    assert.equal(result.disposition, 'REVIEW_REQUIRED', `${shards} shards`)
+    assert.deepEqual(result.reasons, [], `${shards} shards`)
+  }
+  for (const [name, evidence, reason] of [
+    ['5 shards', fixture(5), 'shard-count-drift:'],
+    ['8 shards', fixture(8), 'shard-count-drift:'],
+    ['6 shards, one missing', (e => { e.jobs = e.jobs.filter(j => j.name !== 'Browser journeys (6/6)'); return e })(fixture(6)), 'shard-set-incomplete:'],
+    ['6 shards, one failed', (e => { e.jobs.find(j => j.name === 'Browser journeys (5/6)').conclusion = 'failure'; return e })(fixture(6)), 'job-not-success:'],
+  ]) {
+    const result = evaluateMaintenancePreflight(evidence)
+    assert.equal(result.disposition, 'REFUSE', name)
+    assert.ok(result.reasons.some(r => r.startsWith(reason)), `${name}: ${result.reasons.join('; ')}`)
+  }
 })
 
 for (const [name, mutate, reason] of [
