@@ -104,6 +104,9 @@ export class GroundImagery<Image = ImageBitmap> {
       // Outside the coverage is not a failure; an installation that turned imagery off says so, and that stays.
       if (body?.code === "imagery_relay_disabled") this.report("off");
       else if (response.status !== 404) this.report("unreachable");
+      // "None here" is the source answering, so it ends an earlier failure. Over Canada every tile is a 404, and
+      // without this one dropped tile kept the view saying the source was unreachable for the rest of the flight.
+      else if (this.current === "unreachable") this.report("waiting");
       return null;
     }
     let decoded: DecodedImagery<Image>;

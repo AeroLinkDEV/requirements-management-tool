@@ -614,7 +614,10 @@ HOME production's instance badge also reports main currency and check age. The e
 records its remote observation beside the dedicated-source marker; the API reads that observation passively
 and binds it to its running source identity. A failed, missing, mismatched, or more-than-30-minute-old
 observation is Unverified. Browser status refreshes cannot fetch Git or trigger deployment; the production
-reconciler retains its 30-minute schedule and explicit remote-demo Start reconciles before READY.
+reconciler retains its 30-minute schedule and explicit remote-demo Start reconciles before READY, except that
+Monday to Friday 08:00-18:00 Eastern both hold the revision on disk and only a manual redeploy request
+(`REDEPLOY_AEROLINK_PRODUCTION.bat`) advances it ([DEC-149](DECISIONS_AND_OPEN_QUESTIONS.md#dec-149---production-redeploys-only-on-request-during-work-hours)).
+Merging and `main` are unaffected.
 
 HOME production transitions preserve the prior protected-tunnel ON/OFF state under the initiating policy.
 Exact runtime reuse skips rebuild and PostgreSQL startup. A transition is carried by **one outer authority** -

@@ -1144,7 +1144,8 @@ function Start-AeroLinkRemoteDemo {
             # Two phases for the same reason the timed pass has them: an operator can run this with the demo
             # up, and fast-forwarding the working tree first would rewrite the files that process is executing.
             # Decide with a fetch (remote-tracking refs only), stop what is running out of the tree, advance.
-            $inspect = Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -InspectOnly
+            # Inside the DEC-149 work-hours hold a moved origin/main is not advanced to; the revision on disk runs.
+            $inspect = Get-AeroLinkHeldSourceInspection -Inspect (Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -InspectOnly) -UtcNow (Get-Date).ToUniversalTime()
             if ($inspect.Canonical -and $inspect.Action -eq 'UpdateAvailable') {
                 Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "Production source is behind; stopping the local runtime and the owned tunnel before advancing to $($inspect.TargetSha)."
                 # The tunnel first, and it must actually come down. It forwards the public URL at
@@ -2133,6 +2134,129 @@ function Get-AeroLinkTransitionContinuation {
     }
 }
 
+# DEC-149: Monday to Friday, 08:00 to 18:00 US Eastern, production moves to a new origin/main only when the owner
+# asks. A redeploy takes AeroLink and the protected tunnel down for six to eight minutes, and those are the hours the
+# owner reaches HOME from work. Outside them a scheduled pass redeploys exactly as it did before.
+$script:AeroLinkDeployHoldTimeZoneId = 'Eastern Standard Time'
+$script:AeroLinkDeployHoldStartHour = 8
+$script:AeroLinkDeployHoldEndHour = 18
+$script:AeroLinkRedeployRequestLifetime = [TimeSpan]::FromHours(2)
+
+function ConvertTo-AeroLinkDeployHoldUtc {
+    param([Parameter(Mandatory)][datetime]$Value)
+    if ($Value.Kind -eq [DateTimeKind]::Local) { return $Value.ToUniversalTime() }
+    return [datetime]::SpecifyKind($Value, [DateTimeKind]::Utc)
+}
+
+function Get-AeroLinkDeployHoldWindow {
+    <#
+      .SYNOPSIS Is this instant inside the work-hours deploy hold? { Held, Eastern, Detail }
+      .DESCRIPTION
+        Eastern wall-clock time, so the window follows daylight saving: 08:00 EDT in summer, 08:00 EST in winter,
+        whatever zone the host itself is set to. The window is [08:00, 18:00) Monday to Friday: the 08:00 pass holds
+        and the 18:00 pass redeploys.
+    #>
+    param([Parameter(Mandatory)][datetime]$UtcNow)
+    $zone = [TimeZoneInfo]::FindSystemTimeZoneById($script:AeroLinkDeployHoldTimeZoneId)
+    $eastern = [TimeZoneInfo]::ConvertTimeFromUtc((ConvertTo-AeroLinkDeployHoldUtc $UtcNow), $zone)
+    $weekday = $eastern.DayOfWeek -ne [DayOfWeek]::Saturday -and $eastern.DayOfWeek -ne [DayOfWeek]::Sunday
+    $held = $weekday -and $eastern.Hour -ge $script:AeroLinkDeployHoldStartHour -and $eastern.Hour -lt $script:AeroLinkDeployHoldEndHour
+    $stamp = $eastern.ToString('ddd yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) + ' Eastern'
+    $detail = if ($held) { "it is work hours ($stamp; the hold is Monday-Friday 08:00-18:00 Eastern)" } else { "it is outside work hours ($stamp)" }
+    return [pscustomobject]@{ Held = [bool]$held; Eastern = $eastern; Detail = $detail }
+}
+
+function Get-AeroLinkRedeployRequestPath {
+    param([Parameter(Mandatory)]$Config)
+    return (Join-Path $Config.StatePath 'redeploy-request.json')
+}
+
+function Write-AeroLinkRedeployRequest {
+    <#
+      .SYNOPSIS Records the owner's request that the next reconciliation pass redeploy production, whatever the hour.
+    #>
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][datetime]$UtcNow)
+    if (-not (Test-Path -LiteralPath $Config.StatePath)) { New-Item -ItemType Directory -Path $Config.StatePath -Force | Out-Null }
+    $path = Get-AeroLinkRedeployRequestPath -Config $Config
+    $requestedAt = ConvertTo-AeroLinkDeployHoldUtc $UtcNow
+    $record = [ordered]@{ requestedAtUtc = $requestedAt.ToString('o', [Globalization.CultureInfo]::InvariantCulture); requestedBy = [Environment]::UserName }
+    $temporary = "$path.tmp"
+    ($record | ConvertTo-Json -Compress) | Set-Content -LiteralPath $temporary -Encoding UTF8
+    Move-Item -LiteralPath $temporary -Destination $path -Force
+    return [pscustomobject]@{ Path = $path; RequestedAtUtc = $requestedAt }
+}
+
+function Receive-AeroLinkRedeployRequest {
+    <#
+      .SYNOPSIS Takes the pending redeploy request, if there is one. { Valid, RequestedAtUtc } or $null
+      .DESCRIPTION
+        Taking it removes it: one request lets one pass through. The file is removed even when it cannot be read, so
+        an unreadable request is reported once and never honoured; a removal that fails throws rather than leave a
+        request behind to be honoured again.
+    #>
+    param([Parameter(Mandatory)]$Config)
+    $path = Get-AeroLinkRedeployRequestPath -Config $Config
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    $raw = $null
+    try { $raw = [IO.File]::ReadAllText($path) } catch { }
+    Remove-Item -LiteralPath $path -Force -ErrorAction Stop
+    $requestedAt = $null
+    try {
+        $value = ($raw | ConvertFrom-Json).requestedAtUtc
+        # Windows PowerShell leaves an ISO timestamp as a string; PowerShell 7 has already made it a DateTime.
+        $requestedAt = if ($value -is [datetime]) { ConvertTo-AeroLinkDeployHoldUtc $value } else {
+            [datetime]::Parse([string]$value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+        }
+    }
+    catch { $requestedAt = $null }
+    return [pscustomobject]@{ Valid = ($null -ne $requestedAt); RequestedAtUtc = $requestedAt }
+}
+
+function Get-AeroLinkScheduledRedeployDecision {
+    <#
+      .SYNOPSIS May a SCHEDULED pass that found origin/main moved redeploy now? { Proceed, Detail }
+      .DESCRIPTION
+        Outside work hours, yes, as before DEC-149. Inside them, only on a request made within the last two hours. An
+        older request is not honoured: a pass that could not run when it was asked must not take the tunnel down
+        hours later, in the middle of whatever the owner is doing by then. A request dated in the future is not
+        believed either.
+    #>
+    param([Parameter(Mandatory)][datetime]$UtcNow, $Request)
+    $now = ConvertTo-AeroLinkDeployHoldUtc $UtcNow
+    $window = Get-AeroLinkDeployHoldWindow -UtcNow $now
+    if (-not $window.Held) { return [pscustomobject]@{ Proceed = $true; Detail = "Redeploying: $($window.Detail)." } }
+    $hint = 'Production stays on its current revision until 18:00 Eastern or a manual redeploy (REDEPLOY_AEROLINK_PRODUCTION.bat).'
+    if (-not $Request) { return [pscustomobject]@{ Proceed = $false; Detail = "Not redeploying: $($window.Detail). $hint" } }
+    if (-not $Request.Valid) { return [pscustomobject]@{ Proceed = $false; Detail = "Not redeploying: $($window.Detail), and the pending redeploy request could not be read, so it was discarded. $hint" } }
+    $age = $now - $Request.RequestedAtUtc
+    $asked = $Request.RequestedAtUtc.ToString('yyyy-MM-dd HH:mm', [Globalization.CultureInfo]::InvariantCulture) + ' UTC'
+    if ($age -lt [TimeSpan]::FromMinutes(-5) -or $age -gt $script:AeroLinkRedeployRequestLifetime) {
+        return [pscustomobject]@{ Proceed = $false; Detail = "Not redeploying: $($window.Detail), and the redeploy request made at $asked is not current (a request is honoured for two hours), so it was discarded. $hint" }
+    }
+    return [pscustomobject]@{ Proceed = $true; Detail = "Redeploying on the manual request made at $asked, although $($window.Detail)." }
+}
+
+function Get-AeroLinkHeldSourceInspection {
+    <#
+      .SYNOPSIS Inside the work-hours hold, a start keeps the revision on disk rather than advance to a moved origin/main.
+      .DESCRIPTION
+        Start - the operator launcher, and the boot and logon recovery task - advanced the source whenever origin/main
+        had moved, so restarting a dropped tunnel at 10:00 on a Tuesday was also a six-to-eight-minute redeploy.
+        Inside the hold an UpdateAvailable inspection becomes HeldForWorkHours: still canonical, and naming the
+        revision already on disk as the one to run. Every other inspection, a refusal included, passes through
+        untouched. A manual redeploy goes through the reconciliation pass (RequestRedeploy), never through Start.
+    #>
+    param([Parameter(Mandatory)]$Inspect, [Parameter(Mandatory)][datetime]$UtcNow)
+    if (-not ($Inspect.Canonical -and $Inspect.Action -eq 'UpdateAvailable')) { return $Inspect }
+    $window = Get-AeroLinkDeployHoldWindow -UtcNow $UtcNow
+    if (-not $window.Held) { return $Inspect }
+    return [pscustomobject]@{
+        Action = 'HeldForWorkHours'; Canonical = $true; HeadSha = $Inspect.HeadSha; TargetSha = $Inspect.TargetSha
+        RemoteReachable = $Inspect.RemoteReachable
+        Reason = "$($Inspect.Reason) Not advancing because $($window.Detail); starting the revision already on disk. A manual redeploy (REDEPLOY_AEROLINK_PRODUCTION.bat) moves it."
+    }
+}
+
 function Invoke-AeroLinkProductionSourceReconciliation {
     <#
       .SYNOPSIS One bounded reconciliation pass: decide, stop, advance, restart - in that order.
@@ -2335,7 +2459,8 @@ function Get-AeroLinkRemoteDemoStartAssessment {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Config)
     Assert-AeroLinkDedicatedProductionSource -SourceRoot $Config.AeroLinkRoot | Out-Null
-    $inspect = Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -InspectOnly
+    # The same DEC-149 hold as the start itself applies, so a demo that is up on the revision on disk is AlreadyReady.
+    $inspect = Get-AeroLinkHeldSourceInspection -Inspect (Update-AeroLinkProductionSource -SourceRoot $Config.AeroLinkRoot -InspectOnly) -UtcNow (Get-Date).ToUniversalTime()
     if (-not $inspect.Canonical) { return [pscustomobject]@{ Decision = 'Refused'; Inspect = $inspect; Detail = "AEROLINK REMOTE DEMO NOT READY: $($inspect.Reason)" } }
     if ($inspect.Action -eq 'UpdateAvailable') { return [pscustomobject]@{ Decision = 'NeedsTransition'; Inspect = $inspect; Detail = "the production source is behind origin/main ($($inspect.TargetSha))" } }
     $local = Test-AeroLinkRemoteDemoLocalReady -Config $Config
@@ -2764,6 +2889,11 @@ Export-ModuleMember -Function `
     Get-AeroLinkReconcileTaskXml, `
     Install-AeroLinkReconcileTask, `
     Invoke-AeroLinkProductionSourceReconciliation, `
+    Get-AeroLinkDeployHoldWindow, `
+    Write-AeroLinkRedeployRequest, `
+    Receive-AeroLinkRedeployRequest, `
+    Get-AeroLinkScheduledRedeployDecision, `
+    Get-AeroLinkHeldSourceInspection, `
     Invoke-AeroLinkRemoteDemoHandoff, `
     Get-AeroLinkTransitionBudget, `
     Resolve-AeroLinkFirstDeploymentResult, `
