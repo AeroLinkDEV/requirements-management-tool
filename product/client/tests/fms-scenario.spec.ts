@@ -427,6 +427,9 @@ test('below triggers, expectAircraft ranges and expectHover are validated', () =
   expect(problems({ kind: 'expectHover', reason: 'OFF FINAL TRACK' })).toEqual([])
   expect(problems({ kind: 'expectActive', waypoint: 'MUN' }, { kind: 'below', feet: 350 })).toEqual([])
   expect(problems({ kind: 'expectActive', waypoint: 'MUN' }, { kind: 'below' })).toEqual(['step 1: a below trigger needs feet between -1500 and 60000'])
+  // The cyclic force-trim release as an autopilot action.
+  expect(problems({ kind: 'autopilot', forceTrimRelease: true })).toEqual([])
+  expect(problems({ kind: 'autopilot', forceTrimRelease: 'yes' })).toEqual(['step 1: autopilot altitude, verticalSpeed, speed and heading must be numbers; hold, lnav, hover, transitionUp and forceTrimRelease true or false'])
 })
 
 test('an above trigger fires when the altimeter reads the altitude, to the foot; expectAfcs checks the low-height caption', () => {
