@@ -170,9 +170,11 @@ export const MISSION_87N_OFFSHORE_SAR: Scenario = {
     { when: { kind: "active", waypoint: "CRANN" }, action: { kind: "autopilot", altitude: 560, verticalSpeed: -600 } },
     // The predictions end at the instrument end, the MAP (PROGRESS 2/4, plan R3-03), not at the heliport.
     { when: then, action: { kind: "keys", keys: ["PROG", "NEXT"] } },
-    { when: then, action: { kind: "expectLine", line: 3, pattern: "^\\s*INSTR END\\b" } },
-    { when: then, action: { kind: "expectLine", line: 4, pattern: "^CRANN \\(MAP\\)" } },
-    { when: then, action: { kind: "expectLine", line: 6, pattern: "^KNOWN" } },
+    // FROM, its altitude and ATA first (the last fix overflown, STAYS; plan B1.7), then the endpoint and its basis.
+    { when: then, action: { kind: "expectLine", line: 2, pattern: "^STAYS\\s+\\d+\\s+\\d{4}\\.\\dZ$" } },
+    { when: then, action: { kind: "expectLine", line: 5, pattern: "^\\s*INSTR END\\b" } },
+    { when: then, action: { kind: "expectLine", line: 6, pattern: "^CRANN \\(MAP\\)" } },
+    { when: then, action: { kind: "expectLine", line: 8, pattern: "^KNOWN" } },
     { when: then, action: { kind: "expectAircraft", altitude: 560, heightTolerance: 60 }, within: 240 },
     // The RNAV 190 is LNAV-only (no FAS): flown and annunciated LNAV on a usable receiver, with no integrity alert.
     { when: then, action: { kind: "expectApproachLevel", level: "LNAV" } },
