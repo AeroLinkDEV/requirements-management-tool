@@ -1827,7 +1827,10 @@ test('E3: in the hover the fuel burns at the current flow, and the FUEL page end
   fly(60)
   expect(unit.fuel.quantity).toBeCloseTo(later - (600 * 60) / 3600, 6)
   unit.press('FUEL')
+  // FUEL 1/2 (#1343, M300 14-2): the flow, and the endurance in hours and minutes of the usable fuel at that flow.
   const text = screenText(unit.screen())
-  expect(text[2]).toMatch(/600KG\/H$/)
-  expect(text[4]).toMatch(new RegExp(`${((unit.fuel.quantity - unit.fuel.reserve) / 600).toFixed(1)}H$`))
+  expect(text[5]).toMatch(/^ FUEL FLOW/)
+  expect(text[6]).toMatch(/^600KG\/HR/)
+  const minutes = Math.floor(((unit.fuel.quantity - unit.fuel.reserve) / 600) * 60)
+  expect(text[4]).toMatch(new RegExp(`^${String(Math.floor(minutes / 60)).padStart(2, '0')}\\+${String(minutes % 60).padStart(2, '0')}\\s`))
 })
