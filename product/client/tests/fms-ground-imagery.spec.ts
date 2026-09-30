@@ -8,25 +8,46 @@ import {
 // United States only, relief elsewhere) and its terrain colouring (terrainAwareness.ts: relative to the aircraft, or
 // absolute height bands). Tiles travel as raw bytes here; the decoder hands back a label and a sample to judge.
 
-const sample = (rgb: [number, number, number]) => {
+const sample = (rgb: [number, number, number], alpha = 255) => {
   const out = new Uint8Array(BLANK_SAMPLE_PIXELS * BLANK_SAMPLE_PIXELS * 4)
-  for (let i = 0; i < out.length; i += 4) { out[i] = rgb[0]; out[i + 1] = rgb[1]; out[i + 2] = rgb[2]; out[i + 3] = 255 }
+  for (let i = 0; i < out.length; i += 4) { out[i] = rgb[0]; out[i + 1] = rgb[1]; out[i + 2] = rgb[2]; out[i + 3] = alpha }
   return out
 }
-// The decoder reads the body as text: 'photo', 'white' (the service's blank filler), or 'broken'.
+// A coast along the edge of the coverage: imagery in the first half of the sample, transparent (0, 0, 0, 0) beyond.
+const coast = () => {
+  const out = sample([60, 90, 50])
+  out.fill(0, out.length / 2)
+  return out
+}
+// The decoder reads the body as text: 'photo', 'white' (the service's blank filler), 'coast' (an edge PNG, part
+// transparent), 'sea' (an edge PNG with nothing on this side of the coverage), or 'broken'.
 const decoder: ImageryDecoder<string> = async tile => {
   const kind = await tile.text()
   if (kind === 'broken') throw new Error('not an image')
-  return { image: kind, sample: kind === 'white' ? sample([255, 255, 255]) : sample([60, 90, 50]) }
+  if (kind === 'coast') return { image: kind, sample: coast(), partial: true }
+  if (kind === 'sea') return { image: kind, sample: sample([0, 0, 0], 0), partial: true }
+  return { image: kind, sample: kind === 'white' ? sample([255, 255, 255]) : sample([60, 90, 50]), partial: false }
 }
+const PHOTO = { image: 'photo', partial: false }
 const jpeg = (body: string) => new Response(body, { status: 200, headers: { 'content-type': 'image/jpeg' } })
+const png = (body: string) => new Response(body, { status: 200, headers: { 'content-type': 'image/png' } })
+
+test('along the edge of the coverage a part-transparent tile is drawn over its relief, and an empty one is none', async () => {
+  let answer = () => png('coast')
+  const imagery = new GroundImagery(async () => answer(), decoder)
+  expect(await imagery.load(10, 302, 385)).toEqual({ image: 'coast', partial: true })
+  expect(imagery.status).toBe('live')
+  answer = () => png('sea')
+  expect(await imagery.load(10, 304, 386)).toBeNull()
+  expect(imagery.status).toBe('live')
+})
 
 test('a tile with imagery comes back as its image, and the source says it is live', async () => {
   const asked: string[] = []
   const source: ImagerySource = async (z, x, y) => { asked.push(`${z}/${x}/${y}`); return jpeg('photo') }
   const imagery = new GroundImagery(source, decoder)
   expect(imagery.status).toBe('waiting')
-  expect(await imagery.load(15, 9725, 11855)).toBe('photo')
+  expect(await imagery.load(15, 9725, 11855)).toEqual(PHOTO)
   expect(asked).toEqual(['15/9725/11855'])
   expect(imagery.status).toBe('live')
 })
@@ -41,7 +62,7 @@ test('no imagery (outside the coverage, the blank filler, a tile that will not d
   answer = () => jpeg('broken')
   await expect(imagery.load(12, 1209, 1466)).resolves.toBeNull()
   answer = () => jpeg('photo')
-  expect(await imagery.load(12, 1209, 1467)).toBe('photo')
+  expect(await imagery.load(12, 1209, 1467)).toEqual(PHOTO)
 })
 
 test('deeper than the imagery is published, nothing is asked for', async () => {
@@ -50,7 +71,7 @@ test('deeper than the imagery is published, nothing is asked for', async () => {
   expect(IMAGERY_MAX_ZOOM).toBe(16)
   expect(await imagery.load(IMAGERY_MAX_ZOOM + 1, 0, 0)).toBeNull()
   expect(asked).toEqual([])
-  expect(await imagery.load(IMAGERY_MAX_ZOOM, 0, 0)).toBe('photo')
+  expect(await imagery.load(IMAGERY_MAX_ZOOM, 0, 0)).toEqual(PHOTO)
 })
 
 test('an installation with imagery off says so, stops asking, and that sticks; a failing source is unreachable until tiles come', async () => {
@@ -90,7 +111,7 @@ test('an installation with imagery off says so, stops asking, and that sticks; a
   expect(await failing.load(5, 9, 11)).toBeNull()
   expect(failing.status).toBe('unreachable')
   mode = 'ok'
-  expect(await failing.load(5, 9, 12)).toBe('photo')
+  expect(await failing.load(5, 9, 12)).toEqual(PHOTO)
   expect(failing.status).toBe('live')
   expect(changes).toBe(2)
 })
@@ -103,6 +124,9 @@ test('a blank filler tile is flat near-white; real imagery, snow included, has t
   const mostlyWhite = sample([255, 255, 255]); mostlyWhite[40] = 200
   expect(isBlankTile(mostlyWhite)).toBe(false)
   expect(isBlankTile([])).toBe(false)
+  // Fully transparent is nothing; a transparent sea beside real imagery is still imagery.
+  expect(isBlankTile(sample([0, 0, 0], 0))).toBe(true)
+  expect(isBlankTile(coast())).toBe(false)
 })
 
 test('relative colouring: red at or above 100 ft below the aircraft, amber within 500 ft, nothing lower', () => {
