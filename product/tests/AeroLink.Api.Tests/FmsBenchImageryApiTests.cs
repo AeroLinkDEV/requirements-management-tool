@@ -15,6 +15,7 @@ namespace AeroLink.Api.Tests;
 public sealed class FmsBenchImageryApiTests
 {
     private static readonly byte[] Jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3];
+    private static readonly byte[] Png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 4, 5, 6];
 
     [Fact]
     public async Task A_signed_in_user_gets_the_tile_from_the_fixed_upstream_addressed_level_row_column()
@@ -31,6 +32,26 @@ public sealed class FmsBenchImageryApiTests
         // x = 9725, y = 11855 is asked for as row 11855, column 9725.
         Assert.Equal("https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/15/11855/9725",
             Assert.Single(upstream.Requested).ToString());
+    }
+
+    [Fact]
+    public async Task A_png_tile_is_relayed_as_png_and_the_next_tile_is_still_fetched()
+    {
+        // The upstream cache is "mixed": along the edge of its coverage (coastlines, the border) it serves PNG. On HOME
+        // on 2026-09-30, 66 of the 223 tiles it served over the bench's area were PNG, and treating each as a failure
+        // held every tile back for a minute: the view reported the imagery source unreachable while it answered.
+        using var upstream = new FmsBenchTerrainApiTests.Upstream(request =>
+            request.RequestUri!.AbsolutePath.EndsWith("/11855/9725") ? Image(Png, "image/png") : Image(Jpeg, "image/jpeg"));
+        using var harness = await SignedInAsync(upstream);
+
+        using var png = await harness.Client.GetAsync("/api/fms-bench/imagery/15/9725/11855");
+        using var next = await harness.Client.GetAsync("/api/fms-bench/imagery/15/9726/11855");
+
+        Assert.Equal(HttpStatusCode.OK, png.StatusCode);
+        Assert.Equal("image/png", png.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(Png, await png.Content.ReadAsByteArrayAsync());
+        Assert.Equal(HttpStatusCode.OK, next.StatusCode);
+        Assert.Equal(2, upstream.Requested.Count);
     }
 
     [Theory]
@@ -50,7 +71,7 @@ public sealed class FmsBenchImageryApiTests
     }
 
     [Fact]
-    public async Task No_imagery_upstream_is_a_404_and_a_failure_or_a_body_that_is_not_a_jpeg_is_a_bad_gateway()
+    public async Task No_imagery_upstream_is_a_404_and_a_failure_or_a_body_that_is_not_a_tile_image_is_a_bad_gateway()
     {
         using var missing = new FmsBenchTerrainApiTests.Upstream(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
         using (var harness = await SignedInAsync(missing))
