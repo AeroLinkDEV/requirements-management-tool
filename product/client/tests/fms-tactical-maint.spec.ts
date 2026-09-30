@@ -42,6 +42,33 @@ const scratch = (unit: ScriptedFms) => lines(unit)[SCRATCHPAD_LINE].trimEnd()
 const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
 const active = (unit: ScriptedFms) => { const leg = unit.activeRoute.legs[0]; return leg?.kind === 'wpt' ? leg.ident : null }
 
+// Integration owner: a manual 500-NM travel bound cannot be shortened by assuming the fastest wind-assisted speed.
+test('a reachable moving waypoint inside 500 NM remains achievable against a headwind', () => {
+  const { unit } = setup()
+  Object.assign(unit.wind, { direction: 0, speed: 60 })
+  unit.setAircraft({ tas: 140, groundSpeed: 80, track: 0, heading: 0 })
+  expect(unit.trueAirspeed).toBeCloseTo(140, 6)
+  unit.defineMoving('SHIP1', offset(unit.position, 0, 400), 0, 0)
+  unit.replaceLegs([{ kind: 'wpt', ident: 'SHIP1' }]); unit.press('EXEC')
+  const rendezvous = unit.rendezvousFor(unit.activeRoute, 0)!
+  expect(rendezvous.achievable).toBe(true)
+  expect(rendezvous.distanceNm).toBeCloseTo(400, 5)
+  expect(rendezvous.ttg).toBeCloseTo(400 / 80 * 3600, 1)
+})
+
+// Owner: M300 11-37 ground calculation consumes PLAN DATA, independent of the frozen aircraft's airspeed/wind.
+test('ground moving rendezvous uses entered cruise TAS and wind and includes the exact 500 NM boundary', () => {
+  const { unit } = setup()
+  unit.setAircraft({ onGround: true, tas: 0, groundSpeed: 0, track: 0, heading: 0 })
+  unit.planData.cruiseTas = 100; unit.planData.cruiseWind = { direction: 0, speed: 20 }
+  Object.assign(unit.wind, { direction: 180, speed: 50 })
+  unit.defineMoving('SHIP1', offset(unit.position, 0, 500), 0, 0)
+  unit.replaceLegs([{ kind: 'wpt', ident: 'SHIP1' }]); unit.press('EXEC')
+  const rendezvous = unit.rendezvousFor(unit.activeRoute, 0)!
+  expect(rendezvous.achievable).toBe(true)
+  expect(rendezvous.ttg).toBeCloseTo(500 / 80 * 3600, 1)
+})
+
 test('a rendezvous flies the speed that arrives on time, within the speed limits', () => {
   const { unit, fly } = setup(START, LAB_AIRLINE_VNAV_PROFILE)
   press(unit, 'INIT_REF', 'NEXT', 'LSK6R')
@@ -549,6 +576,7 @@ test('D-R: a restarted scenario restores the moving waypoint\'s epoch from its o
   const scenario: Scenario = {
     id: 'moving-restart', title: 'moving restart', objective: 'epoch', maxSeconds: 600, startTime: '2026-09-27T14:00:00Z',
     steps: [
+      { when: { kind: 'start' }, action: { kind: 'keys', keys: ['INIT_REF', 'LSK5L', 'LSK1L'] } }, // TRUE entry, independent of MAGVAR.
       { when: { kind: 'time', seconds: 60 }, action: { kind: 'keys', keys: ['INIT_REF', 'NEXT', 'LSK6L'] } },
       { when: { kind: 'start' }, action: { kind: 'type', text: 'SHIP1' } },
       { when: { kind: 'start' }, action: { kind: 'keys', keys: ['LSK1L'] } },

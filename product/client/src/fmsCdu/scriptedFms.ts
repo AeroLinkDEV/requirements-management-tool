@@ -1743,7 +1743,7 @@ export class ScriptedFms implements CduBackend {
   /** The rendezvous with the moving waypoint at `index` of `route`, as last determined (determined now if it never was). */
   rendezvousFor(route: Route, index: number): MovingRendezvous | null {
     const leg = route.legs[index];
-    if (leg?.kind !== "wpt" || !this.isMoving(leg.ident)) return null;
+    if (leg?.kind !== "wpt" || leg.position || !this.isMoving(leg.ident)) return null;
     const key = this.rendezvousKey(route, leg.ident);
     const cached = this.rendezvousCache.get(key);
     if (cached && cached.condition === this.rendezvousCondition(route, index)) return cached;
@@ -1762,8 +1762,11 @@ export class ScriptedFms implements CduBackend {
   private solveRendezvous(route: Route, index: number, ident: string): MovingRendezvous {
     const now = this.now.getTime();
     const condition = this.rendezvousCondition(route, index);
-    const tas = this.trueAirspeed ?? this.plannedSpeed;
+    const tas = this.onGround ? this.planData.cruiseTas : this.trueAirspeed ?? this.plannedSpeed;
+    const wind = this.onGround ? this.planData.cruiseWind : this.systemWind;
+    const groundspeed = (course: number) => predictedGroundSpeed(tas, course, wind);
     const unachievable = (): MovingRendezvous => ({ position: null, achievable: false, condition, computedAt: now, ttg: null, distanceNm: null });
+    if (!(tas > 0) || !Number.isFinite(tas) || !Number.isFinite(wind.speed) || !Number.isFinite(wind.direction)) return unachievable();
     let start = this.here, t0 = now;
     if (condition === 2 || condition === 3) {
       let hours = 0;
@@ -1772,7 +1775,7 @@ export class ScriptedFms implements CduBackend {
         if (leg.kind !== "wpt") continue;
         const to = this.isMoving(leg.ident) ? (this.rendezvousFor(route, i)?.position ?? this.movingPositionAt(leg.ident, now)) : this.coordinates(leg.ident, route);
         if (!to) continue;
-        const gs = distanceNm(start, to) < 1e-6 ? tas : this.groundSpeedOn(courseDeg(start, to), tas);
+        const gs = distanceNm(start, to) < 1e-6 ? tas : groundspeed(courseDeg(start, to));
         if (gs === null || gs <= 0) return unachievable();
         hours += distanceNm(start, to) / gs;
         start = to;
@@ -1783,21 +1786,24 @@ export class ScriptedFms implements CduBackend {
     const reach = (s: number) => {
       const target = this.movingPositionAt(ident, t0 + s * 1000)!;
       const nm = distanceNm(start, target);
-      const gs = nm < 1e-6 ? tas : this.groundSpeedOn(courseDeg(start, target), tas);
+      const gs = nm < 1e-6 ? tas : groundspeed(courseDeg(start, target));
       return { ahead: gs === null || gs <= 0 ? -Infinity : (gs * s) / 3600 - nm, nm, target };
     };
-    // Within 500 NM of travel: no longer than 500 NM at the fastest ground speed the wind allows.
-    const limit = (RENDEZVOUS_RANGE_NM / Math.max(1, tas + this.systemWind.speed)) * 3600;
+    // A headwind can make a reachable 500-NM intercept take longer, not shorter. The time envelope uses the
+    // slowest possible speed; the actual distance below enforces the manual bound. The 1-kt search floor is
+    // laboratory numerical policy, never substituted for groundspeed or claimed for sub-1-kt interception.
+    const limit = (RENDEZVOUS_RANGE_NM / Math.max(1, tas - wind.speed)) * 3600;
     let low = 0, bracket: number | null = null;
-    for (let s = 0; s <= limit; s += 10) {
-      if (reach(s).ahead >= 0) { bracket = s; break; }
+    for (let s = 0; s <= limit; s = Math.min(s + 10, limit)) {
+      if (reach(s).ahead >= -1e-9) { bracket = s; break; } // Numerical equality at the closed 500-NM endpoint.
+      if (s === limit) break;
       low = s;
     }
     if (bracket === null) return unachievable();
     let high: number = bracket;
     for (let i = 0; i < 40; i += 1) { const mid: number = (low + high) / 2; if (reach(mid).ahead >= 0) high = mid; else low = mid; }
     const found = reach(high);
-    if (found.nm > RENDEZVOUS_RANGE_NM) return unachievable();
+    if (found.nm > RENDEZVOUS_RANGE_NM + 1e-6) return unachievable(); // Floating-point distance equality allowance, NM.
     return { position: found.target, achievable: true, condition, computedAt: now, ttg: (t0 - now) / 1000 + high, distanceNm: found.nm };
   }
 
@@ -1812,7 +1818,7 @@ export class ScriptedFms implements CduBackend {
     for (const route of [this.active, this.modified]) {
       if (!route) continue;
       route.legs.forEach((leg, index) => {
-        if (leg.kind !== "wpt" || !this.isMoving(leg.ident)) return;
+        if (leg.kind !== "wpt" || leg.position || !this.isMoving(leg.ident)) return;
         const key = this.rendezvousKey(route, leg.ident);
         live.add(key);
         const cached = this.rendezvousCache.get(key);
@@ -1838,7 +1844,7 @@ export class ScriptedFms implements CduBackend {
    */
   get rendezvousRollInvalid(): boolean {
     const leg = this.active.legs[0];
-    if (leg?.kind !== "wpt" || !this.isMoving(leg.ident)) return false;
+    if (leg?.kind !== "wpt" || leg.position || !this.isMoving(leg.ident)) return false;
     return this.rendezvousFor(this.active, 0)?.achievable === false;
   }
 
@@ -2854,7 +2860,7 @@ export class ScriptedFms implements CduBackend {
     // A holding/search origin is recorded once; its subsequent internal circuits do not add route waypoints.
     if (previous?.ident === leg.ident && distanceNm(previous.position, position) < 1e-6) return;
     this.flownHistory.push({ ident: leg.ident, position: { ...position },
-      flyOver: !!leg.qualifier || !!leg.hold || this.active.hold?.fix === leg.ident, temporary: !!leg.temporary });
+      flyOver: !!leg.qualifier || !!leg.hold || this.isMoving(leg.ident) || this.active.hold?.fix === leg.ident, temporary: !!leg.temporary });
   }
   private historyPpos() {
     let serial = 1;
@@ -2879,7 +2885,8 @@ export class ScriptedFms implements CduBackend {
     const reversed: Leg[] = [...this.flownHistory].reverse().map(fix => ({ kind: "wpt", ident: fix.ident, position: { ...fix.position },
       path: "TF", ...(fix.flyOver ? { qualifier: "/O" as const } : {}), ...(fix.temporary ? { temporary: true } : {}) }));
     const active = this.active.legs[0];
-    const currentTo = !this.onGround && active?.kind === "wpt" ? { ...structuredClone(active), path: "TF" as const, course: undefined, arc: undefined } : null;
+    const currentTo = !this.onGround && active?.kind === "wpt" ? { ...structuredClone(active), path: "TF" as const,
+      course: undefined, arc: undefined, hold: undefined, qualifier: active.qualifier ? "/O" as const : undefined } : null;
     const ppos = this.onGround ? null : this.historyPpos();
     const legs: Leg[] = [...(currentTo ? [currentTo, { kind: "disco" as const }] : []),
       ...(ppos ? [{ kind: "wpt" as const, ident: ppos.ident, position: ppos.position, temporary: true, path: "TF" as const }] : []), ...reversed];

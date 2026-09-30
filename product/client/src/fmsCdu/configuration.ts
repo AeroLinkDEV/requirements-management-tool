@@ -33,7 +33,7 @@ const options = {
   hover: on("Transition down to hover", "M300 11-18", "implemented", "declared laboratory join and representative AFCS"),
   predef: on("Predefined waypoint pages", "M300 A-117 to A-122", "partial", "mark/hover functions implemented; external equipment inputs off"),
   centralClear: on("Central user-data clear", "M300 11-34", "pending", "requires coherent per-computer user database and confirmation"),
-  movingIntercept: on("Rendezvous with a moving waypoint", "M300 11-37", "pending"),
+  movingIntercept: on("Rendezvous with a moving waypoint", "M300 11-37", "implemented", "trajectory intercept, 10-second recompute/one-minute freeze, four 500-NM conditions; ground uses entered CRZ TAS/WIND; straight-course laboratory solver"),
   movingWaypoint: on("Moving waypoint information", "M300 A-242", "partial", "moving positions exist; persistent moving-user entries remain pending"),
   predictiveRaim: on("Predictive RAIM requests", "M300 5-27", "partial", "IDENT/ETA intervals from simulated sky; no actual GPS almanac or installation-specific failure prediction"),
   dualFms: on("Two independent FMS computers", "M300 3-23 to 3-26", "implemented", "two computers/CDUs and measured navigation; modeled cross-talk; installation-specific synchronized interfaces remain absent"),

@@ -5,6 +5,7 @@ import { memoryUserDatabaseStore } from '../src/fmsCdu/userDatabase'
 import type { CduFunction } from '../src/fmsCdu/variants'
 import { DualFmsSystem } from '../src/fmsCdu/dualFms'
 import { distanceNm } from '../src/fmsCdu/fmsModel'
+import { offset } from '../src/fmsCdu/fmsModel'
 
 // E6, route semantics (plan rev 2 E6, kept by rev 3): CO ROUTE loads DIRECT or INVERSE from SELECT CO ROUTE (M300 3-10,
 // 3-11: the INV prefix and the DIRECT/INVERSE toggle). The inverse leg semantics are inferred from BACKTRACK (M300
@@ -72,6 +73,12 @@ test('BACKTRACK excludes procedure interiors, keeps holding and SAR origins once
   sar.activateSar('SECTOR'); sar.press('EXEC'); sar.sequence(); sar.arrive(true); sar.arrive(true); sar.completeSar()
   sar.setAircraft({ onGround: true }); sar.press('RTE'); sar.press('LSK5L')
   expect(idents(sar)).toEqual(['SEC01', 'CYOW'])
+  const activeSearch = fms()
+  activeSearch.activateSar('SECTOR'); activeSearch.press('EXEC'); activeSearch.sequence()
+  activeSearch.press('RTE'); activeSearch.press('LSK5L'); activeSearch.press('EXEC')
+  expect(activeSearch.activeRoute.legs[0]).toMatchObject({ ident: 'SEC01', qualifier: '/O' })
+  expect(activeSearch.activeRoute.legs[1]).toEqual({ kind: 'disco' })
+  expect(activeSearch.sar.status).toBeNull() // Keep the TO fix while leaving its search procedure.
   const codedHold = fms()
   codedHold.replaceLegs([{ kind: 'wpt', ident: 'RDG', source: 'APPR' }]); codedHold.press('EXEC')
   codedHold.defineHold('RDG'); codedHold.press('EXEC'); codedHold.sequence(); codedHold.arrive(true)
@@ -84,6 +91,16 @@ test('BACKTRACK excludes procedure interiors, keeps holding and SAR origins once
   for (let i = 0; i < 6; i++) interiors.sequence()
   interiors.setAircraft({ onGround: true }); interiors.press('RTE'); interiors.press('LSK5L')
   expect(idents(interiors)).toEqual(['CYOW'])
+  const movingHistory = fms()
+  movingHistory.defineMoving('SHIP1', offset(movingHistory.position, 0, 20), 0, 0)
+  movingHistory.replaceLegs([{ kind: 'wpt', ident: 'SHIP1' }]); movingHistory.press('EXEC'); movingHistory.sequence()
+  const passedShip = { ...movingHistory.activeLegStart }
+  movingHistory.tick() // Completed route no longer owns a rendezvous cache entry.
+  movingHistory.defineMoving('SHIP1', offset(movingHistory.position, 0, 600), 0, 0)
+  movingHistory.setAircraft({ onGround: true }); movingHistory.press('RTE'); movingHistory.press('LSK5L'); movingHistory.press('EXEC')
+  expect(movingHistory.coordinates('SHIP1')).toEqual(passedShip)
+  expect(movingHistory.rendezvousRollInvalid).toBe(false)
+  expect(movingHistory.activeRoute.legs[0]).toMatchObject({ qualifier: '/O' })
   const capacity = fms(), oldActive = structuredClone(capacity.activeRoute)
   for (let i = 0; i < 50; i++) { capacity.directTo('RDG'); capacity.press('EXEC') }
   const beforeRequest = structuredClone(capacity.activeRoute)
