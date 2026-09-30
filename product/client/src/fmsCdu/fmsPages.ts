@@ -71,6 +71,51 @@ const basisText = (fms: ScriptedFms) => {
   return { kind: endpoint.kind === "INSTRUMENT END" ? "INSTR END" : "SITE ARR", status: status === "CONDITIONAL" ? "COND" : status, reason };
 };
 
+/** VNAV 1/3: the approach path, or why there is none; thirteen lines, the last free for MISSED APPR. */
+function vnavApproachPage(fms: ScriptedFms): (Line | undefined)[] {
+  const path = approach(fms);
+  // An executed approach that does not end at a runway (a point-in-space approach, LNAV only) has no vertical path
+  // to show: it says so, with where it ends ("CRANN (MAP)"), never that there is no approach.
+  const endpoint = fms.approachType !== null ? fms.profile().endpoint : null;
+  if (!path && endpoint)
+    return [title("VNAV", "1/3"), undefined, { center: medium("NO VERTICAL PATH (LNAV)") }, undefined, { center: medium(`TO ${endpoint.label}`) },
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, { left: back("INDEX") }];
+  if (!path)
+    return [title("VNAV", "1/3"), undefined, { center: medium("NO APPROACH IN ROUTE") }, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, { left: back("INDEX") }];
+  const geometry = fms.legGeometry(fms.activeRoute);
+  const legs = fms.activeRoute.legs;
+  const ident = (i: number) => { const leg = legs[i]; return leg?.kind === "wpt" ? leg.ident : leg?.kind === "cond" ? conditionalLabel(leg) : "-----"; };
+  const crsDist = (i: number) => { const leg = geometry[i]; return leg ? `${three(leg.course)}°/${fixed(leg.distance, 1).padStart(5)}NM` : "---°/--.-NM"; };
+  const tan = Math.tan((path.vpa * Math.PI) / 180);
+  // Vertical deviation is shown once the aircraft is on the final approach: FAF or runway active.
+  const toThreshold = distanceNm(fms.position, path.runwayPos);
+  const onFinal = ident(0) === path.faf || ident(0) === path.runway;
+  const pathAltitude = fms.vnav.runwayElevation + Math.min(toThreshold * 6076.12 * tan, fms.vnav.fafAltitude - fms.vnav.runwayElevation);
+  const vdev = Math.round((fms.altitude - pathAltitude) / 10) * 10;
+  const targetVs = Math.round((fms.groundSpeed * 101.27 * tan) / 10) * 10;
+  const outside = path.vpa < GLIDEPATH_LIMITS.low || path.vpa > GLIDEPATH_LIMITS.high;
+  return [
+    // The runway without its RW and LNAV/VNAV as L/VNAV, so the longest title (NO APPR) fits beside 1/3 (R19, 3b).
+    title(`VNAV ${path.runway.replace(/^RW/, "")} ${fms.approachType === "LNAV/VNAV" ? "L/VNAV" : fms.approachType ?? ""}`.trim(), "1/3", "ACT"),
+    caption(" MDA-DA", fms.coldCorrection ? "FAF ALT TEMP COMP " : "FAF ALT "),
+    { left: { text: `${fms.vnav.mda}FT` }, right: { text: `${path.faf} ${fms.fafAltitudeCorrected}A`, color: fms.coldCorrection ? "cyan" : "white" } },
+    caption(" ACT WPT", "CRS/DIST "),
+    { left: { text: pad(ident(0), 5), color: "magenta" }, right: medium(crsDist(0)) },
+    caption(" NEXT WPT", "CRS/DIST "),
+    { left: { text: pad(ident(1), 5), color: "green" }, right: medium(crsDist(1)) },
+    caption(" DEST TEMP", "QNH "),
+    {
+      left: fms.vnav.destTemp === null ? boxes(3) : { text: `${fms.vnav.destTemp >= 0 ? "+" : ""}${fms.vnav.destTemp}°C` },
+      right: fms.vnav.qnh === null ? boxes(4) : { text: fms.vnav.qnh },
+    },
+    caption(" WIND/GS", "VPA "),
+    { left: medium(`${three(fms.wind.direction)}°/${fms.wind.speed}KT ${Math.round(fms.groundSpeed)}KT`), right: medium(`-${fixed(path.vpa, 2)}°`, outside ? "amber" : "white") },
+    caption(" VDEV", "TGT VS "),
+    { left: medium(onFinal ? `${vdev >= 0 ? "+" : ""}${vdev}FT` : "-----"), right: medium(`-${targetVs}FPM`) },
+  ];
+}
+
 /** VNAV CRZ: the planned cruise, path angle and wind, with the top and end of descent the profile works out. */
 function vnavCruise(fms: ScriptedFms): (Line | undefined)[] {
   const profile = fms.profile();
@@ -326,6 +371,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       });
       lines[11] = { left: dashes(24) };
       lines[12] = fms.routeStatus === "MOD" ? { left: back("ERASE"), right: prompt("RTE DATA>") } : { right: prompt("RTE DATA>") };
+      if (index === 0 && fms.missedPromptShown) lines[12] = { ...lines[12], right: prompt("MISSED APPR>") };
       // A direct-to offers INTC CRS (fly a course into the fix instead) and ABEAM PTS (keep the bypassed points).
       if (fms.directModification && index === 0) {
         const first = route.legs[0];
@@ -349,6 +395,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       }
       if (row === 6) {
         if (side === "L" && fms.routeStatus === "MOD") fms.eraseModification();
+        if (side === "R" && index === 0 && fms.missedPromptShown) { fms.requestMissedApproach(); return; }
         if (side === "R") fms.open("RTE", 1);
         return;
       }
@@ -480,7 +527,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           caption(`RNP/ANP ${forced ? "TEST" : nav.rnpManual === null ? fms.flightPhase : "MANUAL"}`),
           { left: medium(`${fixed(rnp, 2)}/${fixed(anp, 2)}NM`, anp > rnp ? "amber" : "white") },
           caption("NAV MODE"),
-          { left: { text: navModeText(fms, true), color: nav.mode === "DR" || nav.uncertain ? "amber" : "cyan" }, right: prompt("NAV STATUS>") },
+          { left: { text: navModeText(fms, true), color: nav.mode === "DR" || nav.uncertain ? "amber" : "cyan" }, right: prompt(fms.missedPromptShown ? "MISSED APPR>" : "NAV STATUS>") },
         ];
       }
       if (index === 1)
@@ -526,7 +573,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     },
     lsk: (fms, side, row, scratch, index) => {
       if (index === 0) {
-        if (side === "R" && row === 6) { fms.open("NAV_STATUS"); return; }
+        if (side === "R" && row === 6) { if (fms.missedPromptShown) fms.requestMissedApproach(); else fms.open("NAV_STATUS"); return; }
         if (side === "L" && row === 3 && scratch) {
           // WIND: a manual entry only while the FMS cannot compute the wind; DELETE returns to the last computed wind.
           const wind = scratch === "DELETE" ? null : /^(\d{3})\/(\d{1,3})$/.exec(scratch);
@@ -969,7 +1016,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         if (!choice || v.reason === "NO RUNWAY THRESHOLD") return [title("VNAV", "1/1"), undefined,
           { center: medium(choice ? "NO VERTICAL PATH (LNAV)" : "NO APPROACH IN ROUTE") }, undefined,
           choice ? { center: medium(`TO ${fms.instrumentEnd ?? "-----"} (MAP)`) } : undefined,
-          undefined, undefined, undefined, undefined, undefined, undefined, undefined, { left: back("INDEX") }];
+          undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+          { left: back("INDEX"), right: fms.missedPromptShown ? prompt("MISSED APPR>") : undefined }];
         const legs = fms.activeRoute.legs, geometry = fms.legGeometry(fms.activeRoute);
         const row = (at: number) => {
           const leg = legs[at], g = geometry[at];
@@ -992,56 +1040,20 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
             right: v.available ? medium(`${Math.round(v.targetVsFpm!)}FPM`) : dashes(5) },
           caption(fms.baroCorrectedAvailable ? " BARO: ADC" : " QNH", v.angleDeg === null ? "" : `VPA -${fixed(v.angleDeg, 2)}° `),
           { left: fms.baroCorrectedAvailable ? undefined : fms.vnav.qnh === null ? boxes(4) : medium(fms.vnav.qnh),
-            right: fms.onFinalSegment ? prompt("MISSED APPR>") : fms.routeStatus === "MOD" ? undefined : back("INDEX") },
+            right: fms.missedPromptShown ? prompt("MISSED APPR>") : fms.routeStatus === "MOD" ? undefined : back("INDEX") },
         ];
       }
       if (index === 1) return vnavCruise(fms);
       if (index === 2) return vnavDescent(fms);
-      const path = approach(fms);
-      // An executed approach that does not end at a runway (a point-in-space approach, LNAV only) has no vertical path
-      // to show: it says so, with where it ends ("CRANN (MAP)"), never that there is no approach.
-      const endpoint = fms.approachType !== null ? fms.profile().endpoint : null;
-      if (!path && endpoint)
-        return [title("VNAV", "1/3"), undefined, { center: medium("NO VERTICAL PATH (LNAV)") }, undefined, { center: medium(`TO ${endpoint.label}`) },
-          undefined, undefined, undefined, undefined, undefined, undefined, undefined, { left: back("INDEX") }];
-      if (!path)
-        return [title("VNAV", "1/3"), undefined, { center: medium("NO APPROACH IN ROUTE") }, undefined, undefined, undefined, undefined,
-          undefined, undefined, undefined, undefined, undefined, { left: back("INDEX") }];
-      const geometry = fms.legGeometry(fms.activeRoute);
-      const legs = fms.activeRoute.legs;
-      const ident = (i: number) => { const leg = legs[i]; return leg?.kind === "wpt" ? leg.ident : leg?.kind === "cond" ? conditionalLabel(leg) : "-----"; };
-      const crsDist = (i: number) => { const leg = geometry[i]; return leg ? `${three(leg.course)}°/${fixed(leg.distance, 1).padStart(5)}NM` : "---°/--.-NM"; };
-      const tan = Math.tan((path.vpa * Math.PI) / 180);
-      // Vertical deviation is shown once the aircraft is on the final approach: FAF or runway active.
-      const toThreshold = distanceNm(fms.position, path.runwayPos);
-      const onFinal = ident(0) === path.faf || ident(0) === path.runway;
-      const pathAltitude = fms.vnav.runwayElevation + Math.min(toThreshold * 6076.12 * tan, fms.vnav.fafAltitude - fms.vnav.runwayElevation);
-      const vdev = Math.round((fms.altitude - pathAltitude) / 10) * 10;
-      const targetVs = Math.round((fms.groundSpeed * 101.27 * tan) / 10) * 10;
-      const outside = path.vpa < GLIDEPATH_LIMITS.low || path.vpa > GLIDEPATH_LIMITS.high;
-      return [
-        // The runway without its RW and LNAV/VNAV as L/VNAV, so the longest title (NO APPR) fits beside 1/3 (R19, 3b).
-        title(`VNAV ${path.runway.replace(/^RW/, "")} ${fms.approachType === "LNAV/VNAV" ? "L/VNAV" : fms.approachType ?? ""}`.trim(), "1/3", "ACT"),
-        caption(" MDA-DA", fms.coldCorrection ? "FAF ALT TEMP COMP " : "FAF ALT "),
-        { left: { text: `${fms.vnav.mda}FT` }, right: { text: `${path.faf} ${fms.fafAltitudeCorrected}A`, color: fms.coldCorrection ? "cyan" : "white" } },
-        caption(" ACT WPT", "CRS/DIST "),
-        { left: { text: pad(ident(0), 5), color: "magenta" }, right: medium(crsDist(0)) },
-        caption(" NEXT WPT", "CRS/DIST "),
-        { left: { text: pad(ident(1), 5), color: "green" }, right: medium(crsDist(1)) },
-        caption(" DEST TEMP", "QNH "),
-        {
-          left: fms.vnav.destTemp === null ? boxes(3) : { text: `${fms.vnav.destTemp >= 0 ? "+" : ""}${fms.vnav.destTemp}°C` },
-          right: fms.vnav.qnh === null ? boxes(4) : { text: fms.vnav.qnh },
-        },
-        caption(" WIND/GS", "VPA "),
-        { left: medium(`${three(fms.wind.direction)}°/${fms.wind.speed}KT ${Math.round(fms.groundSpeed)}KT`), right: medium(`-${fixed(path.vpa, 2)}°`, outside ? "amber" : "white") },
-        caption(" VDEV", "TGT VS "),
-        { left: medium(onFinal ? `${vdev >= 0 ? "+" : ""}${vdev}FT` : "-----"), right: medium(`-${targetVs}FPM`) },
-      ];
+      const lines = vnavApproachPage(fms);
+      // MISSED APPR> in the approach phase, when configured (M300 7-15).
+      if (fms.missedPromptShown) lines[12] = { ...lines[12], right: prompt("MISSED APPR>") };
+      return lines;
     },
     lsk: (fms, side, row, scratch, index) => {
       if (fms.s300Advisory) {
-        if (side === "R" && row === 6) { if (fms.onFinalSegment) fms.goAround(); else fms.open("INIT_REF"); return; }
+        // MISSED APPR> is the FMS request alone (M300 7-15; plan C.3.1); the autopilot go-around is TOGA.
+        if (side === "R" && row === 6) { if (fms.missedPromptShown) fms.requestMissedApproach(); else fms.open("INIT_REF"); return; }
         if (!scratch) return;
         if (!fms.activeRoute.approach || fms.advisoryVertical?.reason === "NO RUNWAY THRESHOLD") return "not-allowed";
         if (side === "R" && row === 1) {
@@ -1062,6 +1074,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         fms.setScratch(""); return;
       }
       if (index === 1) return vnavCruiseLsk(fms, side, row, scratch);
+      if (index === 0 && side === "R" && row === 6 && fms.missedPromptShown) { fms.requestMissedApproach(); return; }
       if (index === 2) {
         if (side === "L" && row === 6 && !fms.profile().descending) { fms.vnav.desNow = true; fms.advisory("DES NOW"); }
         return;

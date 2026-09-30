@@ -261,6 +261,8 @@ export class FlightSimulator {
   private joinPlan: { segments: HoldSegment[]; index: number; id: number } | null = null;
   /** The straight-leg length of the hold being flown, NM (null when none). */
   get holdLegNm() { return this.holdPlan?.legNm ?? null; }
+  /** The hold being flown: its segments (the entry, then the racetrack), the one flown now, and where the entry ends. */
+  get holdProgress() { return this.holdPlan ? { segments: this.holdPlan.segments, index: this.holdPlan.index, entryEnd: this.holdPlan.entryEnd } : null; }
   private sarPlan: { points: LatLon[]; index: number } | null = null;
   private last: Guidance;
 
@@ -399,7 +401,8 @@ export class FlightSimulator {
     const capable = fms.approachVertical;
     if (this.approach === "CAPTURED") {
       if (!this.onFinal || fms.hasCondition("fmsFail")) { this.approach = fms.approachArmed ? "ARMED" : "OFF"; return; }
-      const cancel = !fms.approachArmed ? "APPR pressed off" : this.lateral !== "LNAV" ? "HDG SEL" : null;
+      // The FMS missed-approach request (MISSED APPR) ends the approach; LNAV stays valid to the MAP (M300 7-16 item 1).
+      const cancel = fms.missedApproachRequested ? "missed approach requested" : !fms.approachArmed ? "APPR pressed off" : this.lateral !== "LNAV" ? "HDG SEL" : null;
       if (cancel) {
         this.approach = "OFF";
         this.gpsLateral = false;
