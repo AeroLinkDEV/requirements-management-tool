@@ -43,12 +43,20 @@ const DOCUMENTATION_FILES = /^[^/]+\.md$/i
  * (lower case). The guard in classify.test.mjs scans every test source for documentation references and fails
  * on one it cannot account for, so a new read cannot silently join the documentation topology.
  */
-export const TEST_READ_DOCUMENTATION = Object.freeze([
+const BACKEND_READ_DOCUMENTATION = [
   // ProjectLadderConfigurationTests (Domain) parses the matrix for the activation-manifest source contract.
   'product/docs/requirement_hierarchy_policy_matrix.md',
   // AeroLinkOoxmlProfileTests (Infrastructure) validates this real Word round trip against the OOXML profile.
   'docs/aerolink technical overview.docx',
-])
+]
+// The FMS Test Bench's document guards (client logic tier) read these: fms-applicability.spec.ts holds the source
+// applicability matrix to its owner tests, and fms-register-corrections.spec.ts holds the register's corrections
+// C1-C16 to what checks them. They are FMS paths too, so an edit to either alone runs the FMS gates.
+const CLIENT_READ_DOCUMENTATION = [
+  'product/docs/fms_applicability.md',
+  'product/docs/fms_test_bench.md',
+]
+export const TEST_READ_DOCUMENTATION = Object.freeze([...BACKEND_READ_DOCUMENTATION, ...CLIENT_READ_DOCUMENTATION])
 const TEST_READ_DOCUMENTATION_SET = new Set(TEST_READ_DOCUMENTATION)
 
 function isDocumentationPath(path) {
@@ -135,6 +143,9 @@ const FMS_PATHS = [
   /^product\/client\/tests\/fixtures\/cifp\//,
   /^product\/client\/tests\/support\/tdnoracle\.ts$/,
   /^product\/client\/fast-client-tests\.json$/,
+  // The documents the bench's own guards read (CLIENT_READ_DOCUMENTATION).
+  /^product\/docs\/fms_applicability\.md$/,
+  /^product\/docs\/fms_test_bench\.md$/,
 ]
 
 export function isFmsPath(path) {
@@ -204,14 +215,15 @@ function matchingBroadPath(paths) {
   return paths.find((path) => isBroadPath(path)) ?? null
 }
 
-const TEST_READ_DOCUMENTATION_PATTERN = TEST_READ_DOCUMENTATION
-  .map((path) => `^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
-  .join('|')
+const exactPaths = (paths) => paths.map((path) => `^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`).join('|')
+const BACKEND_READ_PATTERN = exactPaths(BACKEND_READ_DOCUMENTATION)
+const CLIENT_READ_PATTERN = exactPaths(CLIENT_READ_DOCUMENTATION)
 
 export const AREA_PATTERNS = {
   // Documentation read by the Domain and Infrastructure suites selects the backend suites that read it.
-  backend: new RegExp(`^product/(src|tests)/|^product/.*\\.(cs|csproj|sln|slnx|props|targets)$|${WORKFLOW}|${TEST_READ_DOCUMENTATION_PATTERN}`, 'i'),
-  client: new RegExp(`^product/client/|${WORKFLOW}`, 'i'),
+  backend: new RegExp(`^product/(src|tests)/|^product/.*\\.(cs|csproj|sln|slnx|props|targets)$|${WORKFLOW}|${BACKEND_READ_PATTERN}`, 'i'),
+  // Documentation read by the client suites (the FMS Test Bench's document guards) selects the client gate.
+  client: new RegExp(`^product/client/|${WORKFLOW}|${CLIENT_READ_PATTERN}`, 'i'),
   browser: new RegExp(`^product/(client|src/AeroLink\\.Api|src/AeroLink\\.Domain|src/AeroLink\\.Infrastructure)/|${WORKFLOW}`, 'i'),
   // Keyed on persistence as well as the migration/identity keywords: a change to an EF query needs the
   // real provider even when no schema moves, because translation is not portable and the SQLite path

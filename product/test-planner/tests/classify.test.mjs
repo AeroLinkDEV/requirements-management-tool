@@ -67,6 +67,9 @@ const DOCUMENTATION_REFERENCES = {
   // Reads by suites the documentation topology skips.
   'product/tests/AeroLink.Domain.Tests/ProjectLadderConfigurationTests.cs': { reads: true, refs: ['directory', 'product/docs/REQUIREMENT_HIERARCHY_POLICY_MATRIX.md'] },
   'product/tests/AeroLink.Infrastructure.Tests/AeroLinkOoxmlProfileTests.cs': { reads: true, refs: ['directory', 'docs/AeroLink Technical Overview.docx'] },
+  // The FMS Test Bench's document guards (client logic tier): FMS paths, so a change to either document runs them.
+  'product/client/tests/fms-applicability.spec.ts': { reads: true, refs: ['directory', 'product/docs/FMS_APPLICABILITY.md', 'product/docs/FMS_TEST_BENCH.md'] },
+  'product/client/tests/fms-register-corrections.spec.ts': { reads: true, refs: ['directory', 'product/docs/FMS_APPLICABILITY.md', 'product/docs/FMS_TEST_BENCH.md'] },
   // Reads every maintained document, but runs in the always-running classifier job (asserted below), so a
   // documentation-only candidate still runs it.
   'product/scripts/Test-RepositoryLayout.Tests.ps1': { reads: false, why: 'always runs', refs: ['directory', 'CURRENT_PRODUCT_HANDOFF_2026-07-29.md', 'DECISIONS_AND_OPEN_QUESTIONS.md', 'FEATURE_CATALOG.md', 'PROJECT_STATE.md', 'README.md', 'docs/REMOTE_DEMO_OPERATOR.md'] },
@@ -657,6 +660,27 @@ test('a change confined to the FMS Test Bench runs the client, production and FM
   }
 })
 
+test('the documents the bench\'s guards read are test input: alone they run the FMS gates, beside other product code the client gate', () => {
+  for (const doc of ['product/docs/FMS_APPLICABILITY.md', 'product/docs/FMS_TEST_BENCH.md']) {
+    assert.equal(isDocumentationOnlyChange([doc]), false, doc)
+    assert.equal(isFmsPath(doc), true, doc)
+    for (const event of ['pull_request', 'merge_group']) {
+      const alone = of([doc], event)
+      assert.deepEqual({ docsOnly: alone.docsOnly, fmsOnly: alone.fmsOnly, client: alone.client, browser: alone.browser, backend: alone.backend }, { docsOnly: false, fmsOnly: true, client: true, browser: true, backend: false }, `${doc} ${event}`)
+    }
+    // Beside a backend change, the client gate still runs for the document; the backend runs for the backend change.
+    const mixed = of([doc, 'product/src/AeroLink.Api/Program.cs'])
+    assert.equal(mixed.client, true, doc)
+    assert.equal(AREA_PATTERNS.client.test(normalizePath(doc)), true, doc)
+    assert.equal(AREA_PATTERNS.backend.test(normalizePath(doc)), false, doc)
+  }
+  // The backend's own reads still select the backend, not the client.
+  assert.equal(AREA_PATTERNS.backend.test('product/docs/requirement_hierarchy_policy_matrix.md'), true)
+  assert.equal(AREA_PATTERNS.client.test('product/docs/requirement_hierarchy_policy_matrix.md'), false)
+  // Other FMS documents stay documentation.
+  assert.equal(isDocumentationOnlyChange(['product/docs/FMS_V1_ACCEPTANCE.md']), true)
+})
+
 test('anything beyond the bench keeps the existing classification, and so does a bench file renamed out of it', () => {
   const beyond = {
     'App.tsx imports the bench but is not in it': 'product/client/src/App.tsx',
@@ -677,8 +701,11 @@ test('anything beyond the bench keeps the existing classification, and so does a
   }
   // Both sides of a rename are passed; moving a file out of the bench is not a bench-only change.
   assert.equal(isFmsOnlyChange(['product/client/src/fmsCdu/flight.ts', 'product/client/src/flight.ts']), false)
-  // Documentation alone is not FMS-only, and a document a suite reads is product, not documentation.
-  assert.equal(isFmsOnlyChange(['product/docs/FMS_TEST_BENCH.md']), false)
+  // Documentation alone is not FMS-only; a document the bench's own guards read is (fms-applicability.spec.ts,
+  // fms-register-corrections.spec.ts), and a document another suite reads is product, not documentation.
+  assert.equal(isFmsOnlyChange(['README.md']), false)
+  assert.equal(isFmsOnlyChange(['product/docs/OPERATIONS.md']), false)
+  assert.equal(isFmsOnlyChange(['product/docs/FMS_TEST_BENCH.md']), true)
   assert.equal(isFmsOnlyChange(['product/client/src/fmsCdu/flight.ts', 'product/docs/requirement_hierarchy_policy_matrix.md']), false)
   for (const bad of [[], ['product/client/src/fmsCdu/flight.ts', ''], ['product/client/src/fmsCdu/flight.ts', null], undefined]) assert.equal(isFmsOnlyChange(bad), false)
   // Near misses of the patterns stay outside the bench.
