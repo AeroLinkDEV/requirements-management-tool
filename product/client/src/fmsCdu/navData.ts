@@ -295,6 +295,9 @@ export class NavDatabase {
     };
   }
 
+  /** Complete immutable transfer copy, including duplicate entries and procedure geometry. */
+  exportData(): NavData { return structuredClone({ cycle: this.cycle, entries: [...this.byIdent.values()].flat(), airways: [...this.airwayByIdent.values()], procedures: this.procedures, msa: this.msa }); }
+
   /** Every entry with an ident: duplicates are possible, as in real data. */
   find(ident: string): NavEntry[] { return this.byIdent.get(ident) ?? []; }
 

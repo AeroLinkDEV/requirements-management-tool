@@ -591,6 +591,37 @@ export class FlightSimulator {
   get bankAngle() { return this.bank; }
   get sarPath() { return this.sarPlan?.points ?? null; }
 
+  /** The bench changes the selected computer without resetting the single physical aircraft. */
+  adoptAircraftMotion(previous?: FlightSimulator) {
+    this.airspeed = this.fms.trueAirspeed ?? this.airspeed;
+    this.bank = this.fms.navigationInputs?.attitude?.value?.bank ?? 0;
+    if (previous) {
+      // These are selections/state of the one physical AFCS, not a second crew's autopilot.
+      this.selectedAlt = previous.selectedAlt; this.selectedTas = previous.selectedTas; this.vsTarget = previous.vsTarget;
+      this.altitudeHold = previous.altitudeHold; this.vertical = previous.vertical; this.goingAround = previous.goingAround;
+      this.lateral = previous.lateral; this.lnavArmed = previous.lnavArmed; this.heading = previous.heading; this.held = previous.held;
+      this.lowCollective = structuredClone(previous.lowCollective); this.lowHorizontal = structuredClone(previous.lowHorizontal);
+      this.hoverHeading = previous.hoverHeading; this.hoverHeightFt = previous.hoverHeightFt; this.tdSpeed = previous.tdSpeed; this.tdIas = previous.tdIas;
+      // Laboratory source change cancels a captured approach; the crew must re-arm against the new computer's authority.
+      this.approach = "OFF"; this.gpsLateral = false; this.fms.armApproach(false);
+      this.watchFailure(); this.last = this.guide(); this.record("FMS SOURCE CHANGED", "AFCS selections retained; approach requires re-arming");
+    }
+  }
+
+  /** An unselected computer computes its own route guidance against the common aircraft, without integrating physics. */
+  observe(dt: number) {
+    const fms = this.fms;
+    fms.refreshSensorInput(); this.watchFailure(); this.watchGoAround(); this.watchGpsLateral(); this.watchHover();
+    const computed = this.guide(dt); this.updateApproach(computed.crossTrack);
+    this.last = this.altitudeHold !== null && computed.targetAltitude !== this.altitudeHold ? { ...computed, targetAltitude: this.altitudeHold } : computed;
+    this.outputPort?.write({ at: fms.now.getTime(), sequence: ++this.outputSequence,
+      status: fms.hasCondition("fmsFail") ? "FAIL" : this.last.desiredTrack === null ? "NCD" : "NORMAL",
+      value: fms.hasCondition("fmsFail") ? null : structuredClone(this.last) });
+    const final = fms.hasCondition("fmsFail") ? null : this.finalPathAltitude();
+    this.path = final === null ? null : { altitude: final, source: "APPR", coupled: this.approach === "CAPTURED" };
+    this.adoptAircraftMotion(); fms.tick();
+  }
+
   /** Flies for dt seconds of simulated time, in steps of at most one second. */
   step(dt: number) {
     let left = dt;

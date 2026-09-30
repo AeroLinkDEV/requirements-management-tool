@@ -1,5 +1,9 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { FlightSimulator } from '../src/fmsCdu/flight'
+import { DualFmsSystem } from '../src/fmsCdu/dualFms'
+import { stimulusFor } from '../src/fmsCdu/gpsStimulus'
+import { setUp87nRnav190Final } from '../src/fmsCdu/heliDemo'
+import { LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { distanceNm, offset } from '../src/fmsCdu/fmsModel'
 import { iasFromTas } from '../src/fmsCdu/kinematics'
 import { LAB_AIRLINE_VNAV_PROFILE, type AircraftProfile } from '../src/fmsCdu/profile'
@@ -195,24 +199,185 @@ test('the maintenance page runs a self test, which fails while a fault is presen
   expect(lines(unit)[8]).toMatch(/^1400Z GPS LOST/)
 })
 
-test('in dual operation the executed route is cross-loaded; independent, the sides differ until they resynchronise', () => {
-  const unit = new ScriptedFms()
-  unit.press('LEGS')
-  typeText(unit, 'TOLGU')
-  press(unit, 'LSK1L', 'EXEC')
-  expect(unit.crossSideInSync).toBe(true)
-  unit.setCondition('independent', true)
-  unit.press('CLR')
-  unit.press('LEGS')
-  typeText(unit, 'CYUL')
-  press(unit, 'LSK1L', 'EXEC')
-  expect(unit.crossSideInSync).toBe(false)
-  press(unit, 'INIT_REF', 'LSK6L')
-  expect(lines(unit)[6]).toMatch(/^INDEPENDENT\s+RTE DIFFER$/)
-  expect(lines(unit)[8]).toMatch(/^\d{4}Z X-SIDE SYNC LOST\s*$/)
-  unit.setCondition('independent', false)
-  expect(unit.crossSideInSync).toBe(true)
-  expect(lines(unit)[6]).toMatch(/^DUAL SYNC\s+RTE MATCH$/)
+// Owner: real computer separation, confirmed mode transition, single-editor lock and receiving MOD/EXEC activation.
+// A copied-route facade cannot detect one CDU editing or failing while the other remains usable.
+const dualSetup = (secondaryProfile?: AircraftProfile) => {
+  let now = START
+  const system = new DualFmsSystem(() => new Date(now), { secondaryProfile })
+  return { system, one: system.computers[0], two: system.computers[1],
+    tick: (seconds = 1) => { for (let i = 0; i < seconds; i++) { now += 1000; system.tick() } },
+    fly: (seconds: number) => { for (let i = 0; i < seconds; i++) { now += 1000; system.step(1) } } }
+}
+const mode = (unit: ScriptedFms) => { unit.open('SETUP'); unit.press('LSK5L'); unit.press('LSK6R'); unit.press('CLR', { held: true }); unit.press('CLR', { held: true }) }
+test('two computers retain independent CDU and MOD state, synchronize EXEC and require receiving EXEC after crossfill', () => {
+  const { system, one, two } = dualSetup()
+  expect(system.mode).toBe('SYNC')
+  one.open('LEGS'); two.open('PROG'); two.setScratch('KEEP')
+  one.modify(route => { route.legs = [{ kind: 'wpt', ident: 'TOLGU' }] })
+  expect(two.modify(route => { route.dest = 'CYOW' })).toBe(false)
+  expect(two.routeStatus).toBe('ACT')
+  expect(lines(two)[SCRATCHPAD_LINE]).toContain('CDU ENTRY CONFLICT')
+  one.press('EXEC')
+  expect(two.activeRoute.legs).toEqual([{ kind: 'wpt', ident: 'TOLGU' }])
+  expect(lines(two)[0]).toContain('PROGRESS')
+  one.open('SETUP'); one.press('LSK5L'); one.press('LSK6L')
+  expect(system.mode).toBe('SYNC')
+  mode(one); expect(system.mode).toBe('INDEPENDENT')
+  one.modify(route => { route.legs = [{ kind: 'wpt', ident: 'CYUL' }] }); one.press('EXEC')
+  expect(two.activeRoute.legs).toEqual([{ kind: 'wpt', ident: 'TOLGU' }])
+  expect(one.dualOperation!.crossfill(false)).toBe(true)
+  expect(two.routeStatus).toBe('MOD')
+  expect(two.route.legs).toEqual([{ kind: 'wpt', ident: 'CYUL' }])
+  expect(two.activeRoute.legs).toEqual([{ kind: 'wpt', ident: 'TOLGU' }])
+  expect(one.dualOperation!.crossfill(false)).toBe(false)
+  expect(two.route.legs).toEqual([{ kind: 'wpt', ident: 'CYUL' }])
+  two.press('EXEC'); expect(two.activeRoute.legs).toEqual([{ kind: 'wpt', ident: 'CYUL' }])
+  one.copyActiveToSecondary(); one.modify(route => { route.legs = [{ kind: 'wpt', ident: 'MUN' }] }); one.press('EXEC')
+  one.open('RTE'); one.setScratch('SEC'); one.press('LSK4L')
+  expect(two.route.legs).toEqual([{ kind: 'wpt', ident: 'CYUL' }])
+  expect(two.activeRoute.legs).toEqual([{ kind: 'wpt', ident: 'CYUL' }])
+  two.eraseModification()
+  mode(two) // The initiating computer is explicitly authoritative.
+  expect(system.mode).toBe('SYNC')
+  expect(one.activeRoute.legs).toEqual([{ kind: 'wpt', ident: 'CYUL' }])
+  expect(one.activeRoute).not.toBe(two.activeRoute)
+  one.raiseAlert('CHECK ANP'); expect(two.recallList[0].text).toBe('CHECK ANP')
+  two.press('CLR'); expect(one.lamps().has('MSG')).toBe(false)
+  one.setCondition('fmsFail', true)
+  expect(two.hasCondition('fmsFail')).toBe(false)
+  expect(new ScriptedFms().otherFms).toBeNull()
+})
+
+// Owner: settings actually cross the link; mode refusals preserve two plans rather than reporting a false match.
+test('SETUP transfers configured settings and sync refuses link, software, data, user, MOD and active-hold mismatches', () => {
+  const { system, one, two, tick } = dualSetup()
+  one.open('SETUP'); one.press('LSK1L'); one.press('LSK2L'); one.setScratch('+5.5'); one.press('LSK2R')
+  expect(two.angleReference).toBe('TRUE')
+  expect(two.setup).toEqual({ localTime: true, localOffsetHours: 5.5 })
+  one.createUserWaypoint('OWN01', { lat: 42, lon: -72 }); tick()
+  expect(two.userWaypoints).toContainEqual({ ident: 'OWN01', type: 'FIXED', position: { lat: 42, lon: -72 } })
+  system.setLinkAvailable(false)
+  const plans = [structuredClone(one.activeRoute), structuredClone(two.activeRoute)]
+  mode(one); expect(system.mode).toBe('INDEPENDENT')
+  expect(lines(one)[SCRATCHPAD_LINE]).not.toContain('UNABLE') // CLR acknowledges the refusal, recall retains it.
+  expect(one.recallList.some(message => message.text.includes('UNABLE FMS-FMS SYNC'))).toBe(true)
+  system.setLinkAvailable(true); expect(system.mode).toBe('INDEPENDENT')
+  two.modify(route => { route.legs = [{ kind: 'wpt', ident: 'CYUL' }] })
+  mode(one); expect(system.mode).toBe('INDEPENDENT'); two.eraseModification()
+  one.modify(route => { route.hold = { fix: 'MUN', inbound: 90, turn: 'RIGHT', legTime: 1, legDistance: null, exit: 'MANUAL', speed: 90, altitude: '3000', status: 'IN PROGRESS' } }); one.press('EXEC')
+  mode(one); expect(system.mode).toBe('INDEPENDENT')
+  one.modify(route => { route.hold = undefined }); one.press('EXEC')
+  two.createUserWaypoint('OWN02', { lat: 43, lon: -72 }); mode(one)
+  expect(system.mode).toBe('INDEPENDENT')
+  expect(one.faultLog[0].text).toContain('USER DATA DIFFER')
+  expect(two.activeRoute).toEqual(plans[1])
+  const different = dualSetup(LATER_SBAS_PROFILE)
+  expect(different.system.mode).toBe('INDEPENDENT'); mode(different.one)
+  expect(different.one.faultLog[0].text).toContain('OP PROGRAM DIFFER')
+  const cycles = dualSetup(); mode(cycles.one); cycles.two.swapCycles(); mode(cycles.one)
+  expect(cycles.system.mode).toBe('INDEPENDENT'); expect(cycles.one.faultLog[0].text).toContain('NAV DATA DIFFER')
+  const approaches = dualSetup(); mode(approaches.one)
+  expect(setUp87nRnav190Final(approaches.one, approaches.system.flights[0])).toEqual({ ready: true })
+  expect(setUp87nRnav190Final(approaches.two, approaches.system.flights[1])).toEqual({ ready: true })
+  mode(approaches.one); expect(approaches.system.mode).toBe('INDEPENDENT')
+  expect(approaches.one.faultLog[0].text).toContain('GPS APPROACH')
+  approaches.one.armApproach(false); expect(approaches.two.goAround()).toBe(true)
+  mode(approaches.one); expect(approaches.system.mode).toBe('INDEPENDENT')
+  expect(approaches.one.faultLog[0].text).toContain('MISSED APPROACH')
+  const missed = dualSetup()
+  expect(setUp87nRnav190Final(missed.one, missed.system.flights[0])).toEqual({ ready: true })
+  missed.tick()
+  expect(missed.one.goAround()).toBe(true)
+  expect(missed.two.missedApproachActive).toBe(true)
+})
+
+// Owner: measured same-type source selection, 100 m civil hysteresis, independent computed-position disagreement.
+test('synchronized navigation retains its sensor until the peer is 100 metres better and independent estimates can disagree', () => {
+  const { system, one, two, tick } = dualSetup()
+  const stimulus = stimulusFor(one)
+  stimulus.apply(0, { op: 'override', label: '247', kind: 'FORCE', amount: 0.2 })
+  stimulus.apply(1, { op: 'override', label: '247', kind: 'FORCE', amount: 0.15 }); tick()
+  expect(one.localNavigationSolution.anp).toBeCloseTo(0.2, 6)
+  expect(two.localNavigationSolution.anp).toBeCloseTo(0.15, 6)
+  expect(system.navigationSide).toBe(1) // 92.6 m improvement is insufficient.
+  stimulus.apply(1, { op: 'override', label: '247', kind: 'FORCE', amount: 0.14 }); tick()
+  expect(system.navigationSide).toBe(2) // 111.12 m improvement.
+  expect(one.navState.gpsSource).toBe(2); expect(two.navState.gpsSource).toBe(2)
+  stimulus.apply(0, { op: 'override', label: '247', kind: 'FORCE', amount: 0.10 }); tick()
+  expect(system.navigationSide).toBe(2)
+  stimulus.apply(0, { op: 'override', label: '247', kind: 'FORCE', amount: 0.08 }); tick()
+  expect(system.navigationSide).toBe(1)
+  mode(one)
+  stimulus.apply(1, { op: 'spoof', northM: 1852, driftEastMps: 0 }); tick()
+  expect(distanceNm(one.localNavigationSolution.position, two.localNavigationSolution.position)).toBeGreaterThan(0.9)
+  expect(one.recallList.some(message => message.text === 'GPS-GPS POS DISAGREE')).toBe(true)
+  expect(two.recallList.some(message => message.text === 'GPS-GPS POS DISAGREE')).toBe(true)
+  expect(one.truePosition).toEqual(two.truePosition)
+  const phases = dualSetup(), phaseStimulus = stimulusFor(phases.one)
+  for (const index of [0, 1]) {
+    phaseStimulus.apply(index, { op: 'override', label: '110', kind: 'FORCE', amount: index === 0 ? 45.31 : 46.0 })
+    phaseStimulus.apply(index, { op: 'override', label: '111', kind: 'FORCE', amount: -75.6817 })
+    phaseStimulus.apply(index, { op: 'override', label: '120', kind: 'FORCE', amount: 0 })
+    phaseStimulus.apply(index, { op: 'override', label: '121', kind: 'FORCE', amount: 0 })
+  }
+  phases.tick()
+  const departure = phases.one.navdb.airport('CYOW')!.position
+  expect(distanceNm(phases.one.localNavigationSolution.position, departure)).toBeLessThan(33)
+  expect(distanceNm(phases.two.localNavigationSolution.position, departure)).toBeGreaterThan(33)
+  phases.tick(20)
+  phases.one.setCondition('rnpExceeded', true) // A healthy-computer condition notification must not reset local phase history.
+  phases.tick(10)
+  expect(phases.system.mode).toBe('SYNC') // Exactly 30 seconds is not "more than 30".
+  phases.tick()
+  expect(phases.system.mode).toBe('INDEPENDENT')
+  expect(phases.one.faultLog.some(fault => fault.text.includes('PHASE DISAGREEMENT'))).toBe(true)
+})
+
+// Owner: physical RMS acknowledgement is independent of FMS mode/link; standby swap commits only on acknowledgement.
+test('both FMSs tune shared civil devices through feedback and a cross-talk fault only isolates standby entries', () => {
+  const { system, one, two, tick } = dualSetup()
+  one.setRadio('com1Stby', '123.450')
+  expect(two.radioState.com1Stby).toBe('123.450')
+  one.swapRadio('com1')
+  expect(one.radioState.com1).toBe('121.500'); expect(one.radioState.com1Stby).toBe('123.450')
+  tick(); expect(two.radioState.com1).toBe('123.450'); expect(two.radioState.com1Stby).toBe('121.500')
+  mode(two); system.setLinkAvailable(false)
+  two.setRadio('com1Stby', '128.700')
+  expect(one.radioState.com1Stby).toBe('121.500')
+  two.setRadio('nav1', '114.50'); expect(one.radioState.nav1).toBe('113.90')
+  tick(); expect(one.radioState.nav1).toBe('114.50'); expect(two.radioState.nav1).toBe('114.50')
+  two.open('RADIO', 1); two.setScratch('0420'); two.press('LSK1R'); two.setScratch('4321'); two.press('LSK2R'); tick()
+  expect(one.radioState.adf2).toBe('0420'); expect(one.radioState.tpdr2).toBe('4321')
+  system.rms.injectFailure('com1', true); two.swapRadio('com1'); tick()
+  expect(two.radioRequests[0].status).toBe('PENDING'); tick()
+  expect(two.radioRequests[0].status).toBe('FAILED')
+  expect(one.radioState.com1).toBe('123.450'); expect(two.radioState.com1Stby).toBe('128.700')
+  system.rms.injectFailure('com1', false); two.setRadio('com1', '129.100'); tick()
+  expect(one.radioState.com1).toBe('129.100'); expect(two.radioState.com1).toBe('129.100')
+  expect(system.linked).toBe(false); expect(system.mode).toBe('INDEPENDENT')
+})
+
+// Owner: the common plant advances once, and selecting the other computer preserves its motion/independent guidance.
+test('selecting FMS 2 guidance never creates or resets another aircraft and FMS 1 failure leaves FMS 2 output usable', () => {
+  const { system, one, two, fly } = dualSetup()
+  mode(one)
+  two.modify(route => { route.legs = [{ kind: 'wpt', ident: 'CYUL' }] }); two.press('EXEC')
+  const start = { ...one.truePosition }
+  fly(5)
+  expect(one.truePosition).toEqual(two.truePosition)
+  const travelled = distanceNm(start, one.truePosition)
+  expect(travelled).toBeGreaterThan(0.14); expect(travelled).toBeLessThan(0.20) // 120 kt × 5 seconds, single integration.
+  const before = { ...one.truePosition }
+  system.simulator.selectSpeed(80); system.simulator.selectAltitude(4000); system.simulator.engageVerticalSpeed(500)
+  system.selectGuidance(2); expect(two.truePosition).toEqual(before)
+  expect(system.simulator.selectedSpeed).toBe(80); expect(system.simulator.selectedAltitude).toBe(4000)
+  expect(system.simulator.verticalSpeedTarget).toBe(500)
+  one.setCondition('fmsFail', true); fly(5)
+  expect(two.hasCondition('fmsFail')).toBe(false)
+  expect(system.flights[1].guidance.desiredTrack).not.toBeNull()
+  expect(system.flights[0].guidance.desiredTrack).toBeNull()
+  expect(one.truePosition).toEqual(two.truePosition)
+  expect(distanceNm(before, two.truePosition)).toBeGreaterThan(0.1)
 })
 
 // Stage B2 of the helicopter-first plan: the radio altimeter measures the aircraft's physical height above a declared

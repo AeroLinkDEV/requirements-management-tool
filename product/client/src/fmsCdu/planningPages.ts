@@ -85,7 +85,7 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
           { left: { text: route.coRouteInverse ? `INV ${route.coRoute}` : route.coRoute }, right: { text: route.flightNo } },
           caption(" RUNWAY"),
           { left: route.runway ? { text: route.runway } : dashes(5) },
-          undefined, { right: prompt("CO ROUTES>") }, undefined,
+          undefined, { left: fms.dualOperation?.mode === "INDEPENDENT" ? prompt("<XFILL") : undefined, right: prompt("CO ROUTES>") }, undefined,
           { right: prompt("SAVE ROUTE>") },
           { left: dashes(24) },
           footer,
@@ -110,6 +110,11 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
         return;
       }
       if (index === 0) {
+        if (side === "L" && row === 4 && fms.dualOperation) {
+          if (scratch && scratch !== "ACT" && scratch !== "SEC") return "invalid";
+          if (fms.dualOperation.crossfill(scratch === "SEC")) { fms.setScratch(""); fms.advisory("XFILL SENT AS MOD"); }
+          return;
+        }
         if (side === "R" && row === 5) { fms.saveCompanyRoute(); fms.advisory("ROUTE SAVED"); return; }
         if (side === "R" && row === 4) { fms.open("CO_ROUTES"); return; }
         const field = side === "L" ? (row === 1 ? "origin" : row === 2 ? "coRoute" : row === 3 ? "runway" : null)

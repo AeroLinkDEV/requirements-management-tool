@@ -120,12 +120,20 @@
 
 .fmsBenchPanel {
   display: flex;
+  flex-direction: column;
+  gap: 12px;
   justify-content: center;
   padding: 18px;
   border-radius: 14px;
   background: radial-gradient(ellipse at 50% 30%, #3a4250 0%, #20252e 70%);
   transition: background 200ms ease;
 }
+
+.fmsBenchPanel > [data-testid="fms-cdu-inspected"],
+.fmsBenchPanel > [data-testid="fms-cdu-peer"] { width: 100%; min-width: 0; }
+.fmsBenchPanel .fmsBenchActions { flex-wrap: wrap; gap: 8px; }
+.fmsBenchPanel .fmsBenchActions label,
+.fmsBenchPanel h2 { color: #d7dce4; }
 
 /* The stage darkens with the cockpit, so the panel's own lighting carries the scene. */
 .fmsBenchPanel.mode-night {
