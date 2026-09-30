@@ -33,7 +33,7 @@
 | Sensor state | One `anp` number stands in for availability, 95% accuracy, integrity (NP) and eligibility (rev 2 F2). |
 | Transitions | There is no 100 m hysteresis rule or immediate integrity reversion (M300 1-3). |
 | DME/DME | Up to 6 stations, REJ/N/A status and scanning control (M300 12-17) are missing. The solver uses a best pair with a residual check. |
-| VOR/DME | It should use manually tuned stations only, at most two VOR/DME plus one TACAN (M300 12-19). The bench auto-selects instead. |
+| VOR/DME | It should use tuned stations, at most two VOR/DME plus one TACAN (M300 12-19). The bench picks stations from the database without any radio. |
 | Pages | DME STATUS, DME DESELECT, VOR/DME/TCN STATUS, the DESELECT page (TAS, HDG and sensors), the NAV radio pages with AUTO/MAN and TEST, and the ADF pages are missing or partial. |
 | Alerts | The Appendix E navigation, radio and sensor messages are partly present. |
 | Output bus | There are no tags for navigation mode provenance, the integrity annunciator, tuned stations, or radio health. |
@@ -50,10 +50,10 @@ The helicopter profile already declares radio equipment on or off (`configuratio
 | DME ×2 (DME/DME scanning) | 1-4, 12-16, 13-20 | **On** | Needed for the civil priority order |
 | NAV ×2 (VOR/ILS receivers) | 1-5, 12-19, 13-21 | **On** (`nav1`, `nav2` exist) | |
 | ADF ×2 | 13-23 | **On** (`adf1`, `adf2` exist, pending) | ADF is tuned and displayed. It is **not a navigation mode** in M300 (1-4 list). |
-| TACAN | 1-4 note, 12-19 | **Off** | Q1: M300 admits civil TACAN only "when proven accurate" |
-| AHRS/APIRS with KALMAN | 1-5, 12-23, 15-4 | **Question Q2** | The helicopter edition documents it. It is not RNP-applicable (15-4). |
+| TACAN | 1-4 note, 12-19 | **On** (Sean, 30 Sep, DEC-150) | DME/DME may use TACAN ranges; VOR/DME/TCN may use one TACAN. M300 admits civil TACAN "when proven accurate". |
+| AHRS/APIRS with KALMAN | 1-5, 12-23, 15-4 | **On, 2-minute coast, then DR** (Sean, 30 Sep, DEC-150) | Not RNP-applicable (15-4) |
 | IRS / EGI | 12-25 to 12-28 | **Off** (Sean, 29 Sep: remove IRS from the civil profile) | |
-| DVS (Doppler) | 12-20, 1-3 | **Off** (`doppler: off`) | Q3 for SAR over water |
+| DVS (Doppler) | 12-20, 1-3 | **On** (Sean, 30 Sep, DEC-150) | Lowest priority, without integrity in the civil option (12-20) |
 | Military navigation, mGPS/cGPS | 1-6 to 1-8 | **Off** | Sean, 28 Sep |
 
 **Exit condition:**
@@ -73,7 +73,7 @@ Each item has an exit condition and named owner tests. Tests go in new spec file
 ### F1. Navaid data prerequisite
 
 - Read DME-only stations, taking the DME position from ARINC 424 columns 56–74.
-- Read station elevation, and channel/frequency identity (including the TACAN channel pairing kept for data only, with TACAN off).
+- Read station elevation, and channel/frequency identity (including the TACAN channel and its VHF pairing).
 - Read a co-located DME's own position.
 - Missing data gives an explicit **unavailable** or **assumed** state: never a silent zero elevation.
 
@@ -102,7 +102,7 @@ Units are NM. "Below the limit" is strictly less than.
 
 ### F3. Mode selection and transitions (M300 1-3 to 1-5, 12-1)
 
-- **Civil priority:** GPS, then DME/DME, then VOR/DME/TACAN, then KALMAN (if equipped), then DR.
+- **Civil priority (as equipped, DEC-150):** GPS, then DME/DME, then VOR/DME/TACAN, then KALMAN, then DVS (civil: without integrity, lowest priority, M300 12-20), then DR.
 - **Integrity-required transitions are immediate.**
 - **Accuracy-based transitions** use 95% statistics with **100 m hysteresis**. The exceptions, with no hysteresis, are GPS → INS/GPS (not equipped) and **VOR/DME with integrity → DME/DME with integrity**.
 - Hysteresis never delays an integrity reversion.
@@ -142,7 +142,7 @@ With a backup sensor available, the FMS computes a NAIM HIL from the GPS-to-back
 
 ### F6. DME/DME (M300 1-4, 12-16 to 12-18, 15-3)
 
-- **Station selection:** automatic tuning and scanning of up to **six** DME stations (DME-capable TACANs included when equipped). At least three are required. The selection applies distance and geometry reasonableness checks (15-3).
+- **Station selection:** automatic tuning and scanning of up to **six** DME stations (DME-capable TACANs included: TACAN is equipped, DEC-150). At least three are required. The selection applies distance and geometry reasonableness checks (15-3).
 - **DME STATUS status column:** "REJ" means rejected for geometry, blank means used, and "N/A" means not responding to tuning (12-17). A wider meaning of REJ is its own matrix row (Astra).
 - **Third range:** with three ranges, a failed consistency test does **not** identify the faulty station. It makes the mode unavailable, and no station is labelled the culprit without isolation (≥ 4 ranges, with declared rejection and isolation limits). This follows Astra's F6 amendment.
 - **DME DESELECT:** up to **25** stations, paged, with CLR to remove (12-18).
@@ -163,8 +163,9 @@ With a backup sensor available, the FMS computes a NAIM HIL from the GPS-to-back
 
 ### F7. VOR/DME (M300 1-5, 12-19 to 12-20, 15-3)
 
-- **Only manually tuned stations are used:** at least one VOR/DME, and at most two VOR/DME plus one TACAN if equipped (12-19). VOR/DME serves when fewer than three DMEs are available.
-- **VOR/DME/TCN STATUS:** source and identifier, frequency, radial and slant range for each receiver, plus the position. The title changes with the equipment (VOR/DME STATUS with no TACAN).
+- **Tuned stations:** at least one VOR/DME, and at most two VOR/DME plus one TACAN (12-19). VOR/DME serves when fewer than three DMEs are available.
+- **AUTO-tuned VORs are eligible (a named profile option, `autoVorNavigation: on`).** M300 12-19's default navigates on manually tuned stations only. Sean's decision (30 Sep, DEC-150) overrides it. The option carries that provenance and cites 12-19 as the manual default it overrides, and turning it off restores the manual behaviour.
+- **VOR/DME/TCN STATUS:** source and identifier, frequency, radial and slant range for each receiver, plus the TACAN line (channel, bearing/distance), plus the position (12-20).
 - **Accuracy:** 95% of 0.6–0.8 NM within 7 NM of the station, 1.5 NM beyond (15-3). Not available for approach.
 - **Reasonableness:** checks on bearing and distance before use (15-3).
 
@@ -174,7 +175,7 @@ With a backup sensor available, the FMS computes a NAIM HIL from the GPS-to-back
 - a mismatched ident removes the station.
 
 **Owner tests:** `fms-vor-dme.spec.ts`:
-- "with NAV1 manually tuned to a VOR/DME, the fix uses it; with NAV1 in AUTO it does not, unless the configuration allows";
+- "an AUTO-tuned VOR/DME is used under `autoVorNavigation`, and with the option off only a manually tuned one is (M300 12-19)"; "a TACAN bearing and distance give a VOR/DME/TCN fix";
 - "the 95% accuracy steps from 0.8 to 1.5 NM past 7 NM";
 - "an unreasonable radial is rejected".
 
@@ -214,9 +215,7 @@ This makes the RMS real: every radio is a modelled unit that receives a tune com
 - **Libraries (13-2, 13-44 to 13-47):**
   - NAV, ADF and COM libraries of 99 presets, with an identifier of up to five characters;
   - password-protected edits.
-- **Tuning authority:**
-  - an external control head or backup controller can take over;
-  - **RADIO TUNING DISABLED** is shown on entry while the FMS is inhibited (13-3, 13-20).
+- **Tuning authority:** **the FMS is the only tuning source** (no external radio head or backup controller; Sean, DEC-150). The M300's external-head behaviour and RADIO TUNING DISABLED (13-3, 13-20) are declared not configured, with the guard test of F0.
 - **Dual FMS (3-26):**
   - radio tuning is synchronized by burst tuning and radio feedback, not by FMS cross-talk;
   - the standby frequency is cross-talked;
@@ -236,7 +235,6 @@ This makes the RMS real: every radio is a modelled unit that receives a tune com
   - "the displayed active frequency follows feedback when the radio reports a different one";
   - "an out-of-range entry is refused with the scratchpad message";
   - "a library preset tunes by number and by ident, the first match winning";
-  - "tuning disabled: entries raise RADIO TUNING DISABLED";
   - "either CDU tunes, and both show the same standby".
 - `fms-nav-radio.spec.ts`:
   - "VOR AUTO/MAN toggles by DELETE and by swap";
@@ -282,10 +280,10 @@ This makes the RMS real: every radio is a modelled unit that receives a tune com
 - "in the hover, DR is flagged degraded and the ANP grows at the no-velocity rate";
 - "a restored GPS ends DR and the position step is announced".
 
-### F11. KALMAN mode (only if Q2 is answered "equipped"; M300 1-5, 12-23 to 12-24, 15-4)
+### F11. KALMAN and DVS modes (DEC-150; M300 1-5, 12-20 to 12-24, 15-4)
 
 - **Emulated INS:** built from the AHRS and corrected by GPS. It is available one minute after power-up, and a power interruption over 50 ms re-initializes it.
-- **Coast:** it carries navigation for a declared time after GPS loss (the manual says "typically 2 minutes"). Its error growth is independent of the RNP limit (rev 2 F7).
+- **Coast:** **2 minutes** after GPS loss (Sean, DEC-150; the manual says "typically 2 minutes", 1-5), then DR (F10) with FMS NAV IN DR. Its error growth is independent of the RNP limit (rev 2 F7).
 - **KALMAN STATUS 1/1:**
   - OP MODE;
   - KALMAN POSITION and GPS POSITION;
@@ -294,13 +292,32 @@ This makes the RMS real: every radio is a modelled unit that receives a tune com
 - **RNP:** it is not applicable to RNP operations (15-4). On entry it raises CHECK ANP per the phase.
 - **Alerts:** KALMAN NAV LOST, APIRS FAILED and AHRSx FAILED (E-12, E-21, E-22).
 
-**Owner tests:** `fms-kalman.spec.ts`:
-- "GPS lost offshore: KALMAN carries position for the coast time with growing 2-sigma";
-- "KALMAN is never RNP-eligible".
+**DVS (Doppler), equipped (DEC-150):**
+- **Solution:** x/y velocity words with heading and attitude give position, ground speed and status (12-20).
+- **Civil option:** the DVS solution is **without integrity and lowest priority** (12-20). It is never RNP- or approach-eligible.
+- **Pages:** DVS STATUS 1/2 and 2/2 with the water-current entry (12-22, 12-23). The DVS line appears on POS INIT/REF 2/2.
+- **Alerts:** DVS NAV LOST (E-6).
+- **Low-speed regime:** as a declared velocity source it keeps F10's DR undegraded in the hover (Astra's F7 amendment). It is also a candidate for the hover feedback only if the profile declares it.
+
+**Exit:**
+- KALMAN carries position for 2 minutes after GPS loss, then DR;
+- DVS is selected only below every mode with integrity;
+- neither is ever RNP-eligible.
+
+**Owner tests:**
+- `fms-kalman.spec.ts`:
+  - "GPS lost offshore: KALMAN carries position for 2 minutes with growing 2-sigma, then FMS NAV IN DR";
+  - "KALMAN is never RNP-eligible";
+  - "a power interruption over 50 ms re-initializes it".
+- `fms-dvs.spec.ts`:
+  - "with GPS, radios and KALMAN gone, DVS navigates without integrity";
+  - "a water current entry corrects the DVS drift over water";
+  - "DVS NAV LOST on a failed DVS".
 
 ### F12. RNP, ANP and integrity alerts (M300 15-1 to 15-4, 1-4, Appendix E)
 
-- **ANP:** the 95% radial position error, excluding FTE (15-1). In GPS, ANP is the HIL when it is within the limit (12-1).
+- **ANP:** the **95%** radial position error, excluding FTE (15-1), and not the "ANP/HIL = 1.0" 99.999% option (15-2) (Sean, DEC-150). In GPS, ANP is the HIL when it is within the limit (12-1).
+- **Error limit basis: RNP** (M300 1-3's configurable choice; Sean, DEC-150). The GPIAL and each mode's integrity limit follow the active RNP, whether the phase default or the crew entry, not a separate phase-of-flight table.
 - **CHECK ANP:** raised when ANP exceeds RNP for **30 s en route and terminal, and 10 s on approach** (15-2). Today's bench values are demonstration parameters, which this replaces with the sourced ones.
 - **INT lamp:** in GPS, when the HIL exceeds the current RNP (15-2).
 - **CDI full scale (15-1, Table 15-1):**
@@ -369,16 +386,46 @@ Each fault is a scenario step, validated on admission and listed in the run repo
 The mission is offshore from 87N.
 - **No radio coverage:**
   1. GPS integrity is removed while position is kept: GPS POS UNCERTAIN, INT, no approach authority.
-  2. The position is removed: DR (or KALMAN if equipped), with the ANP growing and CHECK ANP at the phase timing.
+  2. The position is removed: KALMAN for 2 minutes, then DVS without integrity (and DR only if DVS also fails), with the ANP growing and CHECK ANP at the phase timing.
   3. GPS is restored: recovery, with the position step shown.
-- **Coastal, with DME coverage:**
+- **Coastal, with DME and TACAN coverage:**
   1. A biased DME is isolated with four stations, and with three the mode goes unavailable.
   2. The crew deselects a station.
   3. A NAV radio fails and its CONTROL LOST alert appears.
-  4. VOR/DME is used with the crew manually tuning.
+  4. VOR/DME is used on an AUTO-tuned VOR (`autoVorNavigation`), and VOR/DME/TCN on a TACAN.
+- **An NDB approach (F16):** flown on FMS guidance with GPS, the ADF bearing on the RMI throughout, and GPS integrity lost on the final.
 - **Throughout:** the computed position is checked against bench truth, independently of the displayed confidence.
 
 **Exit:** the nominal run and each variant pass with recorded evidence. There is one integrating mission, in line with Sean's evidence standard.
+
+### F16. NDB approaches (DEC-150; M300 7-1)
+
+M300 7-1 lists the approach types the FMS is approved to fly with their required sensor: **NDB (GPS or NDB)** and **NDB D (GPS or NDB/(DME))**, with DME optional for the latter. The M300 has **no ADF navigation mode** (1-3, 1-4). So an NDB approach is a **database procedure flown on FMS lateral guidance**, and the ADF bearing is **raw data** for the crew. The FMS never derives a position from it.
+
+- **Data:** the ARINC 424 loader reads NDB and NDB/DME approach records (route types for NDB approaches, the recommended-navaid NDB, and the legs they use: IF, CF, PI with its 1 min/45 s construction at 180 kt per 7-1, and the missed approach).
+  - A leg type the loader cannot fly is refused with the reason, as today.
+  - The fixtures come from CIFP 2609: at least one NDB and one NDB/DME approach, identified in the fixture list.
+- **Selection:** the approach page lists NDB and NDB D approaches with their prefix (7-1). Loading one arms the recommended NDB for ADF tuning:
+  - automatically if the ADF is in the tuning scheme;
+  - otherwise as a crew entry prompted on the ADF page.
+- **Guidance:** the approach phase, RNP 0.3 and the CDI full scale of Table 15-1 apply as for any approach. The GPS integrity and NO APPR INTEGRITY behaviour (#1243, F4) governs the FMS guidance.
+- **The "NDB" required sensor:** without GPS approach integrity, the FMS guidance loses its approach authority as for any GPS-flown approach. The ADF raw data remains, and the crew continues on it or goes around.
+  - The bench shows this state; it does not invent an ADF-derived FMS position.
+  - DME/DME and VOR/DME are never approach-eligible (15-3), so they cannot stand in.
+- **Raw data:** ADF1/2 bearing to the tuned NDB on the RMI (F8, F13), with validity. A failed or untuned ADF shows the RMI flag and raises ADF CONTROL LOST (E-2).
+- **EFIS:** NDBs within map range are drawn when the NDB option is on (C-10, A-47).
+
+**Exit:**
+- an NDB and an NDB/DME approach load from CIFP data and are flown to the MAP on FMS guidance with GPS;
+- the RMI shows the ADF bearing to the recommended NDB throughout;
+- GPS approach integrity lost on the final removes approach authority, and no position is derived from the ADF.
+
+**Owner tests:** `fms-ndb-approach.spec.ts`:
+- "an NDB approach from CIFP loads with its prefix, legs and missed approach";
+- "loading it tunes or prompts the recommended NDB on the ADF";
+- "flown on GPS to the MAP with the RMI on the NDB";
+- "GPS integrity lost on the final: approach authority withdrawn, the ADF bearing still shown, no ADF-derived position";
+- "a failed ADF flags the RMI and raises ADF CONTROL LOST".
 
 ---
 
@@ -393,15 +440,16 @@ The mission is offshore from 87N.
 | F4 | GPS decision table (7 rows) | M300 1-4, 3-26, E-8 | fms-gps-decision | Partial (#1243, #1251) |
 | F5 | NAIM (laboratory formula, no 10⁻⁵/h claim) | M300 1-4, 12-1 | fms-naim | Open |
 | F6 | DME/DME with 6 stations, REJ/N/A, deselect 25, 3-range unavailability, 4-range isolation | M300 12-16 to 12-18, 15-3 | fms-dme-dme | Partial |
-| F7 | VOR/DME on manually tuned stations only, with its accuracy steps | M300 12-19, 15-3 | fms-vor-dme | Partial |
-| F8 | RMS: command, feedback, amber failure, libraries, AUTO/MAN, DME HOLD, TEST, ADF, dual-side tuning, CONTROL LOST | M300 13-1 to 13-26, 3-26, App. E | fms-rms-radios, fms-nav-radio, fms-adf | Partial (pages only) |
+| F7 | VOR/DME/TCN on tuned stations, AUTO-tuned VORs eligible (`autoVorNavigation`, overriding M300 12-19's default), with its accuracy steps | M300 12-19, 15-3; DEC-150 | fms-vor-dme | Partial |
+| F8 | RMS: command, feedback, amber failure, libraries, AUTO/MAN, DME HOLD, TEST, ADF, dual-side tuning, CONTROL LOST; the FMS as the only tuning source | M300 13-1 to 13-26, 3-26, App. E | fms-rms-radios, fms-nav-radio, fms-adf | Partial (pages only) |
 | F9 | NAV STATUS INDEX, DESELECT (TAS, HDG, sensors), POS INIT 2/2 sensor table | M300 5-26, 12-20, 17-3 | fms-nav-status-pages | Partial |
 | F10 | DR from heading, TAS and last wind; degraded in low speed; recovery | M300 1-5; Astra F7 | fms-dead-reckoning | Partial |
-| F11 | KALMAN (if equipped) | M300 1-5, 12-23, 15-4 | fms-kalman | Open (Q2) |
-| F12 | CHECK ANP 30 s/10 s, INT lamp, CDI FSD Table 15-1, VERIFY RNP, POS DIFF messages, no invented messages | M300 15-1, 15-2, App. E | fms-integrity-alerts | Partial |
+| F11 | KALMAN (2-minute coast, then DR) and DVS (lowest priority, no civil integrity) | M300 1-5, 12-20 to 12-24, 15-4; DEC-150 | fms-kalman, fms-dvs | Open |
+| F12 | 95% ANP, RNP-based error limits, CHECK ANP 30 s/10 s, INT lamp, CDI FSD Table 15-1, VERIFY RNP, POS DIFF messages, FMS NAV IN DR, no invented messages | M300 15-1, 15-2, App. E | fms-integrity-alerts | Partial |
 | F13 | Output bus navigation, radio and integrity fields, EFIS from the bus only | Bench contract | fms-output-bus-nav | Open |
 | F14 | Bench sensor and radio failure stimuli in scenarios | rev 3 §10 pattern | per item | Open |
 | F15 | Stage F acceptance mission | Astra gap assessment, item 1 | fms-stage-f-mission | Open |
+| F16 | NDB and NDB/DME approaches from the database on FMS guidance, ADF bearing as raw data, no ADF-derived position | M300 7-1, 1-3; DEC-150 | fms-ndb-approach | Open |
 
 ## 5. Order and size
 
@@ -409,20 +457,25 @@ The mission is offshore from 87N.
 2. **F8** (large): the radios. F6, F7 and F9 depend on tuned-and-receiving stations.
 3. **F3, F4, F5, F6 and F7** (large): the estimator and its transitions.
 4. **F9, F10 and F12** (medium): pages, DR and alerts.
-5. **F13 and F14** (medium), then **F15**.
-6. **F11** only after Q2.
+5. **F11** (medium): KALMAN and DVS, after F3.
+6. **F16** (medium): NDB approaches, after F8 (ADF) and F12.
+7. **F13 and F14** (medium), then **F15**.
 
 Each step is its own PR with red-first owner tests. **F3 and F8 touch shared state and should not be parallelized with each other.**
 
 ---
 
-## 6. Questions for Sean (functional)
+## 6. Sean's answers (30 September 2026, about 4:45 PM ET; recorded as DEC-150)
 
-1. **TACAN:** off for the civil SAR configuration (M300 1-4 admits it civilly only "when proven accurate")? If on, DME/DME may use TACAN ranges and VOR/DME/TCN may use one TACAN.
-2. **AHRS/KALMAN:** equip the helicopter with the APIRS/AHRS KALMAN mode (M300 12-23)? It is the only coast mode after GPS loss offshore without radios, apart from DR, but it is not RNP-eligible (15-4). If yes, what coast time (the manual says "typically 2 minutes")?
-3. **Doppler (DVS) over water:** keep it off? Real SAR helicopters often carry one. M300 makes DVS lowest-priority and without integrity in civil (12-20).
-4. **The error-limit basis:** Phase of Flight or RNP (M300 1-3 says it is configurable)? This decides the GPIAL.
-5. **VOR AUTO tuning:** M300 VOR/DME navigation uses *manually* tuned stations (12-19), while NAV1/NAV2 offer AUTO VOR tuning (13-21). Should an AUTO-tuned VOR be eligible for VOR/DME navigation, or only for display?
-6. **ANP presentation:** the 95% figure, or the "ANP/HIL = 1.0" 99.999% configuration (15-2)?
-7. **External radio control head:** does the helicopter have one (tuning authority can be taken from the FMS, 13-3)? If yes, the bench models it as a second tuning source.
-8. **ADF use:** display and RMI only (M300 has no ADF navigation mode), with NDB approaches out of scope?
+| # | Question | Answer | Where it lands |
+|---|---|---|---|
+| 1 | TACAN | **On.** DME/DME may use TACAN ranges; VOR/DME/TCN may use one TACAN. | F0, F6, F7 |
+| 2 | AHRS/KALMAN | **Equipped, 2-minute coast**, then DR | F0, F11 |
+| 3 | Doppler (DVS) | **On:** lowest priority, no civil integrity (M300 12-20) | F0, F3, F11 |
+| 4 | Error-limit basis | **RNP** | F12 (GPIAL and integrity limits follow the active RNP) |
+| 5 | AUTO-tuned VOR | **Eligible for VOR/DME navigation.** A named profile option, `autoVorNavigation`, with this decision as provenance; M300 12-19's manually-tuned-only rule is the manual default it overrides. | F7 |
+| 6 | ANP presentation | **95% figure** | F12 |
+| 7 | External radio head | **None**: the FMS is the only tuning source | F8 |
+| 8 | ADF use | **NDB approaches in scope:** database NDB approaches flown on FMS guidance, with the ADF bearing as raw data (M300 7-1; no ADF navigation mode) | F16 |
+
+No functional questions remain open for this plan. Astra reviews it before any F0 code starts.
