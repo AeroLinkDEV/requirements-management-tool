@@ -386,7 +386,7 @@ test('a scenario names its aircraft profile and makes autopilot selections; both
   const lab = runHeadless({ id: 'l', title: 'l', objective: '', maxSeconds: 1, profile: 'lab-airline-vnav', steps: [
     { when: { kind: 'start' }, action: { kind: 'autopilot', verticalSpeed: 500 } },
   ] })
-  expect(reportMarkdown(lab.runner)).toMatch(/^- Aircraft profile: lab-airline-vnav v6 /m)
+  expect(reportMarkdown(lab.runner)).toMatch(/^- Aircraft profile: lab-airline-vnav v7 /m)
   expect(reportMarkdown(lab.runner)).toContain('70 of 73 parameters in force; declared only: advisoryMinimumProgress, temperatureLapseRate, settlingTime')
   // VS is a helicopter-profile mode: under the laboratory VNAV profile it is an execution error, not a silent pass.
   expect(lab.runner.outcome).toBe('error')
