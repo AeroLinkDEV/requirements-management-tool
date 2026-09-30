@@ -296,9 +296,10 @@ async function startScene(
     }
   };
   scene.preRender.addEventListener(onFrame);
-  // The frames drawn, on the scene element: the scene draws only on change, and this is how that can be seen (and tested).
+  // The frames drawn, on the scene element: the scene draws only on change, and this is how that can be seen (and tested),
   let frames = 0;
-  const counted = () => { container.dataset.frames = String(++frames); };
+  // With whether the globe has every tile it needs: until then Cesium keeps drawing as tiles arrive.
+  const counted = () => { container.dataset.frames = String(++frames); container.dataset.tilesLoaded = String(scene.globe.tilesLoaded); };
   scene.postRender.addEventListener(counted);
 
   return {
