@@ -86,8 +86,13 @@ export function arcGeometry(arc: { centre: LatLon; turn: "L" | "R" }, to: LatLon
 export const turnRadius = (tas: number, bank = MAX_BANK) => (tas * tas) / (11.26 * Math.tan(rad(bank))) / 6076.12;
 
 /** The distance before a fly-by waypoint at which the turn onto the next leg begins. */
-export const turnLead = (tas: number, courseChange: number, bank = MAX_BANK) =>
-  turnRadius(tas, bank) * Math.tan(rad(Math.min(Math.abs(courseChange), 150) / 2));
+export const turnLead = (tas: number, courseChange: number, bank = MAX_BANK, rollRate?: number) => {
+  const change = Math.min(Math.abs(courseChange), 150);
+  // During roll-in the aircraft covers distance before achieving the design turn rate. Account for half the
+  // ramp time in the anticipation distance; the sine makes the allowance disappear for a straight leg.
+  const rollLead = rollRate && rollRate > 0 ? (tas / 3600) * (bank / rollRate / 2) * Math.sin(rad(Math.min(change, 90))) : 0;
+  return turnRadius(tas, bank) * Math.tan(rad(change / 2)) + rollLead;
+};
 
 /** A leg's altitude constraint as feet: "4500", "1500A" and "5000B" all give their number. */
 export const constraintAltitude = (text: string | undefined) => {
@@ -230,7 +235,7 @@ export class FlightSimulator {
   private legStartPath: { to: string; altitude: number } | null = null;
   private path: VerticalPath | null = null;
   /** The hold being flown: its segments, the one being flown, the straight-leg length, and where the entry ends (-1: none). */
-  private holdPlan: { segments: HoldSegment[]; index: number; legNm: number; entryEnd: number } | null = null;
+  private holdPlan: { segments: HoldSegment[]; index: number; legNm: number; entryEnd: number; designBank: number } | null = null;
   /** Phase 1: the joining path to JN being flown (joining.ts), for the hover procedure with this id. */
   private joinPlan: { segments: HoldSegment[]; index: number; id: number } | null = null;
   /** The straight-leg length of the hold being flown, NM (null when none). */
@@ -1283,7 +1288,7 @@ export class FlightSimulator {
     const nextTo = next?.kind === "wpt" ? fms.coordinates(next.ident) : undefined;
     const flyOver = leg.qualifier !== undefined || !nextTo || next?.kind === "wpt" && next.path === "RF";
     const outbound = next?.kind === "wpt" && next.path === "CF" && next.course !== undefined ? next.course : nextTo ? courseDeg(to, nextTo) : g.track;
-    const lead = flyOver ? 0 : turnLead(this.tas, angleDiff(g.track, outbound), this.steeringLimit);
+    const lead = flyOver ? 0 : turnLead(this.tas, angleDiff(g.track, outbound), this.steeringLimit, this.profile.rollRate.value);
     this.lead = lead;
     if (sequencing && (g.toGo <= lead || g.toGo <= 0.02)) {
       // The altitude planned at the fix becomes the start of the next leg's path.
@@ -1357,7 +1362,7 @@ export class FlightSimulator {
     if (!geometry) { this.unableHold(); return; }
     const fix = this.fms.coordinates(hold.fix)!;
     const entry = entrySegments(this.fms.holdEntryFlown ?? "DIRECT", fix, hold.inbound, hold.turn, geometry);
-    this.holdPlan = { segments: [...entry, ...geometry.racetrack], index: 0, legNm: geometry.legNm, entryEnd: entry.length - 1 };
+    this.holdPlan = { segments: [...entry, ...geometry.racetrack], index: 0, legNm: geometry.legNm, entryEnd: entry.length - 1, designBank: geometry.designBank };
   }
 
   private unableHold() {
@@ -1402,7 +1407,7 @@ export class FlightSimulator {
         if (result === "hold") {
           const geometry = this.holdGeometryNow(hold);
           if (!geometry) this.unableHold();
-          else Object.assign(plan, { segments: geometry.racetrack, index: 0, legNm: geometry.legNm, entryEnd: -1 });
+          else Object.assign(plan, { segments: geometry.racetrack, index: 0, legNm: geometry.legNm, entryEnd: -1, designBank: geometry.designBank });
         } else {
           this.holdPlan = null;
           const circuits = hold.circuits ?? 0;
@@ -1410,7 +1415,10 @@ export class FlightSimulator {
         }
       } else plan.index += 1;
     }
-    return { legFrom: segment.from, legTo: segment.to, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: this.steer(g.track, g.crossTrack) };
+    // Entry reversals use the holding design bank, as their predicted half-turn does, rather than a tighter turn at
+    // the maximum steering envelope. Straight racetrack corrections retain the configured steering authority.
+    const cap = plan.index <= plan.entryEnd ? Math.min(plan.designBank, this.steeringLimit) : this.steeringLimit;
+    return { legFrom: segment.from, legTo: segment.to, desiredTrack: g.track, crossTrack: g.crossTrack, distanceToGo: g.toGo, bankCommand: clamp(this.steer(g.track, g.crossTrack), -cap, cap) };
   }
 
   /**
@@ -1451,7 +1459,7 @@ export class FlightSimulator {
     const from = plan.points[plan.index - 1], to = plan.points[plan.index];
     const g = legGeometry(from, to, fms.position);
     const after = plan.points[plan.index + 1];
-    const lead = after ? turnLead(this.tas, angleDiff(g.track, courseDeg(to, after)), this.steeringLimit) : 0;
+    const lead = after ? turnLead(this.tas, angleDiff(g.track, courseDeg(to, after)), this.steeringLimit, this.profile.rollRate.value) : 0;
     if (dt > 0 && (g.toGo <= lead || g.toGo <= 0.02)) {
       plan.index += 1;
       if (plan.index >= plan.points.length) {
