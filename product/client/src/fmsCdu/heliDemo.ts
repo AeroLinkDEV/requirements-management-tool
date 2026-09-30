@@ -134,8 +134,8 @@ export const MISSION_87N_OFFSHORE_SAR: Scenario = {
     // 5. The transition to the hover at MRK.
     { when: then, action: { kind: "expectAfcs", collective: "RHT", pitch: "HOV", roll: "HOV" }, within: 600 },
     { when: then, action: { kind: "expectAircraft", near: "MRK", nearMetres: 50, radioHeight: 50, heightTolerance: 5, maxGroundSpeed: 1 }, within: 60 },
-    // 6. Two minutes in the hover.
-    { when: at(1100), action: { kind: "expectAircraft", near: "MRK", nearMetres: 10, radioHeight: 50, heightTolerance: 5, maxGroundSpeed: 1 } },
+    // 6. Two minutes in the hover, from the capture (the spec checks every tick of them; this is the scenario's endpoint).
+    { when: { kind: "after", seconds: 120 }, action: { kind: "expectAircraft", near: "MRK", nearMetres: 10, radioHeight: 50, heightTolerance: 5, maxGroundSpeed: 1 } },
     // 7. TU-LAB: each axis captures on its own; then the climb to 2,000 at 90 KIAS.
     { when: then, action: { kind: "autopilot", transitionUp: true } },
     { when: then, action: { kind: "expectAfcs", collective: "RHT", pitch: "IAS", roll: "HDG" }, within: 120 },
@@ -292,11 +292,17 @@ export const MISSION_87N_VARIANTS: readonly Scenario[] = [
     { when: S, action: { kind: "expectActive", waypoint: "87N" } },
     { when: S, action: { kind: "expectAfcs", roll: "NAV" }, within: 5 },
   ], "87n-rnav190-final"),
-  variant("g-integrity-on-final", "(g) GPS integrity lost on the final: GPS POS UNCERTAIN on GPS 1, then NO APPR INTEGRITY with GPS 2 too", "(g) GPS integrity lost on the final: GPS POS UNCERTAIN on GPS 1 with the FMS on GPS 2, then GPS NAV LOST and NO APPR INTEGRITY with GPS 2 too. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
+  variant("g-integrity-on-final", "(g) GPS integrity lost on the final segment: GPS 1 transfers to GPS 2 with LNAV kept, then GPS 2 too: NO APPR INTEGRITY", "(g) GPS integrity lost on the final segment (after STAYS): GPS POS UNCERTAIN on GPS 1 with the FMS on GPS 2 and the approach still LNAV, then GPS NAV LOST and NO APPR INTEGRITY with GPS 2 too. A checkpoint variant of the acceptance mission (plan §10), from a named synthetic start.", [
     // GPS 1 HIL beyond the approach HAL: GPS POS UNCERTAIN, and the FMS goes on on GPS 2, still LNAV.
-    { when: { kind: "distance", waypoint: "STAYS", nm: 1 }, action: { kind: "gps", receiver: 1, stimulus: { op: "override", label: "130", kind: "FORCE", amount: 2 } } },
+    // On the final segment: STAYS (the FAF) sequenced, CRANN active, 20 s on.
+    { when: { kind: "active", waypoint: "CRANN" }, action: { kind: "expectApproachLevel", level: "LNAV" } },
+    { when: after(20), action: { kind: "gps", receiver: 1, stimulus: { op: "override", label: "130", kind: "FORCE", amount: 2 } } },
     { when: S, action: { kind: "expectAlert", text: "GPS POS UNCERTAIN", fresh: true }, within: 10 },
     { when: S, action: { kind: "expectGpsSource", source: "GPS2" }, within: 10 },
+    // The transfer keeps the approach: still LNAV on GPS 2, still on the final to CRANN, no NO APPR INTEGRITY yet.
+    { when: S, action: { kind: "expectApproachLevel", level: "LNAV" } },
+    { when: S, action: { kind: "expectActive", waypoint: "CRANN" } },
+    { when: S, action: { kind: "expectNoAlert", text: "NO APPR INTEGRITY" } },
     // Then GPS 2 too: no receiver may be navigated on, GPS NAV LOST and NO APPR INTEGRITY.
     { when: after(10), action: { kind: "gps", receiver: 2, stimulus: { op: "override", label: "130", kind: "FORCE", amount: 2 } } },
     { when: S, action: { kind: "expectAlert", text: "GPS NAV LOST", fresh: true }, within: 10 },
