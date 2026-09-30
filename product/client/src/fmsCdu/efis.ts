@@ -204,7 +204,8 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     verticalDeviation: sim.verticalFlag ? fail() : gpsVertical !== null ? normal(gpsVertical) : path ? normal(fms.altitude - path.altitude) : ncd(),
     verticalSource: path?.source ?? null,
     verticalCoupled: path?.coupled ?? false,
-    rollCommand: managed ? normal(g.bankCommand) : ncd(),
+    // Invalid with the active waypoint a moving one whose rendezvous is unachievable (M300 11-37, condition 1).
+    rollCommand: managed && !fms.rendezvousRollInvalid ? normal(g.bankCommand) : ncd(),
     distanceToGo: distanceToGo !== null && toIdent ? normal(distanceToGo) : ncd(),
     toWaypoint: toIdent ? normal(toIdent) : ncd(),
     // No ETA without measurable progress: a time from an invented speed would be a plausible falsehood. In a manual hold,

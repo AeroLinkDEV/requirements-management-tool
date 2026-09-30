@@ -42,7 +42,7 @@ export const ALERTS: readonly AlertDefinition[] = [
   { text: "NO APPR INTEGRITY", meaning: "GPS integrity is not sufficient for the approach" },
   { text: "NOT ENOUGH FUEL", meaning: "Predicted fuel at destination is below the reserve" },
   { text: "POSITION SHIFT", meaning: "The navigation solution has jumped" },
-  { text: "RENDEZVOUS UNACHIEVABLE", meaning: "The rendezvous time cannot be met" },
+  { text: "RENDEZVOUS UNACHIEVABLE", meaning: "The rendezvous time cannot be met, or no interception of a moving waypoint is possible within 500 NM (M300 11-37)" },
   { text: "SET QNH", meaning: "Set the barometric reference for the approach" },
   { text: "TDN NOT POSSIBLE", meaning: "A tactical descent cannot be flown from the current state, or the transition to hover from TDN (M300 E-17)" },
   { text: "TRANSITION DOWN", meaning: "The hover procedure is executed; shown until TDN is reached (M300)" },
