@@ -156,6 +156,12 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
               <text x="112" y="256">{heli.vx === null ? "VX ---.-" : `VX ${signed(heli.vx)}`}</text>
               <text x="112" y="272">{heli.vy === null ? "VY ---.-" : `VY ${signed(heli.vy)}`}</text>
               <text x="112" y="290">{`${three(air.wind.direction)}/${Math.round(air.wind.speed)}`}</text>
+              {heli.selectedVelocity ? (
+                <g fill={CYAN} data-testid="pfd-selected-velocity">
+                  <text x="178" y="256">{signed(heli.selectedVelocity.vx)}</text>
+                  <text x="178" y="272">{signed(heli.selectedVelocity.vy)}</text>
+                </g>
+              ) : null}
             </g>
           ) : null}
         </g>
@@ -254,9 +260,15 @@ export function Pfd({ bus, air, now, svs = null }: { bus: FmsOutputs; air: Aircr
             <line x1={cx + (((bus.desiredTrack.value! - air.heading + 540) % 360) - 180) * 4} y1="334" x2={cx + (((bus.desiredTrack.value! - air.heading + 540) % 360) - 180) * 4} y2="352" stroke={MAGENTA} strokeWidth="3" />
           ) : null}
         </g>
+        {/* The heading bug: the selected heading, parked at the edge of the scale when it is off it. */}
+        {(() => {
+          const x = Math.max(106, Math.min(314, cx + (((air.selectedHeading - air.heading + 540) % 360) - 180) * 4));
+          return <polygon data-testid="pfd-selected-heading" points={`${x - 6},334 ${x + 6},334 ${x + 6},342 ${x},337 ${x - 6},342`} fill={CYAN} />;
+        })()}
         <polygon points={`${cx},334 ${cx - 6},326 ${cx + 6},326`} fill={WHITE} />
         <rect x={cx - 24} y="366" width="48" height="22" fill="#000" stroke={WHITE} />
         <text x={cx} y="382" textAnchor="middle" fontSize="15" fill={WHITE}>{three(air.heading)}</text>
+        <text x="316" y="382" textAnchor="end" fontSize="12" fill={CYAN} data-testid="pfd-selected-heading-value">{`HDG ${three(air.selectedHeading)}`}</text>
       </g>
       {bus.failed ? <text x={cx} y="120" textAnchor="middle" fontSize="16" fill={AMBER} data-testid="pfd-fms-flag">FMS FAIL</text> : null}
     </svg>

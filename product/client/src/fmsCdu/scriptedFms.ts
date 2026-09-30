@@ -129,6 +129,25 @@ function planFingerprint(legs: Route["legs"]) {
 
 export type LegGeometry = { course: number; distance: number } | null;
 
+/** M300 11-37: a rendezvous is unachievable when no interception is possible within this travelling distance. */
+export const RENDEZVOUS_RANGE_NM = 500;
+/** M300 11-37: the rendezvous is determined again every 10 seconds, as long as the time to go is over one minute. */
+export const RENDEZVOUS_RECOMPUTE_S = 10;
+export const RENDEZVOUS_FREEZE_S = 60;
+
+/** The rendezvous with a moving waypoint in a route (M300 11-37). */
+export type MovingRendezvous = {
+  /** The intercept point with the moving waypoint's trajectory, when the rendezvous is achievable. */
+  position: LatLon | null;
+  achievable: boolean;
+  /** 1: the active waypoint; 2: later in the active route; 3: later in the modified route; 4: first of the modified route. */
+  condition: 1 | 2 | 3 | 4;
+  /** When it was determined (simulation ms), the time to go to it then (s), and its distance from where the leg starts. */
+  computedAt: number;
+  ttg: number | null;
+  distanceNm: number | null;
+};
+
 export class ScriptedFms implements CduBackend {
   private listeners = new Set<() => void>();
   private changes = 0;
@@ -149,6 +168,13 @@ export class ScriptedFms implements CduBackend {
   private modified: Route | null = null;
   private radios = { com1: "121.500", com1Stby: "126.700", com2: "119.100", com2Stby: "133.600", nav1: "113.90", nav2: "116.70", adf: "0350", tpdr: "1200" };
   private fuel = { quantity: 1850, flow: 540, reserve: 400 };
+  /**
+   * The FUEL pages (S300 manual 14-1…14-4): the crew's "what if" FUEL WT (usable, excluding the reserve) and FUEL FLOW,
+   * which the fuel computer's values replace on each new access of the page; the FIX; the unit shown. KG throughout inside.
+   */
+  readonly fuelPage = { whatIfUsable: null as number | null, whatIfFlow: null as number | null, fix: null as string | null, unit: "KG" as "KG" | "LB" };
+  /** The FUEL+WEIGHTS option's crew weights (FUEL 2/2), kilograms; the gross weight is their sum plus the fuel on board. */
+  readonly weights = { empty: null as number | null, equip: null as number | null, crew: null as number | null, cargo: null as number | null };
   private marks: { ident: string; position: LatLon }[] = [];
   private points: Record<string, LatLon> = {};
   /**
@@ -730,8 +756,15 @@ export class ScriptedFms implements CduBackend {
       if (leg.source === "MISSED") route.hold.missed = true;
     }
     const hold = route.hold;
+    // The hold entry advisory counts the passages of the holding fix, and leaves when its entry is flown.
+    if (hold && hold.fix === leg.ident && this.holdEntryAdvisory && ++this.holdEntryAdvisory.seen >= this.holdEntryAdvisory.passes) {
+      this.withdrawAlert(this.holdEntryAdvisory.text);
+      this.holdEntryAdvisory = null;
+    }
     // A fix crossing in the hold: at the end of the entry (the first crossing after it), or after a whole racetrack.
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && completedCircuit) hold.circuits = (hold.circuits ?? 0) + 1;
+    // HIGH HOLDING SPEED at each fly-over of the fix after the first (M300 10-8), the pattern rebuilt at the speed now.
+    if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
     if (hold && hold.fix === leg.ident && hold.status === "IN PROGRESS" && this.holdExitReached(hold)) hold.status = "EXIT ARMED";
     if (hold && hold.fix === leg.ident && hold.status !== "EXIT ARMED") {
       if (hold.status === "ARMED") {
@@ -740,11 +773,11 @@ export class ScriptedFms implements CduBackend {
         // The defaults are for the altitude at which the entry begins (M300 10-9: leg time 1 or 1.5 minutes "depending on
         // aircraft altitude at the time the hold entry is initiated"; the holding speed by altitude, 10-8), and are not
         // changed again automatically, even across 14,000 ft. Crew entries and coded values are kept as they are.
-        if (hold.defaults?.legTime !== undefined && hold.legDistance === null && hold.legTime === hold.defaults.legTime) hold.legTime = this.defaultHoldLegTime();
-        if (hold.defaults?.speed !== undefined && hold.speed === hold.defaults.speed) hold.speed = this.defaultHoldSpeed();
+        Object.assign(hold, this.entryDefaults(hold));
         delete hold.defaults;
-        const limit = holdingSpeedLimit(this.altitude, this.aircraftProfile);
-        if (limit !== null && hold.speed > limit) this.alert(alert("HIGH HOLDING SPEED"));
+        // Entered without the minute's notice (the hold made within it): checked at the fix.
+        if (this.holdSpeedChecked !== hold && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
+        this.holdSpeedChecked = hold;
       }
       return "hold";
     }
@@ -1232,6 +1265,7 @@ export class ScriptedFms implements CduBackend {
   /** M300 1-11/7-10: loading an approach grants no approach phase, NPA or 0.3-NM RNP. */
   get flightPhase(): FlightPhase {
     const leg = this.active.legs[0];
+    // A missed approach request disarms the approach, so the final it continues along is flown in the terminal phase (M300 7-15).
     const approach = this.approachPhaseActive && this.armedApproach && leg?.kind !== "disco" && leg?.source === "APPR";
     return s300Phase(this.here, this.validBaroAltitude, this.db.airport(this.active.origin), this.db.airport(this.active.dest), approach);
   }
@@ -1481,6 +1515,7 @@ export class ScriptedFms implements CduBackend {
   updatePerformance(dt: number) {
     // Moving waypoints follow the simulation clock from their epochs (rev 2 D-R epoch), not the ticks.
     for (const ident of Object.keys(this.moving)) this.points[ident] = this.movingAt(ident)!;
+    this.updateRendezvous();
     const rendezvous = this.rndz.active ? this.rendezvous() : null;
     if (rendezvous && rendezvous.required !== null && !rendezvous.achievable && !this.rndz.alerted) { this.rndz.alerted = true; this.alert(alert("RENDEZVOUS UNACHIEVABLE")); }
     if (rendezvous?.achievable) this.rndz.alerted = false;
@@ -1578,6 +1613,148 @@ export class ScriptedFms implements CduBackend {
   private movingAt(ident: string): LatLon | undefined {
     const m = this.moving[ident];
     return m && movingPosition(m.origin, m.track, m.speed, m.epoch, this.now.getTime());
+  }
+
+  /** Where a moving waypoint, pilot or stored user one, is at simulation time `at` (ms); undefined for any other. */
+  private movingPositionAt(ident: string, at: number): LatLon | undefined {
+    const m = this.moving[ident];
+    if (m) return movingPosition(m.origin, m.track, m.speed, m.epoch, at);
+    const user = this.userDb.waypoints.find(w => w.ident === ident && w.type === "MOVING");
+    return user ? userWaypointPosition(user, new Date(at)) : undefined;
+  }
+
+  /** Where a moving waypoint is now (its own position, not the rendezvous with it), for the MOVING WPT page. */
+  movingPositionNow(ident: string) { return this.movingPositionAt(ident, this.now.getTime()); }
+
+  /**
+   * How long ago a moving waypoint's position was entered (seconds of simulation time): it never expires (plan rev2
+   * D-R), and the propagated age is shown as a labelled bench aid.
+   */
+  movingAge(ident: string): number | null {
+    const m = this.moving[ident];
+    const user = this.userDb.waypoints.find(w => w.ident === ident && w.type === "MOVING");
+    const epoch = m ? m.epoch : user?.type === "MOVING" ? Date.parse(user.epoch) : NaN;
+    return Number.isFinite(epoch) ? (this.now.getTime() - epoch) / 1000 : null;
+  }
+
+  // ---------------------------------------------------------------- the rendezvous with a moving waypoint (M300 11-37)
+
+  /**
+   * The rendezvous with each moving waypoint in the active and modified routes (M300 11-37): the intercept point with
+   * its trajectory, determined when it is inserted and every 10 seconds from there on while the time to go is over one
+   * minute, then kept. Keyed by route and ident.
+   */
+  private rendezvousCache = new Map<string, MovingRendezvous>();
+  private rendezvousWarned = new Set<string>();
+
+  private rendezvousKey(route: Route, ident: string) { return (route === this.active ? "ACT:" : "MOD:") + ident; }
+
+  /** The M300 11-37 condition a moving waypoint at `index` of `route` falls under. */
+  private rendezvousCondition(route: Route, index: number): 1 | 2 | 3 | 4 {
+    const first = route.legs.findIndex(leg => leg.kind === "wpt") === index;
+    return route === this.active ? (index === 0 ? 1 : 2) : first ? 4 : 3;
+  }
+
+  /** The rendezvous with the moving waypoint at `index` of `route`, as last determined (determined now if it never was). */
+  rendezvousFor(route: Route, index: number): MovingRendezvous | null {
+    const leg = route.legs[index];
+    if (leg?.kind !== "wpt" || !this.isMoving(leg.ident)) return null;
+    const key = this.rendezvousKey(route, leg.ident);
+    const cached = this.rendezvousCache.get(key);
+    if (cached && cached.condition === this.rendezvousCondition(route, index)) return cached;
+    const solved = this.solveRendezvous(route, index, leg.ident);
+    this.rendezvousCache.set(key, solved);
+    return solved;
+  }
+
+  /**
+   * The rendezvous point (M300 11-37): the first point of the moving waypoint's trajectory the aircraft can meet, flying
+   * straight to it at its ground speed on that course (the airspeed flown now, through the system wind). From the
+   * present position when it is the active waypoint, or the first of the modified route (conditions 1 and 4); from the
+   * previous waypoint, reached along the route, otherwise (2 and 3). Unachievable when no such point lies within a
+   * travelling distance of 500 NM from there.
+   */
+  private solveRendezvous(route: Route, index: number, ident: string): MovingRendezvous {
+    const now = this.now.getTime();
+    const condition = this.rendezvousCondition(route, index);
+    const tas = this.trueAirspeed ?? this.plannedSpeed;
+    const unachievable = (): MovingRendezvous => ({ position: null, achievable: false, condition, computedAt: now, ttg: null, distanceNm: null });
+    let start = this.here, t0 = now;
+    if (condition === 2 || condition === 3) {
+      let hours = 0;
+      for (let i = 0; i < index; i += 1) {
+        const leg = route.legs[i];
+        if (leg.kind !== "wpt") continue;
+        const to = this.isMoving(leg.ident) ? (this.rendezvousFor(route, i)?.position ?? this.movingPositionAt(leg.ident, now)) : this.coordinates(leg.ident, route);
+        if (!to) continue;
+        const gs = distanceNm(start, to) < 1e-6 ? tas : this.groundSpeedOn(courseDeg(start, to), tas);
+        if (gs === null || gs <= 0) return unachievable();
+        hours += distanceNm(start, to) / gs;
+        start = to;
+      }
+      t0 = now + hours * 3_600_000;
+    }
+    // Ahead of the target by s seconds: positive once the aircraft could be where the moving waypoint then is.
+    const reach = (s: number) => {
+      const target = this.movingPositionAt(ident, t0 + s * 1000)!;
+      const nm = distanceNm(start, target);
+      const gs = nm < 1e-6 ? tas : this.groundSpeedOn(courseDeg(start, target), tas);
+      return { ahead: gs === null || gs <= 0 ? -Infinity : (gs * s) / 3600 - nm, nm, target };
+    };
+    // Within 500 NM of travel: no longer than 500 NM at the fastest ground speed the wind allows.
+    const limit = (RENDEZVOUS_RANGE_NM / Math.max(1, tas + this.systemWind.speed)) * 3600;
+    let low = 0, bracket: number | null = null;
+    for (let s = 0; s <= limit; s += 10) {
+      if (reach(s).ahead >= 0) { bracket = s; break; }
+      low = s;
+    }
+    if (bracket === null) return unachievable();
+    let high: number = bracket;
+    for (let i = 0; i < 40; i += 1) { const mid: number = (low + high) / 2; if (reach(mid).ahead >= 0) high = mid; else low = mid; }
+    const found = reach(high);
+    if (found.nm > RENDEZVOUS_RANGE_NM) return unachievable();
+    return { position: found.target, achievable: true, condition, computedAt: now, ttg: (t0 - now) / 1000 + high, distanceNm: found.nm };
+  }
+
+  /**
+   * Each tick: the rendezvous determined for a moving waypoint newly in a route, and again every 10 seconds while its
+   * time to go is over one minute (then kept). An unachievable one is annunciated once: as the active waypoint
+   * (condition 1) the RENDEZVOUS UNACHIEVABLE alert, with the roll command invalid; otherwise as an advisory.
+   */
+  private updateRendezvous() {
+    const now = this.now.getTime();
+    const live = new Set<string>();
+    for (const route of [this.active, this.modified]) {
+      if (!route) continue;
+      route.legs.forEach((leg, index) => {
+        if (leg.kind !== "wpt" || !this.isMoving(leg.ident)) return;
+        const key = this.rendezvousKey(route, leg.ident);
+        live.add(key);
+        const cached = this.rendezvousCache.get(key);
+        const toGo = cached?.ttg == null ? null : cached.ttg - (now - cached.computedAt) / 1000;
+        const due = !cached || cached.condition !== this.rendezvousCondition(route, index)
+          || (now - cached.computedAt >= RENDEZVOUS_RECOMPUTE_S * 1000 && (toGo === null || toGo > RENDEZVOUS_FREEZE_S));
+        const solved = due ? this.solveRendezvous(route, index, leg.ident) : cached!;
+        if (due) this.rendezvousCache.set(key, solved);
+        const warned = key + ":" + solved.condition;
+        if (solved.achievable) { this.rendezvousWarned.delete(warned); return; }
+        if (this.rendezvousWarned.has(warned)) return;
+        this.rendezvousWarned.add(warned);
+        if (solved.condition === 1) this.alert(alert("RENDEZVOUS UNACHIEVABLE"));
+        else this.advisory("RENDEZVOUS UNACHIEVABLE");
+      });
+    }
+    for (const key of [...this.rendezvousCache.keys()]) if (!live.has(key)) this.rendezvousCache.delete(key);
+  }
+
+  /**
+   * The active waypoint is a moving one whose rendezvous is unachievable (M300 11-37 condition 1): guidance is toward
+   * the moving waypoint itself, and the roll command is invalid.
+   */
+  get rendezvousRollInvalid(): boolean {
+    const leg = this.active.legs[0];
+    if (leg?.kind !== "wpt" || !this.isMoving(leg.ident)) return false;
+    return this.rendezvousFor(this.active, 0)?.achievable === false;
   }
 
   /** The TDN path angle from present altitude to the target altitude at the point before the reference. */
@@ -1939,35 +2116,61 @@ export class ScriptedFms implements CduBackend {
   }
 
   /**
-   * TOGA or MISSED APPR before the MAP: the missed approach is requested, but lateral guidance continues along the
-   * approach to the MAP, which then sequences the missed approach legs (M300 7-16 item 4; plan R2-03 MA-EARLY and
-   * TOGA-EARLY). The approach is disarmed (no descent on its path) and the missed-approach hold armed. The laboratory
-   * airline profile, whose VNAV climbs on the missed approach legs, drops the rest of the approach at once instead.
+   * The FMS missed-approach request (M300 7-15, 7-16; plan C.3.1), from MISSED APPR or TOGA: the FMS reverts to the
+   * terminal phase (RNP 1.0), NO APPR INTEGRITY is withdrawn, the approach is disarmed (no descent on its path) and the
+   * missed-approach hold armed. Before the MAP guidance continues along the approach to the MAP, which then sequences
+   * the missed approach legs (7-16 item 4; plan R2-03 MA-EARLY). Refused with the FMS failed, or with no missed
+   * approach ahead (once it is being flown there is nothing left to go around from).
    */
-  goAround() {
+  requestMissedApproach() {
     if (this.injected.has("fmsFail")) return false;
-    const route = this.active;
-    const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
-    // Only from the approach: once the missed approach is being flown there is nothing left to go around from.
+    const missed = this.active.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
     if (missed <= 0) return false;
     this.missedRequested = true;
     this.approachCancelled = false;
     this.approachIntegrityLostAt = null;
     this.visualContinuation = false;
     if (this.mapPassed && this.aircraftProfile.verticalPolicy === "ADVISORY") this.passLeg(this.instrumentEnd);
+    this.armedApproach = false;
+    this.armMissedHold(this.active);
+    this.withdrawAlert("NO APPR INTEGRITY");
+    this.emit();
+    return true;
+  }
+
+  /**
+   * MISSED APPR> (LSK 6R on LEGS 1/X, VNAV and PROGRESS 1/4), when configured: in the approach phase, until pressed.
+   * An approach that NO APPR INTEGRITY cancelled has left the approach phase but is still armed and flown, and the
+   * request is what withdraws that alert (C.3.1), so the prompt stays until the request is made or the approach disarmed.
+   */
+  get missedPromptShown() {
+    const flown = this.flightPhase === "APPROACH" || this.approachCancelled && this.armedApproach;
+    return this.aircraftProfile.configuration?.options.missedPrompt.configured === true && !this.injected.has("fmsFail") && flown
+      && this.active.legs.some((leg, i) => i > 0 && leg.kind !== "disco" && leg.source === "MISSED");
+  }
+
+  /**
+   * TOGA: the FMS missed-approach request, with the autopilot's go-around (the flight simulation takes it from
+   * goArounds). TOGA before the MAP keeps the lateral path to the MAP as MISSED APPR does (TOGA-EARLY, inferred). The
+   * laboratory airline profile, whose VNAV climbs on the missed approach legs, drops the rest of the approach at once.
+   */
+  goAround() {
+    const route = this.active;
+    const missed = route.legs.findIndex(leg => leg.kind !== "disco" && leg.source === "MISSED");
+    if (!this.requestMissedApproach()) return false;
     if (this.aircraftProfile.verticalPolicy !== "ADVISORY") {
       route.legs.splice(0, missed);
       this.legStart = { ...this.here };
     }
-    this.armedApproach = false;
     this.goArounds += 1;
-    this.armMissedHold(route);
     this.emit();
     return true;
   }
 
   /** Accepted go-arounds, so the flight simulation takes the go-around transition however TOGA was pressed. */
   goArounds = 0;
+  /** A missed approach requested (MISSED APPR or TOGA), until another approach is loaded. */
+  get missedApproachRequested() { return this.missedRequested; }
   /** The active plan's revision and fingerprint, as the engineering record states them. */
   get planIdentity() { return { revision: this.planRevision, fingerprint: planFingerprint(this.active.legs) }; }
 
@@ -2040,6 +2243,8 @@ export class ScriptedFms implements CduBackend {
   tick() {
     const now = this.now.getTime();
     this.watchHover();
+    this.watchHoldEntry();
+    this.watchHoldSpeed();
     // A database past the end of its cycle is flagged once; swapping to the next cycle clears it.
     // A cycle whose data gives no dates is never out of date: its end is unknown, not past.
     if (this.activeCycle.to !== null && now > this.activeCycle.to && !this.outOfDateAlerted) { this.outOfDateAlerted = true; this.alert(alert("DATABASE OUT OF DATE")); }
@@ -2060,6 +2265,33 @@ export class ScriptedFms implements CduBackend {
   get position(): LatLon { return this.here; }
   get radioState() { return this.radios; }
   get fuelState() { return this.fuel; }
+
+  /**
+   * FUEL 1/2 (S300 manual 14-2): from the usable fuel (the fuel on board less the reserve, or the crew's what-if) and the
+   * flow (or the what-if), the endurance (hours) and, making progress, the maximum range at the present ground speed and
+   * the mileage (kg per NM); the fuel remaining at the FIX (by default the last waypoint of the active route) after the
+   * predicted time to it; the gross weight once the crew weights are entered. EST when a what-if is in use.
+   */
+  fuelPerformance() {
+    const usable = this.fuelPage.whatIfUsable ?? Math.max(0, this.fuel.quantity - this.fuel.reserve);
+    const flow = this.fuelPage.whatIfFlow ?? this.fuel.flow;
+    const endurance = flow > 0 ? usable / flow : null;
+    const moving = makingProgress(this.groundSpeed);
+    const lastWaypoint = [...this.active.legs].reverse().find(leg => leg.kind === "wpt");
+    const fix = this.fuelPage.fix ?? (lastWaypoint?.kind === "wpt" ? lastWaypoint.ident : null);
+    const point = fix === null ? undefined : [...this.profile().points].reverse().find(p => p.ident === fix);
+    const hours = point?.eta != null ? (point.eta - this.now.getTime()) / 3_600_000 : null;
+    const { empty, equip, crew, cargo } = this.weights;
+    const fuelOnBoard = this.fuelPage.whatIfUsable === null ? this.fuel.quantity : this.fuelPage.whatIfUsable + this.fuel.reserve;
+    return {
+      usable, flow, endurance, fix, point: point ?? null,
+      maxRange: endurance !== null && moving ? endurance * this.groundSpeed : null,
+      mileage: moving && flow > 0 ? flow / this.groundSpeed : null,
+      remaining: hours === null ? null : usable - flow * hours,
+      grossWeight: empty === null ? null : empty + (equip ?? 0) + (crew ?? 0) + (cargo ?? 0) + fuelOnBoard,
+      estimated: this.fuelPage.whatIfUsable !== null || this.fuelPage.whatIfFlow !== null,
+    };
+  }
   get markList() { return this.marks; }
   get recallList() { return this.recall; }
   get squawkIdent() { return this.clock().getTime() < this.squawkIdentUntil; }
@@ -2081,6 +2313,13 @@ export class ScriptedFms implements CduBackend {
     if (generated?.kind === "wpt") return generated.position;
     const pending = this.pendingHoverPoints;
     if (pending && route !== this.active && (ident === "JN" || ident === "TDN" || ident === "MRK")) return pending[ident];
+    // A moving waypoint in the route stands at its rendezvous point while that is achievable (M300 11-37); otherwise at
+    // the moving waypoint itself, so guidance is toward it.
+    if (this.isMoving(ident)) {
+      const index = route.legs.findIndex(leg => leg.kind === "wpt" && leg.ident === ident);
+      const rendezvous = index >= 0 ? this.rendezvousFor(route, index) : null;
+      if (rendezvous?.achievable && rendezvous.position) return rendezvous.position;
+    }
     const own = this.ownPoint(ident);
     if (own) return own;
     // The active plan flies its fixes as they were resolved when it became active (pinActive): a fix it was executed
@@ -2409,6 +2648,85 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** The entry the aircraft will fly (or flew) into the hold, from the track that arrives at the holding fix. */
+  /** The hold entry advisory on show, and the passages of the holding fix that remove it. */
+  private holdEntryAdvisory: { text: string; passes: number; seen: number } | null = null;
+
+  /**
+   * PARALLEL, TEARDROP or DIRECT HOLD ENTRY (M300 10-2, 10-4, 10-6), for the entry the FMS will fly: shown one minute
+   * before the holding fix when the aircraft is on track inbound to it, otherwise one minute before above 250 kt of
+   * ground speed and ten seconds before below it; removed at the fix for a direct entry, and at the second passage of
+   * the fix (the end of the entry) for the others. "On track" is laboratory: within 0.1 NM and 10 degrees of the leg.
+   */
+  private watchHoldEntry() {
+    const route = this.active, hold = route.hold, leg = route.legs[0];
+    // The hold gone (erased, exited, replaced) takes its advisory with it.
+    if (this.holdEntryAdvisory && (!hold || hold.status === "EXIT ARMED")) { this.withdrawAlert(this.holdEntryAdvisory.text); this.holdEntryAdvisory = null; }
+    if (this.holdEntryAdvisory || !hold || hold.status !== "ARMED" || leg?.kind !== "wpt" || leg.ident !== hold.fix) return;
+    const fix = this.coordinates(hold.fix);
+    const entry = this.holdEntryFor(route);
+    if (!fix || !entry || this.groundSpeed <= 1) return;
+    const seconds = (distanceNm(this.here, fix) / this.groundSpeed) * 3600;
+    const onTrack = Math.abs(this.crossTrack) <= 0.1 && Math.abs(this.trackError) <= 10;
+    if (seconds > (onTrack || this.groundSpeed > 250 ? 60 : 10)) return;
+    this.holdEntryAdvisory = { text: `${entry} HOLD ENTRY`, passes: entry === "DIRECT" ? 1 : 2, seen: 0 };
+    this.advisory(this.holdEntryAdvisory.text);
+  }
+
+  /** The hold whose entry HIGH HOLDING SPEED has been judged for, a minute before its fix. */
+  private holdSpeedChecked: Hold | null = null;
+
+  /** HIGH HOLDING SPEED on entry: judged once, one minute before the holding fix (M300 10-8). */
+  private watchHoldSpeed() {
+    const route = this.active, hold = route.hold, leg = route.legs[0];
+    if (!hold || hold.status !== "ARMED" || this.holdSpeedChecked === hold || leg?.kind !== "wpt" || leg.ident !== hold.fix) return;
+    const fix = this.coordinates(hold.fix);
+    if (!fix || this.groundSpeed <= 1 || (distanceNm(this.here, fix) / this.groundSpeed) * 3600 > 60) return;
+    this.holdSpeedChecked = hold;
+    // Judged as the entry will begin, with its defaults taken from the altitude now (M300 10-9).
+    if (this.holdExceedsProtection({ ...hold, ...this.entryDefaults(hold) })) this.alert(alert("HIGH HOLDING SPEED"));
+  }
+
+  /**
+   * The leg time and speed a hold's entry begins with: a value still at the default it was given is taken again from
+   * the altitude now (M300 10-8, 10-9); crew entries and coded values are kept.
+   */
+  private entryDefaults(hold: Hold): Pick<Hold, "legTime" | "speed"> {
+    return {
+      legTime: hold.defaults?.legTime !== undefined && hold.legDistance === null && hold.legTime === hold.defaults.legTime ? this.defaultHoldLegTime() : hold.legTime,
+      speed: hold.defaults?.speed !== undefined && hold.speed === hold.defaults.speed ? this.defaultHoldSpeed() : hold.speed,
+    };
+  }
+
+  /**
+   * HIGH HOLDING SPEED (M300 10-8; a bench heuristic, plan D-H, not a containment proof): the hold's pattern at the
+   * present true airspeed (or its holding speed, if faster) and computed wind against the ICAO protected area for the maximum holding speed of Table
+   * 10-1 and the maximum wind at the altitude, less a buffer. Both are built as the flight builds a hold (holds.ts,
+   * rate-one bank or the limit), the ICAO one at the table speed's true airspeed in the omnidirectional wind of
+   * PANS-OPS (Doc 8168): 2h + 47 kt, h the altitude in thousands of feet, its timed leg stretched by that wind. Exceeded when its
+   * length (the leg and the turn diameter) or its width (the turn diameter) passes the protected area's less 5 percent
+   * (a laboratory buffer), or it cannot be flown at all. No table speed (the helicopter above 14,000 ft): no check.
+   */
+  holdExceedsProtection(hold: Hold) {
+    const maxIas = holdingSpeedLimit(this.altitude, this.aircraftProfile);
+    const fix = this.coordinates(hold.fix);
+    if (maxIas === null || !fix) return false;
+    const minutes = hold.legTime ?? defaultLegMinutes(this.altitude);
+    // The leg as flown is the timed leg at the true airspeed (a ground racetrack); the protected area allows the maximum
+    // wind to stretch it, a timed outbound leg flown with the wind behind (a leg distance stays what it is).
+    const size = (tas: number, wind: number, legNm: number) => {
+      const g = holdGeometry(fix, hold.inbound, hold.turn, tas, wind, legNm, MAX_BANK);
+      return g ? { length: g.legNm + 2 * g.radius, width: 2 * g.radius } : null;
+    };
+    // Flown as the bench flies a hold: at the present true airspeed, or the hold's speed if faster.
+    const tas = Math.max(this.aircraft.tas, tasFromIas(hold.speed, this.altitude));
+    const flown = size(tas, this.systemWind.speed, hold.legDistance ?? (minutes * tas) / 60);
+    const maxTas = tasFromIas(maxIas, this.altitude), maxWind = (2 * this.altitude) / 1000 + 47;
+    const area = size(maxTas, maxWind, hold.legDistance ?? (minutes * (maxTas + maxWind)) / 60);
+    if (!area) return false;
+    if (!flown) return true;
+    return flown.length > 0.95 * area.length || flown.width > 0.95 * area.width;
+  }
+
   holdEntryFor(route: Route): HoldEntry | null {
     const hold = route.hold;
     if (!hold) return null;
@@ -2431,6 +2749,8 @@ export class ScriptedFms implements CduBackend {
       this.advisory("NOT CONFIGURED");
       return;
     }
+    // A new access of the FUEL pages replaces the crew's what-if entries by the fuel computer's values (14-1).
+    if (page === "FUEL" && this.page !== "FUEL") Object.assign(this.fuelPage, { whatIfUsable: null, whatIfFlow: null });
     this.page = page;
     this.index = index;
   }

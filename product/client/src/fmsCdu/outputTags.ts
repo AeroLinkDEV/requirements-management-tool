@@ -91,6 +91,7 @@ export const AIRCRAFT_DATA_TAGS: { [K in Exclude<keyof AircraftData, "helicopter
   position: data("the simulated aircraft's true position (for the map's own-ship symbol)", "always valid (laboratory)"),
   selectedAltitude: { kind: "target", selectedBy: "crew", validity: "null when unavailable" },
   selectedSpeed: { kind: "target", selectedBy: "crew", validity: "null when unavailable" },
+  selectedHeading: { kind: "target", selectedBy: "crew", validity: "always valid (laboratory)" },
   missedAltitudeConflict: annunciation("the selected altitude against the missed approach's coded altitude"),
   ias: data("air data: indicated airspeed from the true airspeed (ISA)", "null when unavailable"),
 };
@@ -103,6 +104,7 @@ export const HELICOPTER_DATA_TAGS: { [K in keyof HelicopterData]: OutputTag } = 
   lowHeight: annunciation("the autopilot's low-height protection caption"),
   vx: data("the selected GPS receiver's velocity words, in aircraft axes (the hover feedback)", "null when unavailable"),
   vy: data("the selected GPS receiver's velocity words, in aircraft axes (the hover feedback)", "null when unavailable"),
+  selectedVelocity: { kind: "target", selectedBy: "crew", validity: "null when unavailable" },
   hoverData: annunciation("whether the low-speed data belongs on the display"),
 };
 

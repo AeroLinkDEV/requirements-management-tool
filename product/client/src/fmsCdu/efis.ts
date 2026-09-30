@@ -112,6 +112,8 @@ export type AircraftData = {
    */
   selectedAltitude: number | null;
   selectedSpeed: number | null;
+  /** The heading the crew selected, or HDG holds (drawn cyan on the heading scale): the heading bug. */
+  selectedHeading: number;
   /**
    * The missed approach altitude the selected altitude does not meet, as the CDU writes it ("5600A"), for the PFD to
    * show amber (FlightSimulator.missedAltitudeConflict); null when there is no conflict to show.
@@ -132,6 +134,8 @@ export type AircraftData = {
     /** Measured ground velocity in aircraft axes (knots), or null without eligible feedback. */
     vx: number | null;
     vy: number | null;
+    /** The ground velocity HOV or GSPD holds, in the same axes (drawn cyan beside VX/VY), or null in neither. */
+    selectedVelocity: { vx: number; vy: number } | null;
     hoverData: boolean;
   } | null;
 };
@@ -215,7 +219,8 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
       : sim.verticalFlag ? fail() : gpsVertical !== null ? normal(gpsVertical) : path ? normal(fms.altitude - path.altitude) : ncd(),
     verticalSource: advisory?.available ? "VNAV" : path?.source ?? null,
     verticalCoupled: advisory ? false : path?.coupled ?? false,
-    rollCommand: managed ? normal(g.bankCommand) : ncd(),
+    // Invalid with the active waypoint a moving one whose rendezvous is unachievable (M300 11-37, condition 1).
+    rollCommand: managed && !fms.rendezvousRollInvalid ? normal(g.bankCommand) : ncd(),
     distanceToGo: distanceToGo !== null && toIdent ? normal(distanceToGo) : ncd(),
     toWaypoint: toIdent ? normal(toIdent) : ncd(),
     // No ETA without measurable progress: a time from an invented speed would be a plausible falsehood. In a manual hold,
@@ -247,11 +252,12 @@ export function aircraftData(fms: ScriptedFms, sim: FlightSimulator): AircraftDa
     pitch, bank: sim.bankAngle, heading: fms.heading, track, airspeed, groundSpeed: fms.groundSpeed,
     altitude: fms.indicatedAltitude, baroSetting: formatSetting(fms.baro.setting), physicalAltitude: fms.physicalAltitude, verticalSpeed: fms.verticalSpeed, wind: fms.wind, position: fms.truePosition,
     selectedAltitude: sim.advisory ? sim.selectedAltitude : null, selectedSpeed: sim.advisory ? sim.selectedSpeed : null,
+    selectedHeading: sim.selectedHeading,
     missedAltitudeConflict: sim.missedAltitudeConflict ? formatConstraint(sim.missedAltitudeConflict.target) : null,
     ias: sim.iasReliable ? sim.indicatedAirspeed : null,
     helicopter: sim.advisory ? {
       axes: sim.axisModes, radioHeight: fms.radioHeight, hoverHeight: sim.hoverHeight, lowHeight: sim.lowHeightCaption,
-      ...sim.groundVelocityAxes,
+      ...sim.groundVelocityAxes, selectedVelocity: sim.selectedGroundVelocity,
       hoverData: sim.inLowSpeedRegime || ["RHT", "TD", "TD/H", "TU"].includes(sim.axisModes.collective),
     } : null,
   };

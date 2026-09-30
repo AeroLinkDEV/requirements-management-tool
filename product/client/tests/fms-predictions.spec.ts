@@ -66,8 +66,9 @@ test('the destination prediction is the landing, not the end of the missed appro
   // The same route without the missed approach predicts the same landing.
   const landing = unit.profile({ ...unit.activeRoute, legs: unit.activeRoute.legs.filter(leg => leg.kind === 'disco' || leg.source !== 'MISSED') })
   expect(landing.destination).toEqual(profile.destination)
-  // The FUEL page shows that landing fuel, not the missed approach's.
-  unit.press('FUEL')
+  // PROGRESS 2/4 shows that landing fuel as the EFOB at its endpoint, not the missed approach's.
+  unit.press('PROG')
+  unit.press('NEXT')
   const efob = `${Math.round(profile.destination!.fuel!)}KG`
   expect(lines(unit).some(line => line.includes(efob))).toBe(true)
 })
@@ -146,8 +147,8 @@ test('NOT ENOUGH FUEL is judged at the landing, not at the end of the missed app
     expect(toEnd).toBeGreaterThan(toLanding + 10)
     // Fuel that lands above the reserve by the margin, but would be below it at the end of the missed approach.
     const fuel = Math.round(unit.fuelState.reserve + toLanding + margin)
-    unit.press('FUEL')
-    enter(unit, String(fuel), 'LSK1L')
+    // The fuel computer reports it (FUEL page entries are what-ifs, S300 manual 14-1).
+    unit.setFuel('quantity', fuel)
     fly(1)
     return { unit, missedEnd: unit.profile().points.at(-1)!.fuel! }
   }
