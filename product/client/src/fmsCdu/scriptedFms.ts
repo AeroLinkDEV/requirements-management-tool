@@ -659,6 +659,12 @@ export class ScriptedFms implements CduBackend {
       if (hold.status === "ARMED") {
         this.enteredHold = this.holdEntryFor(route);
         hold.status = "IN PROGRESS";
+        // The defaults are for the altitude at which the entry begins (M300 10-9: leg time 1 or 1.5 minutes "depending on
+        // aircraft altitude at the time the hold entry is initiated"; the holding speed by altitude, 10-8), and are not
+        // changed again automatically, even across 14,000 ft. Crew entries and coded values are kept as they are.
+        if (hold.defaults?.legTime !== undefined && hold.legDistance === null && hold.legTime === hold.defaults.legTime) hold.legTime = this.defaultHoldLegTime();
+        if (hold.defaults?.speed !== undefined && hold.speed === hold.defaults.speed) hold.speed = this.defaultHoldSpeed();
+        delete hold.defaults;
         const limit = holdingSpeedLimit(this.altitude, this.aircraftProfile);
         if (limit !== null && hold.speed > limit) this.alert(alert("HIGH HOLDING SPEED"));
       }
@@ -2401,7 +2407,9 @@ export class ScriptedFms implements CduBackend {
       if (leg.kind === "wpt") leg.qualifier = "/H";
       // The inbound course defaults to the course of the leg into the fix.
       const inbound = this.legGeometry(route)[at]?.course ?? 360;
-      route.hold = { fix, turn: "RIGHT", inbound, legTime: this.defaultHoldLegTime(), legDistance: null, exit: "MANUAL", speed: this.defaultHoldSpeed(), altitude: "5000A", status: "INACTIVE" };
+      // The leg time and speed shown now are the defaults for the altitude now; they are taken again when the entry begins.
+      const legTime = this.defaultHoldLegTime(), speed = this.defaultHoldSpeed();
+      route.hold = { fix, turn: "RIGHT", inbound, legTime, legDistance: null, exit: "MANUAL", speed, altitude: "5000A", status: "INACTIVE", defaults: { legTime, speed } };
     });
   }
 
@@ -2417,10 +2425,16 @@ export class ScriptedFms implements CduBackend {
   /** A coded procedure hold as the route's hold: its coded exit, leg, speed limit (or the default) and altitude. */
   private holdFromProcedure(fix: string, coded: ProcedureHold, status: HoldStatus): Hold {
     const legDistance = coded.legDistanceNm ?? null;
+    // A coded leg or speed limit is the chart's; what the coding leaves out is a default, taken again at the entry.
+    const defaults: Hold["defaults"] = {
+      ...(legDistance === null && coded.legTimeMin === undefined ? { legTime: this.defaultHoldLegTime() } : {}),
+      ...(coded.speedLimit === undefined ? { speed: this.defaultHoldSpeed() } : {}),
+    };
     return {
-      fix, turn: coded.turn, inbound: coded.inbound, legDistance, legTime: legDistance === null ? coded.legTimeMin ?? this.defaultHoldLegTime() : null,
+      fix, turn: coded.turn, inbound: coded.inbound, legDistance, legTime: legDistance === null ? coded.legTimeMin ?? defaults.legTime ?? null : null,
       exit: coded.exit === "ONCE" ? "ONCE" : coded.exit === "AT ALT" ? "AT TGT ALT" : "MANUAL",
-      speed: coded.speedLimit?.kt ?? this.defaultHoldSpeed(), altitude: coded.altitude ?? "", status,
+      speed: coded.speedLimit?.kt ?? defaults.speed ?? this.defaultHoldSpeed(), altitude: coded.altitude ?? "", status,
+      ...(Object.keys(defaults).length ? { defaults } : {}),
     };
   }
 
