@@ -734,6 +734,7 @@ const FMS_PATH_REFERENCES = {
   'product/client/src/icons.tsx': 'names the bench icon; built by the client gate',
   'product/client/src/routing.ts': 'routes to the bench; built by the client gate and asserted by routing-contract.spec.ts, an FMS journey',
   'product/client/tests/primary-navigation-alignment.spec.ts': 'an FMS journey (FMS_OBSERVING_SPECS)',
+  'product/client/tests/production/production-build.spec.ts': 'global physical-CDU typography audit; all production journeys run for every FMS-only change',
   'product/client/tests/routing-contract.spec.ts': 'an FMS journey (FMS_OBSERVING_SPECS)',
   'product/client/vite.config.ts': 'aliases meshoptimizer to a bench file; the client gate and the production journeys build with it',
   'product/src/AeroLink.Api/FmsBenchImageryEndpoints.cs': 'names the bench in comments only; it reads no bench path',
