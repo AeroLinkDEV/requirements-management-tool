@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { Axis, Cartesian3, Event, Matrix3, Matrix4 } from '@cesium/engine'
+import { Axis, Cartesian3, DynamicEnvironmentMapManager, Event, Matrix3, Matrix4 } from '@cesium/engine'
 import { expect, logicTest as test } from './isolated-client-test'
 import { MAIN_ROTOR_RADIUS, buildHelicopterGlb } from '../src/fmsCdu/helicopterModel'
 import { createAircraftModel, MAIN_ROTOR_RAD_S, TAIL_TO_MAIN, type CesiumModule } from '../src/fmsCdu/otwAircraftModel'
@@ -89,6 +89,7 @@ function pendingAircraft() {
   const model = {
     ready: false, readyEvent: new Event(), errorEvent: new Event(), show: false,
     modelMatrix: Matrix4.IDENTITY, destroyed: false,
+    environmentMapManager: new DynamicEnvironmentMapManager(),
     getNode(name: string) {
       if (!this.ready) throw new Error('The model is not loaded.')
       return name === 'main_rotor' ? main : tail
@@ -97,7 +98,12 @@ function pendingAircraft() {
   }
   let decode!: (value: typeof model) => void
   let added = 0, removed = 0, renders = 0
-  const Cesium = { Axis, Matrix3, Matrix4, Model: { fromGltfAsync: () => new Promise<typeof model>(resolve => { decode = resolve }) } } as unknown as CesiumModule
+  const Cesium = { Axis, Matrix3, Matrix4, Model: {
+    fromGltfAsync: (options: { environmentMapOptions?: { enabled?: boolean } }) => {
+      model.environmentMapManager = new DynamicEnvironmentMapManager(options.environmentMapOptions)
+      return new Promise<typeof model>(resolve => { decode = resolve })
+    },
+  } } as unknown as CesiumModule
   const aircraft = createAircraftModel(Cesium, {
     primitives: {
       add<T>(value: T): T { added += 1; return value },
@@ -131,6 +137,36 @@ test('a decoded helicopter keeps its fallback and accepts Chase placement until 
   expect(state.tail.matrix).not.toBe(Matrix4.IDENTITY)
   expect(state.counts().renders).toBeGreaterThanOrEqual(2)
   state.aircraft.destroy()
+})
+
+test('helicopter lighting is requested only while the aircraft is placed and visible, including before render readiness', async () => {
+  const state = pendingAircraft()
+  // This is the real public manager's enable switch, not a GPU completion or cached-position oracle.
+  expect(state.model.environmentMapManager.enabled).toBe(false)
+  await state.decoded()
+  state.aircraft.update(Matrix4.IDENTITY, 0, false)
+  expect(state.model.environmentMapManager.enabled).toBe(false)
+  expect(state.aircraft.loaded).toBe(false)
+  state.aircraft.update(Matrix4.IDENTITY, 0.5, true)
+  expect(state.model.environmentMapManager.enabled).toBe(true)
+  expect(state.aircraft.loaded).toBe(false)
+  state.aircraft.update(Matrix4.IDENTITY, 0.5, false)
+  expect(state.model.environmentMapManager.enabled).toBe(false)
+  state.makeReady()
+  await expect(state.aircraft.ready).resolves.toEqual({ loaded: true })
+  expect(state.model.environmentMapManager.enabled).toBe(false)
+  state.aircraft.update(Matrix4.IDENTITY, 1, true)
+  expect(state.model.environmentMapManager.enabled).toBe(true)
+  state.aircraft.update(Matrix4.IDENTITY, 1, false)
+  expect(state.model.environmentMapManager.enabled).toBe(false)
+  expect(state.aircraft.loaded).toBe(true)
+  state.aircraft.update(undefined, 1, true)
+  expect(state.model.environmentMapManager.enabled).toBe(false)
+  state.aircraft.update(Matrix4.IDENTITY, 1.5, true)
+  expect(state.model.environmentMapManager.enabled).toBe(true)
+  expect(state.aircraft.loaded).toBe(true)
+  state.aircraft.destroy()
+  expect(() => state.aircraft.update(Matrix4.IDENTITY, 2, true)).not.toThrow()
 })
 
 for (const phase of ['before decoding', 'before GPU readiness'] as const) {
