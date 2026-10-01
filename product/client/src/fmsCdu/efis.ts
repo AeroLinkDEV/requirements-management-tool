@@ -4,6 +4,7 @@ import { courseDeg, distanceNm, offset, type LatLon, type Route } from "./fmsMod
 import type { ScriptedFms } from "./scriptedFms";
 import { ACTIVE_PROFILE } from "./profile";
 import { formatConstraint } from "./vnav";
+import type { IntegrityBasis } from "./sensorState";
 
 // The FMS output bus and the aircraft data an EFIS draws from.
 //
@@ -80,6 +81,30 @@ export type FmsOutputs = {
   /** The selected sensor's 95% accuracy, NM; null (NCD) when it gives none (plan C1). */
   anp: number | null;
   navMode: string;
+  /*
+   * Stage F C4 (F13): the selected navigation solution's C1 values (sensorState.ts), each its own word. The accuracy is
+   * the sensor's: unlike `anp`, never the bench's forced TEST value. A failed FMS sends FAIL; a value the solution does not
+   * have is NCD.
+   */
+  /** The 95% radial position error, NM (M300 15-1). */
+  accuracy95Nm: Word<number>;
+  /** Whose figure the accuracy is: the receiver's own (the GPS HFOM), or a laboratory estimate (any declared model). */
+  accuracyBasis: Word<"receiver" | "laboratory">;
+  /** Whether the solution depends on GPS, directly or through anything it was derived from (C1, transitive provenance). */
+  gpsDependent: Word<boolean>;
+  /** The integrity bound NP, NM (the GPS HIL): a separate word from the accuracy, never standing in for it. */
+  integrityBoundNm: Word<number>;
+  /** How integrity is established: NP against the limit, the radio modes' criteria (M300 15-3), or none (DR). */
+  integrityBasis: Word<IntegrityBasis>;
+  /** Whether the solution has integrity against the active error limit (M300 1-3). */
+  integrityValid: Word<boolean>;
+  /** The GPS position is held as uncertain (GPS POS UNCERTAIN): integrity lost, the position kept. */
+  positionUncertain: Word<boolean>;
+  /**
+   * The laboratory NAIM comparison, NM (C1, F5): |GPS - backup| + the backup's 95% accuracy, when an uncertain GPS was
+   * judged against a qualifying radio fix. It never gives integrity and is never the integrity bound.
+   */
+  naimComparisonNm: Word<number>;
   /** For the navigation display. */
   activeRoute: RoutePoint[];
   modifiedRoute: RoutePoint[] | null;
@@ -192,6 +217,20 @@ function alongPolyline(line: LatLon[], nm: number): LatLon | null {
   return null;
 }
 
+type NavigationWords = Pick<FmsOutputs, "accuracy95Nm" | "accuracyBasis" | "gpsDependent" | "integrityBoundNm" | "integrityBasis" | "integrityValid" | "positionUncertain" | "naimComparisonNm">;
+
+/** The selected solution's C1 values as words (Stage F C4): FAIL from a failed FMS, NCD for a value it does not have. */
+function navigationWords(fms: ScriptedFms, failed: boolean): NavigationWords {
+  if (failed) return { accuracy95Nm: fail(), accuracyBasis: fail(), gpsDependent: fail(), integrityBoundNm: fail(), integrityBasis: fail(), integrityValid: fail(), positionUncertain: fail(), naimComparisonNm: fail() };
+  const sensor = fms.navPerformance.sensor;
+  const word = <T>(value: T | null): Word<T> => (value === null ? ncd() : normal(value));
+  return {
+    accuracy95Nm: word(sensor.accuracy95Nm), accuracyBasis: word(sensor.accuracyBasis), gpsDependent: normal(sensor.gpsDependent),
+    integrityBoundNm: word(sensor.integrityNm), integrityBasis: normal(sensor.integrityBasis), integrityValid: normal(sensor.integrity),
+    positionUncertain: normal(fms.navState.uncertain), naimComparisonNm: word(sensor.naimComparisonNm),
+  };
+}
+
 export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
   const failed = fms.hasCondition("fmsFail");
   const g = sim.guidance;
@@ -206,6 +245,7 @@ export function fmsOutputs(fms: ScriptedFms, sim: FlightSimulator): FmsOutputs {
     verticalMode: sim.verticalMode, verticalArmed: [], approach: { type: null, state: "OFF" },
     lateralFullScaleNm: cdiFullScaleNm(phase, fms.navPerformance), verticalFullScaleFt: 400, phase, rnp: fms.navPerformance.rnp, anp: fms.navPerformance.anp,
     navMode: fms.navState.mode, activeRoute: [], modifiedRoute: null, offsetTrack: null, holdFix: null, topOfDescent: null, endOfDescent: null,
+    ...navigationWords(fms, failed),
   };
   // A failed FMS publishes failure warnings; the displays remove its data and flag it. The modes remain: they are the
   // autopilot's (basic heading and altitude hold after the reversion).
