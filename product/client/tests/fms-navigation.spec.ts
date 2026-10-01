@@ -303,7 +303,7 @@ test('an external sensor mailbox refuses a receiver replay even when its air-dat
 
 test('radio AUTO acquisition restarts at the first sample in range after a loss', () => {
   const at = { lat: 45, lon: -75 }
-  const station: Navaid = { kind: 'navaid', ident: 'TEST', type: 'VORDME', name: 'Test fixture', frequency: '115.00', position: offset(at, 90, 10) }
+  const station: Navaid = { kind: 'navaid', ident: 'TEST', type: 'VORDME', name: 'Test fixture', frequency: '115.00', position: offset(at, 90, 10), elevation: { feet: 0, source: 'data' } }
   const receiver = new BenchRadioReceiver()
   receiver.tune([station], 0)
   expect(receiver.sample(at, 3000, 3000)[0].slantRangeNm.status).toBe('NORMAL')
@@ -315,7 +315,7 @@ test('radio AUTO acquisition restarts at the first sample in range after a loss'
 
 test('DME/DME and VOR/DME solve measured ranges and bearings rather than substitute a prior or truth position', () => {
   const at = { lat: 45, lon: -75 }, altitude = 3000, now = 10000
-  const stations: Navaid[] = [90, 0, 225].map((course, i) => ({ kind: 'navaid', ident: `T${i}`, type: 'VORDME', name: 'Test fixture', frequency: '115.00', position: offset(at, course, 10) }))
+  const stations: Navaid[] = [90, 0, 225].map((course, i) => ({ kind: 'navaid', ident: `T${i}`, type: 'VORDME', name: 'Test fixture', frequency: '115.00', position: offset(at, course, 10), elevation: { feet: 0, source: 'data' } }))
   const observations: RadioObservation[] = stations.map(station => ({ station,
     slantRangeNm: { at: now, sequence: 1, status: 'NORMAL', value: Math.hypot(distanceNm(at, station.position), altitude / 6076.12) },
     bearingTrue: { at: now, sequence: 1, status: 'NORMAL', value: bearingDeg(station.position, at) } }))

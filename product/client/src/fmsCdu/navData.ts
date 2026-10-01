@@ -10,9 +10,57 @@ import { distanceNm, longitudeDelta, offset, type ConditionalPath, type FixPath,
  * cycle's data into a new, inactive cycle, which the crew then activates (ScriptedFms.loadNavData).
  */
 
-export type NavaidType = "VOR" | "VORDME" | "VORTAC" | "DME" | "NDB";
+export type NavaidType = "VOR" | "VORDME" | "VORTAC" | "DME" | "TACAN" | "NDB";
 export type Fix = { kind: "fix"; ident: string; position: LatLon };
-export type Navaid = { kind: "navaid"; ident: string; type: NavaidType; position: LatLon; frequency: string; name: string };
+/**
+ * A navaid (Stage F1). `position` is the VOR's (or the NDB's), or for a DME-only or TACAN-only station its DME's.
+ * `dmePosition` is the DME antenna's own position when the data gives one: a co-located DME can stand apart from
+ * its VOR, and ranges are measured from it. `elevation` is the station's, feet MSL, and says where it came from:
+ * `data` (the ARINC 424 record's DME elevation), `terrain` (the ground elevation at an invented demonstration site,
+ * the antenna's height above it unknown), or `assumed` (a record whose field is blank), never a silent zero; a range
+ * corrected with a terrain or assumed elevation says so in its accuracy (radioNavigation.ts). `channel` is the
+ * DME/TACAN channel of the frequency's standard pairing (ICAO Annex 10 Vol I).
+ */
+export type Navaid = {
+  kind: "navaid"; ident: string; type: NavaidType; position: LatLon; frequency: string; name: string;
+  elevation: NavaidElevation;
+  dmePosition?: LatLon;
+  channel?: string;
+};
+/**
+ * A station's elevation (Stage F1 contract; FMS_STAGE_F_PLAN.md F1). Feet above mean sea level. The source, in order
+ * of preference: `data`, the ARINC 424 record's DME elevation (columns 80-84, feet MSL); `terrain`, the ground
+ * elevation at an invented demonstration site (metres above the geoid, taken as MSL); `assumed`, none available (0 ft,
+ * stated). `provenance` says where the figure came from. A terrain height is the ground's, not the antenna's.
+ */
+export type NavaidElevation = { feet: number; source: "data" | "terrain" | "assumed"; provenance: string };
+/** A record's DME elevation. */
+export const dataElevation = (feet: number): NavaidElevation => Object.freeze({ feet, source: "data" as const, provenance: "ARINC 424 DME elevation (columns 80-84)" });
+/** No elevation from the data (a blank ARINC 424 field, or a VOR-only record): an assumed 0 ft, stated as assumed. */
+export const ASSUMED_ELEVATION: NavaidElevation = Object.freeze({ feet: 0, source: "assumed" as const, provenance: "no elevation in the record" });
+/**
+ * The ground elevation at an invented demonstration site, feet: the Terrarium elevation tiles (AWS open data, from
+ * SRTM and national elevation models), zoom 14, read on 30 September 2026. The demonstration navaids are invented, so no
+ * navigation data gives their elevation; the ground under them is the honest figure, the antenna's height above it
+ * unknown (the profile's terrainNavaidElevationUncertainty).
+ */
+const terrain = (feet: number): NavaidElevation =>
+  Object.freeze({ feet, source: "terrain" as const, provenance: "Terrarium ground elevation, zoom 14, read 30 September 2026 (the ground under the invented site, not the antenna)" });
+
+/**
+ * The DME/TACAN channel paired with a VHF frequency (ICAO Annex 10 Vol I, Attachment C, Table A): 108.00 to 112.25 MHz
+ * are channels 17 to 59, 112.30 to 117.95 MHz channels 70 to 126; a frequency ending in 0 is an X channel, in 5 a Y.
+ * Null for a frequency outside the paired bands or off the 50 kHz raster.
+ */
+export function pairedChannel(mhz: number): string | null {
+  const hundredths = Math.round(mhz * 100);
+  if (hundredths % 5 !== 0) return null;
+  const suffix = hundredths % 10 === 0 ? "X" : "Y";
+  const tenths = Math.floor(hundredths / 10);
+  if (tenths >= 1080 && tenths <= 1122) return `${tenths - 1080 + 17}${suffix}`;
+  if (tenths >= 1123 && tenths <= 1179) return `${tenths - 1123 + 70}${suffix}`;
+  return null;
+}
 export type Runway = { ident: string; threshold: LatLon; course: number; elevation: number; length: number };
 export type Airport = {
   kind: "airport"; ident: string; name: string; position: LatLon; elevation: number; runways: Runway[];
@@ -197,16 +245,16 @@ export const DEMO_NAV_DATA: NavData = {
       runways: [...runwayPair({ lat: 43.6772, lon: -79.6306 }, "05", "23", 57, 11120, 569), ...runwayPair({ lat: 43.6700, lon: -79.6100 }, "15L", "33R", 147, 11050, 569)] },
     { kind: "airport", ident: "CYRO", name: "OTTAWA ROCKCLIFFE", position: { lat: 45.4603, lon: -75.6461 }, elevation: 188,
       runways: runwayPair({ lat: 45.4603, lon: -75.6461 }, "09", "27", 90, 3300, 188) },
-    { kind: "navaid", ident: "YOW", type: "VORDME", position: { lat: 45.4398, lon: -75.8967 }, frequency: "114.60", name: "OTTAWA DEMO" },
-    { kind: "navaid", ident: "YUL", type: "VORDME", position: { lat: 45.6334, lon: -73.8740 }, frequency: "116.30", name: "MONTREAL DEMO" },
+    { kind: "navaid", ident: "YOW", type: "VORDME", position: { lat: 45.4398, lon: -75.8967 }, frequency: "114.60", name: "OTTAWA DEMO", elevation: terrain(433) },
+    { kind: "navaid", ident: "YUL", type: "VORDME", position: { lat: 45.6334, lon: -73.8740 }, frequency: "116.30", name: "MONTREAL DEMO", elevation: terrain(157) },
     // South of the airway, so DME/DME has a usable crossing angle with YOW along the route (YOW and YUL alone
     // lie nearly in line with it).
-    { kind: "navaid", ident: "HWK", type: "VORDME", position: { lat: 45.0000, lon: -74.7000 }, frequency: "115.20", name: "HAWKESBURY DEMO" },
-    { kind: "navaid", ident: "RIG", type: "VOR", position: { lat: 45.5600, lon: -74.7000 }, frequency: "112.10", name: "RIGAUD DEMO" },
-    { kind: "navaid", ident: "OW", type: "NDB", position: { lat: 45.3000, lon: -75.5500 }, frequency: "236", name: "OTTAWA NDB DEMO" },
-    { kind: "navaid", ident: "UL", type: "NDB", position: { lat: 45.5050, lon: -73.6500 }, frequency: "371", name: "DORVAL NDB DEMO" },
+    { kind: "navaid", ident: "HWK", type: "VORDME", position: { lat: 45.0000, lon: -74.7000 }, frequency: "115.20", name: "HAWKESBURY DEMO", elevation: terrain(153) },
+    { kind: "navaid", ident: "RIG", type: "VOR", position: { lat: 45.5600, lon: -74.7000 }, frequency: "112.10", name: "RIGAUD DEMO", elevation: terrain(248) },
+    { kind: "navaid", ident: "OW", type: "NDB", position: { lat: 45.3000, lon: -75.5500 }, frequency: "236", name: "OTTAWA NDB DEMO", elevation: terrain(314) },
+    { kind: "navaid", ident: "UL", type: "NDB", position: { lat: 45.5050, lon: -73.6500 }, frequency: "371", name: "DORVAL NDB DEMO", elevation: terrain(160) },
     // A second BOBTU far to the south: duplicate idents exist in real data, and the FMS asks which one is meant.
-    { kind: "navaid", ident: "BOBTU", type: "NDB", position: { lat: 44.2000, lon: -76.5000 }, frequency: "284", name: "KINGSTON NDB DEMO" },
+    { kind: "navaid", ident: "BOBTU", type: "NDB", position: { lat: 44.2000, lon: -76.5000 }, frequency: "284", name: "KINGSTON NDB DEMO", elevation: terrain(246) },
     fix("MUN", 45.2150, -75.3900), fix("RDG", 45.4300, -74.9800), fix("TOLGU", 45.5020, -74.5100),
     // FERDI, the FAF, is on the RW24R extended centreline (057/237), 4.40 NM from the threshold.
     fix("FERDI", 45.51889, -73.63027), fix("ELIBA", 45.6500, -75.1000), fix("BOBTU", 45.2100, -74.6500),

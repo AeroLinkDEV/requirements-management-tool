@@ -169,7 +169,7 @@ test('a scenario becomes test procedure text, and its run a Markdown report mark
   expect(report).toMatch(/not flight-qualified evidence/)
   expect(report).toMatch(/^- Hardware variation: A$/m)
   // The run names the aircraft profile it flew, with a fingerprint that changes with any profile value (plan A2).
-  expect(report).toMatch(/^- Aircraft profile: cma9000-s300-heli-civil v7 \(fnv1a-[0-9a-f]{8}\): CMA-9000 helicopter, civil SAR target \(S\/W -300 baseline\); 72 of 73 parameters in force; declared only: settlingTime; civil-sar-s300: 87 configured references resolved; \d+ options on \(\d+ implemented, \d+ partial, \d+ pending\)$/m)
+  expect(report).toMatch(/^- Aircraft profile: cma9000-s300-heli-civil v8 \(fnv1a-[0-9a-f]{8}\): CMA-9000 helicopter, civil SAR target \(S\/W -300 baseline\); 74 of 75 parameters in force; declared only: settlingTime; civil-sar-s300: 87 configured references resolved; \d+ options on \(\d+ implemented, \d+ partial, \d+ pending\)$/m)
   expect(report).toMatch(new RegExp(`^- Scenario: manual-rnp, ${scenarioDigest(scenario)}$`, 'm'))
   expect(report).toMatch(/^\| 4 \| Then check that screen line 10 matches \/MANUAL\/\. \| 0 s \| PASS \| RNP\/ANP MANUAL \|$/m)
 })
@@ -382,12 +382,12 @@ test('a scenario names its aircraft profile and makes autopilot selections; both
     { when: { kind: 'start' }, action: { kind: 'autopilot', altitude: 3500, verticalSpeed: 500, speed: 100 } },
   ] }).runner
   expect(climb.results[0]).toEqual({ status: 'done', at: 0 })
-  expect(reportMarkdown(climb)).toMatch(/^- Aircraft profile: cma9000-s300-heli-civil v7 /m)
+  expect(reportMarkdown(climb)).toMatch(/^- Aircraft profile: cma9000-s300-heli-civil v8 /m)
   const lab = runHeadless({ id: 'l', title: 'l', objective: '', maxSeconds: 1, profile: 'lab-airline-vnav', steps: [
     { when: { kind: 'start' }, action: { kind: 'autopilot', verticalSpeed: 500 } },
   ] })
-  expect(reportMarkdown(lab.runner)).toMatch(/^- Aircraft profile: lab-airline-vnav v7 /m)
-  expect(reportMarkdown(lab.runner)).toContain('70 of 73 parameters in force; declared only: advisoryMinimumProgress, temperatureLapseRate, settlingTime')
+  expect(reportMarkdown(lab.runner)).toMatch(/^- Aircraft profile: lab-airline-vnav v8 /m)
+  expect(reportMarkdown(lab.runner)).toContain('72 of 75 parameters in force; declared only: advisoryMinimumProgress, temperatureLapseRate, settlingTime')
   // VS is a helicopter-profile mode: under the laboratory VNAV profile it is an execution error, not a silent pass.
   expect(lab.runner.outcome).toBe('error')
   expect(scenarioProblems({ id: 'x', title: 'x', objective: '', maxSeconds: 1, profile: 'jet', steps: [] })).toEqual([expect.stringMatching(/profile must be one of cma9000-s300-heli-civil, cma9000-later-sbas-heli, lab-airline-vnav/)])

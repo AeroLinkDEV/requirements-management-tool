@@ -1,5 +1,6 @@
 import { bearingDeg, distanceNm } from "./fmsModel";
 import type { Airport, Airway, Msa, NavData, NavEntry, NavaidType, Procedure, ProcedureEndpoint, ProcedureLeg, PublishedFas } from "./navData";
+import { ASSUMED_ELEVATION, dataElevation, pairedChannel } from "./navData";
 import { DEPARTURE_CHARTS, PROCEDURE_CHARTS } from "./procedureCharts";
 import { codedVerticalAngle, constraintText, decodeProcedureLegs, type ProcedureRecord } from "./procedureLegs";
 
@@ -57,20 +58,27 @@ export function arincLongitude(text: string) {
  * Latitude 33-41 and longitude 42-51, common to the records read here: a position, "missing" when the fields do not
  * hold coordinates, or "impossible" when they have the shape of coordinates but a value out of range.
  */
-function position(line: string) {
-  const latText = col(line, 33, 41), lonText = col(line, 42, 51);
+function position(line: string, latAt: readonly [number, number] = [33, 41], lonAt: readonly [number, number] = [42, 51]) {
+  const latText = col(line, ...latAt), lonText = col(line, ...lonAt);
   const lat = arincLatitude(latText), lon = arincLongitude(lonText);
   if (lat !== null && lon !== null) return { lat, lon };
   return /^[NS]\d{8}$/.test(latText) && /^[EW]\d{9}$/.test(lonText) ? "impossible" as const : "missing" as const;
 }
 
-function navaidType(navaidClass: string, ndb: boolean): NavaidType {
+/**
+ * The navaid class (columns 28-32): the first character V for a VOR; the second D for a DME, T or M for a (military)
+ * TACAN, I for an ILS/DME and N or P for an MLS/DME. A DME of an ILS or MLS is a DME station here.
+ */
+function navaidType(navaidClass: string, ndb: boolean): NavaidType | null {
   if (ndb) return "NDB";
-  const vor = navaidClass[0] === "V", dme = navaidClass[1] === "D", tacan = navaidClass[1] === "T";
+  const vor = navaidClass[0] === "V", second = navaidClass[1] ?? " ";
+  const tacan = second === "T" || second === "M", dme = "DINP".includes(second) && second !== " ";
   if (vor && tacan) return "VORTAC";
   if (vor && dme) return "VORDME";
-  if (vor) return "VOR";
-  return "DME";
+  if (vor && second === " ") return "VOR";
+  if (tacan) return "TACAN";
+  if (dme) return "DME";
+  return null;
 }
 
 export function parseArinc424(text: string, options: Arinc424Options = {}): Arinc424Result {
@@ -153,20 +161,42 @@ export function parseArinc424(text: string, options: Arinc424Options = {}): Arin
       read += 1;
       return;
     }
-    // VHF navaid (D blank) and NDB (DB): ident 14-17, continuation 22, frequency 23-27, class 28-32, name 94-123.
+    // VHF navaid (D blank) and NDB (DB): ident 14-17, continuation 22, frequency 23-27, class 28-32, VOR position 33-51,
+    // DME position 56-74, DME elevation 80-84 (feet), name 94-123 (ARINC 424-18 4.1.2, 4.1.3).
     if (section === "D" && (subsection === " " || subsection === "B")) {
       if (!"01".includes(line[21])) { skipped += 1; return; }
       const ndb = subsection === "B";
       const name = ident(14, 17, "navaid ident");
       if (!name) return;
-      const vhf = located("navaid position");
-      // A DME-only station has no VOR position; it gives its DME position at 56-74, which this reader does not use.
+      // The class is positional (column 28 the VOR, 29 the DME or TACAN): read it untrimmed.
+      const type = navaidType(line.slice(27, 32).padEnd(5), ndb);
+      if (!type) { fail(`navaid class "${col(line, 28, 32)}" names no VOR, DME or TACAN`); return; }
+      const hasDme = type !== "VOR" && type !== "NDB";
+      // A DME's own position; a DME-only or TACAN-only station has no VOR position and is placed at its DME.
+      let dme: { lat: number; lon: number } | undefined;
+      if (hasDme) {
+        const at = position(line, [56, 64], [65, 74]);
+        if (at === "impossible") { impossible("DME position"); return; }
+        if (at === "missing" && (type === "DME" || type === "TACAN")) { fail("DME-only record without a DME position"); return; }
+        if (typeof at === "object") dme = at;
+      }
+      const vorText = col(line, 33, 51);
+      const vhf = type === "DME" || type === "TACAN" ? (vorText ? located("navaid position") : dme) : located("navaid position");
       if (!vhf) return;
       // VHF in tens of kHz, 108.00 to 117.95 MHz; NDB in tenths of a kHz, 190 to 1750 kHz.
       const raw = ndb ? integer(23, 27, 1900, 17500, "NDB frequency", null) : integer(23, 27, 10800, 11795, "VHF frequency", null);
       if (raw === undefined) return;
       const frequency = ndb ? String(raw / 10) : (raw / 100).toFixed(2);
-      entries.push({ kind: "navaid", ident: name, type: navaidType(col(line, 28, 32), ndb), position: vhf, frequency, name: col(line, 94, 123) });
+      // The station's elevation: the DME elevation when given; blank is stated as assumed, never read as sea level.
+      const feet = hasDme ? integer(80, 84, -1500, 30000, "DME elevation", NaN) : NaN;
+      if (feet === undefined) return;
+      const elevation = Number.isFinite(feet) ? dataElevation(feet as number) : ASSUMED_ELEVATION;
+      const channel = ndb ? null : pairedChannel(raw / 100);
+      entries.push({
+        kind: "navaid", ident: name, type, position: vhf, frequency, name: col(line, 94, 123), elevation,
+        ...(dme && (type === "VORDME" || type === "VORTAC") ? { dmePosition: dme } : {}),
+        ...(channel && hasDme ? { channel } : {}),
+      });
       read += 1;
       return;
     }

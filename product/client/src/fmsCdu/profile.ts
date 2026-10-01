@@ -66,7 +66,7 @@ const p = (value: number, unit: string, basis: ParameterBasis, source: string, i
 
 export const HELICOPTER_PROFILE: AircraftProfile = {
   id: "cma9000-s300-heli-civil",
-  version: 7,
+  version: 8,
   defaultAngleReference: "MAG",
   title: "CMA-9000 helicopter, civil SAR target (S/W -300 baseline)",
   aircraftType: "ROTOR",
@@ -99,6 +99,8 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     radioCrossAngle: p(30, "deg", "lab", "minimum DME crossing angle; maximum is its supplement", true),
     radioResidualLimit: p(0.5, "NM", "lab", "maximum range-circle residual", true),
     radioMinFacilities: p(3, "facilities", "sourced", "M300 1-8: fewer than three DMEs falls back to VOR/DME", true),
+    terrainNavaidElevationUncertainty: p(100, "ft", "lab", "Stage F1: an engineering allowance for a bounded demonstration, not a 95 percent or integrity bound: how far a navaid elevation taken from the ground at an invented site may be from the antenna (its unknown mast height, typically 10 to 30 m, and the elevation model's vertical accuracy, SRTM about 16 m at 90 percent). No source gives the antenna", true),
+    assumedNavaidElevationUncertainty: p(1000, "ft", "lab", "Stage F1: an engineering allowance for a bounded demonstration, not a 95 percent or integrity bound: how far a navaid elevation the data does not give (stated as assumed) may be wrong. It cannot bound an unknown station elevation in general. No source gives it", true),
     drWindUncertainty: p(2, "kt", "lab", "DR last-wind uncertainty allowance", true),
     drTasUncertainty: p(0.5, "kt", "lab", "DR TAS uncertainty allowance", true),
     drHeadingUncertainty: p(1, "deg", "lab", "DR heading uncertainty allowance", true),
@@ -174,7 +176,7 @@ export const ACTIVE_PROFILE = HELICOPTER_PROFILE;
 export const LATER_SBAS_PROFILE: AircraftProfile = {
   ...HELICOPTER_PROFILE,
   id: "cma9000-later-sbas-heli",
-  version: 3,
+  version: 4,
   title: "Later CMA software + CMA-5024 SBAS helicopter (representative simulation)",
   operationalProgram: "later SBAS-capable CMA family; exact OEM software baseline unqualified",
   approachPolicy: "SBAS_COUPLED",
