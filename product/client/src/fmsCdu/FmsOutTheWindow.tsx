@@ -407,7 +407,8 @@ async function startScene(
 
   const ahead = new Cesium.Cartesian3();
   const followCamera = aircraftCamera(Cesium, camera);
-  const onFrame = () => {
+  let frame: { state: Live; air: AircraftSample; height: number } | null = null;
+  const updateCamera = () => {
     const state = live.current;
     if (!state) return;
     const fraction = (performance.now() - state.at) / state.interval;
@@ -420,6 +421,11 @@ async function startScene(
     const height = state.view === "map" || ground === undefined ? pose.height : Math.max(pose.height, ground + 3);
     // Only a new aircraft pose moves the camera; retain its basis through Cesium's own angle-read rounding.
     followCamera({ ...pose, height });
+    frame = { state, air, height };
+  };
+  const onFrame = () => {
+    if (!frame) return;
+    const { state, air, height } = frame;
     if (colouringChoice === "relative") relative.uniforms.aircraft = air.altitude * FT;
     obstacles.update(air.altitude, colouringChoice);
     const at = Cesium.Cartesian3.fromDegrees(air.position.lon, air.position.lat, air.altitude * FT);
@@ -451,7 +457,9 @@ async function startScene(
   };
   // preUpdate runs after initializeFrame and before Cesium tests the camera for demand rendering. preRender
   // runs only once that decision has been made, too late to keep a frozen aircraft's camera fixed (#1298).
-  scene.preUpdate.addEventListener(onFrame);
+  scene.preUpdate.addEventListener(updateCamera);
+  // Models, obstacle colours and HUD projections only change on a drawn frame, including when paused.
+  scene.preRender.addEventListener(onFrame);
   // The frames drawn, on the scene element: the scene draws only on change, and this is how that can be seen (and tested),
   let frames = 0;
   // With whether the globe has every tile it needs: until then Cesium keeps drawing as tiles arrive.
@@ -499,7 +507,8 @@ async function startScene(
     destroy: () => {
       helicopter.destroy();
       obstacles.destroy();
-      scene.preUpdate.removeEventListener(onFrame);
+      scene.preUpdate.removeEventListener(updateCamera);
+      scene.preRender.removeEventListener(onFrame);
       scene.postRender.removeEventListener(counted);
       stopQueueWatch();
       shader.dispose();
