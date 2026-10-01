@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "logic": [
+    "bootstrap-retry.spec.ts",
     "project-navigation-contract.spec.ts",
     "repository-configuration-contract.spec.ts",
     "artifact-thread-contract.spec.ts",
@@ -73,8 +74,7 @@
     "fms-gps-lnav-only.spec.ts",
     "fms-prediction-endpoints.spec.ts",
     "fms-stage-f-configuration.spec.ts",
-    "fms-sensor-state.spec.ts",
-    "bootstrap-retry.spec.ts"
+    "fms-sensor-state.spec.ts"
   ],
   "rendered": [
     "layout-settled.spec.ts",
