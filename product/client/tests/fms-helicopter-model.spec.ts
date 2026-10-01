@@ -148,3 +148,20 @@ for (const phase of ['before decoding', 'before GPU readiness'] as const) {
     expect(() => state.aircraft.update(Matrix4.IDENTITY, 1, true)).not.toThrow()
   })
 }
+
+test('a GPU initialization error retains the fallback and releases the model after Cesium finishes its update', async () => {
+  const state = pendingAircraft()
+  await state.decoded()
+  state.model.errorEvent.raiseEvent(new Error('GPU initialization failed'))
+  // Cesium continues Model.update after emitting this event, so destroying here would cause a second error.
+  expect(state.model.destroyed).toBe(false)
+  expect(state.aircraft.loaded).toBe(false)
+  expect(() => state.aircraft.update(Matrix4.IDENTITY, 1, true)).not.toThrow()
+  await expect(state.aircraft.ready).resolves.toMatchObject({ failed: expect.stringContaining('GPU initialization failed') })
+  expect(state.model.destroyed).toBe(true)
+  expect(state.counts().removed).toBe(1)
+  expect(state.model.readyEvent.numberOfListeners).toBe(0)
+  expect(state.model.errorEvent.numberOfListeners).toBe(0)
+  state.aircraft.destroy()
+  expect(state.counts().removed).toBe(1)
+})

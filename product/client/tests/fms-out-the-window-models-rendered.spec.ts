@@ -9,13 +9,25 @@ test('the chase view flies the glTF helicopter model, its rotors turning, in pla
   test.setTimeout(180_000)
   // Flat ground in a small window, so the globe loads quickly on the software renderer; the model does not need terrain.
   await page.setViewportSize({ width: 700, height: 500 })
+  // Enter Chase while decoding is still pending, as on a fresh/reloaded demo. The old owner selected
+  // Chase only after the model was ready and missed the decoded-file/GPU initialization race (#1443).
+  let releaseModel!: () => void
+  const modelGate = new Promise<void>(resolve => { releaseModel = resolve })
+  await page.route('**/fms-cdu/models/helicopter-light-twin.glb', async route => {
+    await modelGate
+    await route.fallback()
+  })
+  const modelRequested = page.waitForRequest('**/fms-cdu/models/helicopter-light-twin.glb')
+  try {
   await open(page, 'off')
   const view = await show(page)
   const scene = view.locator('.fmsOtwScene')
   // The model (public/fms-cdu/models/helicopter-light-twin.glb) loads from the bench's own origin.
-  await expect(scene, 'the helicopter model loads').toHaveAttribute('data-model', 'glb', { timeout: 60_000 })
+  await modelRequested
   await page.getByRole('radiogroup', { name: 'Window view' }).getByText('Chase', { exact: true }).click()
   await expect(view).toHaveClass(/view-chase/)
+  releaseModel()
+  await expect(scene, 'the helicopter model becomes render-ready in Chase').toHaveAttribute('data-model', 'glb', { timeout: 60_000 })
   await page.getByRole('button', { name: 'Fly' }).click()
   await page.waitForTimeout(2000)
   const first = await view.screenshot({ path: testInfo.outputPath('chase-model-1.png') })
@@ -24,6 +36,9 @@ test('the chase view flies the glTF helicopter model, its rotors turning, in pla
   // Flying, the frames differ (the rotors turn and the aircraft moves); the view stays running.
   expect(Buffer.compare(first, second)).not.toBe(0)
   await expect(view).toHaveAttribute('data-status', 'ready')
+  } finally {
+    releaseModel()
+  }
 })
 
 // Brief C: the FAA Digital Obstacle File extract near the bench areas (public/fms-cdu/obstacles, with its provenance)
