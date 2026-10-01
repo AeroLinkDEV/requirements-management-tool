@@ -75,6 +75,7 @@ export class CivilNavigation {
   private previousRadio: { position: LatLon; at: number; gpsDependent: boolean } | null = null;
   /** Whether the wind DR carries was computed from GPS velocity, or from radio fixes that were themselves GPS-dependent. */
   private windGpsDependent = false;
+  private windAt: number | null = null;
   private readonly parameters: AircraftProfile["parameters"];
   constructor(initial: LatLon, parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters,
     equipment: { kalman: boolean; dvs: boolean } = { kalman: false, dvs: false }) {
@@ -86,6 +87,7 @@ export class CivilNavigation {
   }
   get current(): CivilSolution { return structuredClone(this.solution); }
   get windEstimate() { return { ...this.wind }; }
+  get measuredWind() { return this.windAt === null ? null : { ...this.wind, at: this.windAt, gpsDependent: this.windGpsDependent }; }
   accept(solution: CivilSolution, wind: { north: number; east: number }) {
     this.solution = structuredClone(solution);
     this.wind = { ...wind };
@@ -142,7 +144,7 @@ export class CivilNavigation {
     // Plan F3 step 3 (and step 4's radio order when none has integrity).
     const radio = chooseRadio(fixes, this.solution.mode, input.rnp);
     const priorGpsDependent = this.solution.gpsDependent;
-    const fixGpsDependent = (fix: RadioFix) => fix.priorResolved && priorGpsDependent;
+    const fixGpsDependent = (fix: RadioFix) => fix.motion?.gpsDependent === true || fix.priorResolved && priorGpsDependent;
     // Transitive provenance (plan C1): a fix the prior estimate had to disambiguate inherits the prior's GPS dependency.
     const radioGpsDependent = radio !== null && fixGpsDependent(radio);
     const airValid = air !== null && [air.headingTrue, air.tasKt, air.altitudeFt].every(Number.isFinite)
@@ -163,7 +165,7 @@ export class CivilNavigation {
       const fresh = (fix: RadioFix) => input.now === undefined || input.naimMaxAgeS === undefined
         || (input.now >= fix.oldestAt && input.now - fix.oldestAt <= input.naimMaxAgeS * 1000);
       const backup = input.radioApproved
-        ? chooseRadio(fixes.filter(fix => fresh(fix) && withinLimit(fix.anp, input.rnp) && !fixGpsDependent(fix)), "GPS", input.rnp)
+        ? chooseRadio(fixes.filter(fix => fix.naimEligible !== false && fresh(fix) && withinLimit(fix.anp, input.rnp) && !fixGpsDependent(fix)), "GPS", input.rnp)
         : null;
       const comparison = backup ? distanceNm(input.uncertainGps.position, backup.position) + backup.anp : null;
       naim = comparison;
@@ -181,6 +183,7 @@ export class CivilNavigation {
         const heading = air!.headingTrue * Math.PI / 180;
         this.wind = { north: gps.northKt - air!.tasKt * Math.cos(heading), east: gps.eastKt - air!.tasKt * Math.sin(heading) };
         this.windGpsDependent = true;
+        this.windAt = input.now ?? null;
         this.solution.windComputed = true;
       }
       // Aiding (plan C2): only a GPS with integrity, valid velocity words and a 95% accuracy; it restarts the coast clock.
@@ -197,6 +200,7 @@ export class CivilNavigation {
         const heading = air!.headingTrue * Math.PI / 180;
         this.wind = { north: north - air!.tasKt * Math.cos(heading), east: east - air!.tasKt * Math.sin(heading) };
         this.windGpsDependent = radioGpsDependent || previous.gpsDependent;
+        this.windAt = input.now ?? radio.at;
       }
       const windComputed = airValid && !lowSpeed && previous !== null && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value;
       if (!previous || radio.at > previous.at) this.previousRadio = { position: { ...radio.position }, at: radio.at, gpsDependent: radioGpsDependent };

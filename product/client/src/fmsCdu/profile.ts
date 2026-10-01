@@ -98,7 +98,7 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     dmeScanAcquisition: p(0.5, "s", "lab", "plan C3: a scan channel's range acquisition after it moves to a station", true),
     dmeRangeCacheAge: p(4, "s", "lab", "plan C3: how long a station's cached range stays usable for navigation (at least one full dwell cycle)", true),
     naimRangeMaxAge: p(4, "s", "lab", "plan C3: the oldest range a NAIM backup fix may contain (at most the cache age)", true),
-    rangeMotionWindAllowance: p(50, "kt", "lab", "plan C3: wind added to air-data TAS to bound the motion over a cached range's age (no GPS input)", true),
+    rangeMotionWindAllowance: p(50, "kt", "lab", "plan C3: residual velocity allowance after measured motion compensation; with no motion, added to TAS for navigation-only stale geometry", true),
     radioRangeBias: p(0.02, "NM", "lab", "deterministic radio slant-range bias", true),
     radioBearingBias: p(0.25, "deg", "lab", "deterministic VOR bearing bias", true),
     radioCrossAngle: p(30, "deg", "lab", "minimum DME crossing angle; maximum is its supplement", true),

@@ -1,10 +1,15 @@
 import { expect, logicTest as test } from './isolated-client-test'
 import { DualFmsSystem } from '../src/fmsCdu/dualFms'
 import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
-import { RADIO_MESSAGE_ROWS, RADIO_NAMES, RadioManagementSystem } from '../src/fmsCdu/radioManagement'
+import { RADIO_MESSAGE_ROWS, RADIO_NAMES, SCAN_CHANNELS, RadioManagementSystem } from '../src/fmsCdu/radioManagement'
 import { APPENDIX_E } from '../src/fmsCdu/appendixE'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
+import { bearingDeg, distanceNm, offset } from '../src/fmsCdu/fmsModel'
+import { CivilNavigation } from '../src/fmsCdu/civilNavigation'
+import { radioFixes, type RadioMotion } from '../src/fmsCdu/radioNavigation'
+import type { RadioObservation, SensorFrame } from '../src/fmsCdu/sensorPorts'
+import type { Navaid } from '../src/fmsCdu/navData'
 
 // Stage F plan F8a (M300 13-1 to 13-26, 3-26, Appendix E), on the shared civil RMS of #1350: each radio device answers
 // with feedback, its separate internal states (plan C3) decide what it reports and which Appendix E rows are met, and navigation measures only through what the radios report.
@@ -240,4 +245,220 @@ test('C3: each radio message row names the Appendix E page the shared catalogue 
   // The command-timeout rows: NAV E-13, ADF E-2.
   expect(APPENDIX_E['NAV1 CONTROL LOST']).toEqual({ page: 'E-13' })
   expect(APPENDIX_E['ADF2 CONTROL LOST']).toEqual({ page: 'E-2' })
+})
+
+const roster = ['A', 'B', 'C', 'D', 'E', 'F'].map((ident, i) => ({ ident, frequency: `11${i}.00` }))
+
+test('C3: a six-station roster is spread over the four scan channels; two channels alternate two stations each dwell', () => {
+  let now = T0 - (T0 % 4000)
+  const rms = new RadioManagementSystem(() => now, () => true, () => {}, 0.25, 2)
+  rms.setScanRoster(roster, 2)
+  expect(SCAN_CHANNELS).toHaveLength(4)
+  const onAir = () => rms.scanning().map(entry => `${entry.device}/${entry.channel}:${entry.ident}`).sort()
+  expect(onAir()).toEqual(['dme1/2:A', 'dme1/3:C', 'dme2/2:B', 'dme2/3:D'])
+  now += 2000
+  expect(onAir()).toEqual(['dme1/2:E', 'dme1/3:C', 'dme2/2:F', 'dme2/3:D'])
+  // HOLD keeps channel 1 on the held frequency and does not touch the scan channels.
+  rms.setDmeHold('dme2', true)
+  expect(onAir()).toEqual(['dme1/2:E', 'dme1/3:C', 'dme2/2:F', 'dme2/3:D'])
+  // At most six, and no station twice.
+  rms.setScanRoster([...roster, { ident: 'G', frequency: '117.00' }, { ident: 'A', frequency: '110.00' }], 2)
+  expect(rms.scanRoster().map(station => station.ident)).toEqual(['A', 'B', 'C', 'D', 'E', 'F'])
+})
+
+test('C3: a DME under TEST or with its bus lost hands its stations to the other DME\'s channels, which dwell on three each', () => {
+  let now = T0 - (T0 % 6000)
+  const rms = new RadioManagementSystem(() => now, () => true, () => {}, 0.25, 2)
+  rms.setScanRoster(roster, 2)
+  rms.pressTest('dme1'); rms.pressTest('dme1')
+  const seen = new Set<string>()
+  for (let dwell = 0; dwell < 3; dwell++) {
+    const on = rms.scanning()
+    expect(on.map(entry => entry.device)).toEqual(['dme2', 'dme2'])
+    on.forEach(entry => seen.add(entry.ident))
+    now += 2000
+  }
+  expect([...seen].sort()).toEqual(['A', 'B', 'C', 'D', 'E', 'F'])
+})
+
+
+// Authoring gate (R3-01): epoch alignment, immutable original identity/expiry and compensation dependency are one
+// radio integration contract. The recovered tests asserted only an accuracy widening and could pass without motion.
+// Literal eastward displacement, stale-source and exact expiry controls fail those regressions; production solvers
+// and the measured-input estimator boundary need no test-only getter.
+const CACHE_AT = { lat: 0, lon: 0 }
+const cacheParameters = HELICOPTER_PROFILE.parameters
+function rangesAt(at: number): RadioObservation[] {
+  return [90, 0, 225].map((course, index) => {
+    const station: Navaid = { kind: 'navaid', type: 'DME', ident: `C${index}`, name: 'Range fixture', frequency: `11${index}.00`,
+      position: offset(CACHE_AT, course, 10), elevation: { feet: 0, source: 'data', provenance: 'fixture survey' } }
+    return { station, rangeIdentity: { receiver: 'dme1', channel: index === 0 ? 2 : 3, frequency: station.frequency, commandSequence: 7 },
+      slantRangeNm: { at, sequence: 9, status: 'NORMAL', value: 10 }, bearingTrue: { at, sequence: 9, status: 'NCD', value: null } }
+  })
+}
+const cachedFix = (observations: RadioObservation[], now: number, motion: RadioMotion | null) =>
+  radioFixes(observations, CACHE_AT, 0, now, cacheParameters, { rangeMaxAgeS: 4, motion }).find(fix => fix.mode === 'DME/DME')
+
+test('C3: compensation aligns ranges to the new epoch without renewing observation identity, age or expiry', () => {
+  const observations = rangesAt(T0), original = structuredClone(observations)
+  const motion: RadioMotion = { source: 'DVS', at: T0 + 1000, northKt: 0, eastKt: 600, gpsDependent: false }
+  const fix = cachedFix(observations, T0 + 1000, motion)!
+  expect(fix.position.lat).toBeCloseTo(0, 3)
+  expect(fix.position.lon).toBeCloseTo(1 / 360, 3) // 600 kt for 1 s = 1/6 NM east = 1/360 degree.
+  expect(fix.at).toBe(T0 + 1000)
+  expect(fix.oldestAt).toBe(T0)
+  expect(fix.observations).toEqual(original)
+  expect(observations).toEqual(original)
+  expect(fix.motion).toEqual(motion)
+  expect(fix.naimEligible).toBe(true)
+  const atExpiry = cachedFix(observations, T0 + 4000, { ...motion, at: T0 + 4000 })!
+  expect(atExpiry.oldestAt).toBe(T0)
+  expect(cachedFix(observations, T0 + 4001, { ...motion, at: T0 + 4001 })).toBeUndefined()
+  // Source time is its own clock; a fresh fix epoch must not refresh it.
+  const staleMotion = cachedFix(observations, T0 + 3001, { ...motion, at: T0 })!
+  expect(staleMotion.motion).toBeNull()
+  expect(staleMotion.naimEligible).toBe(false)
+})
+
+test('C3: dependent motion can navigate but cannot supply a GPS-independent NAIM comparison; accuracy never clears dependency', () => {
+  const observations = rangesAt(T0), now = T0 + 1000
+  const source: RadioMotion = { source: 'AIR_WIND', at: now, northKt: 0, eastKt: 600, gpsDependent: true }
+  const dependent = cachedFix(observations, now, source)!
+  const independent = cachedFix(observations, now, { ...source, source: 'DVS', gpsDependent: false })!
+  const check = (radio: typeof dependent) => {
+    const nav = new CivilNavigation(CACHE_AT)
+    return nav.update({ dt: 0, air: null, gps: null, uncertainGps: { position: offset(CACHE_AT, 0, 3), accuracy95Nm: 0.02,
+      hilNm: 2, receiver: 1, northKt: null, eastKt: null }, radios: [radio], radio: null, radioApproved: true, rnp: 1, now, naimMaxAgeS: 4 })
+  }
+  const rejected = check(dependent)
+  expect(rejected.mode).toBe('GPS')
+  expect(rejected.sensors.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeNull()
+  expect(rejected.sensors.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(true)
+  const compared = check(independent)
+  expect(compared.mode).toBe('DME/DME')
+  expect(compared.sensors.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeGreaterThan(3)
+  expect(compared.gpsDependent).toBe(false)
+  const staleComparison = check({ ...independent, oldestAt: now - 4001 })
+  expect(staleComparison.mode).toBe('GPS')
+  expect(staleComparison.sensors.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeNull()
+})
+
+test('C3: legacy receiver words without identity remain fresh-only and never qualify for NAIM', () => {
+  const observations = rangesAt(T0).map(({ rangeIdentity: _identity, ...observation }) => observation)
+  const fresh = cachedFix(observations, T0, null)!
+  expect(fresh).toBeDefined()
+  expect(fresh.naimEligible).toBe(false)
+})
+
+function measuredCache() {
+  let now = T0
+  const seed = new ScriptedFms(() => new Date(now))
+  seed.setAircraft({ position: { lat: 45.5, lon: -74.9 }, altitude: 6000 })
+  for (let i = 0; i < 5; i++) { now += 1000; seed.updateNavigation(1) }
+  let frame: SensorFrame = structuredClone(seed.navigationInputs!)
+  const range = frame.radios.find(observation => observation.slantRangeNm.status === 'NORMAL' && observation.bearingTrue.status === 'NORMAL')!
+  expect(range).toBeDefined()
+  const healthyGps = structuredClone(frame.gps)
+  frame.radios = frame.radios.filter(observation => observation.slantRangeNm.status === 'NORMAL')
+    .map(observation => ({ ...observation, rangeIdentity: { ...observation.rangeIdentity!, receiver: 'dme1', channel: 2 } }))
+  const missingGps = frame.gps.map(word => ({ ...word, status: 'NCD' as const, value: null }))
+  frame.gps = [missingGps[0], missingGps[1]]
+  frame.air.value = { headingTrue: 90, tasKt: 600, altitudeFt: frame.air.value!.altitudeFt }
+  frame.dvs = { at: now, sequence: 1, status: 'NORMAL', value: { alongKt: 600, acrossKt: 0 } }
+  const unit = new ScriptedFms(() => new Date(now), { sensors: { read: () => structuredClone(frame) } })
+  const step = (milliseconds: number, dvs = true) => {
+    now += milliseconds
+    frame.air.at = now; frame.air.sequence++
+    frame.dvs = { ...frame.dvs!, at: now, sequence: frame.dvs!.sequence + 1, status: dvs ? 'NORMAL' : 'FAIL' }
+    frame.radios = []
+    unit.updateNavigation(milliseconds / 1000)
+  }
+  return { unit, step, range: frame.radios[0], frame, healthyGps, now: () => now }
+}
+
+test('C3: RMS station cache keeps ranges after the channels move on, uses independent DVS plus crew current, and expires without renewed ranges', () => {
+  const { unit, step } = measuredCache()
+  expect(unit.navState.mode).toBe('DME/DME')
+  const start = unit.position
+  unit.setWaterCurrent(90, 60)
+  step(1000)
+  expect(unit.navState.mode).toBe('DME/DME')
+  expect(distanceNm(start, unit.position)).toBeCloseTo(11 / 60, 2) // (600 + 60) kt for 1 second.
+  expect(unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(false)
+  step(3000)
+  expect(unit.navState.mode).toBe('DME/DME')
+  step(1)
+  expect(unit.navState.mode).not.toBe('DME/DME')
+})
+
+test('C3: old arrivals and legacy identity-less ranges cannot populate the cache; TEST, bus loss and station deselection invalidate it', () => {
+  for (const invalidate of ['bus', 'test', 'station', 'identity', 'arrival'] as const) {
+    const { unit, step, range, frame } = measuredCache()
+    expect(unit.navState.mode).toBe('DME/DME')
+    if (invalidate === 'bus') unit.setRadioFaults(range.rangeIdentity!.receiver, { measurementBus: 'LOST' })
+    if (invalidate === 'test') { unit.radioPort!.pressTest(range.rangeIdentity!.receiver); unit.radioPort!.pressTest(range.rangeIdentity!.receiver) }
+    if (invalidate === 'station') unit.setInhibited([range.station.ident])
+    if (invalidate === 'identity' || invalidate === 'arrival') {
+      const fresh = structuredClone(frame)
+      fresh.radios = [{ ...range, ...(invalidate === 'identity' ? { rangeIdentity: undefined }
+        : { slantRangeNm: { ...range.slantRangeNm, at: range.slantRangeNm.at - 2001 } }) }]
+      let candidateNow = fresh.air.at
+      const candidate = new ScriptedFms(() => new Date(candidateNow), { sensors: { read: () => fresh } })
+      fresh.radios = []
+      candidateNow += 1000; fresh.air.at = candidateNow
+      candidate.updateNavigation(1)
+      expect(candidate.navState.mode).not.toBe('VOR/DME')
+      continue
+    }
+    step(1000)
+    expect(unit.navState.mode).not.toBe('DME/DME')
+  }
+})
+
+
+test('C3: successive independent radio observations take priority over a conflicting DVS velocity', () => {
+  const { unit, frame, step, now } = measuredCache()
+  const measured = unit.position
+  const ranges = structuredClone(frame.radios)
+  const arrive = (position: typeof measured) => {
+    frame.radios = ranges.map(observation => ({ ...observation,
+      slantRangeNm: { ...observation.slantRangeNm, at: now(), sequence: observation.slantRangeNm.sequence + 1,
+        value: Math.hypot(distanceNm(position, observation.station.dmePosition ?? observation.station.position),
+          (frame.air.value!.altitudeFt - observation.station.elevation.feet) / 6076.12) },
+      bearingTrue: { ...observation.bearingTrue, at: now(), sequence: observation.bearingTrue.sequence + 1,
+        value: bearingDeg(observation.station.position, position) } }))
+    unit.updateNavigation(0)
+  }
+  // Two independently generated, unbiassed observations move 0.1 NM east in one second (360 kt).
+  step(1000); arrive(measured)
+  step(1000); arrive(offset(measured, 90, 0.1))
+  const radioAtSecond = unit.position
+  step(1000)
+  expect(unit.navState.mode).toBe('DME/DME')
+  expect(distanceNm(radioAtSecond, unit.position)).toBeCloseTo(0.1, 2)
+  expect(unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(false)
+})
+
+test('C3: GPS-derived last wind tags cached radio motion dependent, so GPS-only changes never establish an independent NAIM backup', () => {
+  const { unit, frame, healthyGps, step } = measuredCache()
+  frame.radios = []
+  frame.dvs = { ...frame.dvs!, status: 'FAIL', value: null }
+  frame.gps = healthyGps
+  unit.updateNavigation(0)
+  expect(unit.navState.mode).toBe('GPS')
+  step(1000, false)
+  expect(unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(true)
+  // Bias GPS alone by 3 NM north, then reject its integrity. Old radio evidence cannot assess its own aiding source.
+  const biased = frame.gps.map(word => {
+    const bus = structuredClone(word.value!)
+    bus['110'] = { ...bus['110'], value: bus['110'].value! + 3 / 60 }
+    bus['130'] = { ...bus['130'], value: 10 }
+    return { ...word, value: bus }
+  })
+  frame.gps = [biased[0], biased[1]]
+  step(1000, false)
+  expect(unit.navState.mode).toBe('GPS')
+  expect(unit.navState.uncertain).toBe(true)
+  expect(unit.sensorSolutions.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeNull()
+  expect(unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(true)
 })
