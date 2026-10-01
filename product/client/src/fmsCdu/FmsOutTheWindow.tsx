@@ -9,6 +9,7 @@ import { GroundImagery, IMAGERY_MAX_ZOOM, browserImageryDecoder, type ImagerySou
 import { MAIN_ROTOR_RAD_S, createAircraftModel } from "./otwAircraftModel";
 import { createObstacleLayer } from "./otwObstacles";
 import { workerReliefShader } from "./reliefShader";
+import { aircraftCamera } from "./otwCamera";
 import {
   ABSOLUTE_BANDS_FT, ABSOLUTE_RGB, CAUTION_RGB, DANGER_RGB, RELATIVE_CAUTION_FT, RELATIVE_DANGER_FT, type TerrainColouring,
 } from "./terrainAwareness";
@@ -405,7 +406,7 @@ async function startScene(
   });
 
   const ahead = new Cesium.Cartesian3();
-  let lastPose = "";
+  const followCamera = aircraftCamera(Cesium, camera);
   const onFrame = () => {
     const state = live.current;
     if (!state) return;
@@ -417,16 +418,8 @@ async function startScene(
     // The simulation knows nothing of terrain; the eye is kept above the ground it would otherwise fly through.
     const ground = scene.globe.getHeight(Cesium.Cartographic.fromDegrees(pose.longitude, pose.latitude));
     const height = state.view === "map" || ground === undefined ? pose.height : Math.max(pose.height, ground + 3);
-    // Only a new pose moves the camera: setting the same view again leaves rounding differences that Cesium, comparing
-    // cameras to 1e-15, takes for a move, and a paused view then kept drawing several frames a second.
-    const key = `${pose.longitude} ${pose.latitude} ${height} ${pose.heading} ${pose.pitch} ${pose.roll}`;
-    if (key !== lastPose) {
-      lastPose = key;
-      camera.setView({
-        destination: Cesium.Cartesian3.fromDegrees(pose.longitude, pose.latitude, height),
-        orientation: { heading: pose.heading, pitch: pose.pitch, roll: pose.roll },
-      });
-    }
+    // Only a new aircraft pose moves the camera; retain its basis through Cesium's own angle-read rounding.
+    followCamera({ ...pose, height });
     if (colouringChoice === "relative") relative.uniforms.aircraft = air.altitude * FT;
     obstacles.update(air.altitude, colouringChoice);
     const at = Cesium.Cartesian3.fromDegrees(air.position.lon, air.position.lat, air.altitude * FT);
@@ -456,7 +449,9 @@ async function startScene(
       if (at) pathMarker.style.transform = `translate(${at.x}px, ${at.y}px) translate(-50%, -50%) rotate(${-air.bank}deg)`;
     }
   };
-  scene.preRender.addEventListener(onFrame);
+  // preUpdate runs after initializeFrame and before Cesium tests the camera for demand rendering. preRender
+  // runs only once that decision has been made, too late to keep a frozen aircraft's camera fixed (#1298).
+  scene.preUpdate.addEventListener(onFrame);
   // The frames drawn, on the scene element: the scene draws only on change, and this is how that can be seen (and tested),
   let frames = 0;
   // With whether the globe has every tile it needs: until then Cesium keeps drawing as tiles arrive.
@@ -504,7 +499,7 @@ async function startScene(
     destroy: () => {
       helicopter.destroy();
       obstacles.destroy();
-      scene.preRender.removeEventListener(onFrame);
+      scene.preUpdate.removeEventListener(onFrame);
       scene.postRender.removeEventListener(counted);
       stopQueueWatch();
       shader.dispose();
