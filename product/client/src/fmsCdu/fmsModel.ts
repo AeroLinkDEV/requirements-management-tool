@@ -237,6 +237,10 @@ export type Page = {
 
 export const pad = (value: string, length: number) => value.padEnd(length);
 export const fixed = (value: number, digits: number) => value.toFixed(digits);
+/** ANP as the pages show it (plan C1): two decimals, or dashes when the selected sensor gives no 95% accuracy. */
+export const anpText = (anp: number | null) => anp === null ? "----" : anp.toFixed(2);
+/** Whether ANP is above the RNP; an unavailable ANP counts as above (plan C1). */
+export const anpExceeds = (anp: number | null, rnp: number) => anp === null || anp > rnp;
 export const three = (value: number) => String(Math.round(value)).padStart(3, "0");
 /**
  * A value in a field of fixed range: formatted when it is within the range, and asterisks the width of the field when

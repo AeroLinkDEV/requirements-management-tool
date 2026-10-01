@@ -77,7 +77,8 @@ export type FmsOutputs = {
   verticalFullScaleFt: number;
   phase: string;
   rnp: number;
-  anp: number;
+  /** The selected sensor's 95% accuracy, NM; null (NCD) when it gives none (plan C1). */
+  anp: number | null;
   navMode: string;
   /** For the navigation display. */
   activeRoute: RoutePoint[];

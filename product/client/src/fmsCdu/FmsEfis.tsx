@@ -402,7 +402,7 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
           </g>
         ) : null}
         <text x="10" y="408" fontSize="12" fill={bus.failed ? AMBER : GREEN} data-testid="nd-source">{bus.failed ? "MAP" : `${bus.source} ${bus.navMode}`}</text>
-        {!bus.failed ? <text x="410" y="408" fontSize="12" textAnchor="end">RNP {bus.rnp.toFixed(2)} ANP {bus.anp.toFixed(2)}</text> : null}
+        {!bus.failed ? <text x="410" y="408" fontSize="12" textAnchor="end">RNP {bus.rnp.toFixed(2)} ANP {bus.anp === null ? "----" : bus.anp.toFixed(2)}</text> : null}
       </g>
       {bus.failed ? <text x={cx} y="200" textAnchor="middle" fontSize="18" fill={AMBER} data-testid="nd-map-flag">MAP</text> : null}
     </svg>

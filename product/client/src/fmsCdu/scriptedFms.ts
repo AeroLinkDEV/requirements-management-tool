@@ -238,7 +238,7 @@ export class ScriptedFms implements CduBackend {
   private readonly raimExcluded = new Set<number>();
   private automaticRaimFor: string | null = null;
   private nav = {
-    mode: "GPS" as NavMode, anp: 0.05, dmes: [] as string[], vor: null as string | null, rnpManual: null as number | null, uncertain: false, airValid: true, windComputed: true,
+    mode: "GPS" as NavMode, anp: 0.05 as number | null, dmes: [] as string[], vor: null as string | null, rnpManual: null as number | null, uncertain: false, airValid: true, windComputed: true,
     unableSince: null as number | null, unableAlerted: false, integrityAlerted: false, approachIntegrityAlerted: false, armAlerted: false,
     /** The RNAV approach had vertical guidance from the GPS while in the approach phase (to catch its loss, 3b). */
     approachVerticalSeen: false,
@@ -1089,12 +1089,12 @@ export class ScriptedFms implements CduBackend {
     const now = this.now.getTime();
     const air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
     const radio = air ? solveRadio((this.sensorFrame?.radios ?? []).filter(observation => !this.inhibited.includes(observation.station.ident)), this.here, air.altitudeFt, now, this.aircraftProfile.parameters) : null;
-    const measurement = (index: number, uncertain = false): PositionMeasurement | null => {
+    const measurement = (index: number): PositionMeasurement | null => {
       const assessed = gps.assessed[index], bus = gps.buses[index];
       if (!assessed?.fix || !bus) return null;
       const velocity = (label: "166" | "174") => bus[label].ssm === "NORMAL" && Number.isFinite(bus[label].value) ? bus[label].value : null;
+      // Plan C1: the 95% accuracy is the receiver's HFOM, floored; the HIL is the integrity bound. Neither stands in for the other.
       return { position: assessed.fix, receiver: (index + 1) as 1 | 2,
-        anp: uncertain ? Math.max(assessed.hil ?? 0, assessed.hfom ?? 0) : Math.max(ANP_FLOOR_NM, assessed.hfom ?? assessed.hil ?? 0.3),
         accuracy95Nm: assessed.hfom === null ? null : Math.max(ANP_FLOOR_NM, assessed.hfom), hilNm: assessed.hil,
         northKt: velocity("166"), eastKt: velocity("174") };
     };
@@ -1103,7 +1103,7 @@ export class ScriptedFms implements CduBackend {
     const uncertainIndex = uncertainOrder.find(index => gps.assessed[index].reason === "INTEGRITY" && gps.assessed[index].fix !== null);
     const predicted = this.navigation.current.position;
     const selection = this.navigation.update({ dt, air, gps: gps.chosen === null ? null : measurement(gps.chosen),
-      uncertainGps: uncertainIndex === undefined ? null : measurement(uncertainIndex, true), radio,
+      uncertainGps: uncertainIndex === undefined ? null : measurement(uncertainIndex), radio,
       radioApproved: this.flightPhase !== "APPROACH", rnp: this.requiredRnp });
     if (selection.mode !== "DR" && distanceNm(predicted, selection.position) > 0.5) this.alert(alert("POSITION SHIFT"));
     this.localSolution = structuredClone(selection);
@@ -1147,7 +1147,8 @@ export class ScriptedFms implements CduBackend {
     this.departureTerminal = { airport: this.active.origin, inside };
     const { alertSeconds } = RNP_DEFAULTS[this.flightPhase];
     const performance = this.navPerformance;
-    if (performance.anp > performance.rnp) {
+    // An unavailable ANP counts as exceeding the RNP (plan C1).
+    if (performance.anp === null || performance.anp > performance.rnp) {
       this.nav.unableSince ??= now;
       if (!this.nav.unableAlerted && now - this.nav.unableSince >= alertSeconds * 1000) { this.nav.unableAlerted = true; this.alert(alert("CHECK ANP")); }
     } else { this.nav.unableSince = null; this.nav.unableAlerted = false; }
@@ -2556,7 +2557,7 @@ export class ScriptedFms implements CduBackend {
   }
 
   /** Whether ANP has exceeded RNP (the RNP annunciator), on the effective values every page shows. */
-  get rnpExceeded() { const { rnp, anp } = this.navPerformance; return anp > rnp; }
+  get rnpExceeded() { const { rnp, anp } = this.navPerformance; return anp === null || anp > rnp; }
 
   /** The crew's SET POS reference, or null before one is entered (R26). */
   get positionReferenceEntry() { return this.positionReference; }

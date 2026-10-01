@@ -1,4 +1,4 @@
-import { WAYPOINT, caption, dashes, fixed, formatPosition, medium, prompt, small, title, type NavPageId, type Page } from "./fmsModel";
+import { WAYPOINT, anpExceeds, anpText, caption, dashes, fixed, formatPosition, medium, prompt, small, title, type NavPageId, type Page } from "./fmsModel";
 import { MODE_TEXT, shownReceiver, type GpsChoice, type ReceiverAssessment } from "./gpsSensors";
 import type { FlightPhase } from "./navigation";
 import type { Line } from "./screen";
@@ -75,7 +75,7 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
         // The phase is abbreviated so the caption fits beside NAV MODE on one 24-column row (R19); the values are the same
         // effective RNP and ANP as PROGRESS, and a bench-forced value is labelled TEST (R11).
         caption(" NAV MODE", `ANP/RNP ${performance.forced ? "TEST" : performance.rnpSource === "MANUAL" ? "MAN" : PHASE_ABBREVIATION[fms.flightPhase]} `),
-        { left: { text: navModeText(fms), color: nav.mode === "DR" || nav.uncertain ? "amber" : "green" }, right: medium(`${fixed(performance.anp, 2)}/${fixed(performance.rnp, 2)}`, performance.anp > performance.rnp ? "amber" : "white") },
+        { left: { text: navModeText(fms), color: nav.mode === "DR" || nav.uncertain ? "amber" : "green" }, right: medium(`${anpText(performance.anp)}/${fixed(performance.rnp, 2)}`, anpExceeds(performance.anp, performance.rnp) ? "amber" : "white") },
         caption(" DME 1", "DME 2 "),
         { left: dme1 ? medium(`${dme1} ${frequency(fms, dme1)}`) : dashes(4), right: dme2 ? medium(`${dme2} ${frequency(fms, dme2)}`) : dashes(4) },
         // LSK3R opens GPS STATUS for both receivers; the GPS line describes the one navigated on (or GPS1).

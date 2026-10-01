@@ -2,7 +2,7 @@ import { withinLimit } from "./sensorState";
 import { alert } from "./alerts";
 import { formatConstraint, parseAltitude, parseConstraint } from "./vnav";
 import {
-  WAYPOINT, boxes, caption, conditionalLabel, courseDeg, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, offset, pad, parsePosition, prompt, ranged, simulated,
+  WAYPOINT, anpExceeds, anpText, boxes, caption, conditionalLabel, courseDeg, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, offset, pad, parsePosition, prompt, ranged, simulated,
   small, three, title, type CorePageId, type Leg, type LskResult, type Page, type PageId,
 } from "./fmsModel";
 import { HAL_NM, MODE_TEXT, shownReceiver } from "./gpsSensors";
@@ -321,7 +321,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     pages: () => 2,
     render: (fms, index) => index === 1 ? [
       title("POS INIT", "2/2"), caption(" NAV MODE", "RNP/ANP NM "),
-      { left: medium(navModeText(fms)), right: medium(`${fixed(fms.navPerformance.rnp, 2)}/${fixed(fms.navPerformance.anp, 2)}`) },
+      { left: medium(navModeText(fms)), right: medium(`${fixed(fms.navPerformance.rnp, 2)}/${anpText(fms.navPerformance.anp)}`) },
       caption(" TRUE WIND", "TAS "), { left: medium(`${three(fms.wind.direction)}T/${Math.round(fms.wind.speed)}KT`), right: medium(`${fms.trueAirspeed === null ? "---" : Math.round(fms.trueAirspeed)}KT`) },
       caption(" HDG/DA", "TK/GS "), { left: medium(`${fms.angleText(fms.heading)}/${fixed(fms.track - fms.heading, 1)}°`), right: medium(`${fms.angleText(fms.track)}/${Math.round(fms.groundSpeed)}KT`) },
       caption(" MAGVAR", "TKE/XTK "), { left: fms.magneticField ? medium(`${fms.magneticField.declination < 0 ? "W" : "E"}${fixed(Math.abs(fms.magneticField.declination), 1)}°`) : dashes(5), right: medium(`${fixed(fms.trackError, 0)}°/${fixed(fms.crossTrack, 2)}NM`) },
@@ -630,7 +630,7 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
           caption(undefined, "TKE/XTK "),
           { right: medium(`${fms.trackError < 0 ? "L" : "R"}${three(Math.abs(fms.trackError))}°/${xtkBlank ? "       " : `${fms.crossTrack < 0 ? "L" : "R"}${fixed(Math.abs(fms.crossTrack), 2)}NM`}`) },
           caption(`RNP/ANP ${forced ? "TEST" : nav.rnpManual === null ? fms.flightPhase : "MANUAL"}`),
-          { left: medium(`${fixed(rnp, 2)}/${fixed(anp, 2)}NM`, anp > rnp ? "amber" : "white") },
+          { left: medium(`${fixed(rnp, 2)}/${anpText(anp)}NM`, anpExceeds(anp, rnp) ? "amber" : "white") },
           caption("NAV MODE"),
           { left: { text: navModeText(fms, true), color: nav.mode === "DR" || nav.uncertain ? "amber" : "cyan" }, right: prompt(fms.missedPromptShown ? "MISSED APPR>" : "NAV STATUS>") },
         ];

@@ -625,7 +625,7 @@ test('a manual RNP larger than the phase default asks the crew to VERIFY RNP VAL
   expect(scratch(unit)).toBe('INVALID ENTRY')
 })
 
-test('loss of GPS integrity: GPS POS UNCERTAIN, larger ANP, and no RNAV approach guidance', () => {
+test('loss of GPS integrity: GPS POS UNCERTAIN, no integrity with the ANP still the 95% accuracy, and no RNAV approach guidance', () => {
   const unit = new ScriptedFms()
   unit.selectProcedure('APPROACH', 'R24R')
   unit.press('EXEC')
@@ -639,7 +639,13 @@ test('loss of GPS integrity: GPS POS UNCERTAIN, larger ANP, and no RNAV approach
   // granting approach or hover authority to either integrity-rejected receiver.
   expect(unit.navState.mode).toBe('GPS')
   expect(unit.navState.uncertain).toBe(true)
-  expect(unit.navState.anp).toBeGreaterThan(0.3)
+  // Plan C1: integrity and accuracy are separate. The receiver's HIL is the bound (no integrity); the ANP stays its 95%
+  // accuracy (HFOM), and the laboratory NAIM comparison is reported apart from both.
+  const sensor = unit.navPerformance.sensor
+  expect(sensor.integrity).toBe(false)
+  expect(unit.navState.anp).toBe(sensor.accuracy95Nm)
+  expect(sensor.naimComparisonNm).not.toBeNull()
+  expect(sensor.naimComparisonNm).not.toBe(sensor.integrityNm)
   expect(unit.approachType).toBe('NO APPR')
   for (let i = 0; i < 3; i += 1) unit.sequence()
   unit.directTo('FERDI'); unit.press('EXEC')

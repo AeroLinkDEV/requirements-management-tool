@@ -3,6 +3,7 @@ import { STATUS_FIELDS, type FieldType, type GpsBus, type GpsLabel, type GpsRece
 import { MONITOR_LABELS, alertLimits, modeLabel, type GpsView } from "./gpsBench";
 import type { ReceiverAssessment } from "./gpsSensors";
 import type { GpsStimulus, ReceiverStimulus } from "./gpsStimulus";
+import { anpText } from "./fmsModel";
 import type { ScriptedFms } from "./scriptedFms";
 import "./FmsGpsTab.css";
 
@@ -68,7 +69,7 @@ function RoutingStrip({ view, fms }: { view: GpsView; fms: ScriptedFms }) {
         aria-label={`Sensor routing: GPS 1 ${modeText(one)} ${role(0)}, GPS 2 ${modeText(two)} ${role(1)}, ${sourceText}`}>
         {box(8, 8, 200, `GPS 1 · ${modeText(one)}`, role(0), tone(0), "route-gps1")}
         {box(8, 72, 200, `GPS 2 · ${modeText(two)}`, role(1), tone(1), "route-gps2")}
-        {box(280, 40, 170, "FMS nav solution", `${source}${nav.uncertain ? " ?" : ""} · ANP ${nav.anp.toFixed(2)}/RNP ${fms.requiredRnp.toFixed(2)}`, nav.uncertain || nav.mode === "DR" ? "warn" : "ok", "route-fms")}
+        {box(280, 40, 170, "FMS nav solution", `${source}${nav.uncertain ? " ?" : ""} · ANP ${anpText(nav.anp)}/RNP ${fms.requiredRnp.toFixed(2)}`, nav.uncertain || nav.mode === "DR" ? "warn" : "ok", "route-fms")}
         {box(512, 40, 120, "EFIS", "PFD · ND", "ok", "route-efis")}
         <path d="M208 30 C 245 30, 245 62, 280 62" className={`fmsGpsLink ${chosen === 0 ? "" : "dashed"}`} data-testid="route-link-gps1" />
         <path d="M208 94 C 245 94, 245 62, 280 62" className={`fmsGpsLink ${chosen === 1 ? "" : "dashed"}`} data-testid="route-link-gps2" />
