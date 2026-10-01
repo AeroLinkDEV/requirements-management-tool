@@ -63,6 +63,10 @@ test('the out-the-window view and synthetic vision start under the production po
   await page.getByRole('button', { name: 'Focus bench', exact: true }).click()
   await expect(page.locator('.appNavigation')).toBeHidden()
   await expect(view).toHaveAttribute('data-status', 'ready')
+  // The real shell adds its own header rhythm and control-height rules; a fixture cannot prove this fit.
+  const selections = await page.getByRole('form', { name: 'Vertical and speed selections' }).boundingBox()
+  expect(selections!.y + selections!.height, 'pilot controls fit the focused 1440 × 900 cockpit').toBeLessThanOrEqual(900)
+  await page.screenshot({ path: test.info().outputPath('cockpit-built-focused.png'), fullPage: true })
   await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
   await page.getByRole('button', { name: 'More instructor room', exact: true }).click()
   await page.getByRole('tab', { name: 'GPS sensors', exact: true }).click()
