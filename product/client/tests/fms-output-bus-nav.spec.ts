@@ -78,7 +78,13 @@ test('accuracy and integrity bound are separate words: the receiver HFOM and HIL
 test('an uncertain GPS is kept without integrity; the NAIM comparison is its own laboratory word, never the bound', () => {
   const { unit, step, bus } = bench()
   step(60)
-  // HIL 3 NM, over the en route limit of 2: GPS POS UNCERTAIN, the position kept and judged against the radio fix.
+  unit.setRnp(2)
+  expect(unit.navPerformance).toMatchObject({ rnp: 2, rnpSource: 'MANUAL' })
+  const backup = unit.sensorSolutions.find(source => source.mode === 'VOR/DME')
+  expect(backup).toMatchObject({ available: true, gpsDependent: false, integrity: true })
+  expect(typeof backup!.accuracy95Nm).toBe('number')
+  expect(backup!.accuracy95Nm!).toBeLessThan(unit.requiredRnp)
+  // HIL 3 NM, over the manual 2 NM limit: GPS POS UNCERTAIN, judged against the qualifying radio fix.
   for (const index of [0, 1]) stimulusFor(unit).apply(index, { op: 'override', label: '130', kind: 'FORCE', amount: 3 })
   step(20)
   const words = bus()
@@ -95,7 +101,13 @@ test('an uncertain GPS is kept without integrity; the NAIM comparison is its own
 test('a radio solution: a laboratory accuracy, no GPS dependency, integrity by criteria and no bound (NCD)', () => {
   const { unit, step, bus } = bench()
   step(60)
-  // The uncertain GPS biased 0.05 NM away fails the comparison: the FMS reverts to the radio fix (M300 1-4).
+  unit.setRnp(2)
+  expect(unit.navPerformance).toMatchObject({ rnp: 2, rnpSource: 'MANUAL' })
+  const backup = unit.sensorSolutions.find(source => source.mode === 'VOR/DME')
+  expect(backup).toMatchObject({ available: true, gpsDependent: false, integrity: true })
+  expect(typeof backup!.accuracy95Nm).toBe('number')
+  expect(backup!.accuracy95Nm!).toBeLessThan(unit.requiredRnp)
+  // Against the manual 2 NM limit, GPS biased 0.05 degrees fails comparison and reverts to radio (M300 1-4).
   for (const index of [0, 1]) {
     stimulusFor(unit).apply(index, { op: 'override', label: '130', kind: 'FORCE', amount: 3 })
     stimulusFor(unit).apply(index, { op: 'override', label: '110', kind: 'BIAS', amount: 0.05 })
