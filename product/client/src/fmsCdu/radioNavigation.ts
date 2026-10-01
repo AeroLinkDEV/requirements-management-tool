@@ -120,9 +120,15 @@ export function rangeObservations(observations: readonly RadioObservation[], alt
  * The declared residual allowance covers velocity uncertainty; absent motion, old geometry remains usable for
  * navigation with a conservative allowance, but cannot qualify as a NAIM backup.
  */
-export type RangeOptions = { rangeMaxAgeS?: number; motion?: RadioMotion | null; unalignedMotionKt?: number };
+export type RangeOptions = { rangeMaxAgeS?: number; motion?: RadioMotion | null; unalignedMotionKt?: number;
+  /** Plan F6: M300 15-3's typical DME/DME 95% accuracy for the phase (0.5 NM en route, 0.4 NM terminal). */
+  typical95Nm?: number;
+  /** Plan C3, F6: stations the crew deselected (DME DESELECT, M300 12-18): never used for DME/DME; VOR/DME is unaffected. */
+  dmeDeselected?: ReadonlySet<string> };
+/** A ranged station's state for DME STATUS (M300 12-17): used, or rejected with the reason. N/A is the radios' (no range). */
+export type DmeStationStatus = { ident: string; status: "USED" | "REJ"; reason?: string };
 export function radioFixes(observations: readonly RadioObservation[], prior: LatLon, altitudeFt: number, now: number,
-  parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters, options: RangeOptions = {}): RadioFix[] {
+  parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters, options: RangeOptions = {}, stationsOut?: DmeStationStatus[]): RadioFix[] {
   if (!validPosition(prior) || !Number.isFinite(altitudeFt)) return [];
   const motion = options.motion && sampled({ at: options.motion.at, sequence: 0, status: "NORMAL", value: options.motion }, now,
     parameters.sensorMaxAge.value * 1000) && [options.motion.northKt, options.motion.eastKt].every(Number.isFinite) ? options.motion : null;
@@ -136,45 +142,79 @@ export function radioFixes(observations: readonly RadioObservation[], prior: Lat
   const provenance = (used: typeof ranges) => ({ observations: used.map(r => structuredClone(r.observation)), motion: now === oldestAt(used) ? null : motion,
     naimEligible: used.every(r => validRangeIdentity(r.observation.rangeIdentity, r.observation.station.frequency)) && (now === oldestAt(used) || motion !== null && !motion.gpsDependent) });
   const sourced = (used: typeof ranges, source: "assumed" | "terrain") => used.filter(r => r.observation.station.elevation.source === source).map(r => r.observation.station.ident);
-  let best: (RadioFix & { score: number }) | null = null;
-  const accepted: LatLon[] = [];
-  // S300 1-8 falls back to collocated VOR/DME when fewer than three DME facilities are available.
-  for (let i = 0; ranges.length >= parameters.radioMinFacilities.value && i < ranges.length; i++) for (let j = i + 1; j < ranges.length; j++) {
-    const a = ranges[i], b = ranges[j], origin = a.at;
-    const x = longitudeDelta(origin.lon, b.at.lon) * 60 * Math.cos(rad(origin.lat));
-    const y = (b.at.lat - origin.lat) * 60;
-    const d = Math.hypot(x, y);
-    if (d < 0.1) continue;
-    const along = (a.range ** 2 - b.range ** 2 + d ** 2) / (2 * d);
-    const heightSquared = a.range ** 2 - along ** 2;
-    if (heightSquared < 0) continue;
-    const across = Math.sqrt(heightSquared);
-    // The pair's two mirror points: the prior estimate only chooses between them (C1, R3-01); pairs are ranked by their
-    // own accuracy, never by closeness to the prior, so a GPS-derived prior cannot pick among consistent pairs.
-    let pairBest: (RadioFix & { score: number }) | null = null;
-    for (const sign of [-1, 1]) {
-      const east = along * x / d - sign * across * y / d;
-      const north = along * y / d + sign * across * x / d;
-      const position = offset(origin, Math.atan2(east, north) * 180 / Math.PI, Math.hypot(east, north));
-      const angle = Math.abs(((bearingDeg(position, origin) - bearingDeg(position, b.at) + 540) % 360) - 180);
-      if (angle < parameters.radioCrossAngle.value || angle > 180 - parameters.radioCrossAngle.value) continue;
-      const residual = Math.max(...ranges.map(r => Math.abs(distanceNm(position, r.at) - r.range)));
-      if (residual > parameters.radioResidualLimit.value) continue;
-      accepted.push(position);
-      const score = distanceNm(position, prior);
-      if (!pairBest || score < pairBest.score) pairBest = { position, at: now, mode: "DME/DME",
-        anp: 0.1 + 0.15 / Math.sin(rad(angle)) + residual + Math.hypot(a.elevationError, b.elevationError) / Math.sin(rad(angle)) + motionNm(ranges),
-        dmes: [a.observation.station.ident, b.observation.station.ident], vor: null, assumedElevation: sourced([a, b], "assumed"), terrainElevation: sourced([a, b], "terrain"), rejected, accuracyBasis: "laboratory" as const, priorResolved: false, oldestAt: oldestAt(ranges), ...provenance(ranges), score };
+  type Range = (typeof ranges)[number];
+  // Plan F6 (M300 15-3): the DME/DME 95% accuracy reproduces the manual's typical figures (0.5 NM en route, 0.4 NM
+  // terminal) at a 90-degree crossing, widening as 1/sin of the crossing angle; residual, elevation and range-age terms
+  // are added (laboratory).
+  const typical = options.typical95Nm ?? 0.5;
+  /** The best DME/DME position consistent with every range in the set (or null), and the stations no pairing could use. */
+  const solveSet = (set: Range[]): { fix: RadioFix | null; unpaired: Set<string> } => {
+    let best: (RadioFix & { score: number }) | null = null;
+    const accepted: LatLon[] = [];
+    const pairedOk = new Set<string>();
+    for (let i = 0; set.length >= parameters.radioMinFacilities.value && i < set.length; i++) for (let j = i + 1; j < set.length; j++) {
+      const a = set[i], b = set[j], origin = a.at;
+      const x = longitudeDelta(origin.lon, b.at.lon) * 60 * Math.cos(rad(origin.lat));
+      const y = (b.at.lat - origin.lat) * 60;
+      const d = Math.hypot(x, y);
+      if (d < 0.1) continue;
+      const along = (a.range ** 2 - b.range ** 2 + d ** 2) / (2 * d);
+      const heightSquared = a.range ** 2 - along ** 2;
+      if (heightSquared < 0) continue;
+      const across = Math.sqrt(heightSquared);
+      // The pair's two mirror points: the prior estimate only chooses between them (C1, R3-01); pairs are ranked by their
+      // own accuracy, never by closeness to the prior, so a GPS-derived prior cannot pick among consistent pairs.
+      let pairBest: (RadioFix & { score: number }) | null = null;
+      for (const sign of [-1, 1]) {
+        const east = along * x / d - sign * across * y / d;
+        const north = along * y / d + sign * across * x / d;
+        const position = offset(origin, Math.atan2(east, north) * 180 / Math.PI, Math.hypot(east, north));
+        const angle = Math.abs(((bearingDeg(position, origin) - bearingDeg(position, b.at) + 540) % 360) - 180);
+        if (angle < parameters.radioCrossAngle.value || angle > 180 - parameters.radioCrossAngle.value) continue;
+        pairedOk.add(a.observation.station.ident); pairedOk.add(b.observation.station.ident);
+        const residual = Math.max(...set.map(r => Math.abs(distanceNm(position, r.at) - r.range)));
+        if (residual > parameters.radioResidualLimit.value) continue;
+        accepted.push(position);
+        const score = distanceNm(position, prior);
+        if (!pairBest || score < pairBest.score) pairBest = { position, at: now, mode: "DME/DME",
+          anp: typical / Math.sin(rad(angle)) + residual + Math.hypot(a.elevationError, b.elevationError) / Math.sin(rad(angle)) + motionNm(set),
+          dmes: [a.observation.station.ident, b.observation.station.ident], vor: null, assumedElevation: sourced([a, b], "assumed"), terrainElevation: sourced([a, b], "terrain"), rejected, accuracyBasis: "laboratory" as const, priorResolved: false, oldestAt: oldestAt(set), ...provenance(set), score };
+      }
+      if (pairBest && (!best || pairBest.anp < best.anp)) best = pairBest;
     }
-    if (pairBest && (!best || pairBest.anp < best.anp)) best = pairBest;
-  }
-  const fixes: RadioFix[] = [];
-  if (best) {
+    // A station whose every pairing failed the crossing-angle check is rejected for geometry (M300 12-17 REJ).
+    const unpaired = new Set(set.map(r => r.observation.station.ident).filter(ident => !pairedOk.has(ident)));
+    if (!best) return { fix: null, unpaired };
     // Another position, materially apart, also met every range and the geometry checks: only the prior chose.
     const apart = 2 * parameters.radioResidualLimit.value;
     const { score: _score, ...fix } = best; void _score;
-    fixes.push({ ...fix, priorResolved: accepted.some(position => distanceNm(position, fix.position) > apart) });
+    return { fix: { ...fix, priorResolved: accepted.some(position => distanceNm(position, fix.position) > apart) } as RadioFix, unpaired };
+  };
+  // Plan F6 consistency and isolation: all ranges consistent, or (with four or more) exactly one station whose exclusion
+  // leaves a consistent solution (a unique hypothesis). Three inconsistent ranges, or more than one plausible exclusion,
+  // leave DME/DME unavailable with no culprit named.
+  const dmeRanges = ranges.filter(r => !options.dmeDeselected?.has(r.observation.station.ident));
+  const full = solveSet(dmeRanges), geometryRejected = full.unpaired;
+  let dmeDme = full.fix;
+  let isolated: string | null = null;
+  let inconsistent = false;
+  if (!dmeDme && dmeRanges.length >= parameters.radioMinFacilities.value && geometryRejected.size < dmeRanges.length) {
+    inconsistent = true;
+    if (dmeRanges.length >= parameters.radioMinFacilities.value + 1) {
+      const hypotheses = dmeRanges.map((excluded, k) => ({ excluded, fix: solveSet(dmeRanges.filter((_, i) => i !== k)).fix })).filter(h => h.fix !== null);
+      if (hypotheses.length === 1) { dmeDme = hypotheses[0].fix; isolated = hypotheses[0].excluded.observation.station.ident; inconsistent = false; }
+    }
   }
+  stationsOut?.splice(0, stationsOut.length, ...dmeRanges.map(r => {
+    const ident = r.observation.station.ident;
+    const status: DmeStationStatus = ident === isolated ? { ident, status: "REJ", reason: "range inconsistent with the others (isolated)" }
+      : inconsistent ? { ident, status: "REJ", reason: "ranges inconsistent; no unique station to exclude" }
+      : geometryRejected.has(ident) ? { ident, status: "REJ", reason: "geometry" }
+      : dmeDme ? { ident, status: "USED" } : { ident, status: "REJ", reason: "fewer than three usable ranges" };
+    return status;
+  }));
+  const fixes: RadioFix[] = [];
+  if (dmeDme) fixes.push(dmeDme);
   // Plan F3: VOR/DME is its own candidate whenever it can be solved (M300 1-5's "fewer than three DMEs" describes
   // where it is typically used, not a gate); the most accurate one is offered.
   let vorDme: RadioFix | null = null;

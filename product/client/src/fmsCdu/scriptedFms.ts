@@ -27,7 +27,7 @@ import { coldTemperatureCorrection, computeProfile, formatConstraint, parseConst
 import { RNP_DEFAULTS, type FlightPhase, type NavMode } from "./navigation";
 import { APIRS_ACCEL_SIGMA_MS2, CivilNavigation, type PositionMeasurement } from "./civilNavigation";
 import type { SensorSolution } from "./sensorState";
-import { BenchRadioReceiver, radioFixes, type RadioFix, type RadioMotion } from "./radioNavigation";
+import { BenchRadioReceiver, radioFixes, type DmeStationStatus, type RadioFix, type RadioMotion } from "./radioNavigation";
 import { transitionAlert } from "./sensorTransitions";
 import { sampled, validRangeIdentity, type RangeIdentity, type RadioObservation, type SensorFrame, type SensorInputPort } from "./sensorPorts";
 import { NAV_PAGES } from "./navPages";
@@ -1088,7 +1088,8 @@ export class ScriptedFms implements CduBackend {
     // Plan C3: the scan roster (up to six DME-capable stations, F6's selection) goes to the DMEs' scan channels; only the
     // stations a scan channel is on now are tuned, with the scan channel's acquisition time.
     const parameters = this.aircraftProfile.parameters;
-    const roster = this.autoRadioStations().filter(dmeCapable);
+    // DME DESELECT (M300 12-18): a deselected station is never scanned.
+    const roster = this.autoRadioStations().filter(station => dmeCapable(station) && !this.dmeDeselected.includes(station.ident));
     this.rangeOwner.clear();
     rms.setScanRoster(roster.map(station => ({ ident: station.ident, frequency: station.frequency })), parameters.dmeScanDwell.value);
     for (const on of rms.scanning()) {
@@ -1116,6 +1117,9 @@ export class ScriptedFms implements CduBackend {
   private rangeOwner = new Map<string, RangeIdentity>();
   private rangeCache = new Map<string, RadioObservation>();
   private previousMeasuredRadio: RadioFix | null = null;
+  private radioFixesLast: RadioFix[] = [];
+  /** Candidate positions and original measurement provenance feed the sensor status pages. */
+  get lastRadioFixes(): readonly RadioFix[] { return structuredClone(this.radioFixesLast); }
   private radioMotion: RadioMotion | null = null;
   private assignRange(ident: string, receiver: DmeDevice, channel: 1 | 2 | 3, frequency: string) {
     const identity = this.rms?.dmeTuning(receiver, channel);
@@ -1429,7 +1433,10 @@ export class ScriptedFms implements CduBackend {
     const observations = this.rangeObservationsForFix().filter(observation => !this.inhibited.includes(observation.station.ident));
     const radios = air ? radioFixes(observations, this.here, air.altitudeFt, now,
       this.aircraftProfile.parameters, { rangeMaxAgeS: this.aircraftProfile.parameters.dmeRangeCacheAge.value,
-        motion: this.rangeMotion(now, observations, air.altitudeFt), unalignedMotionKt: air.tasKt + this.aircraftProfile.parameters.rangeMotionWindAllowance.value }) : [];
+        motion: this.rangeMotion(now, observations, air.altitudeFt), unalignedMotionKt: air.tasKt + this.aircraftProfile.parameters.rangeMotionWindAllowance.value,
+        typical95Nm: this.flightPhase === "EN ROUTE" ? 0.5 : 0.4, dmeDeselected: new Set(this.dmeDeselected) }, this.dmeStatusLast = []) : [];
+    this.radioFixesLast = radios;
+
     const measurement = (index: number): PositionMeasurement | null => {
       const assessed = gps.assessed[index], bus = gps.buses[index];
       if (!assessed?.fix || !bus) return null;
@@ -2905,6 +2912,25 @@ export class ScriptedFms implements CduBackend {
   get navState() { return this.nav; }
   get truePosition() { return this.truth; }
   get inhibitedNavaids() { return this.inhibited; }
+  /** DME DESELECT (M300 12-18): up to 25 stations the crew keeps out of DME navigation. */
+  private dmeDeselected: string[] = [];
+  private dmeStatusLast: DmeStationStatus[] = [];
+  get dmeDeselectedStations(): readonly string[] { return this.dmeDeselected; }
+  setDmeDeselected(idents: readonly string[]) { this.dmeDeselected = [...new Set(idents)].slice(0, 25); this.updateNavigation(0); }
+  /**
+   * DME STATUS (M300 12-17): each roster station with its status: used (blank), REJ (geometry, or a range the consistency
+   * check excluded) or N/A (no reply to its tuning), its frequency and its slant range.
+   */
+  get dmeStatus(): { ident: string; status: "" | "REJ" | "N/A"; reason?: string; frequency: string; slantNm: number | null }[] {
+    const rms = this.rms;
+    if (!rms) return [];
+    return rms.scanRoster().map(station => {
+      const solved = this.dmeStatusLast.find(entry => entry.ident === station.ident);
+      const range = this.rangeCache.get(station.ident)?.slantRangeNm.value ?? null;
+      const status = !solved ? "N/A" as const : solved.status === "USED" ? "" as const : "REJ" as const;
+      return { ident: station.ident, status, ...(solved?.reason ? { reason: solved.reason } : {}), frequency: station.frequency, slantNm: range };
+    });
+  }
   get gpsNavSelected() { return this.gpsSelected; }
   /**
    * RNP and ANP as every consumer reads them: PROGRESS, NAV STATUS, the EFIS, the RNP annunciator and CHECK ANP (R11).

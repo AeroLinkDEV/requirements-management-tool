@@ -84,7 +84,7 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
         caption(" DR ESTIMATE", "PRAIM> "),
         { left: medium(nav.mode === "DR" ? nav.airValid ? "HDG/TAS/WIND" : "NO AIR DATA" : "STBY"), right: medium(fms.gpsNavSelected ? sbasSummary(shown) : "----") },
         caption(" INHIBITED"),
-        { left: medium(fms.inhibitedNavaids.length ? fms.inhibitedNavaids.join(" ") : "NONE") },
+        { left: medium(fms.inhibitedNavaids.length ? fms.inhibitedNavaids.join(" ") : "NONE"), right: prompt("DME STATUS>") },
         { left: dashes(24) },
         { left: prompt("<INDEX"), right: prompt("NAV OPTIONS>") },
       ];
@@ -93,6 +93,7 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
     lsk: (fms, side, row) => {
       if (side === "R" && row === 3) { fms.open("GPS_STATUS"); return; }
       if (side === "R" && row === 4) { fms.open("PREDICT_RAIM"); return; }
+      if (side === "R" && row === 5) { fms.open("DME_STATUS"); return; }
       if (row !== 6) return;
       fms.open(side === "L" ? "INIT_REF" : "NAV_OPTIONS");
     },
@@ -139,6 +140,74 @@ export const NAV_PAGES: Record<NavPageId, Page> = {
       if (!/^\d{1,2}$/.test(scratch) || Number(scratch) < 1 || Number(scratch) > 32) return "invalid";
       fms.deselectRaimSatellite(Number(scratch), row === 1);
       fms.setScratch("");
+    },
+  },
+
+  // Plan F6 (M300 12-17): the stations the FMS scans for DME/DME, with their status (blank used, REJ rejected, N/A no
+  // reply), frequency and slant range; whether the FMS controls the scan; and the DME/DME position.
+  DME_STATUS: {
+    pages: () => 1,
+    render: fms => {
+      const stations = fms.dmeStatus;
+      const row = (index: number): Line | undefined => {
+        const entry = stations[index];
+        if (!entry) return undefined;
+        const distance = entry.slantNm === null ? "" : `${entry.slantNm < 100 ? entry.slantNm.toFixed(1) : Math.round(entry.slantNm)}NM`;
+        return { left: medium(`${entry.ident.padEnd(5)}${entry.status.padEnd(4)}${entry.frequency.padStart(6)} ${distance.padStart(7)}`, entry.status === "" ? "white" : "amber") };
+      };
+      const fix = fms.lastRadioFixes.find(entry => entry.mode === "DME/DME");
+      const scanning = (["dme1", "dme2"] as const).some(device => fms.radioPort?.dmeReceiving(device));
+      return [
+        title("DME STATUS", "1/1"),
+        caption(" ID   STAT  FREQ    DIS"),
+        row(0), row(1), row(2), row(3), row(4), row(5),
+        { left: small(scanning ? "SCANNING CTRL ACTIVE" : "SCANNING CTRL LOST", scanning ? "green" : "amber") },
+        caption(" POSITION"),
+        { left: fix ? medium(formatPosition(fix.position)) : dashes(18) },
+        { left: dashes(24) },
+        { left: prompt("<NAV STATUS"), right: prompt("DME DESEL>") },
+      ];
+    },
+    lsk: (fms, side, row) => {
+      if (row !== 6) return;
+      fms.open(side === "L" ? "NAV_STATUS" : "DME_DESELECT");
+    },
+  },
+
+  // Plan F6 (M300 12-18): up to 25 deselected DME stations, five a page (NEXT, PREV); an ident on LSK 1-5 inserts it, and
+  // CLR (DELETE) with the LSK removes it.
+  DME_DESELECT: {
+    pages: fms => Math.max(1, Math.ceil(Math.min(fms.dmeDeselectedStations.length + 1, 25) / 5)),
+    render: (fms, index) => {
+      const list = fms.dmeDeselectedStations, pages = Math.max(1, Math.ceil(Math.min(list.length + 1, 25) / 5));
+      const line = (slot: number): Line | undefined => {
+        const ident = list[index * 5 + slot];
+        if (ident) return { left: medium(`${ident.padEnd(6)}${frequency(fms, ident).padStart(6)} MHZ`) };
+        return index * 5 + slot === list.length && list.length < 25 ? { left: dashes(4) } : undefined;
+      };
+      return [
+        title("DME DESELECT", `${index + 1}/${pages}`),
+        caption(" IDENT     FREQ"),
+        line(0), undefined, line(1), undefined, line(2), undefined, line(3), undefined, line(4),
+        { left: dashes(24) },
+        { left: prompt("<DME STATUS") },
+      ];
+    },
+    lsk: (fms, side, row, scratch, index) => {
+      if (side === "L" && row === 6) { fms.open("DME_STATUS"); return; }
+      if (side !== "L" || row > 5 || !scratch) return;
+      const list = [...fms.dmeDeselectedStations], slot = index * 5 + row - 1;
+      if (scratch === "DELETE") {
+        if (slot >= list.length) return "invalid";
+        list.splice(slot, 1); fms.setDmeDeselected(list); fms.setScratch(""); return;
+      }
+      if (!WAYPOINT.test(scratch)) return "invalid";
+      const navaid = fms.navdb.find(scratch).find(entry => entry.kind === "navaid" && ["DME", "VORDME", "VORTAC", "TACAN"].includes(entry.type));
+      if (!navaid) return "not-in-database";
+      if (list.includes(scratch)) { fms.setScratch(""); return; }
+      if (list.length >= 25) return "invalid";
+      list.splice(Math.min(slot, list.length), 0, scratch);
+      fms.setDmeDeselected(list); fms.setScratch("");
     },
   },
 
