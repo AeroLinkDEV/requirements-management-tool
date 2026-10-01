@@ -27,7 +27,8 @@ import { coldTemperatureCorrection, computeProfile, formatConstraint, parseConst
 import { RNP_DEFAULTS, type FlightPhase, type NavMode } from "./navigation";
 import { APIRS_ACCEL_SIGMA_MS2, CivilNavigation, type PositionMeasurement } from "./civilNavigation";
 import type { SensorSolution } from "./sensorState";
-import { BenchRadioReceiver, solveRadio } from "./radioNavigation";
+import { BenchRadioReceiver, radioFixes } from "./radioNavigation";
+import { transitionAlert } from "./sensorTransitions";
 import { sampled, type SensorFrame, type SensorInputPort } from "./sensorPorts";
 import { NAV_PAGES } from "./navPages";
 import { RADIO_PAGES } from "./radioPages";
@@ -1067,6 +1068,9 @@ export class ScriptedFms implements CduBackend {
     }
   }
   private radioAdvisories: string[] = [];
+  private gpsIntegrityAnnunciator = false;
+  /** The GPS integrity annunciation ("GPS INT" on the EHSI, M300 C-9), for the bus (plan C4, F13). */
+  get gpsIntegrityAnnunciation() { return this.gpsIntegrityAnnunciator; }
   get lastAdvisories(): string[] { return [...this.radioAdvisories]; }
 
   /**
@@ -1316,7 +1320,7 @@ export class ScriptedFms implements CduBackend {
     const previous = this.nav.mode, previousSource = this.nav.gpsSource;
     const now = this.now.getTime();
     const air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
-    const radio = air ? solveRadio((this.sensorFrame?.radios ?? []).filter(observation => !this.inhibited.includes(observation.station.ident)), this.here, air.altitudeFt, now, this.aircraftProfile.parameters) : null;
+    const radios = air ? radioFixes((this.sensorFrame?.radios ?? []).filter(observation => !this.inhibited.includes(observation.station.ident)), this.here, air.altitudeFt, now, this.aircraftProfile.parameters) : [];
     const measurement = (index: number): PositionMeasurement | null => {
       const assessed = gps.assessed[index], bus = gps.buses[index];
       if (!assessed?.fix || !bus) return null;
@@ -1331,13 +1335,10 @@ export class ScriptedFms implements CduBackend {
     const uncertainIndex = uncertainOrder.find(index => gps.assessed[index].reason === "INTEGRITY" && gps.assessed[index].fix !== null);
     const predicted = this.navigation.current.position;
     const selection = this.navigation.update({ dt, air, gps: gps.chosen === null ? null : measurement(gps.chosen),
-      uncertainGps: uncertainIndex === undefined ? null : measurement(uncertainIndex), radio,
+      uncertainGps: uncertainIndex === undefined ? null : measurement(uncertainIndex), radio: null, radios,
       radioApproved: this.flightPhase !== "APPROACH", rnp: this.requiredRnp,
       apirs: sampled(this.sensorFrame?.apirs, now, this.sensorMaxAge), dvs: this.dopplerEarth(now), waterCurrent: this.waterCurrent,
       kalmanReady: now - this.poweredAt >= 60_000 });
-    // Leaving the KALMAN or DVS mode for a lower one: its NAV LOST alert (M300 Appendix E, E-6 and E-12).
-    if (previous === "KALMAN" && ["DVS", "DR"].includes(selection.mode)) this.alert(alert("KALMAN NAV LOST"));
-    if (previous === "DVS" && selection.mode === "DR") this.alert(alert("DVS NAV LOST"));
     if (selection.mode !== "DR" && distanceNm(predicted, selection.position) > 0.5) this.alert(alert("POSITION SHIFT"));
     this.localSolution = structuredClone(selection);
     this.here = selection.position;
@@ -1358,7 +1359,18 @@ export class ScriptedFms implements CduBackend {
     if (selection.mode !== previous || gpsSource !== previousSource) {
       this.sourceLog = [{ at: this.now, source: gpsSource !== null ? `GPS${gpsSource}` : selection.mode }, ...this.sourceLog].slice(0, 50);
     }
-    if (previous === "GPS" && selection.mode !== "GPS") this.alert(alert("GPS NAV LOST"));
+    // Leaving a mode for a lower one because it can no longer be navigated on: its NAV LOST (plan F3; M300 Appendix E).
+    // E-17's cause: every VOR receiver, or every DME transceiver, has failed (onside and offside: the radios are shared).
+    const rms = this.rms;
+    const vorDmeReceiversFailed = rms !== null && (rms.receiving("nav1") === null && rms.receiving("nav2") === null
+      || !rms.dmeReceiving("dme1") && !rms.dmeReceiving("dme2"));
+    const lost = transitionAlert(previous, selection.mode, selection.sensors, { vorDmeReceiversFailed });
+    if (lost) this.alert(alert(lost));
+    // The GPS integrity annunciator (plan F3's annunciation contract; M300 1-4): lit while GPS is navigated without
+    // integrity, and after a reversion away from GPS that its loss forced; cleared when GPS with integrity is selected
+    // again. The crew selecting GPS out is not a loss: it lights nothing (simulator policy, the manual is silent).
+    if (selection.mode === "GPS") this.gpsIntegrityAnnunciator = selection.uncertain;
+    else if (lost === "GPS NAV LOST" && this.gpsSelected) this.gpsIntegrityAnnunciator = true;
     // A receiver the FMS may use has a fix but not the integrity for the phase: GPS POS UNCERTAIN, once per episode.
     if (gps.integrityLost && !this.nav.integrityAlerted) { this.nav.integrityAlerted = true; this.alert(alert("GPS POS UNCERTAIN")); }
     if (!gps.integrityLost) this.nav.integrityAlerted = false;

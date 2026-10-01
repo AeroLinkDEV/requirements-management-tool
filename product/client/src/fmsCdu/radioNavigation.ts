@@ -105,9 +105,9 @@ export function rangeObservations(observations: readonly RadioObservation[], alt
 /** Horizontal position from measured slant ranges (air-data altitude correction), never a fixed offset from truth.
  * Range-circle intersections use a local tangent plane. The prior estimate chooses the two-circle ambiguity;
  * additional ranges check residuals. This solver is a bench approximation, not CMA's Kalman implementation. */
-export function solveRadio(observations: readonly RadioObservation[], prior: LatLon, altitudeFt: number, now: number,
-  parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters): RadioFix | null {
-  if (!validPosition(prior) || !Number.isFinite(altitudeFt)) return null;
+export function radioFixes(observations: readonly RadioObservation[], prior: LatLon, altitudeFt: number, now: number,
+  parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters): RadioFix[] {
+  if (!validPosition(prior) || !Number.isFinite(altitudeFt)) return [];
   const { usable: ranges, rejected } = rangeObservations(observations, altitudeFt, now, parameters);
   const sourced = (used: typeof ranges, source: "assumed" | "terrain") => used.filter(r => r.observation.station.elevation.source === source).map(r => r.observation.station.ident);
   let best: (RadioFix & { score: number }) | null = null;
@@ -138,19 +138,30 @@ export function solveRadio(observations: readonly RadioObservation[], prior: Lat
         dmes: [a.observation.station.ident, b.observation.station.ident], vor: null, assumedElevation: sourced([a, b], "assumed"), terrainElevation: sourced([a, b], "terrain"), rejected, accuracyBasis: "laboratory" as const, priorResolved: false, score };
     }
   }
+  const fixes: RadioFix[] = [];
   if (best) {
     // Another position, materially apart, also met every range and the geometry checks: only the prior chose.
     const apart = 2 * parameters.radioResidualLimit.value;
     const { score: _score, ...fix } = best; void _score;
-    return { ...fix, priorResolved: accepted.some(position => distanceNm(position, fix.position) > apart) };
+    fixes.push({ ...fix, priorResolved: accepted.some(position => distanceNm(position, fix.position) > apart) });
   }
+  // Plan F3: VOR/DME is its own candidate whenever it can be solved (M300 1-5's "fewer than three DMEs" describes
+  // where it is typically used, not a gate); the most accurate one is offered.
+  let vorDme: RadioFix | null = null;
   for (const entry of ranges) {
     const { observation, range } = entry;
     const bearing = sampled(observation.bearingTrue, now, parameters.sensorMaxAge.value * 1000);
     if (bearing === null || !Number.isFinite(bearing) || !hasVor(observation.station)) continue;
     // The bearing is from the VOR; the range from the DME (co-located, a few metres apart at most).
-    return { position: offset(observation.station.position, bearing, range), at: Math.min(observation.slantRangeNm.at, observation.bearingTrue.at), mode: "VOR/DME",
+    const candidate: RadioFix = { position: offset(observation.station.position, bearing, range), at: Math.min(observation.slantRangeNm.at, observation.bearingTrue.at), mode: "VOR/DME",
       anp: 0.2 + 0.03 * range + entry.elevationError, dmes: [observation.station.ident], vor: observation.station.ident, assumedElevation: sourced([entry], "assumed"), terrainElevation: sourced([entry], "terrain"), rejected, accuracyBasis: "laboratory", priorResolved: false };
+    if (!vorDme || candidate.anp < vorDme.anp) vorDme = candidate;
   }
-  return null;
+  if (vorDme) fixes.push(vorDme);
+  return fixes;
+}
+
+/** The pre-F3 single fix: DME/DME when it solves, otherwise the most accurate VOR/DME. */
+export function solveRadio(...args: Parameters<typeof radioFixes>): RadioFix | null {
+  return radioFixes(...args)[0] ?? null;
 }

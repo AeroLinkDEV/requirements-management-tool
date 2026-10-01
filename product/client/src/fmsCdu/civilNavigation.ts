@@ -3,6 +3,7 @@ import type { NavMode } from "./navigation";
 import type { RadioFix } from "./radioNavigation";
 import type { AirData } from "./sensorPorts";
 import { accuracy95Isotropic, CIRCULAR_95, ELIGIBILITY, withinLimit, type SensorSolution } from "./sensorState";
+import { chooseRadio } from "./sensorTransitions";
 import { HELICOPTER_PROFILE, type AircraftProfile } from "./profile";
 
 /** A receiver's position with its 95% accuracy (HFOM) and integrity bound (HIL) kept apart (plans F2, C1). ANP is the
@@ -101,6 +102,8 @@ export class CivilNavigation {
   }
   update(input: { dt: number; air: AirData | null; gps: PositionMeasurement | null; uncertainGps: PositionMeasurement | null;
     radio: RadioFix | null; radioApproved: boolean; rnp: number;
+    /** Every radio mode's fix this update (plan F3); the resolver's step 3 chooses among them. Without it, `radio` is the only one. */
+    radios?: readonly RadioFix[];
     /** The emulated INS accelerations (null when the APIRS is unavailable), the Doppler ground velocity relative to
      * the surface, the crew's water current, and whether the KALMAN mode is past its first minute (M300 12-24). */
     apirs?: InertialInput | null; dvs?: DopplerInput | null; waterCurrent?: DopplerInput | null; kalmanReady?: boolean }): CivilSolution {
@@ -116,9 +119,13 @@ export class CivilNavigation {
         k.coast += dtSeconds;
       }
     }
-    const { air, radio } = input;
+    const { air } = input;
+    const fixes = input.radios ?? (input.radio ? [input.radio] : []);
+    // Plan F3 step 3 (and step 4's radio order when none has integrity).
+    const radio = chooseRadio(fixes, this.solution.mode, input.rnp);
+    const fixGpsDependent = (fix: RadioFix) => fix.priorResolved && this.solution.gpsDependent;
     // Transitive provenance (plan C1): a fix the prior estimate had to disambiguate inherits the prior's GPS dependency.
-    const radioGpsDependent = radio !== null && radio.priorResolved && this.solution.gpsDependent;
+    const radioGpsDependent = radio !== null && fixGpsDependent(radio);
     const airValid = air !== null && [air.headingTrue, air.tasKt, air.altitudeFt].every(Number.isFinite)
       && air.tasKt >= 0 && air.tasKt <= 600;
     let gps = input.gps;
@@ -218,9 +225,9 @@ export class CivilNavigation {
         naimComparisonNm: input.gps === null ? naim : null, integrityBasis: "NP",
         integrity: input.gps !== null && withinLimit(gpsInput.hilNm, input.rnp), eligibility: ELIGIBILITY.GPS });
     }
-    if (radio) sensors.push({ mode: radio.mode, available: input.radioApproved, accuracy95Nm: radio.anp, accuracyBasis: "laboratory",
-      gpsDependent: radioGpsDependent, integrityNm: null, naimComparisonNm: null,
-      integrityBasis: "criteria", integrity: withinLimit(radio.anp, input.rnp), eligibility: ELIGIBILITY[radio.mode] });
+    for (const fix of fixes) sensors.push({ mode: fix.mode, available: input.radioApproved, accuracy95Nm: fix.anp, accuracyBasis: "laboratory",
+      gpsDependent: fixGpsDependent(fix), integrityNm: null, naimComparisonNm: null,
+      integrityBasis: "criteria", integrity: withinLimit(fix.anp, input.rnp), eligibility: ELIGIBILITY[fix.mode] });
     if (this.equipment.kalman && this.kalman) sensors.push({ mode: "KALMAN", available: this.kalmanAvailable(input.kalmanReady === true),
       accuracy95Nm: this.kalmanAccuracy95(), accuracyBasis: "laboratory", gpsDependent: true,
       integrityNm: null, naimComparisonNm: null, integrityBasis: "none", integrity: false, eligibility: ELIGIBILITY.KALMAN });
