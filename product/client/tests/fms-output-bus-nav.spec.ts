@@ -58,7 +58,10 @@ test('accuracy and integrity bound are separate words: the receiver HFOM and HIL
   // GPS en route: the accuracy is the receiver's HFOM (label 247) under the ANP floor, the bound its HIL (label 130).
   const words = bus()
   expect(words.navMode).toBe('GPS')
-  expect(words.accuracy95Nm).toEqual({ value: Math.max(ANP_FLOOR_NM, receiverBus()['247'].value), status: 'NORMAL' })
+  const hfom = receiverBus()['247'].value
+  expect(hfom).not.toBeNull()
+  if (hfom === null) throw new Error('The healthy GPS fixture must report its measured HFOM.')
+  expect(words.accuracy95Nm).toEqual({ value: Math.max(ANP_FLOOR_NM, hfom), status: 'NORMAL' })
   expect(words.accuracyBasis).toEqual({ value: 'receiver', status: 'NORMAL' })
   expect(words.integrityBoundNm).toEqual({ value: receiverBus()['130'].value, status: 'NORMAL' })
   expect(words.integrityBasis).toEqual({ value: 'NP', status: 'NORMAL' })
