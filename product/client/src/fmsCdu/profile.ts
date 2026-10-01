@@ -66,7 +66,7 @@ const p = (value: number, unit: string, basis: ParameterBasis, source: string, i
 
 export const HELICOPTER_PROFILE: AircraftProfile = {
   id: "cma9000-s300-heli-civil",
-  version: 8,
+  version: 9,
   defaultAngleReference: "MAG",
   title: "CMA-9000 helicopter, civil SAR target (S/W -300 baseline)",
   aircraftType: "ROTOR",
@@ -104,7 +104,8 @@ export const HELICOPTER_PROFILE: AircraftProfile = {
     drWindUncertainty: p(2, "kt", "lab", "DR last-wind uncertainty allowance", true),
     drTasUncertainty: p(0.5, "kt", "lab", "DR TAS uncertainty allowance", true),
     drHeadingUncertainty: p(1, "deg", "lab", "DR heading uncertainty allowance", true),
-    drNoAirGrowth: p(10, "NM/h", "lab", "position held without air data, with growing uncertainty", true),
+    drNoAirGrowth: p(10, "NM/h", "lab", "position held without air data, with growing uncertainty; also DR's growth in the low-speed regime (plan F10)", true),
+    drLowSpeedIas: p(40, "kt", "lab", "Stage F10 (Astra's amendment): below this indicated airspeed the wind is frozen (M300 12-22 gives no figure) and DR from heading and TAS is degraded", true),
     windRadioMaxGap: p(10, "s", "lab", "maximum successive radio-fix interval for computed wind", true),
     idfCrossingTolerance: p(0.1, "NM", "lab", "PinS IDF crossing proximity; no obstacle/protection claim", true),
     approachPredictionAge: p(60, "s", "lab", "maximum age of the simulated FAF/MAP integrity prediction", true),
@@ -176,7 +177,7 @@ export const ACTIVE_PROFILE = HELICOPTER_PROFILE;
 export const LATER_SBAS_PROFILE: AircraftProfile = {
   ...HELICOPTER_PROFILE,
   id: "cma9000-later-sbas-heli",
-  version: 4,
+  version: 5,
   title: "Later CMA software + CMA-5024 SBAS helicopter (representative simulation)",
   operationalProgram: "later SBAS-capable CMA family; exact OEM software baseline unqualified",
   approachPolicy: "SBAS_COUPLED",

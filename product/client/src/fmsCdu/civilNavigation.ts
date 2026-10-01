@@ -19,6 +19,12 @@ export type CivilSolution = { position: LatLon; mode: NavMode; anp: number | nul
    * compute the wind (M300 12-22), and dead reckoning carries the last one.
    */
   windComputed: boolean;
+  /**
+   * The low-speed regime (plan F10, Astra's amendment): valid air data with the indicated airspeed below the declared
+   * limit. The wind is frozen there (M300 12-22: "the wind is frozen at low speed"), and dead reckoning from heading and
+   * TAS is degraded: its accuracy grows at the declared no-motion rate.
+   */
+  lowSpeed: boolean;
   /** Each candidate this update weighed, with its availability, 95% accuracy, integrity and eligibility (plan F2). */
   sensors: SensorSolution[];
   /** The candidate navigated on: the entry of `sensors` whose mode is `mode`. */
@@ -38,6 +44,16 @@ export const AIDING_VELOCITY_SIGMA_KT = 0.2;
 /** Laboratory: the DVS solution's 95% error grows by this fraction of the distance flown on it. */
 export const DVS_DRIFT_FRACTION = 0.01;
 const MS2_TO_KT_PER_S = 1.943844;
+/**
+ * Indicated airspeed from true airspeed at a pressure altitude, knots: TAS times the square root of the ICAO standard
+ * atmosphere's density ratio in the troposphere, (1 - 6.8756e-6 h)^4.2559. The bench has no indicated-airspeed word,
+ * so the low-speed limit (plan F10, in KIAS) is judged on this; compressibility is negligible below 100 kt.
+ */
+export function indicatedAirspeedKt(tasKt: number, altitudeFt: number) {
+  const sigma = Math.pow(1 - 6.8756e-6 * Math.min(Math.max(altitudeFt, -2000), 36089), 4.2559);
+  return tasKt * Math.sqrt(sigma);
+}
+
 /** A propagated mode entered from a solution with no known accuracy starts from the initialization value (1 NM). */
 const UNKNOWN_START_NM = 1;
 
@@ -64,7 +80,7 @@ export class CivilNavigation {
     this.parameters = parameters;
     this.equipment = equipment;
     const dr = drSensor(false, 1, false);
-    this.solution = { position: { ...initial }, mode: "DR", anp: 1, gpsSource: null, gpsDependent: false, dmes: [], vor: null, uncertain: true, airValid: false, windComputed: false,
+    this.solution = { position: { ...initial }, mode: "DR", anp: 1, gpsSource: null, gpsDependent: false, dmes: [], vor: null, uncertain: true, airValid: false, windComputed: false, lowSpeed: false,
       sensors: [dr], selected: dr };
   }
   get current(): CivilSolution { return structuredClone(this.solution); }
@@ -121,12 +137,13 @@ export class CivilNavigation {
     const radioGpsDependent = radio !== null && radio.priorResolved && this.solution.gpsDependent;
     const airValid = air !== null && [air.headingTrue, air.tasKt, air.altitudeFt].every(Number.isFinite)
       && air.tasKt >= 0 && air.tasKt <= 600;
+    const lowSpeed = airValid && indicatedAirspeedKt(air!.tasKt, air!.altitudeFt) < this.parameters.drLowSpeedIas.value;
     let gps = input.gps;
     let uncertain = false;
     // The NAIM-style bound when an uncertain GPS was judged against an approved radio fix (plan F5 formalizes it).
     let naim: number | null = null;
     // Filled in below, once the selection is made.
-    const pending = { sensors: [] as SensorSolution[], selected: drSensor(false, null, false) };
+    const pending = { sensors: [] as SensorSolution[], selected: drSensor(false, null, false), lowSpeed };
     if (!gps && input.uncertainGps) {
       // S300 1-7: retain a valid uncertain GPS position when it is the only available position source. Where a radio
       // source is approved, judge GPS against its independent position and accuracy before retaining it.
@@ -145,7 +162,7 @@ export class CivilNavigation {
       this.previousRadio = null;
       this.solution = { position: { ...gps.position }, mode: "GPS", anp: gps.accuracy95Nm, gpsSource: gps.receiver, gpsDependent: true,
         dmes: radio?.dmes ?? [], vor: radio?.vor ?? null, uncertain, airValid, windComputed: false, ...pending };
-      if (airValid && !uncertain && gps.northKt !== null && gps.eastKt !== null) {
+      if (airValid && !lowSpeed && !uncertain && gps.northKt !== null && gps.eastKt !== null) {
         const heading = air!.headingTrue * Math.PI / 180;
         this.wind = { north: gps.northKt - air!.tasKt * Math.cos(heading), east: gps.eastKt - air!.tasKt * Math.sin(heading) };
         this.windGpsDependent = true;
@@ -158,7 +175,7 @@ export class CivilNavigation {
     } else if (radio && input.radioApproved) {
       const previous = this.previousRadio;
       const elapsed = previous ? (radio.at - previous.at) / 1000 : 0;
-      if (airValid && previous && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value) {
+      if (airValid && !lowSpeed && previous && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value) {
         const north = (radio.position.lat - previous.position.lat) * 60 * 3600 / elapsed;
         const east = longitudeDelta(previous.position.lon, radio.position.lon) * 60
           * Math.cos((radio.position.lat + previous.position.lat) * Math.PI / 360) * 3600 / elapsed;
@@ -166,7 +183,7 @@ export class CivilNavigation {
         this.wind = { north: north - air!.tasKt * Math.cos(heading), east: east - air!.tasKt * Math.sin(heading) };
         this.windGpsDependent = radioGpsDependent || previous.gpsDependent;
       }
-      const windComputed = airValid && previous !== null && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value;
+      const windComputed = airValid && !lowSpeed && previous !== null && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value;
       if (!previous || radio.at > previous.at) this.previousRadio = { position: { ...radio.position }, at: radio.at, gpsDependent: radioGpsDependent };
       const fix = { position: radio.position, mode: radio.mode, anp: radio.anp, dmes: radio.dmes, vor: radio.vor };
       this.solution = { ...fix, gpsSource: null, gpsDependent: radioGpsDependent, uncertain: false, airValid, windComputed, ...pending };
@@ -198,8 +215,9 @@ export class CivilNavigation {
         position = offset(position, Math.atan2(east, north) * 180 / Math.PI, Math.hypot(north, east) * dt / 3600);
       }
       // 2 kt wind uncertainty, 0.5 kt TAS uncertainty and 1 degree heading uncertainty. No measured motion without
-      // valid air data: hold the last position and grow the bound at 10 NM/h, never substitute the plant's track.
-      const growth = airValid ? Math.hypot(this.parameters.drWindUncertainty.value, this.parameters.drTasUncertainty.value,
+      // valid air data: hold the last position and grow the bound at 10 NM/h, never substitute the plant's track. In the
+      // low-speed regime heading and TAS no longer measure the motion (plan F10): the same no-motion rate.
+      const growth = airValid && !lowSpeed ? Math.hypot(this.parameters.drWindUncertainty.value, this.parameters.drTasUncertainty.value,
         air!.tasKt * Math.sin(this.parameters.drHeadingUncertainty.value * Math.PI / 180)) : this.parameters.drNoAirGrowth.value;
       // DR carries the dependency of the position it started from, and of the wind it propagates with.
       const gpsDependent = this.solution.gpsDependent || airValid && this.windGpsDependent;

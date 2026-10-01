@@ -16,13 +16,15 @@ const files = readdirSync(SOURCE).filter(name => /\.tsx?$/.test(name)).map(name 
 const raised = (pattern: RegExp) => files.flatMap(({ name, text }) => [...text.matchAll(pattern)].map(m => ({ name, text: m[1] })))
 const viaLibrary = raised(/(?<![.\w])alert\("([^"]+)"\)/g)
 const direct = raised(/this\.alert\("([^"]+)"\)/g)
+/** Literal status advisories (this.advisory("…")) whose Appendix E row is mapped: white, not alerts (F10's FMS NAV IN DR). */
+const advisories = raised(/this\.advisory\("([^"]+)"\)/g).filter(r => r.text in APPENDIX_E)
 // Templated raises: GPS${n} NOT USABLE and APPR ON GPS${n}, for receivers 1 and 2.
 const templated = files.flatMap(({ text }) => [...text.matchAll(/alert\(`([^`]+)`\)/g)].map(m => m[1]))
 
 test('F12: every navigation alert has an Appendix E source', () => {
   // Every message in the library has a row or a laboratory reason, and the map holds nothing that is never raised.
   for (const { text } of ALERTS) expect(APPENDIX_E[text], text).toBeDefined()
-  const raisedTexts = new Set([...ALERTS.map(a => a.text), ...viaLibrary.map(r => r.text), ...direct.map(r => r.text)])
+  const raisedTexts = new Set([...ALERTS.map(a => a.text), ...viaLibrary.map(r => r.text), ...direct.map(r => r.text), ...advisories.map(r => r.text)])
   expect(Object.keys(APPENDIX_E).filter(text => !raisedTexts.has(text))).toEqual([])
   // Every literal raise, through the library or not, has its source; the templated ones for both receivers.
   for (const { name, text } of [...viaLibrary, ...direct]) expect(APPENDIX_E[text], `${name}: ${text}`).toBeDefined()
@@ -47,7 +49,11 @@ test('F12: every navigation alert has an Appendix E source', () => {
 test('F12: the messages raised as alerts whose Appendix E row is another class, and the raises that bypass the library, are the known ones', () => {
   // The bench raises every library message as an amber alert. These rows are not system alerts in the manual; F8's
   // per-row message work decides each one's display. A new one fails here.
-  const notSystem = Object.entries(APPENDIX_E).flatMap(([text, s]) => ('page' in s && appendixEClass(s.page) !== 'SYSTEM ALERT' ? [`${text}: ${appendixEClass(s.page)}`] : []))
+  // A mapped message raised only as a status advisory is shown as one, and is not counted here.
+  const asAdvisory = new Set(advisories.map(r => r.text).filter(t => !ALERTS.some(a => a.text === t)))
+  expect([...asAdvisory].map(t => `${t}: ${'page' in APPENDIX_E[t] ? appendixEClass((APPENDIX_E[t] as { page: string }).page) : 'laboratory'}`))
+    .toEqual(['FMS NAV IN DR: STATUS ADVISORY'])
+  const notSystem = Object.entries(APPENDIX_E).flatMap(([text, s]) => (!asAdvisory.has(text) && 'page' in s && appendixEClass(s.page) !== 'SYSTEM ALERT' ? [`${text}: ${appendixEClass(s.page)}`] : []))
   expect(notSystem.sort()).toEqual([
     'MAG VAR CRC FAILED: MAINTENANCE ALERT', 'RALT FAILED: MAINTENANCE ADVISORY', 'SYSTEM FAILED: MAINTENANCE ALERT', 'TRANSITION DOWN: STATUS ADVISORY',
   ])

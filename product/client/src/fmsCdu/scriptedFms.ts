@@ -1336,6 +1336,9 @@ export class ScriptedFms implements CduBackend {
       apirs: sampled(this.sensorFrame?.apirs, now, this.sensorMaxAge), dvs: this.dopplerEarth(now), waterCurrent: this.waterCurrent,
       kalmanReady: now - this.poweredAt >= 60_000 });
     // Leaving the KALMAN or DVS mode for a lower one: its NAV LOST alert (M300 Appendix E, E-6 and E-12).
+    // Entering dead reckoning from another mode: FMS NAV IN DR, a status advisory (M300 Appendix E, E-33), white in the
+    // scratchpad and below any alert raised with it.
+    if (previous !== "DR" && selection.mode === "DR") this.advisory("FMS NAV IN DR");
     if (previous === "KALMAN" && ["DVS", "DR"].includes(selection.mode)) this.alert(alert("KALMAN NAV LOST"));
     if (previous === "DVS" && selection.mode === "DR") this.alert(alert("DVS NAV LOST"));
     if (selection.mode !== "DR" && distanceNm(predicted, selection.position) > 0.5) this.alert(alert("POSITION SHIFT"));
