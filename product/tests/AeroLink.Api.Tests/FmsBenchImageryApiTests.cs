@@ -141,6 +141,22 @@ public sealed class FmsBenchImageryApiTests
     }
 
     [Fact]
+    public async Task A_plaintext_setting_cannot_activate_the_production_esri_relay()
+    {
+        using var usgs = new FmsBenchTerrainApiTests.Upstream(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        var esri = new EsriUpstream(_ => Image(Jpeg, "image/jpeg"));
+        using var harness = new Harness(usgs, esri: esri, legacyDirectKey: "plaintext-must-not-activate-esri");
+        await SecurityBoundaryTests.BootstrapAndLoginAdministratorAsync(harness.Client);
+
+        using var response = await harness.Client.GetAsync("/api/fms-bench/imagery/12/1210/1465");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Single(usgs.Requested);
+        Assert.Empty(esri.Requested);
+    }
+
+    [WindowsFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     public async Task Outside_the_usgs_coverage_the_key_is_encoded_only_in_the_fixed_esri_request_and_its_logging_is_disabled()
     {
         using var usgs = new FmsBenchTerrainApiTests.Upstream(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
@@ -174,7 +190,8 @@ public sealed class FmsBenchImageryApiTests
         Assert.Equal(HttpStatusCode.NotFound, outside.StatusCode);
     }
 
-    [Fact]
+    [WindowsFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     public async Task A_refused_key_is_none_here_pauses_esri_alone_and_never_holds_usgs_back()
     {
         // ArcGIS refuses an expired or revoked token with a JSON error body under status 200.
@@ -192,14 +209,15 @@ public sealed class FmsBenchImageryApiTests
         Assert.Equal(HttpStatusCode.OK, (await harness.Client.GetAsync("/api/fms-bench/imagery/15/9725/11855")).StatusCode);
 
         // Rotation is used on the next tile, even while the previous credential is still in its refusal backoff.
-        harness.Configuration[FmsBenchEsriImageryKey.DirectKeySetting] = "repaired-key";
+        harness.RotateEsriKey("repaired-key");
         using var repaired = await harness.Client.GetAsync("/api/fms-bench/imagery/12/1212/1465");
         Assert.Equal(HttpStatusCode.OK, repaired.StatusCode);
         Assert.Equal(Jpeg, await repaired.Content.ReadAsByteArrayAsync());
         Assert.Equal(2, esri.Requested.Count);
     }
 
-    [Fact]
+    [WindowsFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     public async Task A_decoded_blank_usgs_tile_can_request_esri_directly_without_repeating_usgs()
     {
         using var usgs = new FmsBenchTerrainApiTests.Upstream(_ => Image(Jpeg, "image/jpeg"));
@@ -339,13 +357,18 @@ public sealed class FmsBenchImageryApiTests
     {
         private readonly AeroLinkApiFactory factory = new();
         private readonly Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> host;
+        private readonly ProtectedEsriKey? storedKey;
         public HttpClient Client { get; }
-        public Microsoft.Extensions.Configuration.IConfiguration Configuration => host.Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
         public EsriLogRecorder EsriLogs { get; } = new();
 
         public Harness(FmsBenchTerrainApiTests.Upstream upstream, bool? imagery = true, bool? terrain = null,
-            EsriUpstream? esri = null, string? esriKey = null)
+            EsriUpstream? esri = null, string? esriKey = null, string? legacyDirectKey = null)
         {
+            if (esriKey is not null)
+            {
+                if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("The Esri credential fixture requires Windows DPAPI.");
+                storedKey = new ProtectedEsriKey(esriKey);
+            }
             host = factory.WithWebHostBuilder(builder =>
             {
                 builder.ConfigureLogging(logging => logging
@@ -354,8 +377,9 @@ public sealed class FmsBenchImageryApiTests
                 if (imagery is { } on) builder.UseSetting(FmsBenchImageryEndpoints.EnabledKey, on.ToString());
                 if (terrain is { } terrainOn) builder.UseSetting(FmsBenchTerrainEndpoints.EnabledKey, terrainOn.ToString());
                 // Never the machine's real key: on HOME one is stored, and a test must not spend it or reach Esri.
-                builder.UseSetting(FmsBenchEsriImageryKey.KeyFileSetting, Path.Combine(Path.GetTempPath(), $"no-esri-key-{Guid.NewGuid():N}.json"));
-                if (esriKey is not null) builder.UseSetting(FmsBenchEsriImageryKey.DirectKeySetting, esriKey);
+                builder.UseSetting(FmsBenchEsriImageryKey.KeyFileSetting,
+                    storedKey?.FilePath ?? Path.Combine(Path.GetTempPath(), $"no-esri-key-{Guid.NewGuid():N}.json"));
+                if (legacyDirectKey is not null) builder.UseSetting("FmsBench:EsriImageryKey", legacyDirectKey);
                 builder.ConfigureTestServices(services =>
                 {
                     services.AddHttpClient(FmsBenchImageryEndpoints.ClientName).ConfigurePrimaryHttpMessageHandler(() => upstream);
@@ -366,7 +390,64 @@ public sealed class FmsBenchImageryApiTests
             Client = host.CreateClient();
         }
 
-        public void Dispose() { Client.Dispose(); host.Dispose(); factory.Dispose(); }
+        [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+        public void RotateEsriKey(string key) => (storedKey ?? throw new InvalidOperationException("This host has no protected key fixture.")).Write(key);
+
+        public void Dispose() { Client.Dispose(); host.Dispose(); factory.Dispose(); storedKey?.Dispose(); }
+    }
+
+    /// <summary>Owned synthetic credentials through the actual DPAPI/file/ACL boundary, never the machine's store.</summary>
+    private sealed class ProtectedEsriKey : IDisposable
+    {
+        private readonly DirectoryInfo directory;
+        public string FilePath { get; }
+
+        [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+        public ProtectedEsriKey(string key)
+        {
+            directory = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), $"esri-host-key-{Guid.NewGuid():N}"));
+            FilePath = Path.Combine(directory.FullName, "esri-world-imagery.json");
+            var security = new System.Security.AccessControl.DirectorySecurity();
+            LockDown(security);
+            directory.SetAccessControl(security);
+            Write(key);
+        }
+
+        [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+        public void Write(string key)
+        {
+            var plaintext = System.Text.Encoding.UTF8.GetBytes(key);
+            byte[] ciphertext;
+            try
+            {
+                ciphertext = System.Security.Cryptography.ProtectedData.Protect(plaintext,
+                    "AeroLink protected Esri imagery v1"u8.ToArray(), System.Security.Cryptography.DataProtectionScope.LocalMachine);
+            }
+            finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(plaintext); }
+            File.WriteAllText(FilePath, System.Text.Json.JsonSerializer.Serialize(new
+            {
+                schemaVersion = 1, purpose = "esri-world-imagery",
+                ownerSid = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value,
+                protectedKey = Convert.ToBase64String(ciphertext),
+            }));
+            var security = new System.Security.AccessControl.FileSecurity();
+            LockDown(security);
+            new FileInfo(FilePath).SetAccessControl(security);
+        }
+
+        [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+        private static void LockDown(System.Security.AccessControl.FileSystemSecurity security)
+        {
+            var owner = System.Security.Principal.WindowsIdentity.GetCurrent().User!;
+            security.SetOwner(owner);
+            security.SetAccessRuleProtection(true, false);
+            foreach (var sid in new[] { owner.Value, "S-1-5-18", "S-1-5-32-544" })
+                security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                    new System.Security.Principal.SecurityIdentifier(sid), System.Security.AccessControl.FileSystemRights.FullControl,
+                    System.Security.AccessControl.AccessControlType.Allow));
+        }
+
+        public void Dispose() => directory.Delete(recursive: true);
     }
 
     private sealed class EsriLogRecorder : Microsoft.Extensions.Logging.ILoggerProvider

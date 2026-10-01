@@ -15,12 +15,10 @@ using System.Text.Json;
 ///
 /// A key that is absent, unreadable, owned by another account or exposed by its ACL is simply not used: the view then
 /// draws relief outside the USGS coverage, as it did before. It never fails the API.
-/// <c>FmsBench:EsriImageryKey</c> supplies a key directly, for tests only; production never sets it.
 /// </summary>
 public sealed class FmsBenchEsriImageryKey(IConfiguration configuration, ILogger<FmsBenchEsriImageryKey> logger)
 {
     public const string KeyFileSetting = "FmsBench:EsriImageryKeyFile";
-    public const string DirectKeySetting = "FmsBench:EsriImageryKey";
     /// <summary>Shared with <c>AeroLinkProtectedConfig.psm1</c>; the two must change together.</summary>
     internal const string Entropy = "AeroLink protected Esri imagery v1";
     internal const string Purpose = "esri-world-imagery";
@@ -35,8 +33,6 @@ public sealed class FmsBenchEsriImageryKey(IConfiguration configuration, ILogger
     /// <summary>The key, or null when none is usable.</summary>
     public string? Current()
     {
-        var direct = configuration[DirectKeySetting];
-        if (!string.IsNullOrWhiteSpace(direct)) return direct.Trim();
         if (!OperatingSystem.IsWindows()) return null;
         var path = configuration[KeyFileSetting] is { Length: > 0 } configured ? configured : DefaultPath;
         var file = new FileInfo(path);
