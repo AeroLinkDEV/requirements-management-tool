@@ -53,7 +53,8 @@ function Stop-AeroLinkProductionTransition {
 }
 function Get-AeroLinkBootstrapScriptArguments { @() }
 function Invoke-AeroLinkSourceBootstrap {
-    param($PreAdvanceAction)
+    param($PreAdvanceAction, $BoundSourceSha)
+    if ($case.BoundSourceSha -and $BoundSourceSha -ne $case.BoundSourceSha) { throw 'Production controller lost the transition source binding.' }
     Event 'SourceCheck'
     if ($case.Advance) { & $PreAdvanceAction; Event 'SourceAdvance'; $script:started=$false }
     if ($case.Failure -eq 'Handoff') { return [pscustomobject]@{ Action='Reentered'; ExitCode=1 } }
@@ -106,11 +107,13 @@ function Get-AeroLinkRemoteDemoNgrokProcess { [pscustomobject]@{ Owned=@(); Mism
 function Get-AeroLinkProductionSourcePosture { [pscustomobject]@{ Canonical=$true; Posture=[pscustomobject]@{ HeadSha=('a' * 40) } } }
 function Get-AeroLinkServiceEndpoints { [pscustomobject]@{ ApiPort=5080; PostgresPort=54329; ApiBaseUri='http://127.0.0.1:5080'; ConnectionString=''; Qualification=$false } }
 function Invoke-AeroLinkBootstrapReentry { Event 'Compensate'; return 0 }
-& $Controller -DoNotOpenBrowser
+if ($case.BoundSourceSha) { & $Controller -DoNotOpenBrowser -BoundSourceSha $case.BoundSourceSha }
+else { & $Controller -DoNotOpenBrowser }
 '@ | Set-Content -LiteralPath $driver -Encoding UTF8
 $failures = [Collections.Generic.List[string]]::new()
 try {
     $cases = @()
+    $cases += @{ Tunnel=$true; Runtime='Free'; Advance=$false; Failure=''; BoundSourceSha=('a' * 40) }
     foreach ($tunnel in @($false, $true)) {
         foreach ($runtime in @('Reuse', 'RestartStale', 'RestartModeMismatch', 'RestartUnready', 'RestartUnidentified', 'Free')) {
             $cases += @{ Tunnel=$tunnel; Runtime=$runtime; Advance=$false; Failure='' }

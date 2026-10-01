@@ -847,7 +847,8 @@ function Start-AeroLinkRemoteDemoProductionHelper {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Config,
-        $Run
+        $Run,
+        [string]$BoundSourceSha
     )
     $logDirectory = $Config.LogsPath
     if (-not (Test-Path -LiteralPath $logDirectory)) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
@@ -859,6 +860,10 @@ function Start-AeroLinkRemoteDemoProductionHelper {
     # Pass it before the API starts; an already-running local process is handled below rather than silently
     # claiming a loopback-configured process can produce reachable remote links.
     $argumentLine = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" -DoNotOpenBrowser -NotificationBaseUrl `"$($Config.PublicUrl)`""
+    if ($BoundSourceSha) {
+        if ($BoundSourceSha -notmatch '^[0-9a-fA-F]{40}$') { throw 'The production helper requires an exact clean source SHA.' }
+        $argumentLine += " -BoundSourceSha $BoundSourceSha"
+    }
     $process = Start-Process -FilePath $powershell -ArgumentList $argumentLine -WindowStyle Hidden `
         -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
     $helper = [pscustomobject]@{
@@ -927,6 +932,7 @@ function Invoke-AeroLinkProductionLauncher {
         [scriptblock]$LocalReadyTest,
         [scriptblock]$HelperLauncher,
         [scriptblock]$HelperStopper,
+        [string]$BoundSourceSha,
         # Must cover a supported clone-validated upgrade, not just a plain start. See the budget derivation
         # at the top of this module; injectable so the contract suite can drive the deadline in seconds.
         [int]$TimeoutSeconds = $script:AeroLinkSupportedUpgradeTimeoutSeconds,
@@ -939,7 +945,7 @@ function Invoke-AeroLinkProductionLauncher {
         [switch]$ForceLaunch
     )
     if ($null -eq $LocalReadyTest) { $LocalReadyTest = { param($C) Test-AeroLinkRemoteDemoLocalReady -Config $C } }
-    if ($null -eq $HelperLauncher) { $HelperLauncher = { param($C, $R) Start-AeroLinkRemoteDemoProductionHelper -Config $C -Run $R } }
+    if ($null -eq $HelperLauncher) { $HelperLauncher = { param($C, $R, $Sha) Start-AeroLinkRemoteDemoProductionHelper -Config $C -Run $R -BoundSourceSha $Sha } }
     if ($null -eq $HelperStopper) { $HelperStopper = { param($C, $R, $ProcessId, $Helper) Stop-AeroLinkRemoteDemoOwnedProcess -ProcessId $ProcessId -ExpectedProcess $Helper.Process } }
 
     $local = & $LocalReadyTest $Config
@@ -948,7 +954,7 @@ function Invoke-AeroLinkProductionLauncher {
         return [pscustomobject]@{ Healthy = $true; HelperUsed = $false; ProcessId = $null; Step = 'production-launcher'; Detail = $local.Detail; LogPath = (Join-Path $Config.LogsPath 'remote-demo.log') }
     }
 
-    $helper = & $HelperLauncher $Config $Run
+    $helper = & $HelperLauncher $Config $Run $BoundSourceSha
     Write-AeroLinkRemoteDemoLog -Config $Config -Run $Run -Message "Production launcher helper started (PID $($helper.Id), step production-launcher, stdout $($helper.StdOutPath), stderr $($helper.StdErrPath))."
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $helperExited = $false
@@ -1290,6 +1296,7 @@ function Start-AeroLinkRemoteDemo {
         }
         Write-AeroLinkRemoteDemoLog -Config $Config -Run $run -Message "PostgreSQL ready: $($postgres.Detail)"
         $launcher = Invoke-AeroLinkProductionLauncher -Config $Config -Run $run `
+            -BoundSourceSha $expectedSourceIdentity `
             -LocalReadyTest $LocalReadyTest -HelperLauncher $ProductionHelperLauncher -HelperStopper $ProductionHelperStopper `
             -TimeoutSeconds $ProductionTimeoutSeconds -ForceLaunch
         if (-not $launcher.Healthy) {

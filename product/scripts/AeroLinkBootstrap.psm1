@@ -474,6 +474,8 @@ function Invoke-AeroLinkSourceBootstrap {
         [Parameter(Mandatory)][string]$CurrentScriptPath,
         [AllowEmptyCollection()][string[]]$ScriptArguments = @(),
         [AllowEmptyCollection()][string[]]$LauncherFiles = @(),
+        # A transition already reconciled this revision; a later merge belongs to the next transition.
+        [string]$BoundSourceSha,
         [int]$FetchTimeoutSeconds = 45,
         [scriptblock]$PreAdvanceAction,
         [scriptblock]$FastForwardObserver,
@@ -495,6 +497,9 @@ function Invoke-AeroLinkSourceBootstrap {
         }
         if ($expectedShaFromParent -notmatch '^[0-9a-fA-F]{40}$') {
             throw 'AeroLink re-entry source identity is malformed: the expected SHA is not a full 40-character hexadecimal commit identity. Launch refused; nothing was changed.'
+        }
+        if ($BoundSourceSha -and $BoundSourceSha -ne $expectedShaFromParent) {
+            throw 'AeroLink source identity mismatch: transition binding disagrees with the re-entry source identity.'
         }
 
         $posture = Get-AeroLinkRepositoryPosture -RepositoryRoot $RepositoryRoot
@@ -519,6 +524,22 @@ function Invoke-AeroLinkSourceBootstrap {
         return [pscustomobject]@{
             Action = 'ReentryValidated'; HeadSha = $posture.HeadSha; UpdatedToSha = $null
             RemoteReachable = $null; Reason = 'Re-entry revalidated the HOME canonical source posture; the update cycle was skipped.'
+        }
+    }
+
+    if ($BoundSourceSha) {
+        if (-not $isHomeCanonical -or $BoundSourceSha -notmatch '^[0-9a-fA-F]{40}$') {
+            throw 'AeroLink bound source identity requires HOME canonical mode and a full 40-character hexadecimal commit identity.'
+        }
+        $posture = Get-AeroLinkRepositoryPosture -RepositoryRoot $RepositoryRoot
+        if (-not $posture.HasRemote -or -not $posture.RemoteMainSha) {
+            throw 'AeroLink bound source identity has no cached origin/main against which to validate merged source.'
+        }
+        Assert-AeroLinkHomeCanonicalSourcePolicy -Posture $posture -ExpectedSha $BoundSourceSha
+        Write-Host "Source bootstrap: deployment source validated at main @ $($posture.ShortSha); no further fetch or update." -ForegroundColor DarkGray
+        return [pscustomobject]@{
+            Action = 'BoundSourceValidated'; HeadSha = $posture.HeadSha; UpdatedToSha = $null
+            RemoteReachable = $null; Reason = 'The transition-bound source was revalidated without another update cycle.'
         }
     }
 
