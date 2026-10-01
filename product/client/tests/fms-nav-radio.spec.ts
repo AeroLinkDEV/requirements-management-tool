@@ -136,6 +136,8 @@ test('F8b: the ADF page tunes an NDB and shows its bearing, relative, magnetic o
   fms.press('CLR')
   const ndb = fms.navdb.nearby(fms.truePosition, 75).find(entry => entry.kind === 'navaid' && entry.type === 'NDB')!
   enter((ndb as { frequency: string }).frequency, 'LSK1L')
+  // Entry fills standby; the crew swaps it active before evaluating raw bearing (M300 13-23).
+  fms.press('LSK1L')
   step(1)
   expect(lines()[9]).toMatch(/^ REL-BRG/)
   const relative = fms.adfBearing('adf')!

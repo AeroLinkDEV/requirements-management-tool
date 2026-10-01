@@ -28,6 +28,46 @@ const angular = (bus: FmsOutputs, angle: number) => `${angularAvailable(bus) ? t
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const utc = (ms: number) => { const d = new Date(ms); return `${String(d.getUTCHours()).padStart(2, "0")}${String(d.getUTCMinutes()).padStart(2, "0")}.${Math.floor(d.getUTCSeconds() / 6)}Z`; };
 
+/** Installation-specific bench RMI: heading-up card and two independent raw ADF pointers (M300 13-23/24).
+ * Bearings are heading-relative bus words, independent of the track-up map and of MAG/TRUE card selection. */
+function Rmi({ bus, air }: { bus: FmsOutputs; air: AircraftData }) {
+  const cx = 88, cy = 279, radius = 43;
+  const heading = air.heading - variation(bus);
+  // The routed bench scales the ND; keep the RMI readable at its supported density widths.
+  return <g data-testid="nd-rmi" fontSize="18" textAnchor="middle">
+    <rect x="10" y="204" width="156" height="191" rx="6" fill="#05070a" stroke="#6a7384" />
+    <text x={cx} y="225" fill={WHITE}>RMI (BENCH)</text>
+    <circle cx={cx} cy={cy} r={radius} fill="none" stroke={WHITE} />
+    {angularAvailable(bus) ? <g fill={WHITE} stroke={WHITE}>
+      {Array.from({ length: 12 }, (_, i) => i * 30).map(degrees => {
+        const radians = (degrees - heading) * Math.PI / 180;
+        return <g key={degrees}>
+          <line x1={cx + radius * Math.sin(radians)} y1={cy - radius * Math.cos(radians)} x2={cx + (radius - 5) * Math.sin(radians)} y2={cy - (radius - 5) * Math.cos(radians)} />
+          {degrees % 90 === 0 ? <text x={cx + (radius - 17) * Math.sin(radians)} y={cy - (radius - 17) * Math.cos(radians) + 5} stroke="none">{["N", "E", "S", "W"][degrees / 90]}</text> : null}
+        </g>;
+      })}
+    </g> : null}
+    <polygon points={`${cx},${cy - radius + 3} ${cx - 4},${cy - radius - 4} ${cx + 4},${cy - radius - 4}`} fill={WHITE} />
+    {(["adf", "adf2"] as const).map((device, i) => {
+      const word = bus.radioMeasurements[device].adfBearing;
+      const valid = word.status === "NORMAL" && word.value !== null && Number.isFinite(word.value);
+      const colour = i === 0 ? CYAN : GREEN;
+      return <g key={device}>
+        {valid ? <g data-testid={`rmi-${device}-needle`} transform={`rotate(${word.value} ${cx} ${cy})`} stroke={colour} strokeWidth="1.8" fill={colour}>
+          {i === 0 ? <line x1={cx} y1={cy + 33} x2={cx} y2={cy - 30} /> : <>
+            <line x1={cx - 2} y1={cy + 33} x2={cx - 2} y2={cy - 30} />
+            <line x1={cx + 2} y1={cy + 33} x2={cx + 2} y2={cy - 30} />
+          </>}
+          <polygon points={`${cx},${cy - 37} ${cx - 4},${cy - 29} ${cx + 4},${cy - 29}`} stroke="none" />
+        </g> : null}
+        <text x={cx} y={365 + i * 23} fill={valid ? colour : AMBER} data-testid={`rmi-${device}-value`}>{`ADF${i + 1} ${valid ? `${three(word.value!)} REL` : word.status === "FAIL" ? "FAIL" : "NCD"}`}</text>
+      </g>;
+    })}
+    <circle cx={cx} cy={cy} r="3" fill={WHITE} />
+    <text x={cx} y="342" fill={angularAvailable(bus) ? WHITE : AMBER} data-testid="rmi-heading">{angular(bus, air.heading)}</text>
+  </g>;
+}
+
 /**
  * Newly engaged modes are boxed for ten seconds, as airline mode annunciators do, so a change the crew did not command
  * is noticed. The box times use the simulation clock.
@@ -404,6 +444,7 @@ export function Nd({ bus, air, range }: { bus: FmsOutputs; air: AircraftData; ra
         <text x="10" y="408" fontSize="12" fill={bus.failed ? AMBER : GREEN} data-testid="nd-source">{bus.failed ? "MAP" : `${bus.source} ${bus.navMode}`}</text>
         {!bus.failed ? <text x="410" y="408" fontSize="12" textAnchor="end">RNP {bus.rnp.toFixed(2)} ANP {bus.anp === null ? "----" : bus.anp.toFixed(2)}</text> : null}
       </g>
+      <Rmi bus={bus} air={air} />
       {bus.failed ? <text x={cx} y="200" textAnchor="middle" fontSize="18" fill={AMBER} data-testid="nd-map-flag">MAP</text> : null}
     </svg>
   );

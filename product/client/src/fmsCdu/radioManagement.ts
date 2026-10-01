@@ -1,9 +1,20 @@
 import type { FmsSide, RadioManagementPort } from "./crossTalk";
 import type { RangeIdentity } from "./sensorPorts";
+import type { Navaid } from "./navData";
 
-export type RadioState = { com1: string; com1Stby: string; com2: string; com2Stby: string; nav1: string; nav2: string; adf: string; adf2: string; tpdr: string; tpdr2: string; tacan: string };
+export type RadioState = { com1: string; com1Stby: string; com2: string; com2Stby: string; nav1: string; nav2: string; adf: string; adfStby: string; adf2: string; adf2Stby: string; tpdr: string; tpdr2: string; tacan: string };
 export type RadioKey = keyof RadioState;
-export type RadioDevice = Exclude<RadioKey, "com1Stby" | "com2Stby">;
+/** The standby frequencies the FMS holds (COM, and the ADF's, M300 13-23): an entry goes there, and the LSK swaps it in. */
+export type StandbyKey = "com1Stby" | "com2Stby" | "adfStby" | "adf2Stby";
+export type RadioDevice = Exclude<RadioKey, StandbyKey>;
+const isStandby = (key: RadioKey): key is StandbyKey => key.endsWith("Stby");
+/** ADF-462: 190.0 to 1799.5 kHz and 2179.0 to 2185.0 kHz at 0.5 kHz (M300 13-23, Figure 13-1), as the ADF shows it. */
+export const adfFrequency = (entry: string) => {
+  if (!/^\d{3,4}(\.\d)?$/.test(entry)) return null;
+  const value = Number(entry);
+  const inRange = value >= 190 && value <= 1799.5 || value >= 2179 && value <= 2185;
+  return inRange && Math.round(value * 10) % 5 === 0 ? (Number.isInteger(value) ? String(value).padStart(4, "0") : value.toFixed(1)) : null;
+};
 /**
  * A tune command's status (plan C3): PENDING until the radio's feedback confirms it (ACK); REJECTED when the radio
  * refuses it; SUPERSEDED when a newer command for the same radio replaces it before it is confirmed; TIMEOUT when no
@@ -72,15 +83,15 @@ const TIMEOUT_ROW: Partial<Record<RadioDevice, { row: string; inhibit?: "polarOr
   adf2: { row: "E-2", inhibit: "polarOrRoll", configuredBy: "adfControlLostAlert" },
 };
 
-export const DEFAULT_RADIOS: RadioState = { com1: "121.500", com1Stby: "126.700", com2: "119.100", com2Stby: "133.600", nav1: "113.90", nav2: "116.70", adf: "0350", adf2: "0280", tpdr: "1200", tpdr2: "1200", tacan: "017X" };
+export const DEFAULT_RADIOS: RadioState = { com1: "121.500", com1Stby: "126.700", com2: "119.100", com2Stby: "133.600", nav1: "113.90", nav2: "116.70", adf: "0350", adfStby: "0350", adf2: "0280", adf2Stby: "0280", tpdr: "1200", tpdr2: "1200", tacan: "017X" };
 
 /** M300 3-26: shared radio devices remain accessible when the FMS cross-talk link fails.
  * Burst/feedback latency and timeout are declared laboratory parameters, not OEM bus timing. */
 export class RadioManagementSystem {
   private active = { ...DEFAULT_RADIOS };
-  private standby: [Pick<RadioState, "com1Stby" | "com2Stby">, Pick<RadioState, "com1Stby" | "com2Stby">] = [
-    { com1Stby: DEFAULT_RADIOS.com1Stby, com2Stby: DEFAULT_RADIOS.com2Stby },
-    { com1Stby: DEFAULT_RADIOS.com1Stby, com2Stby: DEFAULT_RADIOS.com2Stby },
+  private standby: [Pick<RadioState, StandbyKey>, Pick<RadioState, StandbyKey>] = [
+    { com1Stby: DEFAULT_RADIOS.com1Stby, com2Stby: DEFAULT_RADIOS.com2Stby, adfStby: DEFAULT_RADIOS.adfStby, adf2Stby: DEFAULT_RADIOS.adf2Stby },
+    { com1Stby: DEFAULT_RADIOS.com1Stby, com2Stby: DEFAULT_RADIOS.com2Stby, adfStby: DEFAULT_RADIOS.adfStby, adf2Stby: DEFAULT_RADIOS.adf2Stby },
   ];
   private sequence = 0;
   private history: RadioRequest[] = [];
@@ -94,8 +105,12 @@ export class RadioManagementSystem {
   /** DME HOLD (M300 13-22): the frequency a held DME stays on, whatever its NAV is retuned to. */
   private held: Record<DmeDevice, string | null> = { dme1: null, dme2: null };
   private adfSettings: Record<"adf" | "adf2", AdfSettings> = { adf: { mode: "ADF", bfo: false, bearing: "REL" }, adf2: { mode: "ADF", bfo: false, bearing: "REL" } };
+  private readonly silentNdbs = new Set<string>();
+  private ndbIdentity(station: Pick<Navaid, "ident" | "frequency" | "position">) {
+    return JSON.stringify([station.ident, Number(station.frequency), station.position.lat, station.position.lon]);
+  }
   private tests = new Map<TestableDevice, { state: RadioTestState; startedAt: number | null }>();
-  private swaps = new Map<number, { side: FmsSide; key: "com1Stby" | "com2Stby"; previous: string }>();
+  private swaps = new Map<number, { side: FmsSide; key: StandbyKey; previous: string }>();
   private roster: RosterStation[] = [];
   private scanDwellS = 2;
   private rangeSequence = 0;
@@ -173,7 +188,7 @@ export class RadioManagementSystem {
     return faults.measurementBus === "NORMAL" && faults.receiver === "NORMAL" && !testing;
   }
   private tune(side: FmsSide, key: RadioKey, value: string): number | null {
-    if (key === "com1Stby" || key === "com2Stby") {
+    if (isStandby(key)) {
       this.standby[side - 1][key] = value;
       if (this.linked()) this.standby[2 - side][key] = value;
       this.notify(); return null;
@@ -225,6 +240,12 @@ export class RadioManagementSystem {
         system.tune(side, key, value);
       },
       receiving(device) { return system.receiving(device); },
+      ndbTransmitting(station) { return !system.silentNdbs.has(system.ndbIdentity(station)); },
+      setNdbOffAir(station, off) {
+        const identity = system.ndbIdentity(station);
+        if (off) system.silentNdbs.add(identity); else system.silentNdbs.delete(identity);
+        system.notify();
+      },
       dmeReceiving(device) { return system.dmeReceiving(device); },
       dmeTuning(device, channel) { return system.dmeTuning(device, channel); },
       navMode(device) { return system.navModes[device]; },
@@ -246,7 +267,7 @@ export class RadioManagementSystem {
       scanRoster() { return system.scanRoster(); },
       scanning() { return system.scanning(); },
       swap(key) {
-        const standby = `${key}Stby` as "com1Stby" | "com2Stby";
+        const standby = `${key}Stby` as StandbyKey;
         const id = system.tune(side, key, system.standby[side - 1][standby]);
         if (id !== null) system.swaps.set(id, { side, key: standby, previous: system.active[key] });
       },

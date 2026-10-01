@@ -51,6 +51,9 @@ export type Action =
   | { kind: "keys"; keys: CduFunction[] }
   | { kind: "type"; text: string }
   | { kind: "condition"; condition: ConditionId; on: boolean }
+  /** F16 authored replay world stimulus. Resolve one active-database NDB; paired DME and airborne radios stay healthy.
+   * Imported/authored scenarios support this action; the interactive recorder has no ground-station control. */
+  | { kind: "ndb"; ident: string; offAir: boolean }
   | { kind: "alert"; text: string }
   | { kind: "procedure"; procedure: "SID" | "STAR" | "APPROACH"; ident: string; transition?: string }
   /** APPR: arms the approach, or (on false) presses it off: a disarm, or after capture a cancellation. */
@@ -171,6 +174,7 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "keys": return `press ${a.keys.map(key => key.replace(/^CHAR_/, "")).join(" ")}`;
       case "type": return `type ${a.text} into the scratchpad`;
       case "condition": return `${a.on ? "inject" : "remove"} the condition ${a.condition}`;
+      case "ndb": return `${a.offAir ? "take" : "restore"} NDB ${a.ident} ${a.offAir ? "off" : "on"} the air`;
       case "alert": return `raise the alert ${a.text}`;
       case "procedure": return `select the ${a.procedure === "APPROACH" ? "approach" : a.procedure} ${a.ident}${a.transition ? ` via ${a.transition}` : ""}`;
       case "armApproach": return a.on === false ? "press APPR off" : "arm the approach";
@@ -275,6 +279,7 @@ function actionProblem(action: unknown): string | null {
   switch (a.kind) {
     case "keys": return Array.isArray(a.keys) && a.keys.length > 0 && a.keys.every(key => typeof key === "string" && KEY.test(key)) ? null : "keys must be a non-empty list of CDU functions";
     case "type": return text(a.text, /^[A-Z0-9 ./-]{1,24}$/) ? null : "type needs up to 24 scratchpad characters";
+    case "ndb": return text(a.ident, IDENT) && typeof a.offAir === "boolean" ? null : "ndb needs a station ident and offAir true or false";
     case "condition": {
       const unmodelled = UNMODELLED_CONDITIONS.find(condition => condition.id === a.condition);
       if (unmodelled) return `${unmodelled.label.toLowerCase()} is not modelled in v1, so a scenario that injects it is refused (rev 3 B3.5 F10)`;
@@ -537,6 +542,9 @@ export class ScenarioRunner {
       case "keys": for (const key of action.keys) fms.press(key); return;
       case "type": for (const key of keysFor(action.text)) fms.press(key); return;
       case "condition": fms.setCondition(action.condition, action.on); return;
+      case "ndb":
+        if (!fms.setNdbOffAir(action.ident, action.offAir)) throw new Error(`NDB ${action.ident} requires one unambiguous NDB in the active database`);
+        return;
       case "alert": fms.raiseAlert(action.text); return;
       case "procedure": fms.selectProcedure(action.procedure, action.ident, action.transition); return;
       case "armApproach": fms.armApproach(action.on !== false); return;

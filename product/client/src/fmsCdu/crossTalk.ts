@@ -1,5 +1,6 @@
 import type { RangeIdentity } from "./sensorPorts";
 import type { Route } from "./fmsModel";
+import type { Navaid } from "./navData";
 import type { AdfSettings, DmeDevice, NavMode, RadioDevice, RadioEvent, RadioFaults, RadioKey, RadioState, RadioRequest, RadioTestState, RosterStation, ScanChannel, TestableDevice } from "./radioManagement";
 
 export type FmsSide = 1 | 2;
@@ -29,9 +30,12 @@ export interface RadioManagementPort {
   readonly state: RadioState;
   readonly requests: readonly RadioRequest[];
   tune(key: RadioKey, value: string): void;
-  swap(key: "com1" | "com2"): void;
+  swap(key: "com1" | "com2" | "adf" | "adf2"): void;
   /** Plan F8a: what a radio reports it is on (null while failed or silent), and whether a DME transceiver answers. */
   receiving(device: RadioDevice): string | null;
+  /** F16 world stimulus: one physical NDB's availability, shared by both computers, separate from radio health. */
+  ndbTransmitting(station: Pick<Navaid, "ident" | "frequency" | "position">): boolean;
+  setNdbOffAir(station: Pick<Navaid, "ident" | "frequency" | "position">, off: boolean): void;
   dmeReceiving(device: DmeDevice): boolean;
   /** Acknowledged physical tuning identity for a range arrival, independent of pending commands. */
   dmeTuning(device: DmeDevice, channel: 1 | 2 | 3): RangeIdentity | null;
