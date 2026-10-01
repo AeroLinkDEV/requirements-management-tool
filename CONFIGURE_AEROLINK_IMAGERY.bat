@@ -1,6 +1,6 @@
 @echo off
 setlocal
-:: DEC-151: stores the Esri World Imagery API key for the FMS Test Bench out-the-window view, encrypted with
+:: DEC-151: stores the Esri World Imagery API key for the flight-management bench out-the-window view, encrypted with
 :: Windows DPAPI. The key is typed at a hidden prompt, never passed as an argument. Actions: Set (default), Status, Remove.
 :: Windows PowerShell must load its own modules; clearing PSModulePath makes it rebuild its own default.
 set "PSModulePath="

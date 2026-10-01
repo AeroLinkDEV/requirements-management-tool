@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 <#
-    Stores, reports or removes the Esri World Imagery API key for the FMS Test Bench's out-the-window view (DEC-151).
+    Stores, reports or removes the Esri World Imagery API key for the flight-management bench out-the-window view (DEC-151).
 
       Set     (default) prompts for the key with hidden input and stores it encrypted (Windows DPAPI) with an ACL for
               this account, SYSTEM and Administrators only. The running API picks it up on its next imagery request.
