@@ -1,7 +1,7 @@
 import { alert } from "./alerts";
 import { formatConstraint, parseAltitude, parseConstraint } from "./vnav";
 import {
-  WAYPOINT, boxes, caption, conditionalLabel, courseDeg, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, offset, pad, parsePosition, prompt, simulated,
+  WAYPOINT, boxes, caption, conditionalLabel, courseDeg, dashes, distanceNm, fixed, formatPosition, hhmm, medium, numberIn, offset, pad, parsePosition, prompt, ranged, simulated,
   small, three, title, type CorePageId, type Leg, type LskResult, type Page, type PageId,
 } from "./fmsModel";
 import { HAL_NM, MODE_TEXT, shownReceiver } from "./gpsSensors";
@@ -33,6 +33,10 @@ function approach(fms: ScriptedFms) {
 export const GLIDEPATH_LIMITS = { low: 2.75, high: 3.77 };
 
 export function verticalPathAngle(fms: ScriptedFms) { return approach(fms)?.vpa ?? null; }
+
+/** A crossing altitude in feet, or as a flight level at or above the transition altitude (PLAN DATA TRANS ALT). */
+const crossingAltitude = (fms: ScriptedFms, feet: number) =>
+  feet >= fms.planData.transAlt ? `FL${String(Math.round(feet / 100)).padStart(3, "0")}` : String(Math.round(feet));
 
 /** The right side of a LEGS line: the speed and altitude constraints, as 180/4500. */
 const altitudeText = (leg: Leg) => {
@@ -600,13 +604,13 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         const waypointLines = hover
           ? hover.flatMap(line => [
             { left: small(` ${fms.angleText(line.course)}`), ...(line === hover[0] ? { center: small("DTG", "green"), right: small("ETA ", "green") } : {}) },
-            { left: { text: pad(line.ident, 5), color: line.at === 0 ? "magenta" as const : "green" as const, inverse: line.at === 0 }, right: medium(`${fixed(line.distance, 1)}NM ${eta(line.at, line.distance)}`) },
+            { left: { text: pad(line.ident, 5), color: line.at === 0 ? "magenta" as const : "green" as const, inverse: line.at === 0 }, right: medium(`${ranged(line.distance, 9999.9, v => fixed(v, 1))}NM ${eta(line.at, line.distance)}`) },
           ])
           : [
             { left: small(` ${fms.angleText(toLeg?.course)}`), center: small("DTG", "green"), right: small("ETA ", "green") },
-            { left: { text: pad(ident(to), 5), color: "magenta" as const, inverse: true }, right: medium(toLeg ? `${fixed(toDistance, 1)}NM ${eta(0, toDistance)}` : "") },
+            { left: { text: pad(ident(to), 5), color: "magenta" as const, inverse: true }, right: medium(toLeg ? `${ranged(toDistance, 9999.9, v => fixed(v, 1))}NM ${eta(0, toDistance)}` : "") },
             { left: small(` ${fms.angleText(nextLeg?.course)}`) },
-            { left: { text: pad(ident(next), 5), color: "green" as const }, right: medium(nextLeg ? `${fixed(toDistance + nextLeg.distance, 1)}NM ${eta(1, toDistance + nextLeg.distance)}` : "") },
+            { left: { text: pad(ident(next), 5), color: "green" as const }, right: medium(nextLeg ? `${ranged(toDistance + nextLeg.distance, 9999.9, v => fixed(v, 1))}NM ${eta(1, toDistance + nextLeg.distance)}` : "") },
           ];
         // XTK blanked in the hover procedure (M300 A-127): on a CF leg, more than 0.2 NM off it and more than 20° off its
         // course together, the cross-track to a leg the aircraft is not flying along means nothing.
@@ -633,6 +637,11 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
       if (index === 1)
         return [
           title("PROGRESS", "2/4", "ACT"),
+          // The last waypoint overflown, its crossing altitude and its actual time of arrival (M300 A-124; plan B1.7).
+          caption(" FROM    ALT", "ATA "),
+          fms.fromWaypoint
+            ? { left: { text: `${pad(fms.fromWaypoint.ident, 7)} ${crossingAltitude(fms, fms.fromWaypoint.altitude)}`, color: "green" }, right: medium(hhmm(new Date(fms.fromWaypoint.ata))) }
+            : { left: dashes(5), right: medium("----.-") },
           caption(" FUEL QTY", "FUEL FLOW "),
           { left: medium(`${Math.round(fms.fuelState.quantity)}KG`), right: medium(`${fms.fuelState.flow}KG/H`) },
           // The endpoint of the predictions (the MAP, or over the landing site), its EFOB and its basis (plan C.11, R3-03).
@@ -852,7 +861,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         caption(" MAX RANGE", "GROSS WT "),
         { left: medium(perf.maxRange === null ? "---NM" : `${Math.round(perf.maxRange)}NM`), right: medium(w(perf.grossWeight)) },
         caption(" ENDURANCE", "FUEL WT "),
-        { left: medium(perf.endurance === null ? "--+--" : hoursMinutes(perf.endurance)), right: { text: w(perf.usable) } },
+        // Hours and minutes, up to 99+59; beyond it, asterisks (M300 2-18).
+        { left: medium(perf.endurance === null ? "--+--" : ranged(perf.endurance, 99 + 59 / 60, hoursMinutes)), right: { text: w(perf.usable) } },
         caption(" FUEL FLOW", "MILEAGE "),
         { left: { text: `${Math.round(fuelIn(unit, perf.flow))}${unit}/HR` }, right: medium(`${mileage}${unit}/NM`) },
         caption(" FUEL REMAINING AT", "FIX "),
@@ -1254,7 +1264,8 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         caption(" ALARM TIME", "COUNTDOWN "),
         {
           left: alarmAt === null ? { text: "----Z" } : { text: `${utc(alarmAt)}Z`, color: "green" },
-          right: remaining === null ? { text: "--:--" } : { text: `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`, color: "green" },
+          // Minutes and seconds to go, up to 99:59; beyond it, asterisks (M300 2-18).
+          right: remaining === null ? { text: "--:--" } : { text: ranged(remaining, 99 * 60 + 59, s => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`), color: "green" },
         },
         caption(" UTC"),
         { left: medium(`${utc(fms.utcTime.getTime())}:${seconds}Z`) },

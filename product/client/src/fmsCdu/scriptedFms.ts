@@ -339,6 +339,11 @@ export class ScriptedFms implements CduBackend {
   private uplinksSent = 0;
   private enteredHold: HoldEntry | null = null;
   private sequenced: string | null = null;
+  /**
+   * The last waypoint overflown (FROM), its crossing altitude and its actual time of arrival (M300 A-124, PROGRESS 2/4;
+   * plan B1.7). In a hold the ATA is the time of entry, at the first crossing of the holding fix (M300 5-17 NOTE).
+   */
+  private overflown: { ident: string; altitude: number; ata: number } | null = null;
   /** The latched VNAV phase (updateVerticalPhase), and the cruise altitude it last saw, to notice a new entry. */
   private vphase = { phase: "CLIMB" as VerticalPhase, reason: "initial", cruise: null as number | null };
 
@@ -925,6 +930,8 @@ export class ScriptedFms implements CduBackend {
         // Entered without the minute's notice (the hold made within it): checked at the fix.
         if (this.holdSpeedChecked !== hold && this.holdExceedsProtection(hold)) this.alert(alert("HIGH HOLDING SPEED"));
         this.holdSpeedChecked = hold;
+        // Established in the hold, FROM and TO are the holding fix; its ATA is this first crossing, kept while holding.
+        this.overflown = { ident: leg.ident, altitude: this.altitude, ata: this.now.getTime() };
       }
       return "hold";
     }
@@ -954,7 +961,10 @@ export class ScriptedFms implements CduBackend {
   private passLeg(ident: string | null) {
     const route = this.active;
     this.legStart = (ident && this.coordinates(ident)) || { ...this.here };
-    if (ident) this.sequenced = ident;
+    if (ident) {
+      this.sequenced = ident;
+      this.overflown = { ident, altitude: this.altitude, ata: this.now.getTime() };
+    }
     const passed = route.legs.shift();
     // A direct-to-fix leg is flown from wherever the aircraft is when it becomes active.
     const next = route.legs[0];
@@ -2637,6 +2647,8 @@ export class ScriptedFms implements CduBackend {
   get holdEntryFlown() { return this.enteredHold; }
   /** The last waypoint sequenced: once past the FAF, the approach still measures its path from it. */
   get lastSequenced() { return this.sequenced; }
+  /** The last waypoint overflown, its crossing altitude and its ATA (PROGRESS 2/4), or null before the first. */
+  get fromWaypoint() { return this.overflown; }
 
   /**
    * A waypoint's position: a search or tactical point, a Mark On Top, or the navigation database. A runway belongs to
