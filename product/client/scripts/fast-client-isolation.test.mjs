@@ -12,7 +12,7 @@ function runProbe(spec) {
     cli,
     'test',
     '--config=playwright.isolation-probe.config.ts',
-    spec,
+    `(?:^|[/\\\\])${spec.replaceAll('.', '\\.')}$`,
     '--reporter=line',
   ], {
     cwd: client,
@@ -37,5 +37,16 @@ test('the ordinary isolation-probe control passes', () => {
   const output = `${result.stdout}\n${result.stderr}`
 
   assert.equal(result.status, 0, output)
-  assert.match(output, /1 passed/)
+  assert.match(output, /3 passed/)
+})
+
+test('swallowed browser violations are prevented and still fail even when mocked', () => {
+  const result = runProbe('network-offending.spec.ts')
+  const output = `${result.stdout}\n${result.stderr}`
+
+  assert.notEqual(result.status, 0, output)
+  assert.match(output, /receiving-server proof: API=0 external=0; native image and font loaded/)
+  assert.match(output, /rendered fixture attempted API or external network access/)
+  assert.match(output, /api\/mocked/)
+  assert.match(output, /2 failed/)
 })

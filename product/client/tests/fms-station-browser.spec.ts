@@ -1,23 +1,7 @@
-import { expect, test as browserTest } from '@playwright/test'
+import { expect, renderedTest as test } from './isolated-client-test'
 
-// Full-browser owner: Chromium's intercepted initial about:blank popups stall images/fonts in the rendered
-// tier. Keep that tier's isolation guard intact. These offline fixtures use only this client origin, and the
-// built-host owner separately proves shipped styles, real WebGL/workers and inherited CSP in every child.
-const test = browserTest.extend<{ stationRequests: void }>({
-  stationRequests: [async ({ context, baseURL }, provide) => {
-    const origin = new URL(baseURL!).origin
-    const unexpected: string[] = []
-    context.on('request', request => {
-      const url = new URL(request.url())
-      if (!['data:', 'blob:'].includes(url.protocol)
-        && (url.origin !== origin || /^\/api(?:\/|$)/i.test(url.pathname))) {
-        unexpected.push(`${url.origin}${url.pathname}`)
-      }
-    })
-    await provide()
-    expect(unexpected, 'station fixture attempted API or external network access').toEqual([])
-  }, { auto: true }],
-})
+// Offline station lifecycle owner under preventive client isolation. The built-host owner separately
+// proves shipped styles, real WebGL/workers and inherited CSP in every child.
 
 test('fixed station presets move one shared cockpit and instructor draft, return on close and remember only intent', async ({ page, context }, testInfo) => {
   test.setTimeout(120_000)
