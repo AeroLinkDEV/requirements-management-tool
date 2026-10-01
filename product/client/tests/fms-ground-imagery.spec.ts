@@ -32,6 +32,29 @@ const PHOTO = { image: 'photo', partial: false }
 const jpeg = (body: string) => new Response(body, { status: 200, headers: { 'content-type': 'image/jpeg' } })
 const png = (body: string) => new Response(body, { status: 200, headers: { 'content-type': 'image/png' } })
 
+test('blank USGS images request the worldwide fallback once; unavailable fallback keeps relief', async () => {
+  for (const blank of ['white', 'sea']) {
+    const asked: Array<[number, number, number, boolean]> = []
+    let available = true
+    const imagery = new GroundImagery(async (z, x, y, fallback = false) => {
+      asked.push([z, x, y, fallback])
+      if (fallback && !available) return new Response(null, { status: 404 })
+      return new Response(fallback ? 'photo' : blank, { headers: {
+        'content-type': blank === 'sea' ? 'image/png' : 'image/jpeg',
+        'x-imagery-source': fallback ? 'esri' : 'usgs',
+      } })
+    }, decoder)
+    expect(await imagery.load(12, 1210, 1465)).toEqual(PHOTO)
+    expect(asked).toEqual([[12, 1210, 1465, false], [12, 1210, 1465, true]])
+    expect(imagery.usesEsri).toBe(true)
+    available = false
+    asked.length = 0
+    expect(await imagery.load(12, 1211, 1465)).toBeNull()
+    expect(asked).toEqual([[12, 1211, 1465, false], [12, 1211, 1465, true]])
+    expect(imagery.status).not.toBe('unreachable')
+  }
+})
+
 test('a tile the relay took from Esri makes the view credit Esri; USGS tiles and Esri tiles with nothing in them do not', async () => {
   let source = 'usgs', body = 'photo'
   const imagery = new GroundImagery(async () => new Response(body, { status: 200, headers: { 'content-type': 'image/jpeg', 'x-imagery-source': source } }), decoder)

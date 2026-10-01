@@ -3,14 +3,14 @@ import { TILE_PIXELS } from "./outTheWindow";
 /**
  * Aerial imagery for the out-the-window view's ground, through the server's relay (FmsBenchImageryEndpoints.cs): the
  * USGS National Map orthoimagery (US federal public-domain data, 6 inches to 1 metre, the United States only). Where
- * there is none, the view draws its elevation relief instead, tile by tile: the relay answers 404 outside the
- * coverage, and at low zoom levels near its edge the service fills a tile with blank white, which counts as none too.
+ * there is none, the relay optionally falls back to Esri World Imagery, otherwise the view draws elevation relief.
+ * At low zoom the service fills a tile with blank white; after decoding it the view asks the same relay for Esri once.
  * Along the edge of the coverage (coastlines, the border) the service sends PNG, transparent where it has no imagery:
  * such a tile is drawn over its relief, and one with nothing in it at all counts as none.
  */
 
 /** Where imagery tiles come from: a JPEG, a PNG along the edge of the coverage, a 404 where there is none, or a failure. */
-export type ImagerySource = (z: number, x: number, y: number) => Promise<Response>;
+export type ImagerySource = (z: number, x: number, y: number, fallback?: boolean) => Promise<Response>;
 /** Nothing yet; tiles arriving; turned off on this installation; or not answering. */
 export type ImageryStatus = "waiting" | "live" | "off" | "unreachable";
 /**
@@ -96,20 +96,20 @@ export class GroundImagery<Image = ImageBitmap> {
    * A tile's imagery, or null where there is none (none published, blank, off, or failing): draw relief there. A partial
    * tile is drawn over its relief.
    */
-  async load(z: number, x: number, y: number): Promise<ImageryTile<Image> | null> {
+  async load(z: number, x: number, y: number, fallback = false): Promise<ImageryTile<Image> | null> {
     if (z > IMAGERY_MAX_ZOOM || this.current === "off") return null;
     let response: Response;
     try {
-      response = await this.source(z, x, y);
+      response = await this.source(z, x, y, fallback);
     } catch {
-      this.report("unreachable");
+      if (!fallback) this.report("unreachable");
       return null;
     }
     if (!response.ok) {
       const body = response.status === 404 ? await response.json().catch(() => null) as { code?: string } | null : null;
       // Outside the coverage is not a failure; an installation that turned imagery off says so, and that stays.
       if (body?.code === "imagery_relay_disabled") this.report("off");
-      else if (response.status !== 404) this.report("unreachable");
+      else if (response.status !== 404 && !fallback) this.report("unreachable");
       // "None here" is the source answering, so it ends an earlier failure. Over Canada every tile is a 404, and
       // without this one dropped tile kept the view saying the source was unreachable for the rest of the flight.
       else if (this.current === "unreachable") this.report("waiting");
@@ -122,7 +122,11 @@ export class GroundImagery<Image = ImageBitmap> {
       return null;
     }
     this.report("live");
-    if (isBlankTile(decoded.sample)) return null;
+    if (isBlankTile(decoded.sample)) {
+      // USGS also answers 200 with white/transparent fillers outside coverage, especially at low zoom.
+      // The browser can decode those; ask the relay for its worldwide fallback once, without repeating USGS.
+      return !fallback && response.headers.get("x-imagery-source") === "usgs" ? this.load(z, x, y, true) : null;
+    }
     if (!this.esri && response.headers.get("x-imagery-source") === "esri") {
       this.esri = true;
       for (const listener of this.listeners) listener();

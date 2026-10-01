@@ -2823,3 +2823,12 @@ choices are created as focused issues only when their trigger and acceptance bou
 - **Key handling:** The key is the owner's, stored on the serving machine with `CONFIGURE_AEROLINK_IMAGERY.bat` (Windows DPAPI, owner-only ACL) and read by the API itself. It never enters the repository, an argument, a launcher, a transition spool, a URL or a log, and an agent never enters it.
 - **Terms:** The view credits Esri whenever Esri imagery is shown. The relay passes Esri's own cache instruction through. The free tier (2,000,000 basemap tiles a month at the time of the decision) is the budget. The relay treats a refusal as "none here", never as a failure of the view, so an exhausted allowance or an expired key degrades to relief.
 - **Not decided here:** a paid plan, or a second worldwide source.
+
+### DEC-152 - Backend-only Esri Imagery Token URL
+
+- **Date:** 2026-10-01
+- **Status:** Accepted owner decision.
+- **Authority:** Sean, 2026-10-01, after live verification of the saved key: "I approve Allow the backend-only Esri URL, with those protections!" He also selected that option in the transport question, which explicitly disclosed that Esri or a TLS-inspection proxy could record the upstream URL.
+- **Supersedes:** DEC-151's prohibition on a credential in a URL only for the server's outbound HTTPS request to the fixed Esri World Imagery tile endpoint. Live tiles returned ArcGIS error 499 under both supported bearer-header forms, while the same key authenticated Basemap Styles metadata. Query-token authentication is required by the tile endpoint.
+- **Protection:** Only the backend constructs this URL. The Esri client's request logging is disabled; redirects and cookies are disabled. The key never enters browser URLs, browser responses, repository content, command arguments, launcher receipts or transition spools. Errors do not report the upstream URL. Keep .NET URI-query redaction enabled, and exclude this credential-bearing client from any additional HTTP instrumentation or URL logging.
+- **Boundary:** The encrypted protected store, owner entry of the key, USGS-first coverage, attribution, Esri caching instructions, graceful relief fallback and free-tier budget in DEC-151 remain in force. No paid plan, added privilege or second worldwide provider is approved. This exception cannot prevent Esri or a TLS-inspection proxy from recording the outbound URL.
