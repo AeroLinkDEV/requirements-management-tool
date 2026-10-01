@@ -109,6 +109,8 @@ Every sensor solution carries five distinct values, each with its meaning, units
 | **naimComparisonNm** (laboratory) | GPS-to-backup discrepancy plus the backup's accuracy95 (F5) | Only when retaining an uncertain GPS against a qualifying backup | — | — | — | — |
 | **eligibility / authority** | Phase eligibility, then actual guidance permission | En route, terminal, approach | En route, terminal (not approach, 15-3) | None (15-4) | None | None |
 
+**accuracy95Nm carries a basis:** `receiver` when it is the receiver's own figure (the GPS HFOM), and `laboratory` when any contributor is a declared model or allowance. Contributors include the radio accuracy models, an assumed or terrain elevation allowance (F1), and the KALMAN, DVS and DR growth. A laboratory value is a simulator estimate, not a validated 95% bound. The basis travels with the value to the bus (C4).
+
 **The limit** is the active RNP (DEC-150 item 4), whether the phase default or the crew entry. "Strictly below" is `value < limit`.
 
 **KALMAN's 2 σ is not a 95% radial figure.**
@@ -329,7 +331,7 @@ Both allowances are named profile parameters (`terrainNavaidElevationUncertainty
 - the slant-range correction uses the station elevation and the DME's own position;
 - a DME-only or TACAN facility is available to DME/DME;
 - the loader refuses malformed DME records, stating the reason;
-- a range with a non-data elevation is named in the fix and widens its ANP (C1's accuracy95Nm) by the propagated allowance;
+- a range with a non-data elevation is named in the fix, and its propagated allowance is added to C1's accuracy95Nm as a declared engineering allowance. Where it contributes, accuracy95Nm is a laboratory estimate (its basis says so, C1), not a validated 95% bound;
 - impossible and undetermined geometry is refused and reported.
 
 **Owner tests** (`fms-navaid-data.spec.ts`, independent values):
