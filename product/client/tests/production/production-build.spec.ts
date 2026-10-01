@@ -403,6 +403,14 @@ test('every workspace chunk arrives and keeps the design contract in both densit
           const box = element.getBoundingClientRect()
           return box.width > 0 && box.height > 0
         }
+        const fontPixels = (element: Element) => {
+          const size = parseFloat(getComputedStyle(element).fontSize)
+          // The bench RMI lives inside a responsive SVG: its authored font can meet the CSS floor while
+          // the screen transform makes the text too small. Measure this new surface at its displayed scale.
+          if (!element.closest('[data-testid="nd-rmi"]') || !(element instanceof SVGGraphicsElement)) return size
+          const matrix = element.getScreenCTM()
+          return matrix ? size * Math.min(Math.hypot(matrix.a, matrix.b), Math.hypot(matrix.c, matrix.d)) : 0
+        }
         // The Digital Thread canvas is a scaled scene (#880 §10.1, DEC-117): text inside it is authored in
         // scene units and drawn at the reader's zoom, so a CSS-pixel floor measures the wrong number there.
         // Its legibility is asserted at default landing zoom by the Digital Thread specs instead. The floor
@@ -428,8 +436,8 @@ test('every workspace chunk arrives and keeps the design contract in both densit
           tiny: [
             ...new Set(
               leaves
-                .filter(element => parseFloat(getComputedStyle(element).fontSize) < 12)
-                .map(element => `${(element.textContent || '').trim().slice(0, 24)} @ ${getComputedStyle(element).fontSize}`),
+                .filter(element => fontPixels(element) < 12)
+                .map(element => `${(element.textContent || '').trim().slice(0, 24)} @ ${fontPixels(element).toFixed(2)}px`),
             ),
           ],
           unstyled: [
