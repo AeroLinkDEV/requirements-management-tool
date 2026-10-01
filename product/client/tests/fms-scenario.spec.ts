@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
+import { DualFmsSystem } from '../src/fmsCdu/dualFms'
+import { fmsOutputs } from '../src/fmsCdu/efis'
 import { FlightSimulator } from '../src/fmsCdu/flight'
 import {
   ScenarioRecorder, ScenarioRunner, TICK_SECONDS, advanceTicks, linePattern, parseScenario, procedureText, reportMarkdown, runHeadless,
@@ -15,6 +18,57 @@ import { screenText } from '../src/fmsCdu/screen'
 // condition, and a step the run never reaches fails it.
 const START = Date.UTC(2026, 8, 27, 14, 0, 0)
 const library = (id: string) => SCENARIO_LIBRARY.find(entry => entry.id === id)!
+
+// F16 replay owner: the supported world outage must reach both independent computers, while HBT's separate DME
+// keeps transmitting. Receiver and rendered owners cannot detect an action refused by admission or applied to one FMS.
+test('F16 authored NDB outage replay flags both computers and restores raw bearing without failing the paired DME', () => {
+  let now = START
+  const system = new DualFmsSystem(() => new Date(now))
+  const fixture = readFileSync('tests/fixtures/cifp/pasd-2609.pc', 'latin1')
+  for (const unit of system.computers) {
+    expect(unit.loadArinc424(fixture, 'pasd-2609.pc')).toMatchObject({ loaded: 'CIFP2609' })
+    unit.swapCycles()
+    // Literal HBT CIFP2609 coordinates: due south, heading east, so the independent relative bearing is 270.
+    unit.setAircraft({ position: { lat: 55 + 18 / 60 + 56.4 / 3600 - 0.02, lon: -(160 + 31 / 60 + 6.22 / 3600) }, heading: 90 })
+    unit.open('ADF_RADIO')
+  }
+  system.computers[0].setCondition('independent', true)
+  system.computers[0].setRadio('adf', '0390')
+  system.computers[0].setRadio('nav1', '113.20')
+  for (let i = 0; i < 60; i++) { now += 1000; system.tick(); system.computers.forEach(unit => unit.updateNavigation(1)) }
+  const dmeBefore = system.computers.map((unit, i) => fmsOutputs(unit, system.flights[i]).radioMeasurements.dme1.dmeDistance)
+  dmeBefore.forEach(word => expect(word.status).toBe('NORMAL'))
+  for (const offAir of [true, false]) {
+    const scenario = parseScenario(JSON.stringify({ id: 'hbt-outage', title: 'HBT ground outage', objective: '', maxSeconds: 5,
+      steps: [{ when: { kind: 'start' }, action: { kind: 'ndb', ident: 'HBT', offAir } },
+        { when: { kind: 'start' }, action: { kind: 'expectLine', line: 10, pattern: offAir ? '^---' : '^270°' } }] }))
+    expect(procedureText(scenario).steps).toContain(offAir ? 'take NDB HBT off the air' : 'restore NDB HBT on the air')
+    const runner = new ScenarioRunner(scenario, system.computers[1])
+    expect(runner.passed).toBe(true)
+    for (const [i, unit] of system.computers.entries()) {
+      const words = fmsOutputs(unit, system.flights[i])
+      expect(words.radioMeasurements.adf.adfBearing).toEqual(offAir ? { value: null, status: 'NCD' } : { value: 270, status: 'NORMAL' })
+      expect(words.radioMeasurements.dme1.dmeDistance).toEqual(dmeBefore[i])
+      expect(words.radios.adf.receiver).toEqual({ value: 'NORMAL', status: 'NORMAL' })
+      expect(unit.lastAdvisories.filter(text => /ADF/.test(text))).toEqual([])
+    }
+  }
+})
+
+test('F16 outage replay refuses malformed actions and unknown, non-NDB or ambiguous active-database identifiers', () => {
+  const fixture = readFileSync('tests/fixtures/cifp/pasd-2609.pc', 'latin1')
+  const scenario = (ident: unknown, offAir: unknown) => JSON.stringify({ id: 'outage', title: 'Outage', maxSeconds: 1,
+    steps: [{ when: { kind: 'start' }, action: { kind: 'ndb', ident, offAir } }] })
+  for (const [ident, offAir] of [['', true], ['HBT', 'true'], ['HBT', null], ['HBT!', true]]) expect(() => parseScenario(scenario(ident, offAir))).toThrow(/ndb needs/)
+  const ndb = fixture.split('\n').find(line => line.startsWith('SCANDB') && line.includes('HBT'))!
+  for (const [ident, data] of [['ZZZZZ', fixture], ['PASD', fixture], ['HBT', `${fixture}\n${ndb.replace('N55185640', 'N56185640')}`]]) {
+    const unit = new ScriptedFms(() => new Date(START))
+    expect(unit.loadArinc424(data, 'outage.pc')).toMatchObject({ loaded: 'CIFP2609' }); unit.swapCycles()
+    const runner = new ScenarioRunner(parseScenario(scenario(ident, true)), unit)
+    expect(runner.outcome).toBe('error')
+    expect(runner.results[0].actual).toContain('requires one unambiguous NDB in the active database')
+  }
+})
 
 test('every built-in scenario passes against the simulation', () => {
   for (const scenario of SCENARIO_LIBRARY) {
