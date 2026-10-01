@@ -26,7 +26,7 @@ public sealed class FmsBenchEsriImageryKey(IConfiguration configuration, ILogger
     internal const string Purpose = "esri-world-imagery";
 
     private readonly Lock gate = new();
-    private (DateTime WrittenUtc, long Length, string? Key)? cached;
+    private (DateTime WrittenUtc, long Length, string Key)? cached;
     private string? lastProblem;
 
     public static string DefaultPath => Path.Combine(
@@ -43,27 +43,33 @@ public sealed class FmsBenchEsriImageryKey(IConfiguration configuration, ILogger
         if (!file.Exists) { lock (gate) cached = null; return null; }
         lock (gate)
         {
-            if (cached is { } hit && hit.WrittenUtc == file.LastWriteTimeUtc && hit.Length == file.Length) return hit.Key;
-            string? key = null;
-            try { key = Read(file); lastProblem = null; }
+            try
+            {
+                // Permission changes do not change file timestamps. Check them before using cached plaintext.
+                var owner = WindowsIdentity.GetCurrent().User?.Value ?? throw new InvalidDataException("this process's account could not be established");
+                AssertLockedDown(file.Directory!.GetAccessControl(), owner, "its directory");
+                AssertLockedDown(file.GetAccessControl(), owner, "the file");
+                if (cached is { } hit && hit.WrittenUtc == file.LastWriteTimeUtc && hit.Length == file.Length) return hit.Key;
+                var key = Read(file, owner);
+                cached = (file.LastWriteTimeUtc, file.Length, key);
+                lastProblem = null;
+                return key;
+            }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException or JsonException
                 or InvalidDataException or KeyNotFoundException or FormatException or InvalidOperationException)
             {
+                cached = null; // A repaired ACL must be reconsidered even when the file content is unchanged.
                 // Reported once per state, and never with the key: the reason is about the file, not its contents.
                 if (lastProblem != exception.Message) logger.LogWarning("The Esri imagery key at {Path} is not used: {Reason}", path, exception.Message);
                 lastProblem = exception.Message;
             }
-            cached = (file.LastWriteTimeUtc, file.Length, key);
-            return key;
+            return null;
         }
     }
 
     [SupportedOSPlatform("windows")]
-    private static string Read(FileInfo file)
+    private static string Read(FileInfo file, string owner)
     {
-        var owner = WindowsIdentity.GetCurrent().User?.Value ?? throw new InvalidDataException("this process's account could not be established");
-        AssertLockedDown(file.Directory!.GetAccessControl(), owner, "its directory");
-        AssertLockedDown(file.GetAccessControl(), owner, "the file");
         using var document = JsonDocument.Parse(File.ReadAllBytes(file.FullName));
         var root = document.RootElement;
         if (!root.TryGetProperty("schemaVersion", out var version) || version.GetInt32() != 1
