@@ -75,7 +75,7 @@ export const REQUIRED_JOBS = [
 // journeys, 4 then 6 shards, in two maintenance steps).
 export const SHARDED_JOB_GROUPS = [
   { name: 'API test suite', pattern: /^API test suite \((\d+)\/(\d+)\)$/, expectedShards: 3, acceptedShards: [3] },
-  { name: 'Browser journeys', pattern: /^Browser journeys \((\d+)\/(\d+)\)$/, expectedShards: 4, acceptedShards: [4, 6] },
+  { name: 'Browser journeys', pattern: /^Browser journeys \((\d+)\/(\d+)\)$/, expectedShards: 6, acceptedShards: [6] },
 ]
 
 const JOB_CONCLUSION_SUCCESS = 'success'
