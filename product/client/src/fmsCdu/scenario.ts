@@ -10,6 +10,8 @@ import { ScriptedFms } from "./scriptedFms";
 import { SCRATCHPAD_LINE, screenText, type Lamp } from "./screen";
 import { SURFACES, surfaceById } from "./surface";
 import type { CduFunction } from "./variants";
+import { NAV_MODES, type NavMode } from "./navigation";
+import { applySensorStimulus, describeSensorStimulus, isSensorStimulus, sensorStimulusProblem, type SensorStimulus } from "./sensorStimulus";
 
 // Scripted test scenarios for the FMS Test Bench (product/docs/FMS_TEST_BENCH.md, step 8). A scenario is an ordered
 // list of steps; each waits for its trigger, then acts on the simulation or checks what the crew would see. Steps
@@ -48,6 +50,7 @@ export type Trigger =
   | { kind: "above"; feet: number };
 
 export type Action =
+  | SensorStimulus
   | { kind: "keys"; keys: CduFunction[] }
   | { kind: "type"; text: string }
   | { kind: "condition"; condition: ConditionId; on: boolean }
@@ -109,7 +112,9 @@ export type Action =
   /** The approach annunciated (FMS approachType). */
   | { kind: "expectApproachLevel"; level: "LPV" | "LNAV/VNAV" | "LNAV" | "NO APPR" }
   /** A receiver's own operating mode (its 273). */
-  | { kind: "expectReceiverMode"; receiver: 1 | 2; mode: GpsMode };
+  | { kind: "expectReceiverMode"; receiver: 1 | 2; mode: GpsMode }
+  /** The navigation solution: its mode, its accuracy basis, and whether the GPS position is held uncertain. Each field given is checked. */
+  | { kind: "expectNav"; mode?: NavMode; accuracyBasis?: "receiver" | "laboratory"; uncertain?: boolean };
 
 /** One step. An expectation not yet met waits up to `within` seconds for it before failing. */
 export type ScenarioStep = { when: Trigger; action: Action; within?: number };
@@ -167,6 +172,7 @@ export function describeStep(step: ScenarioStep, index = 0): string {
   const a = step.action;
   const within = step.within ? ` within ${step.within} s` : "";
   const what = (() => {
+    if (isSensorStimulus(a)) return describeSensorStimulus(a);
     switch (a.kind) {
       case "keys": return `press ${a.keys.map(key => key.replace(/^CHAR_/, "")).join(" ")}`;
       case "type": return `type ${a.text} into the scratchpad`;
@@ -225,6 +231,11 @@ export function describeStep(step: ScenarioStep, index = 0): string {
       case "expectGpsSource": return a.source === "NONE" ? `check that the FMS is not navigating on GPS${within}` : `check that the FMS navigates on ${a.source}${within}`;
       case "expectApproachLevel": return `check that the approach annunciated is ${a.level}${within}`;
       case "expectReceiverMode": return `check that GPS ${a.receiver} is in ${a.mode} mode${within}`;
+      case "expectNav": {
+        const parts = [a.mode && `the FMS navigates on ${a.mode}`, a.accuracyBasis && `its accuracy is a ${a.accuracyBasis} figure`,
+          a.uncertain !== undefined && (a.uncertain ? "the GPS position is held uncertain" : "the GPS position is not held uncertain")].filter(Boolean);
+        return `check that ${parts.join(", ")}${within}`;
+      }
     }
   })();
   return when === "Then" ? `Then ${what}.` : `${when}, ${what}.`;
@@ -272,9 +283,11 @@ function triggerProblem(when: unknown): string | null {
 function actionProblem(action: unknown): string | null {
   const a = action as Record<string, unknown> | null;
   if (!a || typeof a !== "object") return "an action is required";
+  if (typeof a.kind === "string" && isSensorStimulus({ kind: a.kind })) return sensorStimulusProblem(a);
   switch (a.kind) {
     case "keys": return Array.isArray(a.keys) && a.keys.length > 0 && a.keys.every(key => typeof key === "string" && KEY.test(key)) ? null : "keys must be a non-empty list of CDU functions";
     case "type": return text(a.text, /^[A-Z0-9 ./-]{1,24}$/) ? null : "type needs up to 24 scratchpad characters";
+    case "externalRadioHead": return "external radio control head is not equipped in the default profile (DEC-150); this stimulus is refused";
     case "condition": {
       const unmodelled = UNMODELLED_CONDITIONS.find(condition => condition.id === a.condition);
       if (unmodelled) return `${unmodelled.label.toLowerCase()} is not modelled in v1, so a scenario that injects it is refused (rev 3 B3.5 F10)`;
@@ -352,6 +365,13 @@ function actionProblem(action: unknown): string | null {
     case "expectGpsSource": return a.source === "GPS1" || a.source === "GPS2" || a.source === "NONE" ? null : "expectGpsSource needs GPS1, GPS2 or NONE";
     case "expectApproachLevel": return typeof a.level === "string" && APPROACH_LEVELS.has(a.level) ? null : "expectApproachLevel needs LPV, LNAV/VNAV, LNAV or NO APPR";
     case "expectReceiverMode": return receiver(a.receiver) && typeof a.mode === "string" && GPS_MODES.has(a.mode) ? null : `expectReceiverMode needs receiver 1 or 2 and a mode (${[...GPS_MODES].join(", ")})`;
+    case "expectNav": {
+      if (a.mode === undefined && a.accuracyBasis === undefined && a.uncertain === undefined) return "expectNav needs at least one of mode, accuracyBasis and uncertain";
+      if (a.mode !== undefined && !(typeof a.mode === "string" && (NAV_MODES as readonly string[]).includes(a.mode))) return `expectNav mode is one of ${NAV_MODES.join(", ")}`;
+      if (a.accuracyBasis !== undefined && a.accuracyBasis !== "receiver" && a.accuracyBasis !== "laboratory") return "expectNav accuracyBasis is receiver or laboratory";
+      if (a.uncertain !== undefined && typeof a.uncertain !== "boolean") return "expectNav uncertain is true or false";
+      return null;
+    }
     default: return `unsupported action "${String(a.kind)}"`;
   }
 }
@@ -476,7 +496,7 @@ export class ScenarioRunner {
           // A fresh alert check counts what the last action itself raised, so the baseline is taken just before it.
           this.previousAlerts = this.fms.recallList.length;
           this.act(step.action);
-          this.finish({ status: "done", at: now });
+          this.finish({ status: "done", at: now, ...(isSensorStimulus(step.action) ? { actual: describeSensorStimulus(step.action) } : {}) });
         }
       } catch (error) {
         this.results[this.next] = { status: "error", at: now, actual: error instanceof Error ? error.message : String(error) };
@@ -533,6 +553,7 @@ export class ScenarioRunner {
 
   private act(action: Action) {
     const fms = this.fms;
+    if (isSensorStimulus(action)) { applySensorStimulus(fms, action); return; }
     switch (action.kind) {
       case "keys": for (const key of action.keys) fms.press(key); return;
       case "type": for (const key of keysFor(action.text)) fms.press(key); return;
@@ -662,6 +683,12 @@ export class ScenarioRunner {
         const mode = fms.gps[action.receiver - 1].mode;
         return { ok: mode === action.mode, actual: mode };
       }
+      case "expectNav": {
+        const nav = fms.navState, sensor = fms.navPerformance.sensor;
+        const ok = (action.mode === undefined || nav.mode === action.mode) && (action.accuracyBasis === undefined || sensor.accuracyBasis === action.accuracyBasis)
+          && (action.uncertain === undefined || nav.uncertain === action.uncertain);
+        return { ok, actual: `${nav.mode}, accuracy ${sensor.accuracyBasis ?? "none"}${nav.uncertain ? ", GPS position uncertain" : ""}` };
+      }
       default: throw new Error(`Unsupported check "${action.kind}".`);
     }
   }
@@ -767,6 +794,7 @@ export function reportMarkdown(runner: ScenarioRunner) {
     `- Navigation data: ${context.cycle} (${!context.data || context.data === "demonstration data" ? "invented demonstration data" : context.data})`,
     `- Time: ${TICK_SECONDS} s ticks; a step due between ticks runs at the next one.`,
     "- Driven by the scripted CMA-9000 simulation, not the operational program. This is not flight-qualified evidence.",
+    ...(scenario.steps.some(step => isSensorStimulus(step.action)) ? ["- Sensor/world stimulus source: laboratory receiver, ground-station and measured navigation-input models. Physical aircraft/AFCS truth is separate; powerInterrupt applies the C2 KALMAN rule on the receiving FMS, not a full computer restart."] : []),
     `- GPS: model ${GPS_MODEL_VERSION}; constellation seed ${runner.gpsSeeds.constellation}; receiver seeds ${runner.gpsSeeds.receivers.join(" and ")}; the sky is the one at the start time above. With the steps, these fix the GPS timeline.`,
     ...(runner.problems.length ? ["", "Not run, because:", ...runner.problems.map(problem => `- ${problem}`)] : []),
     "",
@@ -836,6 +864,8 @@ export class ScenarioRecorder {
   autopilot(selection: { altitude?: number; verticalSpeed?: number; hold?: boolean; speed?: number; groundSpeed?: number; forceTrimRelease?: boolean }) { this.add({ kind: "autopilot", ...selection }); }
   /** A stimulus applied on the GPS sensors tab. */
   gps(receiver: 1 | 2, stimulus: GpsOp) { this.add({ kind: "gps", receiver, stimulus: structuredClone(stimulus) }); }
+  /** Successfully applied laboratory stimulus from the real sensor card, replayed through the same dispatcher. */
+  sensor(action: SensorStimulus) { this.add(structuredClone(action)); }
   /** Checks a screen line as it is shown now; a few seconds' grace lets playback at another rate catch up. */
   checkLine(line: number, text: string) { this.add({ kind: "expectLine", line, pattern: linePattern(text) }); this.steps.at(-1)!.within = 5; }
 

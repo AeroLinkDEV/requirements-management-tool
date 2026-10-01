@@ -699,3 +699,9 @@
 }
 .fmsBenchTabs button:focus-visible { outline: 2px solid var(--teal-500, #1b8a7d); outline-offset: -2px; }
 .fmsBenchTabPanel[hidden] { display: none; }
+.fmsSensorFaultCard .fmsBenchAlert { flex-wrap: wrap; align-items: end; }
+.fmsSensorFaultCard .fmsBenchAlert label { display: flex; flex: 1 1 7rem; min-width: 0; flex-direction: column; gap: .25rem; }
+.fmsSensorFaultCard .fmsBenchAlert label:has(input[type="checkbox"]) { flex-direction: row; align-items: center; }
+.fmsSensorFaultCard .fmsBenchAlert input:not([type="checkbox"]), .fmsSensorFaultCard select { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+.fmsSensorFaultCard .fmsBenchAlert button { max-width: 100%; }
+.fmsSensorFaultCard .fmsBenchAlert input[type="checkbox"] { flex: none; width: 14px; height: 14px; }

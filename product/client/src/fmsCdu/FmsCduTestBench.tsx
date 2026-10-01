@@ -14,6 +14,7 @@ import { relayImagery, relayTerrain } from "./terrainRelay";
 import { TerrainTiles, type TerrainSource } from "./terrainTiles";
 import type { Layout, View } from "./outTheWindow";
 import FmsScenarioCard from "./FmsScenarioCard";
+import FmsSensorFaultCard from "./FmsSensorFaultCard";
 import { conditionalLabel } from "./fmsModel";
 import { PROCEDURE_CHARTS } from "./procedureCharts";
 import { findProcedure } from "./procedures";
@@ -610,11 +611,12 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </ul>
             {/* Rev 3 B3.5 F10: not modelled in v1, so not offered; a scenario that injects one is refused at admission. */}
             <p className="fmsBenchHint" data-testid="fms-unmodelled-conditions">
-              Not modelled in v1: {UNMODELLED_CONDITIONS.map(condition => condition.label.toLowerCase()).join(", ")}. A scenario that injects one is refused.
+              Not modelled in v1 for aircraft/AFCS: {UNMODELLED_CONDITIONS.map(condition => condition.label.toLowerCase()).join(", ")}. A scenario that injects one is refused. Navigation input validity is controlled in the sensor fault laboratory.
             </p>
           </section>
 
           <BaroCard backend={backend} sensorOwner={system.computers[0]} recordTo={recordTo} />
+          <FmsSensorFaultCard backend={backend} sensorOwner={system.computers[0]} recordTo={recordTo} />
 
           <section className="fmsBenchCard">
             <h2>Alerts</h2>

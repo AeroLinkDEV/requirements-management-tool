@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
-import { expect, renderedTest as test, type Page } from './isolated-client-test'
+import { expect, renderedTest as test } from './isolated-client-test'
+import type { Page } from '@playwright/test'
 
 // The FMS test bench is self-contained: the scripted CMA-9000 runs in the page, so this needs no backend.
 // Engine rules are proved in fms-cdu-engine.spec.ts; this proves the rendered panel wires them to real
@@ -15,6 +16,188 @@ const key = (page: Page, id: string) => page.locator(`.fmsCduKey[data-key="${id}
 const screenLines = async (page: Page) => ((await page.locator('.fmsCduScreen').getAttribute('aria-label')) ?? '').split('\n')
 const expectLine = async (page: Page, line: number, pattern: RegExp) =>
   expect.poll(async () => (await screenLines(page))[line] ?? '').toMatch(pattern)
+
+// F14 primary browser owner: actual forms dispatch admitted stimuli, show independent measured/physical effects,
+// record their payloads and timing, and replay those records through the runner. Engine-only tests cannot see this wiring.
+test('F14 real bench sensor controls drive the full fault matrix and recorded replay reports the applied values', async ({ page }) => {
+  test.setTimeout(120_000)
+  await page.clock.setFixedTime(new Date('2026-09-27T14:00:00Z'))
+  await open(page)
+  const scenarios = page.getByRole('region', { name: 'Scenarios' })
+  await scenarios.getByRole('button', { name: 'Record', exact: true }).click()
+  await scenarios.getByLabel('Recording name').fill('F14 sensor controls')
+  await tab(page, 'Conditions')
+  const card = page.getByRole('region', { name: 'Sensor fault laboratory' })
+  await card.getByLabel('Fault station ident').fill('ZZZZ')
+  await card.getByLabel('Ground station stimulus').selectOption('DME_NO_REPLY')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await expect(card.getByTestId('sensor-stimulus-result')).toContainText('Refused: DME ZZZZ requires one unambiguous compatible facility')
+  // Built-in BOBTU is a unique five-character NDB; the same admitted ident must fit the actual form.
+  await card.getByLabel('Ground station stimulus').selectOption('NDB_OFF')
+  await card.getByLabel('Fault station ident').fill('BOBTU')
+  await expect(card.getByLabel('Fault station ident')).toHaveValue('BOBTU')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await expect(card.getByTestId('sensor-stimulus-result')).toContainText('take NDB BOBTU off the air')
+  await card.getByLabel('Ground station stimulus').selectOption('NDB_ON')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await expect(card.getByTestId('sensor-stimulus-result')).toContainText('restore NDB BOBTU on the air')
+  const radio = card.getByTestId('sensor-radio-readout')
+  for (const device of ['nav1', 'nav2', 'dme1', 'dme2', 'tacan', 'adf', 'adf2']) {
+    await card.getByLabel('Fault radio').selectOption(device)
+    if (device === 'dme1' || device === 'dme2') {
+      await expect(card.getByRole('button', { name: 'Apply control path' })).toBeDisabled()
+      await expect(card).toContainText('DME tuning follows its paired NAV receiver.')
+      if (device === 'dme1') await card.screenshot({ path: test.info().outputPath('f14-dme-control-boundary.png') })
+    }
+    for (const receiver of ['SILENT', 'FAILED', 'NORMAL']) {
+      await card.getByLabel('Radio receiver state').selectOption(receiver)
+      await card.getByRole('button', { name: 'Apply receiver state' }).click()
+      await expect(radio).toContainText(`receiver ${receiver}`)
+      await expect(radio).toContainText(receiver === 'NORMAL' ? /reported frequency (?!none)/ : 'reported frequency none')
+    }
+  }
+  await card.getByLabel('Fault radio').selectOption('nav1')
+  for (const control of ['LOST', 'NORMAL']) {
+    await card.getByLabel('Radio control path').selectOption(control)
+    await card.getByRole('button', { name: 'Apply control path' }).click()
+    await expect(radio).toContainText(`control ${control}`)
+    await expect(radio).toContainText(/reported frequency (?!none)/)
+  }
+  for (const bus of ['LOST', 'NORMAL']) {
+    await card.getByLabel('Radio measurement bus').selectOption(bus)
+    await card.getByRole('button', { name: 'Apply measurement bus' }).click()
+    await expect(radio).toContainText(`bus ${bus}`)
+    await expect(radio).toContainText(bus === 'NORMAL' ? /reported frequency (?!none)/ : 'reported frequency none')
+  }
+  await card.getByLabel('Fault station ident').fill('YOW')
+  const world = card.getByTestId('sensor-world-readout')
+  await expect(world).toContainText(/range NORMAL .*bearing NORMAL/)
+  const before = await world.textContent()
+  const bearing = (text: string) => Number(/bearing NORMAL ([\d.]+)/.exec(text)![1])
+  const range = (text: string) => /range NORMAL ([\d.]+)/.exec(text)![1]
+  for (const [operation, status] of [['DME_NO_REPLY', 'NCD'], ['DME_REPLY', 'NORMAL']] as const) {
+    await card.getByLabel('Ground station stimulus').selectOption(operation)
+    await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+    await expect(world).toContainText(`range ${status}`)
+    await expect(world).toContainText('bearing NORMAL')
+  }
+  await card.getByLabel('Ground station stimulus').selectOption('DME_IDENT')
+  await card.getByLabel('DME reported ident').fill('BAD')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await card.getByLabel('Fault radio').selectOption('dme1')
+  await expect(radio).toContainText('Range — NM; ident BAD')
+  await card.getByLabel('DME reported ident').fill('')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await expect(radio).toContainText(/Range \d/)
+  await card.getByLabel('Ground station stimulus').selectOption('VOR_BIAS')
+  await card.getByLabel('VOR radial bias degrees').fill('10')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await expect.poll(async () => (bearing((await world.textContent())!) - bearing(before!) + 360) % 360).toBeCloseTo(10, 1)
+  expect(range((await world.textContent())!)).toBe(range(before!))
+  await card.getByLabel('VOR radial bias degrees').fill('0')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  const air = card.getByTestId('sensor-air-readout')
+  await card.getByLabel('Navigation TAS valid', { exact: true }).uncheck()
+  await expect(air).toContainText(/TAS [\d.]+ kt \(invalid\)/)
+  await card.getByLabel('Navigation TAS valid', { exact: true }).check()
+  await card.getByLabel('Navigation heading valid', { exact: true }).uncheck()
+  await expect(air).toContainText(/heading [\d.]+° \(invalid\)/)
+  await card.getByLabel('Navigation heading valid', { exact: true }).check()
+  await card.getByLabel('Navigation heading bias degrees').fill('30')
+  await card.getByRole('button', { name: 'Apply heading bias' }).click()
+  await expect.poll(async () => {
+    const value = (await air.textContent())!
+    const measured = Number(/heading ([\d.]+)°/.exec(value)![1])
+    const physical = Number(/Physical heading ([\d.]+)°/.exec(value)![1])
+    return (measured - physical + 360) % 360
+  }).toBeCloseTo(30, 1)
+  await card.getByLabel('Navigation heading bias degrees').fill('0')
+  await card.getByRole('button', { name: 'Apply heading bias' }).click()
+  for (const [label, sensor] of [['APIRS failed', 'APIRS'], ['Doppler (DVS) failed', 'DVS']] as const) {
+    await page.getByLabel(label).check()
+    await expect(air).toContainText(`${sensor} FAIL`)
+    await page.getByLabel(label).uncheck()
+    await expect(air).toContainText(`${sensor} NORMAL`)
+  }
+  await card.getByLabel('Power interruption duration ms').fill('51')
+  await expect(card.getByTestId('sensor-power-readout')).toContainText('available: yes')
+  await card.getByRole('button', { name: 'Interrupt KALMAN power' }).click()
+  await expect(card.getByTestId('sensor-stimulus-result')).toContainText('for 51 ms (C2 laboratory rule)')
+  await expect(card.getByTestId('sensor-power-readout')).toContainText('available: no')
+  await card.getByRole('button', { name: 'GPS pair integrity only' }).click()
+  await expect(card.getByTestId('sensor-gps-readout')).toContainText('GPS1: position NORMAL, HIL NCD; GPS2: position NORMAL, HIL NCD')
+  await card.getByRole('button', { name: 'GPS pair position gone' }).click()
+  await expect(card.getByTestId('sensor-gps-readout')).toContainText('GPS1: position NCD, HIL NORMAL; GPS2: position NCD, HIL NORMAL')
+  await card.getByRole('button', { name: 'Restore GPS pair words' }).click()
+  await expect(card.getByTestId('sensor-gps-readout')).toContainText('GPS1: position NORMAL, HIL NORMAL; GPS2: position NORMAL, HIL NORMAL')
+  // Demonstration OW is an independently named NDB. Tune it through real crew keys; outage/removal is visible on RMI.
+  await page.getByRole('button', { name: 'RADIO', exact: true }).click(); await key(page, 'NEXT').click()
+  await page.keyboard.type('236'); await key(page, 'LSK1L').click()
+  await expect(page.getByTestId('rmi-adf-needle')).toBeVisible()
+  await card.getByLabel('Fault station ident').fill('OW')
+  await card.getByLabel('Ground station stimulus').selectOption('NDB_OFF')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await expect(page.getByTestId('rmi-adf-value')).toHaveText('ADF1 NCD')
+  await expect(page.getByTestId('rmi-adf-needle')).toHaveCount(0)
+  await card.getByLabel('Ground station stimulus').selectOption('NDB_ON')
+  await card.getByRole('button', { name: 'Apply ground stimulus' }).click()
+  await expect(page.getByTestId('rmi-adf-needle')).toBeVisible()
+  await card.screenshot({ path: test.info().outputPath('f14-sensor-card.png') })
+  await tab(page, 'Scenarios')
+  await scenarios.getByRole('button', { name: 'Stop recording' }).click()
+  const [saved] = await Promise.all([page.waitForEvent('download'), scenarios.getByRole('button', { name: 'Save as JSON' }).click()])
+  const recording = JSON.parse(await readFile(await saved.path(), 'utf8')) as { steps: { action: { kind: string; [key: string]: unknown } }[] }
+  for (const kind of ['radioFault', 'stationFault', 'airInput', 'powerInterrupt', 'gpsPair', 'ndb']) expect(recording.steps.some(step => step.action.kind === kind), kind).toBe(true)
+  expect(recording.steps.filter(step => step.action.kind === 'radioFault' && step.action.receiver === 'SILENT')).toHaveLength(7)
+  expect(recording.steps.some(step => step.action.ident === 'ZZZZ')).toBe(false)
+  expect(recording.steps.filter(step => step.action.kind === 'ndb' && step.action.ident === 'BOBTU').map(step => step.action.offAir)).toEqual([true, false])
+  await saved.saveAs(test.info().outputPath('f14-recorded.json'))
+  await scenarios.getByRole('button', { name: 'Run the scenario' }).click()
+  // These are stimuli, with external effect assertions above; a recording with no checks is honestly NO CHECKS.
+  await expect(scenarios.getByRole('status').filter({ hasText: /^NO CHECKS/ })).toBeVisible({ timeout: 60_000 })
+  const [report] = await Promise.all([page.waitForEvent('download'), scenarios.getByRole('button', { name: 'Download run report' }).click()])
+  const reportText = await readFile(await report.path(), 'utf8')
+  expect(reportText).toMatch(/\| [\d.]+ s \| DONE \| set measured navigation air inputs: heading bias 30 degrees \(laboratory\)/)
+  expect(reportText).toContain('for 51 ms (C2 laboratory rule)')
+  expect(reportText).toContain('take NDB OW off the air')
+  await report.saveAs(test.info().outputPath('f14-recorded-run.md'))
+})
+
+// F16 primary rendered owner: C4 requires bus-only RMI raw bearings and flags (M300 13-23/24, plan C3/F16).
+// Receiver/bus tests cannot catch a missing needle, track-relative rotation or stale needle after invalidity.
+// This uses the real Nd with detached words, without a production seam or a live ScriptedFms side channel.
+test('F16 RMI draws both relative bus bearings and replaces an invalid bearing with its NCD or FAIL flag', async ({ page }) => {
+  await page.goto('/tests/fixtures/fms-rmi.html')
+  const rmi = page.getByTestId('nd-rmi')
+  await expect(rmi).toBeVisible()
+  await expect(rmi.getByTestId('rmi-heading')).toHaveText('120T')
+  const second = rmi.getByTestId('rmi-adf2-needle')
+  const rotation = (needle: import('@playwright/test').Locator) => needle.evaluate(element => {
+    const matrix = (element as SVGGElement).transform.baseVal.consolidate()!.matrix
+    return { cosine: matrix.a, sine: matrix.b }
+  })
+  await expect(rmi.getByTestId('rmi-adf-needle')).toBeVisible()
+  const firstRotation = await rotation(rmi.getByTestId('rmi-adf-needle'))
+  expect(firstRotation.cosine).toBeCloseTo(0, 7); expect(firstRotation.sine).toBeCloseTo(1, 7)
+  const secondRotation = await rotation(second)
+  expect(secondRotation.cosine).toBeCloseTo(Math.SQRT1_2, 7); expect(secondRotation.sine).toBeCloseTo(-Math.SQRT1_2, 7)
+  await expect(rmi.getByTestId('rmi-adf-value')).toHaveText('ADF1 090 REL')
+  await rmi.screenshot({ path: test.info().outputPath('rmi-normal.png') })
+  await page.locator('.efisNd').screenshot({ path: test.info().outputPath('nd-rmi-normal.png') })
+  for (const [action, status] of [['NDB off air', 'NCD'], ['Receiver failed', 'FAIL'], ['Measurement bus lost', 'FAIL']] as const) {
+    await page.getByRole('button', { name: action, exact: true }).click()
+    await expect(rmi.getByTestId('rmi-adf-needle')).toHaveCount(0)
+    await expect(rmi.getByTestId('rmi-adf-value')).toHaveText(`ADF1 ${status}`)
+    expect(await rmi.getByTestId('rmi-adf-value').evaluate(element => getComputedStyle(element).fill)).toBe('rgb(255, 176, 32)')
+    await expect(second).toBeVisible()
+    expect(await rotation(second)).toEqual(secondRotation)
+    await rmi.screenshot({ path: test.info().outputPath(`rmi-${action.replaceAll(' ', '-')}.png`) })
+    await page.getByRole('button', { name: 'Valid bearing', exact: true }).click()
+    await expect(rmi.getByTestId('rmi-adf-needle')).toBeVisible()
+    expect(await rotation(rmi.getByTestId('rmi-adf-needle'))).toEqual(firstRotation)
+    await expect(rmi.getByTestId('rmi-adf-value')).toHaveText('ADF1 090 REL')
+  }
+})
 
 // Pointer owner: real ACT RTE 5L opens airborne MOD LEGS; ERASE leaves guidance alone and only EXEC activates it.
 test('BACKTRACK on the actual CDU reviews airborne history before EXEC', async ({ page }) => {
@@ -38,7 +221,7 @@ test('BACKTRACK on the actual CDU reviews airborne history before EXEC', async (
   await key(page, 'RTE').click(); await key(page, 'LSK5L').click()
   await expectLine(page, 0, /^MOD RTE 1 LEGS/)
   await expect(page.locator('.fmsCduScreen')).toHaveAttribute('aria-label', /BT001/)
-  await page.locator('.fmsCdu').screenshot({ path: 'C:/Sean Project/fms-research/Astra-backtrack-CDU.png' })
+  await page.locator('.fmsCdu').screenshot({ path: test.info().outputPath('backtrack-CDU.png') })
   await key(page, 'EXEC').click()
   await expectLine(page, 0, /^ACT RTE 1 LEGS/)
   await expect(page.locator('.fmsCduLamp[data-lamp="EXEC_LIGHT"]')).not.toHaveClass(/\blit\b/)
@@ -157,7 +340,7 @@ test('the Conditions tab says which sensor failures v1 does not model, and offer
   await open(page)
   await tab(page, 'Conditions')
   await expect(page.getByTestId('fms-unmodelled-conditions')).toHaveText(
-    'Not modelled in v1: barometric altitude invalid, heading invalid, attitude invalid. A scenario that injects one is refused.',
+    'Not modelled in v1 for aircraft/AFCS: barometric altitude invalid, heading invalid, attitude invalid. A scenario that injects one is refused. Navigation input validity is controlled in the sensor fault laboratory.',
   )
   for (const name of [/barometric/i, /^heading invalid/i, /attitude/i]) await expect(page.getByRole('checkbox', { name })).toHaveCount(0)
 })
@@ -284,7 +467,7 @@ test('IDENT and preflight wire the consumed MAGVAR loader, reference displays, F
   await expect(page.locator('.efisPfd').getByText(magneticHeading, { exact: true })).toBeVisible()
   await tab(page, 'Nav data')
   const preflight = page.getByRole('region', { name: 'FMS initialization and preflight' })
-  await page.screenshot({ path: 'C:/Sean Project/fms-research/Astra-MAG-preflight-MAG.png', fullPage: true })
+  await page.screenshot({ path: test.info().outputPath('preflight-MAG.png'), fullPage: true })
   const [packageDownload] = await Promise.all([page.waitForEvent('download'), preflight.getByRole('button', { name: 'Export MAGVAR package' }).click()])
   const packageData = JSON.parse(await readFile((await packageDownload.path())!, 'utf8'))
   packageData.coefficients += ' ' // CRC remains unchanged; this is the actual loader boundary.
@@ -369,7 +552,7 @@ test('the two CDU panels target separate computers and shared radio feedback rem
   await page.getByRole('button', { name: 'Pause', exact: true }).click()
   await expect(screen(inspected)).toHaveAttribute('aria-label', /123\.450/)
   await expect(screen(peer)).toHaveAttribute('aria-label', /123\.450/)
-  await page.screenshot({ path: 'C:/Sean Project/fms-research/Astra-dual-CDUs-RMS.png', fullPage: true })
+  await page.screenshot({ path: test.info().outputPath('dual-CDUs-RMS.png'), fullPage: true })
 })
 
 // Owner: common sensor-fault controls must address the physical generator even when CDU 2 is inspected.
@@ -828,7 +1011,7 @@ test('the KBTV demonstration defaults to S300 advisory VNAV and its explicit lat
   for (const id of ['INIT_REF', 'NEXT', 'LSK1R']) await key(page, id).click()
   await expectLine(page, 0, /^ACT VNAV R15\s+1\/1$/)
   await expect(page.getByTestId('fms-bench-profile')).toContainText('cma9000-s300-heli-civil v10')
-  await page.screenshot({ path: 'test-results/s300-kbtv-advisory.png', fullPage: true })
+  await page.screenshot({ path: test.info().outputPath('s300-kbtv-advisory.png'), fullPage: true })
   // The library scenario flies it from the same start state, on a restarted simulation.
   await tab(page, 'Scenarios')
   const card = page.getByRole('region', { name: 'Scenarios' })

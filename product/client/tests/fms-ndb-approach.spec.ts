@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { expect, logicTest as test } from './isolated-client-test'
 import { parseArinc424 } from '../src/fmsCdu/arinc424'
-import { distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
+import { bearingDeg as bearingTo, distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { navaidComponent, NavDatabase, type Navaid, type ProcedureLeg } from '../src/fmsCdu/navData'
 import { vhfFrequency } from '../src/fmsCdu/navPages'
 import { HELICOPTER_PROFILE, LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
@@ -368,4 +368,67 @@ test('F16: outside the S300 the NDB approach keeps the existing RNAV-only approa
   unit.armApproach(); unit.updateNavigation(0)
   unit.arrive(); now += 1000; unit.updateNavigation(0)
   expect(unit.nonPrecisionApproach).toBe(false)
+})
+
+// F16 raw data (plan C3; M300 13-23, 13-24): the ADF is the crew's. Loading an NDB approach requests its recommended
+// NDB in ADF1's standby for the crew to swap in on the ADF page; the bearing is raw data only, never a position source.
+const adfLine = (unit: ScriptedFms) => screenText(unit.screen()).join('\n')
+const relativeTo = (unit: ScriptedFms, target: LatLon) => {
+  const d = (bearingTo(unit.truePosition, target) - unit.heading + 360) % 360
+  return d > 180 ? d - 360 : d
+}
+
+test('F16: loading the NDB approach requests the recommended NDB on the ADF; the crew swaps it in on the ADF page', () => {
+  const { unit, advance } = ndbFinal()
+  // KIAG N28's recommended navaid is the NDB IA, 329 kHz: requested in ADF1's standby, the active frequency untouched.
+  expect(unit.radioState.adfStby).toBe('0329')
+  expect(unit.radioState.adf).toBe('0350')
+  expect(unit.adfRelativeBearing('adf')).toBeNull()
+  unit.open('ADF_RADIO')
+  expect(adfLine(unit)).toContain('STBY 0329')
+  // LSK 1L with the scratchpad empty swaps standby and active (M300 13-23); the radio acknowledges, then IA is received.
+  unit.press('LSK1L')
+  advance(1)
+  expect(unit.radioState.adf).toBe('0329')
+  expect(unit.radioState.adfStby).toBe('0350')
+  const bearing = unit.adfRelativeBearing('adf')
+  expect(bearing).not.toBeNull()
+  expect(Math.abs(bearing! - relativeTo(unit, unit.coordinates('IA')!))).toBeLessThan(1e-6)
+})
+
+test('F16: a frequency entered on the ADF page goes to standby, not active (M300 13-23)', () => {
+  const { unit } = ndbFinal()
+  unit.open('ADF_RADIO')
+  for (const ch of '400') unit.press(`CHAR_${ch}` as CduFunction)
+  unit.press('LSK1L')
+  expect(unit.radioState.adfStby).toBe('0400')
+  expect(unit.radioState.adf).toBe('0350')
+})
+
+test('F16: the NDB off the air flags the bearing, with no fault alert or advisory; back on the air it returns', () => {
+  const { unit, advance } = ndbFinal()
+  unit.open('ADF_RADIO'); unit.press('LSK1L'); advance(1)
+  expect(unit.adfRelativeBearing('adf')).not.toBeNull()
+  unit.setNdbOffAir('IA', true)
+  advance(1)
+  expect(unit.adfRelativeBearing('adf')).toBeNull()
+  // A healthy ADF with nothing to receive meets no Appendix E row (plan C3).
+  expect(recalled(unit, 'ADF1 CONTROL LOST')).toBe(false)
+  expect(unit.lastAdvisories).not.toContain('ADF1 FAILED')
+  unit.setNdbOffAir('IA', false)
+  advance(1)
+  expect(unit.adfRelativeBearing('adf')).not.toBeNull()
+})
+
+test('F16: an ADF receiver failure flags the bearing and raises ADF CONTROL LOST (configured) and ADF FAILED', () => {
+  const { unit, advance } = ndbFinal()
+  unit.open('ADF_RADIO'); unit.press('LSK1L'); advance(1)
+  expect(unit.adfRelativeBearing('adf')).not.toBeNull()
+  unit.setRadioFaults('adf', { receiver: 'FAILED' })
+  advance(1)
+  expect(unit.adfRelativeBearing('adf')).toBeNull()
+  expect(recalled(unit, 'ADF1 CONTROL LOST')).toBe(true)
+  expect(unit.lastAdvisories).toContain('ADF1 FAILED')
+  // Raw data only: the navigation solution does not change with the ADF.
+  expect(unit.navState.mode).toBe('GPS')
 })
