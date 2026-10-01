@@ -43,6 +43,7 @@
     "fms-87n-mission.spec.ts",
     "fms-hover-join.spec.ts",
     "fms-navaid-data.spec.ts",
+    "fms-ndb-approach.spec.ts",
     "fms-heli-displays.spec.ts",
     "fms-baro.spec.ts",
     "fms-applicability.spec.ts",

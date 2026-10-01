@@ -1,0 +1,128 @@
+HDR01FAACIFP18      001P013203968112609  12-AUG-202618:29:21  U.S.A. DOT FAA                                                FBB95AD8
+SCANEAENRT   WOTGU CY0    W     N42571428W079074331                       W0102     NAR           WOTGU                    029392403
+SUSADB       IA    K6003290HOLW N43063280W078501788                       W0100           NARKATHI                         270041709
+SUSAEAENRT   EHMAN K60    C   L N43083158W078211735                       W0107     NAR           EHMAN                    339832504
+SUSAP KIAGK6AIAG     0     098YHN43063029W078564631W010000592         1800018000C    MNAR    NIAGARA FALLS INTL            211782512
+SUSAP KIAGK6CAPIWO K60    W     N43063327W078484910                       W0104     NAR           APIWO                    211792512
+SUSAP KIAGK6CBINNY CY0    W     N43024564W079021183                       W0102     NAR           BINNY                    211802605
+SUSAP KIAGK6CCFMCD K60    W     N43063264W078445037                       W0104     NAR           CFMCD(CNF)               211812605
+SUSAP KIAGK6CCUVTU K60    W     N43063145W078392416                       W0105     NAR           CUVTU                    211822504
+SUSAP KIAGK6CDIONE K60    C     N43063183W078411167                       W0105     NAR           DIONE                    211832512
+SUSAP KIAGK6CKATHI K60    R     N43063280W078501788                       W0104     NAR           KATHI                    211842512
+SUSAP KIAGK6CKIGUW K60    W     N43063372W078515943                       W0104     NAR           KIGUW                    211852512
+SUSAP KIAGK6CUGOCO CY0    W     N43081071W079044198                       W0102     NAR           UGOCO                    211862605
+SUSAP KIAGK6CWINUD CY0    W     N43095949W079113076                       W0102     NAR           WINUD                    211872504
+SUSAP KIAGK6CWURSI K60    W     N43070145W079002070                       W0103     NAR           WURSI                    211882512
+SUSAP KIAGK6CWUVBI K60    W     N43095949W078502257                       W0104     NAR           WUVBI                    211892512
+SUSAP KIAGK6CYEPNU K60    W     N43074455W078540365                       W0103     NAR           YEPNU                    211902605
+SUSAP KIAGK6CZEXOD K60    W     N43050097W078583116                       W0103     NAR           ZEXOD                    211912504
+SUSAP KIAGK6CZUKDU K60    W     N43063438W078583878                       W0103     NAR           ZUKDU                    211922504
+SUSAP KIAGK6CZUPUV K60    W     N43145245W078422058                       W0105     NAR           ZUPUV                    211932504
+SUSAP KIAGK6FI28-Y AEHMAN 010EHMANK6EA0E       IF                                             18000                 0 NS   211942512
+SUSAP KIAGK6FI28-Y AEHMAN 020KATHIK6PC0EY      TF                                 + 02300                           0 NS   211952512
+SUSAP KIAGK6FI28-Y AEHMAN 030KATHIK6PC0EE AR   HF IIAGK6      100100592801T010PI  + 02000                           0 NS   211962512
+SUSAP KIAGK6FI28-Y I      010CFMCDK6PC0E  I    IF IIAGK6      10010099        PI  J 020000200018000                 0 NS   211972512
+SUSAP KIAGK6FI28-Y I      020KATHIK6PC0E  F    CF IIAGK6      1001005928000040PI  H 0200001747        -250IA    K6PN0 NS   211982512
+SUSAP KIAGK6FI28-Y I      030RW28 K6PG0GY M    CF IIAGK6      1001001828000041PI    00655             -250          0 NS   211992512
+SUSAP KIAGK6FI28-Y I      040         0  M     CA                     2801        + 01500                           0 NS   212002512
+SUSAP KIAGK6FI28-Y I      050IA   K6PN0NY  R   DF                                 + 03200                           0 NS   212012512
+SUSAP KIAGK6FI28-Y I      060IA   K6PN0NE  R   HM                     2801T010    + 03200                           0 NS   212022512
+SUSAP KIAGK6FI28-Z ADIONE 010DIONEK6PC0EE AR   HF IIAGK6      100101252801T010PI  + 02200     18000                 0 DS   212032512
+SUSAP KIAGK6FI28-Z I      010DIONEK6PC0E  I    IF IIAGK6      10010125        PI  J 022000200018000                 0 DS   212042512
+SUSAP KIAGK6FI28-Z I      020KATHIK6PC0E  F    CF IIAGK6      1001005928000067PI  H 0200001747        -250IA    K6PN0 DS   212052512
+SUSAP KIAGK6FI28-Z I      030RW28 K6PG0GY M    CF IIAGK6      1001001828000041PI    00655             -250          0 DS   212062512
+SUSAP KIAGK6FI28-Z I      040         0  M     CA                     2801        + 01500                           0 DS   212072512
+SUSAP KIAGK6FI28-Z I      050         0    R   VIY                    1500                                          0 DS   212082512
+SUSAP KIAGK6FI28-Z I      060DIONEK6PC0EY      CF IA  K6      1001006710010100PN  + 03200                           0 DS   212092512
+SUSAP KIAGK6FI28-Z I      070DIONEK6PC0EE  R   HM                     2801T010    + 03200                           0 DS   212102512
+SUSAP KIAGK6FL28-Y AEHMAN 010EHMANK6EA0E       IF                                             18000                 0 NS   212112512
+SUSAP KIAGK6FL28-Y AEHMAN 020KATHIK6PC0EY      TF                                 + 02300                           0 NS   212122512
+SUSAP KIAGK6FL28-Y AEHMAN 030KATHIK6PC0EE AR   HF IIAGK6      100100592801T010PI  + 02000                           0 NS   212132512
+SUSAP KIAGK6FL28-Y L      010CFMCDK6PC0E  I    IF IIAGK6      10010099        PI  + 02000     18000                 0 NS   212142512
+SUSAP KIAGK6FL28-Y L      020KATHIK6PC0E  F    CF IIAGK6      1001005928000040PI  + 02000                 IA    K6PN0 NS   212152512
+SUSAP KIAGK6FL28-Y L      030RW28 K6PG0GY M    CF IIAGK6      1001001828000041PI    00655             -308          0 NS   212162512
+SUSAP KIAGK6FL28-Y L      040         0  M     CA                     2801        + 01500                           0 NS   212172512
+SUSAP KIAGK6FL28-Y L      050IA   K6PN0NY  R   DF                                 + 03200                           0 NS   212182512
+SUSAP KIAGK6FL28-Y L      060IA   K6PN0NE  R   HM                     2801T010    + 03200                           0 NS   212192512
+SUSAP KIAGK6FL28-Z ADIONE 010DIONEK6PC0EE AR   HF IIAGK6      100101252801T010PI  + 02200     18000                 0 DS   212202512
+SUSAP KIAGK6FL28-Z L      010DIONEK6PC0E  I    IF IIAGK6      10010125        PI  + 02200     18000                 0 DS   212212512
+SUSAP KIAGK6FL28-Z L      020KATHIK6PC0E  F    CF IIAGK6      1001005928000067PI  + 02000                 IA    K6PN0 DS   212222512
+SUSAP KIAGK6FL28-Z L      030RW28 K6PG0GY M    CF IIAGK6      1001001828000041PI    00655             -308          0 DS   212232512
+SUSAP KIAGK6FL28-Z L      040         0  M     CA                     2801        + 01500                           0 DS   212242512
+SUSAP KIAGK6FL28-Z L      050         0    R   VIY                    1500                                          0 DS   212252512
+SUSAP KIAGK6FL28-Z L      060DIONEK6PC0EY      CF IA  K6      1001006710010100PN  + 03200                           0 DS   212262512
+SUSAP KIAGK6FL28-Z L      070DIONEK6PC0EE  R   HM                     2801T010    + 03200                           0 DS   212272512
+SUSAP KIAGK6FN28   AEHMAN 010EHMANK6EA0E       IF                                             18000                 0  S   212282512
+SUSAP KIAGK6FN28   AEHMAN 020IA   K6PN0NY      TF                                 + 02300                           0  S   212292512
+SUSAP KIAGK6FN28   AEHMAN 030IA   K6PN0N  AR   HF IA  K6      000000002801T010PN  + 02200                           0  S   212302512
+SUSAP KIAGK6FN28   AEHMAN 040IA   K6PN0NE      CF IA  K6              28040040PN  + 02000                           0  S   212312512
+SUSAP KIAGK6FN28   N      020IA   K6PN0N  F    IF IA  K6                      PN  + 02000     18000       IA    K6PN0  S   212322512
+SUSAP KIAGK6FN28   N      030RW28 K6PG0GY M    CF IA  K6              28040041PN    00643             -310          0  S   212332512
+SUSAP KIAGK6FN28   N      040         0  M     CA                     2940        + 01600                           0  S   212342512
+SUSAP KIAGK6FN28   N      050IA   K6PN0NY  R   DF                                 + 03200                           0  S   212352512
+SUSAP KIAGK6FN28   N      060IA   K6PN0NE  R   HM                     2801T010    + 03200                           0  S   212362512
+SUSAP KIAGK6FR06   AWOTGU 010WOTGUCYEA0EE AR   HF                     04630040    + 03300     18000                 A JS   212372213
+SUSAP KIAGK6FR06   R      010WOTGUCYEA0E  I    IF                                 + 03300     18000                 A JS   212382213
+SUSAP KIAGK6FR06   R      020BINNYCYPC1E  F 010TF                                 + 02300                 RW06  K6PGA JS   212392512
+SUSAP KIAGK6FR06   R      020BINNYCYPC2WALPV       ALNAV/VNAV ALNAV                                                   JS   212402512
+SUSAP KIAGK6FR06   R      021ZEXODK6PC0E S  031TF                                 V 0118001181        -300          A JS   212412501
+SUSAP KIAGK6FR06   R      030RW06 K6PG0GY M 031TF                                   00639             -300          A JS   212422501
+SUSAP KIAGK6FR06   R      040         0  M     CA                     0601        + 00849                           A JS   212431707
+SUSAP KIAGK6FR06   R      050ZUPUVK6PC0EY   010DF                                 + 03600                           A JS   212442501
+SUSAP KIAGK6FR06   R      060ZUPUVK6PC0EE  L   HM                     24030040    + 03600                           A JS   212451310
+SUSAP KIAGK6FR10   AWINUD 010WINUDCYPC0EE AR   HF                     11990040    + 03100     18000                 A JS   212462512
+SUSAP KIAGK6FR10   R      010WINUDCYPC0E  I    IF                                 + 03100     18000                 A JS   212472512
+SUSAP KIAGK6FR10   R      020UGOCOCYPC1E  F 010TF                                 + 02300                 ZUKDU K6PCA JS   212482512
+SUSAP KIAGK6FR10   R      020UGOCOCYPC2WALP        N          ALNAV                                                   JS   212492512
+SUSAP KIAGK6FR10   R      021WURSIK6PC0E S  031TF                                 V 0122001220        -300          A JS   212502512
+SUSAP KIAGK6FR10   R      030ZUKDUK6PC0EY M 031TF                                   00800             -300          A JS   212512512
+SUSAP KIAGK6FR10   R      040         0  M     CA                     1199        + 01100                           A JS   212522512
+SUSAP KIAGK6FR10   R      050DIONEK6PC0EY  L010DF                                 + 03600                           A JS   212532512
+SUSAP KIAGK6FR10   R      060DIONEK6PC0EE  R   HM                     28010040    + 03600                           A JS   212542512
+SUSAP KIAGK6FR24-Y AZUPUV 010ZUPUVK6PC0EE AL   HF                     24030040    + 03600     18000                 A JS   212551310
+SUSAP KIAGK6FR24-Y R      010ZUPUVK6PC0E  I    IF                                 + 03600     18000                 A JS   212561310
+SUSAP KIAGK6FR24-Y R      020WUVBIK6PC1E  F 010TF                                 + 02300                 RW24  K6PGA JS   212572501
+SUSAP KIAGK6FR24-Y R      020WUVBIK6PC2WALP        N          ALNAV                                                   JS   212581310
+SUSAP KIAGK6FR24-Y R      030RW24 K6PG0GY M 031TF                                   00640             -300          A JS   212592501
+SUSAP KIAGK6FR24-Y R      040         0  M     CA                     2402        + 01400                           A JS   212601301
+SUSAP KIAGK6FR24-Y R      050ZUPUVK6PC0EY  L010DF                                 + 03600                           A JS   212612501
+SUSAP KIAGK6FR24-Y R      060ZUPUVK6PC0EE  L   HM                     24030040    + 03600                           A JS   212621310
+SUSAP KIAGK6FR24-Z AZUPUV 010ZUPUVK6PC0EE AL   HF                     24030040    + 03600     18000                 A JS   212631310
+SUSAP KIAGK6FR24-Z R      010ZUPUVK6PC0E  I    IF                                 + 03600     18000                 A JS   212641310
+SUSAP KIAGK6FR24-Z R      020WUVBIK6PC1E  F 010TF                                 + 02300                 RW24  K6PGA JS   212652501
+SUSAP KIAGK6FR24-Z R      020WUVBIK6PC2WALP        N          ALNAV                                                   JS   212661310
+SUSAP KIAGK6FR24-Z R      021YEPNUK6PC0E S  031TF                                 V 0118001182        -300          A JS   212672501
+SUSAP KIAGK6FR24-Z R      030RW24 K6PG0GY M 031TF                                   00640             -300          A JS   212682501
+SUSAP KIAGK6FR24-Z R      040         0  M     CA                     2402        + 01400                           A JS   212691301
+SUSAP KIAGK6FR24-Z R      050ZUPUVK6PC0EY  L010DF                                 + 03600                           A JS   212702501
+SUSAP KIAGK6FR24-Z R      060ZUPUVK6PC0EE  L   HM                     24030040    + 03600                           A JS   212711310
+SUSAP KIAGK6FR28   ACUVTU 010CUVTUK6PC0EE AR   HF                     28030040    + 03100     18000                 A JS   212722512
+SUSAP KIAGK6FR28   R      010CUVTUK6PC0E  I    IF                                 + 03100     18000                 A JS   212732512
+SUSAP KIAGK6FR28   R      020APIWOK6PC1E  F 010TF                                 + 02300                 RW28  K6PGA JS   212742512
+SUSAP KIAGK6FR28   R      020APIWOK6PC2WALPV       ALNAV/VNAV ALNAV                                                   JS   212752512
+SUSAP KIAGK6FR28   R      021KIGUWK6PC0E S  031TF                                 + 0156001560        -300          A JS   212762512
+SUSAP KIAGK6FR28   R      030RW28 K6PG0GY M 031TF                                   00643             -300          A JS   212772512
+SUSAP KIAGK6FR28   R      040         0  M     CA                     2802        + 01040                           A JS   212782512
+SUSAP KIAGK6FR28   R      050ZUPUVK6PC0EY  R010DF                                 + 03600                           A JS   212792512
+SUSAP KIAGK6FR28   R      060ZUPUVK6PC0EE  L   HM                     24030040    + 03600                           A JS   212802512
+SUSAP KIAGK6GRW06    0051880600 N43060636W078564430         +0142400584000055150R                                          212812512
+SUSAP KIAGK6GRW10    0098261000 N43063433W078575834         +0143600588070053150R                                          212822512
+SUSAP KIAGK6GRW24    0051882400 N43063920W078555061         +0144800592000048150R                                          212832512
+SUSAP KIAGK6GRW28    0098262800 N43063416W078555532         +0143500588000067150IIIAG1                                     212842512
+SUSAP KIAGK6IIIAG1   011010RW28 N43063436W0785818812801N43063009W0785616650819 15810377250W01006700583                     212852512
+SUSAP KIAGK6PR06   RW06 001 0000W06A0N4306063585W07856442955+014240300N4307034680W07855109150106751168000550F4005001297D70E212862512
+SUSAP KIAGK6PR06   RW06 002E      +01781+01781LPV       90132                                                              212872512
+SUSAP KIAGK6PR10   RW10 001 0000W10A0N4306242725W07858007620+014360300N4305538535W07856064430106750000000530F400000808E4D6B212882512
+SUSAP KIAGK6PR10   RW10 002E      +01793+01793LP        82147                                                              212892512
+SUSAP KIAGK6PR24-Y RW24 001Y0000W24B0N4306391995W07855506070+014480300N4305420810W07857239665106751168000481F400000D9355B89212902512
+SUSAP KIAGK6PR24-Y RW24 002E      +01805+01805LP        97333                                                              212912512
+SUSAP KIAGK6PR24-Z RW24 001Z0000W24A0N4306391995W07855506070+014480300N4305420810W07857239665106751168000481F4000008105E7CE212922512
+SUSAP KIAGK6PR24-Z RW24 002E      +01805+01805LP        45532                                                              212932512
+SUSAP KIAGK6PR28   RW28 001 0000W28A0N4306341590W07855553155+014350300N4306343450W07858077770106750000000550F4005009BCEB579212942512
+SUSAP KIAGK6PR28   RW28 002E      +01792+01792LPV       63147                                                              212952512
+SUSAP KIAGK6SIA   K6PN                0   025115028251152950242529502503725                                            M   212961313
+SUSAP KIAGK6SRW06 K6PG                0   18018003525                                                                  M   212971301
+SUSAP KIAGK6SRW24 K6PG                0   18018003525                                                                  M   212981301
+SUSAP KIAGK6SRW28 K6PG                0   18018003525                                                                  M   212992512
+SUSAP KIAGK6SZUKDUK6PC                0   18018002925                                                                  M   213001311
+SUSAPNKIAGK6 IA    K6003290HO W N43063280W078501788                       W0100           NARKATHI                         582272108

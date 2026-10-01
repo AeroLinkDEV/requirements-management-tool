@@ -1,0 +1,57 @@
+HDR01FAACIFP18      001P013203968112609  12-AUG-202618:29:21  U.S.A. DOT FAA                                                FBB95AD8
+SUSADB       BKT   K6003260H MW N37073874W078024036                       W0090           NARBLACKSTONE                    268761612
+SUSAEAENRT   CARML K60    C   L N37214254W077580841                       W0100     NAR           CARML                    302502201
+SUSAEAENRT   MELIA K60    C   L N37165634W077464589                       W0101     NAR           MELIA                    442392201
+SUSAEAENRT   NUTTS K60    C   L N37043416W078121369                       W0098     NAR           NUTTS                    456292102
+SUSAP KBKTK6ABKT     0     053YHN37042906W077570652W009000437         1800018000C    MNAR    ALLAN C PERKINSON/BLACKSTONE A357122503
+SUSAP KBKTK6CCFBNK K60    W     N37055598W077594469                       W0099     NAR           CFBNK(CNF)               357132008
+SUSAP KBKTK6CWONEL K60    W     N37090958W077530526                       W0100     NAR           WONEL                    357142102
+SUSAP KBKTK6CWOVUP K60    W     N36593695W078011723                       W0099     NAR           WOVUP                    357152201
+SUSAP KBKTK6CYAGNU K60    W     N37150331W077480016                       W0101     NAR           YAGNU                    357162605
+SUSAP KBKTK6CYAKLU K60    W     N36534849W078061545                       W0098     NAR           YAKLU                    357172008
+SUSAP KBKTK6CZATOR K60    W     N37065867W077545793                       W0100     NAR           ZATOR                    357182304
+SUSAP KBKTK6DBKT1  1RW04  010         0        VA                     0436        + 01300     18000                        357191412
+SUSAP KBKTK6DBKT1  1RW04  020BKT  K6DB0NE  L   DF                                 + 02600                                  357201412
+SUSAP KBKTK6DBKT1  1RW22  010         0        CA                     2235        + 00837     18000                        357211412
+SUSAP KBKTK6DBKT1  1RW22  020BKT  K6DB0NE  R   DF                                 + 02600                                  357221412
+SUSAP KBKTK6DBKT1  3CARML 010BKT  K6DB0N       IF                                             18000                        357231412
+SUSAP KBKTK6DBKT1  3CARML 020CARMLK6EA0EE      TF                                                                          357241412
+SUSAP KBKTK6DBKT1  3MELIA 010BKT  K6DB0N       IF                                             18000                        357251412
+SUSAP KBKTK6DBKT1  3MELIA 020MELIAK6EA0EE      TF                                                                          357261412
+SUSAP KBKTK6DBKT1  3NUTTS 010BKT  K6DB0N       IF                                             18000                        357271412
+SUSAP KBKTK6DBKT1  3NUTTS 020NUTTSK6EA0EE      TF                                                                          357281412
+SUSAP KBKTK6FNDB-A AMELIA 010MELIAK6EA0E       IF                                             18000                 0  C   357292211
+SUSAP KBKTK6FNDB-A AMELIA 020BKT  K6DB0N       TF                                 + 02600                           0  C   357302211
+SUSAP KBKTK6FNDB-A AMELIA 030BKT  K6DB0NE AL   PI BKT K6      0000000000010100DB  + 02600                           0  C   357312211
+SUSAP KBKTK6FNDB-A ANUTTS 010NUTTSK6EA0E       IF                                             18000                 0  C   357322211
+SUSAP KBKTK6FNDB-A ANUTTS 020BKT  K6DB0N       TF                                 + 02600                           0  C   357332211
+SUSAP KBKTK6FNDB-A ANUTTS 030BKT  K6DB0NE AL   PI BKT K6      0000000000010100DB  + 02600                           0  C   357342211
+SUSAP KBKTK6FNDB-A N      020BKT  K6DB0N  F    IF BKT K6                      DB  + 02600     18000       BKT   K6DB0  C   357352211
+SUSAP KBKTK6FNDB-A N      030CFBNKK6PC0EY M    CF BKT K6              13510029DB    00437              000          0  C   357362211
+SUSAP KBKTK6FNDB-A N      040         0  M     CA                     1351        + 00837                           0  C   357372211
+SUSAP KBKTK6FNDB-A N      050BKT  K6DB0NY  L   DF                                 + 02600                           0  C   357382211
+SUSAP KBKTK6FNDB-A N      060BKT  K6DB0NE  R   HM                     1351T010    + 02600                           0  C   357392211
+SUSAP KBKTK6FR04   AYAKLU 010YAKLUK6PC0EE AR   HF                     04350040    + 03000     18000                 A JS   357401404
+SUSAP KBKTK6FR04   R      010YAKLUK6PC0E  I    IF                                 + 03000     18000                 A JS   357411404
+SUSAP KBKTK6FR04   R      020WOVUPK6PC1E  F 010TF                                 + 02200                           A JS   357422403
+SUSAP KBKTK6FR04   R      020WOVUPK6PC2WALPV       ALNAV/VNAV ALNAV                                                   JS   357431404
+SUSAP KBKTK6FR04   R      030RW04 K6PG0GY M 031TF                                   00460             -300          A JS   357442403
+SUSAP KBKTK6FR04   R      040         0  M     CA                     0435        + 00699                           A JS   357452403
+SUSAP KBKTK6FR04   R      050YAGNUK6PC0EY   010DF                                 + 03000                           A JS   357462403
+SUSAP KBKTK6FR04   R      060YAGNUK6PC0EE  R   HM                     22360040    + 03000                           A JS   357471404
+SUSAP KBKTK6FR22   AYAGNU 010YAGNUK6PC0EE AR   HF                     22360040    + 03000     18000                 A JS   357481404
+SUSAP KBKTK6FR22   R      010YAGNUK6PC0E  I    IF                                 + 03000     18000                 A JS   357491404
+SUSAP KBKTK6FR22   R      020WONELK6PC1E  F 010TF                                 + 02200                           A JS   357502403
+SUSAP KBKTK6FR22   R      020WONELK6PC2WALPV       ALNAV/VNAV ALNAV                                                   JS   357511404
+SUSAP KBKTK6FR22   R      021ZATORK6PC0E S  031TF                                 V 0134001357        -300          A JS   357522403
+SUSAP KBKTK6FR22   R      030RW22 K6PG0GY M 031TF                                   00497             -300          A JS   357532403
+SUSAP KBKTK6FR22   R      040         0  M     CA                     2236        + 00696                           A JS   357542403
+SUSAP KBKTK6FR22   R      050YAKLUK6PC0EY   010DF                                 + 03000                           A JS   357552403
+SUSAP KBKTK6FR22   R      060YAKLUK6PC0EE  R   HM                     04350040    + 03000                           A JS   357561404
+SUSAP KBKTK6GRW04    0053330440 N37040734W077572518         +0089800400000060150R                                          357572403
+SUSAP KBKTK6GRW22    0053332240 N37044507W077565277         +0101100437070060150R                                          357582601
+SUSAP KBKTK6PR04   RW04 001 0000W04A0N3704073420W07757251830+008980300N3705208100W07756220200106751128000600F40050044C0C9C1357591404
+SUSAP KBKTK6PR04   RW04 002E      +01220+01220LPV       42934                                                              357601404
+SUSAP KBKTK6PR22   RW22 001 0000W22A0N3704450680W07756527650+010110300N3703315800W07757558800106751336000600F400500456C4831357611404
+SUSAP KBKTK6PR22   RW22 002E      +01333+01333LPV       53734                                                              357621404
+SUSAP KBKTK6SBKT  K6DB                0   18018002625                                                                  M   357631707

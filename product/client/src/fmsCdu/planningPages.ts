@@ -43,6 +43,8 @@ function continueFrom(fms: ScriptedFms) {
 /** An approach by its type and runway (RNAV 15), or a point-in-space approach by its final course (RNAV 190). */
 function procedureLabel(p: Procedure) {
   if (p.kind !== "APPROACH") return p.ident;
+  // A circling or other conventional approach to a fix serves no runway: it is listed by its ident (NDB-A).
+  if (p.endpoint?.identification.basis === "CONVENTIONAL NON-RUNWAY MAP") return p.ident;
   const served = p.pointInSpace ? p.ident.slice(1) : p.runways[0]?.slice(2);
   return `${p.approachType ?? ""} ${served ?? ""}`.trim();
 }
