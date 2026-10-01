@@ -80,7 +80,7 @@ jobs:
 
   # The client checks in three parallel parts (#1313): one job took 10.3–15 minutes serially and hit its
   # 10-minute limit on every PR. Static and logic checks; the rendered tier without the software-WebGL
-  # out-the-window spec; and that spec alone, which takes about as long as the rest of the rendered tier.
+  # out-the-window specs (RENDERED_3D); and those specs alone, which take about as long as the rest of the rendered tier.
   client-fast:
     name: Fast client static and logic checks
     runs-on: windows-latest
@@ -220,7 +220,7 @@ jobs:
   client-3d-fast:
     name: Fast client 3D rendered checks
     runs-on: windows-latest
-    # The software-WebGL out-the-window spec alone (#1313). Its eleven tests take about 9 minutes on one worker on the
+    # The software-WebGL out-the-window specs alone (RENDERED_3D, #1313). Their eleven tests take about 9 minutes on one worker on the
     # hosted runners (8.9 m in run 36820294784, a 9.9-minute job), so 10 left no margin and a slow runner hit it
     # (#1232). Two workers contend and time tests out (#1387, reverted in #1396). The job is advisory.
     timeout-minutes: 15
