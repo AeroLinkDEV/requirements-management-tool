@@ -67,6 +67,7 @@ export const APPENDIX_E: Readonly<Record<string, AppendixESource>> = {
   // Not a message of its own: the MESSAGE RECALL text the manual gives with an FMS FAILED condition (MAG VAR CRC FAILED).
   "SYSTEM FAILED": { page: "E-20" },
   "RALT FAILED": { page: "E-27" },
+  "FMS NAV IN DR": { page: "E-33" },
   "TRANSITION DOWN": { page: "E-36" },
   "APPR ON GPS1": { laboratory: "the bench's approach-aware AUTO receiver transfer (gpsSensors.ts)" },
   "APPR ON GPS2": { laboratory: "the bench's approach-aware AUTO receiver transfer (gpsSensors.ts)" },

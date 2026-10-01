@@ -70,9 +70,10 @@ test('CHECK ANP times out on the same effective RNP the pages show, not the sens
   unit.setCondition('gpsLost', true)
   unit.setRnp(2)
   unit.setCondition('npa', true)
-  // Twenty minutes of stationary DR keeps terminal phase: uncertainty exceeds forced 0.30 NM but not entered 2 NM.
-  now += 1_200_000
-  unit.updateNavigation(1200)
+  // Five minutes of stationary DR keeps terminal phase: uncertainty exceeds forced 0.30 NM but not entered 2 NM.
+  // Stationary is the low-speed regime, where DR's accuracy grows at the no-motion rate (plan F10).
+  now += 300_000
+  unit.updateNavigation(300)
   const { anp } = progressPerformance(unit)
   expect(anp).toBeGreaterThan(0.3)
   expect(anp).toBeLessThan(2)

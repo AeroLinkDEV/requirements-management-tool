@@ -688,6 +688,9 @@ test('NAV OPTIONS inhibits a navaid from updating, and GPS can be selected out',
   enter(unit, 'HWK', 'LSK1R')
   expect(unit.navState.mode).toBe('DR')
   expect(unit.lamps().has('POS')).toBe(true)
+  // Entering DR shows the status advisory (M300 E-33) until the crew acknowledges it.
+  expect(scratch(unit)).toBe('FMS NAV IN DR')
+  unit.press('CLR')
   press(unit, 'LSK6L')
   expect(lines(unit)[10]).toMatch(/^YOW HWK/)
   press(unit, 'LSK6R', 'CLR', 'LSK1L', 'CLR', 'LSK1L')
