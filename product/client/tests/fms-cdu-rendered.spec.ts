@@ -258,6 +258,8 @@ test('Fly moves the aircraft along the route on the map at the chosen rate, and 
 })
 
 test('IDENT and preflight wire the consumed MAGVAR loader, reference displays, FMS startup and maintenance controls', async ({ page }) => {
+  // The demonstration cycles follow the clock the bench starts with: pinned inside DEMO-2609.
+  await page.clock.setFixedTime(new Date('2026-09-30T14:00:00Z'))
   await open(page)
   await expectLine(page, 4, /^DEMO-2609\s+03SEP-30SEP$/)
   await expectLine(page, 6, /^DEMO-2610\s+01OCT-28OCT$/)

@@ -103,6 +103,24 @@ const cycleDate = (text: string, end: boolean) => {
 const cycleOf = (db: NavDatabase, source: string): NavCycle =>
   ({ id: db.cycle.id, from: cycleDate(db.cycle.from, false), to: cycleDate(db.cycle.to, true), source, db });
 const demoCycle = (id: string, from: string, to: string) => cycleOf(new NavDatabase({ ...DEMO_NAV_DATA, cycle: { id, from, to } }), "demonstration data");
+/** AIRAC cycles run 28 days from a common sequence; cycle 2601 began on 22 January 2026. */
+const AIRAC_2601 = Date.UTC(2026, 0, 22), AIRAC_MS = 28 * 86_400_000;
+/** The AIRAC cycle `index` cycles after 2601: its ident (YYNN, numbered within the year it begins) and dates. */
+export function airacCycle(index: number) {
+  const from = AIRAC_2601 + index * AIRAC_MS, year = new Date(from).getUTCFullYear();
+  const firstOfYear = Math.ceil((Date.UTC(year, 0, 1) - AIRAC_2601) / AIRAC_MS);
+  const day = (t: number) => new Date(t).toISOString().slice(0, 10);
+  return { ident: `${String(year % 100).padStart(2, "0")}${String(index - firstOfYear + 1).padStart(2, "0")}`, from: day(from), to: day(from + AIRAC_MS - 86_400_000) };
+}
+/**
+ * The demonstration database is invented data with no real effective period. It is dated to the AIRAC cycle current at
+ * `now` and the next, so a bench built today never starts on an expired cycle. Fixed dates made every unit built after
+ * 30 September 2026 start DATABASE OUT OF DATE. Expiry and the swap are exercised by running a unit past its cycle's end.
+ */
+const demoCycles = (now: Date) => {
+  const index = Math.floor((now.getTime() - AIRAC_2601) / AIRAC_MS);
+  return [index, index + 1].map(i => { const c = airacCycle(i); return demoCycle(`DEMO-${c.ident}`, c.from, c.to); });
+};
 const onGlobe = (p: LatLon) => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
 const samePlace = (a: LatLon | undefined, b: LatLon | undefined) => a !== undefined && b !== undefined && a.lat === b.lat && a.lon === b.lon;
 
@@ -275,10 +293,11 @@ export class ScriptedFms implements CduBackend {
   private selfTest: { startedAt: number | null; result: "PASS" | "FAIL" | null } = { startedAt: null, result: null };
   /**
    * Navigation database cycles, the active one first, each with its own dataset. The two demonstration cycles are
-   * separate datasets built from the same demonstration data: only their idents and dates differ. A loaded file
-   * replaces the inactive one.
+   * separate datasets built from the same demonstration data: only their idents and dates differ. They are the AIRAC
+   * cycle current when the unit is built and the next one (demoCycles), set in the constructor from its clock. A loaded
+   * file replaces the inactive one.
    */
-  private cycles: NavCycle[] = [demoCycle("DEMO-2609", "2026-09-03", "2026-09-30"), demoCycle("DEMO-2610", "2026-10-01", "2026-10-28")];
+  private cycles: NavCycle[];
   private datasetEvents: { at: Date; action: string; detail: string }[] = [];
   /**
    * Where the database fixes of the active plan were when it became active (EXEC, or the initial plan), and in which
@@ -292,7 +311,7 @@ export class ScriptedFms implements CduBackend {
   private pins = new Map<string, LatLon | null>();
   /** The active plan's revision: each EXEC (and each engineering change to it) makes a new one. */
   private planRevision = 0;
-  private pinnedIn: NavCycle = this.cycles[0];
+  private pinnedIn: NavCycle;
   private outOfDateAlerted = false;
   /** The MOVING WPT page's entries before CREATE. */
   movingDraft = { ident: null as string | null, position: null as LatLon | null, motion: null as string | null };
@@ -576,6 +595,8 @@ export class ScriptedFms implements CduBackend {
 
   constructor(clock: () => Date = () => new Date(), options: { profile?: AircraftProfile; sensors?: SensorInputPort; receivers?: readonly [GpsReceiver, GpsReceiver]; preferredGps?: 0 | 1; userDatabase?: { store: UserDatabaseStore; scope: UserScope } } = {}) {
     this.clock = clock;
+    this.cycles = demoCycles(clock());
+    this.pinnedIn = this.cycles[0];
     this.sensorPort = options.sensors ?? null;
     this.receivers = options.receivers ?? [new GpsReceiver({ constellation: this.constellation, seed: 101 }), new GpsReceiver({ constellation: this.constellation, seed: 202 })];
     this.benchRaim = !this.sensorPort || !!options.receivers;

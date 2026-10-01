@@ -22,6 +22,7 @@
     "fms-navigation.spec.ts",
     "fms-vnav.spec.ts",
     "fms-tactical-maint.spec.ts",
+    "fms-demo-cycle.spec.ts",
     "fms-scenario.spec.ts",
     "fms-authority.spec.ts",
     "fms-predictions.spec.ts",
