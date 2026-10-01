@@ -4,7 +4,7 @@ import { parseArinc424 } from '../src/fmsCdu/arinc424'
 import { distanceNm, offset, type LatLon } from '../src/fmsCdu/fmsModel'
 import { navaidComponent, NavDatabase, type Navaid, type ProcedureLeg } from '../src/fmsCdu/navData'
 import { vhfFrequency } from '../src/fmsCdu/navPages'
-import { HELICOPTER_PROFILE } from '../src/fmsCdu/profile'
+import { HELICOPTER_PROFILE, LATER_SBAS_PROFILE } from '../src/fmsCdu/profile'
 import { BenchRadioReceiver } from '../src/fmsCdu/radioNavigation'
 import { ScriptedFms } from '../src/fmsCdu/scriptedFms'
 import { screenText } from '../src/fmsCdu/screen'
@@ -290,4 +290,82 @@ test('F16: KBKT NDB-A loads with a conventional non-runway MAP, not as PinS, and
   expect(screenText(unit.screen()).join('\n')).toContain('NDB-A')
 
   // An RNAV approach whose MAP is not a runway stays refused (PASD R14-Y and R14-Z, in the first test).
+})
+
+// F16 guidance and authority (plan DF-01; M300 7-1, 7-12, C.3.1). The S300 approach authority covers every non-ILS
+// approach, NDB included: an NDB approach flown on FMS guidance with GPS has the approach phase and RNP 0.3, and an
+// integrity-only loss after the FAF is continued for 300 s and then cancelled, as on an RNAV final. KIAG N28: the FAF
+// is the NDB IA, the MAP RW28 on 270.4 true.
+const ndbFinal = () => {
+  let now = Date.UTC(2026, 8, 29, 14)
+  const unit = new ScriptedFms(() => new Date(now))
+  expect(unit.loadArinc424(KIAG, 'kiag-2609.pc')).toMatchObject({ loaded: 'CIFP2609' })
+  unit.swapCycles()
+  unit.modify(route => { route.dest = 'KIAG'; route.legs = [] }); unit.press('EXEC')
+  unit.selectProcedure('APPROACH', 'N28'); unit.press('EXEC')
+  unit.directTo('IA'); unit.press('EXEC')
+  unit.placeAircraft({ position: offset(unit.coordinates('IA')!, 90, 1), altitude: 2000, track: 270 }, 'KIAG N28 one mile before IA')
+  unit.armApproach(); unit.updateNavigation(0)
+  const receivers = (unit as unknown as { gps: readonly { override(label: string, value: unknown): void }[] }).gps
+  const lose = (hdop: number) => {
+    for (const rx of receivers) { rx.override('130', { kind: 'FORCE', value: 1, ssm: 'NORMAL' }); rx.override('101', { kind: 'FORCE', value: hdop, ssm: 'NORMAL' }) }
+    unit.updateNavigation(0)
+  }
+  return { unit, lose, advance: (seconds: number) => { now += seconds * 1000; unit.updateNavigation(0) } }
+}
+const recalled = (unit: ScriptedFms, text: string) => unit.recallList.some(message => message.text === text)
+
+test('F16: an NDB approach flown on FMS guidance with GPS has the approach phase, RNP 0.3 and its CDI full scale', () => {
+  const { unit } = ndbFinal()
+  expect(unit.flightPhase).toBe('APPROACH')
+  expect(unit.nonPrecisionApproach).toBe(true)
+  expect(unit.requiredRnp).toBe(0.3)
+  expect(unit.approachType).toBe('LNAV')
+})
+
+test('F16: GPS integrity lost after the FAF on an NDB final: guidance continues for 300 s, then NO APPR INTEGRITY and NAV withdrawn; MISSED APPR restores terminal guidance', () => {
+  const { unit, lose, advance } = ndbFinal()
+  unit.arrive(); unit.updateNavigation(0)
+  expect(unit.onFinalSegment).toBe(true)
+  lose(1)
+  advance(299)
+  expect(unit.nonPrecisionApproach).toBe(true)
+  expect(unit.approachSteeringValid).toBe(true)
+  expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(false)
+  advance(1)
+  // Cancelled (M300 7-12; C.3.1): the alert, the approach phase ended, and no valid approach steering, so the AFCS
+  // reverts to HDG and NAV is withdrawn.
+  expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(true)
+  expect(unit.nonPrecisionApproach).toBe(false)
+  expect(unit.approachType).toBe('NO APPR')
+  expect(unit.approachSteeringValid).toBe(false)
+  // The crew's MISSED APPR restores terminal guidance on the missed approach; nothing restores approach permission.
+  expect(unit.requestMissedApproach()).toBe(true)
+  expect(unit.approachSteeringValid).toBe(true)
+  expect(unit.flightPhase).toBe('TERMINAL')
+})
+
+test('F16: an invalid GPS position on the NDB final cancels at once', () => {
+  const { unit, lose } = ndbFinal()
+  unit.arrive(); unit.updateNavigation(0)
+  // HDOP above 4 is not an integrity-only loss: no 300 s continuation (M300 7-12).
+  lose(4.01)
+  expect(unit.nonPrecisionApproach).toBe(false)
+  expect(unit.approachSteeringValid).toBe(false)
+  expect(recalled(unit, 'NO APPR INTEGRITY')).toBe(true)
+})
+
+test('F16: outside the S300 the NDB approach keeps the existing RNAV-only approach phase (DF-01 decides the S300 only)', () => {
+  // The later SBAS profile's approach authority for NDB approaches is not decided by the plan: it keeps the behaviour it
+  // had, with no approach phase on an NDB final. A deliberate boundary, open for a decision.
+  let now = Date.UTC(2026, 8, 29, 14)
+  const unit = new ScriptedFms(() => new Date(now), { profile: LATER_SBAS_PROFILE })
+  unit.loadArinc424(KIAG, 'kiag-2609.pc'); unit.swapCycles()
+  unit.modify(route => { route.dest = 'KIAG'; route.legs = [] }); unit.press('EXEC')
+  unit.selectProcedure('APPROACH', 'N28'); unit.press('EXEC')
+  unit.directTo('IA'); unit.press('EXEC')
+  unit.placeAircraft({ position: offset(unit.coordinates('IA')!, 90, 1), altitude: 2000, track: 270 }, 'KIAG N28 one mile before IA')
+  unit.armApproach(); unit.updateNavigation(0)
+  unit.arrive(); now += 1000; unit.updateNavigation(0)
+  expect(unit.nonPrecisionApproach).toBe(false)
 })
