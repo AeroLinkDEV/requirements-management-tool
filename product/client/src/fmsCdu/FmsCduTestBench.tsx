@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type HTMLAttributes, type ReactNode } from "react";
 import { ALERTS } from "./alerts";
 import { CONDITIONS, UNMODELLED_CONDITIONS, type ConditionId } from "./conditions";
 import { MAP_RANGES } from "./flight";
@@ -56,6 +56,17 @@ const TAB_KEY = "aerolink.fmsCdu.tab";
 const storedTab = (): TabId => {
   try { const id = window.localStorage.getItem(TAB_KEY); return TABS.find(tab => tab.id === id)?.id ?? "scenarios"; } catch { return "scenarios"; }
 };
+
+type KeptPanelProps = { shown: boolean; render: () => ReactNode } & Omit<HTMLAttributes<HTMLDivElement>, "hidden" | "children">;
+/**
+ * A tool tab's panel. The simulation tick re-renders the bench four times a second; rebuilding every hidden panel
+ * each time (the key log alone grows to 200 entries) held the page's main thread long enough to stall pointer input
+ * for seconds on a loaded host (#1349). A panel not shown is not rebuilt: it keeps what it last drew, and its
+ * components their state, and is brought up to date when it is shown again.
+ */
+const KeptPanel = memo(function KeptPanel({ shown, render, ...attributes }: KeptPanelProps) {
+  return <div {...attributes} hidden={!shown}>{render()}</div>;
+}, (before, after) => !before.shown && !after.shown);
 
 // The out-the-window view: whether it is shown, and how, is remembered. It starts hidden because showing it loads a
 // 3D engine and the terrain around the aircraft.
@@ -566,7 +577,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </button>
           ))}
         </div>
-        <div className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-scenarios" aria-labelledby="fms-bench-tabbutton-scenarios" hidden={tab !== "scenarios"}>
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-scenarios" aria-labelledby="fms-bench-tabbutton-scenarios" shown={tab === "scenarios"} render={() => (
           <FmsScenarioCard
             runner={runner}
             recording={recording}
@@ -577,8 +588,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             onFinishRecording={finishRecording}
             onCheckLine={line => recorder?.checkLine(line, screenText(backend.screen())[line])}
           />
-        </div>
-        <div className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-conditions" aria-labelledby="fms-bench-tabbutton-conditions" hidden={tab !== "conditions"}>
+        )} />
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-conditions" aria-labelledby="fms-bench-tabbutton-conditions" shown={tab === "conditions"} render={() => (<>
           <section className="fmsBenchCard">
             <h2>Conditions</h2>
             <ul className="fmsBenchConditions">
@@ -620,11 +631,11 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
               <button type="submit" disabled={!alert.trim() || failedFms}>Raise alert</button>
             </form>
           </section>
-        </div>
+        </>)} />
         <div className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-gps" aria-labelledby="fms-bench-tabbutton-gps" hidden={tab !== "gps"}>
           {tab === "gps" ? <FmsGpsTab view={fmsGpsView(backend, system.computers[0])} fms={backend} /> : null}
         </div>
-        <div className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-dual" aria-labelledby="fms-bench-tabbutton-dual" hidden={tab !== "dual"}>
+        <KeptPanel className="fmsBenchTabPanel" role="tabpanel" id="fms-bench-tab-dual" aria-labelledby="fms-bench-tabbutton-dual" shown={tab === "dual"} render={() => (
           <section className="fmsBenchCard" aria-label="Dual computers and radio devices">
             <h2>Dual FMS and civil RMS</h2>
             <label>FMS 2 software profile (restarts the bench) <select aria-label="FMS 2 software profile" value={secondaryProfileChoice.current}
@@ -641,8 +652,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </select></label>
             <ul aria-label="RMS tuning feedback">{system.rms.requests.slice(0, 6).map(request => <li key={request.id}>FMS {request.side}: {request.device.toUpperCase()} {request.value} — {request.status}</li>)}</ul>
           </section>
-        </div>
-        <div className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-navdata" aria-labelledby="fms-bench-tabbutton-navdata" hidden={tab !== "navdata"}>
+        )} />
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-navdata" aria-labelledby="fms-bench-tabbutton-navdata" shown={tab === "navdata"} render={() => (<>
           <section className="fmsBenchCard" aria-label="FMS initialization and preflight">
             <h2>FMS initialization and preflight</h2>
             <p className="fmsBenchReadout">FMS power: {backend.powerState}. Receiver power is controlled on GPS sensors.</p>
@@ -816,8 +827,8 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
             </label>
             {userDbStatus ? <p className="fmsBenchHint" role="status">{userDbStatus}</p> : null}
           </section>
-        </div>
-        <div className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-lighting" aria-labelledby="fms-bench-tabbutton-lighting" hidden={tab !== "lighting"}>
+        </>)} />
+        <KeptPanel className="fmsBenchTabPanel fmsBenchCards" role="tabpanel" id="fms-bench-tab-lighting" aria-labelledby="fms-bench-tabbutton-lighting" shown={tab === "lighting"} render={() => (<>
           <section className="fmsBenchCard">
             <h2>Cockpit lighting</h2>
             <div className="fmsBenchModes" role="radiogroup" aria-label="Cockpit lighting">
@@ -867,7 +878,7 @@ export default function FmsCduTestBench({ terrain, imagery, userName }: { terrai
                 </ol>
               )}
           </section>
-        </div>
+        </>)} />
       </div>
     </main>
   );
