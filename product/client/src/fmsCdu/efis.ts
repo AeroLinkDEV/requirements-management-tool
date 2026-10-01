@@ -290,7 +290,7 @@ function radioBusWords(fms: ScriptedFms, failed: boolean): RadioBusWords {
   const nav = (device: "nav1" | "nav2"): NavMeasurement => ({ stationIdent: word(fms.navStation(device)?.ident, broken(device)), vorRadial: word(fms.navRadial(device), broken(device)) });
   const dme = (device: DmeDevice): DmeMeasurement => {
     const ranging = !!port?.dmeReceiving(device);
-    return { stationIdent: word(ranging ? fms.dmeStation(device)?.ident : null, broken(device)), dmeDistance: word(fms.dmeSlantRangeNm(device), broken(device)) };
+    return { stationIdent: word(ranging ? fms.dmeReportedIdent(device) : null, broken(device)), dmeDistance: word(fms.dmeSlantRangeNm(device), broken(device)) };
   };
   const source = (mode: "KALMAN" | "DVS"): Word<SourceStatus> => {
     const solution = fms.sensorSolutions.find(candidate => candidate.mode === mode);

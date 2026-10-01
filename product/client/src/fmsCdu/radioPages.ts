@@ -23,7 +23,7 @@ export function activeFrequency(fms: ScriptedFms, device: RadioDevice, text = fm
   if (pending) return { text: pending.value, color: "white", inverse: true };
   // Plan C3: amber for a failed tuning (REJECTED or TIMEOUT) or a radio whose words do not reach the FMS (M300 13-3).
   const faults = port?.faults(device);
-  const failed = faults !== undefined && (faults.receiver === "FAILED" || faults.measurementBus === "LOST");
+  const failed = faults !== undefined && (faults.receiver !== "NORMAL" || faults.measurementBus === "LOST");
   if (failed || requests[0]?.status === "REJECTED" || requests[0]?.status === "TIMEOUT") return small(text, "amber");
   return { text, color: "white" };
 }

@@ -36,8 +36,9 @@ export const CONDITIONS: readonly Condition[] = [
 ];
 
 /**
- * Sensor failures v1 does not model (rev 3 B3.5 F10): barometric altitude, heading and attitude are always valid in the
- * simulation, and the representative autopilot has no fallback for losing them. A scenario that injects one is refused at
+ * Aircraft/AFCS sensor failures v1 does not model (rev 3 B3.5 F10): those barometric, heading and attitude signals remain
+ * valid; the representative autopilot has no fallback for losing them. F14 separately models navigation input validity
+ * and heading bias, without changing the physical flight/AFCS truth. A scenario that injects a full aircraft loss is refused at
  * admission with that reason, rather than run as though the aircraft had it; the bench lists them as not modelled.
  */
 export const UNMODELLED_CONDITIONS: readonly { id: string; label: string }[] = [

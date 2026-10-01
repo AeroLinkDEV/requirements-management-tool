@@ -256,6 +256,7 @@ export class ScriptedFms implements CduBackend {
   /** The nominal residual bias (plan C2) and a deliberate injected bias (a fault stimulus, F14), m/s². */
   private apirsBias = nominalApirsBias(1);
   private apirsFaultBias = { north: 0, east: 0 };
+  private airInputFaults = { tasValid: true, headingValid: true, headingBiasDeg: 0 };
   private powerCycles = 1;
   private waterCurrent: { northKt: number; eastKt: number } | null = null;
   private surfaceDrift = { northKt: 0, eastKt: 0 };
@@ -1135,8 +1136,16 @@ export class ScriptedFms implements CduBackend {
   dmeSlantRangeNm(device: DmeDevice): number | null {
     if (!this.rms?.dmeReceiving(device)) return null;
     const station = this.dmeStation(device);
-    const word = station ? this.sensorFrame?.radios.find(observation => observation.station.ident === station.ident)?.slantRangeNm : undefined;
-    return word ? sampled(word, this.now.getTime(), this.sensorMaxAge) : null;
+    const observation = station ? this.sensorFrame?.radios.find(observation => observation.station.ident === station.ident) : undefined;
+    if (observation?.reportedDmeIdent && sampled(observation.reportedDmeIdent, this.now.getTime(), this.sensorMaxAge) !== station?.ident) return null;
+    return observation ? sampled(observation.slantRangeNm, this.now.getTime(), this.sensorMaxAge) : null;
+  }
+  /** Receiver-reported identity, separate from the database facility selected for tuning. */
+  dmeReportedIdent(device: DmeDevice): string | null {
+    if (!this.rms?.dmeReceiving(device)) return null;
+    const station = this.dmeStation(device);
+    const observation = station ? this.sensorFrame?.radios.find(entry => entry.station.ident === station.ident) : undefined;
+    return observation?.reportedDmeIdent ? sampled(observation.reportedDmeIdent, this.now.getTime(), this.sensorMaxAge) : station?.ident ?? null;
   }
   /**
    * The ADF receiver (sensor side, from the plant): the relative bearing to the NDB it reports tuned, while healthy, in
@@ -1176,24 +1185,31 @@ export class ScriptedFms implements CduBackend {
   navRadioMode(device: "nav1" | "nav2") { return this.rms?.navMode(device) ?? "MAN"; }
   setNavRadioMode(device: "nav1" | "nav2", mode: "AUTO" | "MAN") { this.rms?.setNavMode(device, mode); }
   /**
-   * Bench stimulus for the radios: this computer's own, or in dual operation the shared ones through the sink the dual
-   * system sets (a scenario step reaches them either way). False when there is nothing to apply it to.
+   * Bench/scenario stimulus through the physical RMS port, shared in dual operation independently of cross-talk.
+   * False when there is nothing to apply it to.
    */
   setRadioFaults(device: RadioDevice | DmeDevice, faults: Partial<RadioFaults>) {
-    if (this.ownRms) { this.ownRms.setFaults(device, faults); return true; }
-    if (this.radioFaultSink) { this.radioFaultSink(device, faults); return true; }
-    return false;
+    if (!this.rms) return false;
+    this.rms.setFaults(device, faults); return true;
   }
-  /** Set by DualFmsSystem: injects a fault on the shared radios. */
-  radioFaultSink: ((device: RadioDevice | DmeDevice, faults: Partial<RadioFaults>) => void) | null = null;
   /**
    * Bench stimulus (F14): a VOR, DME or TACAN station off the air transmits nothing, so it is received as out of range.
-   * It is the world's, so in dual operation both computers stop receiving it (the dual system sets the sink).
+   * Shared physical-station state makes both computers observe the outage independently of cross-talk.
    */
-  setStationOffAir(ident: string, off: boolean) { if (this.stationOffAirSink) this.stationOffAirSink(ident, off); else this.applyStationOffAir(ident, off); }
-  applyStationOffAir(ident: string, off: boolean) { this.radioReceiver.setOffAir(ident, off); this.emit(); }
-  stationOffAir(ident: string) { return this.radioReceiver.isOffAir(ident); }
-  stationOffAirSink: ((ident: string, off: boolean) => void) | null = null;
+  setStationOffAir(ident: string, off: boolean) { return this.setStationFault(ident, "station", { offAir: off }); }
+  setStationFault(ident: string, component: "station" | "DME" | "VOR", change: Partial<import("./radioManagement").StationFaults>): boolean {
+    const types = component === "DME" ? ["DME", "VORDME", "VORTAC", "TACAN"] : component === "VOR" ? ["VOR", "VORDME", "VORTAC"] : null;
+    const stations = this.db.find(ident).filter((entry): entry is Navaid => entry.kind === "navaid" && entry.type !== "NDB" && (!types || types.includes(entry.type)));
+    if (stations.length !== 1 || !this.rms) return false;
+    this.rms.setStationFaults(stations[0], change); return true;
+  }
+  /** A measured navigation input fault; the aircraft and AFCS still receive their physical plant state. */
+  setAirInputFaults(change: Partial<typeof this.airInputFaults>): boolean {
+    if (this.sensorPort) return false; // An external adapter owns its input words.
+    this.airInputFaults = { ...this.airInputFaults, ...change }; this.emit(); return true;
+  }
+  /** Requested stimulus state for the bench controls; navigationInputs remains the sampled word readback. */
+  get airInputStimulus() { return { ...this.airInputFaults }; }
   radioObservations() { return [...(this.sensorFrame?.radios ?? [])]; }
 
   private autoRadioStations() {
@@ -1214,10 +1230,11 @@ export class ScriptedFms implements CduBackend {
     const gpsWord = (index: number) => ({ at: now, sequence, status: "NORMAL" as const, value: this.receivers[index].bus() });
     const gps: SensorFrame["gps"] = [gpsWord(0), gpsWord(1)];
     const ra = radioHeight(this.declaredSurface, this.truth, this.physicalAltitude, this.hasCondition("raFail"));
-    return { air: { at: now, sequence, status: "NORMAL", value: { headingTrue: this.heading, tasKt: this.aircraft.tas, altitudeFt: this.altitude, indicationQnhHpa: this.baroSystem.declaredQnhHpa } },
+    return { air: { at: now, sequence, status: "NORMAL", value: { headingTrue: normalizeAngle(this.heading + this.airInputFaults.headingBiasDeg), headingValid: this.airInputFaults.headingValid,
+      tasKt: this.aircraft.tas, tasValid: this.airInputFaults.tasValid, altitudeFt: this.altitude, indicationQnhHpa: this.baroSystem.declaredQnhHpa } },
       attitude: { at: now, sequence, status: "NORMAL", value: { bank: this.aircraft.bank, pitch: this.aircraft.pitch } },
       radioHeight: { at: now, sequence, status: ra.status, value: ra.value },
-      gps, radios: this.radioReceiver.sample(this.truth, this.physicalAltitude, now, this.injected.has("dmeOutage")),
+      gps, radios: this.radioReceiver.sample(this.truth, this.physicalAltitude, now, this.injected.has("dmeOutage"), station => this.rms!.stationFaults(station)),
       ...this.inertialAndDoppler(now, sequence) };
   }
 
@@ -1271,7 +1288,7 @@ export class ScriptedFms implements CduBackend {
   private dopplerEarth(now: number) {
     const body = sampled(this.sensorFrame?.dvs, now, this.sensorMaxAge);
     const air = sampled(this.sensorFrame?.air, now, this.sensorMaxAge);
-    if (!body || !air || !Number.isFinite(air.headingTrue)) return null;
+    if (!body || !air || air.headingValid === false || !Number.isFinite(air.headingTrue)) return null;
     const heading = air.headingTrue * Math.PI / 180;
     return { northKt: body.alongKt * Math.cos(heading) - body.acrossKt * Math.sin(heading), eastKt: body.alongKt * Math.sin(heading) + body.acrossKt * Math.cos(heading) };
   }
