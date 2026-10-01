@@ -1,6 +1,6 @@
 import { alert } from "./alerts";
 import type { CrossTalkPort, RadioManagementPort } from "./crossTalk";
-import { DEFAULT_RADIOS, SCAN_CHANNELS, RadioManagementSystem, type DmeDevice, type RadioDevice, type RadioFaults, type RadioKey } from "./radioManagement";
+import { DEFAULT_RADIOS, RadioManagementSystem, type DmeDevice, type RadioDevice, type RadioFaults, type RadioKey } from "./radioManagement";
 import type { CivilSolution } from "./civilNavigation";
 import { MagvarModel, normalizeAngle, polarRegion, type AngleReference } from "./magvar";
 import { WMM2025_DATABASE } from "./wmm2025";
@@ -1089,12 +1089,8 @@ export class ScriptedFms implements CduBackend {
     // stations a scan channel is on now are tuned, with the scan channel's acquisition time.
     const parameters = this.aircraftProfile.parameters;
     const roster = this.autoRadioStations().filter(dmeCapable);
+    this.rangeOwner.clear();
     rms.setScanRoster(roster.map(station => ({ ident: station.ident, frequency: station.frequency })), parameters.dmeScanDwell.value);
-    const channels = SCAN_CHANNELS.filter(channel => rms.dmeReceiving(channel.device));
-    roster.forEach((station, index) => {
-      const channel = channels[index % channels.length];
-      if (channel) this.assignRange(station.ident, channel.device, channel.channel, station.frequency);
-    });
     for (const on of rms.scanning()) {
       const station = roster.find(entry => entry.ident === on.ident);
       if (!station) continue;
@@ -1118,16 +1114,12 @@ export class ScriptedFms implements CduBackend {
 
   /** Plan C3: which DME measured each station's range last, and the station-owned range cache. */
   private rangeOwner = new Map<string, RangeIdentity>();
-  private rangeCommandSequence = 0;
-  private rangeIdentitySeen = new Map<string, RangeIdentity>();
   private rangeCache = new Map<string, RadioObservation>();
   private previousMeasuredRadio: RadioFix | null = null;
   private radioMotion: RadioMotion | null = null;
   private assignRange(ident: string, receiver: DmeDevice, channel: 1 | 2 | 3, frequency: string) {
-    const previous = this.rangeOwner.get(ident);
-    if (previous?.receiver === receiver && previous.channel === channel && previous.frequency === frequency) return;
-    if (!this.sensorPort) this.rangeCache.delete(ident);
-    this.rangeOwner.set(ident, { receiver, channel, frequency, commandSequence: ++this.rangeCommandSequence });
+    const identity = this.rms?.dmeTuning(receiver, channel);
+    if (identity?.frequency === frequency) this.rangeOwner.set(ident, identity);
   }
   /**
    * The range cache (plan C3, R3-01): each roster station's newest NORMAL range is kept after its scan channel moves on,
@@ -1139,27 +1131,24 @@ export class ScriptedFms implements CduBackend {
     const rms = this.rms;
     if (!rms) { this.rangeCache.clear(); return; }
     const roster = new Map(rms.scanRoster().map(station => [station.ident, station.frequency]));
-    const channelOne = new Map((["dme1", "dme2"] as const).flatMap(device => {
-      const station = this.dmeStation(device);
-      return station ? [[station.ident, station.frequency] as const] : [];
-    }));
     const maxAge = this.aircraftProfile.parameters.dmeRangeCacheAge.value * 1000;
     for (const [ident, observation] of this.rangeCache) {
       const identity = observation.rangeIdentity;
-      const frequency = identity?.channel === 1 ? channelOne.get(ident) : roster.get(ident);
+      const station = identity?.channel === 1 ? this.dmeStation(identity.receiver) : null;
+      const frequency = identity?.channel === 1 ? station?.ident === ident ? station.frequency : null : roster.get(ident);
       if (!identity || frequency !== identity.frequency || !rms.dmeReceiving(identity.receiver)
         || now < observation.slantRangeNm.at || now - observation.slantRangeNm.at > maxAge) this.rangeCache.delete(ident);
     }
     for (const observation of observations) {
       const identity = observation.rangeIdentity;
       if (!validRangeIdentity(identity, observation.station.frequency)) continue;
-      const seen = this.rangeIdentitySeen.get(observation.station.ident);
-      if (seen && identity.commandSequence < seen.commandSequence) continue;
-      if (seen && JSON.stringify(seen) !== JSON.stringify(identity)) this.rangeCache.delete(observation.station.ident);
-      this.rangeIdentitySeen.set(observation.station.ident, { ...identity });
+      const feedback = rms.dmeTuning(identity.receiver, identity.channel);
+      if (!feedback || feedback.receiver !== identity.receiver || feedback.channel !== identity.channel
+        || feedback.frequency !== identity.frequency || feedback.commandSequence !== identity.commandSequence) continue;
       if (sampled(observation.slantRangeNm, now, this.sensorMaxAge) === null
         || !rms.dmeReceiving(identity.receiver) || identity.frequency !== observation.station.frequency
-        || (identity.channel === 1 ? channelOne : roster).get(observation.station.ident) !== identity.frequency) continue;
+        || (identity.channel === 1 ? this.dmeStation(identity.receiver)?.ident !== observation.station.ident
+          : roster.get(observation.station.ident) !== identity.frequency)) continue;
       const previous = this.rangeCache.get(observation.station.ident);
       if (previous && JSON.stringify(previous.rangeIdentity) !== JSON.stringify(identity)) this.rangeCache.delete(observation.station.ident);
       if (!previous || !this.rangeCache.has(observation.station.ident) || observation.slantRangeNm.at > previous.slantRangeNm.at
@@ -1183,7 +1172,8 @@ export class ScriptedFms implements CduBackend {
       const current = frame.find(observation => observation.station.ident === ident);
       merged.set(ident, { ...cached, bearingTrue: current?.bearingTrue ?? { ...cached.bearingTrue, status: "NCD", value: null } });
     }
-    return [...merged.values()];
+    // Stable station order keeps the declared tangent-plane pair geometry unchanged when raw words disappear.
+    return [...merged.values()].sort((a, b) => a.station.ident.localeCompare(b.station.ident));
   }
   /** R3-01 source order: successive independent, simultaneous radio fixes; DVS/current; air/last measured wind. */
   private rangeMotion(now: number, observations: readonly RadioObservation[], altitudeFt: number): RadioMotion | null {
@@ -1445,7 +1435,7 @@ export class ScriptedFms implements CduBackend {
       if (!assessed?.fix || !bus) return null;
       const velocity = (label: "166" | "174") => bus[label].ssm === "NORMAL" && Number.isFinite(bus[label].value) ? bus[label].value : null;
       // Plan C1: the 95% accuracy is the receiver's HFOM, floored; the HIL is the integrity bound. Neither stands in for the other.
-      return { position: assessed.fix, receiver: (index + 1) as 1 | 2,
+      return { position: assessed.fix, at: this.sensorFrame?.gps[index].at, receiver: (index + 1) as 1 | 2,
         accuracy95Nm: assessed.hfom === null ? null : Math.max(ANP_FLOOR_NM, assessed.hfom), hilNm: assessed.hil,
         northKt: velocity("166"), eastKt: velocity("174") };
     };
@@ -1453,7 +1443,7 @@ export class ScriptedFms implements CduBackend {
     if (previousSource !== null && uncertainOrder.includes(previousSource - 1)) uncertainOrder.sort(index => index === previousSource - 1 ? -1 : 1);
     const uncertainIndex = uncertainOrder.find(index => gps.assessed[index].reason === "INTEGRITY" && gps.assessed[index].fix !== null);
     const predicted = this.navigation.current.position;
-    const selection = this.navigation.update({ dt, air, gps: gps.chosen === null ? null : measurement(gps.chosen),
+    const selection = this.navigation.update({ dt, air, airAt: this.sensorFrame?.air.at, gps: gps.chosen === null ? null : measurement(gps.chosen),
       uncertainGps: uncertainIndex === undefined ? null : measurement(uncertainIndex), radio: null, radios,
       radioApproved: this.flightPhase !== "APPROACH", rnp: this.requiredRnp,
       apirs: sampled(this.sensorFrame?.apirs, now, this.sensorMaxAge), dvs: this.dopplerEarth(now), waterCurrent: this.waterCurrent,

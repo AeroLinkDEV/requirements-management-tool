@@ -89,6 +89,12 @@ test('C3: a superseded command raises nothing, a rejected one is amber-worthy bu
   expect(one.requests[0].status).toBe('SUPERSEDED')
   advance(LATENCY)
   expect(two.requests[0].status).toBe('ACK')
+  const acknowledgedDme = one.dmeTuning('dme2', 1)
+  rms.rejectNext('nav2')
+  one.tune('nav2', '114.60')
+  advance(LATENCY)
+  expect(one.requests[0].status).toBe('REJECTED')
+  expect(one.dmeTuning('dme2', 1)).toEqual(acknowledgedDme)
   rms.rejectNext('adf')
   one.tune('adf', '0400')
   advance(LATENCY)
@@ -256,8 +262,11 @@ test('C3: a six-station roster is spread over the four scan channels; two channe
   expect(SCAN_CHANNELS).toHaveLength(4)
   const onAir = () => rms.scanning().map(entry => `${entry.device}/${entry.channel}:${entry.ident}`).sort()
   expect(onAir()).toEqual(['dme1/2:A', 'dme1/3:C', 'dme2/2:B', 'dme2/3:D'])
+  const firstFeedback = rms.dmeTuning('dme1', 2)!
   now += 2000
   expect(onAir()).toEqual(['dme1/2:E', 'dme1/3:C', 'dme2/2:F', 'dme2/3:D'])
+  expect(rms.dmeTuning('dme1', 2)!.frequency).toBe('114.00')
+  expect(rms.dmeTuning('dme1', 2)!.commandSequence).not.toBe(firstFeedback.commandSequence)
   // HOLD keeps channel 1 on the held frequency and does not touch the scan channels.
   rms.setDmeHold('dme2', true)
   expect(onAir()).toEqual(['dme1/2:E', 'dme1/3:C', 'dme2/2:F', 'dme2/3:D'])
@@ -350,6 +359,17 @@ test('C3: legacy receiver words without identity remain fresh-only and never qua
   expect(fresh.naimEligible).toBe(false)
 })
 
+// Adapter stimulus follows actual physical feedback; all accuracy/expiry/dependency assertions remain literal.
+function boundRanges(unit: ScriptedFms, observations: RadioObservation[]): RadioObservation[] {
+  const port = unit.radioPort!
+  return observations.flatMap(observation => {
+    const scan = port.scanning().find(on => on.ident === observation.station.ident)
+    const paired = (['dme1', 'dme2'] as const).find(receiver => unit.dmeStation(receiver)?.ident === observation.station.ident)
+    const identity = paired ? port.dmeTuning(paired, 1) : scan ? port.dmeTuning(scan.device, scan.channel) : null
+    return identity ? [{ ...observation, rangeIdentity: identity }] : []
+  })
+}
+
 function measuredCache() {
   let now = T0
   const seed = new ScriptedFms(() => new Date(now))
@@ -359,17 +379,28 @@ function measuredCache() {
   const range = frame.radios.find(observation => observation.slantRangeNm.status === 'NORMAL' && observation.bearingTrue.status === 'NORMAL')!
   expect(range).toBeDefined()
   const healthyGps = structuredClone(frame.gps)
-  frame.radios = frame.radios.filter(observation => observation.slantRangeNm.status === 'NORMAL')
-    .map(observation => ({ ...observation, rangeIdentity: { ...observation.rangeIdentity!, receiver: 'dme1', channel: 2 } }))
+  frame.radios = frame.radios.map(observation => ({ ...observation, slantRangeNm: { ...observation.slantRangeNm, status: 'NORMAL' as const }, bearingTrue: { ...observation.bearingTrue, status: 'NORMAL' as const } }))
+
   const missingGps = frame.gps.map(word => ({ ...word, status: 'NCD' as const, value: null }))
   frame.gps = [missingGps[0], missingGps[1]]
   frame.air.value = { headingTrue: 90, tasKt: 600, altitudeFt: frame.air.value!.altitudeFt }
   frame.dvs = { at: now, sequence: 1, status: 'NORMAL', value: { alongKt: 600, acrossKt: 0 } }
+  const arrivals = frame.radios
+  frame.radios = []
   const unit = new ScriptedFms(() => new Date(now), { sensors: { read: () => structuredClone(frame) } })
-  const step = (milliseconds: number, dvs = true) => {
+  const measuredPosition = { lat: 45.5, lon: -74.9 }
+  // Small declared adapter geometry keeps the local tangent approximation stable under measured translations.
+  frame.radios = boundRanges(unit, arrivals.map((observation, index) => ({ ...observation,
+    station: { ...observation.station, position: offset(measuredPosition, [0, 90, 225][index], 10),
+      dmePosition: offset(measuredPosition, [0, 90, 225][index], 10) } }))).map(observation => ({ ...observation,
+    slantRangeNm: { ...observation.slantRangeNm, at: now, sequence: observation.slantRangeNm.sequence + 1, value: Math.hypot(distanceNm(measuredPosition,
+      observation.station.dmePosition ?? observation.station.position), (6000 - observation.station.elevation.feet) / 6076.12) },
+    bearingTrue: { ...observation.bearingTrue, at: now, sequence: observation.bearingTrue.sequence + 1, value: bearingDeg(observation.station.position, measuredPosition) } }))
+  unit.updateNavigation(0)
+  const step = (milliseconds: number, dvs = true, refreshDvs = true) => {
     now += milliseconds
     frame.air.at = now; frame.air.sequence++
-    frame.dvs = { ...frame.dvs!, at: now, sequence: frame.dvs!.sequence + 1, status: dvs ? 'NORMAL' : 'FAIL' }
+    frame.dvs = { ...frame.dvs!, at: refreshDvs ? now : frame.dvs!.at, sequence: frame.dvs!.sequence + 1, status: dvs ? 'NORMAL' : 'FAIL' }
     frame.radios = []
     unit.updateNavigation(milliseconds / 1000)
   }
@@ -395,8 +426,8 @@ test('C3: old arrivals and legacy identity-less ranges cannot populate the cache
   for (const invalidate of ['bus', 'test', 'station', 'identity', 'arrival'] as const) {
     const { unit, step, range, frame } = measuredCache()
     expect(unit.navState.mode).toBe('DME/DME')
-    if (invalidate === 'bus') unit.setRadioFaults(range.rangeIdentity!.receiver, { measurementBus: 'LOST' })
-    if (invalidate === 'test') { unit.radioPort!.pressTest(range.rangeIdentity!.receiver); unit.radioPort!.pressTest(range.rangeIdentity!.receiver) }
+    if (invalidate === 'bus') for (const receiver of ['dme1', 'dme2'] as const) unit.setRadioFaults(receiver, { measurementBus: 'LOST' })
+    if (invalidate === 'test') for (const receiver of ['dme1', 'dme2'] as const) { unit.radioPort!.pressTest(receiver); unit.radioPort!.pressTest(receiver) }
     if (invalidate === 'station') unit.setInhibited([range.station.ident])
     if (invalidate === 'identity' || invalidate === 'arrival') {
       const fresh = structuredClone(frame)
@@ -421,12 +452,12 @@ test('C3: successive independent radio observations take priority over a conflic
   const measured = unit.position
   const ranges = structuredClone(frame.radios)
   const arrive = (position: typeof measured) => {
-    frame.radios = ranges.map(observation => ({ ...observation,
+    frame.radios = boundRanges(unit, ranges.map(observation => ({ ...observation,
       slantRangeNm: { ...observation.slantRangeNm, at: now(), sequence: observation.slantRangeNm.sequence + 1,
         value: Math.hypot(distanceNm(position, observation.station.dmePosition ?? observation.station.position),
           (frame.air.value!.altitudeFt - observation.station.elevation.feet) / 6076.12) },
       bearingTrue: { ...observation.bearingTrue, at: now(), sequence: observation.bearingTrue.sequence + 1,
-        value: bearingDeg(observation.station.position, position) } }))
+        value: bearingDeg(observation.station.position, position) } })))
     unit.updateNavigation(0)
   }
   // Two independently generated, unbiassed observations move 0.1 NM east in one second (360 kt).
@@ -494,11 +525,11 @@ function radioWind() {
   const nav = new CivilNavigation(CACHE_AT)
   const radioInput = { dt: 1, air: { headingTrue: 90, tasKt: 100, altitudeFt: 0 }, gps: null, uncertainGps: null,
     radioApproved: true, rnp: 2 }
-  nav.update({ ...radioInput, now: T0, radio: cachedFix(rangesAt(T0), T0, null)! })
+  nav.update({ ...radioInput, airAt: T0, now: T0, radio: cachedFix(rangesAt(T0), T0, null)! })
   const at = T0 + 1000, position = offset(CACHE_AT, 90, 0.1)
   const next = rangesAt(at).map(observation => ({ ...observation,
     slantRangeNm: { ...observation.slantRangeNm, value: distanceNm(position, observation.station.position) } }))
-  nav.update({ ...radioInput, now: at, radio: cachedFix(next, at, null)! })
+  nav.update({ ...radioInput, airAt: at, now: at, radio: cachedFix(next, at, null)! })
   expect(nav.current.windComputed).toBe(true)
   expect(nav.measuredWind).toMatchObject({ at, gpsDependent: false })
   return nav
@@ -525,4 +556,99 @@ test('C3: recomputing an uncompensated cached epoch cannot manufacture fresh ind
   expect(result.windComputed).toBe(false)
   expect(nav.measuredWind).toBeNull()
   radioWind() // Fresh independent fixes still compute a source-qualified wind.
+})
+
+
+test('C3: compensated epochs cannot renew an expired DVS source into independent AIR_WIND or NAIM credit', () => {
+  const { unit, frame, healthyGps, step, now } = measuredCache()
+  const observations = structuredClone(frame.radios)
+  step(1000) // Last measured DVS source at t1; no later radio observations arrive.
+  const measuredAt = frame.dvs!.at
+  step(1000, true, false)
+  step(1000, true, false)
+  expect(now() - measuredAt).toBe(2000)
+  step(1000, true, false)
+  expect(now() - measuredAt).toBe(3000)
+  const biased = healthyGps.map(word => {
+    const bus = structuredClone(word.value!)
+    bus['110'] = { ...bus['110'], value: bus['110'].value! + 3 / 60 }
+    bus['130'] = { ...bus['130'], value: 10 }
+    return { ...word, at: now(), sequence: word.sequence + 1, value: bus }
+  })
+  frame.gps = [biased[0], biased[1]]
+  unit.updateNavigation(0)
+  // Observation age is still inside L_NAIM=4 s, but the independent motion sample expired one second earlier.
+  expect(unit.navState.mode).toBe('GPS')
+  expect(unit.navState.uncertain).toBe(true)
+  expect(unit.sensorSolutions.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeNull()
+  // Real new independent radio evidence can qualify immediately and reject the same uncertain biased GPS.
+  frame.radios = boundRanges(unit, observations.map(observation => ({ ...observation,
+    slantRangeNm: { ...observation.slantRangeNm, at: now(), sequence: observation.slantRangeNm.sequence + 1 },
+    bearingTrue: { ...observation.bearingTrue, at: now(), sequence: observation.bearingTrue.sequence + 1 } })))
+  unit.updateNavigation(0)
+  expect(unit.navState.mode).toBe('DME/DME')
+  expect(unit.sensorSolutions.find(sensor => sensor.mode === 'GPS')!.naimComparisonNm).toBeGreaterThan(3)
+})
+
+
+test('C3: range arrivals bind to the acknowledged receiver/channel command, while failed tuning leaves its previous measurements usable', () => {
+  let now = T0
+  const seed = new ScriptedFms(() => new Date(now))
+  for (let i = 0; i < 5; i++) { now += 1000; seed.updateNavigation(1) }
+  const frame = structuredClone(seed.navigationInputs!)
+  const hwk = frame.radios.find(observation => observation.station.ident === 'HWK')!
+  expect(hwk.slantRangeNm.status).toBe('NORMAL')
+  expect(hwk.bearingTrue.status).toBe('NORMAL')
+  frame.gps = frame.gps.map(word => ({ ...word, status: 'NCD', value: null })) as unknown as SensorFrame['gps']
+  frame.dvs = { ...frame.dvs!, status: 'FAIL', value: null }
+  frame.apirs = { ...frame.apirs!, status: 'FAIL', value: null }
+  for (const receiver of ['dme1', 'dme2'] as const) {
+    frame.radios = [{ ...hwk, rangeIdentity: { receiver, channel: 1, frequency: '115.20', commandSequence: 500 } }]
+    const rejected = new ScriptedFms(() => new Date(now), { sensors: { read: () => structuredClone(frame) } })
+    expect(rejected.radioPort!.receiving('nav1')).toBe('114.60')
+    expect(rejected.radioPort!.receiving('nav2')).toBe('115.20')
+    expect(rejected.navState.mode).toBe('DR') // Wrong receiver first; correct receiver with an unacknowledged token second.
+  }
+  frame.radios = []
+  const unit = new ScriptedFms(() => new Date(now), { sensors: { read: () => structuredClone(frame) } })
+  const identity = unit.radioPort!.dmeTuning('dme2', 1)!
+  expect(identity).toMatchObject({ receiver: 'dme2', channel: 1, frequency: '115.20' })
+  const arrive = (accepted = true) => {
+    frame.air.at = now
+    frame.radios = [{ ...hwk, rangeIdentity: identity,
+      slantRangeNm: { ...hwk.slantRangeNm, at: now, sequence: hwk.slantRangeNm.sequence + 1 },
+      bearingTrue: { ...hwk.bearingTrue, at: now, sequence: hwk.bearingTrue.sequence + 1 } }]
+    unit.updateNavigation(0)
+    expect(unit.navState.mode).toBe(accepted ? 'VOR/DME' : 'DR')
+  }
+  arrive()
+  unit.setRadioFaults('nav2', { controlPath: 'LOST' })
+  unit.radioPort!.tune('nav2', '116.30')
+  unit.radioPort!.tune('nav2', '114.60') // The first pending command is superseded, neither changes physical reception.
+  arrive()
+  now += 3000; arrive()
+  expect(unit.radioPort!.requests[0].status).toBe('TIMEOUT')
+  expect(unit.radioPort!.dmeTuning('dme2', 1)).toEqual(identity)
+  unit.setRadioFaults('nav2', { controlPath: 'NORMAL' })
+  unit.radioPort!.tune('nav2', '114.60')
+  now += 300; frame.radios = []; unit.updateNavigation(0)
+  expect(unit.radioPort!.requests[0].status).toBe('ACK')
+  expect(unit.radioPort!.dmeTuning('dme2', 1)).toMatchObject({ frequency: '114.60' })
+  expect(unit.radioPort!.dmeTuning('dme2', 1)!.commandSequence).not.toBe(identity.commandSequence)
+  arrive(false) // Original HWK identity must now be rejected, even though its word is fresh.
+})
+
+
+test('C3: repeated GPS wind computation keeps the oldest velocity/air sample time instead of renewing motion freshness', () => {
+  const nav = new CivilNavigation(CACHE_AT)
+  const gps = { position: CACHE_AT, accuracy95Nm: 0.05, hilNm: 0.1, receiver: 1 as const,
+    northKt: 0, eastKt: 360, at: T0 }
+  const input = { dt: 1, air: { headingTrue: 90, tasKt: 100, altitudeFt: 0 }, airAt: T0,
+    gps, uncertainGps: null, radio: null, radioApproved: true, rnp: 2 }
+  nav.update({ ...input, now: T0 })
+  expect(nav.measuredWind).toMatchObject({ at: T0, gpsDependent: true })
+  nav.update({ ...input, now: T0 + 2000 })
+  expect(nav.measuredWind).toMatchObject({ at: T0, gpsDependent: true })
+  nav.update({ ...input, gps: { ...gps, at: T0 + 2000 }, airAt: T0 + 500, now: T0 + 2000 })
+  expect(nav.measuredWind).toMatchObject({ at: T0 + 500, gpsDependent: true })
 })

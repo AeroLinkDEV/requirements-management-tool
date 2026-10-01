@@ -1,3 +1,4 @@
+import type { RangeIdentity } from "./sensorPorts";
 import type { Route } from "./fmsModel";
 import type { AdfSettings, DmeDevice, NavMode, RadioDevice, RadioEvent, RadioFaults, RadioKey, RadioState, RadioRequest, RadioTestState, RosterStation, ScanChannel, TestableDevice } from "./radioManagement";
 
@@ -32,6 +33,8 @@ export interface RadioManagementPort {
   /** Plan F8a: what a radio reports it is on (null while failed or silent), and whether a DME transceiver answers. */
   receiving(device: RadioDevice): string | null;
   dmeReceiving(device: DmeDevice): boolean;
+  /** Acknowledged physical tuning identity for a range arrival, independent of pending commands. */
+  dmeTuning(device: DmeDevice, channel: 1 | 2 | 3): RangeIdentity | null;
   /** NAV AUTO/MAN (M300 13-21): the FMS's own tuning (AUTO) never switches a NAV to MAN; a crew entry does. */
   navMode(device: "nav1" | "nav2"): NavMode;
   setNavMode(device: "nav1" | "nav2", mode: NavMode): void;

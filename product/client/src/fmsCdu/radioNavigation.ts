@@ -133,7 +133,7 @@ export function radioFixes(observations: readonly RadioObservation[], prior: Lat
   const oldestAt = (used: typeof ranges) => Math.min(...used.map(r => r.measuredAt));
   const motionNm = (used: typeof ranges) => Math.max(0, now - oldestAt(used)) / 3_600_000
     * (motion ? parameters.rangeMotionWindAllowance.value : options.unalignedMotionKt ?? parameters.rangeMotionWindAllowance.value);
-  const provenance = (used: typeof ranges) => ({ observations: used.map(r => structuredClone(r.observation)), motion,
+  const provenance = (used: typeof ranges) => ({ observations: used.map(r => structuredClone(r.observation)), motion: now === oldestAt(used) ? null : motion,
     naimEligible: used.every(r => validRangeIdentity(r.observation.rangeIdentity, r.observation.station.frequency)) && (now === oldestAt(used) || motion !== null && !motion.gpsDependent) });
   const sourced = (used: typeof ranges, source: "assumed" | "terrain") => used.filter(r => r.observation.station.elevation.source === source).map(r => r.observation.station.ident);
   let best: (RadioFix & { score: number }) | null = null;

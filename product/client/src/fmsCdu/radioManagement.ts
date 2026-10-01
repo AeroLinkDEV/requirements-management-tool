@@ -1,4 +1,5 @@
 import type { FmsSide, RadioManagementPort } from "./crossTalk";
+import type { RangeIdentity } from "./sensorPorts";
 
 export type RadioState = { com1: string; com1Stby: string; com2: string; com2Stby: string; nav1: string; nav2: string; adf: string; adf2: string; tpdr: string; tpdr2: string; tacan: string };
 export type RadioKey = keyof RadioState;
@@ -97,6 +98,8 @@ export class RadioManagementSystem {
   private swaps = new Map<number, { side: FmsSide; key: "com1Stby" | "com2Stby"; previous: string }>();
   private roster: RosterStation[] = [];
   private scanDwellS = 2;
+  private rangeSequence = 0;
+  private rangeFeedback = new Map<string, RangeIdentity>();
   private readonly clock: () => number;
   private readonly linked: () => boolean;
   private readonly notify: () => void;
@@ -150,6 +153,19 @@ export class RadioManagementSystem {
     });
   }
 
+  /** Physical channel feedback identity. Pending, refused and timed-out commands do not change this tuning. */
+  dmeTuning(receiver: DmeDevice, channel: 1 | 2 | 3): RangeIdentity | null {
+    if (!this.measuring(receiver)) return null;
+    const frequency = channel === 1 ? this.held[receiver] ?? this.receiving(receiver === "dme1" ? "nav1" : "nav2")
+      : this.scanning().find(on => on.device === receiver && on.channel === channel)?.frequency ?? null;
+    if (frequency === null) return null;
+    const key = `${receiver}/${channel}`, previous = this.rangeFeedback.get(key);
+    if (previous?.frequency === frequency) return { ...previous };
+    const identity: RangeIdentity = { receiver, channel, frequency, commandSequence: ++this.rangeSequence };
+    this.rangeFeedback.set(key, identity);
+    return { ...identity };
+  }
+
   /** Whether the radio's words reach the FMS and are usable for navigation: bus and receiver healthy, and not testing. */
   private measuring(device: RadioDevice | DmeDevice) {
     const faults = this.faults(device);
@@ -171,7 +187,11 @@ export class RadioManagementSystem {
     this.history = this.history.slice(0, 30); this.notify(); return id;
   }
   /** The frequency a radio is already on when the FMS powers up and reads it back (M300 13-1): the demonstration's warm start. */
-  presetActive(device: RadioDevice, value: string) { this.active[device] = value; this.notify(); }
+  presetActive(device: RadioDevice, value: string) {
+    this.active[device] = value;
+    if (device === "nav1" || device === "nav2") this.rangeFeedback.delete(`${device === "nav1" ? "dme1" : "dme2"}/1`);
+    this.notify();
+  }
   // ---- plan F8b: the NAV and ADF page controls, kept with the shared devices.
   dmeHold(device: DmeDevice) { return this.held[device]; }
   /** DME HOLD ON freezes the DME on its NAV's present frequency; OFF returns it to follow the NAV (M300 13-22). */
@@ -206,6 +226,7 @@ export class RadioManagementSystem {
       },
       receiving(device) { return system.receiving(device); },
       dmeReceiving(device) { return system.dmeReceiving(device); },
+      dmeTuning(device, channel) { return system.dmeTuning(device, channel); },
       navMode(device) { return system.navModes[device]; },
       setNavMode(device, mode) { system.navModes[device] = mode; system.notify(); },
       autoTune(device, value) {
@@ -258,6 +279,10 @@ export class RadioManagementSystem {
         continue;
       }
       this.active[request.device] = request.value; request.status = "ACK"; changed = true;
+      if (request.device === "nav1" || request.device === "nav2") {
+        const dme = request.device === "nav1" ? "dme1" : "dme2";
+        if (this.held[dme] === null) this.rangeFeedback.delete(`${dme}/1`);
+      }
       const swap = this.swaps.get(request.id);
       if (swap) { this.tune(swap.side, swap.key, swap.previous); this.swaps.delete(request.id); }
     }

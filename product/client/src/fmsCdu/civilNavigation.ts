@@ -9,7 +9,9 @@ import { HELICOPTER_PROFILE, type AircraftProfile } from "./profile";
 /** A receiver's position with its 95% accuracy (HFOM) and integrity bound (HIL) kept apart (plans F2, C1). ANP is the
  * 95% accuracy (DEC-150 item 6); the HIL is never presented as it. */
 export type PositionMeasurement = { position: LatLon; accuracy95Nm: number | null; hilNm: number | null; receiver: 1 | 2;
-  northKt: number | null; eastKt: number | null };
+  northKt: number | null; eastKt: number | null;
+  /** Original receiver sample time; absent legacy metadata cannot qualify derived motion. */
+  at?: number };
 /** `anp` is the selected solution's 95% accuracy (plan C1), null when the sensor gives none (shown as dashes).
  * `gpsDependent` is its transitive GPS provenance (plan C1): a position, wind or prior derived from GPS carries it. */
 export type CivilSolution = { position: LatLon; mode: NavMode; anp: number | null; gpsSource: 1 | 2 | null; gpsDependent: boolean;
@@ -121,7 +123,7 @@ export class CivilNavigation {
       this.solution.selected = this.solution.sensors.find(sensor => sensor.mode === "DR")!;
     }
   }
-  update(input: { dt: number; air: AirData | null; gps: PositionMeasurement | null; uncertainGps: PositionMeasurement | null;
+  update(input: { dt: number; air: AirData | null; airAt?: number; gps: PositionMeasurement | null; uncertainGps: PositionMeasurement | null;
     radio: RadioFix | null; radioApproved: boolean; rnp: number;
     /** Every radio mode's fix this update (plan F3); the resolver's step 3 chooses among them. Without it, `radio` is the only one. */
     radios?: readonly RadioFix[];
@@ -186,7 +188,8 @@ export class CivilNavigation {
         const heading = air!.headingTrue * Math.PI / 180;
         this.wind = { north: gps.northKt - air!.tasKt * Math.cos(heading), east: gps.eastKt - air!.tasKt * Math.sin(heading) };
         this.windGpsDependent = true;
-        this.measuredWindSample = input.now === undefined ? null : { ...this.wind, at: input.now, gpsDependent: true };
+        this.measuredWindSample = !Number.isFinite(gps.at) || !Number.isFinite(input.airAt) ? null
+          : { ...this.wind, at: Math.min(gps.at!, input.airAt!), gpsDependent: true };
         this.solution.windComputed = true;
       }
       // Aiding (plan C2): only a GPS with integrity, valid velocity words and a 95% accuracy; it restarts the coast clock.
@@ -195,7 +198,10 @@ export class CivilNavigation {
       }
     } else if (radio && input.radioApproved) {
       const previous = this.previousRadio;
-      const qualifiedVelocity = radio.naimEligible !== false || radio.motion?.gpsDependent === true;
+      // Wind needs actual renewed radio observations. A compensated epoch carries its source's velocity,
+      // rather than measuring a new one; differentiating it would restamp that same source indefinitely.
+      const qualifiedVelocity = radio.naimEligible !== false
+        && (!radio.observations || radio.observations.every(observation => observation.slantRangeNm.at === radio.at));
       const elapsed = previous ? (radio.at - previous.at) / 1000 : 0;
       if (airValid && !lowSpeed && qualifiedVelocity && previous?.qualifiedVelocity && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value) {
         const north = (radio.position.lat - previous.position.lat) * 60 * 3600 / elapsed;
@@ -204,7 +210,8 @@ export class CivilNavigation {
         const heading = air!.headingTrue * Math.PI / 180;
         this.wind = { north: north - air!.tasKt * Math.cos(heading), east: east - air!.tasKt * Math.sin(heading) };
         this.windGpsDependent = radioGpsDependent || previous.gpsDependent;
-        this.measuredWindSample = { ...this.wind, at: input.now ?? radio.at, gpsDependent: this.windGpsDependent };
+        this.measuredWindSample = !Number.isFinite(input.airAt) ? null
+          : { ...this.wind, at: Math.min(radio.at, input.airAt!), gpsDependent: this.windGpsDependent };
       }
       const windComputed = airValid && !lowSpeed && qualifiedVelocity && previous?.qualifiedVelocity === true && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value;
       if (!previous || radio.at > previous.at) this.previousRadio = { position: { ...radio.position }, at: radio.at, gpsDependent: radioGpsDependent, qualifiedVelocity };
