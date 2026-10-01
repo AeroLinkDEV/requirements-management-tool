@@ -1,6 +1,7 @@
+import type { RangeIdentity } from "./sensorPorts";
 import type { Route } from "./fmsModel";
 import type { Navaid } from "./navData";
-import type { AdfSettings, DmeDevice, NavMode, RadioDevice, RadioEvent, RadioFaults, RadioKey, RadioState, RadioRequest, RadioTestState, TestableDevice } from "./radioManagement";
+import type { AdfSettings, DmeDevice, NavMode, RadioDevice, RadioEvent, RadioFaults, RadioKey, RadioState, RadioRequest, RadioTestState, RosterStation, ScanChannel, TestableDevice } from "./radioManagement";
 
 export type FmsSide = 1 | 2;
 export type DualMode = "SYNC" | "INDEPENDENT";
@@ -36,6 +37,8 @@ export interface RadioManagementPort {
   ndbTransmitting(station: Pick<Navaid, "ident" | "frequency" | "position">): boolean;
   setNdbOffAir(station: Pick<Navaid, "ident" | "frequency" | "position">, off: boolean): void;
   dmeReceiving(device: DmeDevice): boolean;
+  /** Acknowledged physical tuning identity for a range arrival, independent of pending commands. */
+  dmeTuning(device: DmeDevice, channel: 1 | 2 | 3): RangeIdentity | null;
   /** NAV AUTO/MAN (M300 13-21): the FMS's own tuning (AUTO) never switches a NAV to MAN; a crew entry does. */
   navMode(device: "nav1" | "nav2"): NavMode;
   setNavMode(device: "nav1" | "nav2", mode: NavMode): void;
@@ -51,4 +54,8 @@ export interface RadioManagementPort {
   setAdf(device: "adf" | "adf2", settings: Partial<AdfSettings>): void;
   testState(device: TestableDevice): RadioTestState;
   pressTest(device: TestableDevice): void;
+  /** Plan C3: the DME scan roster the navigation sets, and the roster stations each scan channel is on now. */
+  setScanRoster(stations: readonly RosterStation[], dwellS?: number): void;
+  scanRoster(): RosterStation[];
+  scanning(): (ScanChannel & RosterStation)[];
 }

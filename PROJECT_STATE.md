@@ -425,7 +425,9 @@ backend-only token URLs, disabled Esri request logging and redirects, attributio
   measured DME/DME and VOR/DME feed the estimate; DR uses heading, TAS and last-valid computed wind. Stale input
   cannot navigate. S300 uncertain GPS retention is separate from stronger approach/hover authority. Predictive RAIM
   and its PRN exclusions use visibly simulated sky geometry; real almanac prediction and physical avionics adapters
-  remain unavailable. The applicability matrix records radio, uncertainty and freshness assumptions.
+  remain unavailable. Scanning DME ranges retain receiver/channel/command identity and original expiry in a bounded
+  station cache. Measured radio velocity, Doppler/current or air-data/last-wind compensation aligns them to the fix
+  epoch; GPS-dependent compensation and unqualified motion cannot supply the independent NAIM backup. The applicability matrix records radio, uncertainty and freshness assumptions.
 
 - **Helicopter IFR procedures.** The subset reader imports HD/PD departures and PI, RF and AF geometry. The reviewed
   HUDSN ONE chart separates its VFR site-to-IDF segment from instrument guidance at the coded crossing altitude.
