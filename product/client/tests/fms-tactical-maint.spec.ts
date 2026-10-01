@@ -455,7 +455,7 @@ test('both FMSs tune shared civil devices through feedback and a cross-talk faul
   expect(one.radioState.adf2).toBe('0420'); expect(one.radioState.tpdr2).toBe('4321')
   system.rms.injectFailure('com1', true); two.swapRadio('com1'); tick()
   expect(two.radioRequests[0].status).toBe('PENDING'); tick()
-  expect(two.radioRequests[0].status).toBe('FAILED')
+  expect(two.radioRequests[0].status).toBe('TIMEOUT')
   expect(one.radioState.com1).toBe('123.450'); expect(two.radioState.com1Stby).toBe('128.700')
   system.rms.injectFailure('com1', false); two.setRadio('com1', '129.100'); tick()
   expect(one.radioState.com1).toBe('129.100'); expect(two.radioState.com1).toBe('129.100')

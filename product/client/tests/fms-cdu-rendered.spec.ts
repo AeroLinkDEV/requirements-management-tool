@@ -365,7 +365,7 @@ test('the two CDU panels target separate computers and shared radio feedback rem
   for (const letter of '124.000') await click(inspected, letter === '.' ? 'DOT' : letter)
   await click(inspected, 'LSK1L')
   await page.getByRole('button', { name: 'Fly', exact: true }).click()
-  await expect(devices.getByRole('list', { name: 'RMS tuning feedback' })).toContainText('FMS 2: COM1 124.000 — FAILED')
+  await expect(devices.getByRole('list', { name: 'RMS tuning feedback' })).toContainText('FMS 2: COM1 124.000 — TIMEOUT')
   await page.getByRole('button', { name: 'Pause', exact: true }).click()
   await expect(screen(inspected)).toHaveAttribute('aria-label', /123\.450/)
   await expect(screen(peer)).toHaveAttribute('aria-label', /123\.450/)

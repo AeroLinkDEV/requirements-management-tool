@@ -224,7 +224,9 @@ export type PlanningPageId = "RTE" | "DEP_ARR" | "DEPARTURES" | "ARRIVALS" | "NA
 export type NavPageId = "NAV_STATUS" | "NAV_OPTIONS" | "GPS_STATUS" | "POS_SENSORS" | "PREDICT_RAIM" | "SAT_DESELECT";
 export type TacticalPageId = "TACT" | "SAR" | "TACT_APPR" | "HOVER" | "RNDZ" | "MOVING_WPT" | "TDN";
 export type DatalinkPageId = "ATC" | "FMC_COMM" | "ANS";
-export type PageId = CorePageId | PlanningPageId | NavPageId | TacticalPageId | DatalinkPageId;
+/** The NAV and ADF radio detail pages (plan F8b; M300 13-21 to 13-25). */
+export type RadioPageId = "NAV_RADIO" | "ADF_RADIO";
+export type PageId = CorePageId | PlanningPageId | NavPageId | RadioPageId | TacticalPageId | DatalinkPageId;
 
 export type Page = {
   pages: (fms: ScriptedFms) => number;

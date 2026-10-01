@@ -29,6 +29,9 @@ export const ALERTS: readonly AlertDefinition[] = [
   { text: "GPS DISAGREE", meaning: "(Laboratory) GPS 1 and GPS 2 positions differ by more than the compare limit" },
   { text: "HEADING INPUT LOST", meaning: "The heading input is no longer valid" },
   { text: "HF CONTROL LOST", meaning: "The FMS can no longer tune the HF radio" },
+  // M300 Appendix E: the FMS cannot control the identified radio (its tune command is not taken), E-2 to E-18.
+  ...(["NAV1", "NAV2", "DME1", "DME2", "ADF1", "ADF2", "COM1", "COM2", "ATC1", "ATC2"] as const).map(id =>
+    ({ text: `${id} CONTROL LOST`, meaning: `The FMS cannot control ${id}: the radio does not take its tune command` })),
   { text: "HIGH GLIDEPATH ANGLE", meaning: "The computed vertical path is steeper than 3.77 degrees" },
   { text: "HIGH HOLDING SPEED", meaning: "Speed is above the maximum holding speed for the altitude" },
   // Not in the CMA-9000 list: the bench cannot fly the racetrack when the wind is at least the airspeed (holds.ts).

@@ -1,4 +1,6 @@
 import { withinLimit } from "./sensorState";
+import type { RadioDevice } from "./radioManagement";
+import { activeFrequency } from "./radioPages";
 import { alert } from "./alerts";
 import { formatConstraint, parseAltitude, parseConstraint } from "./vnav";
 import {
@@ -729,26 +731,33 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
     render: (fms, index) => {
       const r = fms.radioState;
       const tx = (on: boolean) => (on ? [small(" TX", "green")] : []);
+      // M300 13-3: inverse while being tuned, small amber when tuning did not succeed or the radio reports nothing.
+      const shown = (device: RadioDevice, color?: "green") => {
+        const segment = activeFrequency(fms, device, r[device]);
+        return segment.inverse || segment.color === "amber" ? segment : { ...segment, color: color ?? segment.color };
+      };
       if (index === 0)
         return [
           title("RADIO", "1/2"),
           { left: [small(" COM1", "green"), ...tx(fms.hasCondition("tx1"))], right: small("STBY ", "green") },
-          { left: { text: r.com1, color: "green" }, right: { text: r.com1Stby } },
+          { left: shown("com1", "green"), right: { text: r.com1Stby } },
           { left: [small(" COM2", "green"), ...tx(fms.hasCondition("tx2"))], right: small("STBY ", "green") },
-          { left: { text: r.com2, color: "green" }, right: { text: r.com2Stby } },
+          { left: shown("com2", "green"), right: { text: r.com2Stby } },
           caption(" NAV1", "NAV2 "),
-          { left: { text: r.nav1 }, right: { text: r.nav2 } },
-          undefined, undefined, undefined, undefined,
-          { left: small(fms.radioRequests.find(request => request.status === "PENDING") ? "RMS TUNING PENDING" : fms.radioRequests[0]?.status === "FAILED" ? "RMS CONTROL LOST" : "RMS FEEDBACK") },
+          { left: shown("nav1"), right: shown("nav2") },
+          undefined, undefined, undefined,
+          { left: prompt("<NAV DETAILS") },
+          { left: small(fms.radioRequests.find(request => request.status === "PENDING") ? "RMS TUNING PENDING" : fms.radioRequests[0]?.status === "TIMEOUT" ? "RMS CONTROL LOST" : "RMS FEEDBACK") },
         ];
       return [
         title("RADIO", "2/2"),
         caption(" ADF1", "ADF2 "),
-        { left: { text: r.adf }, right: { text: r.adf2 } },
+        { left: shown("adf"), right: shown("adf2") },
         caption(" ATC1", "ATC2 "),
         { left: { text: r.tpdr, color: fms.squawkIdent ? "green" : "white", inverse: fms.squawkIdent }, right: { text: r.tpdr2 } },
-        undefined, undefined, undefined, undefined, undefined, undefined,
-        { left: small(fms.radioRequests.find(request => request.status === "PENDING") ? "RMS TUNING PENDING" : fms.radioRequests[0]?.status === "FAILED" ? "RMS CONTROL LOST" : "RMS FEEDBACK") },
+        undefined, undefined, undefined, undefined, undefined,
+        { left: prompt("<ADF DETAILS") },
+        { left: small(fms.radioRequests.find(request => request.status === "PENDING") ? "RMS TUNING PENDING" : fms.radioRequests[0]?.status === "TIMEOUT" ? "RMS CONTROL LOST" : "RMS FEEDBACK") },
       ];
     },
     lsk: (fms, side, row, scratch, index) => {
@@ -762,6 +771,9 @@ export const CORE_PAGES: Record<CorePageId, Page> = {
         "1L2": ["tpdr", /^[0-7]{4}$/, () => true],
         "1R2": ["tpdr2", /^[0-7]{4}$/, () => true],
       };
+      // The NAV and ADF detail pages (M300 13-21, 13-24).
+      if (side === "L" && row === 5 && index === 0) { fms.open("NAV_RADIO"); return; }
+      if (side === "L" && row === 5 && index === 1) { fms.open("ADF_RADIO"); return; }
       const field = fields[`${index}${side}${row}`];
       if (!field) return;
       const [key, shape, range] = field;
