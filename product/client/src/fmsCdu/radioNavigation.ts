@@ -109,7 +109,7 @@ export function rangeObservations(observations: readonly RadioObservation[], alt
     const slant = sampled(observation.slantRangeNm, now, maxAgeS * 1000);
     const station = observation.station, at = dmeAt(station);
     if (!validPosition(at) || !hasDme(station) || slant === null) return [];
-    if (observation.reportedDmeIdent && sampled(observation.reportedDmeIdent, now, parameters.sensorMaxAge.value * 1000) !== station.ident) {
+    if (observation.reportedDmeIdent && sampled(observation.reportedDmeIdent, now, maxAgeS * 1000) !== station.ident) {
       rejected.push({ ident: station.ident, reason: "DME ident missing or mismatched" }); return [];
     }
     const allowanceFt = station.elevation.source === "assumed" ? parameters.assumedNavaidElevationUncertainty.value

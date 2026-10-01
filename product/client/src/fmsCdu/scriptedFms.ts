@@ -1193,7 +1193,7 @@ export class ScriptedFms implements CduBackend {
     if (dvs) return { source: "DVS", at: Math.min(this.sensorFrame!.dvs!.at, this.sensorFrame!.air.at),
       northKt: dvs.northKt + (this.waterCurrent?.northKt ?? 0), eastKt: dvs.eastKt + (this.waterCurrent?.eastKt ?? 0), gpsDependent: false };
     const wind = this.navigation.measuredWind;
-    if (!air || !wind || now < wind.at || now - wind.at > this.sensorMaxAge
+    if (!air || air.tasValid === false || air.headingValid === false || !wind || now < wind.at || now - wind.at > this.sensorMaxAge
       || ![air.tasKt, air.headingTrue, wind.north, wind.east].every(Number.isFinite)) return null;
     const heading = air.headingTrue * Math.PI / 180;
     return { source: "AIR_WIND", at: Math.min(this.sensorFrame!.air.at, wind.at),

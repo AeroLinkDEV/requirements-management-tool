@@ -302,6 +302,7 @@ function rangesAt(at: number): RadioObservation[] {
     const station: Navaid = { kind: 'navaid', type: 'DME', ident: `C${index}`, name: 'Range fixture', frequency: `11${index}.00`,
       position: offset(CACHE_AT, course, 10), elevation: { feet: 0, source: 'data', provenance: 'fixture survey' } }
     return { station, rangeIdentity: { receiver: 'dme1', channel: index === 0 ? 2 : 3, frequency: station.frequency, commandSequence: 7 },
+      reportedDmeIdent: { at, sequence: 9, status: 'NORMAL', value: station.ident },
       slantRangeNm: { at, sequence: 9, status: 'NORMAL', value: 10 }, bearingTrue: { at, sequence: 9, status: 'NCD', value: null } }
   })
 }
@@ -322,7 +323,11 @@ test('C3: compensation aligns ranges to the new epoch without renewing observati
   expect(fix.naimEligible).toBe(true)
   const atExpiry = cachedFix(observations, T0 + 4000, { ...motion, at: T0 + 4000 })!
   expect(atExpiry.oldestAt).toBe(T0)
+  expect(atExpiry.observations).toEqual(original)
   expect(cachedFix(observations, T0 + 4001, { ...motion, at: T0 + 4001 })).toBeUndefined()
+  const mismatched = observations.map(observation => ({ ...observation,
+    reportedDmeIdent: { ...observation.reportedDmeIdent!, value: 'BAD' } }))
+  expect(cachedFix(mismatched, T0 + 1000, motion)).toBeUndefined()
   // Source time is its own clock; a fresh fix epoch must not refresh it.
   const staleMotion = cachedFix(observations, T0 + 3001, { ...motion, at: T0 })!
   expect(staleMotion.motion).toBeNull()
@@ -471,6 +476,55 @@ test('C3: successive independent radio observations take priority over a conflic
 })
 
 test('C3: GPS-derived last wind tags cached radio motion dependent, so GPS-only changes never establish an independent NAIM backup', () => {
+  // F14 composition: a fresh last measured wind cannot qualify AIR_WIND with an explicitly invalid TAS or heading.
+  // Real connected adapter words exercise rangeMotion; no private getter or independent wind container is needed.
+  for (const invalid of ['tasValid', 'headingValid'] as const) {
+    const cache = measuredCache()
+    const originalPosition = cache.unit.position
+    cache.frame.radios = []
+    cache.frame.dvs = { ...cache.frame.dvs!, status: 'FAIL', value: null }
+    cache.frame.gps = cache.healthyGps
+    cache.unit.updateNavigation(0)
+    cache.frame.gps = cache.frame.gps.map(sample => ({ ...sample, status: 'NCD', value: null })) as unknown as SensorFrame['gps']
+    cache.step(500, false)
+    expect(cache.unit.navState.mode).toBe('DME/DME')
+    expect(cache.unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(true)
+    cache.frame.air.value![invalid] = false
+    if (invalid === 'tasValid') cache.frame.air.value!.tasKt = 500
+    else cache.frame.air.value!.headingTrue = 270
+    cache.step(500, false)
+    expect(cache.unit.navState.airValid).toBe(false)
+    expect.soft(cache.unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent, invalid).toBe(false)
+    expect.soft(distanceNm(originalPosition, cache.unit.position), invalid).toBeLessThan(1e-6)
+    cache.frame.air.value![invalid] = true
+    cache.frame.air.value!.tasKt = 600
+    cache.frame.air.value!.headingTrue = 90
+    cache.unit.updateNavigation(0)
+    cache.unit.updateNavigation(0)
+    expect(cache.unit.navState.airValid).toBe(true)
+    expect(cache.unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(true)
+  }
+  for (const milliseconds of [2000, 2001]) for (const invalid of ['tasValid', 'headingValid'] as const) {
+    const cache = measuredCache()
+    const originalPosition = cache.unit.position
+    cache.frame.radios = []
+    cache.frame.dvs = { ...cache.frame.dvs!, status: 'FAIL', value: null }
+    cache.frame.gps = cache.healthyGps
+    cache.unit.updateNavigation(0)
+    cache.frame.gps = cache.frame.gps.map(sample => ({ ...sample, status: 'NCD', value: null })) as unknown as SensorFrame['gps']
+    cache.step(milliseconds, false)
+    expect(cache.unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent).toBe(milliseconds === 2000)
+    if (milliseconds === 2000) expect(distanceNm(originalPosition, cache.unit.position)).toBeGreaterThan(0.001)
+    cache.frame.air.value![invalid] = false
+    for (const value of invalid === 'tasValid' ? [100, 500] : [90, 270]) {
+      if (invalid === 'tasValid') cache.frame.air.value!.tasKt = value
+      else cache.frame.air.value!.headingTrue = value
+      cache.unit.updateNavigation(0)
+      expect(cache.unit.navState.mode).toBe('DME/DME')
+      expect.soft(cache.unit.sensorSolutions.find(sensor => sensor.mode === 'DME/DME')!.gpsDependent, `${milliseconds}ms ${invalid} ${value}`).toBe(false)
+      expect.soft(distanceNm(originalPosition, cache.unit.position), `${milliseconds}ms ${invalid} ${value}`).toBeLessThan(1e-6)
+    }
+  }
   const { unit, frame, healthyGps, step } = measuredCache()
   frame.radios = []
   frame.dvs = { ...frame.dvs!, status: 'FAIL', value: null }
