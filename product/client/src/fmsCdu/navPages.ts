@@ -1,6 +1,7 @@
 import { WAYPOINT, caption, dashes, fixed, formatPosition, medium, prompt, small, title, type NavPageId, type Page } from "./fmsModel";
 import { MODE_TEXT, shownReceiver, type GpsChoice, type ReceiverAssessment } from "./gpsSensors";
 import type { FlightPhase } from "./navigation";
+import { navaidComponent, type NavEntry } from "./navData";
 import type { Line } from "./screen";
 import type { ScriptedFms } from "./scriptedFms";
 
@@ -10,10 +11,9 @@ import type { ScriptedFms } from "./scriptedFms";
  * airline FMSs do. GPS STATUS and POS SENSORS show what the two CMA-5024 receivers report on their buses (GPS phase 3a).
  */
 
-const frequency = (fms: ScriptedFms, ident: string | null | undefined) => {
-  const entry = ident ? fms.navdb.find(ident).find(e => e.kind === "navaid") : undefined;
-  return entry?.kind === "navaid" ? entry.frequency : "";
-};
+/** A tuned DME's or VOR's frequency: the VHF record of its ident, never an NDB of the same ident (PASD's HBT). */
+export const vhfFrequency = (entries: readonly NavEntry[]) => navaidComponent(entries, "VHF")?.frequency ?? "";
+const frequency = (fms: ScriptedFms, ident: string | null | undefined) => (ident ? vhfFrequency(fms.navdb.find(ident)) : "");
 
 /** Flight phases short enough for a caption beside NAV MODE. */
 const PHASE_ABBREVIATION: Record<FlightPhase, string> = { "EN ROUTE": "ENRT", TERMINAL: "TERM", APPROACH: "APPR" };

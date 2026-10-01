@@ -61,6 +61,15 @@ export function pairedChannel(mhz: number): string | null {
   if (tenths >= 1123 && tenths <= 1179) return `${tenths - 1123 + 70}${suffix}`;
   return null;
 }
+/**
+ * The component of a navaid that an ident means to one consumer (Stage F16; PASD Q32's HBT). One ident can name separate
+ * records with their own positions, such as an NDB and a co-located DME. `NDB` is the ADF's station; `VHF` is the NAV
+ * radio's and the DME's (any VOR, DME or TACAN record). Null when the ident names no such component. `entries` are the
+ * database's entries for the ident (NavDatabase.find).
+ */
+export function navaidComponent(entries: readonly NavEntry[], component: "NDB" | "VHF"): Navaid | null {
+  return entries.find((e): e is Navaid => e.kind === "navaid" && (e.type === "NDB") === (component === "NDB")) ?? null;
+}
 export type Runway = { ident: string; threshold: LatLon; course: number; elevation: number; length: number };
 export type Airport = {
   kind: "airport"; ident: string; name: string; position: LatLon; elevation: number; runways: Runway[];
@@ -107,8 +116,14 @@ export type ProcedureLeg =
   | {
     ident: string; altitude?: string; overfly?: boolean; path?: FixPath; course?: number; arc?: { centre: LatLon; turn: "L" | "R" };
     turnDirection?: "LEFT" | "RIGHT"; speedLimit?: SpeedLimit; verticalAngleDeg?: number; hold?: ProcedureHold;
-    /** Generated PI outbound waypoints stay inside their procedure, never in the pilot waypoint database. */
+    /**
+     * Generated PI outbound waypoints stay inside their procedure, never in the pilot waypoint database. A coded fix
+     * whose ident names more than one record (an NDB and a DME both HBT) carries the position of the record its
+     * section code names (ARINC 424 columns 37-38), so the leg flies to the coded fix, not to whichever was read first.
+     */
     position?: LatLon; procedureTurn?: { reference: string; role: "REFERENCE" | "OUTBOUND" | "INBOUND" };
+    /** The coded distance from the leg's recommended navaid (rho, columns 67-70): PASD Q32's HBT 0.4 at RW32. */
+    navaidDistance?: { ident: string; nm: number };
   }
   | { path: ConditionalPath; course: number; altitude?: number; turnDirection?: "LEFT" | "RIGHT"; speedLimit?: SpeedLimit };
 
@@ -137,9 +152,11 @@ export type ProcedureEndpoint = {
   /**
    * Why the MAP is taken for what it is (plan Q8): a coded runway threshold; a heliport-section approach, point-in-space
    * by its section; or an airport-section Copter procedure in the reviewed set (arinc424.ts REVIEWED_COPTER_PINS), with
-   * what was reviewed. Never the ident pattern alone.
+   * what was reviewed. Never the ident pattern alone. Or a conventional approach (NDB, NDB/DME, VOR, VOR/DME; Stage
+   * F16) whose MAP is a fix, not a runway, such as a circling approach: its landing site is the airport, it is never
+   * point-in-space, and its visual segment (circling to land) is the crew's, not flown by the FMS.
    */
-  identification: { basis: "RUNWAY" | "HELIPORT SECTION" | "REVIEWED COPTER PROCEDURE"; source: string };
+  identification: { basis: "RUNWAY" | "HELIPORT SECTION" | "REVIEWED COPTER PROCEDURE" | "CONVENTIONAL NON-RUNWAY MAP"; source: string };
 };
 export type ProcedureKind = "SID" | "STAR" | "APPROACH";
 export type ApproachType = "RNAV" | "ILS" | "VOR" | "NDB";
@@ -151,6 +168,14 @@ export type Procedure = {
   transitions: Record<string, ProcedureLeg[]>;
   legs: ProcedureLeg[];
   approachType?: ApproachType;
+  /**
+   * An imported approach's recommended navaid on the final (ARINC 424 columns 51-54, section 79-80), resolved to the
+   * record the section names. On an NDB/DME approach, also the DME of the same ident, from which its coded distances are
+   * measured: PASD Q32's NDB HBT 390 kHz with the DME HBT on 113.20 (79X), each at its own position.
+   */
+  recommendedNavaid?: { ident: string; type: NavaidType; frequency: string; position: LatLon; dme?: { position: LatLon; channel?: string } };
+  /** Route type Q: an NDB/DME approach, listed as NDB D (M300 7-1). Its DME is required. */
+  dmeRequired?: true;
   /** Approach: the leg that is the final approach fix, and the missed approach legs flown after the runway. */
   faf?: string;
   missed?: ProcedureLeg[];

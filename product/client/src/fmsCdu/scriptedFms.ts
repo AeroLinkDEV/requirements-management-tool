@@ -2166,7 +2166,8 @@ export class ScriptedFms implements CduBackend {
 
   get pinsContinuation() {
     const endpoint = findProcedure(this.db, this.active, "APPROACH")?.endpoint;
-    return endpoint && endpoint.landingSite.kind !== "RUNWAY" ? {
+    // A point-in-space approach only: a conventional approach to a non-runway MAP has no PinS continuation.
+    return endpoint && endpoint.landingSite.kind !== "RUNWAY" && endpoint.identification.basis !== "CONVENTIONAL NON-RUNWAY MAP" ? {
       endpoint, revision: this.approachSession, mapPassed: this.mapPassed, active: this.visualContinuation,
       available: endpoint.visualSegment.validated && endpoint.visualSegment.kind !== "UNKNOWN",
     } : null;

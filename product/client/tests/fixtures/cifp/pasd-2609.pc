@@ -1,0 +1,121 @@
+HDR01FAACIFP18      001P013203968112609  12-AUG-202618:29:21  U.S.A. DOT FAA                                                FBB95AD8
+SCAND        HBT   PA011320 DUW                    HBT N55185695W160311019E0110001301     NARBORLAND                       002691810
+SCAND        OME   PA011500VDHW N64290639W165151143    N64290639W165151143E0110000952     NARNOME                          002812002
+SCANDB       HBT   PA003900H  W N55185640W160310622                       E0110           NARBORLAND                       003711810
+SCANEAENRT   CUBPA PA0    C   L N55292510W160011508                       E0101     NAR           CUBPA                    010062605
+SCANEAENRT   DUGAC PA0    C     N55185249W161060643                       E0097     NAR           DUGAC                    011292605
+SCANEAENRT   RAYMD PA0    C   L N55355352W160123345                       E0101     NAR           RAYMD                    023732605
+SCANEAENRT   SAFKO PA0    C   L N55464866W162020795                       E0093     NAR           SAFKO                    024552605
+SCANP PASDPAASDP     0     052YHN55184930W160311713E011000024         1800018000C    MNAR    SAND POINT                    121922006
+SCANP PASDPACCOVOX PA0    W     N55071924W160190298                       E0100     NAR           COVOX                    121932605
+SCANP PASDPACDODPE PA0    W     N55031028W160305665                       E0099     NAR           DODPE                    121942605
+SCANP PASDPACFOBAN PA0    W     N55105374W160225672                       E0100     NAR           FOBAN                    121952605
+SCANP PASDPACFONIN PA0    W     N55140873W160261761                       E0100     NAR           FONIN                    121962605
+SCANP PASDPACHEMPY PA0    W     N55212746W160340655                       E0099     NAR           HEMPY                    121972605
+SCANP PASDPACHEVIL PA0    W     N55193738W160320858                       E0099     NAR           HEVIL                    121982605
+SCANP PASDPACHORKA PA0    W     N55112703W160070684                       E0101     NAR           HORKA                    121992605
+SCANP PASDPACJETLO PA0    W     N55265823W160400234                       E0099     NAR           JETLO                    122002605
+SCANP PASDPACJOTOK PA0    R     N55122402W160290685                       E0100     NAR           JOTOK                    122012605
+SCANP PASDPACKOANS PA0    W     N55314586W160413590                       E0099     NAR           KOANS                    122022605
+SCANP PASDPACMOMEE PA0    W     N55210063W160345458                       E0099     NAR           MOMEE                    122032605
+SCANP PASDPACORPIE PA0    W     N55193195W160320276                       E0099     NAR           ORPIE                    122042605
+SCANP PASDPACOTIPE PA0    R     N55142204W160294268                       E0100     NAR           OTIPE                    122052605
+SCANP PASDPACPOSAE PA0    W     N55243435W160492875                       E0098     NAR           POSAE                    122062605
+SCANP PASDPACPOYNE PA0    W     N55232400W160361160                       E0099     NAR           POYNE                    122072605
+SCANP PASDPACPREED PA0    W     N55231288W160391141                       E0099     NAR           PREED                    122082605
+SCANP PASDPACREOIL PA0    W     N55033522W160381874                       E0099     NAR           REOIL                    122092605
+SCANP PASDPACRESEW PA0    W     N55305437W160295398                       E0099     NAR           RESEW                    122102605
+SCANP PASDPACSETIE PA0    W     N55094342W160570016                       E0098     NAR           SETIE                    122112605
+SCANP PASDPACWONBA PA0    R     N55102622W160283113                       E0100     NAR           WONBA                    122122605
+SCANP PASDPADHBT2  1RW14  010         0        VI                     1376                    18000                        122131810
+SCANP PASDPADHBT2  1RW14  020HBT  PADB0N       FA OME PA      152456951390    D   + 02400                                  122141810
+SCANP PASDPADHBT2  1RW14  030HBT  PADB0NY  L   DF                                                                          122151810
+SCANP PASDPADHBT2  1RW14  040HBT  PADB0NE  R   HA                     3440T010    + 10000                                  122161810
+SCANP PASDPADHBT2  1RW32  010         0        VI                     3176                    18000                        122171810
+SCANP PASDPADHBT2  1RW32  020HBT  PADB0N       FA OME PA      152456953160    D   + 02400                                  122181810
+SCANP PASDPADHBT2  1RW32  030HBT  PADB0NY  R   DF                                                                          122191810
+SCANP PASDPADHBT2  1RW32  040HBT  PADB0NE  R   HA                     3440T010    + 10000                                  122201810
+SCANP PASDPADRAYMD34RW14  010         0        VA                     1376        + 01800     18000                        122211810
+SCANP PASDPADRAYMD34RW14  020RAYMDPAEA0EY  L   DF                                                                          122221810
+SCANP PASDPADRAYMD34RW14  030RAYMDPAEA0EE  L   HA                     23790050    + 10000                                  122231810
+SCANP PASDPADRAYMD34RW32  010         0        VA                     3176        + 01000     18000                        122241810
+SCANP PASDPADRAYMD34RW32  020RAYMDPAEA0EY      DF                                                                          122251810
+SCANP PASDPADRAYMD34RW32  030RAYMDPAEA0EE  L   HA                     23790050    + 10000                                  122261810
+SCANP PASDPAFQ32   ACUBPA 010CUBPAPAEA0E       IF                                             18000                 0  S   122272211
+SCANP PASDPAFQ32   ACUBPA 020HBT  PADB0N       TF                                 + 04300                           0  S   122282211
+SCANP PASDPAFQ32   ACUBPA 030JOTOKPAPC0E       TF                                 B 0430003500                      0  S   122292211
+SCANP PASDPAFQ32   ACUBPA 040JOTOKPAPC0E  AR   PI HBT PA      1591006711410100DB  + 03100                           0  S   122302211
+SCANP PASDPAFQ32   ACUBPA 050WONBAPAPC0EE      CF HBT PA              33910080DB  + 02900                           0  S   122312211
+SCANP PASDPAFQ32   ADUGAC 010DUGACPAEA0E       IF                                             18000                 0  S   122322211
+SCANP PASDPAFQ32   ADUGAC 020HBT  PADB0N       TF                                 + 04500                           0  S   122332211
+SCANP PASDPAFQ32   ADUGAC 030JOTOKPAPC0E       TF                                 B 0430003500                      0  S   122342211
+SCANP PASDPAFQ32   ADUGAC 040JOTOKPAPC0E  AR   PI HBT PA      1591006711410100DB  + 03100                           0  S   122352211
+SCANP PASDPAFQ32   ADUGAC 050WONBAPAPC0EE      CF HBT PA              33910080DB  + 02900                           0  S   122362211
+SCANP PASDPAFQ32   ARAYMD 010RAYMDPAEA0E       IF                                             18000                 0  S   122372211
+SCANP PASDPAFQ32   ARAYMD 020HBT  PADB0N       TF                                 + 04300                           0  S   122382211
+SCANP PASDPAFQ32   ARAYMD 030JOTOKPAPC0E       TF                                 B 0430003500                      0  S   122392211
+SCANP PASDPAFQ32   ARAYMD 040JOTOKPAPC0E  AR   PI HBT PA      1591006711410100DB  + 03100                           0  S   122402211
+SCANP PASDPAFQ32   ARAYMD 050WONBAPAPC0EE      CF HBT PA              33910080DB  + 02900                           0  S   122412211
+SCANP PASDPAFQ32   ASAFKO 010SAFKOPAEA0E       IF                                             18000                 0  S   122422211
+SCANP PASDPAFQ32   ASAFKO 020HBT  PADB0N       TF                                 + 06200                           0  S   122432211
+SCANP PASDPAFQ32   ASAFKO 030JOTOKPAPC0E       TF                                 B 0430003500                      0  S   122442211
+SCANP PASDPAFQ32   ASAFKO 040JOTOKPAPC0E  AR   PI HBT PA      1591006711410100DB  + 03100                           0  S   122452211
+SCANP PASDPAFQ32   ASAFKO 050WONBAPAPC0EE      CF HBT PA              33910080DB  + 02900                           0  S   122462211
+SCANP PASDPAFQ32   Q      010WONBAPAPC0E  I    IF HBT PA                      DB  + 02900     18000                 0  S   122472211
+SCANP PASDPAFQ32   Q      020JOTOKPAPC0E  F    CF HBT PA              33910020DB  + 02300                 HBT   PADB0  S   122482211
+SCANP PASDPAFQ32   Q      021OTIPEPAPC0E S     CF HBT PA              33910020DB  + 01620             -347          0  S   122492211
+SCANP PASDPAFQ32   Q      030RW32 PAPG0GY M    CF HBT PA          000433910042DB    00059             -347          0  S   122502211
+SCANP PASDPAFQ32   Q      040         0  M     CA                     3391        + 01800                           0  S   122512211
+SCANP PASDPAFQ32   Q      050HBT  PADB0NY  R   DF                                 + 04300                           0  S   122522211
+SCANP PASDPAFQ32   Q      060HBT  PADB0NE  R   HM                     3440T010    + 04300                           0  S   122532211
+SCANP PASDPAFR14-Y ARAYMD 010RAYMDPAEA0E  A    IF                                             18000                 A JS   122542112
+SCANP PASDPAFR14-Y ARAYMD 020KOANSPAPC0EE B 010TF                                 + 03600                           A JS   122552112
+SCANP PASDPAFR14-Y R      010KOANSPAPC0E  I    IF                                 + 03600     18000                 A JS   122562112
+SCANP PASDPAFR14-Y R      020JETLOPAPC1E  F 010TF                                 + 03500                 HEVIL PAPCA JS   122572112
+SCANP PASDPAFR14-Y R      020JETLOPAPC2WALP        N          ALNAV                                                   JS   122582112
+SCANP PASDPAFR14-Y R      021HEMPYPAPC0E S  031TF                                 V 0110001100        -349          A JS   122592112
+SCANP PASDPAFR14-Y R      030HEVILPAPC0EY M 031TF                                   00297             -349          A JS   122602203
+SCANP PASDPAFR14-Y R      040         0  M     CA                     1375        + 00424                           A JS   122612112
+SCANP PASDPAFR14-Y R      050FOBANPAPC0E    010DF                                                                   A JS   122622112
+SCANP PASDPAFR14-Y R      060REOILPAPC0E    010TF                                                                   A JS   122632112
+SCANP PASDPAFR14-Y R      070SETIEPAPC0E    010TF                                                                   A JS   122642112
+SCANP PASDPAFR14-Y R      080DUGACPAEA0EY   010TF                                 + 05000                           A JS   122652112
+SCANP PASDPAFR14-Y R      090DUGACPAEA0EE  R   HM                     04790040    + 05000                           A JS   122662112
+SCANP PASDPAFR14-Z ADUGAC 010DUGACPAEA0E  A    IF                                             18000                 A JS   122672112
+SCANP PASDPAFR14-Z ADUGAC 020POSAEPAPC0EE B 010TF                                 + 02900                           A JS   122682112
+SCANP PASDPAFR14-Z R      010POSAEPAPC0E  I    IF                                 + 02900     18000                 A JS   122692112
+SCANP PASDPAFR14-Z R      020PREEDPAPC1E  F 010TF                                 + 02300                 ORPIE PAPCA JS   122702112
+SCANP PASDPAFR14-Z R      020PREEDPAPC2WALP        N          ALNAV                                                   JS   122712112
+SCANP PASDPAFR14-Z R      021MOMEEPAPC0E S  031TF                                 V 0108001080        -349          A JS   122722112
+SCANP PASDPAFR14-Z R      030ORPIEPAPC0EY M 031TF                                   00262             -349          A JS   122732112
+SCANP PASDPAFR14-Z R      040         0  M     CA                     1211        + 00424                           A JS   122742112
+SCANP PASDPAFR14-Z R      050FOBANPAPC0E    010DF                                                                   A JS   122752112
+SCANP PASDPAFR14-Z R      060REOILPAPC0E    010TF                                                                   A JS   122762112
+SCANP PASDPAFR14-Z R      070SETIEPAPC0E    010TF                                                                   A JS   122772112
+SCANP PASDPAFR14-Z R      080DUGACPAEA0EY   010TF                                 + 05000                           A JS   122782112
+SCANP PASDPAFR14-Z R      090DUGACPAEA0EE  R   HM                     04790040    + 05000                           A JS   122792112
+SCANP PASDPAFR32   ACOVOX 010COVOXPAPC0EE AR   HF                     31780040    + 04100     18000                 A JS   122801810
+SCANP PASDPAFR32   ADODPE 010DODPEPAPC0E  A    IF                                             18000                 A JS   122811810
+SCANP PASDPAFR32   ADODPE 020COVOXPAPC0EE B 010TF                                 + 04100                           A JS   122822203
+SCANP PASDPAFR32   AHORKA 010HORKAPAPC0E  A    IF                                             18000                 A JS   122831810
+SCANP PASDPAFR32   AHORKA 020COVOXPAPC0EE B 010TF                                 + 04100                           A JS   122842203
+SCANP PASDPAFR32   R      010COVOXPAPC0E  I    IF                                 + 04100     18000                 A JS   122851810
+SCANP PASDPAFR32   R      020FONINPAPC1E  F 010TF                                 + 01700                           A JS   122862203
+SCANP PASDPAFR32   R      020FONINPAPC2WALPV       ALNAV/VNAV ALNAV                                                   JS   122871810
+SCANP PASDPAFR32   R      030RW32 PAPG0GY M 031TF                                   00059             -300          A JS   122882203
+SCANP PASDPAFR32   R      040         0  M     CA                     3177        + 00424                           A JS   122891810
+SCANP PASDPAFR32   R      050POYNEPAPC0E    010DF                                                                   A JS   122901810
+SCANP PASDPAFR32   R      060RESEWPAPC0E    010TF                                                                   A JS   122912203
+SCANP PASDPAFR32   R      070CUBPAPAEA0EY   010TF                                 + 07000                           A JS   122922203
+SCANP PASDPAFR32   R      080CUBPAPAEA0EE  R   HM                     22750070    + 07000                           A JS   122931810
+SCANP PASDPAGRW14    0052131370 N55190671W160313575         +0022500020053860150R                                          122941810
+SCANP PASDPAGRW32    0052133170 N55183221W160305884         +0023700023057636150R                                          122952006
+SCANP PASDPAPR14-Y RW14 001Y0000W14B0N5519067075W16031357475+002250349N5517507870W16030145525106751328000600F400000C669E13C122962112
+SCANP PASDPAPR14-Y RW14 002E      +00059+00059LP        86844                                                              122972203
+SCANP PASDPAPR14-Z RW14 001Z0000W14A0N5519120910W16031243370+002250349N5518123435W16029288425106750000000600F40000093E424A1122982112
+SCANP PASDPAPR14-Z RW14 002E      +00059+00059LP        56245                                                              122992112
+SCANP PASDPAPR32   RW32 001 0000W32A0N5518322100W16030588415+002370300N5519481195W16032200915106751336000360F4005005CF5E7A5123001810
+SCANP PASDPAPR32   RW32 002E      +00071+00071LPV       78241                                                              123011810
+SCANP PASDPASHBT  PADB                0   18018005125                                                                  M   123021611
+SCANP PASDPASHEVILPAPC                0   18018005325                                                                  M   123032112
+SCANP PASDPASORPIEPAPC                0   18018005225                                                                  M   123041810
