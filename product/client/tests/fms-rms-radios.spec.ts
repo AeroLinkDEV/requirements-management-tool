@@ -551,7 +551,7 @@ test('C3: GPS-derived last wind tags cached radio motion dependent, so GPS-only 
 
 // Raw frame words must pass the same arrival/receiver admission as cached ranges. Keeping those words present
 // catches the bypass that cache-only invalidation tests cannot see.
-for (const rejected of ['stale arrival', 'receiver bus loss'] as const) test(`C3: raw admission rejects ${rejected}, with a fresh healthy positive control`, () => {
+for (const rejected of ['stale arrival', 'stale reported ident', 'receiver bus loss'] as const) test(`C3: raw admission rejects ${rejected}, with a fresh healthy positive control`, () => {
   const { frame } = measuredCache()
   frame.dvs = { ...frame.dvs!, status: 'FAIL', value: null }
   const healthy = new ScriptedFms(() => new Date(frame.air.at), { sensors: { read: () => frame } })
@@ -563,6 +563,35 @@ for (const rejected of ['stale arrival', 'receiver bus loss'] as const) test(`C3
       bearingTrue: { ...observation.bearingTrue, at: observation.bearingTrue.at - 2001 } }))
     const stale = new ScriptedFms(() => new Date(older.air.at), { sensors: { read: () => older } })
     expect(stale.navState.mode).toBe('DR')
+  } else if (rejected === 'stale reported ident') {
+    // Supplying a physical receiver identity does not earn the longer cache lifetime for a new stale ident.
+    for (const bound of [true, false]) for (const age of [0, 2000, 2001, 5999, 6001]) {
+      const arrival = structuredClone(frame)
+      arrival.radios = arrival.radios.map(observation => ({ ...observation,
+        rangeIdentity: bound ? observation.rangeIdentity : undefined,
+        reportedDmeIdent: { at: arrival.air.at - age, sequence: 1, status: 'NORMAL', value: observation.station.ident } }))
+      const candidate = new ScriptedFms(() => new Date(arrival.air.at), { sensors: { read: () => arrival } })
+      expect.soft(candidate.navState.mode, `${bound ? 'bound' : 'legacy'} new ident age ${age}ms`).toBe(age <= 2000 ? 'DME/DME' : 'DR')
+    }
+    const accepted = structuredClone(frame)
+    accepted.radios = accepted.radios.map(observation => ({ ...observation,
+      reportedDmeIdent: { at: accepted.air.at, sequence: 1, status: 'NORMAL', value: observation.station.ident } }))
+    const candidate = new ScriptedFms(() => new Date(accepted.air.at), { sensors: { read: () => accepted } })
+    expect(candidate.navState.mode).toBe('DME/DME')
+    accepted.air.at++
+    accepted.radios = accepted.radios.map(observation => ({ ...observation,
+      slantRangeNm: { ...observation.slantRangeNm, at: accepted.air.at, sequence: observation.slantRangeNm.sequence + 1 },
+      reportedDmeIdent: { at: accepted.air.at, sequence: 2, status: 'NORMAL', value: 'BAD' } }))
+    candidate.updateNavigation(0.001)
+    expect.soft(candidate.navState.mode, 'fresh BAD must invalidate earlier good station cache').toBe('DR')
+    accepted.radios = []
+    candidate.updateNavigation(0)
+    expect.soft(candidate.navState.mode, 'bad identity must not leave old cache usable').toBe('DR')
+    accepted.radios = frame.radios.map(observation => ({ ...observation,
+      slantRangeNm: { ...observation.slantRangeNm, at: accepted.air.at, sequence: observation.slantRangeNm.sequence + 2 },
+      reportedDmeIdent: { at: accepted.air.at, sequence: 3, status: 'NORMAL', value: observation.station.ident } }))
+    candidate.updateNavigation(0)
+    expect(candidate.navState.mode, 'new fresh matching identity recovers navigation').toBe('DME/DME')
   } else {
     for (const receiver of ['dme1', 'dme2'] as const) healthy.setRadioFaults(receiver, { measurementBus: 'LOST' })
     healthy.updateNavigation(0)
@@ -638,6 +667,7 @@ test('C3: compensated epochs cannot renew an expired DVS source into independent
   // Real new independent radio evidence can qualify immediately and reject the same uncertain biased GPS.
   frame.radios = boundRanges(unit, observations.map(observation => ({ ...observation,
     slantRangeNm: { ...observation.slantRangeNm, at: now(), sequence: observation.slantRangeNm.sequence + 1 },
+    reportedDmeIdent: { ...observation.reportedDmeIdent!, at: now(), sequence: observation.reportedDmeIdent!.sequence + 1 },
     bearingTrue: { ...observation.bearingTrue, at: now(), sequence: observation.bearingTrue.sequence + 1 } })))
   unit.updateNavigation(0)
   expect(unit.navState.mode).toBe('DME/DME')
@@ -671,6 +701,7 @@ test('C3: range arrivals bind to the acknowledged receiver/channel command, whil
     frame.air.at = now
     frame.radios = [{ ...hwk, rangeIdentity: identity,
       slantRangeNm: { ...hwk.slantRangeNm, at: now, sequence: hwk.slantRangeNm.sequence + 1 },
+      reportedDmeIdent: { ...hwk.reportedDmeIdent!, at: now, sequence: hwk.reportedDmeIdent!.sequence + 1 },
       bearingTrue: { ...hwk.bearingTrue, at: now, sequence: hwk.bearingTrue.sequence + 1 } }]
     unit.updateNavigation(0)
     expect(unit.navState.mode).toBe(accepted ? 'VOR/DME' : 'DR')

@@ -1150,6 +1150,11 @@ export class ScriptedFms implements CduBackend {
         || !rms.dmeReceiving(identity.receiver) || identity.frequency !== observation.station.frequency
         || (identity.channel === 1 ? this.dmeStation(identity.receiver)?.ident !== observation.station.ident
           : roster.get(observation.station.ident) !== identity.frequency)) continue;
+      // A supplied ident must be fresh on arrival before the range earns cache TTL. A new bad ident also
+      // withdraws previously accepted evidence for that physical station, rather than keeping the old match.
+      if (observation.reportedDmeIdent && sampled(observation.reportedDmeIdent, now, this.sensorMaxAge) !== observation.station.ident) {
+        this.rangeCache.delete(observation.station.ident); continue;
+      }
       const previous = this.rangeCache.get(observation.station.ident);
       if (previous && JSON.stringify(previous.rangeIdentity) !== JSON.stringify(identity)) this.rangeCache.delete(observation.station.ident);
       if (!previous || !this.rangeCache.has(observation.station.ident) || observation.slantRangeNm.at > previous.slantRangeNm.at
@@ -1165,6 +1170,7 @@ export class ScriptedFms implements CduBackend {
     // by updateRangeCache can use that lifetime; identity-less legacy words stay on the shorter arrival clock.
     const merged = new Map(frame.map(observation => {
       const legacy = !observation.rangeIdentity && sampled(observation.slantRangeNm, now, this.sensorMaxAge) !== null
+        && (!observation.reportedDmeIdent || sampled(observation.reportedDmeIdent, now, this.sensorMaxAge) === observation.station.ident)
         && this.rms?.dmeReceiving("dme1") && this.rms.dmeReceiving("dme2");
       return [observation.station.ident, legacy ? observation : { ...observation,
         slantRangeNm: { ...observation.slantRangeNm, status: "NCD" as const, value: null } }] as const;
