@@ -224,8 +224,14 @@ async function openTeamWork(page: Parameters<typeof login>[0], body: unknown = f
   return calls
 }
 
+/**
+ * The people strip's names, once it has filled. The strip renders after the team-work response, which can come after
+ * the page heading is visible; allTextContents does not wait, and read too early it returns no names (#939).
+ */
 async function peopleNames(page: Parameters<typeof login>[0]) {
-  return page.locator('.teamWorkPeopleStrip .teamWorkPerson strong').allTextContents()
+  const people = page.locator('.teamWorkPeopleStrip .teamWorkPerson strong')
+  await expect(people.first()).toBeVisible()
+  return people.allTextContents()
 }
 
 test('Team Work is a project-wide three-lane board with API-owned card truth and canonical links', async ({ page }) => {
@@ -904,7 +910,7 @@ test('Team Work scopes workload-first affinity by viewer, project, and user id',
   })
   await page.getByRole('link', { name: 'Team Work', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Team Work', exact: true })).toBeVisible()
-  const names = await page.locator('.teamWorkPeopleStrip .teamWorkPerson strong').allTextContents()
+  const names = await peopleNames(page)
   expect(names.slice(0, 3)).toEqual(['API Dana', 'API Alice', 'API Bob'])
   expect(names.at(-1)).toBe(`${me.displayName} (you)`)
   await page.locator('.teamWorkPerson').filter({ hasText: 'API Alice' }).click()
