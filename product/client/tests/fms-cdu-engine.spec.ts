@@ -166,16 +166,20 @@ test('BRT always brightens after five idle seconds, then alternates on each pres
 })
 
 test('radio entries are range-checked, and a standby field with an empty scratchpad swaps active and standby', () => {
-  const { unit } = fms()
+  const { unit, advance } = fms()
+  // The radios answer each command after their acknowledgement latency (plan F8a on the #1350 RMS).
+  const acknowledge = () => { advance(1000); unit.updateNavigation(1) }
   unit.press('RADIO')
   typeText(unit, '124.35')
   unit.press('LSK1L')
   expect(lines(unit)[2]).toMatch(/^124\.350/)
+  acknowledge()
   typeText(unit, '140.00')
   unit.press('LSK1L')
   expect(scratch(unit)).toBe('INVALID ENTRY')
   press(unit, 'CLR', 'CLR', 'CLR', 'CLR', 'CLR', 'CLR', 'CLR')
   unit.press('LSK1R')
+  acknowledge()
   expect(lines(unit)[2]).toMatch(/^126\.700\s+124\.350$/)
 })
 

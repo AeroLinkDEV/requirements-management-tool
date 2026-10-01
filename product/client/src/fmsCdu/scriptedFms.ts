@@ -1,6 +1,6 @@
 import { alert } from "./alerts";
 import type { CrossTalkPort, RadioManagementPort } from "./crossTalk";
-import { DEFAULT_RADIOS, type RadioKey } from "./radioManagement";
+import { DEFAULT_RADIOS, RadioManagementSystem, type DmeDevice, type RadioDevice, type RadioFaults, type RadioKey } from "./radioManagement";
 import type { CivilSolution } from "./civilNavigation";
 import { MagvarModel, normalizeAngle, polarRegion, type AngleReference } from "./magvar";
 import { WMM2025_DATABASE } from "./wmm2025";
@@ -30,6 +30,7 @@ import type { SensorSolution } from "./sensorState";
 import { BenchRadioReceiver, solveRadio } from "./radioNavigation";
 import { sampled, type SensorFrame, type SensorInputPort } from "./sensorPorts";
 import { NAV_PAGES } from "./navPages";
+import { RADIO_PAGES } from "./radioPages";
 import { holdAllowance, holdPathToPassage, piecesHours, predictionEndpoint, type HoldPathReport, type PathPiece } from "./predictions";
 import { MAX_BANK } from "./flight";
 import type { PredictionStatus } from "./vnav";
@@ -82,7 +83,9 @@ const nominalApirsBias = (seed: number) => {
   const next = seededRandom(seed), gaussian = () => Math.sqrt(-2 * Math.log(1 - next())) * Math.cos(2 * Math.PI * next());
   return { north: APIRS_ACCEL_SIGMA_MS2 * gaussian(), east: APIRS_ACCEL_SIGMA_MS2 * gaussian() };
 };
-const PAGES: Record<PageId, Page> = { ...CORE_PAGES, ...PLANNING_PAGES, ...NAV_PAGES, ...TACTICAL_PAGES, ...DATALINK_PAGES };
+const PAGES: Record<PageId, Page> = { ...CORE_PAGES, ...PLANNING_PAGES, ...NAV_PAGES, ...RADIO_PAGES, ...TACTICAL_PAGES, ...DATALINK_PAGES };
+/** Laboratory: the NDB ground-wave range the bench's ADF receives within, NM. */
+const ADF_RANGE_NM = 75;
 
 export type WaypointResolution = { ident: string } | { select: string } | "invalid" | "not-in-database";
 
@@ -208,6 +211,9 @@ export class ScriptedFms implements CduBackend {
   private radios = { ...DEFAULT_RADIOS };
   private crossTalk: CrossTalkPort | null = null;
   private rms: RadioManagementPort | null = null;
+  /** A standalone computer's own radios (plan F8a): navigation always measures through radios. Two computers share
+   * DualFms's instead, which attachComputerPorts installs. */
+  private ownRms: RadioManagementSystem | null = null;
   private localSolution: CivilSolution | null = null;
   private receiverCommands = true;
   private readonly benchRaim: boolean;
@@ -655,7 +661,13 @@ export class ScriptedFms implements CduBackend {
     if (!options.receivers) for (const offset of [60_000, 40_000]) for (const receiver of this.receivers) receiver.step(this.gpsInput(start - offset));
     // The default airborne demonstration also starts with its radios already acquired. Later tuning changes and
     // reacquisition after loss observe the declared delay; cold start uses the initialization workflow.
-    this.radioReceiver.tune(this.autoRadioStations(), start - 40_000);
+    this.ownRms = new RadioManagementSystem(() => this.now.getTime(), () => false, () => {},
+      this.aircraftProfile.parameters.rmsFeedbackDelay.value, this.aircraftProfile.parameters.rmsFeedbackTimeout.value);
+    this.rms = this.ownRms.port(1);
+    // The warm demonstration starts with its NAVs already on the nearest VOR/DMEs, read back at power-up (M300 13-1).
+    this.vorDmeStations().slice(0, 2).forEach((station, index) => this.ownRms!.presetActive(index ? "nav2" : "nav1", station.frequency));
+    const tuning = this.radioTuning();
+    this.radioReceiver.tune(tuning.stations, start - 40_000, tuning.use);
     this.radioReceiver.sample(this.truth, this.physicalAltitude, start - 40_000);
     this.updateNavigation(0);
     this.checkMagvar();
@@ -1026,6 +1038,133 @@ export class ScriptedFms implements CduBackend {
 
   // ------------------------------------------------------------------ navigation sensors (navigation.ts)
 
+  /** VOR stations with a collocated DME, nearest first: the stations VOR/DME can use (M300 12-19). */
+  vorDmeStations(): Navaid[] {
+    return this.db.nearby(this.here, 160).filter((entry): entry is Navaid => entry.kind === "navaid"
+      && (entry.type === "VORDME" || entry.type === "VORTAC") && !this.inhibited.includes(entry.ident))
+      .sort((a, b) => distanceNm(this.here, a.position) - distanceNm(this.here, b.position));
+  }
+  nearestVorDme(): Navaid | undefined { return this.vorDmeStations()[0]; }
+
+  /** NAV in AUTO: this computer tunes NAV1 to the nearest VOR/DME and NAV2 to the next (M300 13-21). */
+  private autoTuneNavs() {
+    if (!this.rms) return;
+    const stations = this.vorDmeStations();
+    (["nav1", "nav2"] as const).forEach((device, index) => { if (stations[index]) this.rms!.autoTune(device, stations[index].frequency); });
+  }
+
+  /** A standalone computer's radios advance with it; every computer raises its own radio messages (Appendix E). */
+  private stepRadios() {
+    this.ownRms?.tick();
+    const options = this.aircraftProfile.configuration?.options as Record<string, { configured: boolean }> | undefined;
+    for (const event of this.rms?.drainEvents() ?? []) {
+      // Plan C3: each row's own configuration and inhibits (E-2: only if configured; not in the polar area or above
+      // 20 degrees of roll). An inhibited message is not raised.
+      if (event.configuredBy && options?.[event.configuredBy]?.configured !== true) continue;
+      if (event.inhibit === "polarOrRoll" && (polarRegion(this.position) || Math.abs(this.aircraft.bank) > 20)) continue;
+      if (event.kind === "alert") this.alert(alert(event.text));
+      else { this.radioAdvisories = [...this.radioAdvisories, event.text].slice(-8); this.advisory(event.text); }
+    }
+  }
+  private radioAdvisories: string[] = [];
+  get lastAdvisories(): string[] { return [...this.radioAdvisories]; }
+
+  /**
+   * What the radios can measure (plan F8a): DME ranges from the scanning set while a DME transceiver answers
+   * (M300 12-16), and each NAV's reported station with its bearing and its paired DME's range. A NAV bearing counts for
+   * VOR/DME when the NAV was tuned manually, or in AUTO under autoVorNavigation (DEC-150; M300 12-19's default is
+   * manual only).
+   */
+  private radioTuning(): { stations: Navaid[]; use: { range: Set<string>; bearing: Set<string> } } {
+    const stations = new Map<string, Navaid>(), range = new Set<string>(), bearing = new Set<string>();
+    const rms = this.rms;
+    if (!rms) return { stations: this.autoRadioStations(), use: { range: new Set(this.autoRadioStations().map(station => station.ident)),
+      bearing: new Set(this.autoRadioStations().map(station => station.ident)) } };
+    const dmeCapable = (station: Navaid) => ["DME", "VORDME", "VORTAC"].includes(station.type);
+    if ((["dme1", "dme2"] as const).some(device => rms.dmeReceiving(device))) {
+      for (const station of this.autoRadioStations()) if (dmeCapable(station)) { stations.set(station.ident, station); range.add(station.ident); }
+    }
+    const options = this.aircraftProfile.configuration?.options as Record<string, { configured: boolean }> | undefined;
+    const autoEligible = options?.autoVorNavigation?.configured === true;
+    ([["nav1", "dme1"], ["nav2", "dme2"]] as const).forEach(([device, dme]) => {
+      const station = this.navStation(device);
+      if (station) {
+        stations.set(station.ident, station);
+        if (rms.navMode(device) === "MAN" || autoEligible) bearing.add(station.ident);
+      }
+      const ranging = this.dmeStation(dme);
+      if (ranging && rms.dmeReceiving(dme)) { stations.set(ranging.ident, ranging); range.add(ranging.ident); }
+    });
+    return { stations: [...stations.values()], use: { range, bearing } };
+  }
+
+  /** The station a NAV receiver reports it is tuned to: the nearest VOR on its frequency (none while it reports nothing). */
+  navStation(device: "nav1" | "nav2"): Navaid | undefined {
+    const frequency = this.rms?.receiving(device) ?? null;
+    return frequency === null ? undefined : this.stationOn(frequency, ["VOR", "VORDME", "VORTAC"]);
+  }
+  /** The station a DME ranges on: its held frequency's (DME HOLD, M300 13-22) or its NAV's, when DME-capable. */
+  dmeStation(device: DmeDevice): Navaid | undefined {
+    const frequency = this.rms?.dmeHold(device) ?? this.rms?.receiving(device === "dme1" ? "nav1" : "nav2") ?? null;
+    return frequency === null ? undefined : this.stationOn(frequency, ["DME", "VORDME", "VORTAC"]);
+  }
+  private stationOn(frequency: string, types: readonly string[]): Navaid | undefined {
+    return this.db.nearby(this.here, 160).filter((entry): entry is Navaid => entry.kind === "navaid" && types.includes(entry.type)
+      && Number(entry.frequency) === Number(frequency) && !this.inhibited.includes(entry.ident))
+      .sort((a, b) => distanceNm(this.here, a.position) - distanceNm(this.here, b.position))[0];
+  }
+  /** The magnetic radial the NAV receiver measures, from the station's bearing word (null without a valid one). */
+  navRadial(device: "nav1" | "nav2"): number | null {
+    const station = this.navStation(device);
+    const word = station ? this.sensorFrame?.radios.find(observation => observation.station.ident === station.ident)?.bearingTrue : undefined;
+    const bearing = word ? sampled(word, this.now.getTime(), this.sensorMaxAge) : null;
+    if (!station || bearing === null) return null;
+    const variation = this.magvar.field(station.position, 0, this.utcTime)?.declination;
+    return variation === undefined ? null : normalizeAngle(bearing - variation);
+  }
+  /**
+   * The DME distance field (M300 13-22): the slant range in small white with valid feedback, blank when no distance is
+   * received for a valid frequency, and **** when the DME's feedback is not valid.
+   */
+  dmeDistance(device: DmeDevice): string {
+    if (!this.rms?.dmeReceiving(device)) return "****";
+    const station = this.dmeStation(device);
+    const word = station ? this.sensorFrame?.radios.find(observation => observation.station.ident === station.ident)?.slantRangeNm : undefined;
+    const range = word ? sampled(word, this.now.getTime(), this.sensorMaxAge) : null;
+    return range === null ? "" : `${range < 100 ? range.toFixed(1) : Math.round(range)}NM`;
+  }
+  /**
+   * The ADF receiver (sensor side, from the plant): the relative bearing to the NDB it reports tuned, while healthy, in
+   * ADF mode (ANT gives none, M300 13-24) and within the laboratory ground-wave range. The display converts it.
+   */
+  adfRelativeBearing(device: "adf" | "adf2"): number | null {
+    const frequency = this.rms?.receiving(device) ?? null;
+    if (frequency === null || this.rms!.adf(device).mode !== "ADF") return null;
+    const ndb = this.db.nearby(this.truth, ADF_RANGE_NM).filter((entry): entry is Navaid => entry.kind === "navaid" && entry.type === "NDB"
+      && Number(entry.frequency) === Number(frequency))
+      .sort((a, b) => distanceNm(this.truth, a.position) - distanceNm(this.truth, b.position))[0];
+    return ndb ? normalizeAngle(bearingDeg(this.truth, ndb.position) - (this.aircraft.heading ?? this.heading)) : null;
+  }
+  /** The bearing as the ADF page shows it: relative, magnetic or true (M300 13-24). */
+  adfBearing(device: "adf" | "adf2"): number | null {
+    const relative = this.adfRelativeBearing(device);
+    if (relative === null) return null;
+    const mode = this.rms!.adf(device).bearing;
+    if (mode === "REL") return relative;
+    const trueBearing = normalizeAngle(relative + this.heading);
+    const variation = this.magneticField?.declination;
+    return mode === "TRUE" ? trueBearing : variation === undefined ? null : normalizeAngle(trueBearing - variation);
+  }
+  get radioPort() { return this.rms; }
+
+  // The radios, for the bench and tests.
+  radioReceiving(device: RadioDevice) { return this.rms?.receiving(device) ?? null; }
+  navRadioMode(device: "nav1" | "nav2") { return this.rms?.navMode(device) ?? "MAN"; }
+  setNavRadioMode(device: "nav1" | "nav2", mode: "AUTO" | "MAN") { this.rms?.setNavMode(device, mode); }
+  /** Bench stimulus for this computer's own radios; two computers inject on DualFms.rms. */
+  setRadioFaults(device: RadioDevice | DmeDevice, faults: Partial<RadioFaults>) { this.ownRms?.setFaults(device, faults); }
+  radioObservations() { return [...(this.sensorFrame?.radios ?? [])]; }
+
   private autoRadioStations() {
     return this.db.nearby(this.here, 160).filter((entry): entry is Navaid => entry.kind === "navaid" && entry.type !== "NDB"
       && !this.inhibited.includes(entry.ident)).sort((a, b) => distanceNm(this.here, a.position) - distanceNm(this.here, b.position)).slice(0, 6);
@@ -1038,7 +1177,9 @@ export class ScriptedFms implements CduBackend {
     if (this.injected.has("gpsIntegrity")) this.applyGpsIntegrityCondition(input);
     this.sendApproach();
     this.receivers.forEach((receiver, i) => receiver.step(this.gpsBaro[i] ? input : { ...input, baroAltitude: null }));
-    this.radioReceiver.tune(this.autoRadioStations(), now);
+    this.autoTuneNavs();
+    const tuning = this.radioTuning();
+    this.radioReceiver.tune(tuning.stations, now, tuning.use);
     const gpsWord = (index: number) => ({ at: now, sequence, status: "NORMAL" as const, value: this.receivers[index].bus() });
     const gps: SensorFrame["gps"] = [gpsWord(0), gpsWord(1)];
     const ra = radioHeight(this.declaredSurface, this.truth, this.physicalAltitude, this.hasCondition("raFail"));
@@ -1161,6 +1302,7 @@ export class ScriptedFms implements CduBackend {
    * against RNP. A returning position source can cause a reported POSITION SHIFT.
    */
   updateNavigation(dt: number) {
+    this.stepRadios();
     this.sensorFrame = this.sampleSensors();
     if (!this.powered) return;
     this.checkRnpEntry();
@@ -2431,7 +2573,7 @@ export class ScriptedFms implements CduBackend {
   get otherFms() { return this.crossTalk?.peerRoute ?? null; }
   get dualOperation() { return this.crossTalk; }
   get radioRequests() { return this.rms?.requests ?? []; }
-  attachComputerPorts(crossTalk: CrossTalkPort, rms: RadioManagementPort) { this.crossTalk = crossTalk; this.rms = rms; }
+  attachComputerPorts(crossTalk: CrossTalkPort, rms: RadioManagementPort) { this.crossTalk = crossTalk; this.rms = rms; this.ownRms = null; }
   notifyComputerState() { this.emit(); }
 
   /** Whether the other FMS holds the same active route: always in dual operation, not necessarily when independent. */

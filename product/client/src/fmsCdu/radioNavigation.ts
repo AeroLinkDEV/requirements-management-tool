@@ -35,10 +35,14 @@ const hasVor = (station: Navaid) => ["VOR", "VORDME", "VORTAC"].includes(station
 
 export class BenchRadioReceiver {
   private tuning = new Map<string, { station: Navaid; since: number; acquired: boolean; inRange: boolean }>();
+  /** Which tuned stations give a range (a DME the radios report) and which a bearing (a NAV the radios report); by
+   * default both, for callers without radio management. */
+  private use: { range: ReadonlySet<string>; bearing: ReadonlySet<string> } | null = null;
   private sequence = 0;
   private readonly parameters: AircraftProfile["parameters"];
   constructor(parameters: AircraftProfile["parameters"] = HELICOPTER_PROFILE.parameters) { this.parameters = parameters; }
-  tune(stations: readonly Navaid[], now: number) {
+  tune(stations: readonly Navaid[], now: number, use: { range: ReadonlySet<string>; bearing: ReadonlySet<string> } | null = null) {
+    this.use = use;
     const next = new Map<string, { station: Navaid; since: number; acquired: boolean; inRange: boolean }>();
     for (const station of stations) {
       const old = this.tuning.get(station.ident);
@@ -62,8 +66,10 @@ export class BenchRadioReceiver {
         status: failed ? "FAIL" : normal && value !== null ? "NORMAL" : "NCD", value: normal ? value : null });
       const sign = entry.station.ident.charCodeAt(0) % 2 ? 1 : -1;
       return { station: entry.station,
-        slantRangeNm: word(hasDme(entry.station) ? Math.hypot(distance, (altitudeFt - entry.station.elevation.feet) / 6076.12) + sign * this.parameters.radioRangeBias.value : null),
-        bearingTrue: word(hasVor(entry.station) ? (bearingDeg(entry.station.position, truth) + sign * this.parameters.radioBearingBias.value + 360) % 360 : null) };
+        slantRangeNm: word(hasDme(entry.station) && (!this.use || this.use.range.has(entry.station.ident))
+          ? Math.hypot(distance, (altitudeFt - entry.station.elevation.feet) / 6076.12) + sign * this.parameters.radioRangeBias.value : null),
+        bearingTrue: word(hasVor(entry.station) && (!this.use || this.use.bearing.has(entry.station.ident))
+          ? (bearingDeg(entry.station.position, truth) + sign * this.parameters.radioBearingBias.value + 360) % 360 : null) };
     });
   }
 }

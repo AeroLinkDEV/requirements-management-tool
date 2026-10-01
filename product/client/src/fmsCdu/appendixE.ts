@@ -41,6 +41,12 @@ export const APPENDIX_E: Readonly<Record<string, AppendixESource>> = {
   "GPS POS UNCERTAIN": { page: "E-8" },
   "HEADING INPUT LOST": { page: "E-9" },
   "HF CONTROL LOST": { page: "E-9" },
+  // Plan C3 (F8a): each radio's CONTROL LOST row, numbered as the manual names the radio.
+  "ADF1 CONTROL LOST": { page: "E-2" }, "ADF2 CONTROL LOST": { page: "E-2" },
+  "ATC1 CONTROL LOST": { page: "E-2" }, "ATC2 CONTROL LOST": { page: "E-2" },
+  "COM1 CONTROL LOST": { page: "E-4" }, "COM2 CONTROL LOST": { page: "E-4" },
+  "DME1 CONTROL LOST": { page: "E-6" }, "DME2 CONTROL LOST": { page: "E-6" },
+  "NAV1 CONTROL LOST": { page: "E-13" }, "NAV2 CONTROL LOST": { page: "E-13" },
   "HIGH GLIDEPATH ANGLE": { page: "E-9" },
   "HIGH HOLDING SPEED": { page: "E-9" },
   "HIGH SAR SPEED": { page: "E-9" },

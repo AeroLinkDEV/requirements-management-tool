@@ -76,7 +76,9 @@
     "fms-prediction-endpoints.spec.ts",
     "fms-stage-f-configuration.spec.ts",
     "fms-sensor-state.spec.ts",
-    "fms-kalman-dvs.spec.ts"
+    "fms-kalman-dvs.spec.ts",
+    "fms-rms-radios.spec.ts",
+    "fms-nav-radio.spec.ts"
   ],
   "rendered": [
     "layout-settled.spec.ts",
