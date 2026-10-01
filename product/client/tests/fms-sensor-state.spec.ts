@@ -147,7 +147,7 @@ test('C1: without a 95% accuracy the ANP is unavailable: dashes, and counted as 
 
 const at = { lat: 45, lon: -75 }, altitudeFt = 3000, now = 10_000
 const observe = (courses: number[], truth = at): RadioObservation[] => courses.map((course, i) => {
-  const station: Navaid = { kind: 'navaid', ident: `T${i}`, type: 'VORDME', name: 'Test fixture', frequency: '115.00', position: offset(at, course, 10) }
+  const station: Navaid = { kind: 'navaid', ident: `T${i}`, type: 'VORDME', name: 'Test fixture', frequency: '115.00', elevation: { feet: 0, source: 'data', provenance: 'test fixture' }, position: offset(at, course, 10) }
   return { station, slantRangeNm: { at: now, sequence: 1, status: 'NORMAL', value: Math.hypot(distanceNm(truth, station.position), altitudeFt / 6076.12) },
     bearingTrue: { at: now, sequence: 1, status: 'NORMAL', value: bearingDeg(station.position, truth) } }
 })
@@ -156,7 +156,7 @@ test('C1: three DMEs on one line leave a mirror ambiguity the prior resolves; sp
   // Stations 10 NM north, here, and 10 NM south of a point 3 NM west of the aircraft: both mirror points fit every range.
   const west = offset(at, 270, 3)
   const collinear: RadioObservation[] = [0, 180, 0].map((course, i) => {
-    const station: Navaid = { kind: 'navaid', ident: `L${i}`, type: 'VORDME', name: 'Line', frequency: '115.00', position: i === 2 ? west : offset(west, course, 10) }
+    const station: Navaid = { kind: 'navaid', ident: `L${i}`, type: 'VORDME', name: 'Line', frequency: '115.00', elevation: { feet: 0, source: 'data', provenance: 'test fixture' }, position: i === 2 ? west : offset(west, course, 10) }
     return { station, slantRangeNm: { at: now, sequence: 1, status: 'NORMAL', value: Math.hypot(distanceNm(at, station.position), altitudeFt / 6076.12) },
       bearingTrue: { at: now, sequence: 1, status: 'NORMAL', value: bearingDeg(station.position, at) } }
   })

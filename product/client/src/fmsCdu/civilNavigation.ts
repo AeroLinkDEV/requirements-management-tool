@@ -109,7 +109,7 @@ export class CivilNavigation {
       }
       const windComputed = airValid && previous !== null && elapsed > 0 && elapsed <= this.parameters.windRadioMaxGap.value;
       if (!previous || radio.at > previous.at) this.previousRadio = { position: { ...radio.position }, at: radio.at, gpsDependent: radioGpsDependent };
-      const { priorResolved: _priorResolved, ...fix } = radio; void _priorResolved;
+      const fix = { position: radio.position, mode: radio.mode, anp: radio.anp, dmes: radio.dmes, vor: radio.vor };
       this.solution = { ...fix, gpsSource: null, gpsDependent: radioGpsDependent, uncertain: false, airValid, windComputed, ...pending };
     } else {
       this.previousRadio = null;
