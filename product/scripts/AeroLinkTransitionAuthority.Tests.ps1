@@ -498,8 +498,12 @@ Invoke-AeroLinkTransitionChain -InstallationRoot $Installation -Lease $lease -Ca
         Own $workerPid
         $workerIdentity = Get-AeroLinkProcessIdentityRecord -ProcessId $workerPid
         $workerWait = [IntPtr]::Zero
+        $workerWaitFailure = ''
         try {
-            if ($workerIdentity) { $workerWait = $K::OpenProcessWait($workerPid, $workerIdentity.StartedAtUtc) }
+            if ($workerIdentity) {
+                try { $workerWait = $K::OpenProcessWait($workerPid, $workerIdentity.StartedAtUtc) }
+                catch { $workerWaitFailure = $_.Exception.Message }
+            }
             $pendingAdmission = Test-AeroLinkInstallationAdmission -InstallationRoot $t12
             Check (-not $pendingAdmission.Admitted) 'T12: while the outer is alive and working, no other attempt is admitted.'
             Stop-Process -Id $outer.Id -Force
@@ -512,7 +516,7 @@ Invoke-AeroLinkTransitionChain -InstallationRoot $Installation -Lease $lease -Ca
             $workerState = if ($workerIdentity) { $K::Classify($workerPid, $workerIdentity.StartedAtUtc, $workerIdentity.ImagePath) } else { 'Unknown:no-recorded-identity' }
             $workerSignal = if ($workerWait -ne [IntPtr]::Zero) { [string]$K::WaitHandle($workerWait, 0) } else { 'Unknown:no-handle' }
             $observation = [ordered]@{ at = (Get-Date).ToUniversalTime().ToString('o'); workerIdentity = $workerIdentity
-                absentFromEnumeration = $workerAbsent; exactProcessWait = $workerSignal; classification = $workerState
+                absentFromEnumeration = $workerAbsent; exactProcessWait = $workerSignal; waitHandleFailure = $workerWaitFailure; classification = $workerState
                 witnessReceipt = $witnessReceipt }
             Write-Host ('T12 collection observation: ' + ($observation | ConvertTo-Json -Depth 12 -Compress))
             Check $workerAbsent "T12: the unleased worker was collected by the witness (pid=$workerPid; exactProcessWait=$workerSignal; classification=$workerState; receipt=$receiptPath)."
