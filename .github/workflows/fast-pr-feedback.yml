@@ -220,7 +220,10 @@ jobs:
   client-3d-fast:
     name: Fast client 3D rendered checks
     runs-on: windows-latest
-    timeout-minutes: 10
+    # The software-WebGL out-the-window spec alone (#1313). Its eleven tests take about 9 minutes on one worker on the
+    # hosted runners (8.9 m in run 36820294784, a 9.9-minute job), so 10 left no margin and a slow runner hit it
+    # (#1232). Two workers contend and time tests out (#1387, reverted in #1396). The job is advisory.
+    timeout-minutes: 15
     outputs:
       elapsed_ms: ${{ steps.run.outputs.elapsed_ms }}
     steps:
