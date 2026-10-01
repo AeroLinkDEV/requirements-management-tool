@@ -69,50 +69,160 @@ test('an obstacle is coloured as the terrain colouring colours its top: relative
 function fakeCesium() {
   const added: unknown[] = [], removed: unknown[] = []
   let renders = 0
-  class PolylineCollection { items: { positions: unknown[]; width: number; material?: unknown }[] = []; add(o: { positions: unknown[]; width: number }) { const item = { ...o, material: undefined as unknown }; this.items.push(item); return item } }
-  class PointPrimitiveCollection { items: { position: unknown; pixelSize: number; color: unknown }[] = []; add(o: { position: unknown; pixelSize: number; color: unknown }) { const item = { ...o }; this.items.push(item); return item } }
-  const Cesium: ObstacleCesium = {
-    PolylineCollection, PointPrimitiveCollection,
-    Cartesian3: { fromDegrees: (lon, lat, height) => ({ lon, lat, height }) },
-    Color: { fromBytes: (r, g, b) => `rgb(${r},${g},${b})` },
-    Material: { fromType: (_type, uniforms) => uniforms.color },
+  const postRender = new Set<() => void>(), renderError = new Set<(_scene: unknown, error: unknown) => void>()
+  type LineOptions = { positions: { height: number }[]; width: number; arcType: number }
+  class PolylineGeometry { constructor(readonly options: LineOptions) {} }
+  class GeometryInstance { constructor(readonly options: { id: number; geometry: PolylineGeometry; attributes: { color: Uint8Array } }) {} }
+  class Primitive {
+    ready = false
+    show: boolean
+    readonly attributes = new Map<number, { color: Uint8Array; boundingSphere: object | undefined }>()
+    constructor(readonly options: { geometryInstances: GeometryInstance[]; show: boolean }) {
+      this.show = options.show
+      for (const instance of options.geometryInstances) {
+        const positions = instance.options.geometry.options.positions
+        this.attributes.set(instance.options.id, { color: instance.options.attributes.color,
+          boundingSphere: positions[0].height === positions[1].height ? undefined : { radius: 1 } })
+      }
+    }
+    getGeometryInstanceAttributes(id: number) {
+      if (!this.ready) throw new Error('geometry still loading')
+      return this.attributes.get(id)
+    }
   }
-  const scene = { primitives: { add<T>(p: T) { added.push(p); return p }, remove(p: unknown) { removed.push(p); return true } }, requestRender: () => { renders += 1 } }
-  return { Cesium, scene, added, removed, renders: () => renders }
+  class PointPrimitiveCollection { show = true; items: { position: unknown; pixelSize: number; color: unknown }[] = []; add(o: { position: unknown; pixelSize: number; color: unknown }) { const item = { ...o }; this.items.push(item); return item } }
+  const bytes = (color: string) => new Uint8Array([...color.slice(4, -1).split(',').map(Number), 255])
+  const Cesium = {
+    Primitive, GeometryInstance, PolylineGeometry, PointPrimitiveCollection,
+    PolylineColorAppearance: Object.assign(class { constructor(readonly options: { translucent: boolean }) {} }, { VERTEX_FORMAT: 'positions' }),
+    ColorGeometryInstanceAttribute: { fromColor: bytes, toValue: bytes }, ArcType: { NONE: 0 },
+    Cartesian3: { fromDegrees: (lon: number, lat: number, height: number) => ({ lon, lat, height }) },
+    Color: { fromBytes: (r: number, g: number, b: number) => `rgb(${r},${g},${b})` },
+  } as unknown as ObstacleCesium
+  const scene = {
+    primitives: { add<T>(p: T) { added.push(p); return p }, remove(p: unknown) { removed.push(p); return true }, isDestroyed: () => false },
+    postRender: { addEventListener(listener: () => void) { postRender.add(listener); return () => { postRender.delete(listener) } } },
+    renderError: { addEventListener(listener: (_scene: unknown, error: unknown) => void) { renderError.add(listener); return () => { renderError.delete(listener) } } },
+    requestRender: () => { renders += 1 },
+  }
+  const lines = () => added.find(p => p instanceof Primitive) as Primitive
+  const render = () => { for (const listener of postRender) listener() }
+  const complete = () => { lines().ready = true; render(); render() }
+  const error = (reason: string) => { for (const listener of renderError) listener(scene, new Error(reason)) }
+  return { Cesium, scene, added, removed, lines, render, complete, error, listeners: () => postRender.size + renderError.size, renders: () => renders }
 }
 
-test('the scene layer draws each obstacle from its base to its top at true height, and recolours by clearance', () => {
+test('the scene layer draws each obstacle from its base to its top at true height, and recolours by clearance', async () => {
   const { obstacles } = parseDof(`${HEADER}\n${GREENWICH}\n${OAKDALE}\n`)
-  const { Cesium, scene, added, removed, renders } = fakeCesium()
+  const { Cesium, scene, added, removed, renders, lines, complete } = fakeCesium()
   const layer = drawObstacles(Cesium, scene, obstacles)
   expect(added).toHaveLength(2)
-  const line = (layer.lines as unknown as { items: { positions: { height: number }[] }[] }).items[1]
+  const line = lines().options.geometryInstances[1].options.geometry.options
   // Oakdale: its top 1,399 ft AMSL, its base 1,090 ft below (309 ft), in metres.
   expect(line.positions[0].height).toBeCloseTo(309 * 0.3048, 6)
   expect(line.positions[1].height).toBeCloseTo(1399 * 0.3048, 6)
+  expect(line.width).toBe(2)
+  expect(line.arcType).toBe(0) // A straight vertical segment, not a surface-following arc.
   // At 1,450 ft the Oakdale tower (1,399 ft) is red; Greenwich (137 ft) stays neutral.
   layer.update(1450, 'relative')
+  complete()
+  expect(await layer.ready).toEqual({ drawn: 2 })
   const points = (layer.tops as unknown as { items: { color: string }[] }).items
   expect(points.map(p => p.color)).toEqual([`rgb(${NEUTRAL_RGB})`, `rgb(${DANGER_RGB})`])
-  expect(renders()).toBe(1)
+  expect(Array.from(lines().attributes.get(1)!.color)).toEqual([...DANGER_RGB, 255])
+  const initialRenders = renders()
   // A change of less than 10 ft recolours nothing; a new mode does.
   layer.update(1455, 'relative')
-  expect(renders()).toBe(1)
+  expect(renders()).toBe(initialRenders)
   layer.update(1455, 'absolute')
   expect(points.map(p => p.color)).toEqual([`rgb(${ABSOLUTE_RGB[0]})`, `rgb(${ABSOLUTE_RGB[2]})`])
+  expect(Array.from(lines().attributes.get(1)!.color)).toEqual([...ABSOLUTE_RGB[2], 255])
   layer.destroy()
   expect(removed).toHaveLength(2)
 })
 
 test('createObstacleLayer fetches the bench extract, applies the latest update once drawn, and reports a failed load', async () => {
-  const { Cesium, scene } = fakeCesium()
+  const { Cesium, scene, complete } = fakeCesium()
   const urls: string[] = []
   const layer = createObstacleLayer(Cesium, scene, async url => { urls.push(url); return `${HEADER}\n${OAKDALE}\n` })
   layer.update(1450, 'relative')
+  await Promise.resolve() // The data arrives before Cesium prepares its geometry.
+  complete()
   expect(await layer.ready).toEqual({ drawn: 1 })
   expect(urls).toEqual([OBSTACLE_DATA_URL])
   expect(layer.count).toBe(1)
   const failed = createObstacleLayer(Cesium, scene, async () => { throw new Error('404 Not Found') })
   expect(await failed.ready).toEqual({ failed: 'obstacle data not loaded: 404 Not Found' })
   expect(failed.count).toBe(0)
+})
+
+test('delayed obstacle geometry first appears with the latest colours, then reports drawn after that frame', async () => {
+  const { obstacles } = parseDof(`${HEADER}\n${OAKDALE}\n`)
+  const { Cesium, scene, lines, render, listeners } = fakeCesium()
+  const layer = drawObstacles(Cesium, scene, obstacles)
+  layer.update(1450, 'relative')
+  render()
+  layer.update(1455, 'absolute')
+  expect(layer.lines!.show).toBe(false)
+  expect(layer.tops.show).toBe(false)
+  expect(layer.count).toBe(0)
+  lines().ready = true
+  render()
+  expect(layer.lines!.show).toBe(true)
+  expect(layer.tops.show).toBe(true)
+  expect(Array.from(lines().attributes.get(0)!.color)).toEqual([...ABSOLUTE_RGB[2], 255])
+  expect(layer.count, 'prepared geometry is not a completed exposed render').toBe(0)
+  layer.update(1000, 'relative')
+  render()
+  expect(await layer.ready).toEqual({ drawn: 1 })
+  expect(Array.from(lines().attributes.get(0)!.color)).toEqual([...DANGER_RGB, 255])
+  expect(layer.count).toBe(1)
+  expect(listeners()).toBe(0)
+  layer.destroy()
+})
+
+test('failed or disposed pending obstacle geometry reports no drawn count and releases its listeners and resources', async () => {
+  const { obstacles } = parseDof(`${HEADER}\n${OAKDALE}\n`)
+  for (const failure of ['worker', 'attributes', 'exposed render', 'destroy']) {
+    const fake = fakeCesium(), layer = drawObstacles(fake.Cesium, fake.scene, obstacles)
+    if (failure === 'destroy') layer.destroy()
+    else {
+      fake.lines().ready = true // Cesium also marks FAILED primitives ready.
+      if (failure === 'attributes') { fake.lines().attributes.clear(); fake.render() }
+      else {
+        if (failure === 'exposed render') fake.render()
+        fake.error('geometry worker or renderer failed')
+      }
+    }
+    expect(await layer.ready).toHaveProperty('failed')
+    await Promise.resolve() // Resource removal follows the engine event traversal.
+    expect(layer.count).toBe(0)
+    expect(fake.listeners()).toBe(0)
+    expect(fake.removed).toHaveLength(2)
+    layer.destroy()
+    fake.complete()
+    expect(layer.count).toBe(0)
+    expect(fake.removed).toHaveLength(2)
+  }
+})
+
+test('zero-height obstacles retain their top point without preventing other segments or an all-point layer from drawing', async () => {
+  const zeroHeight = OAKDALE.replace('01090', '00000')
+  for (const records of [`${GREENWICH}\n${zeroHeight}`, zeroHeight]) {
+    const { obstacles, errors } = parseDof(`${HEADER}\n${records}\n`)
+    expect(errors).toEqual([])
+    const fake = fakeCesium(), layer = drawObstacles(fake.Cesium, fake.scene, obstacles)
+    layer.update(1450, 'relative')
+    if (fake.lines()) fake.lines().ready = true
+    fake.render()
+    fake.render()
+    expect(await layer.ready).toEqual({ drawn: obstacles.length })
+    expect(layer.count).toBe(obstacles.length)
+    const points = (layer.tops as unknown as { items: { position: { height: number }; color: string }[] }).items
+    expect(points).toHaveLength(obstacles.length)
+    expect(points.at(-1)!.position.height).toBeCloseTo(1399 * 0.3048, 6)
+    expect(points.at(-1)!.color).toBe(`rgb(${DANGER_RGB})`)
+    layer.destroy()
+    expect(fake.listeners()).toBe(0)
+  }
 })
