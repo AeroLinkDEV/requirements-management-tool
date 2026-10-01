@@ -528,7 +528,13 @@ backend-only token URLs, disabled Esri request logging and redirects, attributio
   position freeze: the clock keeps running, so timers and the self test still complete. A north-up engineering
   **navigation map** (route, holds, patterns, offset track, navaids and airports, and the true position when the
   FMS has drifted) can replace the ND beside the CDU. The flight controls, flight mode annunciator and guidance
-  readout sit under the displays; the scenario, condition, data, alert and lighting cards sit below.
+  readout sit under the displays; the scenario, condition, data, alert and lighting cards sit below in the
+  established engineering view. An optional cockpit view places CDU 1 and CDU 2 on fixed sides of the EFIS,
+  keeps pilot controls in the cockpit, and opens instructor tools over the outside-view stage. Narrow layouts
+  stack the real panels. The drawer can expand for setup work; Escape closes it and returns focus. Focus mode
+  hides application navigation until explicitly restored. Switching views preserves the simulation and
+  unfinished instructor forms. The initial default remains engineering view; a cockpit preference is remembered
+  per signed-in user in this browser. Recording and scenario playback still target CDU 1; CDU 2 input is not recorded.
 - An **EFIS** beside the CDU draws a generic primary flight display and navigation display from an explicit FMS output bus
   (`efis.ts`: desired track, cross-track, vertical deviation, roll command, distance to go, targets and modes, each
   with a normal, no-data or failure status) plus the aircraft's attitude and air data. It uses airline colour

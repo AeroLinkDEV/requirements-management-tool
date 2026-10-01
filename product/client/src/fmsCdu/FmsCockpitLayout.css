@@ -1,0 +1,148 @@
+/* #1382: an opt-in cockpit. Engineering view remains available during the staged station rollout. */
+.fmsBenchViewBar { order: 0; align-items: center; }
+.fmsBenchHeader { order: 1; }
+.fmsBenchUpper { display: contents; }
+.fmsBenchWindow { order: 2; }
+.fmsBenchCockpit { order: 3; }
+.fmsBenchTools { order: 4; }
+.fmsBenchTools[hidden] { display: none; }
+
+.fmsBenchCockpitView {
+  gap: 10px;
+  container: fms-bench / inline-size;
+}
+.fmsBenchCockpitView .fmsBenchHeader h1 { font-size: 18px; margin: 0; }
+.fmsBenchCockpitView .fmsBenchHeader > div > p:not(.fmsBenchProfile) { display: none; }
+.fmsBenchCockpitView .fmsBenchHeader { gap: 6px; margin-bottom: 0; }
+.fmsBenchCockpitView .fmsBenchHeader .fmsBenchProfile,
+.fmsBenchCockpitView .fmsBenchHeader .fmsBenchEyebrow { display: none; }
+.fmsBenchCockpitView .fmsBenchUpper { display: grid; position: relative; order: 2; min-width: 0; gap: 10px; grid-template-areas: "outside" "cockpit"; }
+.fmsBenchCockpitView .fmsBenchWindow { grid-area: outside; }
+.fmsBenchCockpitView .fmsBenchCockpit { grid-area: cockpit; }
+.fmsBenchCockpitView .fmsBenchWindow { min-height: 210px; padding: 8px; box-sizing: border-box; }
+.fmsBenchCockpitView .fmsOtw,
+.fmsBenchCockpitView .fmsOtw.layout-panel { height: 170px; }
+.fmsBenchCockpitView .fmsBenchIosExpanded .fmsBenchWindow { min-height: 580px; }
+.fmsBenchCockpitView .fmsBenchIosExpanded .fmsOtw { height: 520px; }
+.fmsBenchCockpitView .fmsBenchWindow .fmsBenchMapHead { margin-bottom: 6px; }
+.fmsBenchCockpitView .fmsBenchWindow .fmsBenchDisplayControls { gap: 6px; }
+
+/* Application control defaults are taller than the pilot strip; keep its real controls readable and reachable. */
+.fmsBenchCockpitView .fmsBenchViewBar button,
+.fmsBenchCockpitView .fmsBenchWindow button,
+.fmsBenchCockpitView .fmsBenchDisplays button,
+.fmsBenchCockpitView .fmsBenchFlight button {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.fmsBenchCockpitView .fmsBenchWindow select,
+.fmsBenchCockpitView .fmsBenchDisplays select,
+.fmsBenchCockpitView .fmsBenchFlight select,
+.fmsBenchCockpitView .fmsBenchFlight input {
+  min-height: 32px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.fmsBenchCockpitView .fmsBenchFlight > label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.fmsBenchCockpitView .fmsBenchDisplays input { min-height: 32px; }
+
+/* The drawer occupies the outside-view stage, keeping instruments and pilot controls clear. */
+.fmsBenchCockpitView .fmsBenchTools {
+  position: absolute;
+  grid-area: outside;
+  z-index: 5;
+  inset: 0 0 0 auto;
+  width: min(620px, 100%);
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #9fb0c2;
+  border-radius: 10px;
+  background: #f5f8fb;
+  box-shadow: -8px 0 24px #0003;
+  container: fms-ios / inline-size;
+  scrollbar-gutter: stable;
+  scroll-padding-top: 60px;
+}
+.fmsBenchIosHead { position: sticky; top: 0; z-index: 6; background: #f5f8fb; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; padding-block: 4px; }
+.fmsBenchIosHead button { min-height: 32px; }
+.fmsBenchCockpitView .fmsBenchTabs { gap: 2px; }
+.fmsBenchCockpitView .fmsBenchTabs button { padding: 8px; font-size: 12px; }
+.fmsBenchCockpitView .fmsBenchTools .fmsBenchCards { grid-template-columns: minmax(0, 1fr); }
+.fmsBenchCockpitView .fmsBenchTools .fmsBenchVariant { margin: 12px 0; }
+.fmsBenchCockpitView .fmsBenchTools .fmsBenchVariant select { min-width: 0; }
+.fmsBenchCockpitView .fmsBenchTools .fmsBenchConditions { grid-template-columns: minmax(0, 1fr); }
+.fmsBenchCockpitView .fmsGpsReceivers,
+.fmsBenchCockpitView .fmsGpsSky { grid-template-columns: minmax(0, 1fr); }
+.fmsBenchCockpitView .fmsGpsRouting { overflow-x: auto; }
+.fmsBenchCockpitView .fmsGpsRouting svg { min-width: 640px; }
+.fmsBenchCockpitView .fmsBenchTools .fmsBenchTabs { flex-shrink: 0; }
+.fmsBenchCockpitView .fmsBenchTabPanel { flex-shrink: 0; }
+.fmsBenchCockpitView .fmsBenchTools:not([hidden]) { animation: fms-ios-open 160ms ease-out; }
+@keyframes fms-ios-open { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .fmsBenchCockpitView .fmsBenchTools:not([hidden]) { animation: none; } }
+
+/* Real faceplates keep their proportions. Below the four-panel floor, stack deliberately. */
+.fmsBenchCockpitView .fmsBenchCockpit {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "left" "right" "displays" "flight";
+  gap: 10px;
+}
+.fmsBenchCduStation {
+  padding: 8px;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background: #20252e;
+  min-width: 0;
+}
+.fmsBenchCduStation[data-side="1"] { grid-area: left; }
+.fmsBenchCduStation[data-side="2"] { grid-area: right; }
+.fmsBenchCduStation:focus-within { border-color: #49cbb9; }
+.fmsBenchCduStation[data-active="true"] .fmsBenchCduLabel span { color: #49cbb9; font-weight: 700; }
+.fmsBenchCduLabel { display: flex; justify-content: space-between; gap: 6px; color: #d7dce4; font-size: 12px; margin-bottom: 8px; }
+.fmsBenchCduStation .fmsCdu { margin: auto; max-width: 380px; }
+.fmsBenchCockpitView .fmsBenchDisplays { padding: 8px; }
+.fmsBenchCockpitView .fmsBenchDisplays > .fmsBenchHint { display: none; }
+.fmsBenchCockpitView .fmsBenchFlight { padding: 8px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+.fmsBenchCockpitView .fmsBenchFlight > .fmsBenchReadout { margin: 0; }
+.fmsBenchCockpitView .fmsBenchFlight > .fmsBenchHint,
+.fmsBenchCockpitView .fmsBenchFlight > h2 { display: none; }
+.fmsBenchCockpitView .fmsBenchFlight > .fmsBenchFma { flex: 0 1 auto; margin: 0; }
+.fmsBenchCockpitView .fmsBenchFma { padding: 4px 6px; }
+.fmsBenchCockpitView .fmsBenchFma span { padding: 0 6px; }
+.fmsBenchCockpitView .fmsBenchFlight > .fmsBenchGuidance { flex-basis: 100%; margin: 0; }
+.fmsBenchCockpitView .efisPfd,
+.fmsBenchCockpitView .efisNd { max-width: 420px; }
+.fmsBenchCockpitView .fmsBenchFlight > .fmsBenchHint { margin: 4px 0; }
+.fmsBenchCockpitView .fmsBenchFlight .fmsBenchAutopilot { margin: 0; gap: 6px; }
+.fmsBenchCockpitView .fmsBenchFlight .fmsBenchGuidance { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.fmsBenchCockpitView .fmsBenchFlight .fmsBenchGuidance dd { margin: 0 12px 0 0; }
+.fmsBenchCockpitView .fmsBenchFlight > h2 { margin-bottom: 6px; }
+@container fms-bench (min-width: 720px) {
+  .fmsBenchCockpitView .fmsBenchCockpit { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "left right" "displays displays" "flight flight"; }
+}
+@container fms-bench (min-width: 1320px) {
+  .fmsBenchCockpitView .fmsBenchCockpit {
+    grid-template-columns: minmax(360px, 1fr) minmax(560px, 1.65fr) minmax(360px, 1fr);
+    grid-template-areas: "left displays right" "left flight right";
+  }
+}
+/* Explicit focus mode has a persistent exit button; it does not alter application navigation state. */
+.shell:has(.fmsBenchFocused) { grid-template-columns: minmax(0, 1fr); }
+.shell:has(.fmsBenchFocused) > .appNavigation { display: none; }
+html .workspaceView > main.fmsBenchFocused { padding: 12px 20px 24px; }
+/* Focus mode spends its height on the instruments and pilot controls rather than page spacing. */
+html .workspaceView > main.fmsBenchCockpitView.fmsBenchFocused { padding-top: 8px; }
+.fmsBenchCockpitView.fmsBenchFocused,
+.fmsBenchCockpitView.fmsBenchFocused .fmsBenchUpper { gap: 6px; }
+.fmsBenchCockpitView.fmsBenchFocused .fmsBenchCockpit { row-gap: 6px; }
+/* The context bar identifies the focused bench. Retain its repeated heading for screen-reader navigation. */
+.fmsBenchCockpitView.fmsBenchFocused > .fmsBenchHeader {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -42,8 +42,17 @@ test('the out-the-window view and synthetic vision start under the production po
     ;(window as unknown as { violations: string[] }).violations.push(`${event.violatedDirective} ${event.blockedURI}`)
   }))
 
+  // #1382: establish the real shell and cockpit before software WebGL starts refining its scene.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.getByRole('button', { name: 'Cockpit view', exact: true }).click()
+  await expect(page.locator('.fmsBenchCduStation .fmsCdu')).toHaveCount(2)
+  await page.getByRole('button', { name: 'Focus bench', exact: true }).click()
+  await expect(page.locator('.appNavigation')).toBeHidden()
   await page.getByRole('button', { name: 'Show the view' }).click()
+  // This policy journey needs real terrain meshes and workers, not imagery refinement. Use the pilot's ground choice.
+  await page.getByRole('radiogroup', { name: 'Window ground' }).getByText('Relief', { exact: true }).click()
   const view = page.locator('.fmsOtw')
+  await expect(view).toHaveAttribute('data-ground', 'relief')
   await expect(view, 'the 3D view starts').toHaveAttribute('data-status', 'ready', { timeout: 90_000 })
   await expect(view).toHaveAttribute('data-terrain', 'off', { timeout: 30_000 })
   await expect(view.locator('.fmsOtwNote')).toContainText('FmsBench:TerrainRelay')
@@ -55,6 +64,24 @@ test('the out-the-window view and synthetic vision start under the production po
   await page.getByRole('checkbox', { name: 'Synthetic vision' }).check()
   await expect(page.locator('svg.efisPfd').getByTestId('pfd-svs-flag')).toHaveText('SVS')
   await expect(page.locator('svg.efisPfd').getByTestId('pfd-svs')).toHaveCount(0)
+
+  // Only the built application can prove this CSS cascade under CSP while the real scene remains active.
+  await expect(view).toHaveAttribute('data-status', 'ready')
+  // The real shell adds its own header rhythm and control-height rules; a fixture cannot prove this fit.
+  const selections = await page.getByRole('form', { name: 'Vertical and speed selections' }).boundingBox()
+  expect(selections!.y + selections!.height, 'pilot controls fit the focused 1440 × 900 cockpit').toBeLessThanOrEqual(900)
+  await page.screenshot({ path: test.info().outputPath('cockpit-built-focused.png'), fullPage: false })
+  await page.getByRole('button', { name: 'Instructor station', exact: true }).click()
+  await page.getByRole('button', { name: 'More instructor room', exact: true }).click()
+  await page.getByRole('tab', { name: 'GPS sensors', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'GPS 1', exact: true })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath('cockpit-built-instructor.png'), fullPage: false })
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Show navigation', exact: true }).click()
+  await expect(page.locator('.appNavigation')).toBeVisible()
+  await page.getByRole('button', { name: 'Engineering view', exact: true }).click()
+  await expect(page.locator('.fmsCdu')).toHaveCount(1)
+  await expect(view).toHaveAttribute('data-status', 'ready')
 
   const violations = await page.evaluate(() => (window as unknown as { violations?: string[] }).violations ?? [])
   expect(violations, 'content security policy violations').toEqual([])

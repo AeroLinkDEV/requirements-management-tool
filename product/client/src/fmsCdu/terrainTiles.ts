@@ -70,6 +70,9 @@ export class TerrainTiles {
 
   /** A tile's heights, row 0 north, or null where the source has none or failed. */
   load(z: number, x: number, y: number): Promise<Float32Array | null> {
+    // Off is an installation setting, not a missing tile. Meshes and relief can keep refining,
+    // but no later tile should fetch, enter the cache, or publish a new arrival for this source.
+    if (this.current === "off") return Promise.resolve(null);
     const key = `${z}/${x}/${y}`;
     let tile = this.tiles.get(key);
     if (tile) { this.touch(key); return tile; }
@@ -105,6 +108,7 @@ export class TerrainTiles {
    * starts it loading) or where there is no data. Below sea level reads as sea level, as in the 3D view.
    */
   heightAt(lat: number, lon: number, zoom: number): number | null {
+    if (this.current === "off") return null;
     const { x, y, fx, fy } = tileOf(lat, lon, zoom);
     const key = `${zoom}/${x}/${y}`;
     const heights = this.ready.get(key);
