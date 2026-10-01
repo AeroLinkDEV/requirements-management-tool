@@ -78,8 +78,10 @@ test('passing the runway holds the final extension until the crew selects the mi
 
 test('RTE 2 VIA/TO: an airway from the last fix expands into its fixes; a fix not on it is refused', () => {
   const unit = fms()
+  // OWUL1 whole, through the secondary flight plan: airborne, CO ROUTE on RTE 1 would append it (#1369).
+  unit.loadCompanyRoute('OWUL1', 'secondary')
+  unit.activateSecondary()
   press(unit, 'RTE')
-  enter(unit, 'OWUL1', 'LSK2L')
   expect(idents(unit)).toEqual(['MUN', 'RDG', 'TOLGU', 'CYUL'])
   press(unit, 'EXEC', 'LEGS', 'CLR', 'LSK2L', 'CLR', 'LSK2L', 'EXEC')
   expect(idents(unit)).toEqual(['MUN', 'CYUL'])
@@ -102,7 +104,8 @@ test('company routes load from CO ROUTE, and SAVE ROUTE stores the current one u
   const unit = fms()
   unit.press('RTE')
   enter(unit, 'OWUL2', 'LSK2L')
-  expect(idents(unit)).toEqual(['ELIBA', 'RDG', 'KILLA', 'AGBEK', 'CYUL'])
+  // Airborne, the route is appended after the active waypoint (#1369).
+  expect(idents(unit)).toEqual(['MUN', '(disco)', 'ELIBA', 'RDG', 'KILLA', 'AGBEK', 'CYUL'])
   unit.press('EXEC')
   enter(unit, 'MINE1', 'LSK2L')
   unit.press('LSK5R')
@@ -112,7 +115,8 @@ test('company routes load from CO ROUTE, and SAVE ROUTE stores the current one u
   expect(idents(unit)[0]).toBe('MUN')
   unit.press('EXEC')
   enter(unit, 'MINE1', 'LSK2L')
-  expect(idents(unit)).toEqual(['ELIBA', 'RDG', 'KILLA', 'AGBEK', 'CYUL'])
+  // MINE1 holds the saved route's waypoints (the active MUN among them), appended after the active MUN.
+  expect(idents(unit)).toEqual(['MUN', '(disco)', 'MUN', 'ELIBA', 'RDG', 'KILLA', 'AGBEK', 'CYUL'])
 })
 
 test('origin and destination must be airports in the database', () => {

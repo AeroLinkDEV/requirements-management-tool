@@ -11,7 +11,8 @@ import { offset } from '../src/fmsCdu/fmsModel'
 // 3-11: the INV prefix and the DIRECT/INVERSE toggle). The inverse leg semantics are inferred from BACKTRACK (M300
 // 11-35): the origin and destination swap, the waypoints reverse, every leg TF with the first DF, and no airways or
 // altitude constraints carried. Fixes resolve by ident at load: a missing one refuses the load, never substituted; a
-// moved one is reported.
+// moved one is reported. Airborne, a load into the active route is appended after the active waypoint (#1369, owned by
+// fms-route-append.spec.ts); the swap and the first-leg DF are the whole-route rules, as the secondary plan takes it.
 const clock = () => new Date(Date.UTC(2026, 8, 30, 12, 0, 0))
 const fms = (time: () => Date = clock) => new ScriptedFms(time, { userDatabase: { store: memoryUserDatabaseStore(), scope: { userId: 'pilot.one', profileId: 'cma9000-s300-heli-civil' } } })
 const lines = (unit: ScriptedFms) => screenText(unit.screen())
@@ -143,7 +144,7 @@ test('a flown outbound leg becomes a synchronized backtrack and returns toward i
   expect(distanceNm(one.position, one.coordinates('CYOW')!)).toBeLessThan(0.2) // Existing guidance owner uses this laboratory passage budget.
 })
 
-test('SELECT CO ROUTE loads a route DIRECT, as stored: origin, destination, airways and constraints', () => {
+test('SELECT CO ROUTE loads a route DIRECT, as stored: destination, airways and constraints', () => {
   const unit = fms()
   unit.press('RTE')
   unit.press('LSK4R')
@@ -155,9 +156,10 @@ test('SELECT CO ROUTE loads a route DIRECT, as stored: origin, destination, airw
   expect(lines(unit)[0]).toMatch(/^MOD RTE 1/)
   expect(unit.route).toMatchObject({ origin: 'CYOW', dest: 'CYUL', coRoute: 'OWUL2' })
   expect(unit.route.coRouteInverse).toBeUndefined()
-  expect(idents(unit)).toEqual(['ELIBA', 'RDG', 'KILLA', 'AGBEK', 'CYUL'])
-  expect(unit.route.legs[0]).toMatchObject({ ident: 'ELIBA', altitude: '5000' })
-  expect(unit.route.legs[2]).toMatchObject({ ident: 'KILLA', via: 'T613' })
+  // Airborne: after the active waypoint and a discontinuity (#1369).
+  expect(idents(unit)).toEqual(['MUN', 'disco', 'ELIBA', 'RDG', 'KILLA', 'AGBEK', 'CYUL'])
+  expect(unit.route.legs[2]).toMatchObject({ ident: 'ELIBA', altitude: '5000' })
+  expect(unit.route.legs[4]).toMatchObject({ ident: 'KILLA', via: 'T613' })
 })
 
 test('INVERSE: origin and destination swap, the waypoints reverse, first leg DF, no airways or constraints; INV shown', () => {
@@ -166,20 +168,25 @@ test('INVERSE: origin and destination swap, the waypoints reverse, first leg DF,
   unit.press('LSK4R')
   unit.press('LSK5L')
   expect(lines(unit)[10]).toMatch(/^>INVERSE/)
+  // The whole route, as the secondary flight plan takes it.
+  expect(unit.loadCompanyRoute('OWUL2', 'secondary', unit.coRouteLoad)).toBe(true)
+  const whole = unit.secondary!
+  expect(whole).toMatchObject({ origin: 'CYUL', dest: 'CYOW', coRoute: 'OWUL2', coRouteInverse: true })
+  expect(whole.legs.map(leg => (leg.kind === 'wpt' ? leg.ident : leg.kind))).toEqual(['AGBEK', 'KILLA', 'RDG', 'ELIBA', 'CYOW'])
+  expect(whole.legs[0]).toEqual({ kind: 'wpt', ident: 'AGBEK', path: 'DF' })
+  for (const leg of whole.legs.slice(1, 4)) expect(leg).toEqual({ kind: 'wpt', ident: (leg as { ident: string }).ident })
+  // Airborne into the active route: appended, to the stored origin (#1369).
   expect(unit.loadCompanyRoute('OWUL2', 'active', unit.coRouteLoad)).toBe(true)
-  expect(unit.route).toMatchObject({ origin: 'CYUL', dest: 'CYOW', coRoute: 'OWUL2', coRouteInverse: true })
-  expect(idents(unit)).toEqual(['AGBEK', 'KILLA', 'RDG', 'ELIBA', 'CYOW'])
-  expect(unit.route.legs[0]).toEqual({ kind: 'wpt', ident: 'AGBEK', path: 'DF' })
-  for (const leg of unit.route.legs.slice(1, 4)) expect(leg).toEqual({ kind: 'wpt', ident: (leg as { ident: string }).ident })
+  expect(unit.route).toMatchObject({ dest: 'CYOW', coRoute: 'OWUL2', coRouteInverse: true })
   unit.press('RTE')
-  expect(lines(unit)[4]).toMatch(/^INV OWUL2/)
+  expect(lines(unit)[4]).toMatch(/^INV OWUL2\+/)
   // Executed, the inversed route is the active plan; loading it DIRECT again clears the prefix.
   unit.press('EXEC')
   expect(unit.activeRoute.coRouteInverse).toBe(true)
   unit.loadCompanyRoute('OWUL2')
   unit.press('EXEC')
   expect(unit.activeRoute.coRouteInverse).toBeUndefined()
-  expect(unit.activeRoute.origin).toBe('CYOW')
+  expect(unit.activeRoute.dest).toBe('CYUL')
 })
 
 test('a fix not in the active database refuses the load, reported and never substituted', () => {

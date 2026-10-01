@@ -151,6 +151,8 @@ export type Route = {
   departureJoin?: string; arrivalJoin?: string;
   /** The CO ROUTE was loaded INVERSE (E6): shown with the INV prefix. */
   coRouteInverse?: boolean;
+  /** The CO ROUTE or user route was loaded airborne, appended after the active waypoint (#1369): shown with "+". */
+  coRouteAppended?: boolean;
   offset?: Offset;
 };
 
