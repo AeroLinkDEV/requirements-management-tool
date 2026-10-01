@@ -217,7 +217,8 @@ test('F3 annunciation: INT lights when GPS NAV LOST forces a reversion, stays li
   expect(fms.gpsNavSelected).toBe(false)
   expect(bus()).toEqual({ value: false, status: 'NORMAL' })
   expect(FMS_OUTPUT_TAGS.gpsIntegrityAnnunciation).toMatchObject({ kind: 'data', validity: 'word' })
-  expect(FMS_OUTPUT_TAGS.gpsIntegrityAnnunciation.provenance).toMatch(/GPS.*integrity/i)
+  const tag = FMS_OUTPUT_TAGS.gpsIntegrityAnnunciation
+  expect('provenance' in tag && tag.provenance).toMatch(/GPS.*integrity/i)
   fms.setCondition('fmsFail', true)
   expect(bus()).toEqual({ value: null, status: 'FAIL' })
 })
