@@ -1,0 +1,36 @@
+import { expect, renderedTest as test } from './isolated-client-test'
+import { SOFTWARE_WEBGL, open, show } from './fixtures/fms-otw-rendered'
+
+// The out-the-window view's models (split from fms-out-the-window-rendered.spec.ts, #1298/#1232): the glTF helicopter in
+// the chase view, and the FAA obstacles.
+test.use(SOFTWARE_WEBGL)
+
+test('the chase view flies the glTF helicopter model, its rotors turning, in place of the fallback shapes', async ({ page }, testInfo) => {
+  test.setTimeout(180_000)
+  // Flat ground in a small window, so the globe loads quickly on the software renderer; the model does not need terrain.
+  await page.setViewportSize({ width: 700, height: 500 })
+  await open(page, 'off')
+  const view = await show(page)
+  const scene = view.locator('.fmsOtwScene')
+  // The model (public/fms-cdu/models/helicopter-light-twin.glb) loads from the bench's own origin.
+  await expect(scene, 'the helicopter model loads').toHaveAttribute('data-model', 'glb', { timeout: 60_000 })
+  await page.getByRole('radiogroup', { name: 'Window view' }).getByText('Chase', { exact: true }).click()
+  await expect(view).toHaveClass(/view-chase/)
+  await page.getByRole('button', { name: 'Fly' }).click()
+  await page.waitForTimeout(2000)
+  const first = await view.screenshot({ path: testInfo.outputPath('chase-model-1.png') })
+  await page.waitForTimeout(120)
+  const second = await view.screenshot({ path: testInfo.outputPath('chase-model-2.png') })
+  // Flying, the frames differ (the rotors turn and the aircraft moves); the view stays running.
+  expect(Buffer.compare(first, second)).not.toBe(0)
+  await expect(view).toHaveAttribute('data-status', 'ready')
+})
+
+// Brief C: the FAA Digital Obstacle File extract near the bench areas (public/fms-cdu/obstacles, with its provenance)
+// is loaded from the bench's own origin and drawn in the view; the scene element records how many.
+test('the FAA obstacles near the bench areas are loaded and drawn in the view (Brief C)', async ({ page }) => {
+  test.setTimeout(120_000)
+  await open(page, 'off')
+  const view = await show(page)
+  await expect(view.locator('.fmsOtwScene')).toHaveAttribute('data-obstacles', '11973', { timeout: 60_000 })
+})
