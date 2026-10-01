@@ -81,8 +81,8 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
           caption(" ORIGIN", "DEST "),
           { left: { text: route.origin }, right: { text: route.dest } },
           caption(" CO ROUTE", "FLT NO "),
-          // An inversed custom route shows the INV prefix (M300 3-10).
-          { left: { text: route.coRouteInverse ? `INV ${route.coRoute}` : route.coRoute }, right: { text: route.flightNo } },
+          // An inversed custom route shows the INV prefix (M300 3-10); one loaded airborne, appended, a "+" (M300 3-10, 3-12).
+          { left: { text: `${route.coRouteInverse ? "INV " : ""}${route.coRoute}${route.coRouteAppended ? "+" : ""}` }, right: { text: route.flightNo } },
           caption(" RUNWAY"),
           { left: route.runway ? { text: route.runway } : dashes(5) },
           undefined, { left: fms.dualOperation?.mode === "INDEPENDENT" ? prompt("<XFILL") : undefined, right: prompt("CO ROUTES>") }, undefined,
@@ -132,7 +132,8 @@ export const PLANNING_PAGES: Record<PlanningPageId, Page> = {
         if (scratch.length > 10) return "invalid";
         // A company route name loads the stored route.
         if (field === "coRoute" && fms.loadCompanyRoute(scratch)) { fms.setScratch(""); return; }
-        fms.modify(route => { route[field] = scratch; });
+        // A new name is no longer the appended stored route: the "+" goes with it.
+        fms.modify(route => { route[field] = scratch; if (field === "coRoute") route.coRouteAppended = undefined; });
         fms.setScratch("");
         return;
       }

@@ -60,6 +60,7 @@
     "fms-user-database.spec.ts",
     "fms-fuel-pages.spec.ts",
     "fms-route-load.spec.ts",
+    "fms-route-append.spec.ts",
     "fms-obstacles.spec.ts",
     "fms-pins-approach.spec.ts",
     "fms-gps-scenario.spec.ts",
@@ -77,6 +78,7 @@
     "artifact-thread-rendered.spec.ts",
     "recorded-code-reference-surfaces.spec.ts",
     "fms-cdu-rendered.spec.ts",
+    "fms-route-append-rendered.spec.ts",
     "fms-out-the-window-rendered.spec.ts"
   ]
 }

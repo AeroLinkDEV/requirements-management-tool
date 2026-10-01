@@ -2906,6 +2906,13 @@ export class ScriptedFms implements CduBackend {
    * The fixes are resolved by ident at load time in the active database. A fix that is not there is reported and the
    * load refused, never substituted; a fix a user route recorded at another position is reported as moved (it is
    * flown where the database has it now).
+   *
+   * Airborne, a load into the active route appends rather than replaces (#1369; M300 3-10…3-13). The destination
+   * becomes the stored route's (its origin, inversed), the active waypoint is kept and followed by a discontinuity and
+   * the stored route's waypoints, and a procedure in the plan (SID, STAR, approach) is replaced as a whole. The origin
+   * stays: the manual names only the destination. The RTE page marks the name with "+". An inversed append drops the
+   * first-leg DF, since the active waypoint and the discontinuity now come before it. The secondary flight plan is not
+   * flown and has no active waypoint, so a load into it still replaces it.
    */
   loadCompanyRoute(name: string, target: "active" | "secondary" = "active", direction: "DIRECT" | "INVERSE" = "DIRECT"): boolean {
     const stored = this.storedRoutes.find(route => route.name === name);
@@ -2935,11 +2942,26 @@ export class ScriptedFms implements CduBackend {
       route.dest = inverse ? stored.origin : stored.dest;
       route.coRoute = stored.name;
       route.coRouteInverse = inverse || undefined;
+      route.coRouteAppended = undefined;
       route.sid = route.star = route.approach = undefined;
       route.hold = undefined;
       route.legs = [...legs, { kind: "wpt", ident: route.dest }];
     };
-    if (target === "active") this.modify(build);
+    const append = (route: Route) => {
+      const active = route.legs[0];
+      // The active waypoint is kept as flown; out of its procedure (replaced as a whole), it is an ordinary leg.
+      const kept: Leg[] = !active || active.kind === "disco" ? [] : [(({ source: _source, ...leg }) => leg)(active) as Leg, { kind: "disco" }];
+      const appended = inverse ? legs.map(leg => (leg.kind === "wpt" ? { kind: leg.kind, ident: leg.ident } : leg)) : legs;
+      route.dest = inverse ? stored.origin : stored.dest;
+      route.coRoute = stored.name;
+      route.coRouteInverse = inverse || undefined;
+      route.coRouteAppended = true;
+      route.sid = route.star = route.approach = undefined;
+      route.departureJoin = route.arrivalJoin = undefined;
+      route.hold = undefined;
+      route.legs = [...kept, ...appended, { kind: "wpt", ident: route.dest }];
+    };
+    if (target === "active") this.modify(this.onGround ? build : append);
     else { const route = structuredClone(this.secondaryRoute ?? this.active); build(route); this.secondaryRoute = route; }
     return true;
   }
@@ -3206,7 +3228,7 @@ export class ScriptedFms implements CduBackend {
     }
     if (!this.modify(route => { Object.assign(route, { origin: this.active.dest, dest: this.historyOrigin, coRoute: "BACKTRACK", legs,
       sid: undefined, star: undefined, approach: undefined, hold: undefined, offset: undefined, runway: undefined, coRouteInverse: undefined,
-      departureJoin: undefined, arrivalJoin: undefined }); })) return;
+      coRouteAppended: undefined, departureJoin: undefined, arrivalJoin: undefined }); })) return;
     this.backtrackPending = true; this.directPending = false; this.open("LEGS");
   }
   advisory(text: string) { this.message = { text, alert: false }; }
